@@ -50,6 +50,7 @@ vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 max_vector_field_num = ct.max_vector_field_num
+SPARSE_FLOAT_VECTOR_data_type = "SPARSE_FLOAT_VECTOR"
 
 
 class TestCollectionParams(TestcaseBase):
@@ -615,7 +616,7 @@ class TestCollectionParams(TestcaseBase):
         int_field = cf.gen_int64_field(is_primary=True, auto_id=auto_id)
         vec_field = cf.gen_float_vec_field(name='vec')
         schema, _ = self.collection_schema_wrap.init_collection_schema([int_field, vec_field], auto_id=not auto_id)
-        collection_w = self.collection_wrap.init_collection(cf.gen_unique_str(prefix), schema=schema)[0]
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), schema=schema)
 
         assert collection_w.schema.auto_id is auto_id
 
@@ -1046,6 +1047,24 @@ class TestCollectionParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=int_fields)
         error = {ct.err_code: 65535, ct.err_msg: "maximum field's number should be limited to 64"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_collection_multi_sparse_vectors(self):
+        """
+        target: Test multiple sparse vectors in a collection
+        method: create 2 sparse vectors in a collection
+        expected: successful creation of a collection
+        """
+        # 1. connect
+        self._connect()
+        # 2. create collection with multiple vectors
+        c_name = cf.gen_unique_str(prefix)
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
+                  cf.gen_float_vec_field(vector_data_type=ct.sparse_vector), cf.gen_float_vec_field(name="vec_sparse", vector_data_type=ct.sparse_vector)]
+        schema = cf.gen_collection_schema(fields=fields)
+        self.collection_wrap.init_collection(c_name, schema=schema,
+                                             check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
 
 
 class TestCollectionOperation(TestcaseBase):
@@ -2813,8 +2832,8 @@ class TestLoadCollection(TestcaseBase):
         assert loading_progress == {'loading_progress': '100%'}
 
         # verify load different replicas thrown an exception
-        error = {ct.err_code: 1100, ct.err_msg: "failed to load collection: can't change the replica number for "
-                                                "loaded collection: expected=1, actual=2: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: "call query coordinator LoadCollection: can't change the replica number"
+                                                " for loaded collection: invalid parameter[expected=1][actual=2]"}
         collection_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
         one_replica, _ = collection_w.get_replicas()
         assert len(one_replica.groups) == 1
@@ -4499,3 +4518,149 @@ class TestCollectionMmap(TestcaseBase):
         collection_w.set_properties({'mmap.enabled': True}, check_task=CheckTasks.err_res,
                                     check_items={ct.err_code: 100,
                                               ct.err_msg: f"collection not found"})
+
+
+class TestCollectionNullInvalid(TestcaseBase):
+    """ Test case of collection interface """
+
+    """
+    ******************************************************************
+    #  The followings are invalid cases
+    ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vector_type", ct.all_vector_data_types)
+    def test_create_collection_set_nullable_on_pk_field(self, vector_type):
+        """
+        target: test create collection with set nullable=True on pk field
+        method: create collection with multiple vector fields
+        expected: raise exception
+        """
+        self._connect()
+        int_fields = []
+        c_name = cf.gen_unique_str(prefix)
+        # add other vector fields to maximum fields num
+        int_fields.append(cf.gen_int64_field(is_primary=True, nullable=True))
+        int_fields.append(cf.gen_float_vec_field(vector_data_type=vector_type))
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 1100, ct.err_msg: "primary field not support null"}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vector_type", ct.all_vector_data_types)
+    def test_create_collection_set_nullable_on_vector_field(self, vector_type):
+        """
+        target: test create collection with set nullable=True on vector field
+        method: create collection with multiple vector fields
+        expected: raise exception
+        """
+        self._connect()
+        int_fields = []
+        c_name = cf.gen_unique_str(prefix)
+        # add other vector fields to maximum fields num
+        int_fields.append(cf.gen_int64_field(is_primary=True))
+        int_fields.append(cf.gen_float_vec_field(vector_data_type=vector_type, nullable=True))
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 1100, ct.err_msg: "vector type not support null"}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+
+class TestCollectionDefaultValueInvalid(TestcaseBase):
+    """ Test case of collection interface """
+
+    """
+    ******************************************************************
+    #  The followings are invalid cases
+    ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vector_type", ct.all_vector_data_types)
+    def test_create_collection_default_value_on_pk_field(self, vector_type):
+        """
+        target: test create collection with set default value on pk field
+        method: create collection with default value on primary key field
+        expected: raise exception
+        """
+        self._connect()
+        int_fields = []
+        c_name = cf.gen_unique_str(prefix)
+        # add other vector fields to maximum fields num
+        int_fields.append(cf.gen_int64_field(is_primary=True, default_value=10))
+        int_fields.append(cf.gen_float_vec_field(vector_data_type=vector_type))
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 1100, ct.err_msg: "primary field not support default_value"}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vector_type", ct.all_vector_data_types)
+    def test_create_collection_default_value_on_vector_field(self, vector_type):
+        """
+        target: test create collection with set default value on vector field
+        method: create collection with default value on vector field
+        expected: raise exception
+        """
+        self._connect()
+        int_fields = []
+        c_name = cf.gen_unique_str(prefix)
+        # add other vector fields to maximum fields num
+        int_fields.append(cf.gen_int64_field(is_primary=True))
+        int_fields.append(cf.gen_float_vec_field(vector_data_type=vector_type, default_value=10))
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 1100, ct.err_msg: "default value type mismatches field schema type"}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("scalar_type", ["JSON", "ARRAY"])
+    def test_create_collection_default_value_on_not_support_scalar_field(self, scalar_type):
+        """
+        target: test create collection with set default value on not supported scalar field
+        method: create collection with default value on json and array field
+        expected: raise exception
+        """
+        self._connect()
+        int_fields = []
+        c_name = cf.gen_unique_str(prefix)
+        # add other vector fields to maximum fields num
+        if scalar_type == "JSON":
+            int_fields.append(cf.gen_json_field(default_value=10))
+        if scalar_type == "ARRAY":
+            int_fields.append(cf.gen_array_field(default_value=10))
+        int_fields.append(cf.gen_int64_field(is_primary=True, default_value=10))
+        int_fields.append(cf.gen_float_vec_field())
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 1100, ct.err_msg: "default value type mismatches field schema type"}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_collection_non_match_default_value(self):
+        """
+        target: test create collection with set data type not matched default value
+        method: create collection with data type not matched default value
+        expected: raise exception
+        """
+        self._connect()
+        int_fields = []
+        c_name = cf.gen_unique_str(prefix)
+        # add other vector fields to maximum fields num
+        int_fields.append(cf.gen_int64_field(is_primary=True))
+        int_fields.append(cf.gen_int8_field(default_value=10.0))
+        int_fields.append(cf.gen_float_vec_field())
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 1100, ct.err_msg: "default value type mismatches field schema type"}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_collection_default_value_none(self):
+        """
+        target: test create field with set None default value when nullable is false or true
+        method: create collection with default_value=None on one field
+        expected: 1. raise exception when nullable=False and default_value=None
+                  2. create field successfully when nullable=True and default_value=None
+        """
+        self._connect()
+        self.field_schema_wrap.init_field_schema(name="int8", dtype=DataType.INT8, nullable=True, default_value=None)
+        error = {ct.err_code: 1,
+                 ct.err_msg: "Default value cannot be None for a field that is defined as nullable == false"}
+        self.field_schema_wrap.init_field_schema(name="int8_null", dtype=DataType.INT8, default_value=None,
+                                                 check_task=CheckTasks.err_res, check_items=error)
+

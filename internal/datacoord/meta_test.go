@@ -18,20 +18,20 @@ package datacoord
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	"github.com/milvus-io/milvus/internal/kv"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -74,6 +75,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -89,6 +91,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -101,6 +104,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{
 			{
 				ID:           1,
@@ -209,31 +213,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	}
 
 	mockChMgr := mocks.NewChunkManager(suite.T())
-	mockChMgr.EXPECT().RootPath().Return("mockroot").Times(4)
-	mockChMgr.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, nil).Twice()
-	mockChMgr.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-
 	m := &meta{
 		catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 		segments:     latestSegments,
 		chunkManager: mockChMgr,
-	}
-
-	plan := &datapb.CompactionPlan{
-		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-			{
-				SegmentID:           1,
-				FieldBinlogs:        m.GetSegment(1).GetBinlogs(),
-				Field2StatslogPaths: m.GetSegment(1).GetStatslogs(),
-				Deltalogs:           m.GetSegment(1).GetDeltalogs()[:1], // compaction plan use only 1 deltalog
-			},
-			{
-				SegmentID:           2,
-				FieldBinlogs:        m.GetSegment(2).GetBinlogs(),
-				Field2StatslogPaths: m.GetSegment(2).GetStatslogs(),
-				Deltalogs:           m.GetSegment(2).GetDeltalogs()[:1], // compaction plan use only 1 deltalog
-			},
-		},
 	}
 
 	compactToSeg := &datapb.CompactionSegment{
@@ -246,8 +229,13 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	result := &datapb.CompactionPlanResult{
 		Segments: []*datapb.CompactionSegment{compactToSeg},
 	}
+	task := &datapb.CompactionTask{
+		InputSegments: []UniqueID{1, 2},
+		Type:          datapb.CompactionType_MixCompaction,
+	}
 
-	infos, mutation, err := m.CompleteCompactionMutation(plan, result)
+	infos, mutation, err := m.CompleteCompactionMutation(task, result)
+	assert.NoError(suite.T(), err)
 	suite.Equal(1, len(infos))
 	info := infos[0]
 	suite.NoError(err)
@@ -274,16 +262,6 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			suite.EqualValues(50001, blog.GetLogID())
 		}
 	}
-
-	deltalogs := info.GetDeltalogs()
-	deltalogIDs := []int64{}
-	for _, fbinlog := range deltalogs {
-		for _, blog := range fbinlog.GetBinlogs() {
-			suite.Empty(blog.GetLogPath())
-			deltalogIDs = append(deltalogIDs, blog.GetLogID())
-		}
-	}
-	suite.ElementsMatch([]int64{30001, 31001}, deltalogIDs)
 
 	// check compactFrom segments
 	for _, segID := range []int64{1, 2} {
@@ -400,9 +378,8 @@ func TestMeta_Basic(t *testing.T) {
 	const partID0 = UniqueID(100)
 	const partID1 = UniqueID(101)
 	const channelName = "c1"
-	ctx := context.Background()
 
-	mockAllocator := newMockAllocator()
+	// mockAllocator := newMockAllocator(t)
 	meta, err := newMemoryMeta()
 	assert.NoError(t, err)
 
@@ -421,17 +398,19 @@ func TestMeta_Basic(t *testing.T) {
 		Partitions: []UniqueID{},
 	}
 
+	count := atomic.Int64{}
+	AllocID := func() int64 {
+		return count.Add(1)
+	}
+
 	t.Run("Test Segment", func(t *testing.T) {
 		meta.AddCollection(collInfoWoPartition)
 		// create seg0 for partition0, seg0/seg1 for partition1
-		segID0_0, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID0_0 := AllocID()
 		segInfo0_0 := buildSegment(collID, partID0, segID0_0, channelName)
-		segID1_0, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID1_0 := AllocID()
 		segInfo1_0 := buildSegment(collID, partID1, segID1_0, channelName)
-		segID1_1, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID1_1 := AllocID()
 		segInfo1_1 := buildSegment(collID, partID1, segID1_1, channelName)
 
 		// check AddSegment
@@ -533,16 +512,14 @@ func TestMeta_Basic(t *testing.T) {
 		assert.EqualValues(t, 0, nums)
 
 		// add seg1 with 100 rows
-		segID0, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID0 := AllocID()
 		segInfo0 := buildSegment(collID, partID0, segID0, channelName)
 		segInfo0.NumOfRows = rowCount0
 		err = meta.AddSegment(context.TODO(), segInfo0)
 		assert.NoError(t, err)
 
 		// add seg2 with 300 rows
-		segID1, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID1 := AllocID()
 		segInfo1 := buildSegment(collID, partID0, segID1, channelName)
 		segInfo1.NumOfRows = rowCount1
 		err = meta.AddSegment(context.TODO(), segInfo1)
@@ -599,37 +576,35 @@ func TestMeta_Basic(t *testing.T) {
 		const size1 = 2048
 
 		// add seg0 with size0
-		segID0, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID0 := AllocID()
 		segInfo0 := buildSegment(collID, partID0, segID0, channelName)
 		segInfo0.size.Store(size0)
 		err = meta.AddSegment(context.TODO(), segInfo0)
 		assert.NoError(t, err)
 
 		// add seg1 with size1
-		segID1, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID1 := AllocID()
 		segInfo1 := buildSegment(collID, partID0, segID1, channelName)
 		segInfo1.size.Store(size1)
 		err = meta.AddSegment(context.TODO(), segInfo1)
 		assert.NoError(t, err)
 
 		// check TotalBinlogSize
-		total, collectionBinlogSize, _ := meta.GetCollectionBinlogSize()
-		assert.Len(t, collectionBinlogSize, 1)
-		assert.Equal(t, int64(size0+size1), collectionBinlogSize[collID])
-		assert.Equal(t, int64(size0+size1), total)
+		quotaInfo := meta.GetQuotaInfo()
+		assert.Len(t, quotaInfo.CollectionBinlogSize, 1)
+		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
+		assert.Equal(t, int64(size0+size1), quotaInfo.TotalBinlogSize)
 
 		meta.collections[collID] = collInfo
-		total, collectionBinlogSize, _ = meta.GetCollectionBinlogSize()
-		assert.Len(t, collectionBinlogSize, 1)
-		assert.Equal(t, int64(size0+size1), collectionBinlogSize[collID])
-		assert.Equal(t, int64(size0+size1), total)
+		quotaInfo = meta.GetQuotaInfo()
+		assert.Len(t, quotaInfo.CollectionBinlogSize, 1)
+		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
+		assert.Equal(t, int64(size0+size1), quotaInfo.TotalBinlogSize)
 	})
 
 	t.Run("Test GetCollectionBinlogSize", func(t *testing.T) {
-		meta := createMeta(&datacoord.Catalog{}, nil, createIndexMeta(&datacoord.Catalog{}))
-		ret := meta.GetCollectionIndexFilesSize()
+		meta := createMeta(&datacoord.Catalog{}, withIndexMeta(createIndexMeta(&datacoord.Catalog{})))
+		ret := meta.SetStoredIndexFileSizeMetric()
 		assert.Equal(t, uint64(0), ret)
 
 		meta.collections = map[UniqueID]*collectionInfo{
@@ -638,7 +613,7 @@ func TestMeta_Basic(t *testing.T) {
 				DatabaseName: "db",
 			},
 		}
-		ret = meta.GetCollectionIndexFilesSize()
+		ret = meta.SetStoredIndexFileSizeMetric()
 		assert.Equal(t, uint64(11), ret)
 	})
 
@@ -700,6 +675,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 1)},
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 1)},
 				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: "", LogID: 2}}}},
+				[]*datapb.FieldBinlog{},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
@@ -760,7 +736,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
-			AddBinlogsOperator(1, nil, nil, nil),
+			AddBinlogsOperator(1, nil, nil, nil, nil),
 		)
 		assert.NoError(t, err)
 
@@ -841,6 +817,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
 				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: "", LogID: 2}}}},
+				[]*datapb.FieldBinlog{},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
@@ -856,7 +833,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 	})
 }
 
-func Test_meta_SetSegmentCompacting(t *testing.T) {
+func Test_meta_SetSegmentsCompacting(t *testing.T) {
 	type fields struct {
 		client   kv.MetaKv
 		segments *SegmentsInfo
@@ -884,7 +861,7 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 							isCompacting: false,
 						},
 					},
-					compactionTo: make(map[int64]UniqueID),
+					compactionTo: make(map[int64][]UniqueID),
 				},
 			},
 			args{
@@ -899,58 +876,9 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 				catalog:  &datacoord.Catalog{MetaKv: tt.fields.client},
 				segments: tt.fields.segments,
 			}
-			m.SetSegmentCompacting(tt.args.segmentID, tt.args.compacting)
+			m.SetSegmentsCompacting([]UniqueID{tt.args.segmentID}, tt.args.compacting)
 			segment := m.GetHealthySegment(tt.args.segmentID)
 			assert.Equal(t, tt.args.compacting, segment.isCompacting)
-		})
-	}
-}
-
-func Test_meta_SetSegmentImporting(t *testing.T) {
-	type fields struct {
-		client   kv.MetaKv
-		segments *SegmentsInfo
-	}
-	type args struct {
-		segmentID UniqueID
-		importing bool
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		args   args
-	}{
-		{
-			"test set segment importing",
-			fields{
-				NewMetaMemoryKV(),
-				&SegmentsInfo{
-					segments: map[int64]*SegmentInfo{
-						1: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:          1,
-								State:       commonpb.SegmentState_Flushed,
-								IsImporting: false,
-							},
-						},
-					},
-				},
-			},
-			args{
-				segmentID: 1,
-				importing: true,
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := &meta{
-				catalog:  &datacoord.Catalog{MetaKv: tt.fields.client},
-				segments: tt.fields.segments,
-			}
-			m.SetSegmentCompacting(tt.args.segmentID, tt.args.importing)
-			segment := m.GetHealthySegment(tt.args.segmentID)
-			assert.Equal(t, tt.args.importing, segment.isCompacting)
 		})
 	}
 }

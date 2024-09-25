@@ -32,6 +32,7 @@ using milvus::segcore::GeneratedData;
 using milvus::storage::ChunkManagerPtr;
 using milvus::storage::FieldDataMeta;
 using milvus::storage::InsertData;
+using milvus::storage::MmapConfig;
 using milvus::storage::StorageConfig;
 
 namespace {
@@ -43,6 +44,18 @@ get_default_local_storage_config() {
     storage_config.storage_type = "local";
     storage_config.root_path = TestRemotePath;
     return storage_config;
+}
+
+inline MmapConfig
+get_default_mmap_config() {
+    MmapConfig mmap_config = {
+        .cache_read_ahead_policy = "willneed",
+        .mmap_path = "/tmp/test_mmap_manager/",
+        .disk_limit =
+            uint64_t(2) * uint64_t(1024) * uint64_t(1024) * uint64_t(1024),
+        .fix_file_size = uint64_t(4) * uint64_t(1024) * uint64_t(1024),
+        .growing_enable_mmap = false};
+    return mmap_config;
 }
 
 inline LoadFieldDataInfo
@@ -76,15 +89,15 @@ PrepareInsertBinlog(int64_t collection_id,
     };
 
     {
-        auto field_data =
-            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+        auto field_data = std::make_shared<milvus::FieldData<int64_t>>(
+            DataType::INT64, false);
         field_data->FillFieldData(dataset.row_ids_.data(), row_count);
         auto path = prefix + "/" + std::to_string(RowFieldID.get());
         SaveFieldData(field_data, path, RowFieldID.get());
     }
     {
-        auto field_data =
-            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+        auto field_data = std::make_shared<milvus::FieldData<int64_t>>(
+            DataType::INT64, false);
         field_data->FillFieldData(dataset.timestamps_.data(), row_count);
         auto path = prefix + "/" + std::to_string(TimestampFieldID.get());
         SaveFieldData(field_data, path, TimestampFieldID.get());

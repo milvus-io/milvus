@@ -31,7 +31,7 @@ func (s *ReadDataFromAllRowGroupsSuite) SetupSuite() {
 	s.size = 1 << 10
 
 	data := make([]int8, s.size)
-	err = ew.AddInt8ToPayload(data)
+	err = ew.AddInt8ToPayload(data, nil)
 	s.Require().NoError(err)
 
 	ew.SetEventTimestamp(1, 1)

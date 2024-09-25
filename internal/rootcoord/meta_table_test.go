@@ -1563,7 +1563,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
 				util.DefaultDBName: model.NewDefaultDatabase(),
-				"db1":              model.NewDatabase(2, "db1", pb.DatabaseState_DatabaseCreated),
+				"db1":              model.NewDatabase(2, "db1", pb.DatabaseState_DatabaseCreated, nil),
 			},
 			catalog: catalog,
 			names:   newNameDb(),
@@ -1696,7 +1696,7 @@ func TestMetaTable_ChangePartitionState(t *testing.T) {
 }
 
 func TestMetaTable_CreateDatabase(t *testing.T) {
-	db := model.NewDatabase(1, "exist", pb.DatabaseState_DatabaseCreated)
+	db := model.NewDatabase(1, "exist", pb.DatabaseState_DatabaseCreated, nil)
 	t.Run("database already exist", func(t *testing.T) {
 		meta := &MetaTable{
 			names: newNameDb(),
@@ -1755,7 +1755,7 @@ func TestAlterDatabase(t *testing.T) {
 			mock.Anything,
 		).Return(nil)
 
-		db := model.NewDatabase(1, "db1", pb.DatabaseState_DatabaseCreated)
+		db := model.NewDatabase(1, "db1", pb.DatabaseState_DatabaseCreated, nil)
 
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
@@ -1785,7 +1785,7 @@ func TestAlterDatabase(t *testing.T) {
 			mock.Anything,
 		).Return(mockErr)
 
-		db := model.NewDatabase(1, "db1", pb.DatabaseState_DatabaseCreated)
+		db := model.NewDatabase(1, "db1", pb.DatabaseState_DatabaseCreated, nil)
 
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
@@ -1808,7 +1808,7 @@ func TestAlterDatabase(t *testing.T) {
 
 	t.Run("alter database name", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
-		db := model.NewDatabase(1, "db1", pb.DatabaseState_DatabaseCreated)
+		db := model.NewDatabase(1, "db1", pb.DatabaseState_DatabaseCreated, nil)
 
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
@@ -1863,7 +1863,7 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 			names: newNameDb(),
 			dbName2Meta: map[string]*model.Database{
 				util.DefaultDBName: model.NewDefaultDatabase(),
-				"db2":              model.NewDatabase(2, "db2", pb.DatabaseState_DatabaseCreated),
+				"db2":              model.NewDatabase(2, "db2", pb.DatabaseState_DatabaseCreated, nil),
 			},
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				1: {
@@ -1939,7 +1939,7 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 	t.Run("database not empty", func(t *testing.T) {
 		mt := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				"not_empty": model.NewDatabase(1, "not_empty", pb.DatabaseState_DatabaseCreated),
+				"not_empty": model.NewDatabase(1, "not_empty", pb.DatabaseState_DatabaseCreated, nil),
 			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
@@ -1965,7 +1965,7 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 		).Return(errors.New("error mock DropDatabase"))
 		mt := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated),
+				"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated, nil),
 			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
@@ -1986,7 +1986,7 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 		).Return(nil)
 		mt := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated),
+				"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated, nil),
 			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
@@ -1999,4 +1999,45 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 		assert.False(t, mt.names.exist("not_commit"))
 		assert.False(t, mt.aliases.exist("not_commit"))
 	})
+}
+
+func TestMetaTable_BackupRBAC(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.EXPECT().BackupRBAC(mock.Anything, mock.Anything).Return(&milvuspb.RBACMeta{}, nil)
+	mt := &MetaTable{
+		dbName2Meta: map[string]*model.Database{
+			"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated, nil),
+		},
+		names:   newNameDb(),
+		aliases: newNameDb(),
+		catalog: catalog,
+	}
+	_, err := mt.BackupRBAC(context.TODO(), util.DefaultTenant)
+	assert.NoError(t, err)
+
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().BackupRBAC(mock.Anything, mock.Anything).Return(nil, errors.New("error mock BackupRBAC"))
+	_, err = mt.BackupRBAC(context.TODO(), util.DefaultTenant)
+	assert.Error(t, err)
+}
+
+func TestMetaTable_RestoreRBAC(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.EXPECT().RestoreRBAC(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	mt := &MetaTable{
+		dbName2Meta: map[string]*model.Database{
+			"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated, nil),
+		},
+		names:   newNameDb(),
+		aliases: newNameDb(),
+		catalog: catalog,
+	}
+
+	err := mt.RestoreRBAC(context.TODO(), util.DefaultTenant, &milvuspb.RBACMeta{})
+	assert.NoError(t, err)
+
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().RestoreRBAC(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error mock RestoreRBAC"))
+	err = mt.RestoreRBAC(context.TODO(), util.DefaultTenant, &milvuspb.RBACMeta{})
+	assert.Error(t, err)
 }

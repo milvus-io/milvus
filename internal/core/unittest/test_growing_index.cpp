@@ -150,10 +150,10 @@ TEST_P(GrowingIndexTest, Correctness) {
         const VectorBase* field_data = nullptr;
         if (is_sparse) {
             field_data = segmentImplPtr->get_insert_record()
-                             .get_field_data<milvus::SparseFloatVector>(vec);
+                             .get_data<milvus::SparseFloatVector>(vec);
         } else {
             field_data = segmentImplPtr->get_insert_record()
-                             .get_field_data<milvus::FloatVector>(vec);
+                             .get_data<milvus::FloatVector>(vec);
         }
 
         auto inserted = (i + 1) * per_batch;

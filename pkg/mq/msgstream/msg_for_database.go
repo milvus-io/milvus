@@ -19,14 +19,14 @@
 package msgstream
 
 import (
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 )
 
 type CreateDatabaseMsg struct {
 	BaseMsg
-	milvuspb.CreateDatabaseRequest
+	*milvuspb.CreateDatabaseRequest
 }
 
 var _ TsMsg = &CreateDatabaseMsg{}
@@ -49,7 +49,7 @@ func (c *CreateDatabaseMsg) SourceID() int64 {
 
 func (c *CreateDatabaseMsg) Marshal(input TsMsg) (MarshalType, error) {
 	createDataBaseMsg := input.(*CreateDatabaseMsg)
-	createDatabaseRequest := &createDataBaseMsg.CreateDatabaseRequest
+	createDatabaseRequest := createDataBaseMsg.CreateDatabaseRequest
 	mb, err := proto.Marshal(createDatabaseRequest)
 	if err != nil {
 		return nil, err
@@ -58,12 +58,12 @@ func (c *CreateDatabaseMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (c *CreateDatabaseMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	createDatabaseRequest := milvuspb.CreateDatabaseRequest{}
+	createDatabaseRequest := &milvuspb.CreateDatabaseRequest{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &createDatabaseRequest)
+	err = proto.Unmarshal(in, createDatabaseRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -75,12 +75,12 @@ func (c *CreateDatabaseMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (c *CreateDatabaseMsg) Size() int {
-	return proto.Size(&c.CreateDatabaseRequest)
+	return proto.Size(c.CreateDatabaseRequest)
 }
 
 type DropDatabaseMsg struct {
 	BaseMsg
-	milvuspb.DropDatabaseRequest
+	*milvuspb.DropDatabaseRequest
 }
 
 var _ TsMsg = &DropDatabaseMsg{}
@@ -103,7 +103,7 @@ func (d *DropDatabaseMsg) SourceID() int64 {
 
 func (d *DropDatabaseMsg) Marshal(input TsMsg) (MarshalType, error) {
 	dropDataBaseMsg := input.(*DropDatabaseMsg)
-	dropDatabaseRequest := &dropDataBaseMsg.DropDatabaseRequest
+	dropDatabaseRequest := dropDataBaseMsg.DropDatabaseRequest
 	mb, err := proto.Marshal(dropDatabaseRequest)
 	if err != nil {
 		return nil, err
@@ -112,12 +112,12 @@ func (d *DropDatabaseMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (d *DropDatabaseMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	dropDatabaseRequest := milvuspb.DropDatabaseRequest{}
+	dropDatabaseRequest := &milvuspb.DropDatabaseRequest{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &dropDatabaseRequest)
+	err = proto.Unmarshal(in, dropDatabaseRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -129,5 +129,59 @@ func (d *DropDatabaseMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (d *DropDatabaseMsg) Size() int {
-	return proto.Size(&d.DropDatabaseRequest)
+	return proto.Size(d.DropDatabaseRequest)
+}
+
+type AlterDatabaseMsg struct {
+	BaseMsg
+	*milvuspb.AlterDatabaseRequest
+}
+
+var _ TsMsg = &AlterDatabaseMsg{}
+
+func (a *AlterDatabaseMsg) ID() UniqueID {
+	return a.Base.MsgID
+}
+
+func (a *AlterDatabaseMsg) SetID(id UniqueID) {
+	a.Base.MsgID = id
+}
+
+func (a *AlterDatabaseMsg) Type() MsgType {
+	return a.Base.MsgType
+}
+
+func (a *AlterDatabaseMsg) SourceID() int64 {
+	return a.Base.SourceID
+}
+
+func (a *AlterDatabaseMsg) Marshal(input TsMsg) (MarshalType, error) {
+	alterDataBaseMsg := input.(*AlterDatabaseMsg)
+	alterDatabaseRequest := alterDataBaseMsg.AlterDatabaseRequest
+	mb, err := proto.Marshal(alterDatabaseRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (a *AlterDatabaseMsg) Unmarshal(input MarshalType) (TsMsg, error) {
+	alterDatabaseRequest := &milvuspb.AlterDatabaseRequest{}
+	in, err := convertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, alterDatabaseRequest)
+	if err != nil {
+		return nil, err
+	}
+	alterDatabaseMsg := &AlterDatabaseMsg{AlterDatabaseRequest: alterDatabaseRequest}
+	alterDatabaseMsg.BeginTimestamp = alterDatabaseMsg.GetBase().GetTimestamp()
+	alterDatabaseMsg.EndTimestamp = alterDatabaseMsg.GetBase().GetTimestamp()
+
+	return alterDatabaseMsg, nil
+}
+
+func (a *AlterDatabaseMsg) Size() int {
+	return proto.Size(a.AlterDatabaseRequest)
 }

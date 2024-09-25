@@ -57,7 +57,7 @@ type Executor struct {
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
 	broker    meta.Broker
-	targetMgr *meta.TargetManager
+	targetMgr meta.TargetManagerInterface
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
@@ -69,7 +69,7 @@ type Executor struct {
 func NewExecutor(meta *meta.Meta,
 	dist *meta.DistributionManager,
 	broker meta.Broker,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager,
 ) *Executor {
@@ -276,22 +276,23 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 			// get segment's replica first, then get shard leader by replica
 			replica := ex.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
 			if replica == nil {
-				msg := "node doesn't belong to any replica"
+				msg := "node doesn't belong to any replica, try to send release to worker"
 				err := merr.WrapErrNodeNotAvailable(action.Node())
 				log.Warn(msg, zap.Error(err))
-				return
+				dstNode = action.Node()
+				req.NeedTransfer = false
+			} else {
+				view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard()))
+				if view == nil {
+					msg := "no shard leader for the segment to execute releasing"
+					err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
+					log.Warn(msg, zap.Error(err))
+					return
+				}
+				dstNode = view.ID
+				log = log.With(zap.Int64("shardLeader", view.ID))
+				req.NeedTransfer = true
 			}
-			view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard()))
-			if view == nil {
-				msg := "no shard leader for the segment to execute releasing"
-				err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
-				log.Warn(msg, zap.Error(err))
-				return
-			}
-
-			dstNode = view.ID
-			log = log.With(zap.Int64("shardLeader", view.ID))
-			req.NeedTransfer = true
 		}
 	}
 
@@ -343,6 +344,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		log.Warn("failed to get collection info")
 		return err
 	}
+	loadFields := ex.meta.GetLoadFields(task.CollectionID())
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, task.CollectionID())
 	if err != nil {
 		log.Warn("failed to get partitions of collection")
@@ -358,6 +360,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		task.CollectionID(),
 		collectionInfo.GetDbName(),
 		task.ResourceGroup(),
+		loadFields,
 		partitions...,
 	)
 
@@ -649,6 +652,7 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		log.Warn("failed to get collection info", zap.Error(err))
 		return nil, nil, nil, err
 	}
+	loadFields := ex.meta.GetLoadFields(task.CollectionID())
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, collectionID)
 	if err != nil {
 		log.Warn("failed to get partitions of collection", zap.Error(err))
@@ -660,6 +664,7 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		task.CollectionID(),
 		collectionInfo.GetDbName(),
 		task.ResourceGroup(),
+		loadFields,
 		partitions...,
 	)
 
@@ -674,12 +679,12 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 
 func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int64, channel *meta.DmChannel) (*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
 	log := log.Ctx(ctx)
-	resp, err := ex.broker.GetSegmentInfo(ctx, segmentID)
-	if err != nil || len(resp.GetInfos()) == 0 {
+	segmentInfos, err := ex.broker.GetSegmentInfo(ctx, segmentID)
+	if err != nil || len(segmentInfos) == 0 {
 		log.Warn("failed to get segment info from DataCoord", zap.Error(err))
 		return nil, nil, err
 	}
-	segment := resp.GetInfos()[0]
+	segment := segmentInfos[0]
 	log = log.With(zap.String("level", segment.GetLevel().String()))
 
 	indexes, err := ex.broker.GetIndexInfo(ctx, collectionID, segment.GetID())

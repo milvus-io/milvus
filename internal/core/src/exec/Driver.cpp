@@ -19,9 +19,14 @@
 #include <cassert>
 #include <memory>
 
+#include "common/EasyAssert.h"
 #include "exec/operator/CallbackSink.h"
-#include "exec/operator/FilterBits.h"
+#include "exec/operator/CountNode.h"
+#include "exec/operator/FilterBitsNode.h"
+#include "exec/operator/MvccNode.h"
 #include "exec/operator/Operator.h"
+#include "exec/operator/VectorSearchNode.h"
+#include "exec/operator/GroupByNode.h"
 #include "exec/Task.h"
 
 #include "common/EasyAssert.h"
@@ -51,7 +56,27 @@ DriverFactory::CreateDriver(std::unique_ptr<DriverContext> ctx,
                 std::dynamic_pointer_cast<const plan::FilterBitsNode>(
                     plannode)) {
             operators.push_back(
-                std::make_unique<FilterBits>(id, ctx.get(), filternode));
+                std::make_unique<PhyFilterBitsNode>(id, ctx.get(), filternode));
+        } else if (auto mvccnode =
+                       std::dynamic_pointer_cast<const plan::MvccNode>(
+                           plannode)) {
+            operators.push_back(
+                std::make_unique<PhyMvccNode>(id, ctx.get(), mvccnode));
+        } else if (auto countnode =
+                       std::dynamic_pointer_cast<const plan::CountNode>(
+                           plannode)) {
+            operators.push_back(
+                std::make_unique<PhyCountNode>(id, ctx.get(), countnode));
+        } else if (auto vectorsearchnode =
+                       std::dynamic_pointer_cast<const plan::VectorSearchNode>(
+                           plannode)) {
+            operators.push_back(std::make_unique<PhyVectorSearchNode>(
+                id, ctx.get(), vectorsearchnode));
+        } else if (auto groupbynode =
+                       std::dynamic_pointer_cast<const plan::GroupByNode>(
+                           plannode)) {
+            operators.push_back(
+                std::make_unique<PhyGroupByNode>(id, ctx.get(), groupbynode));
         }
         // TODO: add more operators
     }

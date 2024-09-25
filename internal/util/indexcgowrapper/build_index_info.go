@@ -17,7 +17,7 @@
 package indexcgowrapper
 
 /*
-#cgo pkg-config: milvus_indexbuilder
+#cgo pkg-config: milvus_core
 #include <stdlib.h>	// free
 #include "indexbuilder/index_c.h"
 */
@@ -27,7 +27,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"

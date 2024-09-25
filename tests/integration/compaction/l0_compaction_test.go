@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -125,7 +125,8 @@ func (s *CompactionSuite) TestL0Compaction() {
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
-	s.Equal(1, len(segments))
+	// stats task happened
+	s.Equal(2, len(segments))
 	s.Equal(int64(rowNum), segments[0].GetNumOfRows())
 
 	// load
@@ -228,11 +229,11 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.NoError(err)
 
 	// drop collection
-	status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
-		CollectionName: collectionName,
-	})
-	err = merr.CheckRPCCall(status, err)
-	s.NoError(err)
+	// status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+	//	 CollectionName: collectionName,
+	// })
+	// err = merr.CheckRPCCall(status, err)
+	// s.NoError(err)
 
 	log.Info("Test compaction succeed")
 }

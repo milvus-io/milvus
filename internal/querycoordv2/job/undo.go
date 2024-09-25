@@ -38,12 +38,12 @@ type UndoList struct {
 	ctx            context.Context
 	meta           *meta.Meta
 	cluster        session.Cluster
-	targetMgr      *meta.TargetManager
+	targetMgr      meta.TargetManagerInterface
 	targetObserver *observers.TargetObserver
 }
 
 func NewUndoList(ctx context.Context, meta *meta.Meta,
-	cluster session.Cluster, targetMgr *meta.TargetManager, targetObserver *observers.TargetObserver,
+	cluster session.Cluster, targetMgr meta.TargetManagerInterface, targetObserver *observers.TargetObserver,
 ) *UndoList {
 	return &UndoList{
 		ctx:            ctx,
@@ -78,10 +78,9 @@ func (u *UndoList) RollBack() {
 
 	if u.IsTargetUpdated {
 		if u.IsNewCollection {
-			u.targetMgr.RemoveCollection(u.CollectionID)
 			u.targetObserver.ReleaseCollection(u.CollectionID)
 		} else {
-			u.targetMgr.RemovePartition(u.CollectionID, u.LackPartitions...)
+			u.targetObserver.ReleasePartition(u.CollectionID, u.LackPartitions...)
 		}
 	}
 }

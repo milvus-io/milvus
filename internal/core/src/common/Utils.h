@@ -224,7 +224,6 @@ CopyAndWrapSparseRow(const void* data,
     knowhere::sparse::SparseRow<float> row(num_elements);
     std::memcpy(row.data(), data, size);
     if (validate) {
-        AssertInfo(size > 0, "Sparse row data should not be empty");
         AssertInfo(
             size % knowhere::sparse::SparseRow<float>::element_size() == 0,
             "Invalid size for sparse row data");
@@ -286,5 +285,19 @@ inline void SparseRowsToProto(
     }
     proto->set_dim(max_dim);
 }
+
+class Defer {
+ public:
+    Defer(std::function<void()> fn) : fn_(fn) {
+    }
+    ~Defer() {
+        fn_();
+    }
+
+ private:
+    std::function<void()> fn_;
+};
+
+#define DeferLambda(fn) Defer Defer_##__COUNTER__(fn);
 
 }  // namespace milvus

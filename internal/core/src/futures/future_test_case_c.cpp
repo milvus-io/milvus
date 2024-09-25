@@ -16,7 +16,7 @@ extern "C" CFuture*
 future_create_test_case(int interval, int loop_cnt, int case_no) {
     auto future = milvus::futures::Future<int>::async(
         milvus::futures::getGlobalCPUExecutor(),
-        0,
+        milvus::futures::ExecutePriority::HIGH,
         [interval = interval, loop_cnt = loop_cnt, case_no = case_no](
             milvus::futures::CancellationToken token) {
             for (int i = 0; i < loop_cnt; i++) {

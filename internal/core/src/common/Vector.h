@@ -65,7 +65,8 @@ class ColumnVector final : public BaseVector {
                  size_t length,
                  std::optional<size_t> null_count = std::nullopt)
         : BaseVector(data_type, length, null_count) {
-        values_ = InitScalarFieldData(data_type, length);
+        //todo: support null expr
+        values_ = InitScalarFieldData(data_type, false, length);
     }
 
     //    ColumnVector(FixedVector<bool>&& data)
@@ -77,8 +78,8 @@ class ColumnVector final : public BaseVector {
     // the size is the number of bits
     ColumnVector(TargetBitmap&& bitmap)
         : BaseVector(DataType::INT8, bitmap.size()) {
-        values_ = std::make_shared<FieldDataImpl<uint8_t, false>>(
-            bitmap.size(), DataType::INT8, std::move(bitmap).into());
+        values_ = std::make_shared<FieldBitsetImpl<uint8_t>>(DataType::INT8,
+                                                             std::move(bitmap));
     }
 
     virtual ~ColumnVector() override {
@@ -122,6 +123,16 @@ class RowVector : public BaseVector {
         : BaseVector(DataType::ROW, 0) {
         for (auto& child : children) {
             children_values_.push_back(child);
+            if (child->size() > length_) {
+                length_ = child->size();
+            }
+        }
+    }
+
+    RowVector(std::vector<VectorPtr>&& children)
+        : BaseVector(DataType::ROW, 0) {
+        children_values_ = std::move(children);
+        for (auto& child : children_values_) {
             if (child->size() > length_) {
                 length_ = child->size();
             }

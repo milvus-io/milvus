@@ -151,33 +151,35 @@ func (s *Schema) PKField() *Field {
 
 // Field represent field schema in milvus
 type Field struct {
-	ID             int64  // field id, generated when collection is created, input value is ignored
-	Name           string // field name
-	PrimaryKey     bool   // is primary key
-	AutoID         bool   // is auto id
-	Description    string
-	DataType       FieldType
-	TypeParams     map[string]string
-	IndexParams    map[string]string
-	IsDynamic      bool
-	IsPartitionKey bool
-	ElementType    FieldType
+	ID              int64  // field id, generated when collection is created, input value is ignored
+	Name            string // field name
+	PrimaryKey      bool   // is primary key
+	AutoID          bool   // is auto id
+	Description     string
+	DataType        FieldType
+	TypeParams      map[string]string
+	IndexParams     map[string]string
+	IsDynamic       bool
+	IsPartitionKey  bool
+	IsClusteringKey bool
+	ElementType     FieldType
 }
 
 // ProtoMessage generates corresponding FieldSchema
 func (f *Field) ProtoMessage() *schemapb.FieldSchema {
 	return &schemapb.FieldSchema{
-		FieldID:        f.ID,
-		Name:           f.Name,
-		Description:    f.Description,
-		IsPrimaryKey:   f.PrimaryKey,
-		AutoID:         f.AutoID,
-		DataType:       schemapb.DataType(f.DataType),
-		TypeParams:     MapKvPairs(f.TypeParams),
-		IndexParams:    MapKvPairs(f.IndexParams),
-		IsDynamic:      f.IsDynamic,
-		IsPartitionKey: f.IsPartitionKey,
-		ElementType:    schemapb.DataType(f.ElementType),
+		FieldID:         f.ID,
+		Name:            f.Name,
+		Description:     f.Description,
+		IsPrimaryKey:    f.PrimaryKey,
+		AutoID:          f.AutoID,
+		DataType:        schemapb.DataType(f.DataType),
+		TypeParams:      MapKvPairs(f.TypeParams),
+		IndexParams:     MapKvPairs(f.IndexParams),
+		IsDynamic:       f.IsDynamic,
+		IsPartitionKey:  f.IsPartitionKey,
+		IsClusteringKey: f.IsClusteringKey,
+		ElementType:     schemapb.DataType(f.ElementType),
 	}
 }
 
@@ -221,6 +223,11 @@ func (f *Field) WithIsDynamic(isDynamic bool) *Field {
 
 func (f *Field) WithIsPartitionKey(isPartitionKey bool) *Field {
 	f.IsPartitionKey = isPartitionKey
+	return f
+}
+
+func (f *Field) WithIsClusteringKey(isClusteringKey bool) *Field {
+	f.IsClusteringKey = isClusteringKey
 	return f
 }
 
@@ -340,6 +347,7 @@ func (f *Field) ReadProto(p *schemapb.FieldSchema) *Field {
 	f.IndexParams = KvPairsMap(p.GetIndexParams())
 	f.IsDynamic = p.GetIsDynamic()
 	f.IsPartitionKey = p.GetIsPartitionKey()
+	f.IsClusteringKey = p.GetIsClusteringKey()
 	f.ElementType = FieldType(p.GetElementType())
 
 	return f

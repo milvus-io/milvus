@@ -11,6 +11,9 @@
 
 #pragma once
 
+#include <cstddef>
+#include <vector>
+#include "common/RegexQuery.h"
 #include "index/Index.h"
 #include "storage/FileManager.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -18,7 +21,6 @@
 #include "tantivy-binding.h"
 #include "tantivy-wrapper.h"
 #include "index/StringIndex.h"
-#include "storage/space.h"
 
 namespace milvus::index {
 
@@ -33,14 +35,10 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     using DiskFileManager = storage::DiskFileManagerImpl;
     using DiskFileManagerPtr = std::shared_ptr<DiskFileManager>;
 
-    InvertedIndexTantivy() = default;
-
-    explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx)
-        : InvertedIndexTantivy(ctx, nullptr) {
+    InvertedIndexTantivy() : ScalarIndex<T>(INVERTED_INDEX_TYPE) {
     }
 
-    explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx,
-                                  std::shared_ptr<milvus_storage::Space> space);
+    explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx);
 
     ~InvertedIndexTantivy();
 
@@ -56,9 +54,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
-    void
-    LoadV2(const Config& config = {}) override;
-
     /*
      * deprecated.
      * TODO: why not remove this?
@@ -70,11 +65,13 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                   "BuildWithDataset should be deprecated");
     }
 
-    void
-    Build(const Config& config = {}) override;
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::INVERTED;
+    }
 
     void
-    BuildV2(const Config& config = {}) override;
+    Build(const Config& config = {}) override;
 
     int64_t
     Count() override {
@@ -87,18 +84,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                      const void* values,
                      const Config& config = {}) override;
 
-    /*
-     * deprecated.
-     * TODO: why not remove this?
-     */
     BinarySet
-    Serialize(const Config& config /* not used */) override;
+    Serialize(const Config& config) override;
 
     BinarySet
     Upload(const Config& config = {}) override;
-
-    BinarySet
-    UploadV2(const Config& config = {}) override;
 
     /*
      * deprecated, only used in small chunk index.
@@ -110,6 +100,12 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     const TargetBitmap
     In(size_t n, const T* values) override;
+
+    const TargetBitmap
+    IsNull() override;
+
+    const TargetBitmap
+    IsNotNull() override;
 
     const TargetBitmap
     InApplyFilter(
@@ -157,26 +153,38 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     const TargetBitmap
     Query(const DatasetPtr& dataset) override;
 
+    const TargetBitmap
+    PatternMatch(const std::string& pattern) override {
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
+        return RegexQuery(regex_pattern);
+    }
+
+    bool
+    SupportPatternMatch() const override {
+        return SupportRegexQuery();
+    }
+
     bool
     SupportRegexQuery() const override {
-        return true;
+        return std::is_same_v<T, std::string>;
     }
 
     const TargetBitmap
-    RegexQuery(const std::string& pattern) override;
+    RegexQuery(const std::string& regex_pattern) override;
 
- private:
+ protected:
+    void
+    BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
+
     void
     finish();
-
-    void
-    build_index(const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
 
     void
     build_index_for_array(
         const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
 
- private:
+ protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
     TantivyDataType d_type_;
     std::string path_;
@@ -191,6 +199,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      */
     MemFileManagerPtr mem_file_manager_;
     DiskFileManagerPtr disk_file_manager_;
-    std::shared_ptr<milvus_storage::Space> space_;
+
+    // all data need to be built to align the offset
+    // so need to store null_offset in inverted index additionally
+    std::vector<size_t> null_offset{};
 };
 }  // namespace milvus::index

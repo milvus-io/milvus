@@ -248,10 +248,11 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 			Description: colMeta.Description,
 			AutoID:      colMeta.AutoID,
 			Fields:      model.MarshalFieldModels(colMeta.Fields),
+			Functions:   model.MarshalFunctionModels(colMeta.Functions),
 		},
 		PartitionIDs:   partitionIDs,
 		StartPositions: colMeta.StartPositions,
-		Properties:     req.GetProperties(),
+		Properties:     colMeta.Properties,
 		DbID:           db.ID,
 		VChannels:      colMeta.VirtualChannelNames,
 	}

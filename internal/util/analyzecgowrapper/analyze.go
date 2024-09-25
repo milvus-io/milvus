@@ -17,7 +17,7 @@
 package analyzecgowrapper
 
 /*
-#cgo pkg-config: milvus_clustering
+#cgo pkg-config: milvus_core
 
 #include <stdlib.h>	// free
 #include "clustering/analyze_c.h"
@@ -29,8 +29,8 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/log"

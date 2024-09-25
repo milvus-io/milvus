@@ -3,6 +3,7 @@ package segments
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -13,6 +14,7 @@ import (
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type SegmentSuite struct {
@@ -43,6 +45,9 @@ func (suite *SegmentSuite) SetupTest() {
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	initcore.InitRemoteChunkManager(paramtable.Get())
+	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	initcore.InitLocalChunkManager(localDataRootPath)
+	initcore.InitMmapManager(paramtable.Get())
 
 	suite.collectionID = 100
 	suite.partitionID = 10
@@ -100,7 +105,7 @@ func (suite *SegmentSuite) SetupTest() {
 	g, err := suite.sealed.(*LocalSegment).StartLoadData()
 	suite.Require().NoError(err)
 	for _, binlog := range binlogs {
-		err = suite.sealed.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLength), binlog, false)
+		err = suite.sealed.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLength), binlog)
 		suite.Require().NoError(err)
 	}
 	g.Done(nil)

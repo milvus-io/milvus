@@ -28,6 +28,9 @@ const EventLogRouterPath = "/eventlog"
 // ExprPath is path for expression.
 const ExprPath = "/expr"
 
+// StaticPath is path for the static view.
+const StaticPath = "/static/"
+
 const RootPath = "/"
 
 // Prometheus restful api path

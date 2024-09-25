@@ -8,14 +8,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/x448/float16"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
-var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-var r *rand.Rand
+var (
+	letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	r           *rand.Rand
+)
 
 func init() {
 	r = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -70,7 +73,7 @@ func GenInvalidNames() []string {
 
 func GenFloatVector(dim int) []float32 {
 	vector := make([]float32, 0, dim)
-	for j := 0; j < int(dim); j++ {
+	for j := 0; j < dim; j++ {
 		vector = append(vector, rand.Float32())
 	}
 	return vector
@@ -78,7 +81,7 @@ func GenFloatVector(dim int) []float32 {
 
 func GenFloat16Vector(dim int) []byte {
 	ret := make([]byte, dim*2)
-	for i := 0; i < int(dim); i++ {
+	for i := 0; i < dim; i++ {
 		v := float16.Fromfloat32(rand.Float32()).Bits()
 		binary.LittleEndian.PutUint16(ret[i*2:], v)
 	}
@@ -87,7 +90,7 @@ func GenFloat16Vector(dim int) []byte {
 
 func GenBFloat16Vector(dim int) []byte {
 	ret16 := make([]uint16, 0, dim)
-	for i := 0; i < int(dim); i++ {
+	for i := 0; i < dim; i++ {
 		f := rand.Float32()
 		bits := math.Float32bits(f)
 		bits >>= 16
@@ -151,5 +154,5 @@ var InvalidExpressions = []InvalidExprStruct{
 	{Expr: fmt.Sprintf("json_contains_aby (%s['list'], 2)", DefaultJSONFieldName), ErrNil: false, ErrMsg: "invalid expression: json_contains_aby"},
 	{Expr: fmt.Sprintf("json_contains_aby (%s['list'], 2)", DefaultJSONFieldName), ErrNil: false, ErrMsg: "invalid expression: json_contains_aby"},
 	{Expr: fmt.Sprintf("%s[-1] > %d", DefaultInt8ArrayField, TestCapacity), ErrNil: false, ErrMsg: "cannot parse expression"}, //  array[-1] >
-	{Expr: fmt.Sprintf(fmt.Sprintf("%s[-1] > 1", DefaultJSONFieldName)), ErrNil: false, ErrMsg: "invalid expression"},         //  json[-1] >
+	{Expr: fmt.Sprintf("%s[-1] > 1", DefaultJSONFieldName), ErrNil: false, ErrMsg: "invalid expression"},                      //  json[-1] >
 }

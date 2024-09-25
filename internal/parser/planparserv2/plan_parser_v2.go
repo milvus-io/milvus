@@ -2,18 +2,42 @@ package planparserv2
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+// exprParseKey is used to cache the parse result. Currently only collectionName is used besides expr string, which implies
+// that the same collectionName will have the same schema thus the same parse result. In the future, if there is case that the
+// schema changes without changing the collectionName, we need to change the cache key.
+type exprParseKey struct {
+	collectionName string
+	expr           string
+}
+
+var exprCache = expirable.NewLRU[exprParseKey, any](256, nil, time.Minute*10)
+
 func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
+	parseKey := exprParseKey{collectionName: schema.GetCollectionName(), expr: exprStr}
+	val, ok := exprCache.Get(parseKey)
+	if !ok {
+		val = handleExprWithErrorListener(schema, exprStr, &errorListenerImpl{})
+		// Note that the errors will be cached, too.
+		exprCache.Add(parseKey, val)
+	}
+	return val
+}
+
+func handleExprWithErrorListener(schema *typeutil.SchemaHelper, exprStr string, errorListener errorListener) interface{} {
 	if isEmptyExpression(exprStr) {
 		return &ExprWithType{
 			dataType: schemapb.DataType_Bool,
@@ -22,21 +46,19 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
 	}
 
 	inputStream := antlr.NewInputStream(exprStr)
-	errorListener := &errorListener{}
-
 	lexer := getLexer(inputStream, errorListener)
-	if errorListener.err != nil {
-		return errorListener.err
+	if errorListener.Error() != nil {
+		return errorListener.Error()
 	}
 
 	parser := getParser(lexer, errorListener)
-	if errorListener.err != nil {
-		return errorListener.err
+	if errorListener.Error() != nil {
+		return errorListener.Error()
 	}
 
 	ast := parser.Expr()
-	if errorListener.err != nil {
-		return errorListener.err
+	if errorListener.Error() != nil {
+		return errorListener.Error()
 	}
 
 	if parser.GetCurrentToken().GetTokenType() != antlr.TokenEOF {
@@ -121,6 +143,10 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 	if err != nil {
 		log.Info("CreateSearchPlan failed", zap.Error(err))
 		return nil, err
+	}
+	// plan ok with schema, check ann field
+	if !schema.IsFieldLoaded(vectorField.GetFieldID()) {
+		return nil, merr.WrapErrParameterInvalidMsg("ann field \"%s\" not loaded", vectorFieldName)
 	}
 	fieldID := vectorField.FieldID
 	dataType := vectorField.DataType

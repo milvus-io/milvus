@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -20,10 +20,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -43,6 +45,7 @@ const (
 )
 
 type queryTask struct {
+	baseTask
 	Condition
 	*internalpb.RetrieveRequest
 
@@ -55,7 +58,8 @@ type queryTask struct {
 	queryParams    *queryParams
 	schema         *schemaInfo
 
-	userOutputFields []string
+	userOutputFields  []string
+	userDynamicFields []string
 
 	resultBuf *typeutil.ConcurrentSet[*internalpb.RetrieveResults]
 
@@ -72,9 +76,9 @@ type queryTask struct {
 }
 
 type queryParams struct {
-	limit             int64
-	offset            int64
-	reduceStopForBest bool
+	limit      int64
+	offset     int64
+	reduceType reduce.IReduceType
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
@@ -139,6 +143,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		limit             int64
 		offset            int64
 		reduceStopForBest bool
+		isIterator        bool
 		err               error
 	)
 	reduceStopForBestStr, err := funcutil.GetAttrByKeyFromRepeatedKV(ReduceStopForBestKey, queryParamsPair)
@@ -151,10 +156,29 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		}
 	}
 
+	isIteratorStr, err := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, queryParamsPair)
+	// if reduce_stop_for_best is provided
+	if err == nil {
+		isIterator, err = strconv.ParseBool(isIteratorStr)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalid("true or false", isIteratorStr,
+				"value for iterator field is invalid")
+		}
+	}
+
+	reduceType := reduce.IReduceNoOrder
+	if isIterator {
+		if reduceStopForBest {
+			reduceType = reduce.IReduceInOrderForBest
+		} else {
+			reduceType = reduce.IReduceInOrder
+		}
+	}
+
 	limitStr, err := funcutil.GetAttrByKeyFromRepeatedKV(LimitKey, queryParamsPair)
 	// if limit is not provided
 	if err != nil {
-		return &queryParams{limit: typeutil.Unlimited, reduceStopForBest: reduceStopForBest}, nil
+		return &queryParams{limit: typeutil.Unlimited, reduceType: reduceType}, nil
 	}
 	limit, err = strconv.ParseInt(limitStr, 0, 64)
 	if err != nil {
@@ -176,9 +200,9 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 	}
 
 	return &queryParams{
-		limit:             limit,
-		offset:            offset,
-		reduceStopForBest: reduceStopForBest,
+		limit:      limit,
+		offset:     offset,
+		reduceType: reduceType,
 	}, nil
 }
 
@@ -200,7 +224,7 @@ func createCntPlan(expr string, schemaHelper *typeutil.SchemaHelper) (*planpb.Pl
 
 	plan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
+		return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err))
 	}
 
 	plan.Node.(*planpb.PlanNode_Query).Query.IsCount = true
@@ -223,11 +247,11 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 	if t.plan == nil {
 		t.plan, err = planparserv2.CreateRetrievePlan(schema.schemaHelper, t.request.Expr)
 		if err != nil {
-			return merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
+			return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err))
 		}
 	}
 
-	t.request.OutputFields, t.userOutputFields, err = translateOutputFields(t.request.OutputFields, t.schema, true)
+	t.request.OutputFields, t.userOutputFields, t.userDynamicFields, err = translateOutputFields(t.request.OutputFields, t.schema, true)
 	if err != nil {
 		return err
 	}
@@ -239,6 +263,7 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 	outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
 	t.RetrieveRequest.OutputFieldsId = outputFieldIDs
 	t.plan.OutputFieldIds = outputFieldIDs
+	t.plan.DynamicFields = t.userDynamicFields
 	log.Ctx(ctx).Debug("translate output fields to field ids",
 		zap.Int64s("OutputFieldsID", t.OutputFieldsId),
 		zap.String("requestType", "query"))
@@ -250,6 +275,10 @@ func (t *queryTask) CanSkipAllocTimestamp() bool {
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
 	if !useDefaultConsistency {
+		// legacy SDK & resultful behavior
+		if t.request.GetConsistencyLevel() == commonpb.ConsistencyLevel_Strong && t.request.GetGuaranteeTimestamp() > 0 {
+			return true
+		}
 		consistencyLevel = t.request.GetConsistencyLevel()
 	} else {
 		collID, err := globalMetaCache.GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
@@ -291,7 +320,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("Failed to get collection id.", zap.String("collectionName", collectionName), zap.Error(err))
-		return err
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
 	t.CollectionID = collID
 	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
@@ -302,11 +331,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
-		return errors.New("not support manually specifying the partition names if partition key mode is used")
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used"))
 	}
 	if t.mustUsePartitionKey && !t.partitionKeyMode {
-		return merr.WrapErrParameterInvalidMsg("must use partition key in the query request " +
-			"because the mustUsePartitionKey config is true")
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("must use partition key in the query request " +
+			"because the mustUsePartitionKey config is true"))
 	}
 
 	for _, tag := range t.request.PartitionNames {
@@ -335,7 +364,10 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	t.RetrieveRequest.ReduceStopForBest = queryParams.reduceStopForBest
+	if queryParams.reduceType == reduce.IReduceInOrderForBest {
+		t.RetrieveRequest.ReduceStopForBest = true
+	}
+	t.RetrieveRequest.ReduceType = int32(queryParams.reduceType)
 
 	t.queryParams = queryParams
 	t.RetrieveRequest.Limit = queryParams.limit + queryParams.offset
@@ -363,7 +395,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.plan.Node.(*planpb.PlanNode_Query).Query.Limit = t.RetrieveRequest.Limit
 
 	if planparserv2.IsAlwaysTruePlan(t.plan) && t.RetrieveRequest.Limit == typeutil.Unlimited {
-		return fmt.Errorf("empty expression should be used with limit")
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("empty expression should be used with limit"))
 	}
 
 	// convert partition names only when requery is false
@@ -390,7 +422,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	// count with pagination
 	if t.plan.GetQuery().GetIsCount() && t.queryParams.limit != typeutil.Unlimited {
-		return fmt.Errorf("count entities with pagination is not allowed")
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed"))
 	}
 
 	t.RetrieveRequest.IsCount = t.plan.GetQuery().GetIsCount()
@@ -583,10 +615,8 @@ func IDs2Expr(fieldName string, ids *schemapb.IDs) string {
 func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams) (*milvuspb.QueryResults, error) {
 	log.Ctx(ctx).Debug("reduceInternalRetrieveResults", zap.Int("len(retrieveResults)", len(retrieveResults)))
 	var (
-		ret = &milvuspb.QueryResults{}
-
-		skipDupCnt int64
-		loopEnd    int
+		ret     = &milvuspb.QueryResults{}
+		loopEnd int
 	)
 
 	validRetrieveResults := []*internalpb.RetrieveResults{}
@@ -603,14 +633,13 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		return ret, nil
 	}
 
-	ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].GetFieldsData()))
-	idSet := make(map[interface{}]struct{})
 	cursors := make([]int64, len(validRetrieveResults))
 
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
-		// reduceStopForBest will try to get as many results as possible
+		// IReduceInOrderForBest will try to get as many results as possible
 		// so loopEnd in this case will be set to the sum of all results' size
-		if !queryParams.reduceStopForBest {
+		// to get as many qualified results as possible
+		if reduce.ShouldUseInputLimit(queryParams.reduceType) {
 			loopEnd = int(queryParams.limit)
 		}
 	}
@@ -619,30 +648,22 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	if queryParams != nil && queryParams.offset > 0 {
 		for i := int64(0); i < queryParams.offset; i++ {
 			sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
-			if sel == -1 || (queryParams.reduceStopForBest && drainOneResult) {
+			if sel == -1 || (reduce.ShouldStopWhenDrained(queryParams.reduceType) && drainOneResult) {
 				return ret, nil
 			}
 			cursors[sel]++
 		}
 	}
 
+	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].GetFieldsData(), int64(loopEnd))
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for j := 0; j < loopEnd; {
+	for j := 0; j < loopEnd; j++ {
 		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
-		if sel == -1 || (queryParams.reduceStopForBest && drainOneResult) {
+		if sel == -1 || (reduce.ShouldStopWhenDrained(queryParams.reduceType) && drainOneResult) {
 			break
 		}
-
-		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
-		if _, ok := idSet[pk]; !ok {
-			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
-			idSet[pk] = struct{}{}
-			j++
-		} else {
-			// primary keys duplicate
-			skipDupCnt++
-		}
+		retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
 
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {
@@ -650,10 +671,6 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		}
 
 		cursors[sel]++
-	}
-
-	if skipDupCnt > 0 {
-		log.Ctx(ctx).Debug("skip duplicated query result while reducing QueryResults", zap.Int64("count", skipDupCnt))
 	}
 
 	return ret, nil
@@ -710,6 +727,10 @@ func (t *queryTask) SetTs(ts Timestamp) {
 }
 
 func (t *queryTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	t.Base.MsgType = commonpb.MsgType_Retrieve
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }

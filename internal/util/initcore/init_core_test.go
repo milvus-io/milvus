@@ -41,7 +41,7 @@ func TestOtlpHang(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().TraceCfg.Exporter.Key)
 	defer paramtable.Get().Reset(paramtable.Get().TraceCfg.InitTimeoutSeconds.Key)
 
-	assert.Panics(t, func() {
+	assert.NotPanics(t, func() {
 		ResetTraceConfig(paramtable.Get())
 	})
 }

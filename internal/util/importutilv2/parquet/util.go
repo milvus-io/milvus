@@ -115,7 +115,7 @@ func isArrowArithmeticType(dataType arrow.Type) bool {
 	return isArrowIntegerType(dataType) || isArrowFloatingType(dataType)
 }
 
-func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType) bool {
+func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, nullable bool) bool {
 	srcType := src.ID()
 	dstType := dst.ID()
 	switch srcType {
@@ -142,7 +142,9 @@ func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType) bool {
 	case arrow.BINARY:
 		return dstType == arrow.LIST && dst.(*arrow.ListType).Elem().ID() == arrow.UINT8
 	case arrow.LIST:
-		return dstType == arrow.LIST && isArrowDataTypeConvertible(src.(*arrow.ListType).Elem(), dst.(*arrow.ListType).Elem())
+		return dstType == arrow.LIST && isArrowDataTypeConvertible(src.(*arrow.ListType).Elem(), dst.(*arrow.ListType).Elem(), nullable)
+	case arrow.NULL:
+		return nullable
 	default:
 		return false
 	}
@@ -204,7 +206,7 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 	}
 }
 
-func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, error) {
+func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useNullType bool) (*arrow.Schema, error) {
 	arrFields := make([]arrow.Field, 0)
 	for _, field := range schema.GetFields() {
 		if typeutil.IsAutoPKField(field) {
@@ -214,10 +216,13 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, err
 		if err != nil {
 			return nil, err
 		}
+		if field.GetNullable() && useNullType {
+			arrDataType = arrow.Null
+		}
 		arrFields = append(arrFields, arrow.Field{
 			Name:     field.GetName(),
 			Type:     arrDataType,
-			Nullable: true,
+			Nullable: field.GetNullable(),
 			Metadata: arrow.Metadata{},
 		})
 	}
@@ -243,7 +248,7 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 		if err != nil {
 			return err
 		}
-		if !isArrowDataTypeConvertible(arrField.Type, toArrDataType) {
+		if !isArrowDataTypeConvertible(arrField.Type, toArrDataType, field.GetNullable()) {
 			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' type mis-match, milvus data type '%s', arrow data type get '%s'",
 				field.Name, field.DataType.String(), arrField.Type.String()))
 		}
@@ -261,3 +266,20 @@ func estimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema
 	}
 	return int64(bufferSize) / int64(sizePerRecord), nil
 }
+
+// todo(smellthemoon): use byte to store valid_data
+func bytesToBoolArray(length int, bytes []byte) []bool {
+	bools := make([]bool, 0, length)
+
+	for i := 0; i < length; i++ {
+		bit := (bytes[uint(i)/8] & BitMask[byte(i)%8]) != 0
+		bools = append(bools, bit)
+	}
+
+	return bools
+}
+
+var (
+	BitMask        = [8]byte{1, 2, 4, 8, 16, 32, 64, 128}
+	FlippedBitMask = [8]byte{254, 253, 251, 247, 239, 223, 191, 127}
+)

@@ -1,0 +1,172 @@
+run:
+  go: "1.21"
+  skip-dirs:
+    - build
+    - configs
+    - deployments
+    - docs
+    - scripts
+    - internal/core
+    - cmake_build
+  skip-files:
+    - partial_search_test.go
+
+linters:
+  disable-all: true
+  enable:
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - decorder
+    - depguard
+    - gofmt
+    - goimports
+    - gosec
+    - revive
+    - unconvert
+    - misspell
+    - typecheck
+    - durationcheck
+    - forbidigo
+    - gci
+    - whitespace
+    - gofumpt
+    - gocritic
+
+linters-settings:
+  gci:
+    sections:
+      - standard
+      - default
+      - prefix(github.com/milvus-io)
+    custom-order: true
+  gofumpt:
+    lang-version: "1.18"
+    module-path: github.com/milvus-io
+  goimports:
+    local-prefixes: github.com/milvus-io
+  revive:
+    rules:
+      - name: unused-parameter
+        disabled: true
+      - name: var-naming
+        severity: warning
+        disabled: false
+        arguments:
+          - ["ID"] # Allow list
+      - name: context-as-argument
+        severity: warning
+        disabled: false
+        arguments:
+          - allowTypesBefore: "*testing.T"
+      - name: datarace
+        severity: warning
+        disabled: false
+      - name: duplicated-imports
+        severity: warning
+        disabled: false
+      - name: waitgroup-by-value
+        severity: warning
+        disabled: false
+      - name: indent-error-flow
+        severity: warning
+        disabled: false
+        arguments:
+          - "preserveScope"
+      - name: range-val-in-closure
+        severity: warning
+        disabled: false
+      - name: range-val-address
+        severity: warning
+        disabled: false
+      - name: string-of-int
+        severity: warning
+        disabled: false
+  misspell:
+    locale: US
+  gocritic:
+    enabled-checks:
+      - ruleguard
+    settings:
+      ruleguard:
+        failOnError: true
+        rules: "ruleguard/rules.go"
+  depguard:
+    rules:
+      main:
+        deny:
+          - pkg: "errors"
+            desc: not allowed, use github.com/cockroachdb/errors
+          - pkg: "github.com/pkg/errors"
+            desc: not allowed, use github.com/cockroachdb/errors
+          - pkg: "github.com/pingcap/errors"
+            desc: not allowed, use github.com/cockroachdb/errors
+          - pkg: "golang.org/x/xerrors"
+            desc: not allowed, use github.com/cockroachdb/errors
+          - pkg: "github.com/go-errors/errors"
+            desc: not allowed, use github.com/cockroachdb/errors
+          - pkg: "io/ioutil"
+            desc: ioutil is deprecated after 1.16, 1.17, use os and io package instead
+          - pkg: "github.com/tikv/client-go/rawkv"
+            desc: not allowed, use github.com/tikv/client-go/v2/txnkv
+          - pkg: "github.com/tikv/client-go/v2/rawkv"
+            desc: not allowed, use github.com/tikv/client-go/v2/txnkv
+  forbidigo:
+    forbid:
+      - '^time\.Tick$'
+      - 'return merr\.Err[a-zA-Z]+'
+      - 'merr\.Wrap\w+\(\)\.Error\(\)'
+      - '\.(ErrorCode|Reason) = '
+      - 'Reason:\s+\w+\.Error\(\)'
+      - 'errors.New\((.+)\.GetReason\(\)\)'
+      - 'commonpb\.Status\{[\s\n]*ErrorCode:[\s\n]*.+[\s\S\n]*?\}'
+      - 'os\.Open\(.+\)'
+      - 'os\.ReadFile\(.+\)'
+      - 'os\.WriteFile\(.+\)'
+      - "runtime.NumCPU"
+      - "runtime.GOMAXPROCS(0)"
+      #- 'fmt\.Print.*' WIP
+
+issues:
+  exclude-use-default: false
+  exclude-rules:
+    - path: .+_test\.go
+      linters:
+        - forbidigo
+  exclude:
+    - should have a package comment
+    - should have comment
+    - should be of the form
+    - should not use dot imports
+    - which can be annoying to use
+    # Binds to all network interfaces
+    - G102
+    # Use of unsafe calls should be audited
+    - G103
+    # Errors unhandled
+    - G104
+    # file/folder Permission
+    - G301
+    - G302
+    # Potential file inclusion via variable
+    - G304
+    # Deferring unsafe method like *os.File Close
+    - G307
+    # TLS MinVersion too low
+    - G402
+    # Use of weak random number generator math/rand
+    - G404
+    # Unused parameters
+    - SA1019
+    # defer return errors
+    - SA5001
+
+  # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
+  max-issues-per-linter: 0
+  # Maximum count of issues with the same text. Set to 0 to disable. Default is 3.
+  max-same-issues: 0
+
+service:
+  # use the fixed version to not introduce new linters unexpectedly
+  golangci-lint-version: 1.55.2

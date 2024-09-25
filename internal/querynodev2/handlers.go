@@ -32,11 +32,13 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -317,7 +319,10 @@ func (node *QueryNode) queryStreamSegments(ctx context.Context, req *querypb.Que
 	}
 
 	// Send task to scheduler and wait until it finished.
-	task := tasks.NewQueryStreamTask(ctx, collection, node.manager, req, srv, node.streamBatchSzie)
+
+	task := tasks.NewQueryStreamTask(ctx, collection, node.manager, req, srv,
+		paramtable.Get().QueryNodeCfg.QueryStreamBatchSize.GetAsInt(),
+		paramtable.Get().QueryNodeCfg.QueryStreamMaxBatchSize.GetAsInt())
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to add query task into scheduler", zap.Error(err))
 		return err
@@ -384,12 +389,10 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		req.GetSegmentIDs(),
 	))
 
-	var resp *internalpb.SearchResults
-	if req.GetReq().GetIsAdvanced() {
-		resp, err = segments.ReduceAdvancedSearchResults(ctx, results, req.Req.GetNq())
-	} else {
-		resp, err = segments.ReduceSearchResults(ctx, results, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
-	}
+	resp, err := segments.ReduceSearchOnQueryNode(ctx, results,
+		reduce.NewReduceSearchResultInfo(req.GetReq().GetNq(),
+			req.GetReq().GetTopk()).WithMetricType(req.GetReq().GetMetricType()).WithGroupByField(req.GetReq().GetGroupByFieldId()).
+			WithGroupSize(req.GetReq().GetGroupByFieldId()).WithAdvance(req.GetReq().GetIsAdvanced()))
 	if err != nil {
 		return nil, err
 	}

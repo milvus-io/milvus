@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/Driver.h"
@@ -152,6 +153,11 @@ class Operator {
         return operator_context_->get_plannode_id();
     }
 
+    virtual std::string
+    ToString() const {
+        return "Base Operator";
+    }
+
  protected:
     std::unique_ptr<OperatorContext> operator_context_;
 
@@ -182,14 +188,18 @@ class SourceOperator : public Operator {
 
     void
     AddInput(RowVectorPtr& /* unused */) override {
-        throw NotImplementedException(
-            "SourceOperator does not support addInput()");
+        PanicInfo(NotImplemented, "SourceOperator does not support addInput()");
     }
 
     void
     NoMoreInput() override {
-        throw NotImplementedException(
-            "SourceOperator does not support noMoreInput()");
+        PanicInfo(NotImplemented,
+                  "SourceOperator does not support noMoreInput()");
+    }
+
+    virtual std::string
+    ToString() const override {
+        return "source operator";
     }
 };
 

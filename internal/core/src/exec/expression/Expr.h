@@ -119,7 +119,9 @@ class SegmentExpr : public Expr {
         is_index_mode_ = segment_->HasIndex(field_id_);
         if (is_index_mode_) {
             num_index_chunk_ = segment_->num_chunk_index(field_id_);
-        } else {
+        }
+        // if index not include raw data, also need load data
+        if (segment_->HasFieldData(field_id_)) {
             num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
         }
     }
@@ -166,6 +168,9 @@ class SegmentExpr : public Expr {
     MoveCursor() override {
         if (is_index_mode_) {
             MoveCursorForIndex();
+            if (segment_->HasFieldData(field_id_)) {
+                MoveCursorForData();
+            }
         } else {
             MoveCursorForData();
         }
@@ -173,14 +178,44 @@ class SegmentExpr : public Expr {
 
     int64_t
     GetNextBatchSize() {
-        auto current_chunk =
-            is_index_mode_ ? current_index_chunk_ : current_data_chunk_;
-        auto current_chunk_pos =
-            is_index_mode_ ? current_index_chunk_pos_ : current_data_chunk_pos_;
+        auto current_chunk = is_index_mode_ && use_index_ ? current_index_chunk_
+                                                          : current_data_chunk_;
+        auto current_chunk_pos = is_index_mode_ && use_index_
+                                     ? current_index_chunk_pos_
+                                     : current_data_chunk_pos_;
         auto current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
         return current_rows + batch_size_ >= active_count_
                    ? active_count_ - current_rows
                    : batch_size_;
+    }
+
+    // used for processing raw data expr for sealed segments.
+    // now only used for std::string_view && json
+    // TODO: support more types
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessChunkForSealedSeg(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        TargetBitmapView res,
+        ValTypes... values) {
+        // For sealed segment, only single chunk
+        Assert(num_data_chunk_ == 1);
+        auto need_size =
+            std::min(active_count_ - current_data_chunk_pos_, batch_size_);
+
+        auto& skip_index = segment_->GetSkipIndex();
+        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
+            auto data_vec =
+                segment_
+                    ->get_batch_views<T>(
+                        field_id_, 0, current_data_chunk_pos_, need_size)
+                    .first;
+
+            func(data_vec.data(), need_size, res, values...);
+        }
+        current_data_chunk_pos_ += need_size;
+        return need_size;
     }
 
     template <typename T, typename FUNC, typename... ValTypes>
@@ -191,6 +226,14 @@ class SegmentExpr : public Expr {
         TargetBitmapView res,
         ValTypes... values) {
         int64_t processed_size = 0;
+
+        if constexpr (std::is_same_v<T, std::string_view> ||
+                      std::is_same_v<T, Json>) {
+            if (segment_->type() == SegmentType::Sealed) {
+                return ProcessChunkForSealedSeg<T>(
+                    func, skip_func, res, values...);
+            }
+        }
 
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
@@ -280,6 +323,35 @@ class SegmentExpr : public Expr {
         return result;
     }
 
+    template <typename FUNC, typename... ValTypes>
+    TargetBitmap
+    ProcessTextMatchIndex(FUNC func, ValTypes... values) {
+        TargetBitmap result;
+
+        if (cached_match_res_ == nullptr) {
+            auto index = segment_->GetTextIndex(field_id_);
+            auto res = std::move(func(index, values...));
+            cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
+            if (cached_match_res_->size() < active_count_) {
+                // some entities are not visible in inverted index.
+                // only happend on growing segment.
+                TargetBitmap tail(active_count_ - cached_match_res_->size());
+                cached_match_res_->append(tail);
+            }
+        }
+
+        // return batch size, not sure if we should use the data position.
+        auto real_batch_size =
+            current_data_chunk_pos_ + batch_size_ > active_count_
+                ? active_count_ - current_data_chunk_pos_
+                : batch_size_;
+        result.append(
+            *cached_match_res_, current_data_chunk_pos_, real_batch_size);
+        current_data_chunk_pos_ += real_batch_size;
+
+        return result;
+    }
+
     template <typename T, typename FUNC, typename... ValTypes>
     void
     ProcessIndexChunksV2(FUNC func, ValTypes... values) {
@@ -324,6 +396,30 @@ class SegmentExpr : public Expr {
         return true;
     }
 
+    template <typename T>
+    bool
+    IndexHasRawData() const {
+        typedef std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+                IndexInnerType;
+
+        using Index = index::ScalarIndex<IndexInnerType>;
+        for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
+            const Index& index =
+                segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
+            if (!index.HasRawData()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    void
+    SetNotUseIndex() {
+        use_index_ = false;
+    }
+
  protected:
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;
@@ -331,14 +427,17 @@ class SegmentExpr : public Expr {
     DataType pk_type_;
     int64_t batch_size_;
 
-    // State indicate position that expr computing at
-    // because expr maybe called for every batch.
     bool is_index_mode_{false};
     bool is_data_mode_{false};
+    // sometimes need to skip index and using raw data
+    // default true means use index as much as possible
+    bool use_index_{true};
 
     int64_t active_count_{0};
     int64_t num_data_chunk_{0};
     int64_t num_index_chunk_{0};
+    // State indicate position that expr computing at
+    // because expr maybe called for every batch.
     int64_t current_data_chunk_{0};
     int64_t current_data_chunk_pos_{0};
     int64_t current_index_chunk_{0};
@@ -348,6 +447,9 @@ class SegmentExpr : public Expr {
     // Cache for index scan to avoid search index every batch
     int64_t cached_index_chunk_id_{-1};
     TargetBitmap cached_index_chunk_res_{};
+
+    // Cache for text match.
+    std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};
 };
 
 void

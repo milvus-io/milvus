@@ -4,13 +4,13 @@ import random
 import string
 from faker import Faker
 import numpy as np
-import jax.numpy as jnp
+from ml_dtypes import bfloat16
 from sklearn import preprocessing
 import base64
 import requests
 from loguru import logger
 import datetime
-
+from sklearn.metrics import pairwise_distances
 fake = Faker()
 rng = np.random.default_rng()
 
@@ -191,7 +191,7 @@ def gen_bf16_vectors(num, dim):
     for _ in range(num):
         raw_vector = [random.random() for _ in range(dim)]
         raw_vectors.append(raw_vector)
-        bf16_vector = np.array(jnp.array(raw_vector, dtype=jnp.bfloat16)).view(np.uint8).tolist()
+        bf16_vector = np.array(raw_vector, dtype=bfloat16).view(np.uint8).tolist()
         bf16_vectors.append(bytes(bf16_vector))
 
     return raw_vectors, bf16_vectors
@@ -240,4 +240,28 @@ def get_all_fields_by_data(data, exclude_fields=None):
     return list(fields)
 
 
+def ip_distance(x, y):
+    return np.dot(x, y)
 
+
+def cosine_distance(u, v, epsilon=1e-8):
+    dot_product = np.dot(u, v)
+    norm_u = np.linalg.norm(u)
+    norm_v = np.linalg.norm(v)
+    return dot_product / (max(norm_u * norm_v, epsilon))
+
+
+def l2_distance(u, v):
+    return np.sum((u - v) ** 2)
+
+
+def get_sorted_distance(train_emb, test_emb, metric_type):
+    milvus_sklearn_metric_map = {
+        "L2": l2_distance,
+        "COSINE": cosine_distance,
+        "IP": ip_distance
+    }
+    distance = pairwise_distances(train_emb, Y=test_emb, metric=milvus_sklearn_metric_map[metric_type], n_jobs=-1)
+    distance = np.array(distance.T, order='C', dtype=np.float16)
+    distance_sorted = np.sort(distance, axis=1).tolist()
+    return distance_sorted

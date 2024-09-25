@@ -17,7 +17,7 @@
 package segments
 
 /*
-#cgo pkg-config: milvus_segcore
+#cgo pkg-config: milvus_core
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
@@ -204,7 +204,7 @@ func NewManager() *Manager {
 				return nil, merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
 			}
 
-			err = manager.Loader.LoadLazySegment(ctx, segment.(*LocalSegment), info)
+			err = manager.Loader.LoadLazySegment(ctx, segment, info)
 			return nil, err
 		})
 		if err != nil {

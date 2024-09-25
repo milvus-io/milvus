@@ -24,6 +24,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/jaeger"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	stdout "go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -86,13 +87,26 @@ func CreateTracerExporter(params *paramtable.ComponentParam) (sdk.SpanExporter, 
 			jaeger.WithEndpoint(params.TraceCfg.JaegerURL.GetValue())))
 	case "otlp":
 		secure := params.TraceCfg.OtlpSecure.GetAsBool()
-		opts := []otlptracegrpc.Option{
-			otlptracegrpc.WithEndpoint(params.TraceCfg.OtlpEndpoint.GetValue()),
+		switch params.TraceCfg.OtlpMethod.GetValue() {
+		case "", "grpc":
+			opts := []otlptracegrpc.Option{
+				otlptracegrpc.WithEndpoint(params.TraceCfg.OtlpEndpoint.GetValue()),
+			}
+			if !secure {
+				opts = append(opts, otlptracegrpc.WithInsecure())
+			}
+			exp, err = otlptracegrpc.New(context.Background(), opts...)
+		case "http":
+			opts := []otlptracehttp.Option{
+				otlptracehttp.WithEndpoint(params.TraceCfg.OtlpEndpoint.GetValue()),
+			}
+			if !secure {
+				opts = append(opts, otlptracehttp.WithInsecure())
+			}
+			exp, err = otlptracehttp.New(context.Background(), opts...)
+		default:
+			return nil, errors.Newf("otlp method not supported: %s", params.TraceCfg.OtlpMethod.GetValue())
 		}
-		if !secure {
-			opts = append(opts, otlptracegrpc.WithInsecure())
-		}
-		exp, err = otlptracegrpc.New(context.Background(), opts...)
 	case "stdout":
 		exp, err = stdout.New()
 	case "noop":

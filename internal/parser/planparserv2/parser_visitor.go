@@ -299,7 +299,6 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 			return fmt.Errorf("modulo can only apply on integer types")
 		}
 	default:
-		break
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_BinaryArithExpr{
@@ -335,14 +334,19 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 
 	leftValue, rightValue := getGenericValue(left), getGenericValue(right)
 	if leftValue != nil && rightValue != nil {
+		var ret *ExprWithType
 		switch ctx.GetOp().GetTokenType() {
 		case parser.PlanParserEQ:
-			return Equal(leftValue, rightValue)
+			ret = Equal(leftValue, rightValue)
 		case parser.PlanParserNE:
-			return NotEqual(leftValue, rightValue)
+			ret = NotEqual(leftValue, rightValue)
 		default:
 			return fmt.Errorf("unexpected op: %s", ctx.GetOp().GetText())
 		}
+		if ret == nil {
+			return fmt.Errorf("comparison operations cannot be applied to two incompatible operands: %s", ctx.GetText())
+		}
+		return ret
 	}
 
 	var leftExpr *ExprWithType
@@ -384,18 +388,23 @@ func (v *ParserVisitor) VisitRelational(ctx *parser.RelationalContext) interface
 	leftValue, rightValue := getGenericValue(left), getGenericValue(right)
 
 	if leftValue != nil && rightValue != nil {
+		var ret *ExprWithType
 		switch ctx.GetOp().GetTokenType() {
 		case parser.PlanParserLT:
-			return Less(leftValue, rightValue)
+			ret = Less(leftValue, rightValue)
 		case parser.PlanParserLE:
-			return LessEqual(leftValue, rightValue)
+			ret = LessEqual(leftValue, rightValue)
 		case parser.PlanParserGT:
-			return Greater(leftValue, rightValue)
+			ret = Greater(leftValue, rightValue)
 		case parser.PlanParserGE:
-			return GreaterEqual(leftValue, rightValue)
+			ret = GreaterEqual(leftValue, rightValue)
 		default:
 			return fmt.Errorf("unexpected op: %s", ctx.GetOp().GetText())
 		}
+		if ret == nil {
+			return fmt.Errorf("comparison operations cannot be applied to two incompatible operands: %s", ctx.GetText())
+		}
+		return ret
 	}
 
 	var leftExpr *ExprWithType
@@ -470,6 +479,34 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 					ColumnInfo: column,
 					Op:         op,
 					Value:      NewString(operand),
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{} {
+	column, err := v.translateIdentifier(ctx.Identifier().GetText())
+	if err != nil {
+		return err
+	}
+	if !typeutil.IsStringType(column.dataType) {
+		return fmt.Errorf("text match operation on non-string is unsupported")
+	}
+
+	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_UnaryRangeExpr{
+				UnaryRangeExpr: &planpb.UnaryRangeExpr{
+					ColumnInfo: toColumnInfo(column),
+					Op:         planpb.OpType_TextMatch,
+					Value:      NewString(queryText),
 				},
 			},
 		},

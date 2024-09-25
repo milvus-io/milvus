@@ -11,34 +11,65 @@
 
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
+include_directories(
+    ${KNOWHERE_INCLUDE_DIR}
+    ${SIMDJSON_INCLUDE_DIR}
+    ${TANTIVY_INCLUDE_DIR}
+    ${CONAN_INCLUDE_DIRS}
+)
 
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/test_utils/test_segcore.yaml")
 
 # TODO: better to use ls/find pattern
 set(MILVUS_TEST_FILES
         init_gtest.cpp
+
+        test_always_true_expr.cpp
+        test_array_bitmap_index.cpp
+        test_array_inverted_index.cpp
         test_bf.cpp
         test_bf_sparse.cpp
         test_binary.cpp
+        test_binlog_index.cpp
+        test_bitmap_index.cpp
         test_bool_index.cpp
+        test_c_api.cpp
+        test_chunk_cache.cpp
+        test_chunk.cpp
+        test_chunk_vector.cpp
         test_common.cpp
         test_concurrent_vector.cpp
-        test_c_api.cpp
-        test_expr_materialized_view.cpp
         test_c_stream_reduce.cpp
+        test_c_tokenizer.cpp
+        test_data_codec.cpp
+        test_disk_file_manager_test.cpp
+        test_exec.cpp
         test_expr.cpp
+        test_expr_materialized_view.cpp
         test_float16.cpp
+        test_futures.cpp
+        test_group_by.cpp
         test_growing.cpp
         test_growing_index.cpp
-        test_indexing.cpp
         test_hybrid_index.cpp
-        test_array_bitmap_index.cpp
         test_index_c_api.cpp
+        test_indexing.cpp
         test_index_wrapper.cpp
         test_init.cpp
+        test_integer_overflow.cpp
+        test_inverted_index.cpp
+        test_local_chunk_manager.cpp
+        test_mmap_chunk_manager.cpp
+        test_monitor.cpp
+        test_offset_ordered_array.cpp
+        test_offset_ordered_map.cpp
+        test_plan_proto.cpp
         test_query.cpp
-        test_reduce.cpp
+        test_range_search_sort.cpp
         test_reduce_c.cpp
+        test_reduce.cpp
+        test_regex_query.cpp
+        test_regex_query_util.cpp
         test_relational.cpp
         test_retrieve.cpp
         test_scalar_index.cpp
@@ -46,29 +77,12 @@ set(MILVUS_TEST_FILES
         test_segcore.cpp
         test_similarity_corelation.cpp
         test_span.cpp
-        test_string_expr.cpp
-        test_timestamp_index.cpp
-        test_utils.cpp
-        test_data_codec.cpp
-        test_range_search_sort.cpp
-        test_tracer.cpp
-        test_local_chunk_manager.cpp
-        test_disk_file_manager_test.cpp
-        test_integer_overflow.cpp
-        test_offset_ordered_map.cpp
-        test_offset_ordered_array.cpp
-        test_always_true_expr.cpp
-        test_plan_proto.cpp
-        test_chunk_cache.cpp
-        test_binlog_index.cpp
         test_storage.cpp
-        test_exec.cpp
-        test_inverted_index.cpp
-        test_group_by.cpp
-        test_regex_query_util.cpp
-        test_regex_query.cpp
-        test_futures.cpp
-        test_array_inverted_index.cpp
+        test_string_expr.cpp
+        test_text_match.cpp
+        test_timestamp_index.cpp
+        test_tracer.cpp
+        test_utils.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )
@@ -106,7 +120,7 @@ endif()
 if (LINUX)
     message( STATUS "Building Milvus Unit Test on Linux")
     option(USE_ASAN "Whether to use AddressSanitizer" OFF)
-    if ( USE_ASAN AND false )
+    if ( USE_ASAN )
         message( STATUS "Building Milvus using AddressSanitizer")
         add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
         add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
@@ -125,12 +139,8 @@ if (LINUX)
 
     target_link_libraries(index_builder_test
             gtest
-            gtest_main
-            milvus_segcore
-            milvus_storage
-            milvus_indexbuilder
-            milvus_clustering
-            milvus_common
+            milvus_core
+            knowhere
             )
     install(TARGETS index_builder_test DESTINATION unittest)
 endif()
@@ -141,13 +151,8 @@ add_executable(all_tests
 
 target_link_libraries(all_tests
         gtest
-        milvus_segcore
-        milvus_storage
-        milvus_indexbuilder
-        milvus_clustering
-        pthread
-        milvus_common
-        milvus_exec
+        milvus_core
+        knowhere
         )
 
 install(TARGETS all_tests DESTINATION unittest)

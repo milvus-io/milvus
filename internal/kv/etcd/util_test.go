@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/internal/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/kv/predicates"
 )
 
 type EtcdKVUtilSuite struct {

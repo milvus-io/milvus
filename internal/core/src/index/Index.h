@@ -24,9 +24,7 @@
 #include "knowhere/dataset.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
-
-const std::string kMmapFilepath = "mmap_filepath";
-const std::string kEnableMmap = "enable_mmap";
+#include "index/Meta.h"
 
 namespace milvus::index {
 
@@ -45,9 +43,6 @@ class IndexBase {
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) = 0;
 
     virtual void
-    LoadV2(const Config& config = {}) = 0;
-
-    virtual void
     BuildWithRawData(size_t n,
                      const void* values,
                      const Config& config = {}) = 0;
@@ -58,17 +53,11 @@ class IndexBase {
     virtual void
     Build(const Config& config = {}) = 0;
 
-    virtual void
-    BuildV2(const Config& Config = {}) = 0;
-
     virtual int64_t
     Count() = 0;
 
     virtual BinarySet
     Upload(const Config& config = {}) = 0;
-
-    virtual BinarySet
-    UploadV2(const Config& config = {}) = 0;
 
     virtual const bool
     HasRawData() const = 0;
@@ -85,7 +74,10 @@ class IndexBase {
                index_type_ == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP ||
                index_type_ ==
                    knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
-               index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND;
+               index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND ||
+               // support mmap for bitmap/hybrid index
+               index_type_ == milvus::index::BITMAP_INDEX_TYPE ||
+               index_type_ == milvus::index::HYBRID_INDEX_TYPE;
     }
 
     const IndexType&

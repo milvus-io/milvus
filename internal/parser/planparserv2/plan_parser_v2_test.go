@@ -1,9 +1,11 @@
 package planparserv2
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
+	"github.com/antlr/antlr4/runtime/Go/antlr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -36,7 +38,6 @@ func newTestSchema() *schemapb.CollectionSchema {
 		FieldID: 131, Name: "StringArrayField", IsPrimaryKey: false, Description: "string array field",
 		DataType:    schemapb.DataType_Array,
 		ElementType: schemapb.DataType_VarChar,
-		IsDynamic:   true,
 	})
 
 	return &schemapb.CollectionSchema{
@@ -171,6 +172,27 @@ func TestExpr_Like(t *testing.T) {
 	//for _, exprStr := range unsupported {
 	//	assertInvalidExpr(t, helper, exprStr)
 	//}
+}
+
+func TestExpr_TextMatch(t *testing.T) {
+	schema := newTestSchema()
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	exprStrs := []string{
+		`TextMatch(VarCharField, "query")`,
+	}
+	for _, exprStr := range exprStrs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	unsupported := []string{
+		`TextMatch(not_exist, "query")`,
+		`TextMatch(BoolField, "query")`,
+	}
+	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
+	}
 }
 
 func TestExpr_BinaryRange(t *testing.T) {
@@ -499,6 +521,15 @@ func TestExpr_Invalid(t *testing.T) {
 		//`1 < JSONField`,
 		`ArrayField > 2`,
 		`2 < ArrayField`,
+		// https://github.com/milvus-io/milvus/issues/34139
+		"\"Int64Field\" > 500 && \"Int64Field\" < 1000",
+		"\"Int64Field\" == 500 || \"Int64Field\" != 1000",
+		`"str" < 100`,
+		`"str" <= 100`,
+		`"str" > 100`,
+		`"str" >= 100`,
+		`"str" == 100`,
+		`"str" != 100`,
 		// ------------------------ like ------------------------
 		`(VarCharField % 2) like "prefix%"`,
 		`FloatField like "prefix%"`,
@@ -602,6 +633,39 @@ func TestCreateSearchPlan_Invalid(t *testing.T) {
 		_, err := CreateSearchPlan(schema, "Int64Field > 0", "VarCharField", nil)
 		assert.Error(t, err)
 	})
+}
+
+var listenerCnt int
+
+type errorListenerTest struct {
+	antlr.DefaultErrorListener
+}
+
+func (l *errorListenerTest) SyntaxError(recognizer antlr.Recognizer, offendingSymbol interface{}, line, column int, msg string, e antlr.RecognitionException) {
+	listenerCnt += 1
+}
+
+func (l *errorListenerTest) ReportAmbiguity(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex int, exact bool, ambigAlts *antlr.BitSet, configs antlr.ATNConfigSet) {
+	listenerCnt += 1
+}
+
+func (l *errorListenerTest) Error() error {
+	return nil
+}
+
+func Test_FixErrorListenerNotRemoved(t *testing.T) {
+	schema := newTestSchema()
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	normal := "1 < Int32Field < (Int16Field)"
+	for i := 0; i < 10; i++ {
+		err := handleExprWithErrorListener(schemaHelper, normal, &errorListenerTest{})
+		err1, ok := err.(error)
+		assert.True(t, ok)
+		assert.Error(t, err1)
+	}
+	assert.True(t, listenerCnt <= 10)
 }
 
 func Test_handleExpr(t *testing.T) {
@@ -1224,5 +1288,53 @@ func Test_ArrayLength(t *testing.T) {
 			RoundDecimal: 0,
 		})
 		assert.Error(t, err, expr)
+	}
+}
+
+func TestConcurrency(t *testing.T) {
+	schemaHelper := newTestSchemaHelper(t)
+
+	wg := sync.WaitGroup{}
+	wg.Add(10)
+
+	for i := 0; i < 10; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 10; j++ {
+				r := handleExpr(schemaHelper, fmt.Sprintf("array_length(ArrayField) == %d", j))
+				err := getError(r)
+				assert.NoError(t, err)
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+func BenchmarkPlanCache(b *testing.B) {
+	schema := newTestSchema()
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(b, err)
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		r := handleExpr(schemaHelper, "array_length(ArrayField) == 10")
+		err := getError(r)
+		assert.NoError(b, err)
+	}
+}
+
+func BenchmarkNoPlanCache(b *testing.B) {
+	schema := newTestSchema()
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(b, err)
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		r := handleExpr(schemaHelper, fmt.Sprintf("array_length(ArrayField) == %d", i))
+		err := getError(r)
+		assert.NoError(b, err)
 	}
 }

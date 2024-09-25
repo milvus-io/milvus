@@ -333,7 +333,7 @@ func TestServerBroker_GcConfirm(t *testing.T) {
 }
 
 func mockGetDatabase(meta *mockrootcoord.IMetaTable) {
-	db := model.NewDatabase(1, "default", pb.DatabaseState_DatabaseCreated)
+	db := model.NewDatabase(1, "default", pb.DatabaseState_DatabaseCreated, nil)
 	meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
 		Return(db, nil).Maybe()
 	meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).

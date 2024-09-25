@@ -34,6 +34,7 @@
 #include "sys/mman.h"
 #include "common/Types.h"
 #include "common/IndexMeta.h"
+#include "index/TextMatchIndex.h"
 
 namespace milvus::segcore {
 
@@ -43,14 +44,13 @@ class SegmentSealedImpl : public SegmentSealed {
                                IndexMetaPtr index_meta,
                                const SegcoreConfig& segcore_config,
                                int64_t segment_id,
-                               bool TEST_skip_index_for_retrieve = false);
+                               bool TEST_skip_index_for_retrieve = false,
+                               bool is_sorted_by_pk = false);
     ~SegmentSealedImpl() override;
     void
     LoadIndex(const LoadIndexInfo& info) override;
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
-    void
-    LoadFieldDataV2(const LoadFieldDataInfo& info) override;
     void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
     void
@@ -92,6 +92,13 @@ class SegmentSealedImpl : public SegmentSealed {
     void
     RemoveFieldFile(const FieldId field_id);
 
+    void
+    CreateTextIndex(FieldId field_id) override;
+
+    void
+    LoadTextIndex(FieldId field_id,
+                  std::unique_ptr<index::TextMatchIndex> index) override;
+
  public:
     size_t
     GetMemoryUsageInBytes() const override {
@@ -107,8 +114,29 @@ class SegmentSealedImpl : public SegmentSealed {
     const Schema&
     get_schema() const override;
 
+    std::vector<SegOffset>
+    search_pk(const PkType& pk, Timestamp timestamp) const;
+
+    std::vector<SegOffset>
+    search_pk(const PkType& pk, int64_t insert_barrier) const;
+
+    std::shared_ptr<DeletedRecord::TmpBitmap>
+    get_deleted_bitmap_s(int64_t del_barrier,
+                         int64_t insert_barrier,
+                         DeletedRecord& delete_record,
+                         Timestamp query_timestamp) const;
+
     std::unique_ptr<DataArray>
     get_vector(FieldId field_id, const int64_t* ids, int64_t count) const;
+
+    bool
+    is_nullable(FieldId field_id) const override {
+        auto it = fields_.find(field_id);
+        AssertInfo(it != fields_.end(),
+                   "Cannot find field with field_id: " +
+                       std::to_string(field_id.get()));
+        return it->second->IsNullable();
+    };
 
  public:
     int64_t
@@ -135,12 +163,7 @@ class SegmentSealedImpl : public SegmentSealed {
            const Timestamp* timestamps) override;
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit,
-               const BitsetType& bitset,
-               bool false_filtered_out) const override {
-        return insert_record_.pk2offset_->find_first(
-            limit, bitset, false_filtered_out);
-    }
+    find_first(int64_t limit, const BitsetType& bitset) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]]
     // where Vec is determined from field_offset
@@ -149,6 +172,16 @@ class SegmentSealedImpl : public SegmentSealed {
                    const int64_t* seg_offsets,
                    int64_t count) const override;
 
+    std::unique_ptr<DataArray>
+    bulk_subscript(
+        FieldId field_id,
+        const int64_t* seg_offsets,
+        int64_t count,
+        const std::vector<std::string>& dynamic_field_names) const override;
+
+    bool
+    is_mmap_field(FieldId id) const override;
+
     void
     ClearData();
 
@@ -156,6 +189,15 @@ class SegmentSealedImpl : public SegmentSealed {
     // blob and row_count
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    std::pair<BufferView, FixedVector<bool>>
+    get_chunk_buffer(FieldId field_id,
+                     int64_t chunk_id,
+                     int64_t start_offset,
+                     int64_t length) const override;
 
     const index::IndexBase*
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const override;
@@ -234,7 +276,7 @@ class SegmentSealedImpl : public SegmentSealed {
     }
 
     void
-    mask_with_timestamps(BitsetType& bitset_chunk,
+    mask_with_timestamps(BitsetTypeView& bitset_chunk,
                          Timestamp timestamp) const override;
 
     void
@@ -246,7 +288,7 @@ class SegmentSealedImpl : public SegmentSealed {
                   SearchResult& output) const override;
 
     void
-    mask_with_delete(BitsetType& bitset,
+    mask_with_delete(BitsetTypeView& bitset,
                      int64_t ins_barrier,
                      Timestamp timestamp) const override;
 
@@ -273,12 +315,14 @@ class SegmentSealedImpl : public SegmentSealed {
     LoadScalarIndex(const LoadIndexInfo& info);
 
     void
-    WarmupChunkCache(const FieldId field_id) override;
+    WarmupChunkCache(const FieldId field_id, bool mmap_enabled) override;
 
     bool
     generate_interim_index(const FieldId field_id);
 
  private:
+    // mmap descriptor, used in chunk cache
+    storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     // segment loading state
     BitsetType field_data_ready_bitset_;
     BitsetType index_ready_bitset_;
@@ -305,6 +349,7 @@ class SegmentSealedImpl : public SegmentSealed {
     SchemaPtr schema_;
     int64_t id_;
     std::unordered_map<FieldId, std::shared_ptr<ColumnBase>> fields_;
+    std::unordered_set<FieldId> mmap_fields_;
 
     // only useful in binlog
     IndexMetaPtr col_index_meta_;
@@ -317,6 +362,9 @@ class SegmentSealedImpl : public SegmentSealed {
     // for sparse vector unit test only! Once a type of sparse index that
     // doesn't has raw data is added, this should be removed.
     bool TEST_skip_index_for_retrieve_ = false;
+
+    // whether the segment is sorted by the pk
+    bool is_sorted_by_pk_ = false;
 };
 
 inline SegmentSealedUPtr
@@ -325,12 +373,14 @@ CreateSealedSegment(
     IndexMetaPtr index_meta = nullptr,
     int64_t segment_id = -1,
     const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
-    bool TEST_skip_index_for_retrieve = false) {
+    bool TEST_skip_index_for_retrieve = false,
+    bool is_sorted_by_pk = false) {
     return std::make_unique<SegmentSealedImpl>(schema,
                                                index_meta,
                                                segcore_config,
                                                segment_id,
-                                               TEST_skip_index_for_retrieve);
+                                               TEST_skip_index_for_retrieve,
+                                               is_sorted_by_pk);
 }
 
 }  // namespace milvus::segcore

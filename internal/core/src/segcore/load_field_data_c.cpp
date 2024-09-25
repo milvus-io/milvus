@@ -44,8 +44,8 @@ AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
             static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
         auto iter = load_field_data_info->field_infos.find(field_id);
         if (iter != load_field_data_info->field_infos.end()) {
-            throw milvus::SegcoreError(milvus::FieldAlreadyExist,
-                                       "append same field info multi times");
+            PanicInfo(milvus::ErrorCode::FieldAlreadyExist,
+                      "append same field info multi times");
         }
         FieldBinlogInfo binlog_info;
         binlog_info.field_id = field_id;
@@ -67,8 +67,8 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
             static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
         auto iter = load_field_data_info->field_infos.find(field_id);
         if (iter == load_field_data_info->field_infos.end()) {
-            throw milvus::SegcoreError(milvus::FieldIDInvalid,
-                                       "please append field info first");
+            PanicInfo(milvus::ErrorCode::FieldIDInvalid,
+                      "please append field info first");
         }
         std::string file_path(c_file_path);
         load_field_data_info->field_infos[field_id].insert_files.emplace_back(

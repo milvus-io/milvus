@@ -18,7 +18,7 @@
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
-#include "query/generated/ExecPlanNodeVisitor.h"
+#include "query/ExecPlanNodeVisitor.h"
 
 namespace milvus::segcore {
 
@@ -56,10 +56,21 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
     AssertInfo(results.seg_offsets_.size() == size,
                "Size of result distances is not equal to size of ids");
 
+    std::unique_ptr<DataArray> field_data;
     // fill other entries except primary key by result_offset
     for (auto field_id : plan->target_entries_) {
-        auto field_data =
-            bulk_subscript(field_id, results.seg_offsets_.data(), size);
+        if (plan->schema_.get_dynamic_field_id().has_value() &&
+            plan->schema_.get_dynamic_field_id().value() == field_id &&
+            !plan->target_dynamic_fields_.empty()) {
+            auto& target_dynamic_fields = plan->target_dynamic_fields_;
+            field_data = std::move(bulk_subscript(field_id,
+                                                  results.seg_offsets_.data(),
+                                                  size,
+                                                  target_dynamic_fields));
+        } else {
+            field_data = std::move(
+                bulk_subscript(field_id, results.seg_offsets_.data(), size));
+        }
         results.output_fields_data_[field_id] = std::move(field_data);
     }
 }
@@ -86,7 +97,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    int64_t limit_size,
                                    bool ignore_non_pk) const {
     std::shared_lock lck(mutex_);
-    tracer::AutoSpan span("Retrieve", trace_ctx, false);
+    tracer::AutoSpan span("Retrieve", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(*this, timestamp);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
@@ -99,7 +110,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         output_data_size += get_field_avg_size(field_id) * result_rows;
     }
     if (output_data_size > limit_size) {
-        throw SegcoreError(
+        PanicInfo(
             RetrieveError,
             fmt::format("query results exceed the limit size ", limit_size));
     }
@@ -133,7 +144,7 @@ SegmentInternalInterface::FillTargetEntry(
     int64_t size,
     bool ignore_non_pk,
     bool fill_ids) const {
-    tracer::AutoSpan span("FillTargetEntry", trace_ctx, false);
+    tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
     auto fields_data = results->mutable_fields_data();
     auto ids = results->mutable_ids();
@@ -164,6 +175,16 @@ SegmentInternalInterface::FillTargetEntry(
         }
 
         if (ignore_non_pk && !is_pk_field(field_id)) {
+            continue;
+        }
+
+        if (plan->schema_.get_dynamic_field_id().has_value() &&
+            plan->schema_.get_dynamic_field_id().value() == field_id &&
+            !plan->target_dynamic_fields_.empty()) {
+            auto& target_dynamic_fields = plan->target_dynamic_fields_;
+            auto col =
+                bulk_subscript(field_id, offsets, size, target_dynamic_fields);
+            fields_data->AddAllocated(col.release());
             continue;
         }
 
@@ -219,7 +240,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    const int64_t* offsets,
                                    int64_t size) const {
     std::shared_lock lck(mutex_);
-    tracer::AutoSpan span("RetrieveByOffsets", trace_ctx, false);
+    tracer::AutoSpan span("RetrieveByOffsets", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     FillTargetEntry(trace_ctx, Plan, results, offsets, size, false, false);
     return results;
@@ -236,6 +257,14 @@ SegmentInternalInterface::get_real_count() const {
 #endif
     auto plan = std::make_unique<query::RetrievePlan>(get_schema());
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    milvus::plan::PlanNodePtr plannode;
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    plannode = std::make_shared<milvus::plan::MvccNode>(
+        milvus::plan::GetNextPlanNodeId());
+    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+    plannode = std::make_shared<milvus::plan::CountNode>(
+        milvus::plan::GetNextPlanNodeId(), sources);
+    plan->plan_node_->plannodes_ = plannode;
     plan->plan_node_->is_count_ = true;
     auto res = Retrieve(nullptr, plan.get(), MAX_TIMESTAMP, INT64_MAX, false);
     AssertInfo(res->fields_data().size() == 1,
@@ -258,7 +287,7 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
             return sizeof(int64_t);
         }
 
-        throw SegcoreError(FieldIDInvalid, "unsupported system field id");
+        PanicInfo(FieldIDInvalid, "unsupported system field id");
     }
 
     auto schema = get_schema();
@@ -357,8 +386,10 @@ SegmentInternalInterface::LoadPrimitiveSkipIndex(milvus::FieldId field_id,
                                                  int64_t chunk_id,
                                                  milvus::DataType data_type,
                                                  const void* chunk_data,
+                                                 const bool* valid_data,
                                                  int64_t count) {
-    skip_index_.LoadPrimitive(field_id, chunk_id, data_type, chunk_data, count);
+    skip_index_.LoadPrimitive(
+        field_id, chunk_id, data_type, chunk_data, valid_data, count);
 }
 
 void
@@ -367,6 +398,15 @@ SegmentInternalInterface::LoadStringSkipIndex(
     int64_t chunk_id,
     const milvus::VariableColumn<std::string>& var_column) {
     skip_index_.LoadString(field_id, chunk_id, var_column);
+}
+
+index::TextMatchIndex*
+SegmentInternalInterface::GetTextIndex(FieldId field_id) const {
+    std::shared_lock lock(mutex_);
+    auto iter = text_indexes_.find(field_id);
+    AssertInfo(iter != text_indexes_.end(),
+               "failed to get text index, text index not found");
+    return iter->second.get();
 }
 
 }  // namespace milvus::segcore

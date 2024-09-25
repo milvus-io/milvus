@@ -128,7 +128,14 @@ int64_t
 GetDimFromConfig(const Config& config) {
     auto dimension = GetValueFromConfig<std::string>(config, "dim");
     AssertInfo(dimension.has_value(), "dimension not exist in config");
-    return (std::stoi(dimension.value()));
+    try {
+        return (std::stoi(dimension.value()));
+    } catch (const std::logic_error& e) {
+        auto err_message = fmt::format(
+            "invalided dimension:{}, error:{}", dimension.value(), e.what());
+        LOG_ERROR(err_message);
+        throw std::logic_error(err_message);
+    }
 }
 
 std::string
@@ -151,7 +158,16 @@ GetIndexEngineVersionFromConfig(const Config& config) {
         GetValueFromConfig<std::string>(config, INDEX_ENGINE_VERSION);
     AssertInfo(index_engine_version.has_value(),
                "index_engine not exist in config");
-    return (std::stoi(index_engine_version.value()));
+    try {
+        return (std::stoi(index_engine_version.value()));
+    } catch (const std::logic_error& e) {
+        auto err_message =
+            fmt::format("invalided index engine version:{}, error:{}",
+                        index_engine_version.value(),
+                        e.what());
+        LOG_ERROR(err_message);
+        throw std::logic_error(err_message);
+    }
 }
 
 int32_t
@@ -160,7 +176,15 @@ GetBitmapCardinalityLimitFromConfig(const Config& config) {
         config, index::BITMAP_INDEX_CARDINALITY_LIMIT);
     AssertInfo(bitmap_limit.has_value(),
                "bitmap cardinality limit not exist in config");
-    return (std::stoi(bitmap_limit.value()));
+    try {
+        return (std::stoi(bitmap_limit.value()));
+    } catch (const std::logic_error& e) {
+        auto err_message = fmt::format("invalided bitmap limit:{}, error:{}",
+                                       bitmap_limit.value(),
+                                       e.what());
+        LOG_ERROR(err_message);
+        throw std::logic_error(err_message);
+    }
 }
 
 // TODO :: too ugly
@@ -242,23 +266,24 @@ void
 AssembleIndexDatas(std::map<std::string, FieldDataPtr>& index_datas) {
     if (index_datas.find(INDEX_FILE_SLICE_META) != index_datas.end()) {
         auto slice_meta = index_datas.at(INDEX_FILE_SLICE_META);
-        Config meta_data = Config::parse(std::string(
-            static_cast<const char*>(slice_meta->Data()), slice_meta->Size()));
+        Config meta_data = Config::parse(
+            std::string(static_cast<const char*>(slice_meta->Data()),
+                        slice_meta->DataSize()));
 
         for (auto& item : meta_data[META]) {
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-
+            // build index skip null value, so not need to set nullable == true
             auto new_field_data =
-                storage::CreateFieldData(DataType::INT8, 1, total_len);
+                storage::CreateFieldData(DataType::INT8, false, 1, total_len);
 
             for (auto i = 0; i < slice_num; ++i) {
                 std::string file_name = GenSlicedFileName(prefix, i);
                 AssertInfo(index_datas.find(file_name) != index_datas.end(),
                            "lost index slice data");
                 auto data = index_datas.at(file_name);
-                auto len = data->Size();
+                auto len = data->DataSize();
                 new_field_data->FillFieldData(data->Data(), len);
                 index_datas.erase(file_name);
             }
@@ -282,15 +307,15 @@ AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
         index_datas.erase(INDEX_FILE_SLICE_META);
         Config metadata = Config::parse(
             std::string(static_cast<const char*>(raw_metadata->Data()),
-                        raw_metadata->Size()));
+                        raw_metadata->DataSize()));
 
         for (auto& item : metadata[META]) {
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-
+            // build index skip null value, so not need to set nullable == true
             auto new_field_data =
-                storage::CreateFieldData(DataType::INT8, 1, total_len);
+                storage::CreateFieldData(DataType::INT8, false, 1, total_len);
 
             for (auto i = 0; i < slice_num; ++i) {
                 std::string file_name = GenSlicedFileName(prefix, i);
@@ -299,7 +324,7 @@ AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
                 auto& channel = it->second;
                 auto data_array = storage::CollectFieldDataChannel(channel);
                 auto data = storage::MergeFieldData(data_array);
-                auto len = data->Size();
+                auto len = data->DataSize();
                 new_field_data->FillFieldData(data->Data(), len);
                 index_datas.erase(file_name);
             }
@@ -327,10 +352,9 @@ ReadDataFromFD(int fd, void* buf, size_t size, size_t chunk_size) {
         const size_t count = (size < chunk_size) ? size : chunk_size;
         const ssize_t size_read = read(fd, buf, count);
         if (size_read != count) {
-            throw SegcoreError(
-                ErrorCode::UnistdError,
-                "read data from fd error, returned read size is " +
-                    std::to_string(size_read));
+            PanicInfo(ErrorCode::UnistdError,
+                      "read data from fd error, returned read size is " +
+                          std::to_string(size_read));
         }
 
         buf = static_cast<char*>(buf) + size_read;

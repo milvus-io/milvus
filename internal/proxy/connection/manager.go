@@ -42,7 +42,7 @@ func (s *connectionManager) Stop() {
 func (s *connectionManager) checkLoop() {
 	defer s.wg.Done()
 
-	t := time.NewTicker(paramtable.Get().ProxyCfg.ConnectionCheckIntervalSeconds.GetAsDuration(time.Second))
+	t := time.NewTimer(paramtable.Get().ProxyCfg.ConnectionCheckIntervalSeconds.GetAsDuration(time.Second))
 	defer t.Stop()
 
 	for {

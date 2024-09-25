@@ -25,6 +25,7 @@ struct TraceConfig {
     float sampleFraction;
     std::string jaegerURL;
     std::string otlpEndpoint;
+    std::string otlpMethod;
     bool oltpSecure;
 
     int nodeID;
@@ -46,8 +47,14 @@ GetTracer();
 std::shared_ptr<trace::Span>
 StartSpan(const std::string& name, TraceContext* ctx = nullptr);
 
+std::shared_ptr<trace::Span>
+StartSpan(const std::string& name, const std::shared_ptr<trace::Span>& span);
+
 void
 SetRootSpan(std::shared_ptr<trace::Span> span);
+
+std::shared_ptr<trace::Span>
+GetRootSpan();
 
 void
 CloseRootSpan();
@@ -61,30 +68,34 @@ EmptyTraceID(const TraceContext* ctx);
 bool
 EmptySpanID(const TraceContext* ctx);
 
-std::vector<uint8_t>
-GetTraceIDAsVector(const TraceContext* ctx);
+std::string
+BytesToHexStr(const uint8_t* data, const size_t len);
 
-std::vector<uint8_t>
-GetSpanIDAsVector(const TraceContext* ctx);
+std::string
+GetIDFromHexStr(const std::string& hexStr);
+
+std::string
+GetTraceIDAsHexStr(const TraceContext* ctx);
+
+std::string
+GetSpanIDAsHexStr(const TraceContext* ctx);
 
 struct AutoSpan {
     explicit AutoSpan(const std::string& name,
                       TraceContext* ctx = nullptr,
-                      bool is_root_span = false) {
-        span_ = StartSpan(name, ctx);
-        if (is_root_span) {
-            SetRootSpan(span_);
-        }
-    }
+                      bool is_root_span = false);
 
-    ~AutoSpan() {
-        if (span_ != nullptr) {
-            span_->End();
-        }
-    }
+    explicit AutoSpan(const std::string& name,
+                      const std::shared_ptr<trace::Span>& span);
+
+    std::shared_ptr<trace::Span>
+    GetSpan();
+
+    ~AutoSpan();
 
  private:
     std::shared_ptr<trace::Span> span_;
+    bool is_root_span_;
 };
 
 }  // namespace milvus::tracer

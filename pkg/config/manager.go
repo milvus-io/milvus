@@ -119,7 +119,7 @@ func (m *Manager) CASCachedValue(key string, origin string, value interface{}) b
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
 	current, err := m.GetConfig(key)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return false
 	}
 	if current != origin {
@@ -132,16 +132,15 @@ func (m *Manager) CASCachedValue(key string, origin string, value interface{}) b
 func (m *Manager) EvictCachedValue(key string) {
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
-	delete(m.configCache, key)
+	// cause param'value may rely on other params, so we need to evict all the cached value when config is changed
+	clear(m.configCache)
 }
 
 func (m *Manager) EvictCacheValueByFormat(keys ...string) {
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
-
-	for _, key := range keys {
-		delete(m.configCache, key)
-	}
+	// cause param'value may rely on other params, so we need to evict all the cached value when config is changed
+	clear(m.configCache)
 }
 
 func (m *Manager) GetConfig(key string) (string, error) {
@@ -149,13 +148,13 @@ func (m *Manager) GetConfig(key string) (string, error) {
 	v, ok := m.overlays.Get(realKey)
 	if ok {
 		if v == TombValue {
-			return "", fmt.Errorf("key not found %s", key)
+			return "", errors.Wrap(ErrKeyNotFound, key) // fmt.Errorf("key not found %s", key)
 		}
 		return v, nil
 	}
 	sourceName, ok := m.keySourceMap.Get(realKey)
 	if !ok {
-		return "", fmt.Errorf("key not found: %s", key)
+		return "", errors.Wrap(ErrKeyNotFound, key) // fmt.Errorf("key not found: %s", key)
 	}
 	return m.getConfigValueBySource(realKey, sourceName)
 }

@@ -439,6 +439,7 @@ func (suite *ServerSuite) loadAll() {
 				CollectionID:   collection,
 				ReplicaNumber:  suite.replicaNumber[collection],
 				ResourceGroups: []string{meta.DefaultResourceGroupName},
+				LoadFields:     []int64{100, 101},
 			}
 			resp, err := suite.server.LoadCollection(ctx, req)
 			suite.NoError(err)
@@ -449,6 +450,7 @@ func (suite *ServerSuite) loadAll() {
 				PartitionIDs:   suite.partitions[collection],
 				ReplicaNumber:  suite.replicaNumber[collection],
 				ResourceGroups: []string{meta.DefaultResourceGroupName},
+				LoadFields:     []int64{100, 101},
 			}
 			resp, err := suite.server.LoadPartitions(ctx, req)
 			suite.NoError(err)
@@ -587,6 +589,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.targetMgr,
 		suite.server.targetObserver,
 		suite.server.checkerController,
+		suite.server.proxyClientManager,
 	)
 
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Schema: &schemapb.CollectionSchema{}}, nil).Maybe()

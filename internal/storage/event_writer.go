@@ -19,14 +19,12 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // EventTypeCode represents event type by code
@@ -212,17 +210,18 @@ func newDescriptorEvent() *descriptorEvent {
 	}
 }
 
-func newInsertEventWriter(dataType schemapb.DataType, dim ...int) (*insertEventWriter, error) {
-	var payloadWriter PayloadWriterInterface
-	var err error
-	if typeutil.IsVectorType(dataType) && !typeutil.IsSparseFloatVectorType(dataType) {
-		if len(dim) != 1 {
-			return nil, fmt.Errorf("incorrect input numbers")
-		}
-		payloadWriter, err = NewPayloadWriter(dataType, dim[0])
-	} else {
-		payloadWriter, err = NewPayloadWriter(dataType)
-	}
+func NewBaseDescriptorEvent(collectionID int64, partitionID int64, segmentID int64) *descriptorEvent {
+	de := newDescriptorEvent()
+	de.CollectionID = collectionID
+	de.PartitionID = partitionID
+	de.SegmentID = segmentID
+	de.StartTimestamp = 0
+	de.EndTimestamp = 0
+	return de
+}
+
+func newInsertEventWriter(dataType schemapb.DataType, opts ...PayloadWriterOptions) (*insertEventWriter, error) {
+	payloadWriter, err := NewPayloadWriter(dataType, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -243,8 +242,8 @@ func newInsertEventWriter(dataType schemapb.DataType, dim ...int) (*insertEventW
 	return writer, nil
 }
 
-func newDeleteEventWriter(dataType schemapb.DataType) (*deleteEventWriter, error) {
-	payloadWriter, err := NewPayloadWriter(dataType)
+func newDeleteEventWriter(dataType schemapb.DataType, opts ...PayloadWriterOptions) (*deleteEventWriter, error) {
+	payloadWriter, err := NewPayloadWriter(dataType, opts...)
 	if err != nil {
 		return nil, err
 	}

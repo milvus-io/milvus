@@ -23,6 +23,11 @@ set -x
 
 # Absolute path to the toplevel milvus directory.
 toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
+if [[ -f "$toplevel/.env" ]]; then
+    set -a  # automatically export all variables from .env
+    source $toplevel/.env
+    set +a  # stop automatically exporting
+fi
 
 OS_NAME="${OS_NAME:-ubuntu20.04}"
 MILVUS_IMAGE_REPO="${MILVUS_IMAGE_REPO:-milvusdb/milvus}"

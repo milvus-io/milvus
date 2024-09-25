@@ -30,14 +30,18 @@ template <typename Type>
 class FieldData : public FieldDataImpl<Type, true> {
  public:
     static_assert(IsScalar<Type> || std::is_same_v<Type, PkType>);
-    explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       int64_t buffered_num_rows = 0)
         : FieldDataImpl<Type, true>::FieldDataImpl(
-              1, data_type, buffered_num_rows) {
+              1, data_type, nullable, buffered_num_rows) {
     }
     static_assert(IsScalar<Type> || std::is_same_v<Type, PkType>);
-    explicit FieldData(DataType data_type, FixedVector<Type>&& inner_data)
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       FixedVector<Type>&& inner_data)
         : FieldDataImpl<Type, true>::FieldDataImpl(
-              1, data_type, std::move(inner_data)) {
+              1, data_type, nullable, std::move(inner_data)) {
     }
 };
 
@@ -45,8 +49,10 @@ template <>
 class FieldData<std::string> : public FieldDataStringImpl {
  public:
     static_assert(IsScalar<std::string> || std::is_same_v<std::string, PkType>);
-    explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
-        : FieldDataStringImpl(data_type, buffered_num_rows) {
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       int64_t buffered_num_rows = 0)
+        : FieldDataStringImpl(data_type, nullable, buffered_num_rows) {
     }
 };
 
@@ -54,8 +60,10 @@ template <>
 class FieldData<Json> : public FieldDataJsonImpl {
  public:
     static_assert(IsScalar<std::string> || std::is_same_v<std::string, PkType>);
-    explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
-        : FieldDataJsonImpl(data_type, buffered_num_rows) {
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       int64_t buffered_num_rows = 0)
+        : FieldDataJsonImpl(data_type, nullable, buffered_num_rows) {
     }
 };
 
@@ -63,8 +71,10 @@ template <>
 class FieldData<Array> : public FieldDataArrayImpl {
  public:
     static_assert(IsScalar<Array> || std::is_same_v<std::string, PkType>);
-    explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
-        : FieldDataArrayImpl(data_type, buffered_num_rows) {
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       int64_t buffered_num_rows = 0)
+        : FieldDataArrayImpl(data_type, nullable, buffered_num_rows) {
     }
 };
 
@@ -75,7 +85,7 @@ class FieldData<FloatVector> : public FieldDataImpl<float, false> {
                        DataType data_type,
                        int64_t buffered_num_rows = 0)
         : FieldDataImpl<float, false>::FieldDataImpl(
-              dim, data_type, buffered_num_rows) {
+              dim, data_type, false, buffered_num_rows) {
     }
 };
 
@@ -86,7 +96,7 @@ class FieldData<BinaryVector> : public FieldDataImpl<uint8_t, false> {
                        DataType data_type,
                        int64_t buffered_num_rows = 0)
         : binary_dim_(dim),
-          FieldDataImpl(dim / 8, data_type, buffered_num_rows) {
+          FieldDataImpl(dim / 8, data_type, false, buffered_num_rows) {
         Assert(dim % 8 == 0);
     }
 
@@ -106,7 +116,7 @@ class FieldData<Float16Vector> : public FieldDataImpl<float16, false> {
                        DataType data_type,
                        int64_t buffered_num_rows = 0)
         : FieldDataImpl<float16, false>::FieldDataImpl(
-              dim, data_type, buffered_num_rows) {
+              dim, data_type, false, buffered_num_rows) {
     }
 };
 
@@ -117,7 +127,7 @@ class FieldData<BFloat16Vector> : public FieldDataImpl<bfloat16, false> {
                        DataType data_type,
                        int64_t buffered_num_rows = 0)
         : FieldDataImpl<bfloat16, false>::FieldDataImpl(
-              dim, data_type, buffered_num_rows) {
+              dim, data_type, false, buffered_num_rows) {
     }
 };
 
@@ -134,6 +144,6 @@ using FieldDataChannel = Channel<FieldDataPtr>;
 using FieldDataChannelPtr = std::shared_ptr<FieldDataChannel>;
 
 FieldDataPtr
-InitScalarFieldData(const DataType& type, int64_t cap_rows);
+InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows);
 
 }  // namespace milvus

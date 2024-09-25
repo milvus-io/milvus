@@ -26,11 +26,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -80,6 +81,7 @@ type ShardDelegator interface {
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
 	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)
 	GetTargetVersion() int64
+	GetDeleteBufferSize() (entryNum int64, memorySize int64)
 
 	// manage exclude segments
 	AddExcludedSegments(excludeInfo map[int64]uint64)
@@ -331,6 +333,8 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				IgnoreGrowing:      req.GetReq().GetIgnoreGrowing(),
 				Username:           req.GetReq().GetUsername(),
 				IsAdvanced:         false,
+				GroupByFieldId:     subReq.GetGroupByFieldId(),
+				GroupSize:          subReq.GetGroupSize(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{
@@ -349,11 +353,12 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 					return nil, err
 				}
 
-				return segments.ReduceSearchResults(ctx,
+				return segments.ReduceSearchOnQueryNode(ctx,
 					results,
-					searchReq.Req.GetNq(),
-					searchReq.Req.GetTopk(),
-					searchReq.Req.GetMetricType())
+					reduce.NewReduceSearchResultInfo(searchReq.GetReq().GetNq(),
+						searchReq.GetReq().GetTopk()).WithMetricType(searchReq.GetReq().GetMetricType()).
+						WithGroupByField(searchReq.GetReq().GetGroupByFieldId()).
+						WithGroupSize(searchReq.GetReq().GetGroupSize()))
 			})
 			futures[index] = future
 		}
@@ -372,12 +377,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 			}
 			results[i] = result
 		}
-		var ret *internalpb.SearchResults
-		ret, err = segments.MergeToAdvancedResults(ctx, results)
-		if err != nil {
-			return nil, err
-		}
-		return []*internalpb.SearchResults{ret}, nil
+		return results, nil
 	}
 	return sd.search(ctx, req, sealed, growing)
 }
@@ -583,6 +583,10 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	}
 
 	return results, nil
+}
+
+func (sd *shardDelegator) GetDeleteBufferSize() (entryNum int64, memorySize int64) {
+	return sd.deleteBuffer.Size()
 }
 
 type subTask[T any] struct {
@@ -796,8 +800,14 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 	colID := sd.Collection()
 	log := log.Ctx(ctx)
 	for partID, newVersion := range partStatsVersions {
-		curStats, exist := sd.partitionStats[partID]
-		if exist && curStats.Version >= newVersion {
+		var curStats *storage.PartitionStatsSnapshot
+		var exist bool
+		func() {
+			sd.partitionStatsMut.RLock()
+			defer sd.partitionStatsMut.RUnlock()
+			curStats, exist = sd.partitionStats[partID]
+		}()
+		if exist && curStats != nil && curStats.Version >= newVersion {
 			log.RatedWarn(60, "Input partition stats' version is less or equal than current partition stats, skip",
 				zap.Int64("partID", partID),
 				zap.Int64("curVersion", curStats.Version),
@@ -825,7 +835,8 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 			defer sd.partitionStatsMut.Unlock()
 			sd.partitionStats[partID] = partStats
 		}()
-		log.Info("Updated partitionStats for partition", zap.Int64("partitionID", partID))
+		log.Info("Updated partitionStats for partition", zap.Int64("collectionID", sd.collectionID), zap.Int64("partitionID", partID),
+			zap.Int64("newVersion", newVersion), zap.Int64("oldVersion", curStats.GetVersion()))
 	}
 }
 

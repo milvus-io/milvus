@@ -34,6 +34,7 @@ var MetricFuncMap = map[string]getMetricFunc{
 	"$response_size":     getResponseSize,
 	"$error_code":        getErrorCode,
 	"$error_msg":         getErrorMsg,
+	"$error_type":        getErrorType,
 	"$database_name":     getDbName,
 	"$collection_name":   getCollectionName,
 	"$partition_name":    getPartitionName,
@@ -61,6 +62,7 @@ type AccessInfo interface {
 	ResponseSize() string
 	ErrorCode() string
 	ErrorMsg() string
+	ErrorType() string
 	DbName() string
 	CollectionName() string
 	PartitionName() string
@@ -113,6 +115,10 @@ func getErrorCode(i AccessInfo) string {
 
 func getErrorMsg(i AccessInfo) string {
 	return i.ErrorMsg()
+}
+
+func getErrorType(i AccessInfo) string {
+	return i.ErrorType()
 }
 
 func getDbName(i AccessInfo) string {

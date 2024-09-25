@@ -17,30 +17,26 @@
 package storage
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
-	"sort"
-	"strconv"
+	"sync"
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/apache/arrow/go/v12/parquet"
+	"github.com/apache/arrow/go/v12/parquet/compress"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
-	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
+	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type Record interface {
 	Schema() map[FieldID]schemapb.DataType
+	ArrowSchema() *arrow.Schema
 	Column(i FieldID) arrow.Array
 	Len() int
 	Release()
@@ -89,113 +85,12 @@ func (r *compositeRecord) Schema() map[FieldID]schemapb.DataType {
 	return r.schema
 }
 
-var _ RecordReader = (*compositeRecordReader)(nil)
-
-type compositeRecordReader struct {
-	blobs [][]*Blob
-
-	blobPos int
-	rrs     []array.RecordReader
-	closers []func()
-	fields  []FieldID
-
-	r compositeRecord
-}
-
-func (crr *compositeRecordReader) iterateNextBatch() error {
-	if crr.closers != nil {
-		for _, close := range crr.closers {
-			if close != nil {
-				close()
-			}
-		}
+func (r *compositeRecord) ArrowSchema() *arrow.Schema {
+	var fields []arrow.Field
+	for _, rec := range r.recs {
+		fields = append(fields, rec.Schema().Field(0))
 	}
-	crr.blobPos++
-	if crr.blobPos >= len(crr.blobs[0]) {
-		return io.EOF
-	}
-
-	for i, b := range crr.blobs {
-		reader, err := NewBinlogReader(b[crr.blobPos].Value)
-		if err != nil {
-			return err
-		}
-
-		crr.fields[i] = reader.FieldID
-		// TODO: assert schema being the same in every blobs
-		crr.r.schema[reader.FieldID] = reader.PayloadDataType
-		er, err := reader.NextEventReader()
-		if err != nil {
-			return err
-		}
-		rr, err := er.GetArrowRecordReader()
-		if err != nil {
-			return err
-		}
-		crr.rrs[i] = rr
-		crr.closers[i] = func() {
-			rr.Release()
-			er.Close()
-			reader.Close()
-		}
-	}
-	return nil
-}
-
-func (crr *compositeRecordReader) Next() error {
-	if crr.rrs == nil {
-		if crr.blobs == nil || len(crr.blobs) == 0 {
-			return io.EOF
-		}
-		crr.rrs = make([]array.RecordReader, len(crr.blobs))
-		crr.closers = make([]func(), len(crr.blobs))
-		crr.blobPos = -1
-		crr.fields = make([]FieldID, len(crr.rrs))
-		crr.r = compositeRecord{
-			recs:   make(map[FieldID]arrow.Record, len(crr.rrs)),
-			schema: make(map[FieldID]schemapb.DataType, len(crr.rrs)),
-		}
-		if err := crr.iterateNextBatch(); err != nil {
-			return err
-		}
-	}
-
-	composeRecord := func() bool {
-		for i, rr := range crr.rrs {
-			if ok := rr.Next(); !ok {
-				return false
-			}
-			// compose record
-			crr.r.recs[crr.fields[i]] = rr.Record()
-		}
-		return true
-	}
-
-	// Try compose records
-	if ok := composeRecord(); !ok {
-		// If failed the first time, try iterate next batch (blob), the error may be io.EOF
-		if err := crr.iterateNextBatch(); err != nil {
-			return err
-		}
-		// If iterate next batch success, try compose again
-		if ok := composeRecord(); !ok {
-			// If the next blob is empty, return io.EOF (it's rare).
-			return io.EOF
-		}
-	}
-	return nil
-}
-
-func (crr *compositeRecordReader) Record() Record {
-	return &crr.r
-}
-
-func (crr *compositeRecordReader) Close() {
-	for _, close := range crr.closers {
-		if close != nil {
-			close()
-		}
-	}
+	return arrow.NewSchema(fields, nil)
 }
 
 type serdeEntry struct {
@@ -494,7 +389,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if v == nil {
 				return 8
 			}
-			return uint64(v.(*schemapb.ScalarField).XXX_Size())
+			return uint64(proto.Size(v.(*schemapb.ScalarField)))
 		},
 	}
 
@@ -627,50 +522,21 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 	return m
 }()
 
-func parseBlobKey(bolbKey string) (colId FieldID, logId UniqueID) {
-	if _, _, _, colId, logId, ok := metautil.ParseInsertLogPath(bolbKey); ok {
-		return colId, logId
+// Since parquet does not support custom fallback encoding for now,
+// we disable dict encoding for primary key.
+// It can be scale to all fields once parquet fallback encoding is available.
+func getFieldWriterProps(field *schemapb.FieldSchema) *parquet.WriterProperties {
+	if field.GetIsPrimaryKey() {
+		return parquet.NewWriterProperties(
+			parquet.WithCompression(compress.Codecs.Zstd),
+			parquet.WithCompressionLevel(3),
+			parquet.WithDictionaryDefault(false),
+		)
 	}
-	if colId, err := strconv.ParseInt(bolbKey, 10, 64); err == nil {
-		// data_codec.go generate single field id as blob key.
-		return colId, 0
-	}
-	return -1, -1
-}
-
-func newCompositeRecordReader(blobs []*Blob) (*compositeRecordReader, error) {
-	sort.Slice(blobs, func(i, j int) bool {
-		iCol, iLog := parseBlobKey(blobs[i].Key)
-		jCol, jLog := parseBlobKey(blobs[j].Key)
-
-		if iCol == jCol {
-			return iLog < jLog
-		}
-		return iCol < jCol
-	})
-
-	blobm := make([][]*Blob, 0)
-	var fieldId FieldID = -1
-	var currentCol []*Blob
-
-	for _, blob := range blobs {
-		colId, _ := parseBlobKey(blob.Key)
-		if colId != fieldId {
-			if currentCol != nil {
-				blobm = append(blobm, currentCol)
-			}
-			currentCol = make([]*Blob, 0)
-			fieldId = colId
-		}
-		currentCol = append(currentCol, blob)
-	}
-	if currentCol != nil {
-		blobm = append(blobm, currentCol)
-	}
-
-	return &compositeRecordReader{
-		blobs: blobm,
-	}, nil
+	return parquet.NewWriterProperties(
+		parquet.WithCompression(compress.Codecs.Zstd),
+		parquet.WithCompressionLevel(3),
+	)
 }
 
 type DeserializeReader[T any] struct {
@@ -690,8 +556,8 @@ func (deser *DeserializeReader[T]) Next() error {
 		deser.pos = 0
 		deser.rec = deser.rr.Record()
 
-		// allocate new slice preventing overwrite previous batch
 		deser.values = make([]T, deser.rec.Len())
+
 		if err := deser.deserializer(deser.rec, deser.values); err != nil {
 			return err
 		}
@@ -722,56 +588,6 @@ func NewDeserializeReader[T any](rr RecordReader, deserializer Deserializer[T]) 
 	}
 }
 
-func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*DeserializeReader[*Value], error) {
-	reader, err := newCompositeRecordReader(blobs)
-	if err != nil {
-		return nil, err
-	}
-
-	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		// Note: the return value `Value` is reused.
-		for i := 0; i < r.Len(); i++ {
-			value := v[i]
-			if value == nil {
-				value = &Value{}
-				m := make(map[FieldID]interface{}, len(r.Schema()))
-				value.Value = m
-				v[i] = value
-			}
-
-			m := value.Value.(map[FieldID]interface{})
-			for j, dt := range r.Schema() {
-				if r.Column(j).IsNull(i) {
-					m[j] = nil
-				} else {
-					d, ok := serdeMap[dt].deserialize(r.Column(j), i)
-					if ok {
-						m[j] = d // TODO: avoid memory copy here.
-					} else {
-						return errors.New(fmt.Sprintf("unexpected type %s", dt))
-					}
-				}
-			}
-
-			if _, ok := m[common.RowIDField]; !ok {
-				panic("no row id column found")
-			}
-			value.ID = m[common.RowIDField].(int64)
-			value.Timestamp = m[common.TimeStampField].(int64)
-
-			pk, err := GenPrimaryKeyByRawData(m[PKfieldID], r.Schema()[PKfieldID])
-			if err != nil {
-				return err
-			}
-
-			value.PK = pk
-			value.IsDeleted = false
-			value.Value = m
-		}
-		return nil
-	}), nil
-}
-
 var _ Record = (*selectiveRecord)(nil)
 
 // selectiveRecord is a Record that only contains a single field, reusing existing Record.
@@ -784,6 +600,10 @@ type selectiveRecord struct {
 
 func (r *selectiveRecord) Schema() map[FieldID]schemapb.DataType {
 	return r.schema
+}
+
+func (r *selectiveRecord) ArrowSchema() *arrow.Schema {
+	return r.r.ArrowSchema()
 }
 
 func (r *selectiveRecord) Column(i FieldID) arrow.Array {
@@ -852,12 +672,21 @@ func newCompositeRecordWriter(writers map[FieldID]RecordWriter) *compositeRecord
 
 var _ RecordWriter = (*singleFieldRecordWriter)(nil)
 
+type RecordWriterOptions func(*singleFieldRecordWriter)
+
+func WithRecordWriterProps(writerProps *parquet.WriterProperties) RecordWriterOptions {
+	return func(w *singleFieldRecordWriter) {
+		w.writerProps = writerProps
+	}
+}
+
 type singleFieldRecordWriter struct {
 	fw      *pqarrow.FileWriter
 	fieldId FieldID
 	schema  *arrow.Schema
 
-	numRows int
+	numRows     int
+	writerProps *parquet.WriterProperties
 }
 
 func (sfw *singleFieldRecordWriter) Write(r Record) error {
@@ -872,18 +701,63 @@ func (sfw *singleFieldRecordWriter) Close() {
 	sfw.fw.Close()
 }
 
-func newSingleFieldRecordWriter(fieldId FieldID, field arrow.Field, writer io.Writer) (*singleFieldRecordWriter, error) {
-	schema := arrow.NewSchema([]arrow.Field{field}, nil)
+func newSingleFieldRecordWriter(fieldId FieldID, field arrow.Field, writer io.Writer, opts ...RecordWriterOptions) (*singleFieldRecordWriter, error) {
+	w := &singleFieldRecordWriter{
+		fieldId: fieldId,
+		schema:  arrow.NewSchema([]arrow.Field{field}, nil),
+		writerProps: parquet.NewWriterProperties(
+			parquet.WithMaxRowGroupLength(math.MaxInt64), // No additional grouping for now.
+			parquet.WithCompression(compress.Codecs.Zstd),
+			parquet.WithCompressionLevel(3)),
+	}
+	for _, o := range opts {
+		o(w)
+	}
+	fw, err := pqarrow.NewFileWriter(w.schema, writer, w.writerProps, pqarrow.DefaultWriterProps())
+	if err != nil {
+		return nil, err
+	}
+	w.fw = fw
+	return w, nil
+}
+
+var _ RecordWriter = (*multiFieldRecordWriter)(nil)
+
+type multiFieldRecordWriter struct {
+	fw       *pqarrow.FileWriter
+	fieldIds []FieldID
+	schema   *arrow.Schema
+
+	numRows int
+}
+
+func (mfw *multiFieldRecordWriter) Write(r Record) error {
+	mfw.numRows += r.Len()
+	columns := make([]arrow.Array, len(mfw.fieldIds))
+	for i, fieldId := range mfw.fieldIds {
+		columns[i] = r.Column(fieldId)
+	}
+	rec := array.NewRecord(mfw.schema, columns, int64(r.Len()))
+	defer rec.Release()
+	return mfw.fw.WriteBuffered(rec)
+}
+
+func (mfw *multiFieldRecordWriter) Close() {
+	mfw.fw.Close()
+}
+
+func newMultiFieldRecordWriter(fieldIds []FieldID, fields []arrow.Field, writer io.Writer) (*multiFieldRecordWriter, error) {
+	schema := arrow.NewSchema(fields, nil)
 	fw, err := pqarrow.NewFileWriter(schema, writer,
 		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(math.MaxInt64)), // No additional grouping for now.
 		pqarrow.DefaultWriterProps())
 	if err != nil {
 		return nil, err
 	}
-	return &singleFieldRecordWriter{
-		fw:      fw,
-		fieldId: fieldId,
-		schema:  schema,
+	return &multiFieldRecordWriter{
+		fw:       fw,
+		fieldIds: fieldIds,
+		schema:   schema,
 	}, nil
 }
 
@@ -891,13 +765,16 @@ type SerializeWriter[T any] struct {
 	rw         RecordWriter
 	serializer Serializer[T]
 	batchSize  int
+	mu         sync.Mutex
 
 	buffer            []T
 	pos               int
-	writtenMemorySize uint64
+	writtenMemorySize atomic.Uint64
 }
 
 func (sw *SerializeWriter[T]) Flush() error {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
 	if sw.pos == 0 {
 		return nil
 	}
@@ -911,7 +788,7 @@ func (sw *SerializeWriter[T]) Flush() error {
 		return err
 	}
 	sw.pos = 0
-	sw.writtenMemorySize += size
+	sw.writtenMemorySize.Add(size)
 	return nil
 }
 
@@ -930,7 +807,7 @@ func (sw *SerializeWriter[T]) Write(value T) error {
 }
 
 func (sw *SerializeWriter[T]) WrittenMemorySize() uint64 {
-	return sw.writtenMemorySize
+	return sw.writtenMemorySize.Load()
 }
 
 func (sw *SerializeWriter[T]) Close() error {
@@ -978,170 +855,14 @@ func (sr *simpleArrowRecord) Release() {
 	sr.r.Release()
 }
 
+func (sr *simpleArrowRecord) ArrowSchema() *arrow.Schema {
+	return sr.r.Schema()
+}
+
 func newSimpleArrowRecord(r arrow.Record, schema map[FieldID]schemapb.DataType, field2Col map[FieldID]int) *simpleArrowRecord {
 	return &simpleArrowRecord{
 		r:         r,
 		schema:    schema,
 		field2Col: field2Col,
 	}
-}
-
-type BinlogStreamWriter struct {
-	collectionID UniqueID
-	partitionID  UniqueID
-	segmentID    UniqueID
-	fieldSchema  *schemapb.FieldSchema
-
-	memorySize int // To be updated on the fly
-
-	buf bytes.Buffer
-	rw  *singleFieldRecordWriter
-}
-
-func (bsw *BinlogStreamWriter) GetRecordWriter() (RecordWriter, error) {
-	if bsw.rw != nil {
-		return bsw.rw, nil
-	}
-
-	fid := bsw.fieldSchema.FieldID
-	dim, _ := typeutil.GetDim(bsw.fieldSchema)
-	rw, err := newSingleFieldRecordWriter(fid, arrow.Field{
-		Name:     strconv.Itoa(int(fid)),
-		Type:     serdeMap[bsw.fieldSchema.DataType].arrowType(int(dim)),
-		Nullable: true, // No nullable check here.
-	}, &bsw.buf)
-	if err != nil {
-		return nil, err
-	}
-	bsw.rw = rw
-	return rw, nil
-}
-
-func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
-	if bsw.rw == nil {
-		return nil, io.ErrUnexpectedEOF
-	}
-	bsw.rw.Close()
-
-	var b bytes.Buffer
-	if err := bsw.writeBinlogHeaders(&b); err != nil {
-		return nil, err
-	}
-	if _, err := b.Write(bsw.buf.Bytes()); err != nil {
-		return nil, err
-	}
-	return &Blob{
-		Key:        strconv.Itoa(int(bsw.fieldSchema.FieldID)),
-		Value:      b.Bytes(),
-		RowNum:     int64(bsw.rw.numRows),
-		MemorySize: int64(bsw.memorySize),
-	}, nil
-}
-
-func (bsw *BinlogStreamWriter) writeBinlogHeaders(w io.Writer) error {
-	// Write magic number
-	if err := binary.Write(w, common.Endian, MagicNumber); err != nil {
-		return err
-	}
-	// Write descriptor
-	de := newDescriptorEvent()
-	de.PayloadDataType = bsw.fieldSchema.DataType
-	de.CollectionID = bsw.collectionID
-	de.PartitionID = bsw.partitionID
-	de.SegmentID = bsw.segmentID
-	de.FieldID = bsw.fieldSchema.FieldID
-	de.StartTimestamp = 0
-	de.EndTimestamp = 0
-	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(bsw.memorySize)) // FIXME: enable original size
-	if err := de.Write(w); err != nil {
-		return err
-	}
-	// Write event header
-	eh := newEventHeader(InsertEventType)
-	// Write event data
-	ev := newInsertEventData()
-	ev.StartTimestamp = 1 // Fixme: enable start/end timestamp
-	ev.EndTimestamp = 1
-	eh.EventLength = int32(bsw.buf.Len()) + eh.GetMemoryUsageInBytes() + int32(binary.Size(ev))
-	// eh.NextPosition = eh.EventLength + w.Offset()
-	if err := eh.Write(w); err != nil {
-		return err
-	}
-	if err := ev.WriteEventData(w); err != nil {
-		return err
-	}
-	return nil
-}
-
-func NewBinlogStreamWriters(collectionID, partitionID, segmentID UniqueID,
-	schema []*schemapb.FieldSchema,
-) map[FieldID]*BinlogStreamWriter {
-	bws := make(map[FieldID]*BinlogStreamWriter, len(schema))
-	for _, f := range schema {
-		bws[f.FieldID] = &BinlogStreamWriter{
-			collectionID: collectionID,
-			partitionID:  partitionID,
-			segmentID:    segmentID,
-			fieldSchema:  f,
-		}
-	}
-	return bws
-}
-
-func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, segmentID UniqueID,
-	writers map[FieldID]*BinlogStreamWriter, batchSize int,
-) (*SerializeWriter[*Value], error) {
-	rws := make(map[FieldID]RecordWriter, len(writers))
-	for fid := range writers {
-		w := writers[fid]
-		rw, err := w.GetRecordWriter()
-		if err != nil {
-			return nil, err
-		}
-		rws[fid] = rw
-	}
-	compositeRecordWriter := newCompositeRecordWriter(rws)
-	return NewSerializeRecordWriter[*Value](compositeRecordWriter, func(v []*Value) (Record, uint64, error) {
-		builders := make(map[FieldID]array.Builder, len(schema.Fields))
-		types := make(map[FieldID]schemapb.DataType, len(schema.Fields))
-		for _, f := range schema.Fields {
-			dim, _ := typeutil.GetDim(f)
-			builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, serdeMap[f.DataType].arrowType(int(dim)))
-			types[f.FieldID] = f.DataType
-		}
-
-		var memorySize uint64
-		for _, vv := range v {
-			m := vv.Value.(map[FieldID]any)
-
-			for fid, e := range m {
-				typeEntry, ok := serdeMap[types[fid]]
-				if !ok {
-					panic("unknown type")
-				}
-				ok = typeEntry.serialize(builders[fid], e)
-				if !ok {
-					return nil, 0, errors.New(fmt.Sprintf("serialize error on type %s", types[fid]))
-				}
-				writers[fid].memorySize += int(typeEntry.sizeof(e))
-				memorySize += typeEntry.sizeof(e)
-			}
-		}
-		arrays := make([]arrow.Array, len(types))
-		fields := make([]arrow.Field, len(types))
-		field2Col := make(map[FieldID]int, len(types))
-		i := 0
-		for fid, builder := range builders {
-			arrays[i] = builder.NewArray()
-			builder.Release()
-			fields[i] = arrow.Field{
-				Name:     strconv.Itoa(int(fid)),
-				Type:     arrays[i].DataType(),
-				Nullable: true, // No nullable check here.
-			}
-			field2Col[fid] = i
-			i++
-		}
-		return newSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(len(v))), types, field2Col), memorySize, nil
-	}, batchSize), nil
 }

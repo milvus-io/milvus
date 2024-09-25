@@ -39,6 +39,9 @@ future_create_test_case(int interval, int loop_cnt, int caseNo);
 void
 future_destroy(CFuture* future);
 
+void
+executor_set_thread_num(int thread_num);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,7 +1,7 @@
 package segments
 
 /*
-#cgo pkg-config: milvus_segcore milvus_common
+#cgo pkg-config: milvus_core
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
@@ -26,12 +26,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -243,4 +245,47 @@ func getFieldSizeFromFieldBinlog(fieldBinlog *datapb.FieldBinlog) int64 {
 	}
 
 	return fieldSize
+}
+
+func getFieldSchema(schema *schemapb.CollectionSchema, fieldID int64) (*schemapb.FieldSchema, error) {
+	for _, field := range schema.Fields {
+		if field.FieldID == fieldID {
+			return field, nil
+		}
+	}
+	return nil, fmt.Errorf("field %d not found in schema", fieldID)
+}
+
+func isIndexMmapEnable(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) bool {
+	enableMmap, exist := common.IsMmapIndexEnabled(indexInfo.IndexParams...)
+	if exist {
+		return enableMmap
+	}
+	indexType := common.GetIndexType(indexInfo.IndexParams)
+	var indexSupportMmap bool
+	var defaultEnableMmap bool
+	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+		indexSupportMmap = indexparamcheck.IsVectorMmapIndex(indexType)
+		defaultEnableMmap = params.Params.QueryNodeCfg.MmapVectorIndex.GetAsBool()
+	} else {
+		indexSupportMmap = indexparamcheck.IsScalarMmapIndex(indexType)
+		defaultEnableMmap = params.Params.QueryNodeCfg.MmapScalarIndex.GetAsBool()
+	}
+	return indexSupportMmap && defaultEnableMmap
+}
+
+func isDataMmapEnable(fieldSchema *schemapb.FieldSchema) bool {
+	enableMmap, exist := common.IsMmapDataEnabled(fieldSchema.GetTypeParams()...)
+	if exist {
+		return enableMmap
+	}
+	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+		return params.Params.QueryNodeCfg.MmapVectorField.GetAsBool()
+	}
+	return params.Params.QueryNodeCfg.MmapScalarField.GetAsBool()
+}
+
+func hasRawData(indexInfo *querypb.FieldIndexInfo) bool {
+	log.Warn("hasRawData is not implemented, please check it", zap.Int64("field_id", indexInfo.FieldID))
+	return true
 }

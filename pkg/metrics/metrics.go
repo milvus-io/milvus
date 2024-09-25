@@ -29,6 +29,7 @@ const (
 	AbandonLabel = "abandon"
 	SuccessLabel = "success"
 	FailLabel    = "fail"
+	CancelLabel  = "cancel"
 	TotalLabel   = "total"
 
 	HybridSearchLabel = "hybrid_search"
@@ -75,6 +76,7 @@ const (
 
 	compactionTypeLabelName  = "compaction_type"
 	isVectorFieldLabelName   = "is_vector_field"
+	segmentPruneLabelName    = "segment_prune_label"
 	stageLabelName           = "compaction_stage"
 	nodeIDLabelName          = "node_id"
 	statusLabelName          = "status"
@@ -83,6 +85,7 @@ const (
 	collectionIDLabelName    = "collection_id"
 	partitionIDLabelName     = "partition_id"
 	channelNameLabelName     = "channel_name"
+	channelTermLabelName     = "channel_term"
 	functionLabelName        = "function_name"
 	queryTypeLabelName       = "query_type"
 	collectionName           = "collection_name"
@@ -107,12 +110,14 @@ const (
 	lockType                 = "lock_type"
 	lockOp                   = "lock_op"
 	loadTypeName             = "load_type"
+	pathLabelName            = "path"
 
 	// entities label
 	LoadedLabel         = "loaded"
 	NumEntitiesAllLabel = "all"
 
-	taskTypeLabel = "task_type"
+	taskTypeLabel  = "task_type"
+	taskStateLabel = "task_state"
 )
 
 var (

@@ -41,14 +41,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -56,7 +58,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -831,6 +832,10 @@ func (s *spySegmentManager) AllocSegment(ctx context.Context, collectionID Uniqu
 	return nil, nil
 }
 
+func (s *spySegmentManager) AllocNewGrowingSegment(ctx context.Context, collectionID, partitionID, segmentID UniqueID, channelName string) (*SegmentInfo, error) {
+	return nil, nil
+}
+
 func (s *spySegmentManager) allocSegmentForImport(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error) {
 	return nil, nil
 }
@@ -1310,7 +1315,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		IndexID:   1,
 	})
 	assert.NoError(t, err)
-	err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+	err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 		BuildID: 1,
 		State:   commonpb.IndexState_Finished,
 	})
@@ -1677,7 +1682,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IndexID:   1,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: 1,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1705,7 +1710,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IndexID:   1,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: 2,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1892,7 +1897,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			BuildID:   seg1.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg1.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1902,7 +1907,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			BuildID:   seg2.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg2.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -2074,7 +2079,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			BuildID:   segment.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: segment.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -2340,7 +2345,7 @@ func TestManualCompaction(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
 	t.Run("test manual compaction successfully", func(t *testing.T) {
-		svr := &Server{allocator: &MockAllocator{}}
+		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
@@ -2362,7 +2367,7 @@ func TestManualCompaction(t *testing.T) {
 	})
 
 	t.Run("test manual compaction failure", func(t *testing.T) {
-		svr := &Server{allocator: &MockAllocator{}}
+		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
@@ -2458,8 +2463,8 @@ func TestOptions(t *testing.T) {
 	t.Run("WithCluster", func(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
-		sessionManager := NewSessionManagerImpl()
-		channelManager, err := NewChannelManagerV2(kv, newMockHandler(), sessionManager, newMockAllocator())
+		sessionManager := session.NewDataNodeManagerImpl()
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, allocator.NewMockAllocator(t))
 		assert.NoError(t, err)
 
 		cluster := NewClusterImpl(sessionManager, channelManager)
@@ -2490,20 +2495,6 @@ func TestOptions(t *testing.T) {
 	})
 }
 
-type mockPolicyFactory struct {
-	ChannelPolicyFactoryV1
-}
-
-// NewRegisterPolicy create a new register policy
-func (p *mockPolicyFactory) NewRegisterPolicy() RegisterPolicy {
-	return EmptyRegister
-}
-
-// NewDeregisterPolicy create a new dereigster policy
-func (p *mockPolicyFactory) NewDeregisterPolicy() DeregisterPolicy {
-	return EmptyDeregisterPolicy
-}
-
 func TestHandleSessionEvent(t *testing.T) {
 	kv := getWatchKV(t)
 	defer func() {
@@ -2512,9 +2503,10 @@ func TestHandleSessionEvent(t *testing.T) {
 	}()
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
+	alloc := allocator.NewMockAllocator(t)
 
-	sessionManager := NewSessionManagerImpl()
-	channelManager, err := NewChannelManagerV2(kv, newMockHandler(), sessionManager, newMockAllocator(), withFactoryV2(&mockPolicyFactory{}))
+	sessionManager := session.NewDataNodeManagerImpl()
+	channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, alloc)
 	assert.NoError(t, err)
 
 	cluster := NewClusterImpl(sessionManager, channelManager)
@@ -2557,7 +2549,7 @@ func TestHandleSessionEvent(t *testing.T) {
 		assert.NoError(t, err)
 		dataNodes := svr.cluster.GetSessions()
 		assert.EqualValues(t, 1, len(dataNodes))
-		assert.EqualValues(t, "DN127.0.0.101", dataNodes[0].info.Address)
+		assert.EqualValues(t, "DN127.0.0.101", dataNodes[0].Address())
 
 		evt = &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionDelEvent,
@@ -2616,6 +2608,7 @@ func TestPostFlush(t *testing.T) {
 			CollectionID: 1,
 			PartitionID:  1,
 			State:        commonpb.SegmentState_Flushing,
+			IsSorted:     true,
 		}))
 
 		assert.NoError(t, err)
@@ -3134,6 +3127,47 @@ func closeTestServer(t *testing.T, svr *Server) {
 }
 
 func Test_CheckHealth(t *testing.T) {
+	getSessionManager := func(isHealthy bool) *session.DataNodeManagerImpl {
+		var client *mockDataNodeClient
+		if isHealthy {
+			client = &mockDataNodeClient{
+				id:    1,
+				state: commonpb.StateCode_Healthy,
+			}
+		} else {
+			client = &mockDataNodeClient{
+				id:    1,
+				state: commonpb.StateCode_Abnormal,
+			}
+		}
+
+		sm := session.NewDataNodeManagerImpl(session.WithDataNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+			return client, nil
+		}))
+		sm.AddSession(&session.NodeInfo{
+			NodeID: 1,
+		})
+		return sm
+	}
+
+	getChannelManager := func(t *testing.T, findWatcherOk bool) ChannelManager {
+		channelManager := NewMockChannelManager(t)
+		if findWatcherOk {
+			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, nil)
+		} else {
+			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, errors.New("error"))
+		}
+		return channelManager
+	}
+
+	collections := map[UniqueID]*collectionInfo{
+		449684528748778322: {
+			ID:            449684528748778322,
+			VChannelNames: []string{"ch1", "ch2"},
+		},
+		2: nil,
+	}
+
 	t.Run("not healthy", func(t *testing.T) {
 		ctx := context.Background()
 		s := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
@@ -3144,55 +3178,83 @@ func Test_CheckHealth(t *testing.T) {
 		assert.NotEmpty(t, resp.Reasons)
 	})
 
-	t.Run("data node health check is ok", func(t *testing.T) {
-		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		healthClient := &mockDataNodeClient{
-			id:    1,
-			state: commonpb.StateCode_Healthy,
-		}
-		sm := NewSessionManagerImpl()
-		sm.sessions = struct {
-			lock.RWMutex
-			data map[int64]*Session
-		}{data: map[int64]*Session{1: {
-			client: healthClient,
-			clientCreator: func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-				return healthClient, nil
-			},
-		}}}
-
-		svr.sessionManager = sm
-		ctx := context.Background()
-		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, true, resp.IsHealthy)
-		assert.Empty(t, resp.Reasons)
-	})
-
 	t.Run("data node health check is fail", func(t *testing.T) {
 		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		unhealthClient := &mockDataNodeClient{
-			id:    1,
-			state: commonpb.StateCode_Abnormal,
-		}
-		sm := NewSessionManagerImpl()
-		sm.sessions = struct {
-			lock.RWMutex
-			data map[int64]*Session
-		}{data: map[int64]*Session{1: {
-			client: unhealthClient,
-			clientCreator: func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-				return unhealthClient, nil
-			},
-		}}}
-		svr.sessionManager = sm
+		svr.sessionManager = getSessionManager(false)
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, false, resp.IsHealthy)
 		assert.NotEmpty(t, resp.Reasons)
+	})
+
+	t.Run("check channel watched fail", func(t *testing.T) {
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.sessionManager = getSessionManager(true)
+		svr.channelManager = getChannelManager(t, false)
+		svr.meta = &meta{collections: collections}
+		ctx := context.Background()
+		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, false, resp.IsHealthy)
+		assert.NotEmpty(t, resp.Reasons)
+	})
+
+	t.Run("check checkpoint fail", func(t *testing.T) {
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.sessionManager = getSessionManager(true)
+		svr.channelManager = getChannelManager(t, true)
+		svr.meta = &meta{
+			collections: collections,
+			channelCPs: &channelCPs{
+				checkpoints: map[string]*msgpb.MsgPosition{
+					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
+						Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000*time.Hour), 0),
+						MsgID:     []byte{1, 2, 3, 4},
+					},
+				},
+			},
+		}
+
+		ctx := context.Background()
+		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, false, resp.IsHealthy)
+		assert.NotEmpty(t, resp.Reasons)
+	})
+
+	t.Run("ok", func(t *testing.T) {
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.sessionManager = getSessionManager(true)
+		svr.channelManager = getChannelManager(t, true)
+		svr.meta = &meta{
+			collections: collections,
+			channelCPs: &channelCPs{
+				checkpoints: map[string]*msgpb.MsgPosition{
+					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
+						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+						MsgID:     []byte{1, 2, 3, 4},
+					},
+					"cluster-id-rootcoord-dm_3_449684528748778323v0": {
+						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+						MsgID:     []byte{1, 2, 3, 4},
+					},
+					"invalid-vchannel-name": {
+						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+						MsgID:     []byte{1, 2, 3, 4},
+					},
+				},
+			},
+		}
+		ctx := context.Background()
+		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, true, resp.IsHealthy)
+		assert.Empty(t, resp.Reasons)
 	})
 }
 
@@ -3261,6 +3323,57 @@ func TestDataCoord_EnableActiveStandby(t *testing.T) {
 		// return svr.
 		return svr.GetStateCode() == commonpb.StateCode_Healthy
 	}, time.Second*5, time.Millisecond*100)
+}
+
+func TestLoadCollectionFromRootCoord(t *testing.T) {
+	broker := broker.NewMockBroker(t)
+	s := &Server{
+		broker: broker,
+		meta:   &meta{collections: make(map[UniqueID]*collectionInfo)},
+	}
+
+	t.Run("has collection fail with error", func(t *testing.T) {
+		broker.EXPECT().HasCollection(mock.Anything, mock.Anything).
+			Return(false, errors.New("has collection error")).Once()
+		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		assert.Error(t, err, "has collection error")
+	})
+
+	t.Run("has collection with not found", func(t *testing.T) {
+		broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Once()
+		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, merr.ErrCollectionNotFound))
+	})
+
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil)
+
+	t.Run("describeCollectionInternal fail", func(t *testing.T) {
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(nil, errors.New("describeCollectionInternal error")).Once()
+		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		assert.Error(t, err, "describeCollectionInternal error")
+	})
+
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionID: 1,
+	}, nil).Twice()
+
+	t.Run("ShowPartitionsInternal fail", func(t *testing.T) {
+		broker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).
+			Return(nil, errors.New("ShowPartitionsInternal error")).Once()
+		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		assert.Error(t, err, "ShowPartitionsInternal error")
+	})
+
+	broker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil).Once()
+	t.Run("ok", func(t *testing.T) {
+		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(s.meta.collections))
+		_, ok := s.meta.collections[1]
+		assert.True(t, ok)
+	})
 }
 
 func TestUpdateAutoBalanceConfigLoop(t *testing.T) {

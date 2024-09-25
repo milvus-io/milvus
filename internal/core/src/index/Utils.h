@@ -26,6 +26,7 @@
 #include <tuple>
 #include <map>
 #include <string>
+#include <boost/algorithm/string.hpp>
 
 #include "common/Types.h"
 #include "common/FieldData.h"
@@ -79,7 +80,12 @@ void inline CheckParameter(Config& conf,
 template <typename T>
 inline std::optional<T>
 GetValueFromConfig(const Config& cfg, const std::string& key) {
+    // cfg value are all string type
     if (cfg.contains(key)) {
+        if constexpr (std::is_same_v<T, bool>) {
+            return boost::algorithm::to_lower_copy(
+                       cfg.at(key).get<std::string>()) == "true";
+        }
         return cfg.at(key).get<T>();
     }
     return std::nullopt;
@@ -89,6 +95,20 @@ template <typename T>
 inline void
 SetValueToConfig(Config& cfg, const std::string& key, const T value) {
     cfg[key] = value;
+}
+
+template <typename T>
+inline void
+CheckMetricTypeSupport(const MetricType& metric_type) {
+    if constexpr (std::is_same_v<T, bin1>) {
+        AssertInfo(
+            IsBinaryVectorMetricType(metric_type),
+            "binary vector does not float vector metric type: " + metric_type);
+    } else {
+        AssertInfo(
+            IsFloatVectorMetricType(metric_type),
+            "float vector does not binary vector metric type: " + metric_type);
+    }
 }
 
 int64_t

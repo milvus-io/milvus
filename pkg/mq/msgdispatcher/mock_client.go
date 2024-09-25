@@ -5,7 +5,8 @@ package msgdispatcher
 import (
 	context "context"
 
-	mqwrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	common "github.com/milvus-io/milvus/pkg/mq/common"
+
 	mock "github.com/stretchr/testify/mock"
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -92,15 +93,15 @@ func (_c *MockClient_Deregister_Call) RunAndReturn(run func(string)) *MockClient
 }
 
 // Register provides a mock function with given fields: ctx, vchannel, pos, subPos
-func (_m *MockClient) Register(ctx context.Context, vchannel string, pos *msgpb.MsgPosition, subPos mqwrapper.SubscriptionInitialPosition) (<-chan *msgstream.MsgPack, error) {
+func (_m *MockClient) Register(ctx context.Context, vchannel string, pos *msgpb.MsgPosition, subPos common.SubscriptionInitialPosition) (<-chan *msgstream.MsgPack, error) {
 	ret := _m.Called(ctx, vchannel, pos, subPos)
 
 	var r0 <-chan *msgstream.MsgPack
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, *msgpb.MsgPosition, mqwrapper.SubscriptionInitialPosition) (<-chan *msgstream.MsgPack, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, *msgpb.MsgPosition, common.SubscriptionInitialPosition) (<-chan *msgstream.MsgPack, error)); ok {
 		return rf(ctx, vchannel, pos, subPos)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, *msgpb.MsgPosition, mqwrapper.SubscriptionInitialPosition) <-chan *msgstream.MsgPack); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, *msgpb.MsgPosition, common.SubscriptionInitialPosition) <-chan *msgstream.MsgPack); ok {
 		r0 = rf(ctx, vchannel, pos, subPos)
 	} else {
 		if ret.Get(0) != nil {
@@ -108,7 +109,7 @@ func (_m *MockClient) Register(ctx context.Context, vchannel string, pos *msgpb.
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, *msgpb.MsgPosition, mqwrapper.SubscriptionInitialPosition) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, string, *msgpb.MsgPosition, common.SubscriptionInitialPosition) error); ok {
 		r1 = rf(ctx, vchannel, pos, subPos)
 	} else {
 		r1 = ret.Error(1)
@@ -126,14 +127,14 @@ type MockClient_Register_Call struct {
 //   - ctx context.Context
 //   - vchannel string
 //   - pos *msgpb.MsgPosition
-//   - subPos mqwrapper.SubscriptionInitialPosition
+//   - subPos common.SubscriptionInitialPosition
 func (_e *MockClient_Expecter) Register(ctx interface{}, vchannel interface{}, pos interface{}, subPos interface{}) *MockClient_Register_Call {
 	return &MockClient_Register_Call{Call: _e.mock.On("Register", ctx, vchannel, pos, subPos)}
 }
 
-func (_c *MockClient_Register_Call) Run(run func(ctx context.Context, vchannel string, pos *msgpb.MsgPosition, subPos mqwrapper.SubscriptionInitialPosition)) *MockClient_Register_Call {
+func (_c *MockClient_Register_Call) Run(run func(ctx context.Context, vchannel string, pos *msgpb.MsgPosition, subPos common.SubscriptionInitialPosition)) *MockClient_Register_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(*msgpb.MsgPosition), args[3].(mqwrapper.SubscriptionInitialPosition))
+		run(args[0].(context.Context), args[1].(string), args[2].(*msgpb.MsgPosition), args[3].(common.SubscriptionInitialPosition))
 	})
 	return _c
 }
@@ -143,7 +144,7 @@ func (_c *MockClient_Register_Call) Return(_a0 <-chan *msgstream.MsgPack, _a1 er
 	return _c
 }
 
-func (_c *MockClient_Register_Call) RunAndReturn(run func(context.Context, string, *msgpb.MsgPosition, mqwrapper.SubscriptionInitialPosition) (<-chan *msgstream.MsgPack, error)) *MockClient_Register_Call {
+func (_c *MockClient_Register_Call) RunAndReturn(run func(context.Context, string, *msgpb.MsgPosition, common.SubscriptionInitialPosition) (<-chan *msgstream.MsgPack, error)) *MockClient_Register_Call {
 	_c.Call.Return(run)
 	return _c
 }

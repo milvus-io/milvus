@@ -15,8 +15,7 @@
 #include "common/Types.h"
 #include "index/IndexFactory.h"
 #include "knowhere/comp/index_param.h"
-#include "query/ExprImpl.h"
-#include "segcore/Reduce.h"
+#include "segcore/reduce/Reduce.h"
 #include "segcore/reduce_c.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/PbHelper.h"
@@ -24,24 +23,20 @@
 
 #include "pb/schema.pb.h"
 #include "pb/plan.pb.h"
-#include "query/Expr.h"
 #include "query/Plan.h"
 #include "query/Utils.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "query/PlanProto.h"
 #include "query/SearchBruteForce.h"
-#include "query/generated/ExecPlanNodeVisitor.h"
-#include "query/generated/PlanNodeVisitor.h"
-#include "query/generated/ExecExprVisitor.h"
-#include "query/generated/ExprVisitor.h"
-#include "query/generated/ShowPlanNodeVisitor.h"
+#include "query/ExecPlanNodeVisitor.h"
 #include "segcore/Collection.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
 
 using namespace milvus;
 using namespace milvus::index;
@@ -90,26 +85,6 @@ const int64_t ROW_COUNT = 100 * 1000;
 //         }
 //     }
 // }
-
-TEST(Float16, ShowExecutor) {
-    auto metric_type = knowhere::metric::L2;
-    auto node = std::make_unique<Float16VectorANNS>();
-    auto schema = std::make_shared<Schema>();
-    auto field_id = schema->AddDebugField(
-        "fakevec", DataType::VECTOR_FLOAT16, 16, metric_type);
-    int64_t num_queries = 100L;
-    auto raw_data = DataGen(schema, num_queries);
-    auto& info = node->search_info_;
-    info.metric_type_ = metric_type;
-    info.topk_ = 20;
-    info.field_id_ = field_id;
-    node->predicate_ = std::nullopt;
-    ShowPlanNodeVisitor show_visitor;
-    PlanNodePtr base(node.release());
-    auto res = show_visitor.call_child(*base);
-    auto dup = res;
-    std::cout << dup.dump(4);
-}
 
 TEST(Float16, ExecWithoutPredicateFlat) {
     auto schema = std::make_shared<Schema>();
@@ -235,8 +210,8 @@ TEST(Float16, RetrieveEmpty) {
             fid_64, DataType::INT64, std::vector<std::string>()),
         values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ =
+        milvus::test::CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
@@ -346,26 +321,6 @@ TEST(Float16, ExecWithPredicate) {
 //         }
 //     }
 // }
-
-TEST(BFloat16, ShowExecutor) {
-    auto metric_type = knowhere::metric::L2;
-    auto node = std::make_unique<BFloat16VectorANNS>();
-    auto schema = std::make_shared<Schema>();
-    auto field_id = schema->AddDebugField(
-        "fakevec", DataType::VECTOR_BFLOAT16, 16, metric_type);
-    int64_t num_queries = 100L;
-    auto raw_data = DataGen(schema, num_queries);
-    auto& info = node->search_info_;
-    info.metric_type_ = metric_type;
-    info.topk_ = 20;
-    info.field_id_ = field_id;
-    node->predicate_ = std::nullopt;
-    ShowPlanNodeVisitor show_visitor;
-    PlanNodePtr base(node.release());
-    auto res = show_visitor.call_child(*base);
-    auto dup = res;
-    std::cout << dup.dump(4);
-}
 
 TEST(BFloat16, ExecWithoutPredicateFlat) {
     auto schema = std::make_shared<Schema>();
@@ -480,16 +435,19 @@ TEST(BFloat16, RetrieveEmpty) {
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     std::vector<int64_t> values;
+    std::vector<proto::plan::GenericValue> retrieve_ints;
     for (int i = 0; i < req_size; ++i) {
         values.emplace_back(choose(i));
+        proto::plan::GenericValue val;
+        val.set_int64_val(i);
+        retrieve_ints.push_back(val);
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
-            fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
-        proto::plan::GenericValue::kInt64Val);
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(fid_64, DataType::INT64), retrieve_ints);
+    auto expr_plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->plannodes_ = std::move(expr_plan);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 

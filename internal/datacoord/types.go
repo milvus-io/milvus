@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -26,15 +27,23 @@ import (
 type Task interface {
 	GetTaskID() int64
 	GetNodeID() int64
-	ResetNodeID()
+	ResetTask(mt *meta)
+	PreCheck(ctx context.Context, dependency *taskScheduler) bool
 	CheckTaskHealthy(mt *meta) bool
 	SetState(state indexpb.JobState, failReason string)
 	GetState() indexpb.JobState
 	GetFailReason() string
 	UpdateVersion(ctx context.Context, meta *meta) error
 	UpdateMetaBuildingState(nodeID int64, meta *meta) error
-	AssignTask(ctx context.Context, client types.IndexNodeClient, dependency *taskScheduler) (bool, bool)
+	AssignTask(ctx context.Context, client types.IndexNodeClient) bool
 	QueryResult(ctx context.Context, client types.IndexNodeClient)
 	DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool
 	SetJobInfo(meta *meta) error
+	SetQueueTime(time.Time)
+	GetQueueTime() time.Time
+	SetStartTime(time.Time)
+	GetStartTime() time.Time
+	SetEndTime(time.Time)
+	GetEndTime() time.Time
+	GetTaskType() string
 }

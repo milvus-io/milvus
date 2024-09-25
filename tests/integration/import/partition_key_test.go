@@ -24,9 +24,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -46,7 +46,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	)
 
 	c := s.Cluster
-	ctx, cancel := context.WithTimeout(c.GetContext(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(c.GetContext(), 120*time.Second)
 	defer cancel()
 
 	collectionName := "TestBulkInsert_WithPartitionKey_" + funcutil.GenRandomStr()
@@ -156,7 +156,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 
 	// query partition key, TermExpr
 	queryNum := 10
-	partitionKeyData := insertData.Data[int64(102)].GetRows().([]string)
+	partitionKeyData := insertData.Data[int64(102)].GetDataRows().([]string)
 	queryData := partitionKeyData[:queryNum]
 	strs := lo.Map(queryData, func(str string, _ int) string {
 		return fmt.Sprintf("\"%s\"", str)

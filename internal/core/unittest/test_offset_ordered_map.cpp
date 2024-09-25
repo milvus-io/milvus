@@ -62,8 +62,7 @@ TYPED_TEST_SUITE_P(TypedOffsetOrderedMapTest);
 TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
     // no data.
     {
-        auto [offsets, has_more_res] =
-            this->map_.find_first(Unlimited, {}, true);
+        auto [offsets, has_more_res] = this->map_.find_first(Unlimited, {});
         ASSERT_EQ(0, offsets.size());
         ASSERT_FALSE(has_more_res);
     }
@@ -76,11 +75,10 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
 
     // all is satisfied.
     BitsetType all(num);
-    all.set();
+    all.reset();
 
     {
-        auto [offsets, has_more_res] =
-            this->map_.find_first(num / 2, all, true);
+        auto [offsets, has_more_res] = this->map_.find_first(num / 2, all);
         ASSERT_EQ(num / 2, offsets.size());
         ASSERT_TRUE(has_more_res);
         for (int i = 1; i < offsets.size(); i++) {
@@ -88,8 +86,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
         }
     }
     {
-        auto [offsets, has_more_res] =
-            this->map_.find_first(Unlimited, all, true);
+        auto [offsets, has_more_res] = this->map_.find_first(Unlimited, all);
         ASSERT_EQ(num, offsets.size());
         ASSERT_FALSE(has_more_res);
         for (int i = 1; i < offsets.size(); i++) {
@@ -99,10 +96,10 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
 
     // corner case, segment offset exceeds the size of bitset.
     BitsetType all_minus_1(num - 1);
-    all_minus_1.set();
+    all_minus_1.reset();
     {
         auto [offsets, has_more_res] =
-            this->map_.find_first(num / 2, all_minus_1, true);
+            this->map_.find_first(num / 2, all_minus_1);
         ASSERT_EQ(num / 2, offsets.size());
         ASSERT_TRUE(has_more_res);
         for (int i = 1; i < offsets.size(); i++) {
@@ -111,7 +108,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
     }
     {
         auto [offsets, has_more_res] =
-            this->map_.find_first(Unlimited, all_minus_1, true);
+            this->map_.find_first(Unlimited, all_minus_1);
         ASSERT_EQ(all_minus_1.size(), offsets.size());
         ASSERT_FALSE(has_more_res);
         for (int i = 1; i < offsets.size(); i++) {
@@ -121,16 +118,14 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
 
     // none is satisfied.
     BitsetType none(num);
-    none.reset();
+    none.set();
     {
-        auto [offsets, has_more_res] =
-            this->map_.find_first(num / 2, none, true);
+        auto [offsets, has_more_res] = this->map_.find_first(num / 2, none);
         ASSERT_TRUE(has_more_res);
         ASSERT_EQ(0, offsets.size());
     }
     {
-        auto [offsets, has_more_res] =
-            this->map_.find_first(NoLimit, none, true);
+        auto [offsets, has_more_res] = this->map_.find_first(NoLimit, none);
         ASSERT_TRUE(has_more_res);
         ASSERT_EQ(0, offsets.size());
     }

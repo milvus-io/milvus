@@ -28,8 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/io"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -48,7 +48,6 @@ type LevelZeroCompactionTaskSuite struct {
 	suite.Suite
 
 	mockBinlogIO *io.MockBinlogIO
-	mockAlloc    *allocator.MockAllocator
 	task         *LevelZeroCompactionTask
 
 	dData *storage.DeleteData
@@ -57,10 +56,9 @@ type LevelZeroCompactionTaskSuite struct {
 
 func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	paramtable.Init()
-	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
 	// plan of the task is unset
-	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, nil, nil)
+	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, nil, nil)
 
 	pk2ts := map[int64]uint64{
 		1: 20000,
@@ -77,6 +75,36 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	blob, err := dataCodec.Serialize(0, 0, 0, s.dData)
 	s.Require().NoError(err)
 	s.dBlob = blob.GetValue()
+}
+
+func (s *LevelZeroCompactionTaskSuite) TestGetMaxBatchSize() {
+	tests := []struct {
+		baseMem        float64
+		memLimit       float64
+		batchSizeLimit string
+
+		expected    int
+		description string
+	}{
+		{10, 100, "-1", 10, "no limitation on maxBatchSize"},
+		{10, 100, "0", 10, "no limitation on maxBatchSize v2"},
+		{10, 100, "11", 10, "maxBatchSize == 11"},
+		{10, 100, "1", 1, "maxBatchSize == 1"},
+		{10, 12, "-1", 1, "no limitation on maxBatchSize"},
+		{10, 12, "100", 1, "maxBatchSize == 100"},
+	}
+
+	maxSizeK := paramtable.Get().DataNodeCfg.L0CompactionMaxBatchSize.Key
+	defer paramtable.Get().Reset(maxSizeK)
+	for _, test := range tests {
+		s.Run(test.description, func() {
+			paramtable.Get().Save(maxSizeK, test.batchSizeLimit)
+			defer paramtable.Get().Reset(maxSizeK)
+
+			actual := getMaxBatchSize(test.baseMem, test.memLimit)
+			s.Equal(test.expected, actual)
+		})
+	}
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestProcessLoadDeltaFail() {
@@ -242,6 +270,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 				},
 			},
 		},
+		BeginLogID: 11111,
 	}
 
 	s.task.plan = plan
@@ -258,8 +287,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 	s.task.cm = cm
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(1)
-	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Twice()
-	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
 
 	s.Require().Equal(plan.GetPlanID(), s.task.GetPlanID())
 	s.Require().Equal(plan.GetChannel(), s.task.GetChannelName())
@@ -351,6 +379,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 				},
 			},
 		},
+		BeginLogID: 11111,
 	}
 
 	s.task.plan = plan
@@ -366,7 +395,6 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
 	s.task.cm = cm
 
-	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Once()
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
 
@@ -413,6 +441,7 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 				SegmentID: 100,
 			},
 		},
+		BeginLogID: 11111,
 	}
 
 	s.Run("serializeUpload allocator Alloc failed", func() {
@@ -438,7 +467,6 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 		writer := NewSegmentDeltaWriter(100, 10, 1)
 		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
 		writers := map[int64]*SegmentDeltaWriter{100: writer}
-		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
 
 		results, err := s.task.serializeUpload(ctx, writers)
 		s.Error(err)
@@ -449,8 +477,6 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 		s.SetupTest()
 		s.task.plan = plan
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-
-		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
 		writer := NewSegmentDeltaWriter(100, 10, 1)
 		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
 		writers := map[int64]*SegmentDeltaWriter{100: writer}
@@ -467,20 +493,20 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
-	bfs1 := metacache.NewBloomFilterSetWithBatchSize(100)
+	bfs1 := pkoracle.NewBloomFilterSetWithBatchSize(100)
 	bfs1.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 3}})
-	bfs2 := metacache.NewBloomFilterSetWithBatchSize(100)
+	bfs2 := pkoracle.NewBloomFilterSetWithBatchSize(100)
 	bfs2.UpdatePKRange(&storage.Int64FieldData{Data: []int64{3}})
-	bfs3 := metacache.NewBloomFilterSetWithBatchSize(100)
+	bfs3 := pkoracle.NewBloomFilterSetWithBatchSize(100)
 	bfs3.UpdatePKRange(&storage.Int64FieldData{Data: []int64{3}})
 
 	predicted := []int64{100, 101, 102}
-	segmentBFs := map[int64]*metacache.BloomFilterSet{
+	segmentBFs := map[int64]*pkoracle.BloomFilterSet{
 		100: bfs1,
 		101: bfs2,
 		102: bfs3,
 	}
-	deltaWriters := s.task.splitDelta(context.TODO(), []*storage.DeleteData{s.dData}, segmentBFs)
+	deltaWriters := s.task.splitDelta(context.TODO(), s.dData, segmentBFs)
 
 	s.NotEmpty(deltaWriters)
 	s.ElementsMatch(predicted, lo.Keys(deltaWriters))
@@ -523,16 +549,16 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadDelta() {
 	}
 
 	for _, test := range tests {
-		dDatas, err := s.task.loadDelta(ctx, test.paths)
+		dData, err := s.task.loadDelta(ctx, test.paths)
 
 		if test.expectError {
 			s.Error(err)
 		} else {
 			s.NoError(err)
-			s.NotEmpty(dDatas)
-			s.EqualValues(1, len(dDatas))
-			s.ElementsMatch(s.dData.Pks, dDatas[0].Pks)
-			s.Equal(s.dData.RowCount, dDatas[0].RowCount)
+			s.NotEmpty(dData)
+			s.NotNil(dData)
+			s.ElementsMatch(s.dData.Pks, dData.Pks)
+			s.Equal(s.dData.RowCount, dData.RowCount)
 		}
 	}
 }

@@ -22,13 +22,21 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 )
+
+func inspect[T comparable](a Allocator[T]) {
+	m := a.Inspect()
+	log.Info("Allocation", zap.Any("allocations", m), zap.Any("used", a.Used()))
+}
 
 func TestFixedSizeAllocator(t *testing.T) {
 	a := NewFixedSizeAllocator[string](&Resource{100, 100, 100})
 
+	// Allocate
 	allocated, _ := a.Allocate("a1", &Resource{10, 10, 10})
 	assert.Equal(t, true, allocated)
 	allocated, _ = a.Allocate("a2", &Resource{90, 90, 90})
@@ -36,13 +44,36 @@ func TestFixedSizeAllocator(t *testing.T) {
 	allocated, short := a.Allocate("a3", &Resource{10, 0, 0})
 	assert.Equal(t, false, allocated)
 	assert.Equal(t, &Resource{10, 0, 0}, short)
+	allocated, _ = a.Allocate("a0", &Resource{-10, 0, 0})
+	assert.Equal(t, false, allocated)
+	inspect[string](a)
+
+	// Release
 	a.Release("a2")
 	allocated, _ = a.Allocate("a3", &Resource{10, 0, 0})
 	assert.Equal(t, true, allocated)
+
+	// Inspect
 	m := a.Inspect()
 	assert.Equal(t, 2, len(m))
+
+	// Allocate on identical id is not allowed
 	allocated, _ = a.Allocate("a1", &Resource{10, 0, 0})
 	assert.Equal(t, false, allocated)
+
+	// Reallocate
+	allocated, _ = a.Reallocate("a1", &Resource{10, 0, 0})
+	assert.Equal(t, true, allocated)
+	allocated, _ = a.Reallocate("a1", &Resource{-10, 0, 0})
+	assert.Equal(t, true, allocated)
+	allocated, _ = a.Reallocate("a1", &Resource{-20, 0, 0})
+	assert.Equal(t, false, allocated)
+	allocated, _ = a.Reallocate("a1", &Resource{80, 0, 0})
+	assert.Equal(t, true, allocated)
+	allocated, _ = a.Reallocate("a1", &Resource{10, 0, 0})
+	assert.Equal(t, false, allocated)
+	allocated, _ = a.Reallocate("a4", &Resource{0, 10, 0})
+	assert.Equal(t, true, allocated)
 }
 
 func TestFixedSizeAllocatorRace(t *testing.T) {
@@ -61,6 +92,28 @@ func TestFixedSizeAllocatorRace(t *testing.T) {
 	assert.Equal(t, 100, len(m))
 }
 
+func TestWait(t *testing.T) {
+	a := NewFixedSizeAllocator[string](&Resource{100, 100, 100})
+	allocated, _ := a.Allocate("a1", &Resource{100, 100, 100})
+	assert.True(t, allocated)
+	for i := 0; i < 100; i++ {
+		go func(index int) {
+			allocated, _ := a.Reallocate("a1", &Resource{-1, -1, -1})
+			assert.Equal(t, true, allocated)
+		}(i)
+	}
+
+	allocated, _ = a.Allocate("a2", &Resource{100, 100, 100})
+	i := 1
+	for !allocated {
+		a.Wait()
+		allocated, _ = a.Allocate("a2", &Resource{100, 100, 100})
+		i++
+	}
+	assert.True(t, allocated)
+	assert.True(t, i < 100 && i > 1)
+}
+
 func TestPhysicalAwareFixedSizeAllocator(t *testing.T) {
 	hwMemoryLimit := int64(float32(hardware.GetMemoryCount()) * 0.9)
 	hwDiskLimit := int64(1<<63 - 1)
@@ -73,4 +126,10 @@ func TestPhysicalAwareFixedSizeAllocator(t *testing.T) {
 	allocated, short := a.Allocate("a3", &Resource{10, 0, 0})
 	assert.Equal(t, false, allocated)
 	assert.Equal(t, &Resource{10, 0, 0}, short)
+
+	// Reallocate
+	allocated, _ = a.Reallocate("a1", &Resource{0, -10, 0})
+	assert.True(t, allocated)
+	allocated, _ = a.Reallocate("a1", &Resource{10, 0, 0})
+	assert.False(t, allocated)
 }

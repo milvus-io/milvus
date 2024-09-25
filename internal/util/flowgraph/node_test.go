@@ -28,28 +28,27 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
 func generateMsgPack() msgstream.MsgPack {
 	msgPack := msgstream.MsgPack{}
 
-	timeTickResult := msgpb.TimeTickMsg{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_TimeTick,
-			MsgID:     0,
-			Timestamp: math.MaxUint64,
-			SourceID:  0,
-		},
-	}
 	timeTickMsg := &msgstream.TimeTickMsg{
 		BaseMsg: msgstream.BaseMsg{
 			BeginTimestamp: uint64(time.Now().Unix()),
 			EndTimestamp:   uint64(time.Now().Unix() + 1),
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: timeTickResult,
+		TimeTickMsg: &msgpb.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_TimeTick,
+				MsgID:     0,
+				Timestamp: math.MaxUint64,
+				SourceID:  0,
+			},
+		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 
@@ -64,7 +63,7 @@ func generateInsertMsgPack() msgstream.MsgPack {
 			EndTimestamp:   uint64(time.Now().Unix() + 1),
 			HashValues:     []uint32{0},
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
 		},
 	}
@@ -78,7 +77,7 @@ func TestNodeManager_Start(t *testing.T) {
 
 	msgStream, _ := factory.NewMsgStream(context.TODO())
 	channels := []string{"cc"}
-	msgStream.AsConsumer(context.TODO(), channels, "sub", mqwrapper.SubscriptionPositionEarliest)
+	msgStream.AsConsumer(context.TODO(), channels, "sub", common.SubscriptionPositionEarliest)
 
 	produceStream, _ := factory.NewMsgStream(context.TODO())
 	produceStream.AsProducer(channels)

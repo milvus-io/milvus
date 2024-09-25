@@ -6,20 +6,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
 func TestChannelBalanceSuite(t *testing.T) {
+	if streamingutil.IsStreamingServiceEnabled() {
+		t.Skip("skip channel balance test in streaming service mode")
+	}
 	suite.Run(t, new(ChannelBalanceSuite))
 }
 
@@ -113,7 +117,7 @@ func (s *ChannelBalanceSuite) flushCollections(collections []string) {
 			return info.GetCollectionID() == collID
 		})
 		lo.ForEach(collSegs, func(info *datapb.SegmentInfo, _ int) {
-			s.Require().Contains([]commonpb.SegmentState{commonpb.SegmentState_Flushed, commonpb.SegmentState_Flushing}, info.GetState())
+			s.Require().Contains([]commonpb.SegmentState{commonpb.SegmentState_Flushed, commonpb.SegmentState_Flushing, commonpb.SegmentState_Dropped}, info.GetState())
 		})
 	}
 	log.Info("=========================Data flush done=========================")

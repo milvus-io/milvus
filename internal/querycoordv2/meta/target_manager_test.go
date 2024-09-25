@@ -27,7 +27,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -35,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -346,7 +346,7 @@ func (suite *TargetManagerSuite) assertSegments(expected []int64, actual map[int
 
 func (suite *TargetManagerSuite) TestGetCollectionTargetVersion() {
 	t1 := time.Now().UnixNano()
-	target := NewCollectionTarget(nil, nil)
+	target := NewCollectionTarget(nil, nil, nil)
 	t2 := time.Now().UnixNano()
 
 	version := target.GetTargetVersion()
@@ -608,6 +608,7 @@ func (suite *TargetManagerSuite) TestRecover() {
 	suite.mgr.SaveCurrentTarget(suite.catalog)
 
 	// clear target in memory
+	version := suite.mgr.current.getCollectionTarget(collectionID).GetTargetVersion()
 	suite.mgr.current.removeCollectionTarget(collectionID)
 	// try to recover
 	suite.mgr.Recover(suite.catalog)
@@ -616,6 +617,7 @@ func (suite *TargetManagerSuite) TestRecover() {
 	suite.NotNil(target)
 	suite.Len(target.GetAllDmChannelNames(), 2)
 	suite.Len(target.GetAllSegmentIDs(), 2)
+	suite.Equal(target.GetTargetVersion(), version)
 
 	// after recover, target info should be cleaned up
 	targets, err := suite.catalog.GetCollectionTargets()

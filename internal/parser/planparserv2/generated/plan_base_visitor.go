@@ -79,6 +79,10 @@ func (v *BasePlanVisitor) VisitArrayLength(ctx *ArrayLengthContext) interface{} 
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitTextMatch(ctx *TextMatchContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitTerm(ctx *TermContext) interface{} {
 	return v.VisitChildren(ctx)
 }

@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -37,7 +38,7 @@ type Consumer struct {
 	topic     string
 	groupName string
 	natsChan  chan *nats.Msg
-	msgChan   chan mqwrapper.Message
+	msgChan   chan common.Message
 	closeChan chan struct{}
 	once      sync.Once
 	closeOnce sync.Once
@@ -51,7 +52,7 @@ func (nc *Consumer) Subscription() string {
 }
 
 // Chan returns a channel to read messages from natsmq
-func (nc *Consumer) Chan() <-chan mqwrapper.Message {
+func (nc *Consumer) Chan() <-chan common.Message {
 	if err := nc.closed(); err != nil {
 		panic(err)
 	}
@@ -62,7 +63,7 @@ func (nc *Consumer) Chan() <-chan mqwrapper.Message {
 	}
 	if nc.msgChan == nil {
 		nc.once.Do(func() {
-			nc.msgChan = make(chan mqwrapper.Message, 256)
+			nc.msgChan = make(chan common.Message, 256)
 			nc.wg.Add(1)
 			go func() {
 				defer nc.wg.Done()
@@ -89,7 +90,7 @@ func (nc *Consumer) Chan() <-chan mqwrapper.Message {
 }
 
 // Seek is used to seek the position in natsmq topic
-func (nc *Consumer) Seek(id mqwrapper.MessageID, inclusive bool) error {
+func (nc *Consumer) Seek(id common.MessageID, inclusive bool) error {
 	if err := nc.closed(); err != nil {
 		return err
 	}
@@ -112,7 +113,7 @@ func (nc *Consumer) Seek(id mqwrapper.MessageID, inclusive bool) error {
 }
 
 // Ack is used to ask a natsmq message
-func (nc *Consumer) Ack(message mqwrapper.Message) {
+func (nc *Consumer) Ack(message common.Message) {
 	if err := message.(*nmqMessage).raw.Ack(); err != nil {
 		log.Warn("failed to ack message of nmq", zap.String("topic", message.Topic()), zap.Reflect("msgID", message.ID()))
 	}
@@ -133,7 +134,7 @@ func (nc *Consumer) Close() {
 }
 
 // GetLatestMsgID returns the ID of the most recent message processed by the consumer.
-func (nc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
+func (nc *Consumer) GetLatestMsgID() (common.MessageID, error) {
 	if err := nc.closed(); err != nil {
 		return nil, err
 	}

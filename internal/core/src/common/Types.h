@@ -128,14 +128,26 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
         case DataType::VECTOR_BFLOAT16: {
             return sizeof(bfloat16) * dim;
         }
-        // Not supporting VECTOR_SPARSE_FLOAT here intentionally. We can't
-        // easily estimately the size of a sparse float vector. Caller of this
-        // method must handle this case themselves and must not pass
-        // VECTOR_SPARSE_FLOAT data_type.
+        // Not supporting variable length types(such as VECTOR_SPARSE_FLOAT and
+        // VARCHAR) here intentionally. We can't easily estimate the size of
+        // them. Caller of this method must handle this case themselves and must
+        // not pass variable length types to this method.
         default: {
-            throw SegcoreError(DataTypeInvalid,
-                               fmt::format("invalid type is {}", data_type));
+            PanicInfo(
+                DataTypeInvalid,
+                fmt::format("failed to get data type size, invalid type {}",
+                            data_type));
         }
+    }
+}
+
+template <typename T>
+inline size_t
+GetVecRowSize(int64_t dim) {
+    if constexpr (std::is_same_v<T, bin1>) {
+        return (dim / 8) * sizeof(bin1);
+    } else {
+        return dim * sizeof(T);
     }
 }
 
@@ -364,6 +376,7 @@ using SegOffset =
 
 //using BitsetType = boost::dynamic_bitset<>;
 using BitsetType = CustomBitset;
+using BitsetTypeView = CustomBitsetView;
 using BitsetTypePtr = std::shared_ptr<BitsetType>;
 using BitsetTypeOpt = std::optional<BitsetType>;
 
@@ -391,6 +404,18 @@ inline bool
 IndexIsSparse(const IndexType& index_type) {
     return index_type == knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
            index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND;
+}
+
+inline bool
+IsFloatVectorMetricType(const MetricType& metric_type) {
+    return metric_type == knowhere::metric::L2 ||
+           metric_type == knowhere::metric::IP ||
+           metric_type == knowhere::metric::COSINE;
+}
+
+inline bool
+IsBinaryVectorMetricType(const MetricType& metric_type) {
+    return !IsFloatVectorMetricType(metric_type);
 }
 
 // Plus 1 because we can't use greater(>) symbol

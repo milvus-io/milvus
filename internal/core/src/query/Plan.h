@@ -26,11 +26,20 @@ struct Plan;
 struct PlaceholderGroup;
 struct RetrievePlan;
 
+void
+ParsePlanNodeProto(proto::plan::PlanNode& plan_node,
+                   const void* serialized_expr_plan,
+                   int64_t size);
+
 // Note: serialized_expr_plan is of binary format
 std::unique_ptr<Plan>
 CreateSearchPlanByExpr(const Schema& schema,
                        const void* serialized_expr_plan,
                        const int64_t size);
+
+std::unique_ptr<Plan>
+CreateSearchPlanFromPlanNode(const Schema& schema,
+                             const proto::plan::PlanNode& plan_node);
 
 std::unique_ptr<PlaceholderGroup>
 ParsePlaceholderGroup(const Plan* plan,

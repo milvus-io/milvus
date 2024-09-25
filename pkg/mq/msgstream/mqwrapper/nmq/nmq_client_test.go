@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
@@ -84,7 +85,7 @@ func TestNmqClient_CreateProducer(t *testing.T) {
 	defer client.Close()
 
 	topic := "TestNmqClient_CreateProducer"
-	proOpts := mqwrapper.ProducerOptions{Topic: topic}
+	proOpts := common.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
@@ -93,14 +94,14 @@ func TestNmqClient_CreateProducer(t *testing.T) {
 	nmqProducer := producer.(*nmqProducer)
 	assert.Equal(t, nmqProducer.Topic(), topic)
 
-	msg := &mqwrapper.ProducerMessage{
+	msg := &common.ProducerMessage{
 		Payload:    []byte{},
 		Properties: nil,
 	}
 	_, err = nmqProducer.Send(context.TODO(), msg)
 	assert.NoError(t, err)
 
-	invalidOpts := mqwrapper.ProducerOptions{Topic: ""}
+	invalidOpts := common.ProducerOptions{Topic: ""}
 	producer, e := client.CreateProducer(invalidOpts)
 	assert.Nil(t, producer)
 	assert.Error(t, e)
@@ -112,13 +113,13 @@ func TestNmqClient_GetLatestMsg(t *testing.T) {
 	defer client.Close()
 
 	topic := fmt.Sprintf("t2GetLatestMsg-%d", rand.Int())
-	proOpts := mqwrapper.ProducerOptions{Topic: topic}
+	proOpts := common.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
 	assert.NoError(t, err)
 	defer producer.Close()
 
 	for i := 0; i < 10; i++ {
-		msg := &mqwrapper.ProducerMessage{
+		msg := &common.ProducerMessage{
 			Payload:    []byte{byte(i)},
 			Properties: nil,
 		}
@@ -130,7 +131,7 @@ func TestNmqClient_GetLatestMsg(t *testing.T) {
 	consumerOpts := mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	}
 
@@ -140,7 +141,7 @@ func TestNmqClient_GetLatestMsg(t *testing.T) {
 	expectLastMsg, err := consumer.GetLatestMsgID()
 	assert.NoError(t, err)
 
-	var actualLastMsg mqwrapper.Message
+	var actualLastMsg common.Message
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	for i := 0; i < 10; i++ {
@@ -186,7 +187,7 @@ func TestNmqClient_Subscribe(t *testing.T) {
 	defer client.Close()
 
 	topic := "TestNmqClient_Subscribe"
-	proOpts := mqwrapper.ProducerOptions{Topic: topic}
+	proOpts := common.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
@@ -196,7 +197,7 @@ func TestNmqClient_Subscribe(t *testing.T) {
 	consumerOpts := mqwrapper.ConsumerOptions{
 		Topic:                       "",
 		SubscriptionName:            subName,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	}
 
@@ -211,7 +212,7 @@ func TestNmqClient_Subscribe(t *testing.T) {
 	defer consumer.Close()
 	assert.Equal(t, consumer.Subscription(), subName)
 
-	msg := &mqwrapper.ProducerMessage{
+	msg := &common.ProducerMessage{
 		Payload:    []byte{1},
 		Properties: nil,
 	}

@@ -29,16 +29,17 @@
 #include "index/IndexFactory.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
-#include "query/ExprImpl.h"
 #include "segcore/Collection.h"
-#include "segcore/Reduce.h"
+#include "segcore/reduce/Reduce.h"
 #include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
+#include "futures/Future.h"
+#include "futures/future_c.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/PbHelper.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
-#include "query/generated/ExecExprVisitor.h"
+#include "test_utils/GenExprProto.h"
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
 #include "exec/expression/Expr.h"
@@ -48,6 +49,7 @@
 namespace chrono = std::chrono;
 
 using namespace milvus;
+using namespace milvus::test;
 using namespace milvus::index;
 using namespace milvus::segcore;
 using namespace milvus::tracer;
@@ -64,14 +66,54 @@ CStatus
 CRetrieve(CSegmentInterface c_segment,
           CRetrievePlan c_plan,
           uint64_t timestamp,
-          CRetrieveResult* result) {
-    return Retrieve({},
-                    c_segment,
-                    c_plan,
-                    timestamp,
-                    result,
-                    DEFAULT_MAX_OUTPUT_SIZE,
-                    false);
+          CRetrieveResult** result) {
+    auto future = AsyncRetrieve(
+        {}, c_segment, c_plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false);
+    auto futurePtr = static_cast<milvus::futures::IFuture*>(
+        static_cast<void*>(static_cast<CFuture*>(future)));
+
+    std::mutex mu;
+    mu.lock();
+    futurePtr->registerReadyCallback(
+        [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
+        (CLockedGoMutex*)(&mu));
+    mu.lock();
+
+    auto [retrieveResult, status] = futurePtr->leakyGet();
+    future_destroy(future);
+
+    if (status.error_code != 0) {
+        return status;
+    }
+    *result = static_cast<CRetrieveResult*>(retrieveResult);
+    return status;
+}
+
+CStatus
+CRetrieveByOffsets(CSegmentInterface c_segment,
+                   CRetrievePlan c_plan,
+                   int64_t* offsets,
+                   int64_t len,
+                   CRetrieveResult** result) {
+    auto future = AsyncRetrieveByOffsets({}, c_segment, c_plan, offsets, len);
+    auto futurePtr = static_cast<milvus::futures::IFuture*>(
+        static_cast<void*>(static_cast<CFuture*>(future)));
+
+    std::mutex mu;
+    mu.lock();
+    futurePtr->registerReadyCallback(
+        [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
+        (CLockedGoMutex*)(&mu));
+    mu.lock();
+
+    auto [retrieveResult, status] = futurePtr->leakyGet();
+    future_destroy(future);
+
+    if (status.error_code != 0) {
+        return status;
+    }
+    *result = static_cast<CRetrieveResult*>(retrieveResult);
+    return status;
 }
 
 const char*
@@ -351,10 +393,10 @@ TEST(CApiTest, GetCollectionNameTest) {
 TEST(CApiTest, SegmentTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     CSegmentInterface a_segment;
-    status = NewSegment(collection, Invalid, -1, &a_segment);
+    status = NewSegment(collection, Invalid, -1, &a_segment, false);
     ASSERT_NE(status.error_code, Success);
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -500,7 +542,7 @@ TEST(CApiTest, CApiCPlan_bfloat16) {
 TEST(CApiTest, InsertTest) {
     auto c_collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -527,7 +569,7 @@ TEST(CApiTest, InsertTest) {
 TEST(CApiTest, DeleteTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
@@ -553,7 +595,7 @@ TEST(CApiTest, DeleteTest) {
 TEST(CApiTest, MultiDeleteGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -603,21 +645,21 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         retrive_pks);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
     auto max_ts = dataset.timestamps_[N - 1] + 10;
 
-    CRetrieveResult retrieve_result;
+    CRetrieveResult* retrieve_result = nullptr;
     res = CRetrieve(segment, plan.get(), max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                            retrieve_result->proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
+    retrieve_result = nullptr;
 
     // retrieve pks = {2}
     {
@@ -629,15 +671,15 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
         milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         retrive_pks);
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     res = CRetrieve(segment, plan.get(), max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                       retrieve_result->proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 1);
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
+    retrieve_result = nullptr;
 
     // delete pks = {2}
     delete_pks = {2};
@@ -658,13 +700,13 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     // retrieve pks in {2}
     res = CRetrieve(segment, plan.get(), max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                       retrieve_result->proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -673,7 +715,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
 TEST(CApiTest, MultiDeleteSealedSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -715,21 +757,21 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
         retrive_pks);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
 
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
     auto max_ts = dataset.timestamps_[N - 1] + 10;
 
-    CRetrieveResult retrieve_result;
+    CRetrieveResult* retrieve_result = nullptr;
     auto res = CRetrieve(segment, plan.get(), max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                            retrieve_result->proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
+    retrieve_result = nullptr;
 
     // retrieve pks = {2}
     {
@@ -741,15 +783,15 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
         milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         retrive_pks);
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     res = CRetrieve(segment, plan.get(), max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                       retrieve_result->proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 1);
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
+    retrieve_result = nullptr;
 
     // delete pks = {2}
     delete_pks = {2};
@@ -770,13 +812,13 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     // retrieve pks in {2}
     res = CRetrieve(segment, plan.get(), max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                       retrieve_result->proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -785,7 +827,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -834,21 +876,21 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
         retrive_row_ids);
 
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
-    CRetrieveResult retrieve_result;
+    CRetrieveResult* retrieve_result = nullptr;
     res = CRetrieve(
         segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                            retrieve_result->proto_size);
     ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 6);
-    DeleteRetrieveResult(&retrieve_result);
+    ASSERT_EQ(query_result->ids().int_id().data().size(), 3);
+    DeleteRetrieveResult(retrieve_result);
+    retrieve_result = nullptr;
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
@@ -873,13 +915,14 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     ASSERT_EQ(res.error_code, Success);
 
     query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                       retrieve_result->proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
+    retrieve_result = nullptr;
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -888,7 +931,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
 TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -915,21 +958,21 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
-    CRetrieveResult retrieve_result;
+    CRetrieveResult* retrieve_result = nullptr;
     auto res = CRetrieve(
         segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                            retrieve_result->proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 6);
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
+    retrieve_result = nullptr;
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
@@ -955,22 +998,90 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     ASSERT_EQ(res.error_code, Success);
 
     query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                       retrieve_result->proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
 
     DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, SearcTestWhenNullable) {
+    auto c_collection = NewCollection(get_default_schema_config_nullable());
+    CSegmentInterface segment;
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
+    ASSERT_EQ(status.error_code, Success);
+    auto col = (milvus::segcore::Collection*)c_collection;
+
+    int N = 10000;
+    auto dataset = DataGen(col->get_schema(), N);
+    int64_t ts_offset = 1000;
+
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+
+    auto insert_data = serialize(dataset.raw_);
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
+                          insert_data.size());
+    ASSERT_EQ(ins_res.error_code, Success);
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_vector_type(milvus::proto::plan::VectorType::FloatVector);
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(100);
+    auto query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(10);
+    query_info->set_round_decimal(3);
+    query_info->set_metric_type("L2");
+    query_info->set_search_params(R"({"nprobe": 10})");
+    auto plan_str = plan_node.SerializeAsString();
+
+    int num_queries = 10;
+    auto blob = generate_query_data(num_queries);
+
+    void* plan = nullptr;
+    status = CreateSearchPlanByExpr(
+        c_collection, plan_str.data(), plan_str.size(), &plan);
+    ASSERT_EQ(status.error_code, Success);
+
+    void* placeholderGroup = nullptr;
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
+    ASSERT_EQ(status.error_code, Success);
+
+    std::vector<CPlaceholderGroup> placeholderGroups;
+    placeholderGroups.push_back(placeholderGroup);
+
+    CSearchResult search_result;
+    auto res = CSearch(segment, plan, placeholderGroup, {}, &search_result);
+    ASSERT_EQ(res.error_code, Success);
+
+    CSearchResult search_result2;
+    auto res2 = CSearch(segment, plan, placeholderGroup, {}, &search_result2);
+    ASSERT_EQ(res2.error_code, Success);
+
+    DeleteSearchPlan(plan);
+    DeletePlaceholderGroup(placeholderGroup);
+    DeleteSearchResult(search_result);
+    DeleteSearchResult(search_result2);
+    DeleteCollection(c_collection);
     DeleteSegment(segment);
 }
 
 TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, 111, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -1025,21 +1136,21 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
-    CRetrieveResult retrieve_result;
+    CRetrieveResult* retrieve_result = nullptr;
     res = CRetrieve(
         segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                            retrieve_result->proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
+    retrieve_result = nullptr;
 
     // second insert data
     // insert data with pks = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9} , timestamps = {10, 11, 12, 13, 14, 15, 16, 17, 18, 19}
@@ -1061,13 +1172,13 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     ASSERT_EQ(res.error_code, Success);
 
     query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                       retrieve_result->proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 3);
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -1076,7 +1187,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, true);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -1122,23 +1233,23 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
-    CRetrieveResult retrieve_result;
+    CRetrieveResult* retrieve_result = nullptr;
     auto res = CRetrieve(
         segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                            retrieve_result->proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 4);
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
+    retrieve_result = nullptr;
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -1147,7 +1258,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
 TEST(CApiTest, SearchTest) {
     auto c_collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -1217,7 +1328,7 @@ TEST(CApiTest, SearchTest) {
 TEST(CApiTest, SearchTestWithExpr) {
     auto c_collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -1284,7 +1395,7 @@ TEST(CApiTest, SearchTestWithExpr) {
 TEST(CApiTest, RetrieveTestWithExpr) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
@@ -1319,18 +1430,25 @@ TEST(CApiTest, RetrieveTestWithExpr) {
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
-    CRetrieveResult retrieve_result;
+    CRetrieveResult* retrieve_result = nullptr;
     auto res = CRetrieve(
         segment, plan.get(), dataset.timestamps_[0], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
 
+    // Test Retrieve by offsets.
+    int64_t offsets[] = {0, 1, 2};
+    CRetrieveResult* retrieve_by_offsets_result = nullptr;
+    res = CRetrieveByOffsets(
+        segment, plan.get(), offsets, 3, &retrieve_by_offsets_result);
+    ASSERT_EQ(res.error_code, Success);
+
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
+    DeleteRetrieveResult(retrieve_by_offsets_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1338,7 +1456,7 @@ TEST(CApiTest, RetrieveTestWithExpr) {
 TEST(CApiTest, GetMemoryUsageInBytesTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
@@ -1369,7 +1487,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
 TEST(CApiTest, GetDeletedCountTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
@@ -1400,7 +1518,7 @@ TEST(CApiTest, GetDeletedCountTest) {
 TEST(CApiTest, GetRowCountTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
@@ -1430,7 +1548,7 @@ TEST(CApiTest, GetRowCountTest) {
 TEST(CApiTest, GetRealCount) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
@@ -1480,7 +1598,7 @@ TEST(CApiTest, GetRealCount) {
 TEST(CApiTest, ReduceNullResult) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
@@ -1565,7 +1683,7 @@ TEST(CApiTest, ReduceNullResult) {
 TEST(CApiTest, ReduceRemoveDuplicates) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
@@ -1715,7 +1833,7 @@ testReduceSearchWithExpr(int N,
     }
     auto collection = NewCollection(schema_fun());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
@@ -1904,8 +2022,8 @@ TEST(CApiTest, LoadIndexInfo) {
                        {knowhere::indexparam::NPROBE, 4}};
 
     auto database = knowhere::GenDataSet(N, DIM, raw_data.data());
-    indexing.Train(*database, conf);
-    indexing.Add(*database, conf);
+    indexing.Train(database, conf);
+    indexing.Add(database, conf);
     EXPECT_EQ(indexing.Count(), N);
     EXPECT_EQ(indexing.Dim(), DIM);
     knowhere::BinarySet binary_set;
@@ -1955,8 +2073,8 @@ TEST(CApiTest, LoadIndexSearch) {
                        {knowhere::indexparam::NPROBE, 4}};
 
     auto database = knowhere::GenDataSet(N, DIM, raw_data.data());
-    indexing.Train(*database, conf);
-    indexing.Add(*database, conf);
+    indexing.Train(database, conf);
+    indexing.Add(database, conf);
 
     EXPECT_EQ(indexing.Count(), N);
     EXPECT_EQ(indexing.Dim(), DIM);
@@ -1979,7 +2097,7 @@ TEST(CApiTest, LoadIndexSearch) {
     auto query_dataset =
         knowhere::GenDataSet(num_query, DIM, raw_data.data() + BIAS * DIM);
 
-    auto result = indexing.Search(*query_dataset, conf, nullptr);
+    auto result = indexing.Search(query_dataset, conf, nullptr);
 }
 
 TEST(CApiTest, Indexing_Without_Predicate) {
@@ -1991,7 +2109,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -2140,7 +2258,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -2290,7 +2408,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -2468,7 +2586,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = 1000 * 10;
@@ -2648,7 +2766,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -2820,7 +2938,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = 1000 * 10;
@@ -2994,7 +3112,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -3174,7 +3292,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -3354,7 +3472,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -3551,7 +3669,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -3738,7 +3856,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 TEST(CApiTest, SealedSegmentTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, true);
     ASSERT_EQ(status.error_code, Success);
 
     int N = 1000;
@@ -3764,7 +3882,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, true);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -3917,7 +4035,7 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -3997,7 +4115,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -4171,7 +4289,7 @@ TEST(CApiTest, SealedSegment_Update_Field_Size) {
     int64_t total_size = 0;
     for (int i = 0; i < N; ++i) {
         auto str = "string_data_" + std::to_string(i);
-        total_size += str.size();
+        total_size += str.size() + sizeof(uint32_t);
         str_datas.emplace_back(str);
     }
     auto res = LoadFieldRawData(segment, str_fid.get(), str_datas.data(), N);
@@ -4184,8 +4302,9 @@ TEST(CApiTest, SealedSegment_Update_Field_Size) {
 
 TEST(CApiTest, GrowingSegment_Load_Field_Data) {
     auto schema = std::make_shared<Schema>();
-    schema->AddField(FieldName("RowID"), FieldId(0), DataType::INT64);
-    schema->AddField(FieldName("Timestamp"), FieldId(1), DataType::INT64);
+    schema->AddField(FieldName("RowID"), FieldId(0), DataType::INT64, false);
+    schema->AddField(
+        FieldName("Timestamp"), FieldId(1), DataType::INT64, false);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
     auto vec_fid = schema->AddDebugField(
         "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
@@ -4315,8 +4434,7 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
         milvus::expr::ColumnInfo(
             i64_fid, DataType::INT64, std::vector<std::string>()),
         retrive_row_ids);
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids;
 
     // retrieve value
@@ -4324,13 +4442,13 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
         i8_fid, i16_fid, i32_fid, i64_fid, float_fid, double_fid};
     plan->field_ids_ = target_field_ids;
 
-    CRetrieveResult retrieve_result;
+    CRetrieveResult* retrieve_result = nullptr;
     res = CRetrieve(
         segment, plan.get(), raw_data.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result->proto_blob,
+                                            retrieve_result->proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->fields_data().size(), 6);
     auto fields_data = query_result->fields_data();
@@ -4369,7 +4487,7 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     }
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
 
     DeleteSegment(segment);
 }
@@ -4377,7 +4495,7 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
     auto c_collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -4442,7 +4560,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
     auto c_collection =
         NewCollection(get_default_schema_config(), knowhere::metric::IP);
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -4506,7 +4624,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
     auto c_collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -4570,7 +4688,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     auto c_collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -4629,49 +4747,6 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     DeleteSearchResult(search_result);
     DeleteCollection(c_collection);
     DeleteSegment(segment);
-}
-
-TEST(CApiTest, AssembeChunkTest) {
-    TargetBitmap chunk(1000);
-    for (size_t i = 0; i < 1000; ++i) {
-        chunk[i] = (i % 2 == 0);
-    }
-    BitsetType result;
-    milvus::query::AppendOneChunk(result, chunk);
-    //    std::string s;
-    //    boost::to_string(result, s);
-    //    std::cout << s << std::endl;
-    int index = 0;
-    for (size_t i = 0; i < 1000; i++) {
-        ASSERT_EQ(result[index++], chunk[i]) << i;
-    }
-
-    chunk = TargetBitmap(934);
-    for (int i = 0; i < 934; ++i) {
-        chunk[i] = (i % 2 == 0);
-    }
-    milvus::query::AppendOneChunk(result, chunk);
-    for (size_t i = 0; i < 934; i++) {
-        ASSERT_EQ(result[index++], chunk[i]) << i;
-    }
-
-    chunk = TargetBitmap(62);
-    for (int i = 0; i < 62; ++i) {
-        chunk[i] = (i % 2 == 0);
-    }
-    milvus::query::AppendOneChunk(result, chunk);
-    for (size_t i = 0; i < 62; i++) {
-        ASSERT_EQ(result[index++], chunk[i]) << i;
-    }
-
-    chunk = TargetBitmap(105);
-    for (int i = 0; i < 105; ++i) {
-        chunk[i] = (i % 2 == 0);
-    }
-    milvus::query::AppendOneChunk(result, chunk);
-    for (size_t i = 0; i < 105; i++) {
-        ASSERT_EQ(result[index++], chunk[i]) << i;
-    }
 }
 
 std::vector<SegOffset>
@@ -4755,31 +4830,6 @@ TEST(CApiTest, SearchIdTest) {
     }
 }
 
-TEST(CApiTest, AssembeChunkPerfTest) {
-    TargetBitmap chunk(100000000);
-    for (size_t i = 0; i < 100000000; ++i) {
-        chunk[i] = (i % 2 == 0);
-    }
-    BitsetType result;
-    // while (true) {
-    std::cout << "start test" << std::endl;
-    auto start = std::chrono::steady_clock::now();
-    milvus::query::AppendOneChunk(result, chunk);
-    std::cout << "cost: "
-              << std::chrono::duration_cast<std::chrono::microseconds>(
-                     std::chrono::steady_clock::now() - start)
-                     .count()
-              << "us" << std::endl;
-    int index = 0;
-    for (size_t i = 0; i < 1000; i++) {
-        ASSERT_EQ(result[index++], chunk[i]) << i;
-    }
-    // }
-    // std::string s;
-    // boost::to_string(result, s);
-    // std::cout << s << std::endl;
-}
-
 TEST(CApiTest, Indexing_Without_Predicate_float16) {
     // insert data to segment
     constexpr auto TOPK = 5;
@@ -4789,7 +4839,7 @@ TEST(CApiTest, Indexing_Without_Predicate_float16) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -4939,7 +4989,7 @@ TEST(CApiTest, Indexing_Without_Predicate_bfloat16) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -5084,7 +5134,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_FLOAT16) {
     auto c_collection =
         NewCollection(get_float16_schema_config(), knowhere::metric::IP);
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -5149,7 +5199,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_BFLOAT16) {
     auto c_collection =
         NewCollection(get_bfloat16_schema_config(), knowhere::metric::IP);
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 

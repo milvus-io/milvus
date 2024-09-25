@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package paramtable
 
@@ -98,8 +103,12 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.security.superUsers", "super1,super2,super3")
 		assert.Equal(t, []string{"super1", "super2", "super3"}, Params.SuperUsers.GetAsStrings())
 
+		assert.Equal(t, "Milvus", Params.DefaultRootPassword.GetValue())
+		params.Save("common.security.defaultRootPassword", "defaultMilvus")
+		assert.Equal(t, "defaultMilvus", Params.DefaultRootPassword.GetValue())
+
 		params.Save("common.security.superUsers", "")
-		assert.Equal(t, []string{""}, Params.SuperUsers.GetAsStrings())
+		assert.Equal(t, []string{}, Params.SuperUsers.GetAsStrings())
 
 		assert.Equal(t, false, Params.PreCreatedTopicEnabled.GetAsBool())
 
@@ -110,6 +119,21 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, []string{"timeticker"}, Params.TimeTicker.GetAsStrings())
 
 		assert.Equal(t, 1000, params.CommonCfg.BloomFilterApplyBatchSize.GetAsInt())
+
+		params.Save("common.gcenabled", "false")
+		assert.False(t, Params.GCEnabled.GetAsBool())
+		params.Save("common.gchelper.enabled", "false")
+		assert.False(t, Params.GCHelperEnabled.GetAsBool())
+		params.Save("common.overloadedMemoryThresholdPercentage", "40")
+		assert.Equal(t, 0.4, Params.OverloadedMemoryThresholdPercentage.GetAsFloat())
+		params.Save("common.gchelper.maximumGoGC", "100")
+		assert.Equal(t, 100, Params.MaximumGOGCConfig.GetAsInt())
+		params.Save("common.gchelper.minimumGoGC", "80")
+		assert.Equal(t, 80, Params.MinimumGOGCConfig.GetAsInt())
+
+		assert.Equal(t, 0, len(Params.ReadOnlyPrivileges.GetAsStrings()))
+		assert.Equal(t, 0, len(Params.ReadWritePrivileges.GetAsStrings()))
+		assert.Equal(t, 0, len(Params.AdminPrivileges.GetAsStrings()))
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -184,6 +208,9 @@ func TestComponentParam(t *testing.T) {
 		assert.False(t, Params.SkipPartitionKeyCheck.GetAsBool())
 		params.Save("proxy.skipPartitionKeyCheck", "true")
 		assert.True(t, Params.SkipPartitionKeyCheck.GetAsBool())
+
+		assert.Equal(t, int64(10), Params.CheckWorkloadRequestNum.GetAsInt64())
+		assert.Equal(t, float64(0.1), Params.WorkloadToleranceFactor.GetAsFloat())
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {
@@ -282,6 +309,9 @@ func TestComponentParam(t *testing.T) {
 		checkHealthRPCTimeout := Params.CheckHealthRPCTimeout.GetAsInt()
 		assert.Equal(t, 2000, checkHealthRPCTimeout)
 
+		updateInterval := Params.UpdateCollectionLoadStatusInterval.GetAsDuration(time.Minute)
+		assert.Equal(t, updateInterval, time.Minute*5)
+
 		assert.Equal(t, 0.1, Params.GlobalRowCountFactor.GetAsFloat())
 		params.Save("queryCoord.globalRowCountFactor", "0.4")
 		assert.Equal(t, 0.4, Params.GlobalRowCountFactor.GetAsFloat())
@@ -319,6 +349,12 @@ func TestComponentParam(t *testing.T) {
 		params.Save("queryCoord.checkExecutedFlagInterval", "200")
 		assert.Equal(t, 200, Params.CheckExecutedFlagInterval.GetAsInt())
 		params.Reset("queryCoord.checkExecutedFlagInterval")
+
+		assert.Equal(t, 0.1, Params.DelegatorMemoryOverloadFactor.GetAsFloat())
+		assert.Equal(t, 5, Params.CollectionBalanceSegmentBatchSize.GetAsInt())
+
+		assert.Equal(t, 0, Params.ClusterLevelLoadReplicaNumber.GetAsInt())
+		assert.Len(t, Params.ClusterLevelLoadResourceGroups.GetAsStrings(), 0)
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -420,6 +456,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 3*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
 
 		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
+		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
+
+		assert.Equal(t, true, Params.MmapChunkCache.GetAsBool())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -428,6 +467,7 @@ func TestComponentParam(t *testing.T) {
 		assert.True(t, Params.EnableGarbageCollection.GetAsBool())
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
 		t.Logf("dataCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
+		assert.Equal(t, int64(4096), Params.GrowingSegmentsMemSizeInMB.GetAsInt64())
 
 		assert.Equal(t, true, Params.AutoBalance.GetAsBool())
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
@@ -444,6 +484,11 @@ func TestComponentParam(t *testing.T) {
 		params.Save("datacoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
+		params.Save("dataCoord.compaction.gcInterval", "100")
+		assert.Equal(t, float64(100), Params.CompactionGCIntervalInSeconds.GetAsDuration(time.Second).Seconds())
+		params.Save("dataCoord.compaction.dropTolerance", "100")
+		assert.Equal(t, float64(100), Params.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds())
+
 		params.Save("dataCoord.compaction.clustering.enable", "true")
 		assert.Equal(t, true, Params.ClusteringCompactionEnable.GetAsBool())
 		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10")
@@ -454,12 +499,18 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(10*1024*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
 		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10g")
 		assert.Equal(t, int64(10*1024*1024*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
-		params.Save("dataCoord.compaction.clustering.dropTolerance", "86400")
-		assert.Equal(t, int64(86400), Params.ClusteringCompactionDropTolerance.GetAsInt64())
-		params.Save("dataCoord.compaction.clustering.maxSegmentSize", "100m")
-		assert.Equal(t, int64(100*1024*1024), Params.ClusteringCompactionMaxSegmentSize.GetAsSize())
-		params.Save("dataCoord.compaction.clustering.preferSegmentSize", "10m")
-		assert.Equal(t, int64(10*1024*1024), Params.ClusteringCompactionPreferSegmentSize.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.maxSegmentSizeRatio", "1.2")
+		assert.Equal(t, 1.2, Params.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())
+		params.Save("dataCoord.compaction.clustering.preferSegmentSizeRatio", "0.5")
+		assert.Equal(t, 0.5, Params.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat())
+		params.Save("dataCoord.slot.clusteringCompactionUsage", "10")
+		assert.Equal(t, 10, Params.ClusteringCompactionSlotUsage.GetAsInt())
+		params.Save("dataCoord.slot.mixCompactionUsage", "5")
+		assert.Equal(t, 5, Params.MixCompactionSlotUsage.GetAsInt())
+		params.Save("dataCoord.slot.l0DeleteCompactionUsage", "4")
+		assert.Equal(t, 4, Params.L0DeleteCompactionSlotUsage.GetAsInt())
+		params.Save("datacoord.scheduler.taskSlowThreshold", "1000")
+		assert.Equal(t, 1000*time.Second, Params.TaskSlowThreshold.GetAsDuration(time.Second))
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -512,10 +563,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 16, Params.ReadBufferSizeInMB.GetAsInt())
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
-		assert.Equal(t, 2, Params.SlotCap.GetAsInt())
+		assert.Equal(t, 16, Params.SlotCap.GetAsInt())
+
 		// clustering compaction
 		params.Save("datanode.clusteringCompaction.memoryBufferRatio", "0.1")
 		assert.Equal(t, 0.1, Params.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
+		params.Save("datanode.clusteringCompaction.workPoolSize", "2")
+		assert.Equal(t, int64(2), Params.ClusteringCompactionWorkerPoolSize.GetAsInt64())
 
 		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
@@ -527,6 +581,18 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("indexnode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+	})
+
+	t.Run("test streamingCoordConfig", func(t *testing.T) {
+		assert.Equal(t, 1*time.Minute, params.StreamingCoordCfg.AutoBalanceTriggerInterval.GetAsDurationByParse())
+		assert.Equal(t, 50*time.Millisecond, params.StreamingCoordCfg.AutoBalanceBackoffInitialInterval.GetAsDurationByParse())
+		assert.Equal(t, 2.0, params.StreamingCoordCfg.AutoBalanceBackoffMultiplier.GetAsFloat())
+		params.Save(params.StreamingCoordCfg.AutoBalanceTriggerInterval.Key, "50s")
+		params.Save(params.StreamingCoordCfg.AutoBalanceBackoffInitialInterval.Key, "50s")
+		params.Save(params.StreamingCoordCfg.AutoBalanceBackoffMultiplier.Key, "3.5")
+		assert.Equal(t, 50*time.Second, params.StreamingCoordCfg.AutoBalanceTriggerInterval.GetAsDurationByParse())
+		assert.Equal(t, 50*time.Second, params.StreamingCoordCfg.AutoBalanceBackoffInitialInterval.GetAsDurationByParse())
+		assert.Equal(t, 3.5, params.StreamingCoordCfg.AutoBalanceBackoffMultiplier.GetAsFloat())
 	})
 
 	t.Run("channel config priority", func(t *testing.T) {
@@ -543,6 +609,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.UsePartitionKeyAsClusteringKey.GetAsBool())
 		params.Save("common.useVectorAsClusteringKey", "true")
 		assert.Equal(t, true, Params.UseVectorAsClusteringKey.GetAsBool())
+		params.Save("common.enableVectorClusteringKey", "true")
+		assert.Equal(t, true, Params.EnableVectorClusteringKey.GetAsBool())
 	})
 }
 
@@ -577,6 +645,8 @@ func TestCachedParam(t *testing.T) {
 	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())
 	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())
 
+	assert.Equal(t, 60, params.ServiceParam.MQCfg.PursuitBufferTime.GetAsInt())
+
 	assert.Equal(t, int64(1024), params.DataCoordCfg.SegmentMaxSize.GetAsInt64())
 	assert.Equal(t, int64(1024), params.DataCoordCfg.SegmentMaxSize.GetAsInt64())
 
@@ -585,4 +655,20 @@ func TestCachedParam(t *testing.T) {
 
 	assert.Equal(t, 1*time.Hour, params.DataCoordCfg.GCInterval.GetAsDuration(time.Second))
 	assert.Equal(t, 1*time.Hour, params.DataCoordCfg.GCInterval.GetAsDuration(time.Second))
+
+	params.Save(params.QuotaConfig.DiskQuota.Key, "192")
+	assert.Equal(t, float64(192*1024*1024), params.QuotaConfig.DiskQuota.GetAsFloat())
+	assert.Equal(t, float64(192*1024*1024), params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat())
+	params.Save(params.QuotaConfig.DiskQuota.Key, "256")
+	assert.Equal(t, float64(256*1024*1024), params.QuotaConfig.DiskQuota.GetAsFloat())
+	assert.Equal(t, float64(256*1024*1024), params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat())
+	params.Save(params.QuotaConfig.DiskQuota.Key, "192")
+}
+
+func TestFallbackParam(t *testing.T) {
+	Init()
+	params := Get()
+	params.Save("common.chanNamePrefix.cluster", "foo")
+
+	assert.Equal(t, "foo", params.CommonCfg.ClusterPrefix.GetValue())
 }

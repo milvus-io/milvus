@@ -72,7 +72,7 @@ func TestCreateAlias_all(t *testing.T) {
 	task.CreateAliasRequest.CollectionName = collectionName
 
 	assert.NoError(t, task.PreExecute(ctx))
-	assert.NoError(t, task.Execute(ctx))
+	assert.Error(t, task.Execute(ctx))
 	assert.NoError(t, task.PostExecute(ctx))
 }
 
@@ -107,7 +107,7 @@ func TestDropAlias_all(t *testing.T) {
 	assert.Equal(t, ts, task.EndTs())
 
 	assert.NoError(t, task.PreExecute(ctx))
-	assert.NoError(t, task.Execute(ctx))
+	assert.Error(t, task.Execute(ctx))
 	assert.NoError(t, task.PostExecute(ctx))
 }
 
@@ -153,7 +153,7 @@ func TestAlterAlias_all(t *testing.T) {
 	task.AlterAliasRequest.CollectionName = collectionName
 
 	assert.NoError(t, task.PreExecute(ctx))
-	assert.NoError(t, task.Execute(ctx))
+	assert.Error(t, task.Execute(ctx))
 	assert.NoError(t, task.PostExecute(ctx))
 }
 
@@ -193,7 +193,7 @@ func TestDescribeAlias_all(t *testing.T) {
 	assert.Equal(t, ts, task.EndTs())
 
 	assert.NoError(t, task.PreExecute(ctx))
-	assert.NoError(t, task.Execute(ctx))
+	assert.Error(t, task.Execute(ctx))
 	assert.NoError(t, task.PostExecute(ctx))
 }
 

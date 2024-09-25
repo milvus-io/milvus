@@ -30,10 +30,12 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/mq/common"
+	"github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/server"
 	kafkawrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/kafka"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/nmq"
 	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/pulsar"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
@@ -205,7 +207,7 @@ func (f *KmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 		if err != nil {
 			return err
 		}
-		msgstream.AsConsumer(ctx, channels, subname, mqwrapper.SubscriptionPositionUnknown)
+		msgstream.AsConsumer(ctx, channels, subname, common.SubscriptionPositionUnknown)
 		msgstream.Close()
 		return nil
 	}
@@ -231,5 +233,20 @@ func NewNatsmqFactory() Factory {
 		DispatcherFactory: ProtoUDFactory{},
 		ReceiveBufSize:    paramtable.MQCfg.ReceiveBufSize.GetAsInt64(),
 		MQBufSize:         paramtable.MQCfg.MQBufSize.GetAsInt64(),
+	}
+}
+
+// NewRocksmqFactory creates a new message stream factory based on rocksmq.
+func NewRocksmqFactory(path string, cfg *paramtable.ServiceParam) Factory {
+	if err := server.InitRocksMQ(path); err != nil {
+		log.Fatal("fail to init rocksmq", zap.Error(err))
+	}
+	log.Info("init rocksmq msgstream success", zap.String("path", path))
+
+	return &CommonFactory{
+		Newer:             rmq.NewClientWithDefaultOptions,
+		DispatcherFactory: ProtoUDFactory{},
+		ReceiveBufSize:    cfg.MQCfg.ReceiveBufSize.GetAsInt64(),
+		MQBufSize:         cfg.MQCfg.MQBufSize.GetAsInt64(),
 	}
 }

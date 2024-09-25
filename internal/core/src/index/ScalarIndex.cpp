@@ -65,9 +65,8 @@ ScalarIndex<T>::Query(const DatasetPtr& dataset) {
         case OpType::PrefixMatch:
         case OpType::PostfixMatch:
         default:
-            throw SegcoreError(
-                OpTypeInvalid,
-                fmt::format("unsupported operator type: {}", op));
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("unsupported operator type: {}", op));
     }
 }
 

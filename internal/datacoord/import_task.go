@@ -17,7 +17,7 @@
 package datacoord
 
 import (
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
@@ -118,6 +118,14 @@ func UpdateSegmentIDs(segmentIDs []UniqueID) UpdateAction {
 	return func(t ImportTask) {
 		if task, ok := t.(*importTask); ok {
 			task.ImportTaskV2.SegmentIDs = segmentIDs
+		}
+	}
+}
+
+func UpdateStatsSegmentIDs(segmentIDs []UniqueID) UpdateAction {
+	return func(t ImportTask) {
+		if task, ok := t.(*importTask); ok {
+			task.ImportTaskV2.StatsSegmentIDs = segmentIDs
 		}
 	}
 }

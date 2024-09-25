@@ -174,13 +174,6 @@ func (b *BlobReader) Seek(offset int64, whence int) (int64, error) {
 }
 
 func (AzureObjectStorage *AzureObjectStorage) GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error) {
-	opts := azblob.DownloadStreamOptions{}
-	if offset > 0 {
-		opts.Range = azblob.HTTPRange{
-			Offset: offset,
-			Count:  size,
-		}
-	}
 	return NewBlobReader(AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName), offset)
 }
 

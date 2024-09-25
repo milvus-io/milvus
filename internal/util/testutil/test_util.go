@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -102,7 +103,7 @@ func randomString(length int) string {
 	return string(b)
 }
 
-func CreateInsertData(schema *schemapb.CollectionSchema, rows int) (*storage.InsertData, error) {
+func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent ...int) (*storage.InsertData, error) {
 	insertData, err := storage.NewInsertData(schema)
 	if err != nil {
 		return nil, err
@@ -113,33 +114,19 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int) (*storage.Ins
 		}
 		switch f.GetDataType() {
 		case schemapb.DataType_Bool:
-			insertData.Data[f.FieldID] = &storage.BoolFieldData{
-				Data: testutils.GenerateBoolArray(rows),
-			}
+			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateBoolArray(rows))
 		case schemapb.DataType_Int8:
-			insertData.Data[f.FieldID] = &storage.Int8FieldData{
-				Data: testutils.GenerateInt8Array(rows),
-			}
+			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateInt8Array(rows))
 		case schemapb.DataType_Int16:
-			insertData.Data[f.FieldID] = &storage.Int16FieldData{
-				Data: testutils.GenerateInt16Array(rows),
-			}
+			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateInt16Array(rows))
 		case schemapb.DataType_Int32:
-			insertData.Data[f.FieldID] = &storage.Int32FieldData{
-				Data: testutils.GenerateInt32Array(rows),
-			}
+			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateInt32Array(rows))
 		case schemapb.DataType_Int64:
-			insertData.Data[f.FieldID] = &storage.Int64FieldData{
-				Data: testutils.GenerateInt64Array(rows),
-			}
+			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateInt64Array(rows))
 		case schemapb.DataType_Float:
-			insertData.Data[f.FieldID] = &storage.FloatFieldData{
-				Data: testutils.GenerateFloat32Array(rows),
-			}
+			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateFloat32Array(rows))
 		case schemapb.DataType_Double:
-			insertData.Data[f.FieldID] = &storage.DoubleFieldData{
-				Data: testutils.GenerateFloat64Array(rows),
-			}
+			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateFloat64Array(rows))
 		case schemapb.DataType_BinaryVector:
 			dim, err := typeutil.GetDim(f)
 			if err != nil {
@@ -177,53 +164,52 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int) (*storage.Ins
 				Dim:  int(dim),
 			}
 		case schemapb.DataType_SparseFloatVector:
-			sparseFloatVecData := testutils.GenerateSparseFloatVectors(rows)
+			data, dim := testutils.GenerateSparseFloatVectorsData(rows)
 			insertData.Data[f.FieldID] = &storage.SparseFloatVectorFieldData{
-				SparseFloatArray: *sparseFloatVecData,
+				SparseFloatArray: schemapb.SparseFloatArray{
+					Contents: data,
+					Dim:      dim,
+				},
 			}
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
-			insertData.Data[f.FieldID] = &storage.StringFieldData{
-				Data: testutils.GenerateStringArray(rows),
-			}
+			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateStringArray(rows))
 		case schemapb.DataType_JSON:
-			insertData.Data[f.FieldID] = &storage.JSONFieldData{
-				Data: testutils.GenerateJSONArray(rows),
-			}
+			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateJSONArray(rows))
 		case schemapb.DataType_Array:
 			switch f.GetElementType() {
 			case schemapb.DataType_Bool:
-				insertData.Data[f.FieldID] = &storage.ArrayFieldData{
-					Data: testutils.GenerateArrayOfBoolArray(rows),
-				}
+				insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateArrayOfBoolArray(rows))
 			case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-				insertData.Data[f.FieldID] = &storage.ArrayFieldData{
-					Data: testutils.GenerateArrayOfIntArray(rows),
-				}
+				insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateArrayOfIntArray(rows))
 			case schemapb.DataType_Int64:
-				insertData.Data[f.FieldID] = &storage.ArrayFieldData{
-					Data: testutils.GenerateArrayOfLongArray(rows),
-				}
+				insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateArrayOfLongArray(rows))
 			case schemapb.DataType_Float:
-				insertData.Data[f.FieldID] = &storage.ArrayFieldData{
-					Data: testutils.GenerateArrayOfFloatArray(rows),
-				}
+				insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateArrayOfFloatArray(rows))
 			case schemapb.DataType_Double:
-				insertData.Data[f.FieldID] = &storage.ArrayFieldData{
-					Data: testutils.GenerateArrayOfDoubleArray(rows),
-				}
+				insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateArrayOfDoubleArray(rows))
 			case schemapb.DataType_String, schemapb.DataType_VarChar:
-				insertData.Data[f.FieldID] = &storage.ArrayFieldData{
-					Data: testutils.GenerateArrayOfStringArray(rows),
-				}
+				insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateArrayOfStringArray(rows))
 			}
 		default:
 			panic(fmt.Sprintf("unsupported data type: %s", f.GetDataType().String()))
+		}
+		if f.GetNullable() {
+			if len(nullPercent) > 1 {
+				return nil, merr.WrapErrParameterInvalidMsg("the length of nullPercent is wrong")
+			}
+			if len(nullPercent) == 0 || nullPercent[0] == 50 {
+				insertData.Data[f.FieldID].AppendValidDataRows(testutils.GenerateBoolArray(rows))
+			} else if len(nullPercent) == 1 && nullPercent[0] == 100 {
+				insertData.Data[f.FieldID].AppendValidDataRows(make([]bool, rows))
+			} else {
+				return nil, merr.WrapErrParameterInvalidMsg("not support the number of nullPercent")
+			}
 		}
 	}
 	return insertData, nil
 }
 
-func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.InsertData) ([]arrow.Array, error) {
+func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.InsertData, useNullType bool) ([]arrow.Array, error) {
 	mem := memory.NewGoAllocator()
 	columns := make([]arrow.Array, 0, len(schema.Fields))
 	for _, field := range schema.Fields {
@@ -233,46 +219,59 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 		fieldID := field.GetFieldID()
 		dataType := field.GetDataType()
 		elementType := field.GetElementType()
+		if field.GetNullable() && useNullType {
+			columns = append(columns, array.NewNull(insertData.Data[fieldID].RowNum()))
+			continue
+		}
 		switch dataType {
 		case schemapb.DataType_Bool:
 			builder := array.NewBooleanBuilder(mem)
 			boolData := insertData.Data[fieldID].(*storage.BoolFieldData).Data
-			builder.AppendValues(boolData, nil)
+			validData := insertData.Data[fieldID].(*storage.BoolFieldData).ValidData
+			builder.AppendValues(boolData, validData)
+
 			columns = append(columns, builder.NewBooleanArray())
 		case schemapb.DataType_Int8:
 			builder := array.NewInt8Builder(mem)
 			int8Data := insertData.Data[fieldID].(*storage.Int8FieldData).Data
-			builder.AppendValues(int8Data, nil)
+			validData := insertData.Data[fieldID].(*storage.Int8FieldData).ValidData
+			builder.AppendValues(int8Data, validData)
 			columns = append(columns, builder.NewInt8Array())
 		case schemapb.DataType_Int16:
 			builder := array.NewInt16Builder(mem)
 			int16Data := insertData.Data[fieldID].(*storage.Int16FieldData).Data
-			builder.AppendValues(int16Data, nil)
+			validData := insertData.Data[fieldID].(*storage.Int16FieldData).ValidData
+			builder.AppendValues(int16Data, validData)
 			columns = append(columns, builder.NewInt16Array())
 		case schemapb.DataType_Int32:
 			builder := array.NewInt32Builder(mem)
 			int32Data := insertData.Data[fieldID].(*storage.Int32FieldData).Data
-			builder.AppendValues(int32Data, nil)
+			validData := insertData.Data[fieldID].(*storage.Int32FieldData).ValidData
+			builder.AppendValues(int32Data, validData)
 			columns = append(columns, builder.NewInt32Array())
 		case schemapb.DataType_Int64:
 			builder := array.NewInt64Builder(mem)
 			int64Data := insertData.Data[fieldID].(*storage.Int64FieldData).Data
-			builder.AppendValues(int64Data, nil)
+			validData := insertData.Data[fieldID].(*storage.Int64FieldData).ValidData
+			builder.AppendValues(int64Data, validData)
 			columns = append(columns, builder.NewInt64Array())
 		case schemapb.DataType_Float:
 			builder := array.NewFloat32Builder(mem)
 			floatData := insertData.Data[fieldID].(*storage.FloatFieldData).Data
-			builder.AppendValues(floatData, nil)
+			validData := insertData.Data[fieldID].(*storage.FloatFieldData).ValidData
+			builder.AppendValues(floatData, validData)
 			columns = append(columns, builder.NewFloat32Array())
 		case schemapb.DataType_Double:
 			builder := array.NewFloat64Builder(mem)
 			doubleData := insertData.Data[fieldID].(*storage.DoubleFieldData).Data
-			builder.AppendValues(doubleData, nil)
+			validData := insertData.Data[fieldID].(*storage.DoubleFieldData).ValidData
+			builder.AppendValues(doubleData, validData)
 			columns = append(columns, builder.NewFloat64Array())
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			builder := array.NewStringBuilder(mem)
 			stringData := insertData.Data[fieldID].(*storage.StringFieldData).Data
-			builder.AppendValues(stringData, nil)
+			validData := insertData.Data[fieldID].(*storage.StringFieldData).ValidData
+			builder.AppendValues(stringData, validData)
 			columns = append(columns, builder.NewStringArray())
 		case schemapb.DataType_BinaryVector:
 			builder := array.NewListBuilder(mem, &arrow.Uint8Type{})
@@ -355,12 +354,14 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 		case schemapb.DataType_JSON:
 			builder := array.NewStringBuilder(mem)
 			jsonData := insertData.Data[fieldID].(*storage.JSONFieldData).Data
+			validData := insertData.Data[fieldID].(*storage.JSONFieldData).ValidData
 			builder.AppendValues(lo.Map(jsonData, func(bs []byte, _ int) string {
 				return string(bs)
-			}), nil)
+			}), validData)
 			columns = append(columns, builder.NewStringArray())
 		case schemapb.DataType_Array:
 			data := insertData.Data[fieldID].(*storage.ArrayFieldData).Data
+			validData := insertData.Data[fieldID].(*storage.ArrayFieldData).ValidData
 			rows := len(data)
 			offsets := make([]int32, 0, rows)
 			valid := make([]bool, 0, rows)
@@ -371,12 +372,16 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				builder := array.NewListBuilder(mem, &arrow.BooleanType{})
 				valueBuilder := builder.ValueBuilder().(*array.BooleanBuilder)
 				for i := 0; i < rows; i++ {
-					boolData := data[i].Data.(*schemapb.ScalarField_BoolData).BoolData.GetData()
-					valueBuilder.AppendValues(boolData, nil)
-
-					offsets = append(offsets, currOffset)
-					valid = append(valid, true)
-					currOffset = currOffset + int32(len(boolData))
+					if field.GetNullable() && !validData[i] {
+						offsets = append(offsets, currOffset)
+						valid = append(valid, false)
+					} else {
+						boolData := data[i].Data.(*schemapb.ScalarField_BoolData).BoolData.GetData()
+						valueBuilder.AppendValues(boolData, nil)
+						offsets = append(offsets, currOffset)
+						currOffset = currOffset + int32(len(boolData))
+						valid = append(valid, true)
+					}
 				}
 				builder.AppendValues(offsets, valid)
 				columns = append(columns, builder.NewListArray())
@@ -384,16 +389,20 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				builder := array.NewListBuilder(mem, &arrow.Int8Type{})
 				valueBuilder := builder.ValueBuilder().(*array.Int8Builder)
 				for i := 0; i < rows; i++ {
-					intData := data[i].Data.(*schemapb.ScalarField_IntData).IntData.GetData()
-					int8Data := make([]int8, 0)
-					for j := 0; j < len(intData); j++ {
-						int8Data = append(int8Data, int8(intData[j]))
+					if field.GetNullable() && !validData[i] {
+						offsets = append(offsets, currOffset)
+						valid = append(valid, false)
+					} else {
+						intData := data[i].Data.(*schemapb.ScalarField_IntData).IntData.GetData()
+						int8Data := make([]int8, 0)
+						for j := 0; j < len(intData); j++ {
+							int8Data = append(int8Data, int8(intData[j]))
+						}
+						valueBuilder.AppendValues(int8Data, nil)
+						offsets = append(offsets, currOffset)
+						currOffset = currOffset + int32(len(int8Data))
+						valid = append(valid, true)
 					}
-					valueBuilder.AppendValues(int8Data, nil)
-
-					offsets = append(offsets, currOffset)
-					valid = append(valid, true)
-					currOffset = currOffset + int32(len(int8Data))
 				}
 				builder.AppendValues(offsets, valid)
 				columns = append(columns, builder.NewListArray())
@@ -401,16 +410,20 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				builder := array.NewListBuilder(mem, &arrow.Int16Type{})
 				valueBuilder := builder.ValueBuilder().(*array.Int16Builder)
 				for i := 0; i < rows; i++ {
-					intData := data[i].Data.(*schemapb.ScalarField_IntData).IntData.GetData()
-					int16Data := make([]int16, 0)
-					for j := 0; j < len(intData); j++ {
-						int16Data = append(int16Data, int16(intData[j]))
+					if field.GetNullable() && !validData[i] {
+						offsets = append(offsets, currOffset)
+						valid = append(valid, false)
+					} else {
+						intData := data[i].Data.(*schemapb.ScalarField_IntData).IntData.GetData()
+						int16Data := make([]int16, 0)
+						for j := 0; j < len(intData); j++ {
+							int16Data = append(int16Data, int16(intData[j]))
+						}
+						valueBuilder.AppendValues(int16Data, nil)
+						offsets = append(offsets, currOffset)
+						currOffset = currOffset + int32(len(int16Data))
+						valid = append(valid, true)
 					}
-					valueBuilder.AppendValues(int16Data, nil)
-
-					offsets = append(offsets, currOffset)
-					valid = append(valid, true)
-					currOffset = currOffset + int32(len(int16Data))
 				}
 				builder.AppendValues(offsets, valid)
 				columns = append(columns, builder.NewListArray())
@@ -418,12 +431,16 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				builder := array.NewListBuilder(mem, &arrow.Int32Type{})
 				valueBuilder := builder.ValueBuilder().(*array.Int32Builder)
 				for i := 0; i < rows; i++ {
-					intData := data[i].Data.(*schemapb.ScalarField_IntData).IntData.GetData()
-					valueBuilder.AppendValues(intData, nil)
-
-					offsets = append(offsets, currOffset)
-					valid = append(valid, true)
-					currOffset = currOffset + int32(len(intData))
+					if field.GetNullable() && !validData[i] {
+						offsets = append(offsets, currOffset)
+						valid = append(valid, false)
+					} else {
+						intData := data[i].Data.(*schemapb.ScalarField_IntData).IntData.GetData()
+						valueBuilder.AppendValues(intData, nil)
+						offsets = append(offsets, currOffset)
+						currOffset = currOffset + int32(len(intData))
+						valid = append(valid, true)
+					}
 				}
 				builder.AppendValues(offsets, valid)
 				columns = append(columns, builder.NewListArray())
@@ -431,12 +448,16 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				builder := array.NewListBuilder(mem, &arrow.Int64Type{})
 				valueBuilder := builder.ValueBuilder().(*array.Int64Builder)
 				for i := 0; i < rows; i++ {
-					longData := data[i].Data.(*schemapb.ScalarField_LongData).LongData.GetData()
-					valueBuilder.AppendValues(longData, nil)
-
-					offsets = append(offsets, currOffset)
-					valid = append(valid, true)
-					currOffset = currOffset + int32(len(longData))
+					if field.GetNullable() && !validData[i] {
+						offsets = append(offsets, currOffset)
+						valid = append(valid, false)
+					} else {
+						longData := data[i].Data.(*schemapb.ScalarField_LongData).LongData.GetData()
+						valueBuilder.AppendValues(longData, nil)
+						offsets = append(offsets, currOffset)
+						currOffset = currOffset + int32(len(longData))
+						valid = append(valid, true)
+					}
 				}
 				builder.AppendValues(offsets, valid)
 				columns = append(columns, builder.NewListArray())
@@ -444,12 +465,16 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				builder := array.NewListBuilder(mem, &arrow.Float32Type{})
 				valueBuilder := builder.ValueBuilder().(*array.Float32Builder)
 				for i := 0; i < rows; i++ {
-					floatData := data[i].Data.(*schemapb.ScalarField_FloatData).FloatData.GetData()
-					valueBuilder.AppendValues(floatData, nil)
-
-					offsets = append(offsets, currOffset)
-					valid = append(valid, true)
-					currOffset = currOffset + int32(len(floatData))
+					if field.GetNullable() && !validData[i] {
+						offsets = append(offsets, currOffset)
+						valid = append(valid, false)
+					} else {
+						floatData := data[i].Data.(*schemapb.ScalarField_FloatData).FloatData.GetData()
+						valueBuilder.AppendValues(floatData, nil)
+						offsets = append(offsets, currOffset)
+						currOffset = currOffset + int32(len(floatData))
+						valid = append(valid, true)
+					}
 				}
 				builder.AppendValues(offsets, valid)
 				columns = append(columns, builder.NewListArray())
@@ -457,12 +482,16 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				builder := array.NewListBuilder(mem, &arrow.Float64Type{})
 				valueBuilder := builder.ValueBuilder().(*array.Float64Builder)
 				for i := 0; i < rows; i++ {
-					doubleData := data[i].Data.(*schemapb.ScalarField_DoubleData).DoubleData.GetData()
-					valueBuilder.AppendValues(doubleData, nil)
-
-					offsets = append(offsets, currOffset)
-					valid = append(valid, true)
-					currOffset = currOffset + int32(len(doubleData))
+					if field.GetNullable() && !validData[i] {
+						offsets = append(offsets, currOffset)
+						valid = append(valid, false)
+					} else {
+						doubleData := data[i].Data.(*schemapb.ScalarField_DoubleData).DoubleData.GetData()
+						valueBuilder.AppendValues(doubleData, nil)
+						offsets = append(offsets, currOffset)
+						currOffset = currOffset + int32(len(doubleData))
+						valid = append(valid, true)
+					}
 				}
 				builder.AppendValues(offsets, valid)
 				columns = append(columns, builder.NewListArray())
@@ -470,12 +499,16 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				builder := array.NewListBuilder(mem, &arrow.StringType{})
 				valueBuilder := builder.ValueBuilder().(*array.StringBuilder)
 				for i := 0; i < rows; i++ {
-					stringData := data[i].Data.(*schemapb.ScalarField_StringData).StringData.GetData()
-					valueBuilder.AppendValues(stringData, nil)
-
-					offsets = append(offsets, currOffset)
-					valid = append(valid, true)
-					currOffset = currOffset + int32(len(stringData))
+					if field.GetNullable() && !validData[i] {
+						offsets = append(offsets, currOffset)
+						valid = append(valid, false)
+					} else {
+						stringData := data[i].Data.(*schemapb.ScalarField_StringData).StringData.GetData()
+						valueBuilder.AppendValues(stringData, nil)
+						offsets = append(offsets, currOffset)
+						currOffset = currOffset + int32(len(stringData))
+						valid = append(valid, true)
+					}
 				}
 				builder.AppendValues(offsets, valid)
 				columns = append(columns, builder.NewListArray())
@@ -499,6 +532,10 @@ func CreateInsertDataRowsForJSON(schema *schemapb.CollectionSchema, insertData *
 			dataType := field.GetDataType()
 			elemType := field.GetElementType()
 			if field.GetAutoID() {
+				continue
+			}
+			if v.GetRow(i) == nil {
+				data[fieldID] = nil
 				continue
 			}
 			switch dataType {
@@ -546,4 +583,110 @@ func CreateInsertDataRowsForJSON(schema *schemapb.CollectionSchema, insertData *
 	}
 
 	return rows, nil
+}
+
+func CreateInsertDataForCSV(schema *schemapb.CollectionSchema, insertData *storage.InsertData, nullkey string) ([][]string, error) {
+	rowNum := insertData.GetRowNum()
+	csvData := make([][]string, 0, rowNum+1)
+
+	header := make([]string, 0)
+	nameToFields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
+		name := field.GetName()
+		if !field.GetAutoID() {
+			header = append(header, name)
+		}
+		return name
+	})
+	csvData = append(csvData, header)
+
+	for i := 0; i < rowNum; i++ {
+		data := make([]string, 0)
+		for _, name := range header {
+			field := nameToFields[name]
+			value := insertData.Data[field.FieldID]
+			dataType := field.GetDataType()
+			elemType := field.GetElementType()
+			if field.GetAutoID() {
+				continue
+			}
+			// deal with null value
+			if field.GetNullable() && value.GetRow(i) == nil {
+				data = append(data, nullkey)
+				continue
+			}
+			switch dataType {
+			case schemapb.DataType_Array:
+				var arr any
+				switch elemType {
+				case schemapb.DataType_Bool:
+					arr = value.GetRow(i).(*schemapb.ScalarField).GetBoolData().GetData()
+				case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+					arr = value.GetRow(i).(*schemapb.ScalarField).GetIntData().GetData()
+				case schemapb.DataType_Int64:
+					arr = value.GetRow(i).(*schemapb.ScalarField).GetLongData().GetData()
+				case schemapb.DataType_Float:
+					arr = value.GetRow(i).(*schemapb.ScalarField).GetFloatData().GetData()
+				case schemapb.DataType_Double:
+					arr = value.GetRow(i).(*schemapb.ScalarField).GetDoubleData().GetData()
+				case schemapb.DataType_String:
+					arr = value.GetRow(i).(*schemapb.ScalarField).GetStringData().GetData()
+				}
+				j, err := json.Marshal(arr)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, string(j))
+			case schemapb.DataType_JSON:
+				data = append(data, string(value.GetRow(i).([]byte)))
+			case schemapb.DataType_FloatVector:
+				vec := value.GetRow(i).([]float32)
+				j, err := json.Marshal(vec)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, string(j))
+			case schemapb.DataType_BinaryVector:
+				bytes := value.GetRow(i).([]byte)
+				vec := make([]int, 0, len(bytes))
+				for _, b := range bytes {
+					vec = append(vec, int(b))
+				}
+				j, err := json.Marshal(vec)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, string(j))
+			case schemapb.DataType_Float16Vector:
+				bytes := value.GetRow(i).([]byte)
+				vec := typeutil.Float16BytesToFloat32Vector(bytes)
+				j, err := json.Marshal(vec)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, string(j))
+			case schemapb.DataType_BFloat16Vector:
+				bytes := value.GetRow(i).([]byte)
+				vec := typeutil.BFloat16BytesToFloat32Vector(bytes)
+				j, err := json.Marshal(vec)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, string(j))
+			case schemapb.DataType_SparseFloatVector:
+				bytes := value.GetRow(i).([]byte)
+				m := typeutil.SparseFloatBytesToMap(bytes)
+				j, err := json.Marshal(m)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, string(j))
+			default:
+				str := fmt.Sprintf("%v", value.GetRow(i))
+				data = append(data, str)
+			}
+		}
+		csvData = append(csvData, data)
+	}
+
+	return csvData, nil
 }

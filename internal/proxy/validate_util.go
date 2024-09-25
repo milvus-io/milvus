@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -56,12 +57,10 @@ func (v *validateUtil) apply(opts ...validateOption) {
 	}
 }
 
-func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.CollectionSchema, numRows uint64) error {
-	helper, err := typeutil.CreateSchemaHelper(schema)
-	if err != nil {
-		return err
+func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.SchemaHelper, numRows uint64) error {
+	if helper == nil {
+		return merr.WrapErrServiceInternal("nil schema helper provided for Validation")
 	}
-
 	for _, field := range data {
 		fieldSchema, err := helper.GetFieldFromName(field.GetFieldName())
 		if err != nil {
@@ -122,7 +121,7 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 		}
 	}
 
-	err = v.fillWithValue(data, helper, int(numRows))
+	err := v.fillWithValue(data, helper, int(numRows))
 	if err != nil {
 		return err
 	}
@@ -137,11 +136,11 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil.SchemaHelper, numRows uint64) error {
 	errNumRowsMismatch := func(fieldName string, fieldNumRows uint64) error {
 		msg := fmt.Sprintf("the num_rows (%d) of field (%s) is not equal to passed num_rows (%d)", fieldNumRows, fieldName, numRows)
-		return merr.WrapErrParameterInvalid(fieldNumRows, numRows, msg)
+		return merr.WrapErrParameterInvalid(numRows, fieldNumRows, msg)
 	}
 	errDimMismatch := func(fieldName string, dataDim int64, schemaDim int64) error {
 		msg := fmt.Sprintf("the dim (%d) of field data(%s) is not equal to schema dim (%d)", dataDim, fieldName, schemaDim)
-		return merr.WrapErrParameterInvalid(dataDim, schemaDim, msg)
+		return merr.WrapErrParameterInvalid(schemaDim, dataDim, msg)
 	}
 	for _, field := range data {
 		switch field.GetType() {
@@ -354,7 +353,12 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 			}
 
 		case *schemapb.ScalarField_ArrayData:
-			// Todo: support it
+			if fieldSchema.GetNullable() {
+				sd.ArrayData.Data, err = fillWithNullValueImpl(sd.ArrayData.Data, field.GetValidData())
+				if err != nil {
+					return err
+				}
+			}
 
 		case *schemapb.ScalarField_JsonData:
 			if fieldSchema.GetNullable() {
@@ -392,10 +396,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
-			}
-
 		case *schemapb.ScalarField_IntData:
 			if len(field.GetValidData()) != numRows {
 				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
@@ -407,10 +407,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
-			}
-
 		case *schemapb.ScalarField_LongData:
 			if len(field.GetValidData()) != numRows {
 				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
@@ -420,9 +416,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 			sd.LongData.Data, err = fillWithDefaultValueImpl(sd.LongData.Data, defaultValue, field.GetValidData())
 			if err != nil {
 				return err
-			}
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
 			}
 
 		case *schemapb.ScalarField_FloatData:
@@ -436,10 +429,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
-			}
-
 		case *schemapb.ScalarField_DoubleData:
 			if len(field.GetValidData()) != numRows {
 				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
@@ -451,10 +440,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
-			}
-
 		case *schemapb.ScalarField_StringData:
 			if len(field.GetValidData()) != numRows {
 				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
@@ -464,10 +449,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 			sd.StringData.Data, err = fillWithDefaultValueImpl(sd.StringData.Data, defaultValue, field.GetValidData())
 			if err != nil {
 				return err
-			}
-
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
 			}
 
 		case *schemapb.ScalarField_ArrayData:
@@ -486,10 +467,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
-			}
-
 		default:
 			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 		}
@@ -500,6 +477,18 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 
 	default:
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+	}
+
+	if !typeutil.IsVectorType(field.Type) {
+		if fieldSchema.GetNullable() {
+			validData := make([]bool, numRows)
+			for i := range validData {
+				validData[i] = true
+			}
+			field.ValidData = validData
+		} else {
+			field.ValidData = []bool{}
+		}
 	}
 
 	err = checkValidData(field, fieldSchema, numRows)
@@ -651,8 +640,8 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 		}
 
 		if i, ok := verifyLengthPerRow(strArr, maxLength); !ok {
-			return merr.WrapErrParameterInvalidMsg("the length (%d) of %dth VarChar %s exceeds max length (%d)",
-				len(strArr[i]), i, fieldSchema.GetName(), i, maxLength)
+			return merr.WrapErrParameterInvalidMsg("length of varchar field %s exceeds max length, row number: %d, length: %d, max length: %d",
+				fieldSchema.GetName(), i, len(strArr[i]), maxLength)
 		}
 		return nil
 	}
@@ -863,8 +852,9 @@ func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 		}
 		for rowCnt, row := range data.GetData() {
 			if i, ok := verifyLengthPerRow(row.GetStringData().GetData(), maxLength); !ok {
-				return merr.WrapErrParameterInvalidMsg("the length (%d) of %dth %s %s[%d] exceeds max length (%d)",
-					len(row.GetStringData().GetData()[i]), rowCnt, fieldSchema.GetDataType().String(), fieldSchema.GetName(), i, maxLength)
+				return merr.WrapErrParameterInvalidMsg("length of %s array field \"%s\" exceeds max length, row number: %d, array index: %d, length: %d, max length: %d",
+					fieldSchema.GetDataType().String(), fieldSchema.GetName(), rowCnt, i, len(row.GetStringData().GetData()[i]), maxLength,
+				)
 			}
 		}
 	}
@@ -932,4 +922,16 @@ func newValidateUtil(opts ...validateOption) *validateUtil {
 	v.apply(opts...)
 
 	return v
+}
+
+func ValidateAutoIndexMmapConfig(isVectorField bool, indexParams map[string]string) error {
+	if !Params.AutoIndexConfig.Enable.GetAsBool() {
+		return nil
+	}
+
+	_, ok := indexParams[common.MmapEnabledKey]
+	if ok && isVectorField {
+		return fmt.Errorf("mmap index is not supported to config for the collection in auto index mode")
+	}
+	return nil
 }

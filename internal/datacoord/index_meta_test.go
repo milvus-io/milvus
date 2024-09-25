@@ -33,6 +33,7 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/common"
 )
 
@@ -77,6 +78,136 @@ func TestReloadFromKV(t *testing.T) {
 	})
 }
 
+func TestMeta_ScalarAutoIndex(t *testing.T) {
+	var (
+		collID      = UniqueID(1)
+		indexID     = UniqueID(10)
+		fieldID     = UniqueID(100)
+		indexName   = "_default_idx"
+		typeParams  = []*commonpb.KeyValuePair{}
+		indexParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.IndexTypeKey,
+				Value: "HYBRID",
+			},
+		}
+		userIndexParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.IndexTypeKey,
+				Value: common.AutoIndexName,
+			},
+		}
+	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	m := newSegmentIndexMeta(catalog)
+
+	req := &indexpb.CreateIndexRequest{
+		CollectionID:    collID,
+		FieldID:         fieldID,
+		IndexName:       indexName,
+		TypeParams:      typeParams,
+		IndexParams:     indexParams,
+		Timestamp:       0,
+		IsAutoIndex:     true,
+		UserIndexParams: userIndexParams,
+	}
+
+	t.Run("user index params consistent", func(t *testing.T) {
+		m.indexes[collID] = map[UniqueID]*model.Index{
+			indexID: {
+				TenantID:        "",
+				CollectionID:    collID,
+				FieldID:         fieldID,
+				IndexID:         indexID,
+				IndexName:       indexName,
+				IsDeleted:       false,
+				CreateTime:      10,
+				TypeParams:      typeParams,
+				IndexParams:     indexParams,
+				IsAutoIndex:     false,
+				UserIndexParams: userIndexParams,
+			},
+		}
+		tmpIndexID, err := m.CanCreateIndex(req)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(indexID), tmpIndexID)
+	})
+
+	t.Run("user index params not consistent", func(t *testing.T) {
+		m.indexes[collID] = map[UniqueID]*model.Index{
+			indexID: {
+				TenantID:        "",
+				CollectionID:    collID,
+				FieldID:         fieldID,
+				IndexID:         indexID,
+				IndexName:       indexName,
+				IsDeleted:       false,
+				CreateTime:      10,
+				TypeParams:      typeParams,
+				IndexParams:     indexParams,
+				IsAutoIndex:     false,
+				UserIndexParams: userIndexParams,
+			},
+		}
+		req.UserIndexParams = append(req.UserIndexParams, &commonpb.KeyValuePair{Key: "bitmap_cardinality_limit", Value: "1000"})
+		tmpIndexID, err := m.CanCreateIndex(req)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), tmpIndexID)
+
+		req.UserIndexParams = append(req.UserIndexParams, &commonpb.KeyValuePair{Key: "bitmap_cardinality_limit", Value: "500"})
+		tmpIndexID, err = m.CanCreateIndex(req)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), tmpIndexID)
+	})
+
+	req = &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+		IndexName:    indexName,
+		TypeParams:   typeParams,
+		IndexParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.IndexTypeKey,
+				Value: "HYBRID",
+			},
+		},
+		Timestamp:       0,
+		IsAutoIndex:     true,
+		UserIndexParams: userIndexParams,
+	}
+
+	t.Run("index param rewrite", func(t *testing.T) {
+		m.indexes[collID] = map[UniqueID]*model.Index{
+			indexID: {
+				TenantID:     "",
+				CollectionID: collID,
+				FieldID:      fieldID,
+				IndexID:      indexID,
+				IndexName:    indexName,
+				IsDeleted:    false,
+				CreateTime:   10,
+				TypeParams:   typeParams,
+				IndexParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "INVERTED",
+					},
+				},
+				IsAutoIndex:     false,
+				UserIndexParams: userIndexParams,
+			},
+		}
+		tmpIndexID, err := m.CanCreateIndex(req)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(indexID), tmpIndexID)
+		newIndexParams := req.GetIndexParams()
+		assert.Equal(t, len(newIndexParams), 1)
+		assert.Equal(t, newIndexParams[0].Key, common.IndexTypeKey)
+		assert.Equal(t, newIndexParams[0].Value, "INVERTED")
+	})
+}
+
 func TestMeta_CanCreateIndex(t *testing.T) {
 	var (
 		collID = UniqueID(1)
@@ -94,6 +225,20 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 			{
 				Key:   common.IndexTypeKey,
 				Value: "FLAT",
+			},
+			{
+				Key:   common.MetricTypeKey,
+				Value: "L2",
+			},
+		}
+		userIndexParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.IndexTypeKey,
+				Value: common.AutoIndexName,
+			},
+			{
+				Key:   common.MetricTypeKey,
+				Value: "L2",
 			},
 		}
 	)
@@ -114,7 +259,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		IndexParams:     indexParams,
 		Timestamp:       0,
 		IsAutoIndex:     false,
-		UserIndexParams: indexParams,
+		UserIndexParams: userIndexParams,
 	}
 
 	t.Run("can create index", func(t *testing.T) {
@@ -132,7 +277,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 			TypeParams:      typeParams,
 			IndexParams:     indexParams,
 			IsAutoIndex:     false,
-			UserIndexParams: indexParams,
+			UserIndexParams: userIndexParams,
 		}
 
 		err = m.CreateIndex(index)
@@ -162,6 +307,32 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 
 		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
 		req.UserIndexParams = req.IndexParams
+		tmpIndexID, err = m.CanCreateIndex(req)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), tmpIndexID)
+
+		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserIndexParams = req.IndexParams
+		tmpIndexID, err = m.CanCreateIndex(req)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), tmpIndexID)
+
+		// when we use autoindex, it is possible autoindex changes default metric type
+		// if user does not specify metric type, we should follow the very first autoindex config
+		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserIndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "AUTOINDEX"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserAutoindexMetricTypeSpecified = false
+		tmpIndexID, err = m.CanCreateIndex(req)
+		assert.NoError(t, err)
+		assert.Equal(t, indexID, tmpIndexID)
+		// req should follow the meta
+		assert.Equal(t, "L2", req.GetUserIndexParams()[1].Value)
+		assert.Equal(t, "L2", req.GetIndexParams()[1].Value)
+
+		// if autoindex specify metric type, so the index param change is from user, return error
+		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserIndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "AUTOINDEX"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserAutoindexMetricTypeSpecified = true
 		tmpIndexID, err = m.CanCreateIndex(req)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
@@ -694,7 +865,7 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 
 func TestMeta_GetSegmentIndexes(t *testing.T) {
 	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
-	m := createMeta(catalog, nil, createIndexMeta(catalog))
+	m := createMeta(catalog, withIndexMeta(createIndexMeta(catalog)))
 
 	t.Run("success", func(t *testing.T) {
 		segIndexes := m.indexMeta.getSegmentIndexes(segID)
@@ -1096,7 +1267,7 @@ func TestMeta_FinishTask(t *testing.T) {
 	m := updateSegmentIndexMeta(t)
 
 	t.Run("success", func(t *testing.T) {
-		err := m.FinishTask(&indexpb.IndexTaskInfo{
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID:        buildID,
 			State:          commonpb.IndexState_Finished,
 			IndexFileKeys:  []string{"file1", "file2"},
@@ -1113,7 +1284,7 @@ func TestMeta_FinishTask(t *testing.T) {
 		m.catalog = &datacoord.Catalog{
 			MetaKv: metakv,
 		}
-		err := m.FinishTask(&indexpb.IndexTaskInfo{
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID:        buildID,
 			State:          commonpb.IndexState_Finished,
 			IndexFileKeys:  []string{"file1", "file2"},
@@ -1124,7 +1295,7 @@ func TestMeta_FinishTask(t *testing.T) {
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.FinishTask(&indexpb.IndexTaskInfo{
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID:        buildID + 1,
 			State:          commonpb.IndexState_Finished,
 			IndexFileKeys:  []string{"file1", "file2"},
@@ -1332,7 +1503,7 @@ func TestRemoveSegmentIndex(t *testing.T) {
 
 func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
 	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
-	m := createMeta(catalog, nil, createIndexMeta(catalog))
+	m := createMeta(catalog, withIndexMeta(createIndexMeta(catalog)))
 
 	// normal case
 	segmentIDs := make([]int64, 0, 11)

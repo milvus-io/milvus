@@ -20,6 +20,7 @@
 using namespace milvus;
 
 namespace {
+static constexpr int64_t seg_id = 101;
 auto
 generate_data(int N) {
     std::vector<char> raw_data;

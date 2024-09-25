@@ -23,6 +23,7 @@
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -44,16 +45,6 @@
 #include "storage/Util.h"
 
 namespace milvus::storage {
-
-DiskFileManagerImpl::DiskFileManagerImpl(
-    const FileManagerContext& fileManagerContext,
-    std::shared_ptr<milvus_storage::Space> space)
-    : FileManagerImpl(fileManagerContext.fieldDataMeta,
-                      fileManagerContext.indexMeta),
-      space_(space) {
-    rcm_ = fileManagerContext.chunkManagerPtr;
-}
-
 DiskFileManagerImpl::DiskFileManagerImpl(
     const FileManagerContext& fileManagerContext)
     : FileManagerImpl(fileManagerContext.fieldDataMeta,
@@ -77,37 +68,15 @@ std::string
 DiskFileManagerImpl::GetRemoteIndexPath(const std::string& file_name,
                                         int64_t slice_num) const {
     std::string remote_prefix;
-    if (space_ != nullptr) {
-        remote_prefix = GetRemoteIndexObjectPrefixV2();
-    } else {
-        remote_prefix = GetRemoteIndexObjectPrefix();
-    }
+    remote_prefix = GetRemoteIndexObjectPrefix();
     return remote_prefix + "/" + file_name + "_" + std::to_string(slice_num);
 }
 
-bool
-DiskFileManagerImpl::AddFileUsingSpace(
-    const std::string& local_file_name,
-    const std::vector<int64_t>& local_file_offsets,
-    const std::vector<std::string>& remote_files,
-    const std::vector<int64_t>& remote_file_sizes) {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    for (int64_t i = 0; i < remote_files.size(); ++i) {
-        auto buf =
-            std::shared_ptr<uint8_t[]>(new uint8_t[remote_file_sizes[i]]);
-        local_chunk_manager->Read(local_file_name,
-                                  local_file_offsets[i],
-                                  buf.get(),
-                                  remote_file_sizes[i]);
-
-        auto status =
-            space_->WriteBlob(remote_files[i], buf.get(), remote_file_sizes[i]);
-        if (!status.ok()) {
-            return false;
-        }
-    }
-    return true;
+std::string
+DiskFileManagerImpl::GetRemoteTextLogPath(const std::string& file_name,
+                                          int64_t slice_num) const {
+    auto remote_prefix = GetRemoteTextLogPrefix();
+    return remote_prefix + "/" + file_name + "_" + std::to_string(slice_num);
 }
 
 bool
@@ -148,6 +117,58 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
         auto batch_size = std::min(FILE_SLICE_SIZE, int64_t(fileSize) - offset);
         batch_remote_files.emplace_back(
             GetRemoteIndexPath(fileName, slice_num));
+        remote_file_sizes.emplace_back(batch_size);
+        local_file_offsets.emplace_back(offset);
+        offset += batch_size;
+    }
+    if (batch_remote_files.size() > 0) {
+        AddBatchIndexFiles(
+            file, local_file_offsets, batch_remote_files, remote_file_sizes);
+    }
+    FILEMANAGER_CATCH
+    FILEMANAGER_END
+
+    return true;
+}  // namespace knowhere
+
+bool
+DiskFileManagerImpl::AddTextLog(const std::string& file) noexcept {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    FILEMANAGER_TRY
+    if (!local_chunk_manager->Exist(file)) {
+        LOG_ERROR("local file {} not exists", file);
+        return false;
+    }
+
+    // record local file path
+    local_paths_.emplace_back(file);
+
+    auto fileName = GetFileName(file);
+    auto fileSize = local_chunk_manager->Size(file);
+
+    std::vector<std::string> batch_remote_files;
+    std::vector<int64_t> remote_file_sizes;
+    std::vector<int64_t> local_file_offsets;
+
+    int slice_num = 0;
+    auto parallel_degree =
+        uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    for (int64_t offset = 0; offset < fileSize; slice_num++) {
+        if (batch_remote_files.size() >= parallel_degree) {
+            AddBatchIndexFiles(file,
+                               local_file_offsets,
+                               batch_remote_files,
+
+                               remote_file_sizes);
+            batch_remote_files.clear();
+            remote_file_sizes.clear();
+            local_file_offsets.clear();
+        }
+
+        auto batch_size = std::min(FILE_SLICE_SIZE, int64_t(fileSize) - offset);
+        batch_remote_files.emplace_back(
+            GetRemoteTextLogPath(fileName, slice_num));
         remote_file_sizes.emplace_back(batch_size);
         local_file_offsets.emplace_back(offset);
         offset += batch_size;
@@ -203,82 +224,14 @@ DiskFileManagerImpl::AddBatchIndexFiles(
     }
 
     std::map<std::string, int64_t> res;
-    if (space_ != nullptr) {
-        res = PutIndexData(space_,
-                           data_slices,
-                           remote_file_sizes,
-                           remote_files,
-                           field_meta_,
-                           index_meta_);
-    } else {
-        res = PutIndexData(rcm_.get(),
-                           data_slices,
-                           remote_file_sizes,
-                           remote_files,
-                           field_meta_,
-                           index_meta_);
-    }
+    res = PutIndexData(rcm_.get(),
+                       data_slices,
+                       remote_file_sizes,
+                       remote_files,
+                       field_meta_,
+                       index_meta_);
     for (auto& re : res) {
         remote_paths_to_size_[re.first] = re.second;
-    }
-}
-
-void
-DiskFileManagerImpl::CacheIndexToDisk() {
-    auto blobs = space_->StatisticsBlobs();
-    std::vector<std::string> remote_files;
-    for (auto& blob : blobs) {
-        remote_files.push_back(blob.name);
-    }
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-
-    std::map<std::string, std::vector<int>> index_slices;
-    for (auto& file_path : remote_files) {
-        auto pos = file_path.find_last_of("_");
-        index_slices[file_path.substr(0, pos)].emplace_back(
-            std::stoi(file_path.substr(pos + 1)));
-    }
-
-    for (auto& slices : index_slices) {
-        std::sort(slices.second.begin(), slices.second.end());
-    }
-
-    auto EstimateParallelDegree = [&](const std::string& file) -> uint64_t {
-        auto fileSize = space_->GetBlobByteSize(file);
-        return uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / fileSize.value());
-    };
-
-    for (auto& slices : index_slices) {
-        auto prefix = slices.first;
-        auto local_index_file_name =
-            GetLocalIndexObjectPrefix() +
-            prefix.substr(prefix.find_last_of('/') + 1);
-        local_chunk_manager->CreateFile(local_index_file_name);
-        int64_t offset = 0;
-        std::vector<std::string> batch_remote_files;
-        uint64_t max_parallel_degree = INT_MAX;
-        for (int& iter : slices.second) {
-            if (batch_remote_files.size() == max_parallel_degree) {
-                auto next_offset = CacheBatchIndexFilesToDiskV2(
-                    batch_remote_files, local_index_file_name, offset);
-                offset = next_offset;
-                batch_remote_files.clear();
-            }
-            auto origin_file = prefix + "_" + std::to_string(iter);
-            if (batch_remote_files.size() == 0) {
-                // Use first file size as average size to estimate
-                max_parallel_degree = EstimateParallelDegree(origin_file);
-            }
-            batch_remote_files.push_back(origin_file);
-        }
-        if (batch_remote_files.size() > 0) {
-            auto next_offset = CacheBatchIndexFilesToDiskV2(
-                batch_remote_files, local_index_file_name, offset);
-            offset = next_offset;
-            batch_remote_files.clear();
-        }
-        local_paths_.emplace_back(local_index_file_name);
     }
 }
 
@@ -291,8 +244,16 @@ DiskFileManagerImpl::CacheIndexToDisk(
     std::map<std::string, std::vector<int>> index_slices;
     for (auto& file_path : remote_files) {
         auto pos = file_path.find_last_of('_');
-        index_slices[file_path.substr(0, pos)].emplace_back(
-            std::stoi(file_path.substr(pos + 1)));
+        AssertInfo(pos > 0, "invalided index file path:{}", file_path);
+        try {
+            auto idx = std::stoi(file_path.substr(pos + 1));
+            index_slices[file_path.substr(0, pos)].emplace_back(idx);
+        } catch (const std::logic_error& e) {
+            auto err_message = fmt::format(
+                "invalided index file path:{}, error:{}", file_path, e.what());
+            LOG_ERROR(err_message);
+            throw std::logic_error(err_message);
+        }
     }
 
     for (auto& slices : index_slices) {
@@ -303,6 +264,74 @@ DiskFileManagerImpl::CacheIndexToDisk(
         auto prefix = slices.first;
         auto local_index_file_name =
             GetLocalIndexObjectPrefix() +
+            prefix.substr(prefix.find_last_of('/') + 1);
+        local_chunk_manager->CreateFile(local_index_file_name);
+        auto file =
+            File::Open(local_index_file_name, O_CREAT | O_RDWR | O_TRUNC);
+
+        // Get the remote files
+        std::vector<std::string> batch_remote_files;
+        batch_remote_files.reserve(slices.second.size());
+
+        uint64_t max_parallel_degree =
+            uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+
+        auto appendIndexFiles = [&]() {
+            auto index_chunks = GetObjectData(rcm_.get(), batch_remote_files);
+            for (auto& chunk : index_chunks) {
+                auto index_data = chunk.get()->GetFieldData();
+                auto index_size = index_data->DataSize();
+                auto chunk_data = reinterpret_cast<uint8_t*>(
+                    const_cast<void*>(index_data->Data()));
+                file.Write(chunk_data, index_size);
+            }
+            batch_remote_files.clear();
+        };
+
+        for (int& iter : slices.second) {
+            auto origin_file = prefix + "_" + std::to_string(iter);
+            batch_remote_files.push_back(origin_file);
+
+            if (batch_remote_files.size() == max_parallel_degree) {
+                appendIndexFiles();
+            }
+        }
+        if (batch_remote_files.size() > 0) {
+            appendIndexFiles();
+        }
+        local_paths_.emplace_back(local_index_file_name);
+    }
+}
+
+void
+DiskFileManagerImpl::CacheTextLogToDisk(
+    const std::vector<std::string>& remote_files) {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+
+    std::map<std::string, std::vector<int>> index_slices;
+    for (auto& file_path : remote_files) {
+        auto pos = file_path.find_last_of("_");
+        AssertInfo(pos > 0, "invalided index file path:{}", file_path);
+        try {
+            auto idx = std::stoi(file_path.substr(pos + 1));
+            index_slices[file_path.substr(0, pos)].emplace_back(idx);
+        } catch (const std::logic_error& e) {
+            auto err_message = fmt::format(
+                "invalided text log path:{}, error:{}", file_path, e.what());
+            LOG_ERROR(err_message);
+            throw std::logic_error(err_message);
+        }
+    }
+
+    for (auto& slices : index_slices) {
+        std::sort(slices.second.begin(), slices.second.end());
+    }
+
+    for (auto& slices : index_slices) {
+        auto prefix = slices.first;
+        auto local_index_file_name =
+            GetLocalTextIndexPrefix() + "/" +
             prefix.substr(prefix.find_last_of('/') + 1);
         local_chunk_manager->CreateFile(local_index_file_name);
         auto file =
@@ -326,111 +355,6 @@ DiskFileManagerImpl::CacheIndexToDisk(
         }
         local_paths_.emplace_back(local_index_file_name);
     }
-}
-
-uint64_t
-DiskFileManagerImpl::CacheBatchIndexFilesToDisk(
-    const std::vector<std::string>& remote_files,
-    const std::string& local_file_name,
-    uint64_t local_file_init_offfset) {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    auto index_datas = GetObjectData(rcm_.get(), remote_files);
-    int batch_size = remote_files.size();
-    AssertInfo(index_datas.size() == batch_size,
-               "inconsistent file num and index data num!");
-
-    uint64_t offset = local_file_init_offfset;
-    for (int i = 0; i < batch_size; ++i) {
-        auto index_data = index_datas[i].get()->GetFieldData();
-        auto index_size = index_data->Size();
-        auto uint8_data =
-            reinterpret_cast<uint8_t*>(const_cast<void*>(index_data->Data()));
-        local_chunk_manager->Write(
-            local_file_name, offset, uint8_data, index_size);
-        offset += index_size;
-    }
-    return offset;
-}
-
-uint64_t
-DiskFileManagerImpl::CacheBatchIndexFilesToDiskV2(
-    const std::vector<std::string>& remote_files,
-    const std::string& local_file_name,
-    uint64_t local_file_init_offfset) {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    auto index_datas = GetObjectData(space_, remote_files);
-    int batch_size = remote_files.size();
-    AssertInfo(index_datas.size() == batch_size,
-               "inconsistent file num and index data num!");
-
-    uint64_t offset = local_file_init_offfset;
-    for (int i = 0; i < batch_size; ++i) {
-        auto index_data = index_datas[i];
-        auto index_size = index_data->Size();
-        auto uint8_data =
-            reinterpret_cast<uint8_t*>(const_cast<void*>(index_data->Data()));
-        local_chunk_manager->Write(
-            local_file_name, offset, uint8_data, index_size);
-        offset += index_size;
-    }
-    return offset;
-}
-template <typename DataType>
-std::string
-DiskFileManagerImpl::CacheRawDataToDisk(
-    std::shared_ptr<milvus_storage::Space> space) {
-    auto segment_id = GetFieldDataMeta().segment_id;
-    auto field_id = GetFieldDataMeta().field_id;
-
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    auto local_data_path = storage::GenFieldRawDataPathPrefix(
-                               local_chunk_manager, segment_id, field_id) +
-                           "raw_data";
-    local_chunk_manager->CreateFile(local_data_path);
-    // file format
-    // num_rows(uint32) | dim(uint32) | index_data ([]uint8_t)
-    uint32_t num_rows = 0;
-    uint32_t dim = 0;
-    int64_t write_offset = sizeof(num_rows) + sizeof(dim);
-    auto reader = space->ScanData();
-    for (auto rec : *reader) {
-        if (!rec.ok()) {
-            PanicInfo(IndexBuildError,
-                      fmt::format("failed to read data: {}",
-                                  rec.status().ToString()));
-        }
-        auto data = rec.ValueUnsafe();
-        if (data == nullptr) {
-            break;
-        }
-        auto total_num_rows = data->num_rows();
-        num_rows += total_num_rows;
-        auto col_data = data->GetColumnByName(index_meta_.field_name);
-        auto field_data = storage::CreateFieldData(
-            index_meta_.field_type, index_meta_.dim, total_num_rows);
-        field_data->FillFieldData(col_data);
-        dim = field_data->get_dim();
-        auto data_size =
-            field_data->get_num_rows() * index_meta_.dim * sizeof(DataType);
-        local_chunk_manager->Write(local_data_path,
-                                   write_offset,
-                                   const_cast<void*>(field_data->Data()),
-                                   data_size);
-        write_offset += data_size;
-    }
-
-    // write num_rows and dim value to file header
-    write_offset = 0;
-    local_chunk_manager->Write(
-        local_data_path, write_offset, &num_rows, sizeof(num_rows));
-    write_offset += sizeof(num_rows);
-    local_chunk_manager->Write(
-        local_data_path, write_offset, &dim, sizeof(dim));
-
-    return local_data_path;
 }
 
 void
@@ -490,10 +414,9 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
             if (data_type == milvus::DataType::VECTOR_SPARSE_FLOAT) {
                 dim = std::max(
                     dim,
-                    (uint32_t)(
-                        std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(
-                            field_data)
-                            ->Dim()));
+                    (uint32_t)(std::dynamic_pointer_cast<
+                                   FieldData<SparseFloatVector>>(field_data)
+                                   ->Dim()));
                 auto sparse_rows =
                     static_cast<const knowhere::sparse::SparseRow<float>*>(
                         field_data->Data());
@@ -517,8 +440,8 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
                            "inconsistent dim value in multi binlogs!");
                 dim = field_data->get_dim();
 
-                auto data_size =
-                    field_data->get_num_rows() * dim * sizeof(DataType);
+                auto data_size = field_data->get_num_rows() *
+                                 milvus::GetVecRowSize<DataType>(dim);
                 local_chunk_manager->Write(
                     local_data_path,
                     write_offset,
@@ -570,7 +493,7 @@ using DataTypeToOffsetMap =
     std::unordered_map<DataTypeNativeOrVoid<T>, int64_t>;
 
 template <DataType T>
-void
+bool
 WriteOptFieldIvfDataImpl(
     const int64_t field_id,
     const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
@@ -588,6 +511,12 @@ WriteOptFieldIvfDataImpl(
             mp[val].push_back(offset++);
         }
     }
+
+    // Do not write to disk if there is only one value
+    if (mp.size() == 1) {
+        return false;
+    }
+
     local_chunk_manager->Write(local_data_path,
                                write_offset,
                                const_cast<int64_t*>(&field_id),
@@ -613,6 +542,7 @@ WriteOptFieldIvfDataImpl(
                                    data_size);
         write_offset += data_size;
     }
+    return true;
 }
 
 #define GENERATE_OPT_FIELD_IVF_IMPL(DT)               \
@@ -631,32 +561,23 @@ WriteOptFieldIvfData(
     uint64_t& write_offset) {
     switch (dt) {
         case DataType::BOOL:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::BOOL);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::BOOL);
         case DataType::INT8:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT8);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT8);
         case DataType::INT16:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT16);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT16);
         case DataType::INT32:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT32);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT32);
         case DataType::INT64:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT64);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT64);
         case DataType::FLOAT:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::FLOAT);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::FLOAT);
         case DataType::DOUBLE:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::DOUBLE);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::DOUBLE);
         case DataType::STRING:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::STRING);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::STRING);
         case DataType::VARCHAR:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::VARCHAR);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::VARCHAR);
         default:
             LOG_WARN("Unsupported data type in optional scalar field: ", dt);
             return false;
@@ -684,83 +605,9 @@ WriteOptFieldsIvfMeta(
     write_offset += sizeof(num_of_fields);
 }
 
-// write optional scalar fields ivf info in the following format without space among them
-// | (meta)
-// | version (uint8_t) | num_of_fields (uint32_t) |
-// | (field_0)
-// | field_id (int64_t) | num_of_unique_field_data (uint32_t)
-// | size_0 (uint32_t) | offset_0 (uint32_t)...
-// | size_1 | offset_0, offset_1, ...
-std::string
-DiskFileManagerImpl::CacheOptFieldToDisk(
-    std::shared_ptr<milvus_storage::Space> space, OptFieldT& fields_map) {
-    uint32_t num_of_fields = fields_map.size();
-    if (0 == num_of_fields) {
-        return "";
-    } else if (num_of_fields > 1) {
-        PanicInfo(
-            ErrorCode::NotImplemented,
-            "vector index build with multiple fields is not supported yet");
-    }
-    if (nullptr == space) {
-        LOG_ERROR("Failed to cache optional field. Space is null");
-        return "";
-    }
-
-    auto segment_id = GetFieldDataMeta().segment_id;
-    auto vec_field_id = GetFieldDataMeta().field_id;
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    auto local_data_path = storage::GenFieldRawDataPathPrefix(
-                               local_chunk_manager, segment_id, vec_field_id) +
-                           std::string(VEC_OPT_FIELDS);
-    local_chunk_manager->CreateFile(local_data_path);
-
-    uint64_t write_offset = 0;
-    WriteOptFieldsIvfMeta(
-        local_chunk_manager, local_data_path, num_of_fields, write_offset);
-
-    auto reader = space->ScanData();
-    for (auto& [field_id, tup] : fields_map) {
-        const auto& field_name = std::get<0>(tup);
-        const auto& field_type = std::get<1>(tup);
-        std::vector<FieldDataPtr> field_datas;
-        for (auto rec : *reader) {
-            if (!rec.ok()) {
-                PanicInfo(IndexBuildError,
-                          fmt::format("failed to read optional field data: {}",
-                                      rec.status().ToString()));
-            }
-            auto data = rec.ValueUnsafe();
-            if (data == nullptr) {
-                break;
-            }
-            auto total_num_rows = data->num_rows();
-            if (0 == total_num_rows) {
-                LOG_WARN("optional field {} has no data", field_name);
-                return "";
-            }
-            auto col_data = data->GetColumnByName(field_name);
-            auto field_data =
-                storage::CreateFieldData(field_type, 1, total_num_rows);
-            field_data->FillFieldData(col_data);
-            field_datas.emplace_back(field_data);
-        }
-        if (!WriteOptFieldIvfData(field_type,
-                                  field_id,
-                                  local_chunk_manager,
-                                  local_data_path,
-                                  field_datas,
-                                  write_offset)) {
-            return "";
-        }
-    }
-    return local_data_path;
-}
-
 std::string
 DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
-    uint32_t num_of_fields = fields_map.size();
+    const uint32_t num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return "";
     } else if (num_of_fields > 1) {
@@ -794,6 +641,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
 
     auto parallel_degree =
         uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    std::unordered_set<int64_t> actual_field_ids;
     for (auto& [field_id, tup] : fields_map) {
         const auto& field_type = std::get<1>(tup);
         auto& field_paths = std::get<2>(tup);
@@ -815,15 +663,27 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
         if (batch_files.size() > 0) {
             FetchRawData();
         }
-        if (!WriteOptFieldIvfData(field_type,
-                                  field_id,
-                                  local_chunk_manager,
-                                  local_data_path,
-                                  field_datas,
-                                  write_offset)) {
+        if (WriteOptFieldIvfData(field_type,
+                                 field_id,
+                                 local_chunk_manager,
+                                 local_data_path,
+                                 field_datas,
+                                 write_offset)) {
+            actual_field_ids.insert(field_id);
+        }
+    }
+
+    if (actual_field_ids.size() != num_of_fields) {
+        write_offset = 0;
+        WriteOptFieldsIvfMeta(local_chunk_manager,
+                              local_data_path,
+                              actual_field_ids.size(),
+                              write_offset);
+        if (actual_field_ids.empty()) {
             return "";
         }
     }
+
     return local_data_path;
 }
 
@@ -839,6 +699,31 @@ DiskFileManagerImpl::GetLocalIndexObjectPrefix() {
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     return GenIndexPathPrefix(
         local_chunk_manager, index_meta_.build_id, index_meta_.index_version);
+}
+
+std::string
+DiskFileManagerImpl::GetLocalTextIndexPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenTextIndexPathPrefix(local_chunk_manager,
+                                  index_meta_.build_id,
+                                  index_meta_.index_version,
+                                  field_meta_.segment_id,
+                                  field_meta_.field_id);
+}
+
+std::string
+DiskFileManagerImpl::GetIndexIdentifier() {
+    return GenIndexPathIdentifier(index_meta_.build_id,
+                                  index_meta_.index_version);
+}
+
+std::string
+DiskFileManagerImpl::GetTextIndexIdentifier() {
+    return std::to_string(index_meta_.build_id) + "/" +
+           std::to_string(index_meta_.index_version) + "/" +
+           std::to_string(field_meta_.segment_id) +
+           std::to_string(field_meta_.field_id);
 }
 
 std::string
@@ -881,17 +766,4 @@ DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bin1>(
     std::vector<std::string> remote_files);
-template std::string
-DiskFileManagerImpl::CacheRawDataToDisk<float>(
-    std::shared_ptr<milvus_storage::Space> space);
-template std::string
-DiskFileManagerImpl::CacheRawDataToDisk<float16>(
-    std::shared_ptr<milvus_storage::Space> space);
-template std::string
-DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(
-    std::shared_ptr<milvus_storage::Space> space);
-template std::string
-DiskFileManagerImpl::CacheRawDataToDisk<bin1>(
-    std::shared_ptr<milvus_storage::Space> space);
-
 }  // namespace milvus::storage

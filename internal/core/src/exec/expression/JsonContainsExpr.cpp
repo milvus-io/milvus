@@ -35,7 +35,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             if (is_index_mode_) {
                 PanicInfo(
                     ExprInvalid,
-                    "exists expr for json or array index mode not supportted");
+                    "exists expr for json or array index mode not supported");
             }
             result = EvalJsonContainsForDataSegment();
             break;

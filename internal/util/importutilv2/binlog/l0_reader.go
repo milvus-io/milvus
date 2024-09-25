@@ -18,16 +18,15 @@ package binlog
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus-storage/go/common/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -83,24 +82,37 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 			return nil, io.EOF
 		}
 		path := r.deltaLogs[r.readIdx]
-		br, err := newBinlogReader(r.ctx, r.cm, path)
+
+		bytes, err := r.cm.Read(r.ctx, path)
 		if err != nil {
 			return nil, err
 		}
-		rowsSet, err := readData(br, storage.DeleteEventType)
+		blobs := []*storage.Blob{{
+			Key:   path,
+			Value: bytes,
+		}}
+		// TODO: support multiple delta logs
+		reader, err := storage.CreateDeltalogReader(blobs)
 		if err != nil {
+			log.Error("malformed delta file", zap.Error(err))
 			return nil, err
 		}
-		for _, rows := range rowsSet {
-			for _, row := range rows.([]string) {
-				dl := &storage.DeleteLog{}
-				err = json.Unmarshal([]byte(row), dl)
-				if err != nil {
-					return nil, err
+		defer reader.Close()
+
+		for {
+			err := reader.Next()
+			if err != nil {
+				if err == io.EOF {
+					break
 				}
-				deleteData.Append(dl.Pk, dl.Ts)
+				log.Error("error on importing L0 segment, fail to read deltalogs", zap.Error(err))
+				return nil, err
 			}
+
+			dl := reader.Value()
+			deleteData.Append(dl.Pk, dl.Ts)
 		}
+
 		r.readIdx++
 		if deleteData.Size() >= int64(r.bufferSize) {
 			break

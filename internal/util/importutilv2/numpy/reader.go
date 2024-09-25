@@ -45,6 +45,11 @@ type reader struct {
 }
 
 func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string, bufferSize int) (*reader, error) {
+	for _, fieldSchema := range schema.Fields {
+		if fieldSchema.GetNullable() {
+			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support bulk insert numpy files in field(%s) which set nullable == true", fieldSchema.GetName()))
+		}
+	}
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
@@ -89,7 +94,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 		if data == nil {
 			return nil, io.EOF
 		}
-		err = insertData.Data[fieldID].AppendRows(data)
+		err = insertData.Data[fieldID].AppendRows(data, nil)
 		if err != nil {
 			return nil, err
 		}

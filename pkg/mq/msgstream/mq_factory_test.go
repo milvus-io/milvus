@@ -18,10 +18,13 @@ package msgstream
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestPmsFactory(t *testing.T) {
@@ -147,4 +150,20 @@ func TestKafkaFactory(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRmsFactory(t *testing.T) {
+	defer os.Unsetenv("ROCKSMQ_PATH")
+	paramtable.Init()
+
+	dir := t.TempDir()
+
+	rmsFactory := NewRocksmqFactory(dir, &paramtable.Get().ServiceParam)
+
+	ctx := context.Background()
+	_, err := rmsFactory.NewMsgStream(ctx)
+	assert.NoError(t, err)
+
+	_, err = rmsFactory.NewTtMsgStream(ctx)
+	assert.NoError(t, err)
 }

@@ -9,18 +9,19 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/kv"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
+	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -205,8 +207,17 @@ func TestCatalog_ListCollections(t *testing.T) {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
 			Return([]string{"key"}, []string{string(fm)}, nil)
-		kc := Catalog{Snapshot: kv}
 
+		functionMeta := &schemapb.FunctionSchema{}
+		fcm, err := proto.Marshal(functionMeta)
+		assert.NoError(t, err)
+		kv.On("LoadWithPrefix", mock.MatchedBy(
+			func(prefix string) bool {
+				return strings.HasPrefix(prefix, FunctionMetaPrefix)
+			}), ts).
+			Return([]string{"key"}, []string{string(fcm)}, nil)
+
+		kc := Catalog{Snapshot: kv}
 		ret, err := kc.ListCollections(ctx, testDb, ts)
 		assert.NoError(t, err)
 		assert.NotNil(t, ret)
@@ -246,6 +257,16 @@ func TestCatalog_ListCollections(t *testing.T) {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
 			Return([]string{"key"}, []string{string(fm)}, nil)
+
+		functionMeta := &schemapb.FunctionSchema{}
+		fcm, err := proto.Marshal(functionMeta)
+		assert.NoError(t, err)
+		kv.On("LoadWithPrefix", mock.MatchedBy(
+			func(prefix string) bool {
+				return strings.HasPrefix(prefix, FunctionMetaPrefix)
+			}), ts).
+			Return([]string{"key"}, []string{string(fcm)}, nil)
+
 		kv.On("MultiSaveAndRemove", mock.Anything, mock.Anything, ts).Return(nil)
 		kc := Catalog{Snapshot: kv}
 
@@ -1213,6 +1234,22 @@ func TestCatalog_CreateCollection(t *testing.T) {
 		err := kc.CreateCollection(ctx, coll, 100)
 		assert.NoError(t, err)
 	})
+
+	t.Run("create collection with function", func(t *testing.T) {
+		mockSnapshot := newMockSnapshot(t, withMockSave(nil), withMockMultiSave(nil))
+		kc := &Catalog{Snapshot: mockSnapshot}
+		ctx := context.Background()
+		coll := &model.Collection{
+			Partitions: []*model.Partition{
+				{PartitionName: "test"},
+			},
+			Fields:    []*model.Field{{Name: "text", DataType: schemapb.DataType_VarChar}, {Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}},
+			Functions: []*model.Function{{Name: "test", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse"}}},
+			State:     pb.CollectionState_CollectionCreating,
+		}
+		err := kc.CreateCollection(ctx, coll, 100)
+		assert.NoError(t, err)
+	})
 }
 
 func TestCatalog_DropCollection(t *testing.T) {
@@ -1279,10 +1316,26 @@ func TestCatalog_DropCollection(t *testing.T) {
 		err := kc.DropCollection(ctx, coll, 100)
 		assert.NoError(t, err)
 	})
+
+	t.Run("drop collection with function", func(t *testing.T) {
+		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(nil))
+		kc := &Catalog{Snapshot: mockSnapshot}
+		ctx := context.Background()
+		coll := &model.Collection{
+			Partitions: []*model.Partition{
+				{PartitionName: "test"},
+			},
+			Fields:    []*model.Field{{Name: "text", DataType: schemapb.DataType_VarChar}, {Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}},
+			Functions: []*model.Function{{Name: "test", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse"}}},
+			State:     pb.CollectionState_CollectionDropping,
+		}
+		err := kc.DropCollection(ctx, coll, 100)
+		assert.NoError(t, err)
+	})
 }
 
 func getUserInfoMetaString(username string) string {
-	validInfo := internalpb.CredentialInfo{Username: username, EncryptedPassword: "pwd" + username}
+	validInfo := &internalpb.CredentialInfo{Username: username, EncryptedPassword: "pwd" + username}
 	validBytes, _ := json.Marshal(validInfo)
 	return string(validBytes)
 }
@@ -1473,7 +1526,20 @@ func TestRBAC_Credential(t *testing.T) {
 				}
 				return nil
 			},
-			nil,
+			func(key string) []string {
+				cmu.RLock()
+				defer cmu.RUnlock()
+				passwd, _ := json.Marshal(&model.Credential{EncryptedPassword: crypto.Base64Encode("passwd")})
+				if count == 0 {
+					return []string{
+						string(passwd),
+						string(passwd),
+						string(passwd),
+						string(passwd),
+					}
+				}
+				return nil
+			},
 			func(key string) error {
 				cmu.RLock()
 				defer cmu.RUnlock()
@@ -1931,7 +1997,14 @@ func TestRBAC_Role(t *testing.T) {
 					}
 				}
 				return nil
-			}, nil,
+			},
+			func(key string) []string {
+				if loadCredentialPrefixReturn.Load() {
+					passwd, _ := json.Marshal(&model.Credential{EncryptedPassword: crypto.Base64Encode("passwd")})
+					return []string{string(passwd)}
+				}
+				return nil
+			},
 			func(key string) error {
 				if loadCredentialPrefixReturn.Load() {
 					return nil
@@ -2300,12 +2373,18 @@ func TestRBAC_Grant(t *testing.T) {
 			kvmock = mocks.NewTxnKV(t)
 			c      = &Catalog{Txn: kvmock}
 
-			errorRole       = "error-role"
-			errorRolePrefix = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, errorRole+"/")
+			errorRole           = "error-role"
+			errorRolePrefix     = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, errorRole+"/")
+			loadErrorRole       = "load-error-role"
+			loadErrorRolePrefix = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, loadErrorRole+"/")
+			granteeID           = "123456"
+			granteePrefix       = funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, granteeID+"/")
 		)
 
-		kvmock.EXPECT().RemoveWithPrefix(errorRolePrefix).Call.Return(errors.New("mock removeWithPrefix error"))
-		kvmock.EXPECT().RemoveWithPrefix(mock.Anything).Call.Return(nil)
+		kvmock.EXPECT().LoadWithPrefix(loadErrorRolePrefix).Call.Return(nil, nil, errors.New("mock loadWithPrefix error"))
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything).Call.Return(nil, []string{granteeID}, nil)
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, []string{errorRolePrefix, granteePrefix}, mock.Anything).Call.Return(errors.New("mock removeWithPrefix error"))
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).Call.Return(nil)
 
 		tests := []struct {
 			isValid bool
@@ -2315,6 +2394,7 @@ func TestRBAC_Grant(t *testing.T) {
 		}{
 			{true, "role1", "valid role1"},
 			{false, errorRole, "invalid errorRole"},
+			{false, loadErrorRole, "invalid load errorRole"},
 		}
 
 		for _, test := range tests {
@@ -2544,10 +2624,190 @@ func TestRBAC_Grant(t *testing.T) {
 	})
 }
 
+func TestRBAC_Backup(t *testing.T) {
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := "/test/rbac"
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix("")
+	defer metaKV.Close()
+	c := &Catalog{Txn: metaKV}
+
+	ctx := context.Background()
+	c.CreateRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+	c.AlterGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "role1"},
+		Object:     &milvuspb.ObjectEntity{Name: "obj1"},
+		ObjectName: "obj_name1",
+		DbName:     util.DefaultDBName,
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: "user1"},
+			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+		},
+	}, milvuspb.OperatePrivilegeType_Grant)
+	c.CreateCredential(ctx, &model.Credential{
+		Username:          "user1",
+		EncryptedPassword: "passwd",
+	})
+	c.AlterUserRole(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: "user1"}, &milvuspb.RoleEntity{Name: "role1"}, milvuspb.OperateUserRoleType_AddUserToRole)
+
+	// test backup success
+	backup, err := c.BackupRBAC(ctx, util.DefaultTenant)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(backup.Grants))
+	assert.Equal(t, "obj_name1", backup.Grants[0].ObjectName)
+	assert.Equal(t, "role1", backup.Grants[0].Role.Name)
+	assert.Equal(t, 1, len(backup.Users))
+	assert.Equal(t, "user1", backup.Users[0].User)
+	assert.Equal(t, 1, len(backup.Users[0].Roles))
+	assert.Equal(t, 1, len(backup.Roles))
+}
+
+func TestRBAC_Restore(t *testing.T) {
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := "/test/rbac"
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix("")
+	defer metaKV.Close()
+	c := &Catalog{Txn: metaKV}
+
+	ctx := context.Background()
+
+	rbacMeta := &milvuspb.RBACMeta{
+		Users: []*milvuspb.UserInfo{
+			{
+				User:     "user1",
+				Password: "passwd",
+				Roles: []*milvuspb.RoleEntity{
+					{
+						Name: "role1",
+					},
+				},
+			},
+		},
+		Roles: []*milvuspb.RoleEntity{
+			{
+				Name: "role1",
+			},
+		},
+
+		Grants: []*milvuspb.GrantEntity{
+			{
+				Role:       &milvuspb.RoleEntity{Name: "role1"},
+				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
+				ObjectName: "obj_name1",
+				DbName:     util.DefaultDBName,
+				Grantor: &milvuspb.GrantorEntity{
+					User:      &milvuspb.UserEntity{Name: "user1"},
+					Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+				},
+			},
+		},
+	}
+	// test restore success
+	err := c.RestoreRBAC(ctx, util.DefaultTenant, rbacMeta)
+	assert.NoError(t, err)
+
+	// check user
+	users, err := c.ListCredentialsWithPasswd(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, users, 1)
+	assert.Equal(t, users["user1"], "passwd")
+	// check role
+	roles, err := c.ListRole(ctx, util.DefaultTenant, nil, false)
+	assert.NoError(t, err)
+	assert.Len(t, roles, 1)
+	assert.Equal(t, "role1", roles[0].Role.Name)
+	// check grant
+	grants, err := c.ListGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:   roles[0].Role,
+		DbName: util.AnyWord,
+	})
+	assert.NoError(t, err)
+	assert.Len(t, grants, 1)
+	assert.Equal(t, "obj_name1", grants[0].ObjectName)
+	assert.Equal(t, "role1", grants[0].Role.Name)
+	assert.Equal(t, "user1", grants[0].Grantor.User.Name)
+
+	rbacMeta2 := &milvuspb.RBACMeta{
+		Users: []*milvuspb.UserInfo{
+			{
+				User:     "user2",
+				Password: "passwd",
+				Roles: []*milvuspb.RoleEntity{
+					{
+						Name: "role2",
+					},
+				},
+			},
+			{
+				User:     "user1",
+				Password: "passwd",
+				Roles: []*milvuspb.RoleEntity{
+					{
+						Name: "role2",
+					},
+				},
+			},
+		},
+		Roles: []*milvuspb.RoleEntity{
+			{
+				Name: "role2",
+			},
+		},
+
+		Grants: []*milvuspb.GrantEntity{
+			{
+				Role:       &milvuspb.RoleEntity{Name: "role2"},
+				Object:     &milvuspb.ObjectEntity{Name: "obj2"},
+				ObjectName: "obj_name2",
+				DbName:     util.DefaultDBName,
+				Grantor: &milvuspb.GrantorEntity{
+					User:      &milvuspb.UserEntity{Name: "user2"},
+					Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+				},
+			},
+		},
+	}
+
+	// test restore failed and roll back
+	err = c.RestoreRBAC(ctx, util.DefaultTenant, rbacMeta2)
+	assert.Error(t, err)
+
+	// check user
+	users, err = c.ListCredentialsWithPasswd(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, users, 1)
+	// check role
+	roles, err = c.ListRole(ctx, util.DefaultTenant, nil, false)
+	assert.NoError(t, err)
+	assert.Len(t, roles, 1)
+	// check grant
+	grants, err = c.ListGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:   roles[0].Role,
+		DbName: util.AnyWord,
+	})
+	assert.NoError(t, err)
+	assert.Len(t, grants, 1)
+}
+
 func TestCatalog_AlterDatabase(t *testing.T) {
 	kvmock := mocks.NewSnapShotKV(t)
 	c := &Catalog{Snapshot: kvmock}
-	db := model.NewDatabase(1, "db", pb.DatabaseState_DatabaseCreated)
+	db := model.NewDatabase(1, "db", pb.DatabaseState_DatabaseCreated, nil)
 
 	kvmock.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	ctx := context.Background()
@@ -2569,4 +2829,16 @@ func TestCatalog_AlterDatabase(t *testing.T) {
 	kvmock.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 	err = c.AlterDatabase(ctx, newDB, typeutil.ZeroTimestamp)
 	assert.ErrorIs(t, err, mockErr)
+}
+
+func TestCatalog_listFunctionError(t *testing.T) {
+	mockSnapshot := newMockSnapshot(t)
+	kc := &Catalog{Snapshot: mockSnapshot}
+	mockSnapshot.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, fmt.Errorf("mock error"))
+	_, err := kc.listFunctions(1, 1)
+	assert.Error(t, err)
+
+	mockSnapshot.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return([]string{"test-key"}, []string{"invalid bytes"}, nil)
+	_, err = kc.listFunctions(1, 1)
+	assert.Error(t, err)
 }

@@ -7,11 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/tests/go_client/testcases/helper"
-
 	clientv2 "github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
+	"github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
 // test connect and close, connect again
@@ -56,7 +55,8 @@ func TestConnectInvalidAddr(t *testing.T) {
 	// connect
 	ctx := helper.CreateContext(t, time.Second*5)
 	for _, invalidCfg := range genInvalidClientConfig() {
-		_, errConnect := base.NewMilvusClient(ctx, &invalidCfg)
+		cfg := invalidCfg
+		_, errConnect := base.NewMilvusClient(ctx, &cfg)
 		common.CheckErr(t, errConnect, false, "context deadline exceeded")
 	}
 }

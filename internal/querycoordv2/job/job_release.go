@@ -39,7 +39,7 @@ type ReleaseCollectionJob struct {
 	meta              *meta.Meta
 	broker            meta.Broker
 	cluster           session.Cluster
-	targetMgr         *meta.TargetManager
+	targetMgr         meta.TargetManagerInterface
 	targetObserver    *observers.TargetObserver
 	checkerController *checkers.CheckerController
 }
@@ -50,7 +50,7 @@ func NewReleaseCollectionJob(ctx context.Context,
 	meta *meta.Meta,
 	broker meta.Broker,
 	cluster session.Cluster,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	checkerController *checkers.CheckerController,
 ) *ReleaseCollectionJob {
@@ -95,7 +95,6 @@ func (job *ReleaseCollectionJob) Execute() error {
 		log.Warn(msg, zap.Error(err))
 	}
 
-	job.targetMgr.RemoveCollection(req.GetCollectionID())
 	job.targetObserver.ReleaseCollection(req.GetCollectionID())
 	waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
 	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
@@ -114,7 +113,7 @@ type ReleasePartitionJob struct {
 	meta              *meta.Meta
 	broker            meta.Broker
 	cluster           session.Cluster
-	targetMgr         *meta.TargetManager
+	targetMgr         meta.TargetManagerInterface
 	targetObserver    *observers.TargetObserver
 	checkerController *checkers.CheckerController
 }
@@ -125,7 +124,7 @@ func NewReleasePartitionJob(ctx context.Context,
 	meta *meta.Meta,
 	broker meta.Broker,
 	cluster session.Cluster,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	checkerController *checkers.CheckerController,
 ) *ReleasePartitionJob {
@@ -178,7 +177,6 @@ func (job *ReleasePartitionJob) Execute() error {
 		if err != nil {
 			log.Warn("failed to remove replicas", zap.Error(err))
 		}
-		job.targetMgr.RemoveCollection(req.GetCollectionID())
 		job.targetObserver.ReleaseCollection(req.GetCollectionID())
 		metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
@@ -189,7 +187,7 @@ func (job *ReleasePartitionJob) Execute() error {
 			log.Warn(msg, zap.Error(err))
 			return errors.Wrap(err, msg)
 		}
-		job.targetMgr.RemovePartition(req.GetCollectionID(), toRelease...)
+		job.targetObserver.ReleasePartition(req.GetCollectionID(), toRelease...)
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID(), toRelease...)
 	}
 	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))

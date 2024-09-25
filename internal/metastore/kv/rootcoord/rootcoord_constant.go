@@ -20,6 +20,7 @@ const (
 	PartitionMetaPrefix = ComponentPrefix + "/partitions"
 	AliasMetaPrefix     = ComponentPrefix + "/aliases"
 	FieldMetaPrefix     = ComponentPrefix + "/fields"
+	FunctionMetaPrefix  = ComponentPrefix + "/functions"
 
 	// CollectionAliasMetaPrefix210 prefix for collection alias meta
 	CollectionAliasMetaPrefix210 = ComponentPrefix + "/collection-alias"

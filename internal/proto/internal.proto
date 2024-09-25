@@ -94,6 +94,8 @@ message SubSearchRequest {
   int64  topk = 7;
   int64 offset = 8;
   string metricType = 9;
+  int64 group_by_field_id = 10;
+  int64 group_size = 11;
 }
 
 message SearchRequest {
@@ -120,6 +122,8 @@ message SearchRequest {
   bool   is_advanced = 20;
   int64 offset = 21;
   common.ConsistencyLevel consistency_level = 22;
+  int64 group_by_field_id = 23;
+  int64 group_size = 24;
 }
 
 message SubSearchResults {
@@ -180,9 +184,9 @@ message RetrieveRequest {
   bool is_count = 13;
   int64 iteration_extension_reduce_rate = 14;
   string username = 15;
-  bool reduce_stop_for_best = 16;
+  bool reduce_stop_for_best = 16; //deprecated
+  int32 reduce_type = 17;
 }
-
 
 
 message RetrieveResults {
@@ -300,6 +304,8 @@ enum ImportJobState {
   Importing = 3;
   Failed = 4;
   Completed = 5;
+  Stats = 6;
+  IndexBuilding = 7;
 }
 
 message ImportFile {

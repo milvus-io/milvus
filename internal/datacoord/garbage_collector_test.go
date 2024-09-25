@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	kvmocks "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -46,7 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -1440,7 +1441,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	err = gc.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+	err = gc.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 		BuildID:        buildID + 4,
 		State:          commonpb.IndexState_Finished,
 		IndexFileKeys:  []string{"file1", "file2", "file3", "file4"},
@@ -1474,6 +1475,66 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	assert.Nil(t, segA)
 	segB = gc.meta.GetSegment(segID + 1)
 	assert.Nil(t, segB)
+}
+
+func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+
+	m := &meta{
+		catalog:    catalog,
+		channelCPs: newChannelCps(),
+	}
+
+	m.channelCPs.checkpoints = map[string]*msgpb.MsgPosition{
+		"cluster-id-rootcoord-dm_0_123v0": nil,
+		"cluster-id-rootcoord-dm_1_123v0": nil,
+		"cluster-id-rootcoord-dm_0_124v0": nil,
+	}
+
+	broker := broker2.NewMockBroker(t)
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Twice()
+
+	gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: broker})
+
+	t.Run("list channel cp fail", func(t *testing.T) {
+		catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock error")).Once()
+		gc.recycleChannelCPMeta(context.TODO())
+		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
+	})
+
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Unset()
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{
+		"cluster-id-rootcoord-dm_0_123v0":                   nil,
+		"cluster-id-rootcoord-dm_1_123v0":                   nil,
+		"cluster-id-rootcoord-dm_0_invalidedCollectionIDv0": nil,
+		"cluster-id-rootcoord-dm_0_124v0":                   nil,
+	}, nil).Times(3)
+
+	catalog.EXPECT().GcConfirm(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, collectionID int64, i2 int64) bool {
+			if collectionID == 123 {
+				return true
+			}
+			return false
+		}).Maybe()
+
+	t.Run("skip drop channel due to collection is available", func(t *testing.T) {
+		gc.recycleChannelCPMeta(context.TODO())
+		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
+	})
+
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Times(4)
+	t.Run("drop channel cp fail", func(t *testing.T) {
+		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(errors.New("mock error")).Twice()
+		gc.recycleChannelCPMeta(context.TODO())
+		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
+	})
+
+	t.Run("channel cp gc ok", func(t *testing.T) {
+		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Twice()
+		gc.recycleChannelCPMeta(context.TODO())
+		assert.Equal(t, 1, len(m.channelCPs.checkpoints))
+	})
 }
 
 func TestGarbageCollector_removeObjectPool(t *testing.T) {

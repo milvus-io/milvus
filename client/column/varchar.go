@@ -47,6 +47,21 @@ func (c *ColumnVarChar) Len() int {
 	return len(c.values)
 }
 
+func (c *ColumnVarChar) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnVarChar{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		values:     c.values[start:end],
+	}
+}
+
 // Get returns value at index as interface{}.
 func (c *ColumnVarChar) Get(idx int) (interface{}, error) {
 	if idx < 0 || idx > c.Len() {

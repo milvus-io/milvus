@@ -32,7 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -265,7 +265,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import() {
 			},
 		},
 		Ts: 1000,
-		AutoIDRange: &datapb.AutoIDRange{
+		IDRange: &datapb.IDRange{
 			Begin: 0,
 			End:   int64(s.numRows),
 		},
@@ -326,7 +326,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import_Failed() {
 			},
 		},
 		Ts: 1000,
-		AutoIDRange: &datapb.AutoIDRange{
+		IDRange: &datapb.IDRange{
 			Begin: 0,
 			End:   int64(s.numRows),
 		},
@@ -379,7 +379,7 @@ func (s *SchedulerSuite) TestScheduler_ReadFileStat() {
 	}
 	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
 	s.manager.Add(preimportTask)
-	err = preimportTask.(*PreImportTask).readFileStat(s.reader, preimportTask, 0)
+	err = preimportTask.(*PreImportTask).readFileStat(s.reader, 0)
 	s.NoError(err)
 }
 
@@ -417,7 +417,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 			},
 		},
 		Ts: 1000,
-		AutoIDRange: &datapb.AutoIDRange{
+		IDRange: &datapb.IDRange{
 			Begin: 0,
 			End:   int64(s.numRows),
 		},
@@ -431,7 +431,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 	}
 	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(importTask)
-	err = importTask.(*ImportTask).importFile(s.reader, importTask)
+	err = importTask.(*ImportTask).importFile(s.reader)
 	s.NoError(err)
 }
 

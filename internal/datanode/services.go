@@ -30,9 +30,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
-	"github.com/milvus-io/milvus/internal/datanode/io"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -214,6 +213,10 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		return merr.Success(), nil
 	}
 
+	if req.GetBeginLogID() == 0 {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid beginLogID")), nil
+	}
+
 	/*
 		spanCtx := trace.SpanContextFromContext(ctx)
 
@@ -227,22 +230,25 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		task = compaction.NewLevelZeroCompactionTask(
 			taskCtx,
 			binlogIO,
-			node.allocator,
 			node.chunkManager,
 			req,
 		)
 	case datapb.CompactionType_MixCompaction:
+		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
+			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
+		}
 		task = compaction.NewMixCompactionTask(
 			taskCtx,
 			binlogIO,
-			node.allocator,
 			req,
 		)
 	case datapb.CompactionType_ClusteringCompaction:
+		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
+			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
+		}
 		task = compaction.NewClusteringCompactionTask(
 			taskCtx,
 			binlogIO,
-			node.allocator,
 			req,
 		)
 	default:
@@ -250,8 +256,12 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil
 	}
 
-	node.compactionExecutor.Execute(task)
-	return merr.Success(), nil
+	succeed, err := node.compactionExecutor.Execute(task)
+	if succeed {
+		return merr.Success(), nil
+	} else {
+		return merr.Status(err), nil
+	}
 }
 
 // GetCompactionState called by DataCoord
@@ -306,31 +316,41 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		allSegments[segID] = struct{}{}
 	}
 
-	missingSegments := ds.metacache.DetectMissingSegments(allSegments)
+	missingSegments := ds.GetMetaCache().DetectMissingSegments(allSegments)
 
 	newSegments := make([]*datapb.SyncSegmentInfo, 0, len(missingSegments))
 	futures := make([]*conc.Future[any], 0, len(missingSegments))
 
 	for _, segID := range missingSegments {
-		segID := segID
-		future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
-			newSeg := req.GetSegmentInfos()[segID]
-			var val *metacache.BloomFilterSet
-			var err error
-			err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
-			if err != nil {
-				log.Warn("failed to DecompressBinLog", zap.Error(err))
-				return val, err
+		newSeg := req.GetSegmentInfos()[segID]
+		switch newSeg.GetLevel() {
+		case datapb.SegmentLevel_L0:
+			log.Warn("segment level is L0, may be the channel has not been successfully watched yet", zap.Int64("segmentID", segID))
+		case datapb.SegmentLevel_Legacy:
+			log.Warn("segment level is legacy, please check", zap.Int64("segmentID", segID))
+		default:
+			if newSeg.GetState() == commonpb.SegmentState_Flushed {
+				log.Info("segment loading PKs", zap.Int64("segmentID", segID))
+				newSegments = append(newSegments, newSeg)
+				future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
+					var val *pkoracle.BloomFilterSet
+					var err error
+					err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
+					if err != nil {
+						log.Warn("failed to DecompressBinLog", zap.Error(err))
+						return val, err
+					}
+					pks, err := compaction.LoadStats(ctx, node.chunkManager, ds.GetMetaCache().Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
+					if err != nil {
+						log.Warn("failed to load segment stats log", zap.Error(err))
+						return val, err
+					}
+					val = pkoracle.NewBloomFilterSet(pks...)
+					return val, nil
+				})
+				futures = append(futures, future)
 			}
-			pks, err := util.LoadStats(ctx, node.chunkManager, ds.metacache.Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
-			if err != nil {
-				log.Warn("failed to load segment stats log", zap.Error(err))
-				return val, err
-			}
-			val = metacache.NewBloomFilterSet(pks...)
-			return val, nil
-		})
-		futures = append(futures, future)
+		}
 	}
 
 	err := conc.AwaitAll(futures...)
@@ -338,11 +358,11 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(err), nil
 	}
 
-	newSegmentsBF := lo.Map(futures, func(future *conc.Future[any], _ int) *metacache.BloomFilterSet {
-		return future.Value().(*metacache.BloomFilterSet)
+	newSegmentsBF := lo.Map(futures, func(future *conc.Future[any], _ int) *pkoracle.BloomFilterSet {
+		return future.Value().(*pkoracle.BloomFilterSet)
 	})
 
-	ds.metacache.UpdateSegmentView(req.GetPartitionId(), newSegments, newSegmentsBF, allSegments)
+	ds.GetMetaCache().UpdateSegmentView(req.GetPartitionId(), newSegments, newSegmentsBF, allSegments)
 	return merr.Success(), nil
 }
 

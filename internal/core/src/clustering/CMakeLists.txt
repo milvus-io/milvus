@@ -9,16 +9,5 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
-
-set(CLUSTERING_FILES
-        analyze_c.cpp
-        KmeansClustering.cpp
-        )
-
-milvus_add_pkg_config("milvus_clustering")
-add_library(milvus_clustering SHARED ${CLUSTERING_FILES})
-
-# link order matters
-target_link_libraries(milvus_clustering milvus_index)
-
-install(TARGETS milvus_clustering DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+add_source_at_current_directory_recursively()
+add_library(milvus_clustering OBJECT ${SOURCE_FILES})

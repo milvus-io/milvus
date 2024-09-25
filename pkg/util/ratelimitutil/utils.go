@@ -19,7 +19,7 @@ package ratelimitutil
 import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
 var QuotaErrorString = map[commonpb.ErrorCode]string{
-	commonpb.ErrorCode_ForceDeny:            "the writing has been deactivated by the administrator",
+	commonpb.ErrorCode_ForceDeny:            "access has been disabled by the administrator",
 	commonpb.ErrorCode_MemoryQuotaExhausted: "memory quota exceeded, please allocate more resources",
 	commonpb.ErrorCode_DiskQuotaExhausted:   "disk quota exceeded, please allocate more resources",
 	commonpb.ErrorCode_TimeTickLongDelay:    "time tick long delay",

@@ -31,7 +31,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/exp/maps"
 
-	"github.com/milvus-io/milvus/internal/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -905,4 +905,65 @@ func TestHasPrefix(t *testing.T) {
 	has, err = kv.HasPrefix("key")
 	assert.NoError(t, err)
 	assert.False(t, has)
+}
+
+func TestRetrySuccess(t *testing.T) {
+	// Test case where the function succeeds on the first attempt
+	err := retry(defaultRetryCount, defaultRetryInterval, func() error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestRetryFailure(t *testing.T) {
+	// Test case where the function fails all attempts
+	expectedErr := errors.New("always fail")
+	err := retry(defaultRetryCount, defaultRetryInterval, func() error {
+		return expectedErr
+	})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if err != expectedErr {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+}
+
+func TestRetryEventuallySucceeds(t *testing.T) {
+	// Test case where the function fails the first two attempts and succeeds on the third
+	attempts := 0
+	err := retry(defaultRetryCount, defaultRetryInterval, func() error {
+		attempts++
+		if attempts < 3 {
+			return errors.New("temporary failure")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("expected 3 attempts, got %d", attempts)
+	}
+}
+
+func TestRetryInterval(t *testing.T) {
+	// Test case to check if retry respects the interval
+	startTime := time.Now()
+	err := retry(defaultRetryCount, defaultRetryInterval, func() error {
+		return errors.New("fail")
+	})
+	elapsed := time.Since(startTime)
+	// expected (defaultRetryCount - 1) intervals of defaultRetryInterval
+	expectedMin := defaultRetryInterval * (defaultRetryCount - 1)
+	expectedMax := expectedMin + (50 * time.Millisecond) // Allow 50ms margin for timing precision
+
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if elapsed < expectedMin || elapsed > expectedMax {
+		t.Fatalf("expected elapsed time around %v, got %v", expectedMin, elapsed)
+	}
 }

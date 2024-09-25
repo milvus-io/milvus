@@ -105,6 +105,8 @@ service QueryCoord {
   rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
   rpc TransferChannel(TransferChannelRequest) returns (common.Status) {}
   rpc CheckQueryNodeDistribution(CheckQueryNodeDistributionRequest) returns (common.Status) {}
+
+  rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -187,6 +189,7 @@ message ShowCollectionsResponse {
     repeated int64 inMemory_percentages = 3;
     repeated bool query_service_available = 4;
     repeated int64 refresh_progress = 5;
+    repeated schema.LongArray load_fields = 6;
 }
 
 message ShowPartitionsRequest {
@@ -214,6 +217,7 @@ message LoadCollectionRequest {
     bool refresh = 7;
     // resource group names
     repeated string resource_groups = 8;
+    repeated int64 load_fields = 9;
 }
 
 message ReleaseCollectionRequest {
@@ -244,6 +248,7 @@ message LoadPartitionsRequest {
     // resource group names
     repeated string resource_groups = 9;
     repeated index.IndexInfo index_info_list = 10;
+    repeated int64 load_fields = 11;
 }
 
 message ReleasePartitionsRequest {
@@ -313,6 +318,7 @@ message LoadMetaInfo {
     string metric_type = 4 [deprecated = true];
     string db_name = 5; // Only used for metrics label.
     string resource_group = 6; // Only used for metrics label.
+    repeated int64 load_fields = 7;
 }
 
 message WatchDmChannelsRequest {
@@ -359,6 +365,8 @@ message SegmentLoadInfo {
     int64 readableVersion = 16;
     data.SegmentLevel level = 17;
     int64 storageVersion = 18;
+    bool is_sorted = 19;
+    map<int64, data.TextIndexStats> textStatsLogs = 20;
 }
 
 message FieldIndexInfo {
@@ -548,6 +556,7 @@ message SegmentInfo {
     repeated int64 node_ids = 15;
     bool enable_index = 16;
     bool is_fake = 17;
+    data.SegmentLevel level = 18;
 }
 
 message CollectionInfo {
@@ -625,6 +634,7 @@ message SegmentVersionInfo {
     int64 version = 5;
     uint64 last_delta_timestamp = 6;
     map<int64, FieldIndexInfo> index_info = 7;
+    data.SegmentLevel level = 8; 
 }
 
 message ChannelVersionInfo {
@@ -648,6 +658,7 @@ message CollectionLoadInfo {
     map<int64, int64> field_indexID = 5;
     LoadType load_type = 6;
     int32 recover_times = 7;
+    repeated int64 load_fields = 8;
 }
 
 message PartitionLoadInfo {
@@ -883,4 +894,10 @@ message CheckQueryNodeDistributionRequest {
   int64 target_nodeID = 4;
 }
 
-
+message UpdateLoadConfigRequest {
+    common.MsgBase base = 1;
+    int64 dbID = 2;
+    repeated int64 collectionIDs = 3;
+    int32 replica_number = 4;
+    repeated string resource_groups = 5;
+}

@@ -24,10 +24,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -150,6 +150,7 @@ func (s *BalanceTestSuit) initCollection(collectionName string, replica int, cha
 	s.NoError(err)
 	s.True(merr.Ok(createIndexStatus))
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
+	log.Info("index create done")
 
 	for i := 1; i < replica; i++ {
 		s.Cluster.AddQueryNode()

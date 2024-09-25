@@ -23,11 +23,11 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -353,6 +353,242 @@ func TestSchema_GetVectorFieldSchema(t *testing.T) {
 	t.Run("GetVectorFieldSchemaInvalid", func(t *testing.T) {
 		res := GetVectorFieldSchemas(schemaInvalid)
 		assert.Equal(t, 0, len(res))
+	})
+}
+
+func TestSchemaHelper_GetDynamicField(t *testing.T) {
+	t.Run("with_dynamic_schema", func(t *testing.T) {
+		sch := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field_int64",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  101,
+					Name:     "field_float_vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+				{
+					FieldID:   102,
+					Name:      "$meta",
+					DataType:  schemapb.DataType_JSON,
+					IsDynamic: true,
+				},
+			},
+		}
+
+		helper, err := CreateSchemaHelper(sch)
+		require.NoError(t, err)
+
+		f, err := helper.GetDynamicField()
+		assert.NoError(t, err)
+		assert.NotNil(t, f)
+		assert.EqualValues(t, 102, f.FieldID)
+	})
+
+	t.Run("without_dynamic_schema", func(t *testing.T) {
+		sch := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field_int64",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  101,
+					Name:     "field_float_vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+			},
+		}
+
+		helper, err := CreateSchemaHelper(sch)
+		require.NoError(t, err)
+
+		_, err = helper.GetDynamicField()
+		assert.Error(t, err)
+	})
+
+	t.Run("multiple_dynamic_fields", func(t *testing.T) {
+		sch := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field_int64",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  101,
+					Name:     "field_float_vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+				{
+					FieldID:   102,
+					Name:      "$meta",
+					DataType:  schemapb.DataType_JSON,
+					IsDynamic: true,
+				},
+				{
+					FieldID:   103,
+					Name:      "other_json",
+					DataType:  schemapb.DataType_JSON,
+					IsDynamic: true,
+				},
+			},
+		}
+
+		_, err := CreateSchemaHelper(sch)
+		assert.Error(t, err)
+	})
+}
+
+func TestSchemaHelper_GetClusteringKeyField(t *testing.T) {
+	t.Run("with_clustering_key", func(t *testing.T) {
+		sch := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field_int64",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  101,
+					Name:     "field_float_vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+				{
+					FieldID:         102,
+					Name:            "group",
+					DataType:        schemapb.DataType_Int64,
+					IsClusteringKey: true,
+				},
+			},
+		}
+
+		helper, err := CreateSchemaHelper(sch)
+		require.NoError(t, err)
+
+		f, err := helper.GetClusteringKeyField()
+		assert.NoError(t, err)
+		assert.NotNil(t, f)
+		assert.EqualValues(t, 102, f.FieldID)
+	})
+
+	t.Run("without_clusteriny_key_schema", func(t *testing.T) {
+		sch := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field_int64",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  101,
+					Name:     "field_float_vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+			},
+		}
+
+		helper, err := CreateSchemaHelper(sch)
+		require.NoError(t, err)
+
+		_, err = helper.GetClusteringKeyField()
+		assert.Error(t, err)
+	})
+
+	t.Run("multiple_dynamic_fields", func(t *testing.T) {
+		sch := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field_int64",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  101,
+					Name:     "field_float_vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+				{
+					FieldID:         102,
+					Name:            "group",
+					DataType:        schemapb.DataType_Int64,
+					IsClusteringKey: true,
+				},
+				{
+					FieldID:         103,
+					Name:            "batch",
+					DataType:        schemapb.DataType_VarChar,
+					IsClusteringKey: true,
+				},
+			},
+		}
+
+		_, err := CreateSchemaHelper(sch)
+		assert.Error(t, err)
 	})
 }
 
@@ -821,7 +1057,7 @@ func TestAppendFieldData(t *testing.T) {
 	SparseFloatVector := &schemapb.SparseFloatArray{
 		Dim: 231,
 		Contents: [][]byte{
-			CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+			CreateSparseFloatRow([]uint32{}, []float32{}),
 			CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
 		},
 	}
@@ -965,7 +1201,7 @@ func TestDeleteFieldData(t *testing.T) {
 	assert.Equal(t, BFloat16Vector[0:2*Dim], result1[BFloat16VectorFieldID-common.StartOfUserFieldID].GetVectors().Data.(*schemapb.VectorField_Bfloat16Vector).Bfloat16Vector)
 	tmpSparseFloatVector := proto.Clone(SparseFloatVector).(*schemapb.SparseFloatArray)
 	tmpSparseFloatVector.Contents = [][]byte{SparseFloatVector.Contents[0]}
-	assert.Equal(t, tmpSparseFloatVector, result1[SparseFloatVectorFieldID-common.StartOfUserFieldID].GetVectors().GetSparseFloatVector())
+	assert.Equal(t, tmpSparseFloatVector.Contents, result1[SparseFloatVectorFieldID-common.StartOfUserFieldID].GetVectors().GetSparseFloatVector().Contents)
 
 	AppendFieldData(result2, fieldDataArray2, 0)
 	AppendFieldData(result2, fieldDataArray1, 0)
@@ -982,7 +1218,7 @@ func TestDeleteFieldData(t *testing.T) {
 	assert.Equal(t, BFloat16Vector[2*Dim:4*Dim], result2[BFloat16VectorFieldID-common.StartOfUserFieldID].GetVectors().Data.(*schemapb.VectorField_Bfloat16Vector).Bfloat16Vector)
 	tmpSparseFloatVector = proto.Clone(SparseFloatVector).(*schemapb.SparseFloatArray)
 	tmpSparseFloatVector.Contents = [][]byte{SparseFloatVector.Contents[1]}
-	assert.Equal(t, tmpSparseFloatVector, result2[SparseFloatVectorFieldID-common.StartOfUserFieldID].GetVectors().GetSparseFloatVector())
+	assert.EqualExportedValues(t, tmpSparseFloatVector, result2[SparseFloatVectorFieldID-common.StartOfUserFieldID].GetVectors().GetSparseFloatVector())
 }
 
 func TestEstimateEntitySize(t *testing.T) {
@@ -1397,7 +1633,7 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 	SparseFloatVector := &schemapb.SparseFloatArray{
 		Dim: 231,
 		Contents: [][]byte{
-			CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+			CreateSparseFloatRow([]uint32{}, []float32{}),
 			CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
 		},
 	}
@@ -1469,7 +1705,7 @@ func TestMergeFieldData(t *testing.T) {
 		// 3 rows for src
 		CreateSparseFloatRow([]uint32{600, 800, 2300}, []float32{2.1, 2.2, 2.3}),
 		CreateSparseFloatRow([]uint32{90, 141, 352}, []float32{1.1, 1.2, 1.3}),
-		CreateSparseFloatRow([]uint32{160, 280, 340}, []float32{2.1, 2.2, 2.3}),
+		CreateSparseFloatRow([]uint32{}, []float32{}),
 	}
 
 	t.Run("merge data", func(t *testing.T) {
@@ -2069,6 +2305,10 @@ func TestValidateSparseFloatRows(t *testing.T) {
 			CreateSparseFloatRow([]uint32{1, 3, 5}, []float32{1.0, 2.0, 3.0}),
 			CreateSparseFloatRow([]uint32{2, 4, 6}, []float32{4.0, 5.0, 6.0}),
 			CreateSparseFloatRow([]uint32{0, 7, 8}, []float32{7.0, 8.0, 9.0}),
+			// we allow empty row(including indices with 0 value)
+			CreateSparseFloatRow([]uint32{}, []float32{}),
+			CreateSparseFloatRow([]uint32{24}, []float32{0}),
+			{},
 		}
 		err := ValidateSparseFloatRows(rows...)
 		assert.NoError(t, err)
@@ -2139,14 +2379,6 @@ func TestValidateSparseFloatRows(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("empty indices or values", func(t *testing.T) {
-		rows := [][]byte{
-			CreateSparseFloatRow([]uint32{}, []float32{}),
-		}
-		err := ValidateSparseFloatRows(rows...)
-		assert.Error(t, err)
-	})
-
 	t.Run("no rows", func(t *testing.T) {
 		err := ValidateSparseFloatRows()
 		assert.NoError(t, err)
@@ -2182,6 +2414,20 @@ func TestParseJsonSparseFloatRow(t *testing.T) {
 		assert.Equal(t, CreateSparseFloatRow([]uint32{math.MaxInt32 + 1}, []float32{1.0}), res)
 	})
 
+	t.Run("valid row 5", func(t *testing.T) {
+		row := map[string]interface{}{"indices": []interface{}{}, "values": []interface{}{}}
+		res, err := CreateSparseFloatRowFromMap(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{}, []float32{}), res)
+	})
+
+	t.Run("valid row 6", func(t *testing.T) {
+		row := map[string]interface{}{"indices": []interface{}{1}, "values": []interface{}{0}}
+		res, err := CreateSparseFloatRowFromMap(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{1}, []float32{0}), res)
+	})
+
 	t.Run("invalid row 1", func(t *testing.T) {
 		row := map[string]interface{}{"indices": []interface{}{1, 3, 5}, "values": []interface{}{1.0, 2.0}}
 		_, err := CreateSparseFloatRowFromMap(row)
@@ -2190,12 +2436,6 @@ func TestParseJsonSparseFloatRow(t *testing.T) {
 
 	t.Run("invalid row 2", func(t *testing.T) {
 		row := map[string]interface{}{"indices": []interface{}{1}, "values": []interface{}{1.0, 2.0}}
-		_, err := CreateSparseFloatRowFromMap(row)
-		assert.Error(t, err)
-	})
-
-	t.Run("invalid row 3", func(t *testing.T) {
-		row := map[string]interface{}{"indices": []interface{}{}, "values": []interface{}{}}
 		_, err := CreateSparseFloatRowFromMap(row)
 		assert.Error(t, err)
 	})
@@ -2250,6 +2490,20 @@ func TestParseJsonSparseFloatRow(t *testing.T) {
 		assert.Equal(t, CreateSparseFloatRow([]uint32{1, 3, 5}, []float32{2.0, 1.0, 3.0}), res)
 	})
 
+	t.Run("valid dict row 3", func(t *testing.T) {
+		row := map[string]interface{}{}
+		res, err := CreateSparseFloatRowFromMap(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{}, []float32{}), res)
+	})
+
+	t.Run("valid dict row 4", func(t *testing.T) {
+		row := map[string]interface{}{"1": 0}
+		res, err := CreateSparseFloatRowFromMap(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{1}, []float32{0}), res)
+	})
+
 	t.Run("invalid dict row 1", func(t *testing.T) {
 		row := map[string]interface{}{"a": 1.0, "3": 2.0, "5": 3.0}
 		_, err := CreateSparseFloatRowFromMap(row)
@@ -2276,12 +2530,6 @@ func TestParseJsonSparseFloatRow(t *testing.T) {
 
 	t.Run("invalid dict row 5", func(t *testing.T) {
 		row := map[string]interface{}{"1": -1.0, "3": 2.0, "5": 3.0}
-		_, err := CreateSparseFloatRowFromMap(row)
-		assert.Error(t, err)
-	})
-
-	t.Run("invalid dict row 6", func(t *testing.T) {
-		row := map[string]interface{}{}
 		_, err := CreateSparseFloatRowFromMap(row)
 		assert.Error(t, err)
 	})
@@ -2332,6 +2580,20 @@ func TestParseJsonSparseFloatRowBytes(t *testing.T) {
 		res, err := CreateSparseFloatRowFromJSON(row)
 		assert.NoError(t, err)
 		assert.Equal(t, CreateSparseFloatRow([]uint32{math.MaxInt32 + 1}, []float32{1.0}), res)
+	})
+
+	t.Run("valid row 4", func(t *testing.T) {
+		row := []byte(`{"indices":[], "values":[]}`)
+		res, err := CreateSparseFloatRowFromJSON(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{}, []float32{}), res)
+	})
+
+	t.Run("valid row 5", func(t *testing.T) {
+		row := []byte(`{"indices":[1], "values":[0]}`)
+		res, err := CreateSparseFloatRowFromJSON(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{1}, []float32{0}), res)
 	})
 
 	t.Run("invalid row 1", func(t *testing.T) {
@@ -2390,6 +2652,20 @@ func TestParseJsonSparseFloatRowBytes(t *testing.T) {
 		assert.Equal(t, CreateSparseFloatRow([]uint32{1, 3, 5}, []float32{2.0, 1.0, 3.0}), res)
 	})
 
+	t.Run("valid dict row 3", func(t *testing.T) {
+		row := []byte(`{}`)
+		res, err := CreateSparseFloatRowFromJSON(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{}, []float32{}), res)
+	})
+
+	t.Run("valid dict row 4", func(t *testing.T) {
+		row := []byte(`{"1": 0}`)
+		res, err := CreateSparseFloatRowFromJSON(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{1}, []float32{0}), res)
+	})
+
 	t.Run("invalid dict row 1", func(t *testing.T) {
 		row := []byte(`{"a": 1.0, "3": 2.0, "5": 3.0}`)
 		_, err := CreateSparseFloatRowFromJSON(row)
@@ -2427,7 +2703,7 @@ func TestParseJsonSparseFloatRowBytes(t *testing.T) {
 	})
 
 	t.Run("invalid dict row 7", func(t *testing.T) {
-		row := []byte(`{}`)
+		row := []byte(``)
 		_, err := CreateSparseFloatRowFromJSON(row)
 		assert.Error(t, err)
 	})

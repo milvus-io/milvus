@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -116,6 +117,16 @@ func TestSimpleRateLimiter(t *testing.T) {
 		}
 
 		for _, rt := range internalpb.RateType_value {
+			if internalpb.RateType_DDLFlush == internalpb.RateType(rt) {
+				// the flush request has 0.1 rate limiter that means only allow to execute one request each 10 seconds.
+				time.Sleep(10 * time.Second)
+				err := simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType_DDLFlush, 1)
+				assert.NoError(t, err)
+				err = simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType_DDLFlush, 1)
+				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
+				continue
+			}
+
 			if IsDDLRequest(internalpb.RateType(rt)) {
 				err := simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType(rt), 1)
 				assert.NoError(t, err)
@@ -123,14 +134,15 @@ func TestSimpleRateLimiter(t *testing.T) {
 				assert.NoError(t, err)
 				err = simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType(rt), 5)
 				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
-			} else {
-				err := simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType(rt), 1)
-				assert.NoError(t, err)
-				err = simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType(rt), 1)
-				assert.NoError(t, err)
-				err = simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType(rt), 1)
-				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
+				continue
 			}
+
+			err := simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType(rt), 1)
+			assert.NoError(t, err)
+			err = simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType(rt), 1)
+			assert.NoError(t, err)
+			err = simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType(rt), 1)
+			assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
 		}
 		Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
 	})

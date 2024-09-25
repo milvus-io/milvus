@@ -19,25 +19,30 @@ package compaction
 import (
 	"context"
 	"fmt"
+	sio "io"
 	"math"
 	"path"
+	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/io"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/proto/clusteringpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -57,23 +62,28 @@ import (
 var _ Compactor = (*clusteringCompactionTask)(nil)
 
 type clusteringCompactionTask struct {
-	binlogIO  io.BinlogIO
-	allocator allocator.Allocator
+	binlogIO   io.BinlogIO
+	logIDAlloc allocator.Interface
+	segIDAlloc allocator.Interface
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
-	tr     *timerecord.TimeRecorder
+	ctx         context.Context
+	cancel      context.CancelFunc
+	done        chan struct{}
+	tr          *timerecord.TimeRecorder
+	mappingPool *conc.Pool[any]
+	flushPool   *conc.Pool[any]
 
 	plan *datapb.CompactionPlan
 
-	// schedule
-	spillChan chan SpillSignal
-	pool      *conc.Pool[any]
+	// flush
+	flushMutex sync.Mutex
+	flushCount *atomic.Int64
+	flushChan  chan FlushSignal
+	doneChan   chan struct{}
 
-	// metrics
-	spillCount    *atomic.Int64
+	// metrics, don't use
 	writtenRowNum *atomic.Int64
+	hasSignal     *atomic.Bool
 
 	// inner field
 	collectionID          int64
@@ -83,7 +93,6 @@ type clusteringCompactionTask struct {
 	clusteringKeyField    *schemapb.FieldSchema
 	primaryKeyField       *schemapb.FieldSchema
 
-	spillMutex         sync.Mutex
 	memoryBufferSize   int64
 	clusterBuffers     []*ClusterBuffer
 	clusterBufferLocks *lock.KeyLock[int]
@@ -97,11 +106,15 @@ type clusteringCompactionTask struct {
 type ClusterBuffer struct {
 	id int
 
-	writer       *SegmentWriter
-	bufferRowNum atomic.Int64
+	writer    *SegmentWriter
+	flushLock lock.RWMutex
 
-	flushedRowNum  int64
-	flushedBinlogs map[typeutil.UniqueID]*datapb.FieldBinlog
+	bufferMemorySize atomic.Int64
+
+	flushedRowNum        map[typeutil.UniqueID]atomic.Int64
+	currentSegmentRowNum atomic.Int64
+	// segID -> fieldID -> binlogs
+	flushedBinlogs map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog
 
 	uploadedSegments     []*datapb.CompactionSegment
 	uploadedSegmentStats map[typeutil.UniqueID]storage.SegmentStats
@@ -109,14 +122,16 @@ type ClusterBuffer struct {
 	clusteringKeyFieldStats *storage.FieldStats
 }
 
-type SpillSignal struct {
-	buffer *ClusterBuffer
+type FlushSignal struct {
+	writer *SegmentWriter
+	pack   bool
+	id     int
+	done   bool
 }
 
 func NewClusteringCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
-	alloc allocator.Allocator,
 	plan *datapb.CompactionPlan,
 ) *clusteringCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
@@ -124,15 +139,16 @@ func NewClusteringCompactionTask(
 		ctx:                ctx,
 		cancel:             cancel,
 		binlogIO:           binlogIO,
-		allocator:          alloc,
 		plan:               plan,
 		tr:                 timerecord.NewTimeRecorder("clustering_compaction"),
 		done:               make(chan struct{}, 1),
-		spillChan:          make(chan SpillSignal, 100),
+		flushChan:          make(chan FlushSignal, 100),
+		doneChan:           make(chan struct{}),
 		clusterBuffers:     make([]*ClusterBuffer, 0),
 		clusterBufferLocks: lock.NewKeyLock[int](),
-		spillCount:         atomic.NewInt64(0),
+		flushCount:         atomic.NewInt64(0),
 		writtenRowNum:      atomic.NewInt64(0),
+		hasSignal:          atomic.NewBool(false),
 	}
 }
 
@@ -153,19 +169,39 @@ func (t *clusteringCompactionTask) GetChannelName() string {
 	return t.plan.GetChannel()
 }
 
+func (t *clusteringCompactionTask) GetCompactionType() datapb.CompactionType {
+	return t.plan.GetType()
+}
+
 func (t *clusteringCompactionTask) GetCollection() int64 {
 	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 }
 
 func (t *clusteringCompactionTask) init() error {
+	if t.plan.GetType() != datapb.CompactionType_ClusteringCompaction {
+		return merr.WrapErrIllegalCompactionPlan("illegal compaction type")
+	}
+	if len(t.plan.GetSegmentBinlogs()) == 0 {
+		return merr.WrapErrIllegalCompactionPlan("empty segment binlogs")
+	}
 	t.collectionID = t.GetCollection()
 	t.partitionID = t.plan.GetSegmentBinlogs()[0].GetPartitionID()
 
+	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
+	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
+	t.logIDAlloc = logIDAlloc
+	t.segIDAlloc = segIDAlloc
+
 	var pkField *schemapb.FieldSchema
 	if t.plan.Schema == nil {
-		return errors.New("empty schema in compactionPlan")
+		return merr.WrapErrIllegalCompactionPlan("empty schema in compactionPlan")
 	}
 	for _, field := range t.plan.Schema.Fields {
+		// todo(wayblink): supprot null in clustring compact
+		if field.GetNullable() {
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("clustering compaction can't be trigger in field(%s) which set nullable == true", field.GetName()))
+		}
+
 		if field.GetIsPrimaryKey() && field.GetFieldID() >= 100 && typeutil.IsPrimaryFieldType(field.GetDataType()) {
 			pkField = field
 		}
@@ -178,7 +214,8 @@ func (t *clusteringCompactionTask) init() error {
 	t.currentTs = tsoutil.GetCurrentTime()
 	t.memoryBufferSize = t.getMemoryBufferSize()
 	workerPoolSize := t.getWorkerPoolSize()
-	t.pool = conc.NewPool[any](workerPoolSize)
+	t.mappingPool = conc.NewPool[any](workerPoolSize)
+	t.flushPool = conc.NewPool[any](workerPoolSize)
 	log.Info("clustering compaction task initialed", zap.Int64("memory_buffer_size", t.memoryBufferSize), zap.Int("worker_pool_size", workerPoolSize))
 	return nil
 }
@@ -187,27 +224,23 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("clusteringCompaction-%d", t.GetPlanID()))
 	defer span.End()
 	log := log.With(zap.Int64("planID", t.plan.GetPlanID()), zap.String("type", t.plan.GetType().String()))
-	if t.plan.GetType() != datapb.CompactionType_ClusteringCompaction {
-		// this shouldn't be reached
-		log.Warn("compact wrong, illegal compaction type")
-		return nil, merr.WrapErrIllegalCompactionPlan()
+	// 0, verify and init
+	err := t.init()
+	if err != nil {
+		log.Error("compaction task init failed", zap.Error(err))
+		return nil, err
 	}
-	log.Info("Clustering compaction", zap.Duration("wait in queue elapse", t.tr.RecordSpan()))
+
 	if !funcutil.CheckCtxValid(ctx) {
 		log.Warn("compact wrong, task context done or timeout")
 		return nil, ctx.Err()
 	}
 	ctxTimeout, cancelAll := context.WithTimeout(ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
-
-	err := t.init()
-	if err != nil {
-		return nil, err
-	}
 	defer t.cleanUp(ctx)
 
 	// 1, download delta logs to build deltaMap
-	deltaBlobs, _, err := loadDeltaMap(t.plan.GetSegmentBinlogs())
+	deltaBlobs, _, err := composePaths(t.plan.GetSegmentBinlogs())
 	if err != nil {
 		return nil, err
 	}
@@ -252,12 +285,14 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	metrics.DataNodeCompactionLatency.
 		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).
 		Observe(float64(t.tr.ElapseSpan().Milliseconds()))
-	log.Info("Clustering compaction finished", zap.Duration("elapse", t.tr.ElapseSpan()))
+	log.Info("Clustering compaction finished", zap.Duration("elapse", t.tr.ElapseSpan()), zap.Int64("flushTimes", t.flushCount.Load()))
 
 	return planResult, nil
 }
 
 func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) error {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("getScalarAnalyzeResult-%d", t.GetPlanID()))
+	defer span.End()
 	analyzeDict, err := t.scalarAnalyze(ctx)
 	if err != nil {
 		return err
@@ -274,12 +309,15 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 		buffer := &ClusterBuffer{
 			id:                      id,
-			flushedBinlogs:          make(map[typeutil.UniqueID]*datapb.FieldBinlog, 0),
+			flushedRowNum:           map[typeutil.UniqueID]atomic.Int64{},
+			flushedBinlogs:          make(map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog, 0),
 			uploadedSegments:        make([]*datapb.CompactionSegment, 0),
 			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
 		}
-		t.refreshBufferWriter(buffer)
+		if _, err = t.refreshBufferWriterWithPack(buffer); err != nil {
+			return err
+		}
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
 		for _, key := range bucket {
 			scalarToClusterBufferMap[key] = buffer
@@ -293,6 +331,8 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 }
 
 func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) error {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("getVectorAnalyzeResult-%d", t.GetPlanID()))
+	defer span.End()
 	analyzeResultPath := t.plan.AnalyzeResultPath
 	centroidFilePath := path.Join(analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), common.Centroids)
 	offsetMappingFiles := make(map[int64]string, 0)
@@ -323,12 +363,15 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 		fieldStats.SetVectorCentroids(storage.NewVectorFieldValue(t.clusteringKeyField.DataType, centroid))
 		clusterBuffer := &ClusterBuffer{
 			id:                      id,
-			flushedBinlogs:          make(map[typeutil.UniqueID]*datapb.FieldBinlog, 0),
+			flushedRowNum:           map[typeutil.UniqueID]atomic.Int64{},
+			flushedBinlogs:          make(map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog, 0),
 			uploadedSegments:        make([]*datapb.CompactionSegment, 0),
 			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
 		}
-		t.refreshBufferWriter(clusterBuffer)
+		if _, err = t.refreshBufferWriterWithPack(clusterBuffer); err != nil {
+			return err
+		}
 		t.clusterBuffers = append(t.clusterBuffers, clusterBuffer)
 	}
 	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
@@ -341,11 +384,13 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	deltaPk2Ts map[interface{}]typeutil.Timestamp,
 ) ([]*datapb.CompactionSegment, *storage.PartitionStatsSnapshot, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mapping-%d", t.GetPlanID()))
+	defer span.End()
 	inputSegments := t.plan.GetSegmentBinlogs()
 	mapStart := time.Now()
 
-	// start spill goroutine
-	go t.backgroundSpill(ctx)
+	// start flush goroutine
+	go t.backgroundFlush(ctx)
 
 	futures := make([]*conc.Future[any], 0, len(inputSegments))
 	for _, segment := range inputSegments {
@@ -354,7 +399,7 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 			// only FieldBinlogs needed
 			FieldBinlogs: segment.FieldBinlogs,
 		}
-		future := t.pool.Submit(func() (any, error) {
+		future := t.mappingPool.Submit(func() (any, error) {
 			err := t.mappingSegment(ctx, segmentClone, deltaPk2Ts)
 			return struct{}{}, err
 		})
@@ -364,9 +409,20 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 		return nil, nil, err
 	}
 
-	// force spill all buffers
-	err := t.spillAll(ctx)
+	t.flushChan <- FlushSignal{
+		done: true,
+	}
+
+	// block util all writer flushed.
+	<-t.doneChan
+
+	// force flush all buffers
+	err := t.flushAll(ctx)
 	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := t.checkBuffersAfterCompaction(); err != nil {
 		return nil, nil, err
 	}
 
@@ -404,10 +460,12 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	return resultSegments, resultPartitionStats, nil
 }
 
-func (t *clusteringCompactionTask) getWrittenMemoryBufferSize() int64 {
+func (t *clusteringCompactionTask) getBufferTotalUsedMemorySize() int64 {
 	var totalBufferSize int64 = 0
 	for _, buffer := range t.clusterBuffers {
-		totalBufferSize = totalBufferSize + int64(buffer.writer.WrittenMemorySize())
+		t.clusterBufferLocks.Lock(buffer.id)
+		totalBufferSize = totalBufferSize + int64(buffer.writer.WrittenMemorySize()) + buffer.bufferMemorySize.Load()
+		t.clusterBufferLocks.Unlock(buffer.id)
 	}
 	return totalBufferSize
 }
@@ -418,7 +476,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	segment *datapb.CompactionSegmentBinlogs,
 	delta map[interface{}]typeutil.Timestamp,
 ) error {
-	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("Compact-Map-%d", t.GetPlanID()))
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mappingSegment-%d-%d", t.GetPlanID(), segment.GetSegmentID()))
 	defer span.End()
 	log := log.With(zap.Int64("planID", t.GetPlanID()),
 		zap.Int64("collectionID", t.GetCollection()),
@@ -478,33 +536,34 @@ func (t *clusteringCompactionTask) mappingSegment(
 		fieldBinlogPaths = append(fieldBinlogPaths, ps)
 	}
 
-	for _, path := range fieldBinlogPaths {
-		bytesArr, err := t.binlogIO.Download(ctx, path)
-		blobs := make([]*storage.Blob, len(bytesArr))
-		var segmentSize int64
-		for i := range bytesArr {
-			blobs[i] = &storage.Blob{Value: bytesArr[i]}
-			segmentSize = segmentSize + int64(len(bytesArr[i]))
-		}
+	for _, paths := range fieldBinlogPaths {
+		allValues, err := t.binlogIO.Download(ctx, paths)
 		if err != nil {
-			log.Warn("download insertlogs wrong", zap.Strings("path", path), zap.Error(err))
+			log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
 			return err
 		}
-
-		pkIter, err := storage.NewInsertBinlogIterator(blobs, t.primaryKeyField.GetFieldID(), t.primaryKeyField.GetDataType())
+		blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
+			return &storage.Blob{Key: paths[i], Value: v}
+		})
+		pkIter, err := storage.NewBinlogDeserializeReader(blobs, t.primaryKeyField.GetFieldID())
 		if err != nil {
-			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", path), zap.Error(err))
+			log.Warn("new insert binlogs Itr wrong", zap.Strings("paths", paths), zap.Error(err))
 			return err
 		}
 
 		var offset int64 = -1
-		for pkIter.HasNext() {
-			vInter, _ := pkIter.Next()
-			v, ok := vInter.(*storage.Value)
-			if !ok {
-				log.Warn("transfer interface to Value wrong", zap.Strings("path", path))
-				return errors.New("unexpected error")
+		for {
+			err := pkIter.Next()
+			if err != nil {
+				if err == sio.EOF {
+					pkIter.Close()
+					break
+				} else {
+					log.Warn("compact wrong, failed to iter through data", zap.Error(err))
+					return err
+				}
 			}
+			v := pkIter.Value()
 			offset++
 
 			// Filtering deleted entity
@@ -521,7 +580,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 			row, ok := v.Value.(map[typeutil.UniqueID]interface{})
 			if !ok {
-				log.Warn("transfer interface to map wrong", zap.Strings("path", path))
+				log.Warn("transfer interface to map wrong", zap.Strings("paths", paths))
 				return errors.New("unexpected error")
 			}
 
@@ -538,22 +597,48 @@ func (t *clusteringCompactionTask) mappingSegment(
 			}
 			remained++
 
-			// currentSize := t.totalBufferSize.Load()
-			if (remained+1)%20 == 0 {
-				currentBufferSize := t.getWrittenMemoryBufferSize()
-				// trigger spill
-				if clusterBuffer.bufferRowNum.Load() > t.plan.GetMaxSegmentRows() || clusterBuffer.writer.IsFull() {
+			if (remained+1)%100 == 0 {
+				currentBufferTotalMemorySize := t.getBufferTotalUsedMemorySize()
+				if clusterBuffer.currentSegmentRowNum.Load() > t.plan.GetMaxSegmentRows() || clusterBuffer.writer.IsFull() {
 					// reach segment/binlog max size
-					t.spillChan <- SpillSignal{
-						buffer: clusterBuffer,
+					flushWriterFunc := func() {
+						t.clusterBufferLocks.Lock(clusterBuffer.id)
+						currentSegmentNumRows := clusterBuffer.currentSegmentRowNum.Load()
+						// double-check the condition is still met
+						if currentSegmentNumRows > t.plan.GetMaxSegmentRows() || clusterBuffer.writer.IsFull() {
+							writer := clusterBuffer.writer
+							pack, _ := t.refreshBufferWriterWithPack(clusterBuffer)
+							log.Debug("buffer need to flush", zap.Int("bufferID", clusterBuffer.id),
+								zap.Bool("pack", pack),
+								zap.Int64("current segment", writer.GetSegmentID()),
+								zap.Int64("current segment num rows", currentSegmentNumRows),
+								zap.Int64("writer num", writer.GetRowNum()))
+
+							t.clusterBufferLocks.Unlock(clusterBuffer.id)
+							// release the lock before sending the signal, avoid long wait caused by a full channel.
+							t.flushChan <- FlushSignal{
+								writer: writer,
+								pack:   pack,
+								id:     clusterBuffer.id,
+							}
+							return
+						}
+						// release the lock even if the conditions are no longer met.
+						t.clusterBufferLocks.Unlock(clusterBuffer.id)
 					}
-				} else if currentBufferSize >= t.getMemoryBufferMiddleWatermark() {
-					// reach spill trigger threshold
-					t.spillChan <- SpillSignal{}
+					flushWriterFunc()
+				} else if currentBufferTotalMemorySize > t.getMemoryBufferHighWatermark() && !t.hasSignal.Load() {
+					// reach flushBinlog trigger threshold
+					log.Debug("largest buffer need to flush",
+						zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize))
+					t.flushChan <- FlushSignal{}
+					t.hasSignal.Store(true)
 				}
 
-				// if the total buffer size is too large, block here, wait for memory release by spill
-				if currentBufferSize > t.getMemoryBufferHighWatermark() {
+				// if the total buffer size is too large, block here, wait for memory release by flushBinlog
+				if t.getBufferTotalUsedMemorySize() > t.getMemoryBufferBlockFlushThreshold() {
+					log.Debug("memory is already above the block watermark, pause writing",
+						zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize))
 				loop:
 					for {
 						select {
@@ -564,8 +649,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 							log.Warn("stop waiting for memory buffer release as task chan done")
 							return nil
 						default:
-							currentSize := t.getWrittenMemoryBufferSize()
-							if currentSize < t.getMemoryBufferMiddleWatermark() {
+							// currentSize := t.getCurrentBufferWrittenMemorySize()
+							currentSize := t.getBufferTotalUsedMemorySize()
+							if currentSize < t.getMemoryBufferHighWatermark() {
+								log.Debug("memory is already below the high watermark, continue writing",
+									zap.Int64("currentSize", currentSize))
 								break loop
 							}
 							time.Sleep(time.Millisecond * 200)
@@ -590,17 +678,15 @@ func (t *clusteringCompactionTask) writeToBuffer(ctx context.Context, clusterBuf
 	defer t.clusterBufferLocks.Unlock(clusterBuffer.id)
 	// prepare
 	if clusterBuffer.writer == nil {
-		err := t.refreshBufferWriter(clusterBuffer)
-		if err != nil {
-			return err
-		}
+		log.Warn("unexpected behavior, please check", zap.Int("buffer id", clusterBuffer.id))
+		return fmt.Errorf("unexpected behavior, please check buffer id: %d", clusterBuffer.id)
 	}
 	err := clusterBuffer.writer.Write(value)
 	if err != nil {
 		return err
 	}
 	t.writtenRowNum.Inc()
-	clusterBuffer.bufferRowNum.Add(1)
+	clusterBuffer.currentSegmentRowNum.Inc()
 	return nil
 }
 
@@ -613,15 +699,19 @@ func (t *clusteringCompactionTask) getMemoryBufferSize() int64 {
 	return int64(float64(hardware.GetMemoryCount()) * paramtable.Get().DataNodeCfg.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
 }
 
-func (t *clusteringCompactionTask) getMemoryBufferMiddleWatermark() int64 {
-	return int64(float64(t.memoryBufferSize) * 0.5)
+func (t *clusteringCompactionTask) getMemoryBufferLowWatermark() int64 {
+	return int64(float64(t.memoryBufferSize) * 0.3)
 }
 
 func (t *clusteringCompactionTask) getMemoryBufferHighWatermark() int64 {
-	return int64(float64(t.memoryBufferSize) * 0.9)
+	return int64(float64(t.memoryBufferSize) * 0.7)
 }
 
-func (t *clusteringCompactionTask) backgroundSpill(ctx context.Context) {
+func (t *clusteringCompactionTask) getMemoryBufferBlockFlushThreshold() int64 {
+	return t.memoryBufferSize
+}
+
+func (t *clusteringCompactionTask) backgroundFlush(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -630,117 +720,216 @@ func (t *clusteringCompactionTask) backgroundSpill(ctx context.Context) {
 		case <-t.done:
 			log.Info("clustering compaction task done")
 			return
-		case signal := <-t.spillChan:
+		case signal := <-t.flushChan:
 			var err error
-			if signal.buffer == nil {
-				err = t.spillLargestBuffers(ctx)
+			if signal.done {
+				t.doneChan <- struct{}{}
+			} else if signal.writer == nil {
+				t.hasSignal.Store(false)
+				err = t.flushLargestBuffers(ctx)
 			} else {
-				err = func() error {
-					t.clusterBufferLocks.Lock(signal.buffer.id)
-					defer t.clusterBufferLocks.Unlock(signal.buffer.id)
-					return t.spill(ctx, signal.buffer)
-				}()
+				future := t.flushPool.Submit(func() (any, error) {
+					err := t.flushBinlog(ctx, t.clusterBuffers[signal.id], signal.writer, signal.pack)
+					if err != nil {
+						return nil, err
+					}
+					return struct{}{}, nil
+				})
+				err = conc.AwaitAll(future)
 			}
 			if err != nil {
-				log.Warn("fail to spill data", zap.Error(err))
+				log.Warn("fail to flushBinlog data", zap.Error(err))
 				// todo handle error
 			}
 		}
 	}
 }
 
-func (t *clusteringCompactionTask) spillLargestBuffers(ctx context.Context) error {
-	// only one spillLargestBuffers or spillAll should do at the same time
-	t.spillMutex.Lock()
-	defer t.spillMutex.Unlock()
+func (t *clusteringCompactionTask) flushLargestBuffers(ctx context.Context) error {
+	// only one flushLargestBuffers or flushAll should do at the same time
+	getLock := t.flushMutex.TryLock()
+	if !getLock {
+		return nil
+	}
+	defer t.flushMutex.Unlock()
+	currentMemorySize := t.getBufferTotalUsedMemorySize()
+	if currentMemorySize <= t.getMemoryBufferLowWatermark() {
+		log.Info("memory low water mark", zap.Int64("memoryBufferSize", t.getBufferTotalUsedMemorySize()))
+		return nil
+	}
+	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "flushLargestBuffers")
+	defer span.End()
 	bufferIDs := make([]int, 0)
+	bufferRowNums := make([]int64, 0)
 	for _, buffer := range t.clusterBuffers {
 		bufferIDs = append(bufferIDs, buffer.id)
+		t.clusterBufferLocks.RLock(buffer.id)
+		bufferRowNums = append(bufferRowNums, buffer.writer.GetRowNum())
+		t.clusterBufferLocks.RUnlock(buffer.id)
 	}
 	sort.Slice(bufferIDs, func(i, j int) bool {
-		return t.clusterBuffers[i].writer.GetRowNum() > t.clusterBuffers[j].writer.GetRowNum()
+		return bufferRowNums[i] > bufferRowNums[j]
 	})
-	for index, bufferId := range bufferIDs {
-		err := func() error {
-			t.clusterBufferLocks.Lock(bufferId)
-			defer t.clusterBufferLocks.Unlock(bufferId)
-			return t.spill(ctx, t.clusterBuffers[bufferId])
-		}()
-		if err != nil {
+	log.Info("start flushLargestBuffers", zap.Ints("bufferIDs", bufferIDs), zap.Int64("currentMemorySize", currentMemorySize))
+
+	futures := make([]*conc.Future[any], 0)
+	for _, bufferId := range bufferIDs {
+		t.clusterBufferLocks.Lock(bufferId)
+		buffer := t.clusterBuffers[bufferId]
+		writer := buffer.writer
+		currentMemorySize -= int64(writer.WrittenMemorySize())
+		if err := t.refreshBufferWriter(buffer); err != nil {
+			t.clusterBufferLocks.Unlock(bufferId)
 			return err
 		}
-		if index >= len(bufferIDs) {
+		t.clusterBufferLocks.Unlock(bufferId)
+
+		log.Info("currentMemorySize after flush buffer binlog",
+			zap.Int64("currentMemorySize", currentMemorySize),
+			zap.Int("bufferID", bufferId),
+			zap.Uint64("WrittenMemorySize()", writer.WrittenMemorySize()),
+			zap.Int64("RowNum", writer.GetRowNum()))
+		future := t.flushPool.Submit(func() (any, error) {
+			err := t.flushBinlog(ctx, buffer, writer, false)
+			if err != nil {
+				return nil, err
+			}
+			return struct{}{}, nil
+		})
+		futures = append(futures, future)
+
+		if currentMemorySize <= t.getMemoryBufferLowWatermark() {
+			log.Info("reach memory low water mark", zap.Int64("memoryBufferSize", t.getBufferTotalUsedMemorySize()))
 			break
 		}
 	}
-	return nil
-}
-
-func (t *clusteringCompactionTask) spillAll(ctx context.Context) error {
-	// only one spillLargestBuffers or spillAll should do at the same time
-	t.spillMutex.Lock()
-	defer t.spillMutex.Unlock()
-	for _, buffer := range t.clusterBuffers {
-		err := func() error {
-			t.clusterBufferLocks.Lock(buffer.id)
-			defer t.clusterBufferLocks.Unlock(buffer.id)
-			err := t.spill(ctx, buffer)
-			if err != nil {
-				log.Error("spill fail")
-				return err
-			}
-			err = t.packBufferToSegment(ctx, buffer)
-			return err
-		}()
-		if err != nil {
-			return err
-		}
+	if err := conc.AwaitAll(futures...); err != nil {
+		return err
 	}
+
+	log.Info("flushLargestBuffers end", zap.Int64("currentMemorySize", currentMemorySize))
 	return nil
 }
 
-func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buffer *ClusterBuffer) error {
-	if len(buffer.flushedBinlogs) == 0 {
+func (t *clusteringCompactionTask) flushAll(ctx context.Context) error {
+	// only one flushLargestBuffers or flushAll should do at the same time
+	t.flushMutex.Lock()
+	defer t.flushMutex.Unlock()
+	futures := make([]*conc.Future[any], 0)
+	for _, buffer := range t.clusterBuffers {
+		buffer := buffer
+		future := t.flushPool.Submit(func() (any, error) {
+			err := t.flushBinlog(ctx, buffer, buffer.writer, true)
+			if err != nil {
+				return nil, err
+			}
+			return struct{}{}, nil
+		})
+		futures = append(futures, future)
+	}
+	if err := conc.AwaitAll(futures...); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buffer *ClusterBuffer, segmentID int64) error {
+	if binlogs, ok := buffer.flushedBinlogs[segmentID]; !ok || len(binlogs) == 0 {
 		return nil
 	}
+
+	binlogNum := 0
+	numRows := buffer.flushedRowNum[segmentID]
 	insertLogs := make([]*datapb.FieldBinlog, 0)
-	for _, fieldBinlog := range buffer.flushedBinlogs {
+	for _, fieldBinlog := range buffer.flushedBinlogs[segmentID] {
 		insertLogs = append(insertLogs, fieldBinlog)
+		binlogNum = len(fieldBinlog.GetBinlogs())
 	}
-	statPaths, err := statSerializeWrite(ctx, t.binlogIO, t.allocator, buffer.writer, buffer.flushedRowNum)
+
+	fieldBinlogPaths := make([][]string, 0)
+	for idx := 0; idx < binlogNum; idx++ {
+		var ps []string
+		for _, fieldID := range []int64{t.primaryKeyField.GetFieldID(), common.RowIDField, common.TimeStampField} {
+			ps = append(ps, buffer.flushedBinlogs[segmentID][fieldID].GetBinlogs()[idx].GetLogPath())
+		}
+		fieldBinlogPaths = append(fieldBinlogPaths, ps)
+	}
+
+	statsLogs, err := t.generatePkStats(ctx, segmentID, numRows.Load(), fieldBinlogPaths)
 	if err != nil {
 		return err
 	}
 
-	// pack current spill data into a segment
+	// pack current flushBinlog data into a segment
 	seg := &datapb.CompactionSegment{
 		PlanID:              t.plan.GetPlanID(),
-		SegmentID:           buffer.writer.GetSegmentID(),
-		NumOfRows:           buffer.flushedRowNum,
+		SegmentID:           segmentID,
+		NumOfRows:           numRows.Load(),
 		InsertLogs:          insertLogs,
-		Field2StatslogPaths: []*datapb.FieldBinlog{statPaths},
+		Field2StatslogPaths: []*datapb.FieldBinlog{statsLogs},
 		Channel:             t.plan.GetChannel(),
 	}
 	buffer.uploadedSegments = append(buffer.uploadedSegments, seg)
 	segmentStats := storage.SegmentStats{
 		FieldStats: []storage.FieldStats{buffer.clusteringKeyFieldStats.Clone()},
-		NumRows:    int(buffer.flushedRowNum),
+		NumRows:    int(numRows.Load()),
 	}
-	buffer.uploadedSegmentStats[buffer.writer.GetSegmentID()] = segmentStats
-	// refresh
-	t.refreshBufferWriter(buffer)
-	buffer.flushedRowNum = 0
-	buffer.flushedBinlogs = make(map[typeutil.UniqueID]*datapb.FieldBinlog, 0)
-	log.Info("finish pack segment", zap.Int64("partitionID", t.partitionID), zap.Int64("segID", buffer.writer.GetSegmentID()), zap.String("seg", seg.String()), zap.Any("segStats", segmentStats))
+	buffer.uploadedSegmentStats[segmentID] = segmentStats
+
+	for _, binlog := range seg.InsertLogs {
+		log.Debug("pack binlog in segment", zap.Int64("partitionID", t.partitionID),
+			zap.Int64("segID", segmentID), zap.String("binlog", binlog.String()))
+	}
+	for _, statsLog := range seg.Field2StatslogPaths {
+		log.Debug("pack binlog in segment", zap.Int64("partitionID", t.partitionID),
+			zap.Int64("segID", segmentID), zap.String("binlog", statsLog.String()))
+	}
+
+	log.Debug("finish pack segment", zap.Int64("partitionID", t.partitionID),
+		zap.Int64("segID", seg.GetSegmentID()),
+		zap.Int64("row num", seg.GetNumOfRows()))
+
+	// clear segment binlogs cache
+	delete(buffer.flushedBinlogs, segmentID)
 	return nil
 }
 
-func (t *clusteringCompactionTask) spill(ctx context.Context, buffer *ClusterBuffer) error {
-	log := log.With(zap.Int("bufferID", buffer.id), zap.Int64("bufferSize", buffer.bufferRowNum.Load()))
-	if buffer.writer.IsEmpty() {
+func (t *clusteringCompactionTask) flushBinlog(ctx context.Context, buffer *ClusterBuffer, writer *SegmentWriter, pack bool) error {
+	segmentID := writer.GetSegmentID()
+	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("flushBinlog-%d", segmentID))
+	defer span.End()
+	if writer == nil {
+		log.Warn("buffer writer is nil, please check", zap.Int("buffer id", buffer.id))
+		return fmt.Errorf("buffer: %d writer is nil, please check", buffer.id)
+	}
+	defer func() {
+		// set old writer nil
+		writer = nil
+	}()
+	buffer.flushLock.Lock()
+	defer buffer.flushLock.Unlock()
+	writtenMemorySize := int64(writer.WrittenMemorySize())
+	writtenRowNum := writer.GetRowNum()
+	log := log.With(zap.Int("bufferID", buffer.id),
+		zap.Int64("segmentID", segmentID),
+		zap.Bool("pack", pack),
+		zap.Int64("writerRowNum", writtenRowNum),
+		zap.Int64("writtenMemorySize", writtenMemorySize),
+		zap.Int64("bufferMemorySize", buffer.bufferMemorySize.Load()),
+	)
+
+	log.Info("start flush binlog")
+	if writtenRowNum <= 0 {
+		log.Debug("writerRowNum is zero, skip flush")
+		if pack {
+			return t.packBufferToSegment(ctx, buffer, segmentID)
+		}
 		return nil
 	}
-	kvs, partialBinlogs, err := serializeWrite(ctx, t.allocator, buffer.writer)
+
+	start := time.Now()
+	kvs, partialBinlogs, err := serializeWrite(ctx, t.logIDAlloc, writer)
 	if err != nil {
 		log.Warn("compact wrong, failed to serialize writer", zap.Error(err))
 		return err
@@ -748,29 +937,42 @@ func (t *clusteringCompactionTask) spill(ctx context.Context, buffer *ClusterBuf
 
 	if err := t.binlogIO.Upload(ctx, kvs); err != nil {
 		log.Warn("compact wrong, failed to upload kvs", zap.Error(err))
+		return err
+	}
+
+	if info, ok := buffer.flushedBinlogs[segmentID]; !ok || info == nil {
+		buffer.flushedBinlogs[segmentID] = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
 	}
 
 	for fID, path := range partialBinlogs {
-		tmpBinlog, ok := buffer.flushedBinlogs[fID]
+		tmpBinlog, ok := buffer.flushedBinlogs[segmentID][fID]
 		if !ok {
 			tmpBinlog = path
 		} else {
 			tmpBinlog.Binlogs = append(tmpBinlog.Binlogs, path.GetBinlogs()...)
 		}
-		buffer.flushedBinlogs[fID] = tmpBinlog
+		buffer.flushedBinlogs[segmentID][fID] = tmpBinlog
 	}
-	buffer.flushedRowNum = buffer.flushedRowNum + buffer.bufferRowNum.Load()
 
-	// clean buffer
-	buffer.bufferRowNum.Store(0)
+	curSegFlushedRowNum := buffer.flushedRowNum[segmentID]
+	curSegFlushedRowNum.Add(writtenRowNum)
+	buffer.flushedRowNum[segmentID] = curSegFlushedRowNum
 
-	t.spillCount.Inc()
-	log.Info("finish spill binlogs", zap.Int64("spillCount", t.spillCount.Load()))
-	if buffer.flushedRowNum > t.plan.GetMaxSegmentRows() {
-		if err := t.packBufferToSegment(ctx, buffer); err != nil {
+	// clean buffer with writer
+	buffer.bufferMemorySize.Sub(writtenMemorySize)
+
+	t.flushCount.Inc()
+	if pack {
+		if err := t.packBufferToSegment(ctx, buffer, segmentID); err != nil {
 			return err
 		}
 	}
+
+	writer = nil
+	runtime.GC()
+	debug.FreeOSMemory()
+	log.Info("finish flush binlogs", zap.Int64("flushCount", t.flushCount.Load()),
+		zap.Int64("cost", time.Since(start).Milliseconds()))
 	return nil
 }
 
@@ -782,7 +984,8 @@ func (t *clusteringCompactionTask) uploadPartitionStats(ctx context.Context, col
 	if err != nil {
 		return err
 	}
-	newStatsPath := path.Join(common.PartitionStatsPath, metautil.JoinIDPath(collectionID, partitionID), t.plan.GetChannel(), strconv.FormatInt(version, 10))
+	rootPath := strings.Split(t.plan.AnalyzeResultPath, common.AnalyzeStatsPath)[0]
+	newStatsPath := path.Join(rootPath, common.PartitionStatsPath, metautil.JoinIDPath(collectionID, partitionID), t.plan.GetChannel(), strconv.FormatInt(version, 10))
 	kv := map[string][]byte{
 		newStatsPath: partitionStatsBytes,
 	}
@@ -799,6 +1002,8 @@ func (t *clusteringCompactionTask) cleanUp(ctx context.Context) {
 }
 
 func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[interface{}]int64, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("scalarAnalyze-%d", t.GetPlanID()))
+	defer span.End()
 	inputSegments := t.plan.GetSegmentBinlogs()
 	futures := make([]*conc.Future[any], 0, len(inputSegments))
 	analyzeStart := time.Now()
@@ -814,8 +1019,9 @@ func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[inter
 			Level:               segment.Level,
 			CollectionID:        segment.CollectionID,
 			PartitionID:         segment.PartitionID,
+			IsSorted:            segment.IsSorted,
 		}
-		future := t.pool.Submit(func() (any, error) {
+		future := t.mappingPool.Submit(func() (any, error) {
 			analyzeResult, err := t.scalarAnalyzeSegment(ctx, segmentClone)
 			mutex.Lock()
 			defer mutex.Unlock()
@@ -845,6 +1051,8 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	ctx context.Context,
 	segment *datapb.CompactionSegmentBinlogs,
 ) (map[interface{}]int64, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("scalarAnalyzeSegment-%d-%d", t.GetPlanID(), segment.GetSegmentID()))
+	defer span.End()
 	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.Int64("segmentID", segment.GetSegmentID()))
 
 	// vars
@@ -871,7 +1079,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	// Unable to deal with all empty segments cases, so return error
 	if binlogNum == 0 {
 		log.Warn("compact wrong, all segments' binlogs are empty")
-		return nil, merr.WrapErrIllegalCompactionPlan()
+		return nil, merr.WrapErrIllegalCompactionPlan("all segments' binlogs are empty")
 	}
 	log.Debug("binlogNum", zap.Int("binlogNum", binlogNum))
 	for idx := 0; idx < binlogNum; idx++ {
@@ -989,16 +1197,104 @@ func (t *clusteringCompactionTask) scalarPlan(dict map[interface{}]int64) [][]in
 	return buckets
 }
 
-func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) error {
-	segmentID, err := t.allocator.AllocOne()
-	if err != nil {
-		return err
+func (t *clusteringCompactionTask) refreshBufferWriterWithPack(buffer *ClusterBuffer) (bool, error) {
+	var segmentID int64
+	var err error
+	var pack bool
+	if buffer.writer != nil {
+		segmentID = buffer.writer.GetSegmentID()
+		buffer.bufferMemorySize.Add(int64(buffer.writer.WrittenMemorySize()))
 	}
+	if buffer.writer == nil || buffer.currentSegmentRowNum.Load() > t.plan.GetMaxSegmentRows() {
+		pack = true
+		segmentID, err = t.segIDAlloc.AllocOne()
+		if err != nil {
+			return pack, err
+		}
+		buffer.currentSegmentRowNum.Store(0)
+	}
+
+	writer, err := NewSegmentWriter(t.plan.GetSchema(), t.plan.MaxSegmentRows, segmentID, t.partitionID, t.collectionID)
+	if err != nil {
+		return pack, err
+	}
+
+	buffer.writer = writer
+	return pack, nil
+}
+
+func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) error {
+	var segmentID int64
+	var err error
+	segmentID = buffer.writer.GetSegmentID()
+	buffer.bufferMemorySize.Add(int64(buffer.writer.WrittenMemorySize()))
+
 	writer, err := NewSegmentWriter(t.plan.GetSchema(), t.plan.MaxSegmentRows, segmentID, t.partitionID, t.collectionID)
 	if err != nil {
 		return err
 	}
+
 	buffer.writer = writer
-	buffer.bufferRowNum.Store(0)
 	return nil
+}
+
+func (t *clusteringCompactionTask) GetSlotUsage() int64 {
+	return t.plan.GetSlotUsage()
+}
+
+func (t *clusteringCompactionTask) checkBuffersAfterCompaction() error {
+	for _, buffer := range t.clusterBuffers {
+		if len(buffer.flushedBinlogs) != 0 {
+			log.Warn("there are some binlogs have leaked, please check", zap.Int("buffer id", buffer.id),
+				zap.Int64s("leak segments", lo.Keys(buffer.flushedBinlogs)))
+			log.Debug("leak binlogs", zap.Any("buffer flushedBinlogs", buffer.flushedBinlogs))
+			return fmt.Errorf("there are some binlogs have leaked")
+		}
+	}
+	return nil
+}
+
+func (t *clusteringCompactionTask) generatePkStats(ctx context.Context, segmentID int64,
+	numRows int64, binlogPaths [][]string,
+) (*datapb.FieldBinlog, error) {
+	stats, err := storage.NewPrimaryKeyStats(t.primaryKeyField.GetFieldID(), int64(t.primaryKeyField.GetDataType()), numRows)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, path := range binlogPaths {
+		bytesArr, err := t.binlogIO.Download(ctx, path)
+		if err != nil {
+			log.Warn("download insertlogs wrong", zap.Strings("path", path), zap.Error(err))
+			return nil, err
+		}
+		blobs := make([]*storage.Blob, len(bytesArr))
+		for i := range bytesArr {
+			blobs[i] = &storage.Blob{Value: bytesArr[i]}
+		}
+
+		pkIter, err := storage.NewInsertBinlogIterator(blobs, t.primaryKeyField.GetFieldID(), t.primaryKeyField.GetDataType())
+		if err != nil {
+			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", path), zap.Error(err))
+			return nil, err
+		}
+
+		for pkIter.HasNext() {
+			vIter, _ := pkIter.Next()
+			v, ok := vIter.(*storage.Value)
+			if !ok {
+				log.Warn("transfer interface to Value wrong", zap.Strings("path", path))
+				return nil, errors.New("unexpected error")
+			}
+			stats.Update(v.PK)
+		}
+	}
+
+	codec := storage.NewInsertCodecWithSchema(&etcdpb.CollectionMeta{ID: t.collectionID, Schema: t.plan.GetSchema()})
+	sblob, err := codec.SerializePkStats(stats, numRows)
+	if err != nil {
+		return nil, err
+	}
+
+	return uploadStatsBlobs(ctx, t.collectionID, t.partitionID, segmentID, t.primaryKeyField.GetFieldID(), numRows, t.binlogIO, t.logIDAlloc, sblob)
 }

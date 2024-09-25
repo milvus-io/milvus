@@ -14,7 +14,6 @@
 #include <limits>
 #include <string>
 
-#include "query/Expr.h"
 #include "common/Utils.h"
 
 namespace milvus::query {
@@ -69,6 +68,13 @@ template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
 inline bool
 out_of_range(int64_t t) {
     return gt_ub<T>(t) || lt_lb<T>(t);
+}
+
+inline bool
+dis_closer(float dis1, float dis2, const MetricType& metric_type) {
+    if (PositivelyRelated(metric_type))
+        return dis1 > dis2;
+    return dis1 < dis2;
 }
 
 }  // namespace milvus::query

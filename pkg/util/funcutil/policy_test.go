@@ -72,3 +72,10 @@ func Test_PolicyForResource(t *testing.T) {
 		`COLLECTION-db.col1`,
 		PolicyForResource("db", "COLLECTION", "col1"))
 }
+
+func Test_PolicyCheckerWithRole(t *testing.T) {
+	a := PolicyForPrivilege("admin", "COLLECTION", "col1", "ALL", "default")
+	b := PolicyForPrivilege("foo", "COLLECTION", "col1", "ALL", "default")
+	assert.True(t, PolicyCheckerWithRole(a, "admin"))
+	assert.False(t, PolicyCheckerWithRole(b, "admin"))
+}

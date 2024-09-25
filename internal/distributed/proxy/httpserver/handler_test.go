@@ -209,7 +209,7 @@ func (m *mockProxyComponent) Query(ctx context.Context, request *milvuspb.QueryR
 	return &queryResult, nil
 }
 
-var flushResult = milvuspb.FlushResponse{
+var flushResult = &milvuspb.FlushResponse{
 	DbName: "default",
 }
 
@@ -217,10 +217,10 @@ func (m *mockProxyComponent) Flush(ctx context.Context, request *milvuspb.FlushR
 	if len(request.CollectionNames) < 1 {
 		return nil, errors.New("body parse err")
 	}
-	return &flushResult, nil
+	return flushResult, nil
 }
 
-var calcDistanceResult = milvuspb.CalcDistanceResults{
+var calcDistanceResult = &milvuspb.CalcDistanceResults{
 	Array: &milvuspb.CalcDistanceResults_IntDist{
 		IntDist: &schemapb.IntArray{
 			Data: []int32{1, 2, 3},
@@ -232,7 +232,7 @@ func (m *mockProxyComponent) CalcDistance(ctx context.Context, request *milvuspb
 	if len(request.Params) < 1 {
 		return nil, errors.New("body parse err")
 	}
-	return &calcDistanceResult, nil
+	return calcDistanceResult, nil
 }
 
 func (m *mockProxyComponent) GetFlushState(ctx context.Context, request *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {

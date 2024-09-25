@@ -28,10 +28,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -44,16 +45,13 @@ func WrapTaskNotFoundError(taskID int64) error {
 }
 
 func NewSyncTask(ctx context.Context,
+	allocator allocator.Interface,
 	metaCaches map[string]metacache.MetaCache,
 	ts uint64,
 	segmentID, partitionID, collectionID int64, vchannel string,
 	insertData *storage.InsertData,
 	deleteData *storage.DeleteData,
 ) (syncmgr.Task, error) {
-	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		return nil, merr.WrapErrImportFailed("storage v2 is not supported") // TODO: dyh, resolve storage v2
-	}
-
 	metaCache := metaCaches[vchannel]
 	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
 		metaCache.AddSegment(&datapb.SegmentInfo{
@@ -62,15 +60,16 @@ func NewSyncTask(ctx context.Context,
 			CollectionID:  collectionID,
 			PartitionID:   partitionID,
 			InsertChannel: vchannel,
-		}, func(info *datapb.SegmentInfo) *metacache.BloomFilterSet {
-			bfs := metacache.NewBloomFilterSet()
+		}, func(info *datapb.SegmentInfo) pkoracle.PkStat {
+			bfs := pkoracle.NewBloomFilterSet()
 			return bfs
-		})
+		}, metacache.NewBM25StatsFactory)
 	}
 
 	var serializer syncmgr.Serializer
 	var err error
 	serializer, err = syncmgr.NewStorageSerializer(
+		allocator,
 		metaCache,
 		nil,
 	)
@@ -112,13 +111,18 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 	}, nil
 }
 
-func PickSegment(segments []*datapb.ImportRequestSegment, vchannel string, partitionID int64) int64 {
+func PickSegment(segments []*datapb.ImportRequestSegment, vchannel string, partitionID int64) (int64, error) {
 	candidates := lo.Filter(segments, func(info *datapb.ImportRequestSegment, _ int) bool {
 		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
 	})
 
+	if len(candidates) == 0 {
+		return 0, fmt.Errorf("no candidate segments found for channel %s and partition %d",
+			vchannel, partitionID)
+	}
+
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	return candidates[r.Intn(len(candidates))].GetSegmentID()
+	return candidates[r.Intn(len(candidates))].GetSegmentID(), nil
 }
 
 func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData) error {
@@ -152,17 +156,19 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 }
 
 func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
-	idRange := task.req.GetAutoIDRange()
 	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
 	if err != nil {
 		return err
 	}
 	rowNum := GetInsertDataRowCount(data, task.GetSchema())
 	ids := make([]int64, rowNum)
-	for i := 0; i < rowNum; i++ {
-		ids[i] = idRange.GetBegin() + int64(i)
+	start, _, err := task.allocator.Alloc(uint32(rowNum))
+	if err != nil {
+		return err
 	}
-	idRange.Begin += int64(rowNum)
+	for i := 0; i < rowNum; i++ {
+		ids[i] = start + int64(i)
+	}
 	if pkField.GetAutoID() {
 		switch pkField.GetDataType() {
 		case schemapb.DataType_Int64:
@@ -240,9 +246,9 @@ func NewMetaCache(req *datapb.ImportRequest) map[string]metacache.MetaCache {
 			},
 			Schema: schema,
 		}
-		metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
-		})
+		metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
+		}, metacache.NoneBm25StatsFactory)
 		metaCaches[channel] = metaCache
 	}
 	return metaCaches

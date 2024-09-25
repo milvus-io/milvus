@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
-	"sort"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -31,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
@@ -39,11 +39,15 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -199,85 +203,10 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 		Data: cacheItems,
 	})
 
-	start := time.Now()
-	retMap := sd.applyBFInParallel(deleteData, segments.GetBFApplyPool())
-	// segment => delete data
-	delRecords := make(map[int64]DeleteData)
-	retMap.Range(func(key int, value *BatchApplyRet) bool {
-		startIdx := value.StartIdx
-		pk2SegmentIDs := value.Segment2Hits
-
-		pks := deleteData[value.DeleteDataIdx].PrimaryKeys
-		tss := deleteData[value.DeleteDataIdx].Timestamps
-
-		for segmentID, hits := range pk2SegmentIDs {
-			for i, hit := range hits {
-				if hit {
-					delRecord := delRecords[segmentID]
-					delRecord.PrimaryKeys = append(delRecord.PrimaryKeys, pks[startIdx+i])
-					delRecord.Timestamps = append(delRecord.Timestamps, tss[startIdx+i])
-					delRecord.RowCount++
-					delRecords[segmentID] = delRecord
-				}
-			}
-		}
-		return true
-	})
-	bfCost := time.Since(start)
-
-	offlineSegments := typeutil.NewConcurrentSet[int64]()
-
-	sealed, growing, version := sd.distribution.PinOnlineSegments()
-
-	start = time.Now()
-	eg, ctx := errgroup.WithContext(context.Background())
-	for _, entry := range sealed {
-		entry := entry
-		eg.Go(func() error {
-			worker, err := sd.workerManager.GetWorker(ctx, entry.NodeID)
-			if err != nil {
-				log.Warn("failed to get worker",
-					zap.Int64("nodeID", paramtable.GetNodeID()),
-					zap.Error(err),
-				)
-				// skip if node down
-				// delete will be processed after loaded again
-				return nil
-			}
-			offlineSegments.Upsert(sd.applyDelete(ctx, entry.NodeID, worker, delRecords, entry.Segments, querypb.DataScope_Historical)...)
-			return nil
-		})
-	}
-	if len(growing) > 0 {
-		eg.Go(func() error {
-			worker, err := sd.workerManager.GetWorker(ctx, paramtable.GetNodeID())
-			if err != nil {
-				log.Error("failed to get worker(local)",
-					zap.Int64("nodeID", paramtable.GetNodeID()),
-					zap.Error(err),
-				)
-				// panic here, local worker shall not have error
-				panic(err)
-			}
-			offlineSegments.Upsert(sd.applyDelete(ctx, paramtable.GetNodeID(), worker, delRecords, growing, querypb.DataScope_Streaming)...)
-			return nil
-		})
-	}
-	// not error return in apply delete
-	_ = eg.Wait()
-	forwardDeleteCost := time.Since(start)
-
-	sd.distribution.Unpin(version)
-	offlineSegIDs := offlineSegments.Collect()
-	if len(offlineSegIDs) > 0 {
-		log.Warn("failed to apply delete, mark segment offline", zap.Int64s("offlineSegments", offlineSegIDs))
-		sd.markSegmentOffline(offlineSegIDs...)
-	}
+	sd.forwardStreamingDeletion(context.Background(), deleteData)
 
 	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.QueryNodeApplyBFCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(bfCost.Milliseconds()))
-	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(forwardDeleteCost.Milliseconds()))
 }
 
 type BatchApplyRet = struct {
@@ -304,8 +233,9 @@ func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *con
 			retIdx += 1
 			tmpRetIndex := retIdx
 			deleteDataId := didx
+			partitionID := data.PartitionID
 			future := pool.Submit(func() (any, error) {
-				ret := sd.pkOracle.BatchGet(pks[startIdx:endIdx], pkoracle.WithPartitionID(data.PartitionID))
+				ret := sd.pkOracle.BatchGet(pks[startIdx:endIdx], pkoracle.WithPartitionID(partitionID))
 				retMap.Insert(tmpRetIndex, &BatchApplyRet{
 					DeleteDataIdx: deleteDataId,
 					StartIdx:      startIdx,
@@ -322,7 +252,13 @@ func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *con
 }
 
 // applyDelete handles delete record and apply them to corresponding workers.
-func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker cluster.Worker, delRecords map[int64]DeleteData, entries []SegmentEntry, scope querypb.DataScope) []int64 {
+func (sd *shardDelegator) applyDelete(ctx context.Context,
+	nodeID int64,
+	worker cluster.Worker,
+	delRecords func(segmentID int64) (DeleteData, bool),
+	entries []SegmentEntry,
+	scope querypb.DataScope,
+) []int64 {
 	offlineSegments := typeutil.NewConcurrentSet[int64]()
 	log := sd.getLogger(ctx)
 
@@ -335,7 +271,7 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 	var futures []*conc.Future[struct{}]
 	for _, segmentEntry := range entries {
 		segmentEntry := segmentEntry
-		delRecord, ok := delRecords[segmentEntry.SegmentID]
+		delRecord, ok := delRecords(segmentEntry.SegmentID)
 		log := log.With(
 			zap.Int64("segmentID", segmentEntry.SegmentID),
 			zap.Int64("workerID", nodeID),
@@ -526,6 +462,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			PartitionID: info.GetPartitionID(),
 			NodeID:      req.GetDstNodeID(),
 			Version:     req.GetVersion(),
+			Level:       info.GetLevel(),
 		}
 	})
 	if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
@@ -542,7 +479,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		}
 
 		log.Debug("load delete...")
-		err = sd.loadStreamDelete(ctx, candidates, infos, req.GetDeltaPositions(), targetNodeID, worker, entries)
+		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker)
 		if err != nil {
 			log.Warn("load stream delete failed", zap.Error(err))
 			return err
@@ -592,10 +529,6 @@ func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkorac
 		}
 	}
 
-	sort.Slice(pks, func(i, j int) bool {
-		return tss[i] < tss[j]
-	})
-
 	return pks, tss
 }
 
@@ -620,16 +553,16 @@ func (sd *shardDelegator) RefreshLevel0DeletionStats() {
 func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	candidates []*pkoracle.BloomFilterSet,
 	infos []*querypb.SegmentLoadInfo,
-	deltaPositions []*msgpb.MsgPosition,
+	req *querypb.LoadSegmentsRequest,
 	targetNodeID int64,
 	worker cluster.Worker,
-	entries []SegmentEntry,
 ) error {
 	log := sd.getLogger(ctx)
 
 	idCandidates := lo.SliceToMap(candidates, func(candidate *pkoracle.BloomFilterSet) (int64, *pkoracle.BloomFilterSet) {
 		return candidate.ID(), candidate
 	})
+	deltaPositions := req.GetDeltaPositions()
 
 	sd.deleteMut.RLock()
 	defer sd.deleteMut.RUnlock()
@@ -650,29 +583,23 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			position = deltaPositions[0]
 		}
 
-		deletedPks, deletedTss := sd.GetLevel0Deletions(candidate.Partition(), candidate)
-		deleteData := &storage.DeleteData{}
-		deleteData.AppendBatch(deletedPks, deletedTss)
-		if deleteData.RowCount > 0 {
-			log.Info("forward L0 delete to worker...",
-				zap.Int64("deleteRowNum", deleteData.RowCount),
-			)
-			err := worker.Delete(ctx, &querypb.DeleteRequest{
-				Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(targetNodeID)),
-				CollectionId: info.GetCollectionID(),
-				PartitionId:  info.GetPartitionID(),
-				SegmentId:    info.GetSegmentID(),
-				PrimaryKeys:  storage.ParsePrimaryKeys2IDs(deleteData.Pks),
-				Timestamps:   deleteData.Tss,
-				Scope:        querypb.DataScope_Historical, // only sealed segment need to loadStreamDelete
-			})
-			if err != nil {
-				log.Warn("failed to apply delete when LoadSegment", zap.Error(err))
-				return err
-			}
+		// after L0 segment feature
+		// growing segemnts should have load stream delete as well
+		deleteScope := querypb.DataScope_All
+		switch candidate.Type() {
+		case commonpb.SegmentState_Sealed:
+			deleteScope = querypb.DataScope_Historical
+		case commonpb.SegmentState_Growing:
+			deleteScope = querypb.DataScope_Streaming
 		}
 
-		deleteData = &storage.DeleteData{}
+		// forward l0 deletion
+		err := sd.forwardL0Deletion(ctx, info, req, candidate, targetNodeID, worker)
+		if err != nil {
+			return err
+		}
+
+		deleteData := &storage.DeleteData{}
 		// start position is dml position for segment
 		// if this position is before deleteBuffer's safe ts, it means some delete shall be read from msgstream
 		if position.GetTimestamp() < sd.deleteBuffer.SafeTs() {
@@ -722,6 +649,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 				SegmentId:    info.GetSegmentID(),
 				PrimaryKeys:  storage.ParsePrimaryKeys2IDs(deleteData.Pks),
 				Timestamps:   deleteData.Tss,
+				Scope:        deleteScope,
 			})
 			if err != nil {
 				log.Warn("failed to apply delete when LoadSegment", zap.Error(err))
@@ -742,14 +670,10 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	return nil
 }
 
-func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position *msgpb.MsgPosition, safeTs uint64, candidate *pkoracle.BloomFilterSet) (*storage.DeleteData, error) {
-	log := sd.getLogger(ctx).With(
-		zap.String("channel", position.ChannelName),
-		zap.Int64("segmentID", candidate.ID()),
-	)
+func (sd *shardDelegator) createStreamFromMsgStream(ctx context.Context, position *msgpb.MsgPosition) (ch <-chan *msgstream.MsgPack, closer func(), err error) {
 	stream, err := sd.factory.NewTtMsgStream(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer stream.Close()
 	vchannelName := position.ChannelName
@@ -761,17 +685,59 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 	// Random the subname in case we trying to load same delta at the same time
 	subName := fmt.Sprintf("querynode-delta-loader-%d-%d-%d", paramtable.GetNodeID(), sd.collectionID, rand.Int())
 	log.Info("from dml check point load delete", zap.Any("position", position), zap.String("vChannel", vchannelName), zap.String("subName", subName), zap.Time("positionTs", ts))
-	err = stream.AsConsumer(context.TODO(), []string{pChannelName}, subName, mqwrapper.SubscriptionPositionUnknown)
+	err = stream.AsConsumer(context.TODO(), []string{pChannelName}, subName, mqcommon.SubscriptionPositionUnknown)
 	if err != nil {
-		return nil, err
+		return nil, stream.Close, err
 	}
 
-	ts = time.Now()
 	err = stream.Seek(context.TODO(), []*msgpb.MsgPosition{position}, false)
 	if err != nil {
+		return nil, stream.Close, err
+	}
+	return stream.Chan(), stream.Close, nil
+}
+
+func (sd *shardDelegator) createDeleteStreamFromStreamingService(ctx context.Context, position *msgpb.MsgPosition) (ch <-chan *msgstream.MsgPack, closer func(), err error) {
+	handler := adaptor.NewMsgPackAdaptorHandler()
+	s := streaming.WAL().Read(ctx, streaming.ReadOption{
+		VChannel: position.GetChannelName(),
+		DeliverPolicy: options.DeliverPolicyStartFrom(
+			adaptor.MustGetMessageIDFromMQWrapperIDBytes("pulsar", position.GetMsgID()),
+		),
+		DeliverFilters: []options.DeliverFilter{
+			// only deliver message which timestamp >= position.Timestamp
+			options.DeliverFilterTimeTickGTE(position.GetTimestamp()),
+			// only delete message
+			options.DeliverFilterMessageType(message.MessageTypeDelete),
+		},
+		MessageHandler: handler,
+	})
+	return handler.Chan(), s.Close, nil
+}
+
+func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position *msgpb.MsgPosition, safeTs uint64, candidate *pkoracle.BloomFilterSet) (*storage.DeleteData, error) {
+	log := sd.getLogger(ctx).With(
+		zap.String("channel", position.ChannelName),
+		zap.Int64("segmentID", candidate.ID()),
+	)
+	pChannelName := funcutil.ToPhysicalChannel(position.ChannelName)
+
+	var ch <-chan *msgstream.MsgPack
+	var closer func()
+	var err error
+	if streamingutil.IsStreamingServiceEnabled() {
+		ch, closer, err = sd.createDeleteStreamFromStreamingService(ctx, position)
+	} else {
+		ch, closer, err = sd.createStreamFromMsgStream(ctx, position)
+	}
+	if closer != nil {
+		defer closer()
+	}
+	if err != nil {
 		return nil, err
 	}
 
+	start := time.Now()
 	result := &storage.DeleteData{}
 	hasMore := true
 	for hasMore {
@@ -779,7 +745,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 		case <-ctx.Done():
 			log.Debug("read delta msg from seek position done", zap.Error(ctx.Err()))
 			return nil, ctx.Err()
-		case msgPack, ok := <-stream.Chan():
+		case msgPack, ok := <-ch:
 			if !ok {
 				err = fmt.Errorf("stream channel closed, pChannelName=%v, msgID=%v", pChannelName, position.GetMsgID())
 				log.Warn("fail to read delta msg",
@@ -827,7 +793,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 			}
 		}
 	}
-	log.Info("successfully read delete from stream ", zap.Duration("time spent", time.Since(ts)))
+	log.Info("successfully read delete from stream ", zap.Duration("time spent", time.Since(start)))
 	return result, nil
 }
 

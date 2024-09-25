@@ -114,7 +114,7 @@ func TestHTTPWrapper(t *testing.T) {
 	})
 	path = "/wrapper/post/trace/call"
 	app.POST(path, wrapperPost(func() any { return &DefaultReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
-		return wrapperProxy(ctx, c, req, false, false, func(reqctx context.Context, req any) (any, error) {
+		return wrapperProxy(ctx, c, req, false, false, "", func(reqctx context.Context, req any) (any, error) {
 			return nil, nil
 		})
 	})))
@@ -174,12 +174,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, handle)
+		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path: path,
@@ -193,12 +193,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, handle)
+		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path:    path,
@@ -215,12 +215,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, handle)
+		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path: path,
@@ -239,12 +239,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, handle)
+		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path:    path,
@@ -274,7 +274,7 @@ func TestGrpcWrapper(t *testing.T) {
 	for _, testcase := range getTestCasesNeedAuth {
 		t.Run("get"+testcase.path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, testcase.path, nil)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			ginHandler.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -291,11 +291,11 @@ func TestGrpcWrapper(t *testing.T) {
 
 	path = "/wrapper/grpc/auth"
 	app.GET(path, func(c *gin.Context) {
-		wrapperProxy(context.Background(), c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(context.Background(), c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "test", DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.LoadCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.LoadCollectionRequest{}, true, false, "", handle)
 	})
 	t.Run("check authorization", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -311,7 +311,7 @@ func TestGrpcWrapper(t *testing.T) {
 
 		paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
 		req = httptest.NewRequest(http.MethodGet, needAuthPrefix+path, nil)
-		req.SetBasicAuth("test", util.DefaultRootPassword)
+		req.SetBasicAuth("test", getDefaultRootPassword())
 		w = httptest.NewRecorder()
 		ginHandler.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusForbidden, w.Code)
@@ -469,9 +469,14 @@ func TestDatabaseWrapper(t *testing.T) {
 }
 
 func TestCreateCollection(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(12)
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(13)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
 	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
@@ -599,6 +604,15 @@ func TestCreateCollection(t *testing.T) {
         }, "indexParams": [{"fieldName": "book_xxx", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
 		errMsg:  "missing required parameters, error: `book_xxx` hasn't defined in schema",
 		errCode: 1802,
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+		        "fields": [
+		            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "isPartitionKey": true, "elementTypeParams": {}},
+		            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
+		        ]
+		    }, "params": {"partitionKeyIsolation": "true"}}`),
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
@@ -954,6 +968,7 @@ func TestMethodGet(t *testing.T) {
 
 var commonSuccessStatus = &commonpb.Status{
 	ErrorCode: commonpb.ErrorCode_Success,
+	Code:      merr.Code(nil),
 	Reason:    "",
 }
 
@@ -964,6 +979,9 @@ var commonErrorStatus = &commonpb.Status{
 
 func TestMethodDelete(t *testing.T) {
 	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().DropPartition(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
@@ -1013,6 +1031,9 @@ func TestMethodDelete(t *testing.T) {
 
 func TestMethodPost(t *testing.T) {
 	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().RenameCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
@@ -1151,6 +1172,9 @@ func TestMethodPost(t *testing.T) {
 
 func TestDML(t *testing.T) {
 	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
@@ -1159,7 +1183,16 @@ func TestDML(t *testing.T) {
 		Status:         &StatusSuccess,
 	}, nil).Times(6)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: commonErrorStatus}, nil).Times(4)
-	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{Status: commonSuccessStatus, OutputFields: []string{}, FieldsData: []*schemapb.FieldData{}}, nil).Times(3)
+	mp.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		if matchCountRule(req.OutputFields) {
+			for _, pair := range req.QueryParams {
+				if pair.GetKey() == ParamLimit {
+					return nil, fmt.Errorf("mock error")
+				}
+			}
+		}
+		return &milvuspb.QueryResults{Status: commonSuccessStatus, OutputFields: []string{}, FieldsData: []*schemapb.FieldData{}}, nil
+	}).Times(4)
 	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
 	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{}}}}}, nil).Once()
 	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
@@ -1180,6 +1213,10 @@ func TestDML(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        QueryAction,
 		requestBody: []byte(`{"collectionName": "book", "filter": "book_id in [2, 4, 6, 8]"}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        QueryAction,
+		requestBody: []byte(`{"collectionName": "book", "filter": "", "outputFields": ["count(*)"], "limit": 10}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        InsertAction,
@@ -1257,6 +1294,9 @@ func TestDML(t *testing.T) {
 
 func TestAllowInt64(t *testing.T) {
 	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 	mp := mocks.NewMockProxy(t)
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []requestBodyTestCase{}
@@ -1299,6 +1339,9 @@ func TestAllowInt64(t *testing.T) {
 
 func TestSearchV2(t *testing.T) {
 	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 	outputFields := []string{FieldBookID, FieldWordCount, "author", "date"}
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
@@ -1306,7 +1349,7 @@ func TestSearchV2(t *testing.T) {
 		Schema:         generateCollectionSchema(schemapb.DataType_Int64),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Times(12)
+	}, nil).Times(11)
 	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
 		TopK:         int64(3),
 		OutputFields: outputFields,
@@ -1336,10 +1379,10 @@ func TestSearchV2(t *testing.T) {
 	bfloat16VectorField.Name = "bfloat16Vector"
 	sparseFloatVectorField := generateVectorFieldSchema(schemapb.DataType_SparseFloatVector)
 	sparseFloatVectorField.Name = "sparseFloatVector"
-	collSchema.Fields = append(collSchema.Fields, &binaryVectorField)
-	collSchema.Fields = append(collSchema.Fields, &float16VectorField)
-	collSchema.Fields = append(collSchema.Fields, &bfloat16VectorField)
-	collSchema.Fields = append(collSchema.Fields, &sparseFloatVectorField)
+	collSchema.Fields = append(collSchema.Fields, binaryVectorField)
+	collSchema.Fields = append(collSchema.Fields, float16VectorField)
+	collSchema.Fields = append(collSchema.Fields, bfloat16VectorField)
+	collSchema.Fields = append(collSchema.Fields, sparseFloatVectorField)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         collSchema,
@@ -1355,7 +1398,7 @@ func TestSearchV2(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"],"consistencyLevel": "Strong"}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
@@ -1363,8 +1406,8 @@ func TestSearchV2(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"range_filter": 0.1}}`),
-		errMsg:      "can only accept json format request, error: invalid search params",
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "searchParams": {"ignore_growing": "true"}}`),
+		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go struct field searchParams.searchParams.ignore_growing of type bool",
 		errCode:     1801, // ErrIncorrectParameterFormat
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
@@ -1380,7 +1423,7 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [["0.1", "0.2"]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
-		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go value of type float32: invalid parameter[expected=FloatVector][actual=[\"0.1\", \"0.2\"]]",
+		errMsg:      "can only accept json format request, error: Mismatch type float32 with value string \"at index 8: mismatched type with value\\n\\n\\t[\\\"0.1\\\", \\\"0.2\\\"]\\n\\t........^.....\\n\": invalid parameter[expected=FloatVector][actual=[\"0.1\", \"0.2\"]]",
 		errCode:     1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
@@ -1422,7 +1465,7 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "binaryVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
-		errMsg:      "can only accept json format request, error: json: cannot unmarshal number 0.1 into Go value of type uint8: invalid parameter[expected=BinaryVector][actual=[[0.1, 0.2]]]",
+		errMsg:      "can only accept json format request, error: Mismatch type uint8 with value number \"at index 7: mismatched type with value\\n\\n\\t[[0.1, 0.2]]\\n\\t.......^....\\n\": invalid parameter[expected=BinaryVector][actual=[[0.1, 0.2]]]",
 		errCode:     1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
@@ -1485,6 +1528,12 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [{"1": 0.1}], "annsField": "sparseFloatVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "searchParams": {"params":"a"}}`),
+		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go struct field searchParams.searchParams.params of type map[string]interface {}",
+		errCode:     1801, // ErrIncorrectParameterFormat
 	})
 
 	for _, testcase := range queryTestCases {

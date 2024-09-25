@@ -17,7 +17,6 @@
 #include "Plan.h"
 #include "common/Utils.h"
 #include "PlanProto.h"
-#include "generated/ShowPlanNodeVisitor.h"
 
 namespace milvus::query {
 
@@ -61,7 +60,7 @@ ParsePlaceholderGroup(const Plan* plan,
         } else {
             auto line_size = info.values().Get(0).size();
             if (field_meta.get_sizeof() != line_size) {
-                throw SegcoreError(
+                PanicInfo(
                     DimNotMatch,
                     fmt::format("vector dimension mismatch, expected vector "
                                 "size(byte) {}, actual {}.",
@@ -80,13 +79,34 @@ ParsePlaceholderGroup(const Plan* plan,
     return result;
 }
 
+void
+ParsePlanNodeProto(proto::plan::PlanNode& plan_node,
+                   const void* serialized_expr_plan,
+                   int64_t size) {
+    google::protobuf::io::ArrayInputStream array_stream(serialized_expr_plan,
+                                                        size);
+    google::protobuf::io::CodedInputStream input_stream(&array_stream);
+    input_stream.SetRecursionLimit(std::numeric_limits<int32_t>::max());
+
+    auto res = plan_node.ParsePartialFromCodedStream(&input_stream);
+    if (!res) {
+        PanicInfo(UnexpectedError, "parse plan node proto failed");
+    }
+}
+
 std::unique_ptr<Plan>
 CreateSearchPlanByExpr(const Schema& schema,
                        const void* serialized_expr_plan,
                        const int64_t size) {
     // Note: serialized_expr_plan is of binary format
     proto::plan::PlanNode plan_node;
-    plan_node.ParseFromArray(serialized_expr_plan, size);
+    ParsePlanNodeProto(plan_node, serialized_expr_plan, size);
+    return ProtoParser(schema).CreatePlan(plan_node);
+}
+
+std::unique_ptr<Plan>
+CreateSearchPlanFromPlanNode(const Schema& schema,
+                             const proto::plan::PlanNode& plan_node) {
     return ProtoParser(schema).CreatePlan(plan_node);
 }
 
@@ -95,15 +115,7 @@ CreateRetrievePlanByExpr(const Schema& schema,
                          const void* serialized_expr_plan,
                          const int64_t size) {
     proto::plan::PlanNode plan_node;
-    google::protobuf::io::ArrayInputStream array_stream(serialized_expr_plan,
-                                                        size);
-    google::protobuf::io::CodedInputStream input_stream(&array_stream);
-    input_stream.SetRecursionLimit(std::numeric_limits<int32_t>::max());
-
-    auto res = plan_node.ParsePartialFromCodedStream(&input_stream);
-    if (!res) {
-        throw SegcoreError(UnexpectedError, "parse plan node proto failed");
-    }
+    ParsePlanNodeProto(plan_node, serialized_expr_plan, size);
     return ProtoParser(schema).CreateRetrievePlan(plan_node);
 }
 
@@ -131,21 +143,5 @@ GetNumOfQueries(const PlaceholderGroup* group) {
 //    }
 //    return plan;
 //}
-
-void
-Plan::check_identical(Plan& other) {
-    Assert(&schema_ == &other.schema_);
-    auto json = ShowPlanNodeVisitor().call_child(*this->plan_node_);
-    auto other_json = ShowPlanNodeVisitor().call_child(*other.plan_node_);
-    Assert(json.dump(2) == other_json.dump(2));
-    Assert(this->extra_info_opt_.has_value() ==
-           other.extra_info_opt_.has_value());
-    if (this->extra_info_opt_.has_value()) {
-        Assert(this->extra_info_opt_->involved_fields_ ==
-               other.extra_info_opt_->involved_fields_);
-    }
-    Assert(this->tag2field_ == other.tag2field_);
-    Assert(this->target_entries_ == other.target_entries_);
-}
 
 }  // namespace milvus::query

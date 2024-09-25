@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -36,27 +36,27 @@ import (
 )
 
 func TestPrintBinlogFilesInt64(t *testing.T) {
-	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
+	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40, false)
 
 	curTS := time.Now().UnixNano() / int64(time.Millisecond)
 
 	e1, err := w.NextInsertEventWriter()
 	assert.NoError(t, err)
-	err = e1.AddDataToPayload([]int64{1, 2, 3})
+	err = e1.AddDataToPayload([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
-	err = e1.AddDataToPayload([]int32{4, 5, 6})
+	err = e1.AddDataToPayload([]int32{4, 5, 6}, nil)
 	assert.Error(t, err)
-	err = e1.AddDataToPayload([]int64{4, 5, 6})
+	err = e1.AddDataToPayload([]int64{4, 5, 6}, nil)
 	assert.NoError(t, err)
 	e1.SetEventTimestamp(tsoutil.ComposeTS(curTS+10*60*1000, 0), tsoutil.ComposeTS(curTS+20*60*1000, 0))
 
 	e2, err := w.NextInsertEventWriter()
 	assert.NoError(t, err)
-	err = e2.AddDataToPayload([]int64{7, 8, 9})
+	err = e2.AddDataToPayload([]int64{7, 8, 9}, nil)
 	assert.NoError(t, err)
-	err = e2.AddDataToPayload([]bool{true, false, true})
+	err = e2.AddDataToPayload([]bool{true, false, true}, nil)
 	assert.Error(t, err)
-	err = e2.AddDataToPayload([]int64{10, 11, 12})
+	err = e2.AddDataToPayload([]int64{10, 11, 12}, nil)
 	assert.NoError(t, err)
 	e2.SetEventTimestamp(tsoutil.ComposeTS(curTS+30*60*1000, 0), tsoutil.ComposeTS(curTS+40*60*1000, 0))
 
@@ -441,10 +441,10 @@ func TestPrintDDFiles(t *testing.T) {
 	dropPartitionString, err := proto.Marshal(&dropPartitionReq)
 	assert.NoError(t, err)
 	ddRequests := []string{
-		string(createCollString[:]),
-		string(dropCollString[:]),
-		string(createPartitionString[:]),
-		string(dropPartitionString[:]),
+		string(createCollString),
+		string(dropCollString),
+		string(createPartitionString),
+		string(dropPartitionString),
 	}
 	eventTypeCodes := []EventTypeCode{
 		CreateCollectionEventType,

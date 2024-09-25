@@ -17,7 +17,7 @@
 package segments
 
 /*
-#cgo pkg-config: milvus_segcore
+#cgo pkg-config: milvus_core
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
@@ -28,10 +28,10 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -146,6 +146,7 @@ type Collection struct {
 	metricType atomic.String // deprecated
 	schema     atomic.Pointer[schemapb.CollectionSchema]
 	isGpuIndex bool
+	loadFields typeutil.Set[int64]
 
 	refCount *atomic.Uint32
 }
@@ -227,7 +228,23 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		CCollection
 		NewCollection(const char* schema_proto_blob);
 	*/
-	schemaBlob, err := proto.Marshal(schema)
+
+	var loadFieldIDs typeutil.Set[int64]
+	loadSchema := typeutil.Clone(schema)
+
+	// if load fields is specified, do filtering logic
+	// otherwise use all fields for backward compatibility
+	if len(loadMetaInfo.GetLoadFields()) > 0 {
+		loadFieldIDs = typeutil.NewSet(loadMetaInfo.GetLoadFields()...)
+		loadSchema.Fields = lo.Filter(loadSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+			// system field shall always be loaded for now
+			return loadFieldIDs.Contain(field.GetFieldID()) || common.IsSystemField(field.GetFieldID())
+		})
+	} else {
+		loadFieldIDs = typeutil.NewSet(lo.Map(loadSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })...)
+	}
+
+	schemaBlob, err := proto.Marshal(loadSchema)
 	if err != nil {
 		log.Warn("marshal schema failed", zap.Error(err))
 		return nil
@@ -263,6 +280,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		resourceGroup: loadMetaInfo.GetResourceGroup(),
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
+		loadFields:    loadFieldIDs,
 	}
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)

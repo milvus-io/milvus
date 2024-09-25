@@ -2,14 +2,14 @@ package kafka
 
 import (
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 )
 
 type kafkaID struct {
 	messageID int64
 }
 
-var _ mqwrapper.MessageID = &kafkaID{}
+var _ mqcommon.MessageID = &kafkaID{}
 
 func (kid *kafkaID) Serialize() []byte {
 	return SerializeKafkaID(kid.messageID)

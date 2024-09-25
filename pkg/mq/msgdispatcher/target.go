@@ -21,6 +21,10 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -32,6 +36,8 @@ type target struct {
 	closeMu   sync.Mutex
 	closeOnce sync.Once
 	closed    bool
+
+	cancelCh lifetime.SafeChan
 }
 
 func newTarget(vchannel string, pos *Pos) *target {
@@ -39,12 +45,14 @@ func newTarget(vchannel string, pos *Pos) *target {
 		vchannel: vchannel,
 		ch:       make(chan *MsgPack, paramtable.Get().MQCfg.TargetBufSize.GetAsInt()),
 		pos:      pos,
+		cancelCh: lifetime.NewSafeChan(),
 	}
 	t.closed = false
 	return t
 }
 
 func (t *target) close() {
+	t.cancelCh.Close()
 	t.closeMu.Lock()
 	defer t.closeMu.Unlock()
 	t.closeOnce.Do(func() {
@@ -61,6 +69,9 @@ func (t *target) send(pack *MsgPack) error {
 	}
 	maxTolerantLag := paramtable.Get().MQCfg.MaxTolerantLag.GetAsDuration(time.Second)
 	select {
+	case <-t.cancelCh.CloseCh():
+		log.Info("target closed", zap.String("vchannel", t.vchannel))
+		return nil
 	case <-time.After(maxTolerantLag):
 		return fmt.Errorf("send target timeout, vchannel=%s, timeout=%s", t.vchannel, maxTolerantLag)
 	case t.ch <- pack:

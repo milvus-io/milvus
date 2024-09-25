@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -246,6 +247,7 @@ class Array {
             return T(data_ + offsets_[index], element_length);
         }
         if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
+                      std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
                       std::is_same_v<T, float> || std::is_same_v<T, double>) {
             switch (element_type_) {
                 case DataType::INT8:
@@ -272,6 +274,11 @@ class Array {
 
     const std::vector<uint64_t>&
     get_offsets() const {
+        return offsets_;
+    }
+
+    std::vector<uint64_t>
+    get_offsets_in_copy() const {
         return offsets_;
     }
 
@@ -572,6 +579,11 @@ class ArrayView {
     const void*
     data() const {
         return data_;
+    }
+    // copy to result
+    std::vector<uint64_t>
+    get_offsets_in_copy() const {
+        return offsets_;
     }
 
     bool

@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type DatabaseReq struct {
@@ -104,7 +105,7 @@ type QueryReqV2 struct {
 	CollectionName string   `json:"collectionName" binding:"required"`
 	PartitionNames []string `json:"partitionNames"`
 	OutputFields   []string `json:"outputFields"`
-	Filter         string   `json:"filter" binding:"required"`
+	Filter         string   `json:"filter"`
 	Limit          int32    `json:"limit"`
 	Offset         int32    `json:"offset"`
 }
@@ -140,18 +141,28 @@ type CollectionDataReq struct {
 
 func (req *CollectionDataReq) GetDbName() string { return req.DbName }
 
+type searchParams struct {
+	// not use metricType any more, just for compatibility
+	MetricType    string                 `json:"metricType"`
+	Params        map[string]interface{} `json:"params"`
+	IgnoreGrowing bool                   `json:"ignore_growing"`
+}
+
 type SearchReqV2 struct {
-	DbName         string             `json:"dbName"`
-	CollectionName string             `json:"collectionName" binding:"required"`
-	Data           []interface{}      `json:"data" binding:"required"`
-	AnnsField      string             `json:"annsField"`
-	PartitionNames []string           `json:"partitionNames"`
-	Filter         string             `json:"filter"`
-	GroupByField   string             `json:"groupingField"`
-	Limit          int32              `json:"limit"`
-	Offset         int32              `json:"offset"`
-	OutputFields   []string           `json:"outputFields"`
-	Params         map[string]float64 `json:"params"`
+	DbName           string        `json:"dbName"`
+	CollectionName   string        `json:"collectionName" binding:"required"`
+	Data             []interface{} `json:"data" binding:"required"`
+	AnnsField        string        `json:"annsField"`
+	PartitionNames   []string      `json:"partitionNames"`
+	Filter           string        `json:"filter"`
+	GroupByField     string        `json:"groupingField"`
+	Limit            int32         `json:"limit"`
+	Offset           int32         `json:"offset"`
+	OutputFields     []string      `json:"outputFields"`
+	SearchParams     searchParams  `json:"searchParams"`
+	ConsistencyLevel string        `json:"consistencyLevel"`
+	// not use Params any more, just for compatibility
+	Params map[string]float64 `json:"params"`
 }
 
 func (req *SearchReqV2) GetDbName() string { return req.DbName }
@@ -162,25 +173,25 @@ type Rand struct {
 }
 
 type SubSearchReq struct {
-	Data          []interface{}      `json:"data" binding:"required"`
-	AnnsField     string             `json:"annsField"`
-	Filter        string             `json:"filter"`
-	GroupByField  string             `json:"groupingField"`
-	MetricType    string             `json:"metricType"`
-	Limit         int32              `json:"limit"`
-	Offset        int32              `json:"offset"`
-	IgnoreGrowing bool               `json:"ignoreGrowing"`
-	Params        map[string]float64 `json:"params"`
+	Data         []interface{} `json:"data" binding:"required"`
+	AnnsField    string        `json:"annsField"`
+	Filter       string        `json:"filter"`
+	GroupByField string        `json:"groupingField"`
+	MetricType   string        `json:"metricType"`
+	Limit        int32         `json:"limit"`
+	Offset       int32         `json:"offset"`
+	SearchParams searchParams  `json:"searchParams"`
 }
 
 type HybridSearchReq struct {
-	DbName         string         `json:"dbName"`
-	CollectionName string         `json:"collectionName" binding:"required"`
-	PartitionNames []string       `json:"partitionNames"`
-	Search         []SubSearchReq `json:"search"`
-	Rerank         Rand           `json:"rerank"`
-	Limit          int32          `json:"limit"`
-	OutputFields   []string       `json:"outputFields"`
+	DbName           string         `json:"dbName"`
+	CollectionName   string         `json:"collectionName" binding:"required"`
+	PartitionNames   []string       `json:"partitionNames"`
+	Search           []SubSearchReq `json:"search"`
+	Rerank           Rand           `json:"rerank"`
+	Limit            int32          `json:"limit"`
+	OutputFields     []string       `json:"outputFields"`
+	ConsistencyLevel string         `json:"consistencyLevel"`
 }
 
 func (req *HybridSearchReq) GetDbName() string { return req.DbName }
@@ -356,14 +367,14 @@ func (req *AliasCollectionReq) GetAliasName() string {
 }
 
 func wrapperReturnHas(has bool) gin.H {
-	return gin.H{HTTPReturnCode: commonpb.ErrorCode_Success, HTTPReturnData: gin.H{HTTPReturnHas: has}}
+	return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{HTTPReturnHas: has}}
 }
 
 func wrapperReturnList(names []string) gin.H {
 	if names == nil {
-		return gin.H{HTTPReturnCode: commonpb.ErrorCode_Success, HTTPReturnData: []string{}}
+		return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []string{}}
 	}
-	return gin.H{HTTPReturnCode: commonpb.ErrorCode_Success, HTTPReturnData: names}
+	return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: names}
 }
 
 func wrapperReturnRowCount(pairs []*commonpb.KeyValuePair) gin.H {
@@ -375,15 +386,15 @@ func wrapperReturnRowCount(pairs []*commonpb.KeyValuePair) gin.H {
 	}
 	rowCount, err := strconv.ParseInt(rowCountValue, 10, 64)
 	if err != nil {
-		return gin.H{HTTPReturnCode: commonpb.ErrorCode_Success, HTTPReturnData: gin.H{HTTPReturnRowCount: rowCountValue}}
+		return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{HTTPReturnRowCount: rowCountValue}}
 	}
-	return gin.H{HTTPReturnCode: commonpb.ErrorCode_Success, HTTPReturnData: gin.H{HTTPReturnRowCount: rowCount}}
+	return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{HTTPReturnRowCount: rowCount}}
 }
 
 func wrapperReturnDefault() gin.H {
-	return gin.H{HTTPReturnCode: commonpb.ErrorCode_Success, HTTPReturnData: gin.H{}}
+	return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}}
 }
 
 func wrapperReturnDefaultWithCost(cost int) gin.H {
-	return gin.H{HTTPReturnCode: commonpb.ErrorCode_Success, HTTPReturnData: gin.H{}, HTTPReturnCost: cost}
+	return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}, HTTPReturnCost: cost}
 }

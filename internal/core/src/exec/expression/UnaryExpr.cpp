@@ -21,6 +21,69 @@ namespace milvus {
 namespace exec {
 
 template <typename T>
+bool
+PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
+    using Index = index::ScalarIndex<IndexInnerType>;
+
+    for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
+        const Index& index =
+            segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
+
+        if (index.GetIndexType() == milvus::index::ScalarIndexType::HYBRID ||
+            index.GetIndexType() == milvus::index::ScalarIndexType::BITMAP) {
+            return false;
+        }
+    }
+    return true;
+}
+
+template <>
+bool
+PhyUnaryRangeFilterExpr::CanUseIndexForArray<milvus::Array>() {
+    bool res;
+    if (!is_index_mode_) {
+        use_index_ = res = false;
+        return res;
+    }
+    switch (expr_->column_.element_type_) {
+        case DataType::BOOL:
+            res = CanUseIndexForArray<bool>();
+            break;
+        case DataType::INT8:
+            res = CanUseIndexForArray<int8_t>();
+            break;
+        case DataType::INT16:
+            res = CanUseIndexForArray<int16_t>();
+            break;
+        case DataType::INT32:
+            res = CanUseIndexForArray<int32_t>();
+            break;
+        case DataType::INT64:
+            res = CanUseIndexForArray<int64_t>();
+            break;
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+            // not accurate on floating point number, rollback to bruteforce.
+            res = false;
+            break;
+        case DataType::VARCHAR:
+        case DataType::STRING:
+            res = CanUseIndexForArray<std::string_view>();
+            break;
+        default:
+            PanicInfo(DataTypeInvalid,
+                      "unsupported element type when execute array "
+                      "equal for index: {}",
+                      expr_->column_.element_type_);
+    }
+    use_index_ = res;
+    return res;
+}
+
+template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex() {
     return ExecRangeVisitorImplArray<T>();
@@ -112,7 +175,10 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VARCHAR: {
-            if (segment_->type() == SegmentType::Growing) {
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
                 result = ExecRangeVisitorImpl<std::string>();
             } else {
                 result = ExecRangeVisitorImpl<std::string_view>();
@@ -147,19 +213,23 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto val_type = expr_->val_.val_case();
             switch (val_type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal:
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<bool>();
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<int64_t>();
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<double>();
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<std::string>();
                     break;
                 case proto::plan::GenericValue::ValCase::kArrayVal:
-                    if (is_index_mode_) {
+                    if (CanUseIndexForArray<milvus::Array>()) {
                         result = ExecRangeVisitorImplArrayForIndex<
                             proto::plan::Array>();
                     } else {
@@ -531,6 +601,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
 template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl() {
+    if (expr_->op_type_ == proto::plan::OpType::TextMatch) {
+        return ExecTextMatch();
+    }
+
     if (CanUseIndex<T>()) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
@@ -781,12 +855,22 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData() {
 
 template <typename T>
 bool
-PhyUnaryRangeFilterExpr::CanUseIndex() const {
-    if (!is_index_mode_) {
-        return false;
-    }
-    return SegmentExpr::CanUseIndex<T>(expr_->op_type_);
+PhyUnaryRangeFilterExpr::CanUseIndex() {
+    bool res = is_index_mode_ && SegmentExpr::CanUseIndex<T>(expr_->op_type_);
+    use_index_ = res;
+    return res;
 }
+
+VectorPtr
+PhyUnaryRangeFilterExpr::ExecTextMatch() {
+    using Index = index::TextMatchIndex;
+    auto query = GetValueFromProto<std::string>(expr_->val_);
+    auto func = [](Index* index, const std::string& query) -> TargetBitmap {
+        return index->MatchQuery(query);
+    };
+    auto res = ProcessTextMatchIndex(func, query);
+    return std::make_shared<ColumnVector>(std::move(res));
+};
 
 }  // namespace exec
 }  // namespace milvus

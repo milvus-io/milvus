@@ -2,7 +2,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -20,19 +19,20 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 type ServerSuite struct {
@@ -44,7 +44,7 @@ type ServerSuite struct {
 
 func WithChannelManager(cm ChannelManager) Option {
 	return func(svr *Server) {
-		svr.sessionManager = NewSessionManagerImpl(withSessionCreator(svr.dataNodeCreator))
+		svr.sessionManager = session.NewDataNodeManagerImpl(session.WithDataNodeCreator(svr.dataNodeCreator))
 		svr.channelManager = cm
 		svr.cluster = NewClusterImpl(svr.sessionManager, svr.channelManager)
 	}
@@ -77,7 +77,7 @@ func genMsg(msgType commonpb.MsgType, ch string, t Timestamp, sourceID int64) *m
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{0},
 		},
-		DataNodeTtMsg: msgpb.DataNodeTtMsg{
+		DataNodeTtMsg: &msgpb.DataNodeTtMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   msgType,
 				Timestamp: t,
@@ -88,309 +88,6 @@ func genMsg(msgType commonpb.MsgType, ch string, t Timestamp, sourceID int64) *m
 			SegmentsStats: []*commonpb.SegmentStats{{SegmentID: 2, NumRows: 100}},
 		},
 	}
-}
-
-func (s *ServerSuite) TestHandleDataNodeTtMsg() {
-	var (
-		chanName       = "ch-1"
-		collID   int64 = 100
-		sourceID int64 = 1
-	)
-	s.testServer.meta.AddCollection(&collectionInfo{
-		ID:         collID,
-		Schema:     newTestSchema(),
-		Partitions: []int64{10},
-	})
-	resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-		NodeID: sourceID,
-		SegmentIDRequests: []*datapb.SegmentIDRequest{
-			{
-				CollectionID: collID,
-				PartitionID:  10,
-				ChannelName:  chanName,
-				Count:        100,
-			},
-		},
-	})
-	s.Require().NoError(err)
-	s.Require().True(merr.Ok(resp.GetStatus()))
-	s.Equal(1, len(resp.GetSegIDAssignments()))
-	assign := resp.GetSegIDAssignments()[0]
-
-	assignedSegmentID := resp.SegIDAssignments[0].SegID
-	segment := s.testServer.meta.GetHealthySegment(assignedSegmentID)
-	s.Require().NotNil(segment)
-	s.Equal(1, len(segment.allocations))
-
-	ts := tsoutil.AddPhysicalDurationOnTs(assign.ExpireTime, -3*time.Minute)
-	msg := genMsg(commonpb.MsgType_DataNodeTt, chanName, ts, sourceID)
-	msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
-		SegmentID: assign.GetSegID(),
-		NumRows:   1,
-	})
-	mockCluster := NewMockCluster(s.T())
-	mockCluster.EXPECT().Close().Once()
-	mockCluster.EXPECT().Flush(mock.Anything, sourceID, chanName, mock.Anything).RunAndReturn(
-		func(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error {
-			s.EqualValues(chanName, channel)
-			s.EqualValues(sourceID, nodeID)
-			s.Equal(1, len(segments))
-			s.EqualValues(2, segments[0].GetID())
-
-			return fmt.Errorf("mock error")
-		}).Once()
-	s.testServer.cluster = mockCluster
-	s.mockChMgr.EXPECT().Match(sourceID, chanName).Return(true).Twice()
-
-	err = s.testServer.handleDataNodeTtMsg(context.TODO(), &msg.DataNodeTtMsg)
-	s.NoError(err)
-
-	tt := tsoutil.AddPhysicalDurationOnTs(assign.ExpireTime, 48*time.Hour)
-	msg = genMsg(commonpb.MsgType_DataNodeTt, chanName, tt, sourceID)
-	msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
-		SegmentID: assign.GetSegID(),
-		NumRows:   1,
-	})
-
-	err = s.testServer.handleDataNodeTtMsg(context.TODO(), &msg.DataNodeTtMsg)
-	s.Error(err)
-}
-
-// restart the server for config DataNodeTimeTickByRPC=false
-func (s *ServerSuite) initSuiteForTtChannel() {
-	s.testServer.serverLoopWg.Add(1)
-	s.testServer.startDataNodeTtLoop(s.testServer.serverLoopCtx)
-
-	s.testServer.meta.AddCollection(&collectionInfo{
-		ID:         1,
-		Schema:     newTestSchema(),
-		Partitions: []int64{10},
-	})
-}
-
-func (s *ServerSuite) TestDataNodeTtChannel_ExpireAfterTt() {
-	s.initSuiteForTtChannel()
-
-	ctx := context.TODO()
-	ttMsgStream, err := s.testServer.factory.NewMsgStream(ctx)
-	s.Require().NoError(err)
-
-	ttMsgStream.AsProducer([]string{paramtable.Get().CommonCfg.DataCoordTimeTick.GetValue()})
-	defer ttMsgStream.Close()
-
-	var (
-		sourceID int64 = 9997
-		chanName       = "ch-1"
-		signal         = make(chan struct{})
-		collID   int64 = 1
-	)
-	mockCluster := NewMockCluster(s.T())
-	mockCluster.EXPECT().Close().Once()
-	mockCluster.EXPECT().Flush(mock.Anything, sourceID, chanName, mock.Anything).RunAndReturn(
-		func(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error {
-			s.EqualValues(chanName, channel)
-			s.EqualValues(sourceID, nodeID)
-			s.Equal(1, len(segments))
-			s.EqualValues(2, segments[0].GetID())
-
-			signal <- struct{}{}
-			return nil
-		}).Once()
-	s.testServer.cluster = mockCluster
-	s.mockChMgr.EXPECT().Match(sourceID, chanName).Return(true).Once()
-
-	resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-		NodeID: sourceID,
-		SegmentIDRequests: []*datapb.SegmentIDRequest{
-			{
-				CollectionID: collID,
-				PartitionID:  10,
-				ChannelName:  chanName,
-				Count:        100,
-			},
-		},
-	})
-	s.Require().NoError(err)
-	s.Require().True(merr.Ok(resp.GetStatus()))
-	s.Equal(1, len(resp.GetSegIDAssignments()))
-
-	assignedSegmentID := resp.SegIDAssignments[0].SegID
-	segment := s.testServer.meta.GetHealthySegment(assignedSegmentID)
-	s.Require().NotNil(segment)
-	s.Equal(1, len(segment.allocations))
-
-	msgPack := msgstream.MsgPack{}
-	tt := tsoutil.AddPhysicalDurationOnTs(resp.SegIDAssignments[0].ExpireTime, 48*time.Hour)
-	msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", tt, sourceID)
-	msgPack.Msgs = append(msgPack.Msgs, msg)
-	err = ttMsgStream.Produce(&msgPack)
-	s.Require().NoError(err)
-
-	<-signal
-	segment = s.testServer.meta.GetHealthySegment(assignedSegmentID)
-	s.NotNil(segment)
-	s.Equal(0, len(segment.allocations))
-}
-
-func (s *ServerSuite) TestDataNodeTtChannel_FlushWithDiffChan() {
-	s.initSuiteForTtChannel()
-
-	ctx := context.TODO()
-	ttMsgStream, err := s.testServer.factory.NewMsgStream(ctx)
-	s.Require().NoError(err)
-
-	ttMsgStream.AsProducer([]string{paramtable.Get().CommonCfg.DataCoordTimeTick.GetValue()})
-	defer ttMsgStream.Close()
-
-	var (
-		sourceID int64 = 9998
-		chanName       = "ch-1"
-		signal         = make(chan struct{})
-		collID   int64 = 1
-	)
-
-	mockCluster := NewMockCluster(s.T())
-	mockCluster.EXPECT().Close().Once()
-	mockCluster.EXPECT().Flush(mock.Anything, sourceID, chanName, mock.Anything).RunAndReturn(
-		func(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error {
-			s.EqualValues(chanName, channel)
-			s.EqualValues(sourceID, nodeID)
-			s.Equal(1, len(segments))
-
-			signal <- struct{}{}
-			return nil
-		}).Once()
-	mockCluster.EXPECT().FlushChannels(mock.Anything, sourceID, mock.Anything, []string{chanName}).Return(nil).Once()
-	s.testServer.cluster = mockCluster
-
-	s.mockChMgr.EXPECT().Match(sourceID, chanName).Return(true).Once()
-	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(collID).Return(map[int64][]string{
-		sourceID: {chanName},
-	})
-
-	resp, err := s.testServer.AssignSegmentID(ctx, &datapb.AssignSegmentIDRequest{
-		NodeID: sourceID,
-		SegmentIDRequests: []*datapb.SegmentIDRequest{
-			{
-				CollectionID: collID,
-				PartitionID:  10,
-				ChannelName:  chanName,
-				Count:        100,
-			},
-			{
-				CollectionID: collID,
-				PartitionID:  10,
-				ChannelName:  "ch-2",
-				Count:        100,
-			},
-		},
-	})
-	s.Require().NoError(err)
-	s.Require().True(merr.Ok(resp.GetStatus()))
-	s.Equal(2, len(resp.GetSegIDAssignments()))
-	var assign *datapb.SegmentIDAssignment
-	for _, segment := range resp.SegIDAssignments {
-		if segment.GetChannelName() == chanName {
-			assign = segment
-			break
-		}
-	}
-	s.Require().NotNil(assign)
-
-	resp2, err := s.testServer.Flush(ctx, &datapb.FlushRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_Flush,
-			SourceID: sourceID,
-		},
-		CollectionID: collID,
-	})
-	s.Require().NoError(err)
-	s.Require().True(merr.Ok(resp2.GetStatus()))
-
-	msgPack := msgstream.MsgPack{}
-	msg := genMsg(commonpb.MsgType_DataNodeTt, chanName, assign.ExpireTime, sourceID)
-	msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
-		SegmentID: assign.GetSegID(),
-		NumRows:   1,
-	})
-	msgPack.Msgs = append(msgPack.Msgs, msg)
-	err = ttMsgStream.Produce(&msgPack)
-	s.NoError(err)
-
-	<-signal
-}
-
-func (s *ServerSuite) TestDataNodeTtChannel_SegmentFlushAfterTt() {
-	s.initSuiteForTtChannel()
-
-	var (
-		sourceID int64 = 9999
-		chanName       = "ch-1"
-		signal         = make(chan struct{})
-		collID   int64 = 1
-	)
-	mockCluster := NewMockCluster(s.T())
-	mockCluster.EXPECT().Close().Once()
-	mockCluster.EXPECT().Flush(mock.Anything, sourceID, chanName, mock.Anything).RunAndReturn(
-		func(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error {
-			s.EqualValues(chanName, channel)
-			s.EqualValues(sourceID, nodeID)
-			s.Equal(1, len(segments))
-
-			signal <- struct{}{}
-			return nil
-		}).Once()
-	mockCluster.EXPECT().FlushChannels(mock.Anything, sourceID, mock.Anything, []string{chanName}).Return(nil).Once()
-	s.testServer.cluster = mockCluster
-
-	s.mockChMgr.EXPECT().Match(sourceID, chanName).Return(true).Once()
-	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(collID).Return(map[int64][]string{
-		sourceID: {chanName},
-	})
-
-	ctx := context.TODO()
-	ttMsgStream, err := s.testServer.factory.NewMsgStream(ctx)
-	s.Require().NoError(err)
-
-	ttMsgStream.AsProducer([]string{paramtable.Get().CommonCfg.DataCoordTimeTick.GetValue()})
-	defer ttMsgStream.Close()
-
-	resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-		SegmentIDRequests: []*datapb.SegmentIDRequest{
-			{
-				CollectionID: 1,
-				PartitionID:  10,
-				ChannelName:  chanName,
-				Count:        100,
-			},
-		},
-	})
-	s.Require().NoError(err)
-	s.Require().True(merr.Ok(resp.GetStatus()))
-	s.Require().Equal(1, len(resp.GetSegIDAssignments()))
-
-	assign := resp.GetSegIDAssignments()[0]
-
-	resp2, err := s.testServer.Flush(ctx, &datapb.FlushRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_Flush,
-		},
-		CollectionID: 1,
-	})
-	s.Require().NoError(err)
-	s.Require().True(merr.Ok(resp2.GetStatus()))
-
-	msgPack := msgstream.MsgPack{}
-	msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime, 9999)
-	msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
-		SegmentID: assign.GetSegID(),
-		NumRows:   1,
-	})
-	msgPack.Msgs = append(msgPack.Msgs, msg)
-	err = ttMsgStream.Produce(&msgPack)
-	s.Require().NoError(err)
-
-	<-signal
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
@@ -779,6 +476,10 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 	s.EqualValues(1, len(allocations))
 	expireTs := allocations[0].ExpireTime
 	segID := allocations[0].SegmentID
+
+	info, err := s.testServer.segmentManager.AllocNewGrowingSegment(context.TODO(), 0, 1, 1, "channel-1")
+	s.NoError(err)
+	s.NotNil(info)
 
 	resp, err := s.testServer.Flush(context.TODO(), req)
 	s.NoError(err)
@@ -1176,7 +877,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			BuildID:   seg1.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg1.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1186,7 +887,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			BuildID:   seg2.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg2.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1360,7 +1061,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			BuildID:   segment.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: segment.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1618,14 +1319,14 @@ func TestImportV2(t *testing.T) {
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
 
 		// alloc failed
-		alloc := NewNMockAllocator(t)
-		alloc.EXPECT().allocN(mock.Anything).Return(0, 0, mockErr)
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, mockErr)
 		s.allocator = alloc
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{})
 		assert.NoError(t, err)
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-		alloc = NewNMockAllocator(t)
-		alloc.EXPECT().allocN(mock.Anything).Return(0, 0, nil)
+		alloc = allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, nil)
 		s.allocator = alloc
 
 		// add job failed
@@ -1763,6 +1464,56 @@ func TestImportV2(t *testing.T) {
 		assert.Equal(t, 1, len(resp.GetReasons()))
 		assert.Equal(t, 1, len(resp.GetProgresses()))
 	})
+}
+
+func TestGetChannelRecoveryInfo(t *testing.T) {
+	ctx := context.Background()
+
+	// server not healthy
+	s := &Server{}
+	s.stateCode.Store(commonpb.StateCode_Initializing)
+	resp, err := s.GetChannelRecoveryInfo(ctx, nil)
+	assert.NoError(t, err)
+	assert.NotEqual(t, int32(0), resp.GetStatus().GetCode())
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+
+	// get collection failed
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).
+		Return(nil, errors.New("mock err"))
+	s.handler = handler
+	assert.NoError(t, err)
+	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{
+		Vchannel: "ch-1",
+	})
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+
+	// normal case
+	channelInfo := &datapb.VchannelInfo{
+		CollectionID:        0,
+		ChannelName:         "ch-1",
+		SeekPosition:        nil,
+		UnflushedSegmentIds: []int64{1},
+		FlushedSegmentIds:   []int64{2},
+		DroppedSegmentIds:   []int64{3},
+		IndexedSegmentIds:   []int64{4},
+	}
+
+	handler = NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).
+		Return(&collectionInfo{Schema: &schemapb.CollectionSchema{}}, nil)
+	handler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).Return(channelInfo)
+	s.handler = handler
+
+	assert.NoError(t, err)
+	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{
+		Vchannel: "ch-1",
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, int32(0), resp.GetStatus().GetCode())
+	assert.NotNil(t, resp.GetSchema())
+	assert.Equal(t, channelInfo, resp.GetInfo())
 }
 
 type GcControlServiceSuite struct {

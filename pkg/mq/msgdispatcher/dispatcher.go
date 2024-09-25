@@ -19,6 +19,8 @@ package msgdispatcher
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,8 +30,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -79,14 +81,12 @@ type Dispatcher struct {
 }
 
 func NewDispatcher(ctx context.Context,
-	factory msgstream.Factory,
-	isMain bool,
-	pchannel string,
-	position *Pos,
-	subName string,
-	subPos SubPos,
+	factory msgstream.Factory, isMain bool,
+	pchannel string, position *Pos,
+	subName string, subPos SubPos,
 	lagNotifyChan chan struct{},
 	lagTargets *typeutil.ConcurrentMap[string, *target],
+	includeCurrentMsg bool,
 ) (*Dispatcher, error) {
 	log := log.With(zap.String("pchannel", pchannel),
 		zap.String("subName", subName), zap.Bool("isMain", isMain))
@@ -96,22 +96,23 @@ func NewDispatcher(ctx context.Context,
 		return nil, err
 	}
 	if position != nil && len(position.MsgID) != 0 {
+		position = typeutil.Clone(position)
 		position.ChannelName = funcutil.ToPhysicalChannel(position.ChannelName)
-		err = stream.AsConsumer(ctx, []string{pchannel}, subName, mqwrapper.SubscriptionPositionUnknown)
+		err = stream.AsConsumer(ctx, []string{pchannel}, subName, common.SubscriptionPositionUnknown)
 		if err != nil {
 			log.Error("asConsumer failed", zap.Error(err))
 			return nil, err
 		}
 
-		err = stream.Seek(ctx, []*Pos{position}, false)
+		err = stream.Seek(ctx, []*Pos{position}, includeCurrentMsg)
 		if err != nil {
 			stream.Close()
 			log.Error("seek failed", zap.Error(err))
 			return nil, err
 		}
 		posTime := tsoutil.PhysicalTime(position.GetTimestamp())
-		log.Info("seek successfully", zap.Time("posTime", posTime),
-			zap.Duration("tsLag", time.Since(posTime)))
+		log.Info("seek successfully", zap.Uint64("posTs", position.GetTimestamp()),
+			zap.Time("posTime", posTime), zap.Duration("tsLag", time.Since(posTime)))
 	} else {
 		err := stream.AsConsumer(ctx, []string{pchannel}, subName, subPos)
 		if err != nil {
@@ -234,7 +235,7 @@ func (d *Dispatcher) work() {
 					}
 				}
 				if err != nil {
-					t.pos = pack.StartPositions[0]
+					t.pos = typeutil.Clone(pack.StartPositions[0])
 					// replace the pChannel with vChannel
 					t.pos.ChannelName = t.vchannel
 					d.lagTargets.Insert(t.vchannel, t)
@@ -262,17 +263,28 @@ func (d *Dispatcher) groupingMsgs(pack *MsgPack) map[string]*MsgPack {
 	}
 	// group messages by vchannel
 	for _, msg := range pack.Msgs {
-		var vchannel string
+		var vchannel, collectionID string
 		switch msg.Type() {
 		case commonpb.MsgType_Insert:
 			vchannel = msg.(*msgstream.InsertMsg).GetShardName()
 		case commonpb.MsgType_Delete:
 			vchannel = msg.(*msgstream.DeleteMsg).GetShardName()
+		case commonpb.MsgType_CreateCollection:
+			collectionID = strconv.FormatInt(msg.(*msgstream.CreateCollectionMsg).GetCollectionID(), 10)
+		case commonpb.MsgType_DropCollection:
+			collectionID = strconv.FormatInt(msg.(*msgstream.DropCollectionMsg).GetCollectionID(), 10)
+		case commonpb.MsgType_CreatePartition:
+			collectionID = strconv.FormatInt(msg.(*msgstream.CreatePartitionMsg).GetCollectionID(), 10)
+		case commonpb.MsgType_DropPartition:
+			collectionID = strconv.FormatInt(msg.(*msgstream.DropPartitionMsg).GetCollectionID(), 10)
 		}
 		if vchannel == "" {
 			// for non-dml msg, such as CreateCollection, DropCollection, ...
-			// we need to dispatch it to all the vchannels.
+			// we need to dispatch it to the vchannel of this collection
 			for k := range targetPacks {
+				if !strings.Contains(k, collectionID) {
+					continue
+				}
 				// TODO: There's data race when non-dml msg is sent to different flow graph.
 				// Wrong open-trancing information is generated, Fix in future.
 				targetPacks[k].Msgs = append(targetPacks[k].Msgs, msg)

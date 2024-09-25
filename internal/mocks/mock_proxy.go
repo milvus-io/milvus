@@ -309,6 +309,61 @@ func (_c *MockProxy_AlterIndex_Call) RunAndReturn(run func(context.Context, *mil
 	return _c
 }
 
+// BackupRBAC provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) BackupRBAC(_a0 context.Context, _a1 *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *milvuspb.BackupRBACMetaResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.BackupRBACMetaRequest) *milvuspb.BackupRBACMetaResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.BackupRBACMetaResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.BackupRBACMetaRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_BackupRBAC_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BackupRBAC'
+type MockProxy_BackupRBAC_Call struct {
+	*mock.Call
+}
+
+// BackupRBAC is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.BackupRBACMetaRequest
+func (_e *MockProxy_Expecter) BackupRBAC(_a0 interface{}, _a1 interface{}) *MockProxy_BackupRBAC_Call {
+	return &MockProxy_BackupRBAC_Call{Call: _e.mock.On("BackupRBAC", _a0, _a1)}
+}
+
+func (_c *MockProxy_BackupRBAC_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.BackupRBACMetaRequest)) *MockProxy_BackupRBAC_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.BackupRBACMetaRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_BackupRBAC_Call) Return(_a0 *milvuspb.BackupRBACMetaResponse, _a1 error) *MockProxy_BackupRBAC_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_BackupRBAC_Call) RunAndReturn(run func(context.Context, *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error)) *MockProxy_BackupRBAC_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CalcDistance provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) CalcDistance(_a0 context.Context, _a1 *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
 	ret := _m.Called(_a0, _a1)
@@ -4936,6 +4991,61 @@ func (_c *MockProxy_ReplicateMessage_Call) Return(_a0 *milvuspb.ReplicateMessage
 }
 
 func (_c *MockProxy_ReplicateMessage_Call) RunAndReturn(run func(context.Context, *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error)) *MockProxy_ReplicateMessage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RestoreRBAC provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) RestoreRBAC(_a0 context.Context, _a1 *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RestoreRBACMetaRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.RestoreRBACMetaRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_RestoreRBAC_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreRBAC'
+type MockProxy_RestoreRBAC_Call struct {
+	*mock.Call
+}
+
+// RestoreRBAC is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.RestoreRBACMetaRequest
+func (_e *MockProxy_Expecter) RestoreRBAC(_a0 interface{}, _a1 interface{}) *MockProxy_RestoreRBAC_Call {
+	return &MockProxy_RestoreRBAC_Call{Call: _e.mock.On("RestoreRBAC", _a0, _a1)}
+}
+
+func (_c *MockProxy_RestoreRBAC_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.RestoreRBACMetaRequest)) *MockProxy_RestoreRBAC_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.RestoreRBACMetaRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_RestoreRBAC_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_RestoreRBAC_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_RestoreRBAC_Call) RunAndReturn(run func(context.Context, *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error)) *MockProxy_RestoreRBAC_Call {
 	_c.Call.Return(run)
 	return _c
 }

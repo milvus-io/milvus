@@ -44,6 +44,7 @@ constexpr const char* ASCENDING_SORT = "STL_SORT";
 constexpr const char* MARISA_TRIE = "Trie";
 constexpr const char* INVERTED_INDEX_TYPE = "INVERTED";
 constexpr const char* BITMAP_INDEX_TYPE = "BITMAP";
+constexpr const char* HYBRID_INDEX_TYPE = "HYBRID";
 
 // index meta
 constexpr const char* COLLECTION_ID = "collection_id";
@@ -56,6 +57,12 @@ constexpr const char* INDEX_VERSION = "index_version";
 constexpr const char* INDEX_ENGINE_VERSION = "index_engine_version";
 constexpr const char* BITMAP_INDEX_CARDINALITY_LIMIT =
     "bitmap_cardinality_limit";
+
+// index config key
+constexpr const char* MMAP_FILE_PATH = "mmap_filepath";
+constexpr const char* ENABLE_MMAP = "enable_mmap";
+constexpr const char* INDEX_FILES = "index_files";
+constexpr const char* ENABLE_OFFSET_CACHE = "indexoffsetcache.enabled";
 
 // VecIndex file metas
 constexpr const char* DISK_ANN_PREFIX_PATH = "index_prefix";

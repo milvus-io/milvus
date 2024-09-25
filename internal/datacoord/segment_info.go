@@ -19,23 +19,25 @@ package datacoord
 import (
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // SegmentsInfo wraps a map, which maintains ID to SegmentInfo relation
 type SegmentsInfo struct {
 	segments         map[UniqueID]*SegmentInfo
 	secondaryIndexes segmentInfoIndexes
-	compactionTo     map[UniqueID]UniqueID // map the compact relation, value is the segment which `CompactFrom` contains key.
-	// A segment can be compacted to only one segment finally in meta.
+	// map the compact relation, value is the segment which `CompactFrom` contains key.
+	// now segment could be compacted to multiple segments
+	compactionTo map[UniqueID][]UniqueID
 }
 
 type segmentInfoIndexes struct {
@@ -52,6 +54,7 @@ type SegmentInfo struct {
 	isCompacting  bool
 	// a cache to avoid calculate twice
 	size            atomic.Int64
+	deltaRowcount   atomic.Int64
 	lastWrittenTime time.Time
 }
 
@@ -60,14 +63,20 @@ type SegmentInfo struct {
 // Note that the allocation information is not preserved,
 // the worst case scenario is to have a segment with twice size we expects
 func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
-	return &SegmentInfo{
-		SegmentInfo:   info,
-		currRows:      info.GetNumOfRows(),
-		allocations:   make([]*Allocation, 0, 16),
-		lastFlushTime: time.Now().Add(-1 * flushInterval),
-		// A growing segment from recovery can be also considered idle.
-		lastWrittenTime: getZeroTime(),
+	s := &SegmentInfo{
+		SegmentInfo: info,
+		currRows:    info.GetNumOfRows(),
 	}
+	// setup growing fields
+	if s.GetState() == commonpb.SegmentState_Growing {
+		s.allocations = make([]*Allocation, 0, 16)
+		s.lastFlushTime = time.Now().Add(-1 * paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second))
+		// A growing segment from recovery can be also considered idle.
+		s.lastWrittenTime = getZeroTime()
+	}
+	// mark as uninitialized
+	s.deltaRowcount.Store(-1)
+	return s
 }
 
 // NewSegmentsInfo creates a `SegmentsInfo` instance, which makes sure internal map is initialized
@@ -79,7 +88,7 @@ func NewSegmentsInfo() *SegmentsInfo {
 			coll2Segments:    make(map[UniqueID]map[UniqueID]*SegmentInfo),
 			channel2Segments: make(map[string]map[UniqueID]*SegmentInfo),
 		},
-		compactionTo: make(map[UniqueID]UniqueID),
+		compactionTo: make(map[UniqueID][]UniqueID),
 	}
 }
 
@@ -159,15 +168,21 @@ func (s *SegmentsInfo) GetRealSegmentsForChannel(channel string) []*SegmentInfo 
 // Return (nil, false) if given segmentID can not found in the meta.
 // Return (nil, true) if given segmentID can be found not no compaction to.
 // Return (notnil, true) if given segmentID can be found and has compaction to.
-func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) (*SegmentInfo, bool) {
+func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) ([]*SegmentInfo, bool) {
 	if _, ok := s.segments[fromSegmentID]; !ok {
 		return nil, false
 	}
-	if toID, ok := s.compactionTo[fromSegmentID]; ok {
-		if to, ok := s.segments[toID]; ok {
-			return to, true
+	if compactTos, ok := s.compactionTo[fromSegmentID]; ok {
+		result := []*SegmentInfo{}
+		for _, compactTo := range compactTos {
+			to, ok := s.segments[compactTo]
+			if !ok {
+				log.Warn("compactionTo relation is broken", zap.Int64("from", fromSegmentID), zap.Int64("to", compactTo))
+				return nil, true
+			}
+			result = append(result, to)
 		}
-		log.Warn("unreachable code: compactionTo relation is broken", zap.Int64("from", fromSegmentID), zap.Int64("to", toID))
+		return result, true
 	}
 	return nil, true
 }
@@ -329,6 +344,7 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 		lastWrittenTime: s.lastWrittenTime,
 	}
 	cloned.size.Store(s.size.Load())
+	cloned.deltaRowcount.Store(s.deltaRowcount.Load())
 
 	for _, opt := range opts {
 		opt(cloned)
@@ -371,7 +387,7 @@ func (s *SegmentsInfo) removeSecondaryIndex(segment *SegmentInfo) {
 // addCompactTo adds the compact relation to the segment
 func (s *SegmentsInfo) addCompactTo(segment *SegmentInfo) {
 	for _, from := range segment.GetCompactionFrom() {
-		s.compactionTo[from] = segment.GetID()
+		s.compactionTo[from] = append(s.compactionTo[from], segment.GetID())
 	}
 }
 
@@ -464,8 +480,9 @@ func SetLevel(level datapb.SegmentLevel) SegmentInfoOption {
 	}
 }
 
+// getSegmentSize use cached value when segment is immutable
 func (s *SegmentInfo) getSegmentSize() int64 {
-	if s.size.Load() <= 0 {
+	if s.size.Load() <= 0 || s.GetState() != commonpb.SegmentState_Flushed {
 		var size int64
 		for _, binlogs := range s.GetBinlogs() {
 			for _, l := range binlogs.GetBinlogs() {
@@ -489,6 +506,21 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 		}
 	}
 	return s.size.Load()
+}
+
+// getDeltaCount use cached value when segment is immutable
+func (s *SegmentInfo) getDeltaCount() int64 {
+	if s.deltaRowcount.Load() < 0 || s.State != commonpb.SegmentState_Flushed {
+		var rc int64
+		for _, deltaLogs := range s.GetDeltalogs() {
+			for _, l := range deltaLogs.GetBinlogs() {
+				rc += l.GetEntriesNum()
+			}
+		}
+		s.deltaRowcount.Store(rc)
+	}
+	r := s.deltaRowcount.Load()
+	return r
 }
 
 // SegmentInfoSelector is the function type to select SegmentInfo from meta

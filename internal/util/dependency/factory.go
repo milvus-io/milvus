@@ -6,7 +6,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	smsgstream "github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -40,7 +39,7 @@ type DefaultFactory struct {
 func NewDefaultFactory(standAlone bool) *DefaultFactory {
 	return &DefaultFactory{
 		standAlone:       standAlone,
-		msgStreamFactory: smsgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
+		msgStreamFactory: msgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactory("local",
 			storage.RootPath("/tmp/milvus")),
 	}
@@ -50,7 +49,7 @@ func NewDefaultFactory(standAlone bool) *DefaultFactory {
 func MockDefaultFactory(standAlone bool, params *paramtable.ComponentParam) *DefaultFactory {
 	return &DefaultFactory{
 		standAlone:          standAlone,
-		msgStreamFactory:    smsgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
+		msgStreamFactory:    msgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactoryWithParam(params),
 	}
 }
@@ -89,7 +88,7 @@ func (f *DefaultFactory) initMQ(standalone bool, params *paramtable.ComponentPar
 	case mqTypeNatsmq:
 		f.msgStreamFactory = msgstream.NewNatsmqFactory()
 	case mqTypeRocksmq:
-		f.msgStreamFactory = smsgstream.NewRocksmqFactory(params.RocksmqCfg.Path.GetValue(), &params.ServiceParam)
+		f.msgStreamFactory = msgstream.NewRocksmqFactory(params.RocksmqCfg.Path.GetValue(), &params.ServiceParam)
 	case mqTypePulsar:
 		f.msgStreamFactory = msgstream.NewPmsFactory(&params.ServiceParam)
 	case mqTypeKafka:

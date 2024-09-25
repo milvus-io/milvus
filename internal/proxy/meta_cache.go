@@ -59,8 +59,6 @@ type Cache interface {
 	GetCollectionName(ctx context.Context, database string, collectionID int64) (string, error)
 	// GetCollectionInfo get collection's information by name or collection id, such as schema, and etc.
 	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionBasicInfo, error)
-	// GetCollectionNamesByID get collection name and database name by collection id
-	GetCollectionNamesByID(ctx context.Context, collectionID []UniqueID) ([]string, []string, error)
 	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error)
 	// GetPartitions get all partitions' id of specific collection.
@@ -95,24 +93,27 @@ type Cache interface {
 	AllocID(ctx context.Context) (int64, error)
 }
 type collectionBasicInfo struct {
-	collID              typeutil.UniqueID
-	createdTimestamp    uint64
-	createdUtcTimestamp uint64
-	consistencyLevel    commonpb.ConsistencyLevel
+	collID                typeutil.UniqueID
+	createdTimestamp      uint64
+	createdUtcTimestamp   uint64
+	consistencyLevel      commonpb.ConsistencyLevel
+	partitionKeyIsolation bool
 }
 
 type collectionInfo struct {
-	collID              typeutil.UniqueID
-	schema              *schemaInfo
-	partInfo            *partitionInfos
-	createdTimestamp    uint64
-	createdUtcTimestamp uint64
-	consistencyLevel    commonpb.ConsistencyLevel
+	collID                typeutil.UniqueID
+	schema                *schemaInfo
+	partInfo              *partitionInfos
+	createdTimestamp      uint64
+	createdUtcTimestamp   uint64
+	consistencyLevel      commonpb.ConsistencyLevel
+	partitionKeyIsolation bool
 }
 
 type databaseInfo struct {
 	dbID             typeutil.UniqueID
 	createdTimestamp uint64
+	properties       map[string]string
 }
 
 // schemaInfo is a helper function wraps *schemapb.CollectionSchema
@@ -125,7 +126,7 @@ type schemaInfo struct {
 	schemaHelper         *typeutil.SchemaHelper
 }
 
-func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
+func newSchemaInfoWithLoadFields(schema *schemapb.CollectionSchema, loadFields []int64) *schemaInfo {
 	fieldMap := typeutil.NewConcurrentMap[string, int64]()
 	hasPartitionkey := false
 	var pkField *schemapb.FieldSchema
@@ -139,7 +140,7 @@ func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
 		}
 	}
 	// schema shall be verified before
-	schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
+	schemaHelper, _ := typeutil.CreateSchemaHelperWithLoadFields(schema, loadFields)
 	return &schemaInfo{
 		CollectionSchema:     schema,
 		fieldMap:             fieldMap,
@@ -147,6 +148,10 @@ func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
 		pkField:              pkField,
 		schemaHelper:         schemaHelper,
 	}
+}
+
+func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
+	return newSchemaInfoWithLoadFields(schema, nil)
 }
 
 func (s *schemaInfo) MapFieldID(name string) (int64, bool) {
@@ -162,6 +167,90 @@ func (s *schemaInfo) GetPkField() (*schemapb.FieldSchema, error) {
 		return nil, merr.WrapErrServiceInternal("pk field not found")
 	}
 	return s.pkField, nil
+}
+
+// GetLoadFieldIDs returns field id for load field list.
+// If input `loadFields` is empty, use collection schema definition.
+// Otherwise, perform load field list constraint check then return field id.
+func (s *schemaInfo) GetLoadFieldIDs(loadFields []string, skipDynamicField bool) ([]int64, error) {
+	if len(loadFields) == 0 {
+		// skip check logic since create collection already did the rule check already
+		return common.GetCollectionLoadFields(s.CollectionSchema, skipDynamicField), nil
+	}
+
+	fieldIDs := typeutil.NewSet[int64]()
+	// fieldIDs := make([]int64, 0, len(loadFields))
+	fields := make([]*schemapb.FieldSchema, 0, len(loadFields))
+	for _, name := range loadFields {
+		fieldSchema, err := s.schemaHelper.GetFieldFromName(name)
+		if err != nil {
+			return nil, err
+		}
+
+		fields = append(fields, fieldSchema)
+		fieldIDs.Insert(fieldSchema.GetFieldID())
+	}
+
+	// only append dynamic field when skipFlag == false
+	if !skipDynamicField {
+		// find dynamic field
+		dynamicField := lo.FindOrElse(s.Fields, nil, func(field *schemapb.FieldSchema) bool {
+			return field.IsDynamic
+		})
+
+		// if dynamic field not nil
+		if dynamicField != nil {
+			fieldIDs.Insert(dynamicField.GetFieldID())
+			fields = append(fields, dynamicField)
+		}
+	}
+
+	// validate load fields list
+	if err := s.validateLoadFields(loadFields, fields); err != nil {
+		return nil, err
+	}
+
+	return fieldIDs.Collect(), nil
+}
+
+func (s *schemaInfo) validateLoadFields(names []string, fields []*schemapb.FieldSchema) error {
+	// ignore error if not found
+	partitionKeyField, _ := s.schemaHelper.GetPartitionKeyField()
+	clusteringKeyField, _ := s.schemaHelper.GetClusteringKeyField()
+
+	var hasPrimaryKey, hasPartitionKey, hasClusteringKey, hasVector bool
+	for _, field := range fields {
+		if field.GetFieldID() == s.pkField.GetFieldID() {
+			hasPrimaryKey = true
+		}
+		if typeutil.IsVectorType(field.GetDataType()) {
+			hasVector = true
+		}
+		if field.IsPartitionKey {
+			hasPartitionKey = true
+		}
+		if field.IsClusteringKey {
+			hasClusteringKey = true
+		}
+	}
+
+	if !hasPrimaryKey {
+		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain primary key field %s", names, s.pkField.GetName())
+	}
+	if !hasVector {
+		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain vector field", names)
+	}
+	if partitionKeyField != nil && !hasPartitionKey {
+		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain partition key field %s", names, partitionKeyField.GetName())
+	}
+	if clusteringKeyField != nil && !hasClusteringKey {
+		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain clustering key field %s", names, clusteringKeyField.GetName())
+	}
+	return nil
+}
+
+func (s *schemaInfo) IsFieldLoaded(fieldID int64) bool {
+	return s.schemaHelper.IsFieldLoaded(fieldID)
 }
 
 // partitionInfos contains the cached collection partition informations.
@@ -184,10 +273,11 @@ type partitionInfo struct {
 func (info *collectionInfo) getBasicInfo() *collectionBasicInfo {
 	// Do a deep copy for all fields.
 	basicInfo := &collectionBasicInfo{
-		collID:              info.collID,
-		createdTimestamp:    info.createdTimestamp,
-		createdUtcTimestamp: info.createdUtcTimestamp,
-		consistencyLevel:    info.consistencyLevel,
+		collID:                info.collID,
+		createdTimestamp:      info.createdTimestamp,
+		createdUtcTimestamp:   info.createdUtcTimestamp,
+		consistencyLevel:      info.consistencyLevel,
+		partitionKeyIsolation: info.partitionKeyIsolation,
 	}
 
 	return basicInfo
@@ -251,19 +341,18 @@ type MetaCache struct {
 	rootCoord  types.RootCoordClient
 	queryCoord types.QueryCoordClient
 
-	dbInfo           map[string]*databaseInfo                // database -> db_info
-	collInfo         map[string]map[string]*collectionInfo   // database -> collectionName -> collection_info
-	collLeader       map[string]map[string]*shardLeaders     // database -> collectionName -> collection_leaders
-	dbCollectionInfo map[string]map[typeutil.UniqueID]string // database -> collectionID -> collectionName
-	credMap          map[string]*internalpb.CredentialInfo   // cache for credential, lazy load
-	privilegeInfos   map[string]struct{}                     // privileges cache
-	userToRoles      map[string]map[string]struct{}          // user to role cache
-	mu               sync.RWMutex
-	credMut          sync.RWMutex
-	leaderMut        sync.RWMutex
-	shardMgr         shardClientMgr
-	sfGlobal         conc.Singleflight[*collectionInfo]
-	sfDB             conc.Singleflight[*databaseInfo]
+	dbInfo         map[string]*databaseInfo              // database -> db_info
+	collInfo       map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
+	collLeader     map[string]map[string]*shardLeaders   // database -> collectionName -> collection_leaders
+	credMap        map[string]*internalpb.CredentialInfo // cache for credential, lazy load
+	privilegeInfos map[string]struct{}                   // privileges cache
+	userToRoles    map[string]map[string]struct{}        // user to role cache
+	mu             sync.RWMutex
+	credMut        sync.RWMutex
+	leaderMut      sync.RWMutex
+	shardMgr       shardClientMgr
+	sfGlobal       conc.Singleflight[*collectionInfo]
+	sfDB           conc.Singleflight[*databaseInfo]
 
 	IDStart int64
 	IDCount int64
@@ -296,16 +385,15 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 // NewMetaCache creates a MetaCache with provided RootCoord and QueryNode
 func NewMetaCache(rootCoord types.RootCoordClient, queryCoord types.QueryCoordClient, shardMgr shardClientMgr) (*MetaCache, error) {
 	return &MetaCache{
-		rootCoord:        rootCoord,
-		queryCoord:       queryCoord,
-		dbInfo:           map[string]*databaseInfo{},
-		collInfo:         map[string]map[string]*collectionInfo{},
-		collLeader:       map[string]map[string]*shardLeaders{},
-		dbCollectionInfo: map[string]map[typeutil.UniqueID]string{},
-		credMap:          map[string]*internalpb.CredentialInfo{},
-		shardMgr:         shardMgr,
-		privilegeInfos:   map[string]struct{}{},
-		userToRoles:      map[string]map[string]struct{}{},
+		rootCoord:      rootCoord,
+		queryCoord:     queryCoord,
+		dbInfo:         map[string]*databaseInfo{},
+		collInfo:       map[string]map[string]*collectionInfo{},
+		collLeader:     map[string]map[string]*shardLeaders{},
+		credMap:        map[string]*internalpb.CredentialInfo{},
+		shardMgr:       shardMgr,
+		privilegeInfos: map[string]struct{}{},
+		userToRoles:    map[string]map[string]struct{}{},
 	}, nil
 }
 
@@ -362,6 +450,11 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, err
 	}
 
+	loadFields, err := m.getCollectionLoadFields(ctx, collection.CollectionID)
+	if err != nil {
+		return nil, err
+	}
+
 	// check partitionID, createdTimestamp and utcstamp has sam element numbers
 	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) || len(partitions.PartitionNames) != len(partitions.CreatedUtcTimestamps) {
 		return nil, merr.WrapErrParameterInvalidMsg("partition names and timestamps number is not aligned, response: %s", partitions.String())
@@ -384,14 +477,20 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		m.collInfo[database] = make(map[string]*collectionInfo)
 	}
 
-	schemaInfo := newSchemaInfo(collection.Schema)
+	isolation, err := common.IsPartitionKeyIsolationKvEnabled(collection.Properties...)
+	if err != nil {
+		return nil, err
+	}
+
+	schemaInfo := newSchemaInfoWithLoadFields(collection.Schema, loadFields)
 	m.collInfo[database][collectionName] = &collectionInfo{
-		collID:              collection.CollectionID,
-		schema:              schemaInfo,
-		partInfo:            parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
-		createdTimestamp:    collection.CreatedTimestamp,
-		createdUtcTimestamp: collection.CreatedUtcTimestamp,
-		consistencyLevel:    collection.ConsistencyLevel,
+		collID:                collection.CollectionID,
+		schema:                schemaInfo,
+		partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
+		createdTimestamp:      collection.CreatedTimestamp,
+		createdUtcTimestamp:   collection.CreatedUtcTimestamp,
+		consistencyLevel:      collection.ConsistencyLevel,
+		partitionKeyIsolation: isolation,
 	}
 
 	log.Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName), zap.Int64("collectionID", collection.CollectionID))
@@ -483,90 +582,6 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, coll
 
 	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
 	return collInfo.getBasicInfo(), nil
-}
-
-func (m *MetaCache) GetCollectionNamesByID(ctx context.Context, collectionIDs []UniqueID) ([]string, []string, error) {
-	hasUpdate := false
-
-	dbNames := make([]string, 0)
-	collectionNames := make([]string, 0)
-	for _, collectionID := range collectionIDs {
-		dbName, collectionName := m.innerGetCollectionByID(collectionID)
-		if dbName != "" {
-			dbNames = append(dbNames, dbName)
-			collectionNames = append(collectionNames, collectionName)
-			continue
-		}
-		if hasUpdate {
-			return nil, nil, errors.New("collection not found after meta cache has been updated")
-		}
-		hasUpdate = true
-		err := m.updateDBInfo(ctx)
-		if err != nil {
-			return nil, nil, err
-		}
-		dbName, collectionName = m.innerGetCollectionByID(collectionID)
-		if dbName == "" {
-			return nil, nil, errors.New("collection not found")
-		}
-		dbNames = append(dbNames, dbName)
-		collectionNames = append(collectionNames, collectionName)
-	}
-
-	return dbNames, collectionNames, nil
-}
-
-func (m *MetaCache) innerGetCollectionByID(collectionID int64) (string, string) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for database, db := range m.dbCollectionInfo {
-		name, ok := db[collectionID]
-		if ok {
-			return database, name
-		}
-	}
-	return "", ""
-}
-
-func (m *MetaCache) updateDBInfo(ctx context.Context) error {
-	databaseResp, err := m.rootCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
-		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases)),
-	})
-
-	if err := merr.CheckRPCCall(databaseResp, err); err != nil {
-		log.Warn("failed to ListDatabases", zap.Error(err))
-		return err
-	}
-
-	dbInfo := make(map[string]map[int64]string)
-	for _, dbName := range databaseResp.DbNames {
-		resp, err := m.rootCoord.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
-			),
-			DbName: dbName,
-		})
-
-		if err := merr.CheckRPCCall(resp, err); err != nil {
-			log.Warn("failed to ShowCollections",
-				zap.String("dbName", dbName),
-				zap.Error(err))
-			return err
-		}
-
-		collections := make(map[int64]string)
-		for i, collection := range resp.CollectionNames {
-			collections[resp.CollectionIds[i]] = collection
-		}
-		dbInfo[dbName] = collections
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.dbCollectionInfo = dbInfo
-
-	return nil
 }
 
 // GetCollectionInfo returns the collection information related to provided collection name
@@ -704,6 +719,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 			Description:        coll.Schema.Description,
 			AutoID:             coll.Schema.AutoID,
 			Fields:             make([]*schemapb.FieldSchema, 0),
+			Functions:          make([]*schemapb.FunctionSchema, 0),
 			EnableDynamicField: coll.Schema.EnableDynamicField,
 		},
 		CollectionID:         coll.CollectionID,
@@ -713,12 +729,15 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 		CreatedUtcTimestamp:  coll.CreatedUtcTimestamp,
 		ConsistencyLevel:     coll.ConsistencyLevel,
 		DbName:               coll.GetDbName(),
+		Properties:           coll.Properties,
 	}
 	for _, field := range coll.Schema.Fields {
 		if field.FieldID >= common.StartOfUserFieldID {
 			resp.Schema.Fields = append(resp.Schema.Fields, field)
 		}
 	}
+
+	resp.Schema.Functions = append(resp.Schema.Functions, coll.Schema.Functions...)
 	return resp, nil
 }
 
@@ -747,6 +766,28 @@ func (m *MetaCache) showPartitions(ctx context.Context, dbName string, collectio
 	}
 
 	return partitions, nil
+}
+
+func (m *MetaCache) getCollectionLoadFields(ctx context.Context, collectionID UniqueID) ([]int64, error) {
+	req := &querypb.ShowCollectionsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		CollectionIDs: []int64{collectionID},
+	}
+
+	resp, err := m.queryCoord.ShowCollections(ctx, req)
+	if err != nil {
+		if errors.Is(err, merr.ErrCollectionNotLoaded) {
+			return []int64{}, nil
+		}
+		return nil, err
+	}
+	// backward compatility, ignore HPL logic
+	if len(resp.GetLoadFields()) < 1 {
+		return []int64{}, nil
+	}
+	return resp.GetLoadFields()[0].GetData(), nil
 }
 
 func (m *MetaCache) describeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error) {
@@ -794,7 +835,7 @@ func parsePartitionsInfo(infos []*partitionInfo, hasPartitionKey bool) *partitio
 		}
 		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
 		if err != nil {
-			log.Info("partition group not in partitionKey pattern", zap.String("parititonName", partitionName), zap.Error(err))
+			log.Info("partition group not in partitionKey pattern", zap.String("partitionName", partitionName), zap.Error(err))
 			return result
 		}
 		partitionNames[index] = partitionName
@@ -911,11 +952,6 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		zap.String("collectionName", collectionName),
 		zap.Int64("collectionID", collectionID))
 
-	info, err := m.getFullCollectionInfo(ctx, database, collectionName, collectionID)
-	if err != nil {
-		return nil, err
-	}
-
 	cacheShardLeaders, ok := m.getCollectionShardLeader(database, collectionName)
 	if withCache {
 		if ok {
@@ -927,6 +963,12 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
 		log.Info("no shard cache for collection, try to get shard leaders from QueryCoord")
 	}
+
+	info, err := m.getFullCollectionInfo(ctx, database, collectionName, collectionID)
+	if err != nil {
+		return nil, err
+	}
+
 	req := &querypb.GetShardLeadersRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_GetShardLeaders),
@@ -1063,6 +1105,7 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 			if le != nil {
 				log.Error("failed to load policy after RefreshPolicyInfo", zap.Error(le))
 			}
+			CleanPrivilegeCache()
 		}
 	}()
 	if op.OpType != typeutil.CacheRefresh {
@@ -1101,11 +1144,24 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 		for user := range m.userToRoles {
 			delete(m.userToRoles[user], op.OpKey)
 		}
+
+		for policy := range m.privilegeInfos {
+			if funcutil.PolicyCheckerWithRole(policy, op.OpKey) {
+				delete(m.privilegeInfos, policy)
+			}
+		}
 	case typeutil.CacheRefresh:
 		resp, err := m.rootCoord.ListPolicy(context.Background(), &internalpb.ListPolicyRequest{})
 		if err != nil {
 			log.Error("fail to init meta cache", zap.Error(err))
 			return err
+		}
+
+		if !merr.Ok(resp.GetStatus()) {
+			log.Error("fail to init meta cache",
+				zap.String("error_code", resp.GetStatus().GetErrorCode().String()),
+				zap.String("reason", resp.GetStatus().GetReason()))
+			return merr.Error(resp.Status)
 		}
 
 		m.mu.Lock()
@@ -1121,9 +1177,13 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 
 func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	delete(m.collInfo, database)
 	delete(m.dbInfo, database)
+	m.mu.Unlock()
+
+	m.leaderMut.Lock()
+	delete(m.collLeader, database)
+	m.leaderMut.Unlock()
 }
 
 func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
@@ -1150,6 +1210,7 @@ func (m *MetaCache) GetDatabaseInfo(ctx context.Context, database string) (*data
 		dbInfo := &databaseInfo{
 			dbID:             resp.GetDbID(),
 			createdTimestamp: resp.GetCreatedTimestamp(),
+			properties:       funcutil.KeyValuePair2Map(resp.GetProperties()),
 		}
 		m.dbInfo[database] = dbInfo
 		return dbInfo, nil

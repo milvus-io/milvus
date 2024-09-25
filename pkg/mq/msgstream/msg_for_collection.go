@@ -19,7 +19,7 @@
 package msgstream
 
 import (
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 )
@@ -27,7 +27,7 @@ import (
 // LoadCollectionMsg is a message pack that contains load collection request
 type LoadCollectionMsg struct {
 	BaseMsg
-	milvuspb.LoadCollectionRequest
+	*milvuspb.LoadCollectionRequest
 }
 
 // interface implementation validation
@@ -51,7 +51,7 @@ func (l *LoadCollectionMsg) SourceID() int64 {
 
 func (l *LoadCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	loadCollectionMsg := input.(*LoadCollectionMsg)
-	loadCollectionRequest := &loadCollectionMsg.LoadCollectionRequest
+	loadCollectionRequest := loadCollectionMsg.LoadCollectionRequest
 	mb, err := proto.Marshal(loadCollectionRequest)
 	if err != nil {
 		return nil, err
@@ -60,12 +60,12 @@ func (l *LoadCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (l *LoadCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	loadCollectionRequest := milvuspb.LoadCollectionRequest{}
+	loadCollectionRequest := &milvuspb.LoadCollectionRequest{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &loadCollectionRequest)
+	err = proto.Unmarshal(in, loadCollectionRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -77,13 +77,13 @@ func (l *LoadCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (l *LoadCollectionMsg) Size() int {
-	return proto.Size(&l.LoadCollectionRequest)
+	return proto.Size(l.LoadCollectionRequest)
 }
 
 // ReleaseCollectionMsg is a message pack that contains release collection request
 type ReleaseCollectionMsg struct {
 	BaseMsg
-	milvuspb.ReleaseCollectionRequest
+	*milvuspb.ReleaseCollectionRequest
 }
 
 var _ TsMsg = &ReleaseCollectionMsg{}
@@ -106,7 +106,7 @@ func (r *ReleaseCollectionMsg) SourceID() int64 {
 
 func (r *ReleaseCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	releaseCollectionMsg := input.(*ReleaseCollectionMsg)
-	releaseCollectionRequest := &releaseCollectionMsg.ReleaseCollectionRequest
+	releaseCollectionRequest := releaseCollectionMsg.ReleaseCollectionRequest
 	mb, err := proto.Marshal(releaseCollectionRequest)
 	if err != nil {
 		return nil, err
@@ -115,12 +115,12 @@ func (r *ReleaseCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (r *ReleaseCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	releaseCollectionRequest := milvuspb.ReleaseCollectionRequest{}
+	releaseCollectionRequest := &milvuspb.ReleaseCollectionRequest{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &releaseCollectionRequest)
+	err = proto.Unmarshal(in, releaseCollectionRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -132,12 +132,12 @@ func (r *ReleaseCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (r *ReleaseCollectionMsg) Size() int {
-	return proto.Size(&r.ReleaseCollectionRequest)
+	return proto.Size(r.ReleaseCollectionRequest)
 }
 
 type FlushMsg struct {
 	BaseMsg
-	milvuspb.FlushRequest
+	*milvuspb.FlushRequest
 }
 
 var _ TsMsg = &FlushMsg{}
@@ -160,7 +160,7 @@ func (f *FlushMsg) SourceID() int64 {
 
 func (f *FlushMsg) Marshal(input TsMsg) (MarshalType, error) {
 	flushMsg := input.(*FlushMsg)
-	flushRequest := &flushMsg.FlushRequest
+	flushRequest := flushMsg.FlushRequest
 	mb, err := proto.Marshal(flushRequest)
 	if err != nil {
 		return nil, err
@@ -169,12 +169,12 @@ func (f *FlushMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (f *FlushMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	flushRequest := milvuspb.FlushRequest{}
+	flushRequest := &milvuspb.FlushRequest{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &flushRequest)
+	err = proto.Unmarshal(in, flushRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -186,5 +186,5 @@ func (f *FlushMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (f *FlushMsg) Size() int {
-	return proto.Size(&f.FlushRequest)
+	return proto.Size(f.FlushRequest)
 }

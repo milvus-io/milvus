@@ -19,8 +19,8 @@ package meta
 import (
 	"sync"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -57,7 +57,7 @@ func (f *ReplicaSegDistFilter) Match(s *Segment) bool {
 	return f.GetCollectionID() == s.GetCollectionID() && f.Contains(s.Node)
 }
 
-func (f ReplicaSegDistFilter) AddFilter(filter *segDistCriterion) {
+func (f *ReplicaSegDistFilter) AddFilter(filter *segDistCriterion) {
 	filter.nodes = f.GetNodes()
 	filter.collectionID = f.GetCollectionID()
 }
@@ -224,23 +224,6 @@ func (m *SegmentDistManager) GetByFilter(filters ...SegmentDistFilter) []*Segmen
 	var ret []*Segment
 	for _, nodeSegments := range candidates {
 		ret = append(ret, nodeSegments.Filter(criterion, mergedFilters)...)
-	}
-	return ret
-}
-
-// return node list which contains the given segmentID
-func (m *SegmentDistManager) GetSegmentDist(segmentID int64) []int64 {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	ret := make([]int64, 0)
-	for nodeID, segments := range m.segments {
-		for _, segment := range segments.segments {
-			if segment.GetID() == segmentID {
-				ret = append(ret, nodeID)
-				break
-			}
-		}
 	}
 	return ret
 }

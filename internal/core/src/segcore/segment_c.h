@@ -20,6 +20,7 @@ extern "C" {
 #include <stdint.h>
 
 #include "common/type_c.h"
+#include "futures/future_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/load_index_c.h"
 #include "segcore/load_field_data_c.h"
@@ -32,7 +33,8 @@ CStatus
 NewSegment(CCollection collection,
            SegmentType seg_type,
            int64_t segment_id,
-           CSegmentInterface* newSegment);
+           CSegmentInterface* newSegment,
+           bool is_sorted_by_pk);
 
 void
 DeleteSegment(CSegmentInterface c_segment);
@@ -43,33 +45,30 @@ ClearSegmentData(CSegmentInterface c_segment);
 void
 DeleteSearchResult(CSearchResult search_result);
 
-CStatus
-Search(CTraceContext c_trace,
-       CSegmentInterface c_segment,
-       CSearchPlan c_plan,
-       CPlaceholderGroup c_placeholder_group,
-       uint64_t timestamp,
-       CSearchResult* result);
+CFuture*  // Future<CSearchResultBody>
+AsyncSearch(CTraceContext c_trace,
+            CSegmentInterface c_segment,
+            CSearchPlan c_plan,
+            CPlaceholderGroup c_placeholder_group,
+            uint64_t timestamp);
 
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);
 
-CStatus
-Retrieve(CTraceContext c_trace,
-         CSegmentInterface c_segment,
-         CRetrievePlan c_plan,
-         uint64_t timestamp,
-         CRetrieveResult* result,
-         int64_t limit_size,
-         bool ignore_non_pk);
+CFuture*  // Future<CRetrieveResult>
+AsyncRetrieve(CTraceContext c_trace,
+              CSegmentInterface c_segment,
+              CRetrievePlan c_plan,
+              uint64_t timestamp,
+              int64_t limit_size,
+              bool ignore_non_pk);
 
-CStatus
-RetrieveByOffsets(CTraceContext c_trace,
-                  CSegmentInterface c_segment,
-                  CRetrievePlan c_plan,
-                  CRetrieveResult* result,
-                  int64_t* offsets,
-                  int64_t len);
+CFuture*  // Future<CRetrieveResult>
+AsyncRetrieveByOffsets(CTraceContext c_trace,
+                       CSegmentInterface c_segment,
+                       CRetrievePlan c_plan,
+                       int64_t* offsets,
+                       int64_t len);
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);
@@ -105,10 +104,6 @@ LoadFieldData(CSegmentInterface c_segment,
               CLoadFieldDataInfo load_field_data_info);
 
 CStatus
-LoadFieldDataV2(CSegmentInterface c_segment,
-                CLoadFieldDataInfo load_field_data_info);
-
-CStatus
 LoadFieldRawData(CSegmentInterface c_segment,
                  int64_t field_id,
                  const void* data,
@@ -121,6 +116,11 @@ LoadDeletedRecord(CSegmentInterface c_segment,
 CStatus
 UpdateSealedSegmentIndex(CSegmentInterface c_segment,
                          CLoadIndexInfo c_load_index_info);
+
+CStatus
+LoadTextIndex(CSegmentInterface c_segment,
+              const uint8_t* serialized_load_text_index_info,
+              const uint64_t len);
 
 CStatus
 UpdateFieldRawDataSize(CSegmentInterface c_segment,
@@ -139,7 +139,9 @@ AddFieldDataInfoForSealed(CSegmentInterface c_segment,
                           CLoadFieldDataInfo c_load_field_data_info);
 
 CStatus
-WarmupChunkCache(CSegmentInterface c_segment, int64_t field_id);
+WarmupChunkCache(CSegmentInterface c_segment,
+                 int64_t field_id,
+                 bool mmap_enabled);
 
 //////////////////////////////    interfaces for SegmentInterface    //////////////////////////////
 CStatus
@@ -158,6 +160,9 @@ Delete(CSegmentInterface c_segment,
 
 void
 RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id);
+
+CStatus
+CreateTextIndex(CSegmentInterface c_segment, int64_t field_id);
 
 #ifdef __cplusplus
 }

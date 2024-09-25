@@ -23,14 +23,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -38,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -63,6 +64,7 @@ func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, err
 	insertLogs := make(map[typeutil.UniqueID][]*datapb.FieldBinlog, 1)
 	deltaLogs := make(map[typeutil.UniqueID][]*datapb.FieldBinlog, 1)
 	statsLogs := make(map[typeutil.UniqueID][]*datapb.FieldBinlog, 1)
+	bm25Logs := make(map[typeutil.UniqueID][]*datapb.FieldBinlog, 1)
 
 	executeFn := func(binlogType storage.BinlogType, result map[typeutil.UniqueID][]*datapb.FieldBinlog) {
 		group.Go(func() error {
@@ -80,6 +82,7 @@ func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, err
 	executeFn(storage.InsertBinlog, insertLogs)
 	executeFn(storage.DeleteBinlog, deltaLogs)
 	executeFn(storage.StatsBinlog, statsLogs)
+	executeFn(storage.BM25Binlog, bm25Logs)
 	group.Go(func() error {
 		ret, err := kc.listSegments()
 		if err != nil {
@@ -94,7 +97,7 @@ func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, err
 		return nil, err
 	}
 
-	err = kc.applyBinlogInfo(segments, insertLogs, deltaLogs, statsLogs)
+	err = kc.applyBinlogInfo(segments, insertLogs, deltaLogs, statsLogs, bm25Logs)
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +110,12 @@ func (kc *Catalog) listSegments() ([]*datapb.SegmentInfo, error) {
 	applyFn := func(key []byte, value []byte) error {
 		// due to SegmentStatslogPathPrefix has the same prefix with SegmentPrefix, so skip it.
 		if strings.Contains(string(key), SegmentStatslogPathPrefix) {
+			return nil
+		}
+
+		// due to StatsTaskPrefix has the same prefix with SegmentPrefix, so skip it.
+		// when the WalkWithPrefix is refactored, this patch can be removed.
+		if strings.Contains(string(key), StatsTaskPrefix) {
 			return nil
 		}
 
@@ -165,6 +174,8 @@ func (kc *Catalog) listBinlogs(binlogType storage.BinlogType) (map[typeutil.Uniq
 		logPathPrefix = SegmentDeltalogPathPrefix
 	case storage.StatsBinlog:
 		logPathPrefix = SegmentStatslogPathPrefix
+	case storage.BM25Binlog:
+		logPathPrefix = SegmentBM25logPathPrefix
 	default:
 		err = fmt.Errorf("invalid binlog type: %d", binlogType)
 	}
@@ -211,35 +222,36 @@ func (kc *Catalog) listBinlogs(binlogType storage.BinlogType) (map[typeutil.Uniq
 }
 
 func (kc *Catalog) applyBinlogInfo(segments []*datapb.SegmentInfo, insertLogs, deltaLogs,
-	statsLogs map[typeutil.UniqueID][]*datapb.FieldBinlog,
+	statsLogs, bm25Logs map[typeutil.UniqueID][]*datapb.FieldBinlog,
 ) error {
 	var err error
 	for _, segmentInfo := range segments {
 		if len(segmentInfo.Binlogs) == 0 {
 			segmentInfo.Binlogs = insertLogs[segmentInfo.ID]
-		} else {
-			err = binlog.CompressFieldBinlogs(segmentInfo.Binlogs)
-			if err != nil {
-				return err
-			}
+		}
+		if err = binlog.CompressFieldBinlogs(segmentInfo.Binlogs); err != nil {
+			return err
 		}
 
 		if len(segmentInfo.Deltalogs) == 0 {
 			segmentInfo.Deltalogs = deltaLogs[segmentInfo.ID]
-		} else {
-			err = binlog.CompressFieldBinlogs(segmentInfo.Deltalogs)
-			if err != nil {
-				return err
-			}
+		}
+		if err = binlog.CompressFieldBinlogs(segmentInfo.Deltalogs); err != nil {
+			return err
 		}
 
 		if len(segmentInfo.Statslogs) == 0 {
 			segmentInfo.Statslogs = statsLogs[segmentInfo.ID]
-		} else {
-			err = binlog.CompressFieldBinlogs(segmentInfo.Statslogs)
-			if err != nil {
-				return err
-			}
+		}
+		if err = binlog.CompressFieldBinlogs(segmentInfo.Statslogs); err != nil {
+			return err
+		}
+
+		if len(segmentInfo.Bm25Statslogs) == 0 {
+			segmentInfo.Bm25Statslogs = bm25Logs[segmentInfo.ID]
+		}
+		if err = binlog.CompressFieldBinlogs(segmentInfo.Bm25Statslogs); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -308,7 +320,7 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		segment := b.Segment
 
 		binlogKvs, err := buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(),
-			cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetStatslogs()))
+			cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetStatslogs()), cloneLogs(segment.GetBm25Statslogs()))
 		if err != nil {
 			return err
 		}
@@ -327,7 +339,7 @@ func (kc *Catalog) handleDroppedSegment(segment *datapb.SegmentInfo) (kvs map[st
 	}
 	// To be compatible with previous implementation, we have to write binlogs on etcd for correct gc.
 	if !has {
-		kvs, err = buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetStatslogs()))
+		kvs, err = buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetStatslogs()), cloneLogs(segment.GetBm25Statslogs()))
 		if err != nil {
 			return
 		}
@@ -397,7 +409,7 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 	kvs := make(map[string]string)
 	for _, s := range segments {
 		key := buildSegmentPath(s.GetCollectionID(), s.GetPartitionID(), s.GetID())
-		noBinlogsSegment, _, _, _ := CloneSegmentWithExcludeBinlogs(s)
+		noBinlogsSegment, _, _, _, _ := CloneSegmentWithExcludeBinlogs(s)
 		// `s` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `s`.
 		segmentutil.ReCalcRowCount(s, noBinlogsSegment)
 		segBytes, err := proto.Marshal(noBinlogsSegment)
@@ -781,13 +793,11 @@ func (kc *Catalog) DropImportTask(taskID int64) error {
 	return kc.MetaKv.Remove(key)
 }
 
-const allPartitionID = -1
-
 // GcConfirm returns true if related collection/partition is not found.
 // DataCoord will remove all the meta eventually after GC is finished.
 func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool {
 	prefix := buildCollectionPrefix(collectionID)
-	if partitionID != allPartitionID {
+	if partitionID != common.AllPartitionsID {
 		prefix = buildPartitionPrefix(collectionID, partitionID)
 	}
 	keys, values, err := kc.MetaKv.LoadWithPrefix(prefix)
@@ -928,5 +938,42 @@ func (kc *Catalog) GetCurrentPartitionStatsVersion(ctx context.Context, collID, 
 
 func (kc *Catalog) DropCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) error {
 	key := buildCurrentPartitionStatsVersionPath(collID, partID, vChannel)
+	return kc.MetaKv.Remove(key)
+}
+
+func (kc *Catalog) ListStatsTasks(ctx context.Context) ([]*indexpb.StatsTask, error) {
+	tasks := make([]*indexpb.StatsTask, 0)
+	_, values, err := kc.MetaKv.LoadWithPrefix(StatsTaskPrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, value := range values {
+		task := &indexpb.StatsTask{}
+		err = proto.Unmarshal([]byte(value), task)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
+}
+
+func (kc *Catalog) SaveStatsTask(ctx context.Context, task *indexpb.StatsTask) error {
+	key := buildStatsTaskKey(task.TaskID)
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+
+	err = kc.MetaKv.Save(key, string(value))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) error {
+	key := buildStatsTaskKey(taskID)
 	return kc.MetaKv.Remove(key)
 }

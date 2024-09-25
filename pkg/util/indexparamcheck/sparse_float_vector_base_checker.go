@@ -32,14 +32,14 @@ func (c sparseFloatVectorBaseChecker) CheckTrain(params map[string]string) error
 	return nil
 }
 
-func (c sparseFloatVectorBaseChecker) CheckValidDataType(dType schemapb.DataType) error {
-	if !typeutil.IsSparseFloatVectorType(dType) {
+func (c sparseFloatVectorBaseChecker) CheckValidDataType(field *schemapb.FieldSchema) error {
+	if !typeutil.IsSparseFloatVectorType(field.GetDataType()) {
 		return fmt.Errorf("only sparse float vector is supported for the specified index tpye")
 	}
 	return nil
 }
 
-func (c sparseFloatVectorBaseChecker) SetDefaultMetricTypeIfNotExist(params map[string]string) {
+func (c sparseFloatVectorBaseChecker) SetDefaultMetricTypeIfNotExist(params map[string]string, dType schemapb.DataType) {
 	setDefaultIfNotExist(params, common.MetricTypeKey, SparseFloatVectorDefaultMetricType)
 }
 

@@ -89,6 +89,12 @@ func setResultSegments(segments []int64) compactionTaskOpt {
 	}
 }
 
+func setTmpSegments(segments []int64) compactionTaskOpt {
+	return func(task *datapb.CompactionTask) {
+		task.TmpSegments = segments
+	}
+}
+
 func setState(state datapb.CompactionTaskState) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
 		task.State = state
@@ -98,5 +104,17 @@ func setState(state datapb.CompactionTaskState) compactionTaskOpt {
 func setStartTime(startTime int64) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
 		task.StartTime = startTime
+	}
+}
+
+func setRetryTimes(retryTimes int32) compactionTaskOpt {
+	return func(task *datapb.CompactionTask) {
+		task.RetryTimes = retryTimes
+	}
+}
+
+func setLastStateStartTime(lastStateStartTime int64) compactionTaskOpt {
+	return func(task *datapb.CompactionTask) {
+		task.LastStateStartTime = lastStateStartTime
 	}
 }

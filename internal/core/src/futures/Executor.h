@@ -18,23 +18,13 @@
 
 namespace milvus::futures {
 
-folly::Executor::KeepAlive<>
+namespace ExecutePriority {
+const int LOW = 2;
+const int NORMAL = 1;
+const int HIGH = 0;
+}  // namespace ExecutePriority
+
+folly::CPUThreadPoolExecutor*
 getGlobalCPUExecutor();
-
-class ExecutorSingleton {
- public:
-    ExecutorSingleton() = default;
-
-    ExecutorSingleton(const ExecutorSingleton&) = delete;
-
-    ExecutorSingleton(ExecutorSingleton&&) noexcept = delete;
-
-    folly::Executor::KeepAlive<>
-    GetCPUExecutor();
-
- private:
-    std::unique_ptr<folly::Executor> cpu_executor_;
-    std::once_flag cpu_executor_once_;
-};
 
 };  // namespace milvus::futures

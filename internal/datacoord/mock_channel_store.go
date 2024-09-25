@@ -137,48 +137,6 @@ func (_c *MockRWChannelStore_GetNode_Call) RunAndReturn(run func(int64) *NodeCha
 	return _c
 }
 
-// GetNodeChannelCount provides a mock function with given fields: nodeID
-func (_m *MockRWChannelStore) GetNodeChannelCount(nodeID int64) int {
-	ret := _m.Called(nodeID)
-
-	var r0 int
-	if rf, ok := ret.Get(0).(func(int64) int); ok {
-		r0 = rf(nodeID)
-	} else {
-		r0 = ret.Get(0).(int)
-	}
-
-	return r0
-}
-
-// MockRWChannelStore_GetNodeChannelCount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNodeChannelCount'
-type MockRWChannelStore_GetNodeChannelCount_Call struct {
-	*mock.Call
-}
-
-// GetNodeChannelCount is a helper method to define mock.On call
-//   - nodeID int64
-func (_e *MockRWChannelStore_Expecter) GetNodeChannelCount(nodeID interface{}) *MockRWChannelStore_GetNodeChannelCount_Call {
-	return &MockRWChannelStore_GetNodeChannelCount_Call{Call: _e.mock.On("GetNodeChannelCount", nodeID)}
-}
-
-func (_c *MockRWChannelStore_GetNodeChannelCount_Call) Run(run func(nodeID int64)) *MockRWChannelStore_GetNodeChannelCount_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
-	})
-	return _c
-}
-
-func (_c *MockRWChannelStore_GetNodeChannelCount_Call) Return(_a0 int) *MockRWChannelStore_GetNodeChannelCount_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockRWChannelStore_GetNodeChannelCount_Call) RunAndReturn(run func(int64) int) *MockRWChannelStore_GetNodeChannelCount_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetNodeChannelsBy provides a mock function with given fields: nodeSelector, channelSelectors
 func (_m *MockRWChannelStore) GetNodeChannelsBy(nodeSelector NodeSelector, channelSelectors ...ChannelSelector) []*NodeChannelInfo {
 	_va := make([]interface{}, len(channelSelectors))
@@ -364,48 +322,6 @@ func (_c *MockRWChannelStore_GetNodesChannels_Call) Return(_a0 []*NodeChannelInf
 }
 
 func (_c *MockRWChannelStore_GetNodesChannels_Call) RunAndReturn(run func() []*NodeChannelInfo) *MockRWChannelStore_GetNodesChannels_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// HasChannel provides a mock function with given fields: channel
-func (_m *MockRWChannelStore) HasChannel(channel string) bool {
-	ret := _m.Called(channel)
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(string) bool); ok {
-		r0 = rf(channel)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// MockRWChannelStore_HasChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasChannel'
-type MockRWChannelStore_HasChannel_Call struct {
-	*mock.Call
-}
-
-// HasChannel is a helper method to define mock.On call
-//   - channel string
-func (_e *MockRWChannelStore_Expecter) HasChannel(channel interface{}) *MockRWChannelStore_HasChannel_Call {
-	return &MockRWChannelStore_HasChannel_Call{Call: _e.mock.On("HasChannel", channel)}
-}
-
-func (_c *MockRWChannelStore_HasChannel_Call) Run(run func(channel string)) *MockRWChannelStore_HasChannel_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
-	})
-	return _c
-}
-
-func (_c *MockRWChannelStore_HasChannel_Call) Return(_a0 bool) *MockRWChannelStore_HasChannel_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockRWChannelStore_HasChannel_Call) RunAndReturn(run func(string) bool) *MockRWChannelStore_HasChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }

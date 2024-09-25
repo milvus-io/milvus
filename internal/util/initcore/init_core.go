@@ -17,7 +17,7 @@
 package initcore
 
 /*
-#cgo pkg-config: milvus_common milvus_storage milvus_segcore
+#cgo pkg-config: milvus_core
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -29,6 +29,7 @@ import "C"
 
 import (
 	"fmt"
+	"path"
 	"time"
 	"unsafe"
 
@@ -50,16 +51,21 @@ func InitTraceConfig(params *paramtable.ComponentParam) {
 	nodeID := C.int(paramtable.GetNodeID())
 	exporter := C.CString(params.TraceCfg.Exporter.GetValue())
 	jaegerURL := C.CString(params.TraceCfg.JaegerURL.GetValue())
+	otlpMethod := C.CString(params.TraceCfg.OtlpMethod.GetValue())
 	endpoint := C.CString(params.TraceCfg.OtlpEndpoint.GetValue())
+	otlpSecure := params.TraceCfg.OtlpSecure.GetAsBool()
 	defer C.free(unsafe.Pointer(exporter))
 	defer C.free(unsafe.Pointer(jaegerURL))
 	defer C.free(unsafe.Pointer(endpoint))
+	defer C.free(unsafe.Pointer(otlpMethod))
 
 	config := C.CTraceConfig{
 		exporter:       exporter,
 		sampleFraction: sampleFraction,
 		jaegerURL:      jaegerURL,
 		otlpEndpoint:   endpoint,
+		otlpMethod:     otlpMethod,
+		oltpSecure:     (C.bool)(otlpSecure),
 		nodeID:         nodeID,
 	}
 	// oltp grpc may hangs forever, add timeout logic at go side
@@ -77,15 +83,20 @@ func ResetTraceConfig(params *paramtable.ComponentParam) {
 	exporter := C.CString(params.TraceCfg.Exporter.GetValue())
 	jaegerURL := C.CString(params.TraceCfg.JaegerURL.GetValue())
 	endpoint := C.CString(params.TraceCfg.OtlpEndpoint.GetValue())
+	otlpMethod := C.CString(params.TraceCfg.OtlpMethod.GetValue())
+	otlpSecure := params.TraceCfg.OtlpSecure.GetAsBool()
 	defer C.free(unsafe.Pointer(exporter))
 	defer C.free(unsafe.Pointer(jaegerURL))
 	defer C.free(unsafe.Pointer(endpoint))
+	defer C.free(unsafe.Pointer(otlpMethod))
 
 	config := C.CTraceConfig{
 		exporter:       exporter,
 		sampleFraction: sampleFraction,
 		jaegerURL:      jaegerURL,
 		otlpEndpoint:   endpoint,
+		otlpMethod:     otlpMethod,
+		oltpSecure:     (C.bool)(otlpSecure),
 		nodeID:         nodeID,
 	}
 
@@ -160,13 +171,25 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitRemoteChunkManagerSingleton failed")
 }
 
-func InitChunkCache(mmapDirPath string, readAheadPolicy string) error {
-	cMmapDirPath := C.CString(mmapDirPath)
-	defer C.free(unsafe.Pointer(cMmapDirPath))
-	cReadAheadPolicy := C.CString(readAheadPolicy)
-	defer C.free(unsafe.Pointer(cReadAheadPolicy))
-	status := C.InitChunkCacheSingleton(cMmapDirPath, cReadAheadPolicy)
-	return HandleCStatus(&status, "InitChunkCacheSingleton failed")
+func InitMmapManager(params *paramtable.ComponentParam) error {
+	mmapDirPath := params.QueryNodeCfg.MmapDirPath.GetValue()
+	cMmapChunkManagerDir := C.CString(path.Join(mmapDirPath, "/mmap_chunk_manager/"))
+	cCacheReadAheadPolicy := C.CString(params.QueryNodeCfg.ReadAheadPolicy.GetValue())
+	defer C.free(unsafe.Pointer(cMmapChunkManagerDir))
+	defer C.free(unsafe.Pointer(cCacheReadAheadPolicy))
+	diskCapacity := params.QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
+	diskLimit := uint64(float64(params.QueryNodeCfg.MaxMmapDiskPercentageForMmapManager.GetAsUint64()*diskCapacity) * 0.01)
+	mmapFileSize := params.QueryNodeCfg.FixedFileSizeForMmapManager.GetAsFloat() * 1024 * 1024
+	mmapConfig := C.CMmapConfig{
+		cache_read_ahead_policy:  cCacheReadAheadPolicy,
+		mmap_path:                cMmapChunkManagerDir,
+		disk_limit:               C.uint64_t(diskLimit),
+		fix_file_size:            C.uint64_t(mmapFileSize),
+		growing_enable_mmap:      C.bool(params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()),
+		scalar_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapScalarIndex.GetAsBool()),
+	}
+	status := C.InitMmapManager(mmapConfig)
+	return HandleCStatus(&status, "InitMmapManager failed")
 }
 
 func CleanRemoteChunkManager() {

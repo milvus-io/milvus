@@ -24,9 +24,9 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -126,11 +126,13 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("ListAllAvailCollections",
+		meta.EXPECT().ListAllAvailCollections(
 			mock.Anything,
-		).Return(map[int64][]int64{
-			1: {1, 2},
-		}, nil)
+		).Return(map[int64][]int64{1: {1, 2}})
+
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
+			Return(&model.Database{Name: "db1"}, nil).Once()
+
 		core := newTestCore(withMeta(meta))
 		task := createCollectionTask{
 			baseTask: newBaseTask(context.TODO(), core),
@@ -152,16 +154,69 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("collection num per db exceeds limit", func(t *testing.T) {
+	t.Run("collection num per db exceeds limit with db properties", func(t *testing.T) {
 		paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNumPerDB.Key, strconv.Itoa(2))
 		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNumPerDB.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("ListAllAvailCollections",
-			mock.Anything,
-		).Return(map[int64][]int64{
-			1: {1, 2},
-		}, nil)
+		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{util.DefaultDBID: {1, 2}})
+
+		// test reach limit
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
+			Return(&model.Database{
+				Name: "db1",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DatabaseMaxCollectionsKey,
+						Value: "2",
+					},
+				},
+			}, nil).Once()
+
+		core := newTestCore(withMeta(meta))
+		task := createCollectionTask{
+			baseTask: newBaseTask(context.TODO(), core),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			},
+			dbID: util.DefaultDBID,
+		}
+		err := task.validate()
+		assert.Error(t, err)
+
+		// invalid properties
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
+			Return(&model.Database{
+				Name: "db1",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DatabaseMaxCollectionsKey,
+						Value: "invalid-value",
+					},
+				},
+			}, nil).Once()
+		core = newTestCore(withMeta(meta))
+		task = createCollectionTask{
+			baseTask: newBaseTask(context.TODO(), core),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			},
+			dbID: util.DefaultDBID,
+		}
+
+		err = task.validate()
+		assert.Error(t, err)
+	})
+
+	t.Run("collection num per db exceeds limit with global configuration", func(t *testing.T) {
+		paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNumPerDB.Key, strconv.Itoa(2))
+		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNumPerDB.Key)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{1: {1, 2}})
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
+			Return(&model.Database{Name: "db1"}, nil).Once()
+
 		core := newTestCore(withMeta(meta))
 		task := createCollectionTask{
 			baseTask: newBaseTask(context.TODO(), core),
@@ -188,11 +243,10 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		defer paramtable.Get().Reset(Params.RootCoordCfg.MaxGeneralCapacity.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("ListAllAvailCollections",
-			mock.Anything,
-		).Return(map[int64][]int64{
-			1: {1, 2},
-		}, nil)
+		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{1: {1, 2}})
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
+			Return(&model.Database{Name: "db1"}, nil).Once()
+
 		meta.On("GetDatabaseByID",
 			mock.Anything, mock.Anything, mock.Anything,
 		).Return(&model.Database{
@@ -225,15 +279,24 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrGeneralCapacityExceeded)
 	})
 
-	t.Run("normal case", func(t *testing.T) {
+	t.Run("ok", func(t *testing.T) {
+		paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNumPerDB.Key, "1")
+		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNumPerDB.Key)
+
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("ListAllAvailCollections",
-			mock.Anything,
-		).Return(map[int64][]int64{
-			1: {1, 2},
-		}, nil)
-		meta.On("GetDatabaseByID", mock.Anything,
-			mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
+		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{1: {1, 2}})
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
+			Return(&model.Database{
+				Name: "db1",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DatabaseMaxCollectionsKey,
+						Value: "3",
+					},
+				},
+			}, nil).Once()
+		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, errors.New("mock"))
 
 		core := newTestCore(withMeta(meta))
 		task := createCollectionTask{
@@ -248,9 +311,6 @@ func Test_createCollectionTask_validate(t *testing.T) {
 
 		paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
-
-		paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNumPerDB.Key, strconv.Itoa(math.MaxInt64))
-		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNumPerDB.Key)
 
 		err := task.validate()
 		assert.NoError(t, err)
@@ -269,6 +329,54 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		}
 		schema := &schemapb.CollectionSchema{
 			Name: otherName,
+		}
+		err := task.validateSchema(schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("primary field set nullable", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "pk",
+					IsPrimaryKey: true,
+					Nullable:     true,
+				},
+			},
+		}
+		err := task.validateSchema(schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("primary field set default_value", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "pk",
+					IsPrimaryKey: true,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_LongData{
+							LongData: 1,
+						},
+					},
+				},
+			},
 		}
 		err := task.validateSchema(schema)
 		assert.Error(t, err)
@@ -552,6 +660,34 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 				{
 					Name:     field1,
 					DataType: 200,
+				},
+			},
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+			},
+		}
+		err = task.prepareSchema()
+		assert.Error(t, err)
+	})
+
+	t.Run("vector type not support null", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     field1,
+					DataType: 101,
+					Nullable: true,
 				},
 			},
 		}

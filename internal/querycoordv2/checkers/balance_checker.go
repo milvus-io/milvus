@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -43,12 +44,12 @@ type BalanceChecker struct {
 	nodeManager                          *session.NodeManager
 	normalBalanceCollectionsCurrentRound typeutil.UniqueSet
 	scheduler                            task.Scheduler
-	targetMgr                            *meta.TargetManager
+	targetMgr                            meta.TargetManagerInterface
 	getBalancerFunc                      GetBalancerFunc
 }
 
 func NewBalanceChecker(meta *meta.Meta,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
 	getBalancerFunc GetBalancerFunc,
@@ -74,7 +75,7 @@ func (b *BalanceChecker) Description() string {
 
 func (b *BalanceChecker) readyToCheck(collectionID int64) bool {
 	metaExist := (b.meta.GetCollection(collectionID) != nil)
-	targetExist := b.targetMgr.IsNextTargetExist(collectionID) || b.targetMgr.IsCurrentTargetExist(collectionID)
+	targetExist := b.targetMgr.IsNextTargetExist(collectionID) || b.targetMgr.IsCurrentTargetExist(collectionID, common.AllPartitionsID)
 
 	return metaExist && targetExist
 }
@@ -118,17 +119,12 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 		return nil
 	}
 
-	// scheduler is handling segment task, skip
-	if b.scheduler.GetSegmentTaskNum() != 0 {
-		return nil
-	}
-
 	// iterator one normal collection in one round
 	normalReplicasToBalance := make([]int64, 0)
 	hasUnbalancedCollection := false
 	for _, cid := range loadedCollections {
 		if b.normalBalanceCollectionsCurrentRound.Contain(cid) {
-			log.Debug("ScoreBasedBalancer is balancing this collection, skip balancing in this round",
+			log.RatedDebug(10, "ScoreBasedBalancer is balancing this collection, skip balancing in this round",
 				zap.Int64("collectionID", cid))
 			continue
 		}
@@ -170,6 +166,11 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 
 	replicasToBalance := b.replicasToBalance()
 	segmentPlans, channelPlans := b.balanceReplicas(replicasToBalance)
+	// iterate all collection to find a collection to balance
+	for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.normalBalanceCollectionsCurrentRound.Len() > 0 {
+		replicasToBalance := b.replicasToBalance()
+		segmentPlans, channelPlans = b.balanceReplicas(replicasToBalance)
+	}
 
 	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), segmentPlans)
 	task.SetPriority(task.TaskPriorityLow, tasks...)

@@ -19,7 +19,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "query/PlanProto.h"
-#include "query/generated/ExecPlanNodeVisitor.h"
+#include "query/ExecPlanNodeVisitor.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -35,21 +35,21 @@ GenTestSchema() {
     schema_->set_primary_field_id(pk);
 
     if constexpr (std::is_same_v<T, bool>) {
-        schema_->AddDebugArrayField("array", DataType::BOOL);
+        schema_->AddDebugArrayField("array", DataType::BOOL, false);
     } else if constexpr (std::is_same_v<T, int8_t>) {
-        schema_->AddDebugArrayField("array", DataType::INT8);
+        schema_->AddDebugArrayField("array", DataType::INT8, false);
     } else if constexpr (std::is_same_v<T, int16_t>) {
-        schema_->AddDebugArrayField("array", DataType::INT16);
+        schema_->AddDebugArrayField("array", DataType::INT16, false);
     } else if constexpr (std::is_same_v<T, int32_t>) {
-        schema_->AddDebugArrayField("array", DataType::INT32);
+        schema_->AddDebugArrayField("array", DataType::INT32, false);
     } else if constexpr (std::is_same_v<T, int64_t>) {
-        schema_->AddDebugArrayField("array", DataType::INT64);
+        schema_->AddDebugArrayField("array", DataType::INT64, false);
     } else if constexpr (std::is_same_v<T, float>) {
-        schema_->AddDebugArrayField("array", DataType::FLOAT);
+        schema_->AddDebugArrayField("array", DataType::FLOAT, false);
     } else if constexpr (std::is_same_v<T, double>) {
-        schema_->AddDebugArrayField("array", DataType::DOUBLE);
+        schema_->AddDebugArrayField("array", DataType::DOUBLE, false);
     } else if constexpr (std::is_same_v<T, std::string>) {
-        schema_->AddDebugArrayField("array", DataType::VARCHAR);
+        schema_->AddDebugArrayField("array", DataType::VARCHAR, false);
     }
 
     return schema_;
@@ -156,9 +156,8 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayContainsAny) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(this->seg_.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    visitor.ExecuteExprNode(parsed, segpromote, this->N_, final);
+    final = ExecuteQueryExpr(parsed, segpromote, this->N_, MAX_TIMESTAMP);
 
     std::unordered_set<TypeParam> elems(this->vec_of_array_[0].begin(),
                                         this->vec_of_array_[0].end());
@@ -205,9 +204,8 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayContainsAll) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(this->seg_.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    visitor.ExecuteExprNode(parsed, segpromote, this->N_, final);
+    final = ExecuteQueryExpr(parsed, segpromote, this->N_, MAX_TIMESTAMP);
 
     std::unordered_set<TypeParam> elems(this->vec_of_array_[0].begin(),
                                         this->vec_of_array_[0].end());
@@ -262,9 +260,8 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayEqual) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(this->seg_.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    visitor.ExecuteExprNode(parsed, segpromote, this->N_, final);
+    final = ExecuteQueryExpr(parsed, segpromote, this->N_, MAX_TIMESTAMP);
 
     auto ref = [this](size_t offset) -> bool {
         if (this->vec_of_array_[0].size() !=

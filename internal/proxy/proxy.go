@@ -31,7 +31,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -40,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -67,9 +67,8 @@ type Timestamp = typeutil.Timestamp
 var _ types.Proxy = (*Proxy)(nil)
 
 var (
-	Params    = paramtable.Get()
-	Extension hook.Extension
-	rateCol   *ratelimitutil.RateCollector
+	Params  = paramtable.Get()
+	rateCol *ratelimitutil.RateCollector
 )
 
 // Proxy of milvus
@@ -157,7 +156,6 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	expr.Register("proxy", node)
 	hookutil.InitOnceHook()
-	Extension = hookutil.Extension
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
 	return node, nil
 }
@@ -209,7 +207,6 @@ func (node *Proxy) initRateCollector() error {
 	// TODO: add bulkLoad rate
 	rateCol.Register(internalpb.RateType_DQLSearch.String())
 	rateCol.Register(internalpb.RateType_DQLQuery.String())
-	rateCol.Register(metricsinfo.ReadResultThroughput)
 	return nil
 }
 
@@ -403,26 +400,28 @@ func (node *Proxy) Start() error {
 	}
 	log.Debug("start id allocator done", zap.String("role", typeutil.ProxyRole))
 
-	if err := node.segAssigner.Start(); err != nil {
-		log.Warn("failed to start segment id assigner", zap.String("role", typeutil.ProxyRole), zap.Error(err))
-		return err
-	}
-	log.Debug("start segment id assigner done", zap.String("role", typeutil.ProxyRole))
+	if !streamingutil.IsStreamingServiceEnabled() {
+		if err := node.segAssigner.Start(); err != nil {
+			log.Warn("failed to start segment id assigner", zap.String("role", typeutil.ProxyRole), zap.Error(err))
+			return err
+		}
+		log.Debug("start segment id assigner done", zap.String("role", typeutil.ProxyRole))
 
-	if err := node.chTicker.start(); err != nil {
-		log.Warn("failed to start channels time ticker", zap.String("role", typeutil.ProxyRole), zap.Error(err))
-		return err
-	}
-	log.Debug("start channels time ticker done", zap.String("role", typeutil.ProxyRole))
+		if err := node.chTicker.start(); err != nil {
+			log.Warn("failed to start channels time ticker", zap.String("role", typeutil.ProxyRole), zap.Error(err))
+			return err
+		}
+		log.Debug("start channels time ticker done", zap.String("role", typeutil.ProxyRole))
 
-	node.sendChannelsTimeTickLoop()
+		node.sendChannelsTimeTickLoop()
+	}
 
 	// Start callbacks
 	for _, cb := range node.startCallbacks {
 		cb()
 	}
 
-	Extension.Report(map[string]any{
+	hookutil.GetExtension().Report(map[string]any{
 		hookutil.OpTypeKey: hookutil.OpTypeNodeID,
 		hookutil.NodeIDKey: paramtable.GetNodeID(),
 	})
@@ -443,22 +442,24 @@ func (node *Proxy) Stop() error {
 		log.Info("close id allocator", zap.String("role", typeutil.ProxyRole))
 	}
 
-	if node.segAssigner != nil {
-		node.segAssigner.Close()
-		log.Info("close segment id assigner", zap.String("role", typeutil.ProxyRole))
-	}
-
 	if node.sched != nil {
 		node.sched.Close()
 		log.Info("close scheduler", zap.String("role", typeutil.ProxyRole))
 	}
 
-	if node.chTicker != nil {
-		err := node.chTicker.close()
-		if err != nil {
-			return err
+	if !streamingutil.IsStreamingServiceEnabled() {
+		if node.segAssigner != nil {
+			node.segAssigner.Close()
+			log.Info("close segment id assigner", zap.String("role", typeutil.ProxyRole))
 		}
-		log.Info("close channels time ticker", zap.String("role", typeutil.ProxyRole))
+
+		if node.chTicker != nil {
+			err := node.chTicker.close()
+			if err != nil {
+				return err
+			}
+			log.Info("close channels time ticker", zap.String("role", typeutil.ProxyRole))
+		}
 	}
 
 	for _, cb := range node.closeCallbacks {

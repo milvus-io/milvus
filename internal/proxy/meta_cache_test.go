@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -195,6 +196,9 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -209,9 +213,10 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection1",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection1",
 	})
 	id, err = globalMetaCache.GetCollectionID(ctx, dbName, "collection2")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
@@ -221,9 +226,10 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection2",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection2",
 	})
 
 	// test to get from cache, this should trigger root request
@@ -235,9 +241,10 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection1",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection1",
 	})
 }
 
@@ -245,6 +252,8 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -277,6 +286,7 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -291,9 +301,10 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection1",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection1",
 	})
 	collection, err = globalMetaCache.GetCollectionName(ctx, GetCurDBNameFromContextOrDefault(ctx), 1)
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
@@ -303,9 +314,10 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection2",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection2",
 	})
 
 	// test to get from cache, this should trigger root request
@@ -317,9 +329,10 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection1",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection1",
 	})
 }
 
@@ -327,6 +340,7 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -341,18 +355,20 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection1",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection1",
 	})
 
 	rootCoord.Error = true
 	// should be cached with no error
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection1",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection1",
 	})
 }
 
@@ -360,6 +376,7 @@ func TestMetaCache_GetNonExistCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -376,6 +393,7 @@ func TestMetaCache_GetPartitionID(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -398,6 +416,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -411,9 +430,10 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 			schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
 			assert.NoError(t, err)
 			assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-				AutoID: true,
-				Fields: []*schemapb.FieldSchema{},
-				Name:   "collection1",
+				AutoID:    true,
+				Fields:    []*schemapb.FieldSchema{},
+				Functions: []*schemapb.FunctionSchema{},
+				Name:      "collection1",
 			})
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -452,6 +472,7 @@ func TestMetaCache_GetPartitionError(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -679,9 +700,13 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 	t.Run("Delete user or drop role", func(t *testing.T) {
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{
-				Status:      merr.Success(),
-				PolicyInfos: []string{"policy1", "policy2", "policy3"},
-				UserRoles:   []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2"), funcutil.EncodeUserRoleCache("foo2", "role3")},
+				Status: merr.Success(),
+				PolicyInfos: []string{
+					funcutil.PolicyForPrivilege("role2", "Collection", "collection1", "read", "default"),
+					"policy2",
+					"policy3",
+				},
+				UserRoles: []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2"), funcutil.EncodeUserRoleCache("foo2", "role3")},
 			}, nil
 		}
 		err := InitMetaCache(context.Background(), client, qc, mgr)
@@ -805,6 +830,7 @@ func TestMetaCache_Database(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	shardMgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
 	assert.NoError(t, err)
@@ -926,152 +952,6 @@ func TestMetaCache_AllocID(t *testing.T) {
 	})
 }
 
-func TestGlobalMetaCache_UpdateDBInfo(t *testing.T) {
-	rootCoord := mocks.NewMockRootCoordClient(t)
-	queryCoord := mocks.NewMockQueryCoordClient(t)
-	shardMgr := newShardClientMgr()
-	ctx := context.Background()
-
-	cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
-	assert.NoError(t, err)
-
-	t.Run("fail to list db", func(t *testing.T) {
-		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Code:      500,
-			},
-		}, nil).Once()
-		err := cache.updateDBInfo(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to list collection", func(t *testing.T) {
-		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			DbNames: []string{"db1"},
-		}, nil).Once()
-		rootCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Code:      500,
-			},
-		}, nil).Once()
-		err := cache.updateDBInfo(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			DbNames: []string{"db1"},
-		}, nil).Once()
-		rootCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			CollectionNames: []string{"collection1"},
-			CollectionIds:   []int64{1},
-		}, nil).Once()
-		err := cache.updateDBInfo(ctx)
-		assert.NoError(t, err)
-		assert.Len(t, cache.dbCollectionInfo, 1)
-		assert.Len(t, cache.dbCollectionInfo["db1"], 1)
-		assert.Equal(t, "collection1", cache.dbCollectionInfo["db1"][1])
-	})
-}
-
-func TestGlobalMetaCache_GetCollectionNamesByID(t *testing.T) {
-	rootCoord := mocks.NewMockRootCoordClient(t)
-	queryCoord := mocks.NewMockQueryCoordClient(t)
-	shardMgr := newShardClientMgr()
-	ctx := context.Background()
-
-	t.Run("fail to update db info", func(t *testing.T) {
-		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Code:      500,
-			},
-		}, nil).Once()
-
-		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
-		assert.NoError(t, err)
-
-		_, _, err = cache.GetCollectionNamesByID(ctx, []int64{1})
-		assert.Error(t, err)
-	})
-
-	t.Run("not found collection", func(t *testing.T) {
-		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			DbNames: []string{"db1"},
-		}, nil).Once()
-		rootCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			CollectionNames: []string{"collection1"},
-			CollectionIds:   []int64{1},
-		}, nil).Once()
-
-		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
-		assert.NoError(t, err)
-		_, _, err = cache.GetCollectionNamesByID(ctx, []int64{2})
-		assert.Error(t, err)
-	})
-
-	t.Run("not found collection 2", func(t *testing.T) {
-		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			DbNames: []string{"db1"},
-		}, nil).Once()
-		rootCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			CollectionNames: []string{"collection1"},
-			CollectionIds:   []int64{1},
-		}, nil).Once()
-
-		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
-		assert.NoError(t, err)
-		_, _, err = cache.GetCollectionNamesByID(ctx, []int64{1, 2})
-		assert.Error(t, err)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			DbNames: []string{"db1"},
-		}, nil).Once()
-		rootCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			CollectionNames: []string{"collection1", "collection2"},
-			CollectionIds:   []int64{1, 2},
-		}, nil).Once()
-
-		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
-		assert.NoError(t, err)
-		dbNames, collectionNames, err := cache.GetCollectionNamesByID(ctx, []int64{1, 2})
-		assert.NoError(t, err)
-		assert.Equal(t, []string{"collection1", "collection2"}, collectionNames)
-		assert.Equal(t, []string{"db1", "db1"}, dbNames)
-	})
-}
-
 func TestMetaCache_InvalidateShardLeaderCache(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(Params.ProxyCfg.ShardLeaderCacheInterval.Key, "1")
@@ -1118,4 +998,246 @@ func TestMetaCache_InvalidateShardLeaderCache(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, nodeInfos["channel-1"], 3)
 	assert.Equal(t, called.Load(), int32(2))
+}
+
+func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
+	type testCase struct {
+		tag              string
+		schema           *schemapb.CollectionSchema
+		loadFields       []string
+		skipDynamicField bool
+		expectResult     []int64
+		expectErr        bool
+	}
+
+	rowIDField := &schemapb.FieldSchema{
+		FieldID:  common.RowIDField,
+		Name:     common.RowIDFieldName,
+		DataType: schemapb.DataType_Int64,
+	}
+	timestampField := &schemapb.FieldSchema{
+		FieldID:  common.TimeStampField,
+		Name:     common.TimeStampFieldName,
+		DataType: schemapb.DataType_Int64,
+	}
+	pkField := &schemapb.FieldSchema{
+		FieldID:      common.StartOfUserFieldID,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+	}
+	scalarField := &schemapb.FieldSchema{
+		FieldID:  common.StartOfUserFieldID + 1,
+		Name:     "text",
+		DataType: schemapb.DataType_VarChar,
+	}
+	scalarFieldSkipLoad := &schemapb.FieldSchema{
+		FieldID:  common.StartOfUserFieldID + 1,
+		Name:     "text",
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.FieldSkipLoadKey, Value: "true"},
+		},
+	}
+	partitionKeyField := &schemapb.FieldSchema{
+		FieldID:        common.StartOfUserFieldID + 2,
+		Name:           "part_key",
+		DataType:       schemapb.DataType_Int64,
+		IsPartitionKey: true,
+	}
+	vectorField := &schemapb.FieldSchema{
+		FieldID:  common.StartOfUserFieldID + 3,
+		Name:     "vector",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "768"},
+		},
+	}
+	dynamicField := &schemapb.FieldSchema{
+		FieldID:   common.StartOfUserFieldID + 4,
+		Name:      common.MetaFieldName,
+		DataType:  schemapb.DataType_JSON,
+		IsDynamic: true,
+	}
+	clusteringKeyField := &schemapb.FieldSchema{
+		FieldID:         common.StartOfUserFieldID + 5,
+		Name:            "clustering_key",
+		DataType:        schemapb.DataType_Int32,
+		IsClusteringKey: true,
+	}
+
+	testCases := []testCase{
+		{
+			tag: "default",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					dynamicField,
+				},
+				Functions: []*schemapb.FunctionSchema{},
+			},
+			loadFields:       nil,
+			skipDynamicField: false,
+			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 1, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 4},
+			expectErr:        false,
+		},
+		{
+			tag: "default_from_schema",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarFieldSkipLoad,
+					partitionKeyField,
+					vectorField,
+					dynamicField,
+					clusteringKeyField,
+				},
+				Functions: []*schemapb.FunctionSchema{},
+			},
+			loadFields:       nil,
+			skipDynamicField: false,
+			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 4, common.StartOfUserFieldID + 5},
+			expectErr:        false,
+		},
+		{
+			tag: "load_fields",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					dynamicField,
+					clusteringKeyField,
+				},
+				Functions: []*schemapb.FunctionSchema{},
+			},
+			loadFields:       []string{"pk", "part_key", "vector", "clustering_key"},
+			skipDynamicField: false,
+			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 4, common.StartOfUserFieldID + 5},
+			expectErr:        false,
+		},
+		{
+			tag: "load_fields_skip_dynamic",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					dynamicField,
+				},
+				Functions: []*schemapb.FunctionSchema{},
+			},
+			loadFields:       []string{"pk", "part_key", "vector"},
+			skipDynamicField: true,
+			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3},
+			expectErr:        false,
+		},
+		{
+			tag: "pk_not_loaded",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					dynamicField,
+				},
+				Functions: []*schemapb.FunctionSchema{},
+			},
+			loadFields:       []string{"part_key", "vector"},
+			skipDynamicField: true,
+			expectErr:        true,
+		},
+		{
+			tag: "part_key_not_loaded",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					dynamicField,
+				},
+				Functions: []*schemapb.FunctionSchema{},
+			},
+			loadFields:       []string{"pk", "vector"},
+			skipDynamicField: true,
+			expectErr:        true,
+		},
+		{
+			tag: "vector_not_loaded",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					dynamicField,
+				},
+				Functions: []*schemapb.FunctionSchema{},
+			},
+			loadFields:       []string{"pk", "part_key"},
+			skipDynamicField: true,
+			expectErr:        true,
+		},
+		{
+			tag: "clustering_key_not_loaded",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					clusteringKeyField,
+				},
+				Functions: []*schemapb.FunctionSchema{},
+			},
+			loadFields: []string{"pk", "part_key", "vector"},
+			expectErr:  true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.tag, func(t *testing.T) {
+			info := newSchemaInfo(tc.schema)
+
+			result, err := info.GetLoadFieldIDs(tc.loadFields, tc.skipDynamicField)
+			if tc.expectErr {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.ElementsMatch(t, tc.expectResult, result)
+		})
+	}
 }

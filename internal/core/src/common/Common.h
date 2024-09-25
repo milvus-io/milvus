@@ -46,4 +46,12 @@ SetCpuNum(const int core);
 void
 SetDefaultExecEvalExprBatchSize(int64_t val);
 
+struct BufferView {
+    char* data_;
+    size_t size_;
+
+    BufferView(char* data_ptr, size_t size) : data_(data_ptr), size_(size) {
+    }
+};
+
 }  // namespace milvus

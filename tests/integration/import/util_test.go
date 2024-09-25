@@ -18,6 +18,7 @@ package importv2
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -67,7 +68,7 @@ func GenerateParquetFileAndReturnInsertData(filePath string, schema *schemapb.Co
 		return nil, err
 	}
 
-	pqSchema, err := pq.ConvertToArrowSchema(schema)
+	pqSchema, err := pq.ConvertToArrowSchema(schema, false)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +83,7 @@ func GenerateParquetFileAndReturnInsertData(filePath string, schema *schemapb.Co
 		return nil, err
 	}
 
-	columns, err := testutil.BuildArrayData(schema, insertData)
+	columns, err := testutil.BuildArrayData(schema, insertData, false)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +126,7 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 		dType := field.GetDataType()
 		switch dType {
 		case schemapb.DataType_BinaryVector:
-			rows := fieldData.GetRows().([]byte)
+			rows := fieldData.GetDataRows().([]byte)
 			if dim != fieldData.(*storage.BinaryVectorFieldData).Dim {
 				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.BinaryVectorFieldData).Dim))
 			}
@@ -133,22 +134,22 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		case schemapb.DataType_FloatVector:
-			rows := fieldData.GetRows().([]float32)
+			rows := fieldData.GetDataRows().([]float32)
 			if dim != fieldData.(*storage.FloatVectorFieldData).Dim {
 				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.FloatVectorFieldData).Dim))
 			}
 			chunked := lo.Chunk(rows, dim)
 			chunkedRows := make([][dim]float32, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		case schemapb.DataType_Float16Vector:
-			rows := insertData.Data[fieldID].GetRows().([]byte)
+			rows := insertData.Data[fieldID].GetDataRows().([]byte)
 			if dim != fieldData.(*storage.Float16VectorFieldData).Dim {
 				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.Float16VectorFieldData).Dim))
 			}
@@ -156,11 +157,11 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		case schemapb.DataType_BFloat16Vector:
-			rows := insertData.Data[fieldID].GetRows().([]byte)
+			rows := insertData.Data[fieldID].GetDataRows().([]byte)
 			if dim != fieldData.(*storage.BFloat16VectorFieldData).Dim {
 				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.BFloat16VectorFieldData).Dim))
 			}
@@ -168,13 +169,13 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		case schemapb.DataType_SparseFloatVector:
 			data = insertData.Data[fieldID].(*storage.SparseFloatVectorFieldData).GetContents()
 		default:
-			data = insertData.Data[fieldID].GetRows()
+			data = insertData.Data[fieldID].GetDataRows()
 		}
 
 		err := writeFn(path, data)
@@ -200,6 +201,28 @@ func GenerateJSONFile(t *testing.T, filePath string, schema *schemapb.Collection
 
 	err = os.WriteFile(filePath, jsonBytes, 0o644) // nolint
 	assert.NoError(t, err)
+}
+
+func GenerateCSVFile(t *testing.T, filePath string, schema *schemapb.CollectionSchema, count int) rune {
+	insertData, err := testutil.CreateInsertData(schema, count)
+	assert.NoError(t, err)
+
+	sep := ','
+	nullkey := ""
+
+	csvData, err := testutil.CreateInsertDataForCSV(schema, insertData, nullkey)
+	assert.NoError(t, err)
+
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	assert.NoError(t, err)
+
+	writer := csv.NewWriter(wf)
+	writer.Comma = sep
+	writer.WriteAll(csvData)
+	writer.Flush()
+	assert.NoError(t, err)
+
+	return sep
 }
 
 func WaitForImportDone(ctx context.Context, c *integration.MiniClusterV2, jobID string) error {

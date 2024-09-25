@@ -27,7 +27,6 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -43,6 +42,8 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -120,14 +121,14 @@ func (s *Server) init() error {
 		log.Info("Connected to tikv. Using tikv as metadata storage.")
 	}
 
-	err = s.startGrpc()
-	if err != nil {
-		log.Debug("DataCoord startGrpc failed", zap.Error(err))
+	if err := s.dataCoord.Init(); err != nil {
+		log.Error("dataCoord init error", zap.Error(err))
 		return err
 	}
 
-	if err := s.dataCoord.Init(); err != nil {
-		log.Error("dataCoord init error", zap.Error(err))
+	err = s.startGrpc()
+	if err != nil {
+		log.Debug("DataCoord startGrpc failed", zap.Error(err))
 		return err
 	}
 	return nil
@@ -168,14 +169,12 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	opts := tracer.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
@@ -184,9 +183,9 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 				}
 				return s.serverID.Load()
 			}),
+			streamingserviceinterceptor.NewStreamingServiceUnaryServerInterceptor(),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			otelgrpc.StreamServerInterceptor(opts...),
 			logutil.StreamTraceLoggerInterceptor,
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
@@ -195,9 +194,15 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 				}
 				return s.serverID.Load()
 			}),
-		)))
+			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
+		)),
+		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()))
 	indexpb.RegisterIndexCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
+	// register the streaming coord grpc service.
+	if streamingutil.IsStreamingServiceEnabled() {
+		s.dataCoord.RegisterStreamingCoordGRPCService(s.grpcServer)
+	}
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
 		s.grpcErrChan <- err
@@ -295,6 +300,11 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	return s.dataCoord.AssignSegmentID(ctx, req)
 }
 
+// AllocSegment alloc a new growing segment, add it into segment meta.
+func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentRequest) (*datapb.AllocSegmentResponse, error) {
+	return s.dataCoord.AllocSegment(ctx, req)
+}
+
 // GetSegmentStates gets states of segments
 func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	return s.dataCoord.GetSegmentStates(ctx, req)
@@ -333,6 +343,11 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 // GetRecoveryInfoV2 gets information for recovering channels
 func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
 	return s.dataCoord.GetRecoveryInfoV2(ctx, req)
+}
+
+// GetChannelRecoveryInfo gets the corresponding vchannel info.
+func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChannelRecoveryInfoRequest) (*datapb.GetChannelRecoveryInfoResponse, error) {
+	return s.dataCoord.GetChannelRecoveryInfo(ctx, req)
 }
 
 // GetFlushedSegments get all flushed segments of a partition

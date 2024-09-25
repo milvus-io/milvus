@@ -18,18 +18,21 @@ type Database struct {
 	Properties  []*commonpb.KeyValuePair
 }
 
-func NewDatabase(id int64, name string, state pb.DatabaseState) *Database {
+func NewDatabase(id int64, name string, state pb.DatabaseState, properties []*commonpb.KeyValuePair) *Database {
+	if properties == nil {
+		properties = make([]*commonpb.KeyValuePair, 0)
+	}
 	return &Database{
 		ID:          id,
 		Name:        name,
 		State:       state,
 		CreatedTime: uint64(time.Now().UnixNano()),
-		Properties:  make([]*commonpb.KeyValuePair, 0),
+		Properties:  properties,
 	}
 }
 
 func NewDefaultDatabase() *Database {
-	return NewDatabase(util.DefaultDBID, util.DefaultDBName, pb.DatabaseState_DatabaseCreated)
+	return NewDatabase(util.DefaultDBID, util.DefaultDBName, pb.DatabaseState_DatabaseCreated, nil)
 }
 
 func (c *Database) Available() bool {
@@ -54,6 +57,15 @@ func (c *Database) Equal(other Database) bool {
 		c.State == other.State &&
 		c.CreatedTime == other.CreatedTime &&
 		checkParamsEqual(c.Properties, other.Properties)
+}
+
+func (c *Database) GetProperty(key string) string {
+	for _, e := range c.Properties {
+		if e.GetKey() == key {
+			return e.GetValue()
+		}
+	}
+	return ""
 }
 
 func MarshalDatabaseModel(db *Database) *pb.DatabaseInfo {

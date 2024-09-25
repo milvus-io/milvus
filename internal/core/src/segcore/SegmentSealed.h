@@ -41,7 +41,11 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual void
     AddFieldDataInfoForSealed(const LoadFieldDataInfo& field_data_info) = 0;
     virtual void
-    WarmupChunkCache(const FieldId field_id) = 0;
+    WarmupChunkCache(const FieldId field_id, bool mmap_enabled) = 0;
+
+    virtual void
+    LoadTextIndex(FieldId field_id,
+                  std::unique_ptr<index::TextMatchIndex> index) = 0;
 
     SegmentType
     type() const override {

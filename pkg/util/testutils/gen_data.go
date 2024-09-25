@@ -301,6 +301,48 @@ func GenerateFloat16VectorsWithInvalidData(numRows, dim int) []byte {
 	return ret
 }
 
+func GenerateSparseFloatVectorsData(numRows int) ([][]byte, int64) {
+	dim := 700
+	avgNnz := 20
+	var contents [][]byte
+	maxDim := 0
+
+	uniqueAndSort := func(indices []uint32) []uint32 {
+		seen := make(map[uint32]bool)
+		var result []uint32
+		for _, value := range indices {
+			if _, ok := seen[value]; !ok {
+				seen[value] = true
+				result = append(result, value)
+			}
+		}
+		sort.Slice(result, func(i, j int) bool {
+			return result[i] < result[j]
+		})
+		return result
+	}
+
+	for i := 0; i < numRows; i++ {
+		nnz := rand.Intn(avgNnz*2) + 1
+		indices := make([]uint32, 0, nnz)
+		for j := 0; j < nnz; j++ {
+			indices = append(indices, uint32(rand.Intn(dim)))
+		}
+		indices = uniqueAndSort(indices)
+		values := make([]float32, 0, len(indices))
+		for j := 0; j < len(indices); j++ {
+			values = append(values, rand.Float32())
+		}
+		if len(indices) > 0 && int(indices[len(indices)-1])+1 > maxDim {
+			maxDim = int(indices[len(indices)-1]) + 1
+		}
+		rowBytes := typeutil.CreateSparseFloatRow(indices, values)
+
+		contents = append(contents, rowBytes)
+	}
+	return contents, int64(maxDim)
+}
+
 func GenerateSparseFloatVectors(numRows int) *schemapb.SparseFloatArray {
 	dim := 700
 	avgNnz := 20

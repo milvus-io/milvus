@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -37,14 +38,10 @@ import (
 
 // getQuotaMetrics returns DataCoordQuotaMetrics.
 func (s *Server) getQuotaMetrics() *metricsinfo.DataCoordQuotaMetrics {
-	total, colSizes, partSizes := s.meta.GetCollectionBinlogSize()
+	info := s.meta.GetQuotaInfo()
 	// Just generate the metrics data regularly
-	_ = s.meta.GetCollectionIndexFilesSize()
-	return &metricsinfo.DataCoordQuotaMetrics{
-		TotalBinlogSize:      total,
-		CollectionBinlogSize: colSizes,
-		PartitionsBinlogSize: partSizes,
-	}
+	_ = s.meta.SetStoredIndexFileSizeMetric()
+	return info
 }
 
 func (s *Server) getCollectionMetrics(ctx context.Context) *metricsinfo.DataCoordCollectionMetrics {
@@ -176,7 +173,7 @@ func (s *Server) getDataCoordMetrics(ctx context.Context) metricsinfo.DataCoordI
 
 // getDataNodeMetrics composes DataNode infos
 // this function will invoke GetMetrics with DataNode specified in NodeInfo
-func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node *Session) (metricsinfo.DataNodeInfos, error) {
+func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node *session.Session) (metricsinfo.DataNodeInfos, error) {
 	infos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			HasError: true,

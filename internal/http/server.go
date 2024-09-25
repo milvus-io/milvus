@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -86,6 +87,10 @@ func registerDefaults() {
 			w.Write([]byte(fmt.Sprintf(`{"output": "%s"}`, output)))
 		}),
 	})
+	Register(&Handler{
+		Path:    StaticPath,
+		Handler: GetStaticHandler(),
+	})
 }
 
 func RegisterStopComponent(triggerComponentStop func(role string) error) {
@@ -151,6 +156,10 @@ func ServeHTTP() {
 		bindAddr := getHTTPAddr()
 		log.Info("management listen", zap.String("addr", bindAddr))
 		server = &http.Server{Handler: metricsServer, Addr: bindAddr, ReadTimeout: 10 * time.Second}
+		// enable mutex && block profile, sampling rate 10%
+		runtime.SetMutexProfileFraction(10)
+		runtime.SetBlockProfileRate(10)
+
 		if err := server.ListenAndServe(); err != nil {
 			log.Error("handle metrics failed", zap.Error(err))
 		}

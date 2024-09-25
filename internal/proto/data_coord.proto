@@ -35,7 +35,12 @@ service DataCoord {
 
   rpc Flush(FlushRequest) returns (FlushResponse) {}
 
-  rpc AssignSegmentID(AssignSegmentIDRequest) returns (AssignSegmentIDResponse) {}
+  // AllocSegment alloc a new growing segment, add it into segment meta.
+  rpc AllocSegment(AllocSegmentRequest) returns (AllocSegmentResponse) {}
+
+  rpc AssignSegmentID(AssignSegmentIDRequest) returns (AssignSegmentIDResponse) {
+    option deprecated = true;
+  }
 
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
   rpc GetSegmentStates(GetSegmentStatesRequest) returns (GetSegmentStatesResponse) {}
@@ -49,6 +54,7 @@ service DataCoord {
   rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
   rpc GetRecoveryInfo(GetRecoveryInfoRequest) returns (GetRecoveryInfoResponse){}
   rpc GetRecoveryInfoV2(GetRecoveryInfoRequestV2) returns (GetRecoveryInfoResponseV2){}
+  rpc GetChannelRecoveryInfo(GetChannelRecoveryInfoRequest) returns (GetChannelRecoveryInfoResponse){}
   rpc GetFlushedSegments(GetFlushedSegmentsRequest) returns(GetFlushedSegmentsResponse){}
   rpc GetSegmentsByStates(GetSegmentsByStatesRequest) returns(GetSegmentsByStatesResponse){}
   rpc GetFlushAllState(milvus.GetFlushAllStateRequest) returns(milvus.GetFlushAllStateResponse) {}
@@ -166,6 +172,18 @@ message SegmentIDRequest {
   bool isImport = 5;        // deprecated
   int64 importTaskID = 6;   // deprecated
   SegmentLevel level = 7;
+}
+
+message AllocSegmentRequest {
+  int64 collection_id = 1;
+  int64 partition_id = 2;
+  int64 segment_id = 3; // segment id must be allocate from rootcoord idalloc service.
+  string vchannel = 4;
+}
+
+message AllocSegmentResponse {
+  SegmentInfo segment_info = 1;
+  common.Status status = 2;
 }
 
 message AssignSegmentIDRequest {
@@ -332,6 +350,13 @@ message SegmentInfo {
   SegmentLevel last_level = 23;
   // use in major compaction, if compaction fail, should revert partition stats version to last value 
   int64 last_partition_stats_version = 24;
+
+  // used to indicate whether the segment is sorted by primary key.
+  bool is_sorted = 25;
+
+  // textStatsLogs is used to record tokenization index for fields.
+  map<int64, TextIndexStats> textStatsLogs = 26;
+  repeated FieldBinlog bm25statslogs = 27;
 }
 
 message SegmentStartPosition {
@@ -355,6 +380,7 @@ message SaveBinlogPathsRequest {
   SegmentLevel seg_level =13;
   int64 partitionID =14; // report partitionID for create L0 segment
   int64 storageVersion = 15;
+  repeated FieldBinlog field2Bm25logPaths = 16;
 }
 
 message CheckPoint {
@@ -401,11 +427,21 @@ message SegmentBinlogs {
   repeated FieldBinlog statslogs = 4;
   repeated FieldBinlog deltalogs = 5;
   string insert_channel = 6;
+  map<int64, TextIndexStats> textStatsLogs = 7;
 }
 
 message FieldBinlog{
   int64 fieldID = 1;
   repeated Binlog binlogs = 2;
+}
+
+message TextIndexStats {
+  int64 fieldID = 1;
+  int64 version = 2;
+  repeated string files = 3;
+  int64 log_size = 4;
+  int64 memory_size = 5;
+  int64 buildID = 6;
 }
 
 message Binlog {
@@ -444,6 +480,17 @@ message GetRecoveryInfoRequestV2 {
   common.MsgBase base = 1;
   int64 collectionID = 2;
   repeated int64 partitionIDs = 3;
+}
+
+message GetChannelRecoveryInfoRequest {
+  common.MsgBase base = 1;
+  string vchannel = 2;
+}
+
+message GetChannelRecoveryInfoResponse {
+  common.Status status = 1;
+  VchannelInfo info = 2;
+  schema.CollectionSchema schema = 3;
 }
 
 message GetSegmentsByStatesRequest {
@@ -541,6 +588,7 @@ message CompactionSegmentBinlogs {
   SegmentLevel level = 6;
   int64 collectionID = 7;
   int64 partitionID = 8;
+  bool is_sorted = 9;
 }
 
 message CompactionPlan {
@@ -560,6 +608,10 @@ message CompactionPlan {
   string analyze_result_path = 14;
   repeated int64 analyze_segment_ids = 15;
   int32 state = 16;
+  int64 begin_logID = 17;
+  IDRange pre_allocated_segmentIDs = 18; // only for clustering compaction
+  int64 slot_usage = 19;
+  int64 max_size = 20;
 }
 
 message CompactionSegment {
@@ -570,6 +622,8 @@ message CompactionSegment {
   repeated FieldBinlog field2StatslogPaths = 5;
   repeated FieldBinlog deltalogs = 6;
   string channel = 7;
+  bool is_sorted = 8;
+  repeated FieldBinlog bm25logs = 9;
 }
 
 message CompactionPlanResult {
@@ -723,7 +777,7 @@ message PreImportRequest {
   repeated common.KeyValuePair options = 9;
 }
 
-message autoIDRange {
+message IDRange {
   int64 begin = 1;
   int64 end = 2;
 }
@@ -745,7 +799,7 @@ message ImportRequest {
   repeated internal.ImportFile files = 8;
   repeated common.KeyValuePair options = 9;
   uint64 ts = 10;
-  autoIDRange autoID_range = 11;
+  IDRange ID_range = 11;
   repeated ImportRequestSegment request_segments = 12;
 }
 
@@ -854,6 +908,7 @@ message ImportTaskV2 {
   string reason = 7;
   string complete_time = 8;
   repeated ImportFileStats file_stats = 9;
+  repeated int64 stats_segmentIDs = 10;
 }
 
 enum GcCommand {
@@ -886,6 +941,7 @@ enum CompactionTaskState {
   indexing = 7;
   cleaned = 8;
   meta_saved = 9;
+  statistic = 10;
 }
 
 message CompactionTask{
@@ -913,6 +969,9 @@ message CompactionTask{
   int64 prefer_segment_rows = 22;
   int64 analyzeTaskID = 23;
   int64 analyzeVersion = 24;
+  int64 lastStateStartTime = 25;
+  int64 max_size = 26;
+  repeated int64 tmpSegments = 27;
 }
 
 message PartitionStatsInfo {
@@ -922,6 +981,7 @@ message PartitionStatsInfo {
   int64 version = 4;
   repeated int64 segmentIDs = 5;
   int64 analyzeTaskID = 6;
+  int64 commitTime = 7;
 }
 
 message DropCompactionPlanRequest {

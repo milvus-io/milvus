@@ -44,6 +44,7 @@ const (
 
 var StatusSuccess = commonpb.Status{
 	ErrorCode: commonpb.ErrorCode_Success,
+	Code:      merr.Code(nil),
 	Reason:    "",
 }
 
@@ -79,6 +80,11 @@ var DefaultTrueResp = milvuspb.BoolResponse{
 var DefaultFalseResp = milvuspb.BoolResponse{
 	Status: &StatusSuccess,
 	Value:  false,
+}
+
+func getDefaultRootPassword() string {
+	paramtable.Init()
+	return paramtable.Get().CommonCfg.DefaultRootPassword.GetValue()
 }
 
 func versional(path string) string {
@@ -127,7 +133,7 @@ func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
 			username, password, ok := ParseUsernamePassword(c)
 			if !ok {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
-			} else if username == util.UserRoot && password != util.DefaultRootPassword {
+			} else if username == util.UserRoot && password != getDefaultRootPassword() {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 			} else {
 				c.Set(ContextUsername, username)
@@ -182,7 +188,7 @@ func TestVectorAuthenticate(t *testing.T) {
 
 	t.Run("root's password correct", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath), nil)
-		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+		req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -236,7 +242,7 @@ func TestVectorListCollection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
 			req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath), nil)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, tt.exceptCode, w.Code)
@@ -300,7 +306,7 @@ func TestVectorCollectionsDescribe(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
 			req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsDescribePath)+"?collectionName="+DefaultCollectionName, nil)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, tt.exceptCode, w.Code)
@@ -314,7 +320,7 @@ func TestVectorCollectionsDescribe(t *testing.T) {
 	t.Run("need collectionName", func(t *testing.T) {
 		testEngine := initHTTPServer(mocks.NewMockProxy(t), true)
 		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsDescribePath)+"?"+DefaultCollectionName, nil)
-		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+		req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -335,7 +341,7 @@ func TestVectorCreateCollection(t *testing.T) {
 		expectedBody: PrintErr(ErrDefault),
 	})
 
-	err := merr.WrapErrCollectionNumLimitExceeded(65535)
+	err := merr.WrapErrCollectionNumLimitExceeded("default", 65535)
 	mp2 := mocks.NewMockProxy(t)
 	mp2.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(merr.Status(err), nil).Once()
 	testCases = append(testCases, testCase{
@@ -383,7 +389,7 @@ func TestVectorCreateCollection(t *testing.T) {
 			jsonBody := []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2}`)
 			bodyReader := bytes.NewReader(jsonBody)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorCollectionsCreatePath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, tt.exceptCode, w.Code)
@@ -440,7 +446,7 @@ func TestVectorDropCollection(t *testing.T) {
 			jsonBody := []byte(`{"collectionName": "` + DefaultCollectionName + `"}`)
 			bodyReader := bytes.NewReader(jsonBody)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorCollectionsDropPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, tt.exceptCode, w.Code)
@@ -516,7 +522,7 @@ func TestQuery(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
 			for _, req := range reqs {
-				req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+				req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
 				assert.Equal(t, tt.exceptCode, w.Code)
@@ -601,7 +607,7 @@ func TestDelete(t *testing.T) {
 			jsonBody := []byte(`{"collectionName": "` + DefaultCollectionName + `" , "id": [1,2,3]}`)
 			bodyReader := bytes.NewReader(jsonBody)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorDeletePath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, tt.exceptCode, w.Code)
@@ -633,7 +639,7 @@ func TestDeleteForFilter(t *testing.T) {
 			testEngine := initHTTPServer(mp, true)
 			bodyReader := bytes.NewReader(jsonBody)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorDeletePath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -725,7 +731,7 @@ func TestInsert(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, tt.exceptCode, w.Code)
@@ -746,7 +752,7 @@ func TestInsert(t *testing.T) {
 		testEngine := initHTTPServer(mp, true)
 		bodyReader := bytes.NewReader([]byte(`{"collectionName": "` + DefaultCollectionName + `", "data": {}}`))
 		req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
-		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+		req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -787,7 +793,7 @@ func TestInsertForDataType(t *testing.T) {
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -812,7 +818,7 @@ func TestInsertForDataType(t *testing.T) {
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -855,7 +861,7 @@ func TestReturnInt64(t *testing.T) {
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -886,7 +892,7 @@ func TestReturnInt64(t *testing.T) {
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -917,7 +923,7 @@ func TestReturnInt64(t *testing.T) {
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			req.Header.Set(HTTPHeaderAllowInt64, "true")
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -949,7 +955,7 @@ func TestReturnInt64(t *testing.T) {
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			req.Header.Set(HTTPHeaderAllowInt64, "true")
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -982,7 +988,7 @@ func TestReturnInt64(t *testing.T) {
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -1013,7 +1019,7 @@ func TestReturnInt64(t *testing.T) {
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -1044,7 +1050,7 @@ func TestReturnInt64(t *testing.T) {
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			req.Header.Set(HTTPHeaderAllowInt64, "false")
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -1076,7 +1082,7 @@ func TestReturnInt64(t *testing.T) {
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			req.Header.Set(HTTPHeaderAllowInt64, "false")
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -1166,7 +1172,7 @@ func TestUpsert(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, tt.exceptCode, w.Code)
@@ -1187,7 +1193,7 @@ func TestUpsert(t *testing.T) {
 		testEngine := initHTTPServer(mp, true)
 		bodyReader := bytes.NewReader([]byte(`{"collectionName": "` + DefaultCollectionName + `", "data": {}}`))
 		req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
-		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+		req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -1270,7 +1276,7 @@ func TestSearch(t *testing.T) {
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorSearchPath), bodyReader)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, tt.exceptCode, w.Code)
@@ -1318,7 +1324,7 @@ func TestSearch(t *testing.T) {
 		})
 		bodyReader := bytes.NewReader(data)
 		req := httptest.NewRequest(http.MethodPost, versional(VectorSearchPath), bodyReader)
-		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+		req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, tt.exceptCode, w.Code)
@@ -1480,7 +1486,7 @@ func TestHttpRequestFormat(t *testing.T) {
 				testEngine := initHTTPServer(mocks.NewMockProxy(t), true)
 				bodyReader := bytes.NewReader(requestJsons[i])
 				req := httptest.NewRequest(http.MethodPost, path, bodyReader)
-				req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+				req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
 				assert.Equal(t, http.StatusOK, w.Code)

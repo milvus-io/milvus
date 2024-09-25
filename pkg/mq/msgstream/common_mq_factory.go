@@ -5,6 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
@@ -51,7 +52,7 @@ func (f *CommonFactory) NewMsgStreamDisposer(ctx context.Context) func([]string,
 		if err != nil {
 			return err
 		}
-		msgs.AsConsumer(ctx, channels, subName, mqwrapper.SubscriptionPositionUnknown)
+		msgs.AsConsumer(ctx, channels, subName, common.SubscriptionPositionUnknown)
 		msgs.Close()
 		return nil
 	}

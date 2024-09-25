@@ -47,7 +47,7 @@ class Channel {
         inner_.pop(result);
         if (!result.has_value()) {
             if (ex_.has_value()) {
-                throw ex_.value();
+                std::rethrow_exception(ex_.value());
             }
             return false;
         }
@@ -56,7 +56,7 @@ class Channel {
     }
 
     void
-    close(std::optional<MilvusException> ex = std::nullopt) {
+    close(std::optional<std::exception_ptr> ex = std::nullopt) {
         if (ex.has_value()) {
             ex_ = std::move(ex);
         }
@@ -65,6 +65,6 @@ class Channel {
 
  private:
     oneapi::tbb::concurrent_bounded_queue<std::optional<T>> inner_{};
-    std::optional<MilvusException> ex_{};
+    std::optional<std::exception_ptr> ex_{};
 };
 }  // namespace milvus

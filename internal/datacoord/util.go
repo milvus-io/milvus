@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -28,11 +29,15 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -272,4 +277,75 @@ func getBinLogIDs(segment *SegmentInfo, fieldID int64) []int64 {
 		}
 	}
 	return binlogIDs
+}
+
+func CheckCheckPointsHealth(meta *meta) error {
+	for channel, cp := range meta.GetChannelCheckpoints() {
+		collectionID := funcutil.GetCollectionIDFromVChannel(channel)
+		if collectionID == -1 {
+			log.RatedWarn(60, "can't parse collection id from vchannel, skip check cp lag", zap.String("vchannel", channel))
+			continue
+		}
+		if meta.GetCollection(collectionID) == nil {
+			log.RatedWarn(60, "corresponding the collection doesn't exists, skip check cp lag", zap.String("vchannel", channel))
+			continue
+		}
+		ts, _ := tsoutil.ParseTS(cp.Timestamp)
+		lag := time.Since(ts)
+		if lag > paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsDuration(time.Second) {
+			return merr.WrapErrChannelCPExceededMaxLag(channel, fmt.Sprintf("checkpoint lag: %f(min)", lag.Minutes()))
+		}
+	}
+	return nil
+}
+
+func CheckAllChannelsWatched(meta *meta, channelManager ChannelManager) error {
+	collIDs := meta.ListCollections()
+	for _, collID := range collIDs {
+		collInfo := meta.GetCollection(collID)
+		if collInfo == nil {
+			log.Warn("collection info is nil, skip it", zap.Int64("collectionID", collID))
+			continue
+		}
+
+		for _, channelName := range collInfo.VChannelNames {
+			_, err := channelManager.FindWatcher(channelName)
+			if err != nil {
+				log.Warn("find watcher for channel failed", zap.Int64("collectionID", collID),
+					zap.String("channelName", channelName), zap.Error(err))
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func createStorageConfig() *indexpb.StorageConfig {
+	var storageConfig *indexpb.StorageConfig
+
+	if Params.CommonCfg.StorageType.GetValue() == "local" {
+		storageConfig = &indexpb.StorageConfig{
+			RootPath:    Params.LocalStorageCfg.Path.GetValue(),
+			StorageType: Params.CommonCfg.StorageType.GetValue(),
+		}
+	} else {
+		storageConfig = &indexpb.StorageConfig{
+			Address:          Params.MinioCfg.Address.GetValue(),
+			AccessKeyID:      Params.MinioCfg.AccessKeyID.GetValue(),
+			SecretAccessKey:  Params.MinioCfg.SecretAccessKey.GetValue(),
+			UseSSL:           Params.MinioCfg.UseSSL.GetAsBool(),
+			SslCACert:        Params.MinioCfg.SslCACert.GetValue(),
+			BucketName:       Params.MinioCfg.BucketName.GetValue(),
+			RootPath:         Params.MinioCfg.RootPath.GetValue(),
+			UseIAM:           Params.MinioCfg.UseIAM.GetAsBool(),
+			IAMEndpoint:      Params.MinioCfg.IAMEndpoint.GetValue(),
+			StorageType:      Params.CommonCfg.StorageType.GetValue(),
+			Region:           Params.MinioCfg.Region.GetValue(),
+			UseVirtualHost:   Params.MinioCfg.UseVirtualHost.GetAsBool(),
+			CloudProvider:    Params.MinioCfg.CloudProvider.GetValue(),
+			RequestTimeoutMs: Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		}
+	}
+
+	return storageConfig
 }

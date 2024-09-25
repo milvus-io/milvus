@@ -40,7 +40,7 @@ func TestSliceSparseEmbedding(t *testing.T) {
 		assert.EqualValues(t, length, se.Len())
 
 		bs := se.Serialize()
-		nv, err := deserializeSliceSparceEmbedding(bs)
+		nv, err := DeserializeSliceSparseEmbedding(bs)
 		require.NoError(t, err)
 
 		for i := 0; i < length; i++ {

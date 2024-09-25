@@ -35,3 +35,25 @@ func TestCloneStr2Str(t *testing.T) {
 		})
 	}
 }
+
+func TestMapEqual(t *testing.T) {
+	{
+		m1 := map[int64]int64{1: 11, 2: 22, 3: 33}
+		m2 := map[int64]int64{1: 11, 2: 22, 3: 33}
+		assert.True(t, MapEquals(m1, m2))
+	}
+	{
+		m1 := map[int64]int64{1: 11, 2: 23, 3: 33}
+		m2 := map[int64]int64{1: 11, 2: 22, 3: 33}
+		assert.False(t, MapEquals(m1, m2))
+	}
+	{
+		m1 := map[int64]int64{1: 11, 2: 23, 3: 33}
+		m2 := map[int64]int64{1: 11, 2: 22}
+		assert.False(t, MapEquals(m1, m2))
+	}
+	{
+		m1 := map[int64]int64{1: 11, 2: 23, 3: 33}
+		assert.False(t, MapEquals(m1, nil))
+	}
+}

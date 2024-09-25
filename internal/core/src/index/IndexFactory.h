@@ -32,7 +32,6 @@
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexMarisa.h"
 #include "index/BoolIndex.h"
-#include "storage/space.h"
 
 namespace milvus::index {
 
@@ -55,11 +54,6 @@ class IndexFactory {
     IndexBasePtr
     CreateIndex(const CreateIndexInfo& create_index_info,
                 const storage::FileManagerContext& file_manager_context);
-
-    IndexBasePtr
-    CreateIndex(const CreateIndexInfo& create_index_info,
-                const storage::FileManagerContext& file_manager_context,
-                std::shared_ptr<milvus_storage::Space> space);
 
     IndexBasePtr
     CreateVectorIndex(const CreateIndexInfo& create_index_info,
@@ -92,19 +86,6 @@ class IndexFactory {
                       const storage::FileManagerContext& file_manager_context =
                           storage::FileManagerContext());
 
-    IndexBasePtr
-    CreateVectorIndex(const CreateIndexInfo& create_index_info,
-                      const storage::FileManagerContext& file_manager_context,
-                      std::shared_ptr<milvus_storage::Space> space);
-
-    IndexBasePtr
-    CreateScalarIndex(const CreateIndexInfo& create_index_info,
-                      const storage::FileManagerContext& file_manager_context,
-                      std::shared_ptr<milvus_storage::Space> space) {
-        PanicInfo(ErrorCode::Unsupported,
-                  "CreateScalarIndexV2 not implemented");
-    }
-
     // IndexBasePtr
     // CreateIndex(DataType dtype, const IndexType& index_type);
  private:
@@ -115,12 +96,6 @@ class IndexFactory {
     CreatePrimitiveScalarIndex(const IndexType& index_type,
                                const storage::FileManagerContext& file_manager =
                                    storage::FileManagerContext());
-
-    template <typename T>
-    ScalarIndexPtr<T>
-    CreatePrimitiveScalarIndex(const IndexType& index_type,
-                               const storage::FileManagerContext& file_manager,
-                               std::shared_ptr<milvus_storage::Space> space);
 };
 
 }  // namespace milvus::index

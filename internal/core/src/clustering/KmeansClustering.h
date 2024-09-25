@@ -21,7 +21,6 @@
 #include <vector>
 
 #include "storage/MemFileManagerImpl.h"
-#include "storage/space.h"
 #include "pb/clustering.pb.h"
 #include "knowhere/cluster/cluster_factory.h"
 

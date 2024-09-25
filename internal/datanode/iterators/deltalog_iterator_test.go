@@ -35,7 +35,7 @@ func (s *DeltalogIteratorSuite) TestDeltalogIteratorIntPK() {
 	dCodec := storage.NewDeleteCodec()
 	blob, err := dCodec.Serialize(CollectionID, 1, 1, dData)
 	s.Require().NoError(err)
-	value := [][]byte{blob.Value[:]}
+	value := [][]byte{blob.Value}
 
 	iter := NewDeltalogIterator(value, &Label{segmentID: 100})
 	s.NotNil(iter)

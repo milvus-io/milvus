@@ -43,6 +43,16 @@ type ResultSet struct {
 // DataSet is an alias type for column slice.
 type DataSet []column.Column
 
+// GetColumn returns column with provided field name.
+func (rs ResultSet) GetColumn(fieldName string) column.Column {
+	for _, column := range rs.Fields {
+		if column.Name() == fieldName {
+			return column
+		}
+	}
+	return nil
+}
+
 func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ...grpc.CallOption) ([]ResultSet, error) {
 	req := option.Request()
 	collection, err := c.getCollection(ctx, req.GetCollectionName())
@@ -78,24 +88,22 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 			ResultCount: rc,
 			Scores:      results.GetScores()[offset : offset+rc],
 		}
-		// parse result set if current nq is not empty
-		if rc > 0 {
-			entry.IDs, entry.Err = column.IDColumns(schema, results.GetIds(), offset, offset+rc)
+
+		entry.IDs, entry.Err = column.IDColumns(schema, results.GetIds(), offset, offset+rc)
+		if entry.Err != nil {
+			offset += rc
+			continue
+		}
+		// parse group-by values
+		if gb != nil {
+			entry.GroupByValue, entry.Err = column.FieldDataColumn(gb, offset, offset+rc)
 			if entry.Err != nil {
 				offset += rc
 				continue
 			}
-			// parse group-by values
-			if gb != nil {
-				entry.GroupByValue, entry.Err = column.FieldDataColumn(gb, offset, offset+rc)
-				if entry.Err != nil {
-					offset += rc
-					continue
-				}
-			}
-			entry.Fields, entry.Err = c.parseSearchResult(schema, outputFields, fieldDataList, i, offset, offset+rc)
-			sr = append(sr, entry)
 		}
+		entry.Fields, entry.Err = c.parseSearchResult(schema, outputFields, fieldDataList, i, offset, offset+rc)
+		sr = append(sr, entry)
 
 		offset += rc
 	}

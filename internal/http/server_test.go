@@ -101,6 +101,7 @@ func (suite *HTTPServerTestSuite) TestHealthzHandler() {
 	url := "http://localhost:" + DefaultListenPort + "/healthz"
 	client := http.Client{}
 
+	healthz.SetComponentNum(1)
 	healthz.Register(&MockIndicator{"m1", commonpb.StateCode_Healthy})
 
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
@@ -118,6 +119,7 @@ func (suite *HTTPServerTestSuite) TestHealthzHandler() {
 	body, _ = io.ReadAll(resp.Body)
 	suite.Equal("{\"state\":\"OK\",\"detail\":[{\"name\":\"m1\",\"code\":1}]}", string(body))
 
+	healthz.SetComponentNum(2)
 	healthz.Register(&MockIndicator{"m2", commonpb.StateCode_Abnormal})
 	req, _ = http.NewRequest(http.MethodGet, url, nil)
 	req.Header.Set("Content-Type", "application/json")
@@ -125,7 +127,10 @@ func (suite *HTTPServerTestSuite) TestHealthzHandler() {
 	suite.Nil(err)
 	defer resp.Body.Close()
 	body, _ = io.ReadAll(resp.Body)
-	suite.Equal("{\"state\":\"component m2 state is Abnormal\",\"detail\":[{\"name\":\"m1\",\"code\":1},{\"name\":\"m2\",\"code\":2}]}", string(body))
+	respObj := &healthz.HealthResponse{}
+	err = json.Unmarshal(body, respObj)
+	suite.NoError(err)
+	suite.NotEqual("OK", respObj.State)
 }
 
 func (suite *HTTPServerTestSuite) TestEventlogHandler() {

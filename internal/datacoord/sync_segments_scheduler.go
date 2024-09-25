@@ -23,6 +23,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -35,10 +36,10 @@ type SyncSegmentsScheduler struct {
 
 	meta           *meta
 	channelManager ChannelManager
-	sessions       SessionManager
+	sessions       session.DataNodeManager
 }
 
-func newSyncSegmentsScheduler(m *meta, channelManager ChannelManager, sessions SessionManager) *SyncSegmentsScheduler {
+func newSyncSegmentsScheduler(m *meta, channelManager ChannelManager, sessions session.DataNodeManager) *SyncSegmentsScheduler {
 	return &SyncSegmentsScheduler{
 		quit:           make(chan struct{}),
 		wg:             sync.WaitGroup{},
@@ -114,8 +115,11 @@ func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections() {
 func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, channelName string, nodeID, pkFieldID int64) error {
 	log := log.With(zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID),
 		zap.String("channelName", channelName), zap.Int64("nodeID", nodeID))
+	// sync all healthy segments, but only check flushed segments on datanode. Because L0 growing segments may not in datacoord's meta.
+	// upon receiving the SyncSegments request, the datanode's segment state may have already transitioned from Growing/Flushing
+	// to Flushed, so the view must include this segment.
 	segments := sss.meta.SelectSegments(WithChannel(channelName), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.GetPartitionID() == partitionID && isSegmentHealthy(info) && info.GetLevel() != datapb.SegmentLevel_L0
+		return info.GetPartitionID() == partitionID && info.GetLevel() != datapb.SegmentLevel_L0 && isSegmentHealthy(info)
 	}))
 	req := &datapb.SyncSegmentsRequest{
 		ChannelName:  channelName,
@@ -125,16 +129,21 @@ func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, 
 	}
 
 	for _, seg := range segments {
+		req.SegmentInfos[seg.ID] = &datapb.SyncSegmentInfo{
+			SegmentId: seg.GetID(),
+			State:     seg.GetState(),
+			Level:     seg.GetLevel(),
+			NumOfRows: seg.GetNumOfRows(),
+		}
+		statsLogs := make([]*datapb.Binlog, 0)
 		for _, statsLog := range seg.GetStatslogs() {
 			if statsLog.GetFieldID() == pkFieldID {
-				req.SegmentInfos[seg.ID] = &datapb.SyncSegmentInfo{
-					SegmentId:  seg.GetID(),
-					PkStatsLog: statsLog,
-					State:      seg.GetState(),
-					Level:      seg.GetLevel(),
-					NumOfRows:  seg.GetNumOfRows(),
-				}
+				statsLogs = append(statsLogs, statsLog.GetBinlogs()...)
 			}
+		}
+		req.SegmentInfos[seg.ID].PkStatsLog = &datapb.FieldBinlog{
+			FieldID: pkFieldID,
+			Binlogs: statsLogs,
 		}
 	}
 

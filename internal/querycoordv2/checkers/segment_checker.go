@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -43,7 +44,7 @@ type SegmentChecker struct {
 	*checkerActivation
 	meta            *meta.Meta
 	dist            *meta.DistributionManager
-	targetMgr       *meta.TargetManager
+	targetMgr       meta.TargetManagerInterface
 	nodeMgr         *session.NodeManager
 	getBalancerFunc GetBalancerFunc
 }
@@ -51,7 +52,7 @@ type SegmentChecker struct {
 func NewSegmentChecker(
 	meta *meta.Meta,
 	dist *meta.DistributionManager,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	getBalancerFunc GetBalancerFunc,
 ) *SegmentChecker {
@@ -75,7 +76,7 @@ func (c *SegmentChecker) Description() string {
 
 func (c *SegmentChecker) readyToCheck(collectionID int64) bool {
 	metaExist := (c.meta.GetCollection(collectionID) != nil)
-	targetExist := c.targetMgr.IsNextTargetExist(collectionID) || c.targetMgr.IsCurrentTargetExist(collectionID)
+	targetExist := c.targetMgr.IsNextTargetExist(collectionID) || c.targetMgr.IsCurrentTargetExist(collectionID, common.AllPartitionsID)
 
 	return metaExist && targetExist
 }
@@ -100,8 +101,25 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	released := utils.FilterReleased(segments, collectionIDs)
 	reduceTasks := c.createSegmentReduceTasks(ctx, released, meta.NilReplica, querypb.DataScope_Historical)
 	task.SetReason("collection released", reduceTasks...)
+	task.SetPriority(task.TaskPriorityNormal, reduceTasks...)
 	results = append(results, reduceTasks...)
-	task.SetPriority(task.TaskPriorityNormal, results...)
+
+	// clean node which has been move out from replica
+	for _, nodeInfo := range c.nodeMgr.GetAll() {
+		nodeID := nodeInfo.ID()
+		segmentsOnQN := c.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(nodeID))
+		collectionSegments := lo.GroupBy(segmentsOnQN, func(segment *meta.Segment) int64 { return segment.GetCollectionID() })
+		for collectionID, segments := range collectionSegments {
+			replica := c.meta.ReplicaManager.GetByCollectionAndNode(collectionID, nodeID)
+			if replica == nil {
+				reduceTasks := c.createSegmentReduceTasks(ctx, segments, meta.NilReplica, querypb.DataScope_Historical)
+				task.SetReason("dirty segment exists", reduceTasks...)
+				task.SetPriority(task.TaskPriorityNormal, reduceTasks...)
+				results = append(results, reduceTasks...)
+			}
+		}
+	}
+
 	return results
 }
 
@@ -113,11 +131,13 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	// loadCtx := trace.ContextWithSpan(context.Background(), c.meta.GetCollection(replica.CollectionID).LoadSpan)
 	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, replica)
 	task.SetReason("lacks of segment", tasks...)
+	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
 
 	redundancies = c.filterSegmentInUse(replica, redundancies)
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Historical)
 	task.SetReason("segment not exists in target", tasks...)
+	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
 
 	// compare inner dists to find repeated loaded segments
@@ -125,12 +145,15 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	redundancies = c.filterExistedOnLeader(replica, redundancies)
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Historical)
 	task.SetReason("redundancies of segment", tasks...)
+	// set deduplicate task priority to low, to avoid deduplicate task cancel balance task
+	task.SetPriority(task.TaskPriorityLow, tasks...)
 	ret = append(ret, tasks...)
 
 	// compare with target to find the lack and redundancy of segments
 	_, redundancies = c.getGrowingSegmentDiff(replica.GetCollectionID(), replica.GetID())
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Streaming)
 	task.SetReason("streaming segment not exists in target", tasks...)
+	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
 
 	return ret

@@ -90,13 +90,13 @@ InstructionSet::InstructionSet()
     }
 
     // load bitset with flags for function 0x80000001
-    if (nExIds_ >= (int)0x80000001) {
+    if (nExIds_ >= static_cast<int>(0x80000001)) {
         f_81_ECX_ = extdata_[1][2];
         f_81_EDX_ = extdata_[1][3];
     }
 
     // Interpret CPU brand string if reported
-    if (nExIds_ >= (int)0x80000004) {
+    if (nExIds_ >= static_cast<int>(0x80000004)) {
         memcpy(brand, extdata_[2].data(), sizeof(cpui));
         memcpy(brand + 16, extdata_[3].data(), sizeof(cpui));
         memcpy(brand + 32, extdata_[4].data(), sizeof(cpui));

@@ -17,6 +17,8 @@
 package utils
 
 import (
+	"strings"
+
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -25,13 +27,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-)
-
-var (
-	ErrGetNodesFromRG       = errors.New("failed to get node from rg")
-	ErrNoReplicaFound       = errors.New("no replica found during assign nodes")
-	ErrReplicasInconsistent = errors.New("all replicas should belong to same collection during assign nodes")
-	ErrUseWrongNumRG        = errors.New("resource group num can only be 0, 1 or same as replica number")
 )
 
 func GetPartitions(collectionMgr *meta.CollectionManager, collectionID int64) ([]int64, error) {
@@ -115,9 +110,10 @@ func RecoverAllCollection(m *meta.Meta) {
 	}
 }
 
-func checkResourceGroup(m *meta.Meta, resourceGroups []string, replicaNumber int32) (map[string]int, error) {
+func AssignReplica(m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool) (map[string]int, error) {
 	if len(resourceGroups) != 0 && len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
-		return nil, ErrUseWrongNumRG
+		return nil, errors.Errorf(
+			"replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
 	}
 
 	replicaNumInRG := make(map[string]int)
@@ -140,15 +136,19 @@ func checkResourceGroup(m *meta.Meta, resourceGroups []string, replicaNumber int
 	// 3. replica1 spawn finished, but cannot find related resource group.
 	for rgName, num := range replicaNumInRG {
 		if !m.ContainResourceGroup(rgName) {
-			return nil, ErrGetNodesFromRG
+			return nil, merr.WrapErrResourceGroupNotFound(rgName)
 		}
 		nodes, err := m.ResourceManager.GetNodes(rgName)
 		if err != nil {
 			return nil, err
 		}
+
 		if num > len(nodes) {
-			log.Warn("node not enough", zap.Error(meta.ErrNodeNotEnough), zap.Int("replicaNum", num), zap.Int("nodeNum", len(nodes)), zap.String("rgName", rgName))
-			return nil, meta.ErrNodeNotEnough
+			log.Warn("failed to check resource group", zap.Error(err))
+			if checkNodeNum {
+				err := merr.WrapErrResourceGroupNodeNotEnough(rgName, len(nodes), num)
+				return nil, err
+			}
 		}
 	}
 	return replicaNumInRG, nil
@@ -156,7 +156,7 @@ func checkResourceGroup(m *meta.Meta, resourceGroups []string, replicaNumber int
 
 // SpawnReplicasWithRG spawns replicas in rgs one by one for given collection.
 func SpawnReplicasWithRG(m *meta.Meta, collection int64, resourceGroups []string, replicaNumber int32, channels []string) ([]*meta.Replica, error) {
-	replicaNumInRG, err := checkResourceGroup(m, resourceGroups, replicaNumber)
+	replicaNumInRG, err := AssignReplica(m, resourceGroups, replicaNumber, true)
 	if err != nil {
 		return nil, err
 	}
@@ -169,4 +169,77 @@ func SpawnReplicasWithRG(m *meta.Meta, collection int64, resourceGroups []string
 	// Active recover it.
 	RecoverReplicaOfCollection(m, collection)
 	return replicas, nil
+}
+
+func ReassignReplicaToRG(
+	m *meta.Meta,
+	collectionID int64,
+	newReplicaNumber int32,
+	newResourceGroups []string,
+) (map[string]int, map[string][]*meta.Replica, []int64, error) {
+	// assign all replicas to newResourceGroups, got each rg's replica number
+	newAssignment, err := AssignReplica(m, newResourceGroups, newReplicaNumber, false)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	replicas := m.ReplicaManager.GetByCollection(collectionID)
+	replicasInRG := lo.GroupBy(replicas, func(replica *meta.Replica) string {
+		return replica.GetResourceGroup()
+	})
+
+	// if rg doesn't exist in newResourceGroups, add all replicas to candidateToRelease
+	candidateToRelease := make([]*meta.Replica, 0)
+	outRg, _ := lo.Difference(lo.Keys(replicasInRG), newResourceGroups)
+	if len(outRg) > 0 {
+		for _, rgName := range outRg {
+			candidateToRelease = append(candidateToRelease, replicasInRG[rgName]...)
+		}
+	}
+
+	// if rg has more replicas than newAssignment's replica number, add the rest replicas to candidateToMove
+	// also set the lacked replica number as rg's replicaToSpawn value
+	replicaToSpawn := make(map[string]int, len(newAssignment))
+	for rgName, count := range newAssignment {
+		if len(replicasInRG[rgName]) > count {
+			candidateToRelease = append(candidateToRelease, replicasInRG[rgName][count:]...)
+		} else {
+			lack := count - len(replicasInRG[rgName])
+			if lack > 0 {
+				replicaToSpawn[rgName] = lack
+			}
+		}
+	}
+
+	candidateIdx := 0
+	// if newReplicaNumber is small than current replica num, pick replica from candidate and add it to replicasToRelease
+	replicasToRelease := make([]int64, 0)
+	replicaReleaseCounter := len(replicas) - int(newReplicaNumber)
+	for replicaReleaseCounter > 0 {
+		replicasToRelease = append(replicasToRelease, candidateToRelease[candidateIdx].GetID())
+		replicaReleaseCounter -= 1
+		candidateIdx += 1
+	}
+
+	// if candidateToMove is not empty, pick replica from candidate add add it to replicaToTransfer
+	// which means if rg has less replicas than expected, we transfer some existed replica to it.
+	replicaToTransfer := make(map[string][]*meta.Replica)
+	if candidateIdx < len(candidateToRelease) {
+		for rg := range replicaToSpawn {
+			for replicaToSpawn[rg] > 0 && candidateIdx < len(candidateToRelease) {
+				if replicaToTransfer[rg] == nil {
+					replicaToTransfer[rg] = make([]*meta.Replica, 0)
+				}
+				replicaToTransfer[rg] = append(replicaToTransfer[rg], candidateToRelease[candidateIdx])
+				candidateIdx += 1
+				replicaToSpawn[rg] -= 1
+			}
+
+			if replicaToSpawn[rg] == 0 {
+				delete(replicaToSpawn, rg)
+			}
+		}
+	}
+
+	return replicaToSpawn, replicaToTransfer, replicasToRelease, nil
 }

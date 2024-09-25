@@ -19,10 +19,12 @@ package meta
 import (
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type LeaderViewManagerSuite struct {
@@ -248,16 +250,68 @@ func (suite *LeaderViewManagerSuite) TestNotifyDelegatorChanges() {
 		},
 	}
 
-	updateCollections := make([]int64, 0)
+	retSet := typeutil.NewUniqueSet()
 	mgr.SetNotifyFunc(func(collectionIDs ...int64) {
-		updateCollections = append(updateCollections, collectionIDs...)
+		retSet.Insert(collectionIDs...)
 	})
 
 	mgr.Update(1, newViews...)
+	suite.Equal(2, retSet.Len())
+	suite.True(retSet.Contain(100))
+	suite.True(retSet.Contain(103))
 
-	suite.Equal(2, len(updateCollections))
-	suite.Contains(updateCollections, int64(100))
-	suite.Contains(updateCollections, int64(103))
+	newViews1 := []*LeaderView{
+		{
+			ID:                 1,
+			CollectionID:       101,
+			Channel:            "test-channel-2",
+			UnServiceableError: errors.New("test error"),
+		},
+		{
+			ID:                 1,
+			CollectionID:       102,
+			Channel:            "test-channel-3",
+			UnServiceableError: errors.New("test error"),
+		},
+		{
+			ID:                 1,
+			CollectionID:       103,
+			Channel:            "test-channel-4",
+			UnServiceableError: errors.New("test error"),
+		},
+	}
+
+	retSet.Clear()
+	mgr.Update(1, newViews1...)
+	suite.Equal(3, len(retSet))
+	suite.True(retSet.Contain(101))
+	suite.True(retSet.Contain(102))
+	suite.True(retSet.Contain(103))
+
+	newViews2 := []*LeaderView{
+		{
+			ID:                 1,
+			CollectionID:       101,
+			Channel:            "test-channel-2",
+			UnServiceableError: errors.New("test error"),
+		},
+		{
+			ID:           1,
+			CollectionID: 102,
+			Channel:      "test-channel-3",
+		},
+		{
+			ID:           1,
+			CollectionID: 103,
+			Channel:      "test-channel-4",
+		},
+	}
+
+	retSet.Clear()
+	mgr.Update(1, newViews2...)
+	suite.Equal(2, len(retSet))
+	suite.True(retSet.Contain(102))
+	suite.True(retSet.Contain(103))
 }
 
 func TestLeaderViewManager(t *testing.T) {

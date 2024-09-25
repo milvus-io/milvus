@@ -186,6 +186,10 @@ func (m *GrpcRootCoordClient) ShowSegments(ctx context.Context, in *milvuspb.Sho
 	return &milvuspb.ShowSegmentsResponse{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) GetPChannelInfo(ctx context.Context, in *rootcoordpb.GetPChannelInfoRequest, opts ...grpc.CallOption) (*rootcoordpb.GetPChannelInfoResponse, error) {
+	return &rootcoordpb.GetPChannelInfoResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) DescribeSegments(ctx context.Context, in *rootcoordpb.DescribeSegmentsRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeSegmentsResponse, error) {
 	return &rootcoordpb.DescribeSegmentsResponse{}, m.Err
 }
@@ -259,6 +263,14 @@ func (m *GrpcRootCoordClient) AlterCollection(ctx context.Context, in *milvuspb.
 }
 
 func (m *GrpcRootCoordClient) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) BackupRBAC(ctx context.Context, in *milvuspb.BackupRBACMetaRequest, opts ...grpc.CallOption) (*milvuspb.BackupRBACMetaResponse, error) {
+	return &milvuspb.BackupRBACMetaResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) RestoreRBAC(ctx context.Context, in *milvuspb.RestoreRBACMetaRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
 

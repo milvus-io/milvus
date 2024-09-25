@@ -54,6 +54,7 @@ var configableIndexParams = typeutil.NewSet[string]()
 
 func init() {
 	configableIndexParams.Insert(common.MmapEnabledKey)
+	configableIndexParams.Insert(common.IndexOffsetCacheEnabledKey)
 }
 
 func IsConfigableIndexParam(key string) bool {
@@ -298,6 +299,14 @@ func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64)
 	return nil
 }
 
+func SetBitmapIndexLoadParams(params *paramtable.ComponentParam, indexParams map[string]string) {
+	_, exist := indexParams[common.IndexOffsetCacheEnabledKey]
+	if exist {
+		return
+	}
+	indexParams[common.IndexOffsetCacheEnabledKey] = params.QueryNodeCfg.IndexOffsetCacheEnabled.GetValue()
+}
+
 // SetDiskIndexLoadParams set disk index load params with ratio params on queryNode
 // QueryNode cal load params with ratio params ans cpu count...
 func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[string]string, numRows int64) error {
@@ -360,6 +369,10 @@ func AppendPrepareLoadParams(params *paramtable.ComponentParam, indexParams map[
 	if params.AutoIndexConfig.Enable.GetAsBool() { // `enable` only for cloud instance.
 		// override prepare params by
 		for k, v := range params.AutoIndexConfig.PrepareParams.GetAsJSONMap() {
+			indexParams[k] = v
+		}
+
+		for k, v := range params.AutoIndexConfig.LoadAdaptParams.GetAsJSONMap() {
 			indexParams[k] = v
 		}
 	}

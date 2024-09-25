@@ -28,5 +28,5 @@ TEST(PlanProto, NotSetUnsupported) {
 
     proto::plan::Expr expr_pb;
     ProtoParser parser(*schema);
-    ASSERT_ANY_THROW(parser.ParseExpr(expr_pb));
+    ASSERT_ANY_THROW(parser.ParseExprs(expr_pb));
 }

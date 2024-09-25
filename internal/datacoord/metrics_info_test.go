@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -66,7 +67,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	assert.Error(t, err)
 
 	// nil client node
-	_, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, nil))
+	_, err = svr.getDataNodeMetrics(ctx, req, session.NewSession(&session.NodeInfo{}, nil))
 	assert.Error(t, err)
 
 	creator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
@@ -74,13 +75,13 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	}
 
 	// mock datanode client
-	session := NewSession(&NodeInfo{}, creator)
-	info, err := svr.getDataNodeMetrics(ctx, req, session)
+	sess := session.NewSession(&session.NodeInfo{}, creator)
+	info, err := svr.getDataNodeMetrics(ctx, req, sess)
 	assert.NoError(t, err)
 	assert.False(t, info.HasError)
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.DataNodeRole, 100), info.BaseComponentInfos.Name)
 
-	getMockFailedClientCreator := func(mockFunc func() (*milvuspb.GetMetricsResponse, error)) dataNodeCreatorFunc {
+	getMockFailedClientCreator := func(mockFunc func() (*milvuspb.GetMetricsResponse, error)) session.DataNodeCreatorFunc {
 		return func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 			cli, err := creator(ctx, addr, nodeID)
 			assert.NoError(t, err)
@@ -92,7 +93,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 		return nil, errors.New("mocked fail")
 	})
 
-	info, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, mockFailClientCreator))
+	info, err = svr.getDataNodeMetrics(ctx, req, session.NewSession(&session.NodeInfo{}, mockFailClientCreator))
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 
@@ -104,7 +105,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 		}, nil
 	})
 
-	info, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, mockFailClientCreator))
+	info, err = svr.getDataNodeMetrics(ctx, req, session.NewSession(&session.NodeInfo{}, mockFailClientCreator))
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 	assert.Equal(t, "mocked error", info.ErrorReason)
@@ -117,7 +118,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 		}, nil
 	})
 
-	info, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, mockFailClientCreator))
+	info, err = svr.getDataNodeMetrics(ctx, req, session.NewSession(&session.NodeInfo{}, mockFailClientCreator))
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 }

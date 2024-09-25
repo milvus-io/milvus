@@ -19,7 +19,6 @@ package paramtable
 import (
 	"fmt"
 	"math"
-	"strconv"
 
 	"go.uber.org/zap"
 
@@ -133,36 +132,38 @@ type quotaConfig struct {
 	MaxOutputSize                  ParamItem `refreshable:"true"`
 	MaxInsertSize                  ParamItem `refreshable:"true"`
 	MaxResourceGroupNumOfQueryNode ParamItem `refreshable:"true"`
+	MaxGroupSize                   ParamItem `refreshable:"true"`
 
 	// limit writing
-	ForceDenyWriting                     ParamItem `refreshable:"true"`
-	TtProtectionEnabled                  ParamItem `refreshable:"true"`
-	MaxTimeTickDelay                     ParamItem `refreshable:"true"`
-	MemProtectionEnabled                 ParamItem `refreshable:"true"`
-	DataNodeMemoryLowWaterLevel          ParamItem `refreshable:"true"`
-	DataNodeMemoryHighWaterLevel         ParamItem `refreshable:"true"`
-	QueryNodeMemoryLowWaterLevel         ParamItem `refreshable:"true"`
-	QueryNodeMemoryHighWaterLevel        ParamItem `refreshable:"true"`
-	GrowingSegmentsSizeProtectionEnabled ParamItem `refreshable:"true"`
-	GrowingSegmentsSizeMinRateRatio      ParamItem `refreshable:"true"`
-	GrowingSegmentsSizeLowWaterLevel     ParamItem `refreshable:"true"`
-	GrowingSegmentsSizeHighWaterLevel    ParamItem `refreshable:"true"`
-	DiskProtectionEnabled                ParamItem `refreshable:"true"`
-	DiskQuota                            ParamItem `refreshable:"true"`
-	DiskQuotaPerDB                       ParamItem `refreshable:"true"`
-	DiskQuotaPerCollection               ParamItem `refreshable:"true"`
-	DiskQuotaPerPartition                ParamItem `refreshable:"true"`
+	ForceDenyWriting                      ParamItem `refreshable:"true"`
+	TtProtectionEnabled                   ParamItem `refreshable:"true"`
+	MaxTimeTickDelay                      ParamItem `refreshable:"true"`
+	MemProtectionEnabled                  ParamItem `refreshable:"true"`
+	DataNodeMemoryLowWaterLevel           ParamItem `refreshable:"true"`
+	DataNodeMemoryHighWaterLevel          ParamItem `refreshable:"true"`
+	QueryNodeMemoryLowWaterLevel          ParamItem `refreshable:"true"`
+	QueryNodeMemoryHighWaterLevel         ParamItem `refreshable:"true"`
+	GrowingSegmentsSizeProtectionEnabled  ParamItem `refreshable:"true"`
+	GrowingSegmentsSizeMinRateRatio       ParamItem `refreshable:"true"`
+	GrowingSegmentsSizeLowWaterLevel      ParamItem `refreshable:"true"`
+	GrowingSegmentsSizeHighWaterLevel     ParamItem `refreshable:"true"`
+	DiskProtectionEnabled                 ParamItem `refreshable:"true"`
+	DiskQuota                             ParamItem `refreshable:"true"`
+	DiskQuotaPerDB                        ParamItem `refreshable:"true"`
+	DiskQuotaPerCollection                ParamItem `refreshable:"true"`
+	DiskQuotaPerPartition                 ParamItem `refreshable:"true"`
+	L0SegmentRowCountProtectionEnabled    ParamItem `refreshable:"true"`
+	L0SegmentRowCountLowWaterLevel        ParamItem `refreshable:"true"`
+	L0SegmentRowCountHighWaterLevel       ParamItem `refreshable:"true"`
+	DeleteBufferRowCountProtectionEnabled ParamItem `refreshable:"true"`
+	DeleteBufferRowCountLowWaterLevel     ParamItem `refreshable:"true"`
+	DeleteBufferRowCountHighWaterLevel    ParamItem `refreshable:"true"`
+	DeleteBufferSizeProtectionEnabled     ParamItem `refreshable:"true"`
+	DeleteBufferSizeLowWaterLevel         ParamItem `refreshable:"true"`
+	DeleteBufferSizeHighWaterLevel        ParamItem `refreshable:"true"`
 
 	// limit reading
-	ForceDenyReading               ParamItem `refreshable:"true"`
-	QueueProtectionEnabled         ParamItem `refreshable:"true"`
-	NQInQueueThreshold             ParamItem `refreshable:"true"`
-	QueueLatencyThreshold          ParamItem `refreshable:"true"`
-	ResultProtectionEnabled        ParamItem `refreshable:"true"`
-	MaxReadResultRate              ParamItem `refreshable:"true"`
-	MaxReadResultRatePerDB         ParamItem `refreshable:"true"`
-	MaxReadResultRatePerCollection ParamItem `refreshable:"true"`
-	CoolOffSpeed                   ParamItem `refreshable:"true"`
+	ForceDenyReading ParamItem `refreshable:"true"`
 }
 
 func (p *quotaConfig) init(base *BaseTable) {
@@ -201,6 +202,7 @@ seconds, (0 ~ 65536)`,
 		Key:          "quotaAndLimits.ddl.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Doc:          "Whether DDL request throttling is enabled.",
 		Export:       true,
 	}
 	p.DDLLimitEnabled.Init(base.mgr)
@@ -219,7 +221,9 @@ seconds, (0 ~ 65536)`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit, rate for CreateCollection, DropCollection, LoadCollection, ReleaseCollection",
+		Doc: `Maximum number of collection-related DDL requests per second.
+Setting this item to 10 indicates that Milvus processes no more than 10 collection-related DDL requests per second, including collection creation requests, collection drop requests, collection load requests, and collection release requests.
+To use this setting, set quotaAndLimits.ddl.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DDLCollectionRate.Init(base.mgr)
@@ -257,7 +261,9 @@ seconds, (0 ~ 65536)`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit, rate for CreatePartition, DropPartition, LoadPartition, ReleasePartition",
+		Doc: `Maximum number of partition-related DDL requests per second.
+Setting this item to 10 indicates that Milvus processes no more than 10 partition-related requests per second, including partition creation requests, partition drop requests, partition load requests, and partition release requests.
+To use this setting, set quotaAndLimits.ddl.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DDLPartitionRate.Init(base.mgr)
@@ -285,6 +291,7 @@ seconds, (0 ~ 65536)`,
 		Key:          "quotaAndLimits.indexRate.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Doc:          "Whether index-related request throttling is enabled.",
 		Export:       true,
 	}
 	p.IndexLimitEnabled.Init(base.mgr)
@@ -303,7 +310,9 @@ seconds, (0 ~ 65536)`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit, rate for CreateIndex, DropIndex",
+		Doc: `Maximum number of index-related requests per second.
+Setting this item to 10 indicates that Milvus processes no more than 10 partition-related requests per second, including index creation requests and index drop requests.
+To use this setting, set quotaAndLimits.indexRate.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.MaxIndexRate.Init(base.mgr)
@@ -330,7 +339,8 @@ seconds, (0 ~ 65536)`,
 	p.FlushLimitEnabled = ParamItem{
 		Key:          "quotaAndLimits.flushRate.enabled",
 		Version:      "2.2.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
+		Doc:          "Whether flush request throttling is enabled.",
 		Export:       true,
 	}
 	p.FlushLimitEnabled.Init(base.mgr)
@@ -349,7 +359,9 @@ seconds, (0 ~ 65536)`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit, rate for flush",
+		Doc: `Maximum number of flush requests per second.
+Setting this item to 10 indicates that Milvus processes no more than 10 flush requests per second.
+To use this setting, set quotaAndLimits.flushRate.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.MaxFlushRate.Init(base.mgr)
@@ -376,7 +388,7 @@ seconds, (0 ~ 65536)`,
 	p.MaxFlushRatePerCollection = ParamItem{
 		Key:          "quotaAndLimits.flushRate.collection.max",
 		Version:      "2.3.9",
-		DefaultValue: "-1",
+		DefaultValue: "0.1",
 		Formatter: func(v string) string {
 			if !p.FlushLimitEnabled.GetAsBool() {
 				return max
@@ -396,6 +408,7 @@ seconds, (0 ~ 65536)`,
 		Key:          "quotaAndLimits.compactionRate.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Doc:          "Whether manual compaction request throttling is enabled.",
 		Export:       true,
 	}
 	p.CompactionLimitEnabled.Init(base.mgr)
@@ -414,7 +427,9 @@ seconds, (0 ~ 65536)`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit, rate for manualCompaction",
+		Doc: `Maximum number of manual-compaction requests per second.
+Setting this item to 10 indicates that Milvus processes no more than 10 manual-compaction requests per second.
+To use this setting, set quotaAndLimits.compaction.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.MaxCompactionRate.Init(base.mgr)
@@ -443,9 +458,8 @@ seconds, (0 ~ 65536)`,
 		Key:          "quotaAndLimits.dml.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
-		Doc: `dml limit rates, default no limit.
-The maximum rate will not be greater than ` + "max" + `.`,
-		Export: true,
+		Doc:          "Whether DML request throttling is enabled.",
+		Export:       true,
 	}
 	p.DMLLimitEnabled.Init(base.mgr)
 
@@ -467,7 +481,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return fmt.Sprintf("%f", rate)
 		},
-		Doc:    "MB/s, default no limit",
+		Doc: `Highest data insertion rate per second.
+Setting this item to 5 indicates that Milvus only allows data insertion at the rate of 5 MB/s.
+To use this setting, set quotaAndLimits.dml.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DMLMaxInsertRate.Init(base.mgr)
@@ -555,7 +571,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return fmt.Sprintf("%f", rate)
 		},
-		Doc:    "MB/s, default no limit",
+		Doc: `Highest data insertion rate per collection per second.
+Setting this item to 5 indicates that Milvus only allows data insertion to any collection at the rate of 5 MB/s.
+To use this setting, set quotaAndLimits.dml.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DMLMaxInsertRatePerCollection.Init(base.mgr)
@@ -819,7 +837,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return fmt.Sprintf("%f", rate)
 		},
-		Doc:    "MB/s, default no limit",
+		Doc: `Highest data deletion rate per second.
+Setting this item to 0.1 indicates that Milvus only allows data deletion at the rate of 0.1 MB/s.
+To use this setting, set quotaAndLimits.dml.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DMLMaxDeleteRate.Init(base.mgr)
@@ -907,7 +927,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return fmt.Sprintf("%f", rate)
 		},
-		Doc:    "MB/s, default no limit",
+		Doc: `Highest data deletion rate per second.
+Setting this item to 0.1 indicates that Milvus only allows data deletion from any collection at the rate of 0.1 MB/s.
+To use this setting, set quotaAndLimits.dml.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DMLMaxDeleteRatePerCollection.Init(base.mgr)
@@ -1158,9 +1180,8 @@ The maximum rate will not be greater than ` + "max" + `.`,
 		Key:          "quotaAndLimits.dql.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
-		Doc: `dql limit rates, default no limit.
-The maximum rate will not be greater than ` + "max" + `.`,
-		Export: true,
+		Doc:          "Whether DQL request throttling is enabled.",
+		Export:       true,
 	}
 	p.DQLLimitEnabled.Init(base.mgr)
 
@@ -1178,7 +1199,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return v
 		},
-		Doc:    "vps (vectors per second), default no limit",
+		Doc: `Maximum number of vectors to search per second.
+Setting this item to 100 indicates that Milvus only allows searching 100 vectors per second no matter whether these 100 vectors are all in one search or scattered across multiple searches.
+To use this setting, set quotaAndLimits.dql.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DQLMaxSearchRate.Init(base.mgr)
@@ -1258,7 +1281,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return v
 		},
-		Doc:    "vps (vectors per second), default no limit",
+		Doc: `Maximum number of vectors to search per collection per second.
+Setting this item to 100 indicates that Milvus only allows searching 100 vectors per second per collection no matter whether these 100 vectors are all in one search or scattered across multiple searches.
+To use this setting, set quotaAndLimits.dql.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DQLMaxSearchRatePerCollection.Init(base.mgr)
@@ -1338,7 +1363,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit",
+		Doc: `Maximum number of queries per second.
+Setting this item to 100 indicates that Milvus only allows 100 queries per second.
+To use this setting, set quotaAndLimits.dql.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DQLMaxQueryRate.Init(base.mgr)
@@ -1418,7 +1445,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit",
+		Doc: `Maximum number of queries per collection per second.
+Setting this item to 100 indicates that Milvus only allows 100 queries per collection per second.
+To use this setting, set quotaAndLimits.dql.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DQLMaxQueryRatePerCollection.Init(base.mgr)
@@ -1497,6 +1526,7 @@ The maximum rate will not be greater than ` + "max" + `.`,
 		Key:          "quotaAndLimits.limits.maxCollectionNumPerDB",
 		Version:      "2.2.0",
 		DefaultValue: "65536",
+		Doc:          "Maximum number of collections per database.",
 		Export:       true,
 	}
 	p.MaxCollectionNumPerDB.Init(base.mgr)
@@ -1559,6 +1589,15 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 	}
 	p.MaxResourceGroupNumOfQueryNode.Init(base.mgr)
 
+	p.MaxGroupSize = ParamItem{
+		Key:          "quotaAndLimits.limits.maxGroupSize",
+		Version:      "2.5.0",
+		Doc:          `maximum size for one single group when doing search group by`,
+		DefaultValue: "10",
+		Export:       true,
+	}
+	p.MaxGroupSize.Init(base.mgr)
+
 	// limit writing
 	p.ForceDenyWriting = ParamItem{
 		Key:          "quotaAndLimits.limitWriting.forceDeny",
@@ -1584,15 +1623,10 @@ specific conditions, such as memory of nodes to water marker), ` + "true" + ` me
 		Version:      "2.2.0",
 		DefaultValue: defaultMaxTtDelay,
 		Formatter: func(v string) string {
-			if !p.TtProtectionEnabled.GetAsBool() {
-				return fmt.Sprintf("%d", math.MaxInt64)
+			if getAsFloat(v) < 0 {
+				return "0"
 			}
-			delay := getAsFloat(v)
-			// (0, 65536)
-			if delay <= 0 || delay >= 65536 {
-				return defaultMaxTtDelay
-			}
-			return fmt.Sprintf("%f", delay)
+			return v
 		},
 		Doc: `maxTimeTickDelay indicates the backpressure for DML Operations.
 DML rates would be reduced according to the ratio of time tick delay to maxTimeTickDelay,
@@ -1861,6 +1895,87 @@ but the rate will not be lower than minRateRatio * dmlRate.`,
 	}
 	p.DiskQuotaPerPartition.Init(base.mgr)
 
+	p.L0SegmentRowCountProtectionEnabled = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.l0SegmentsRowCountProtection.enabled",
+		Version:      "2.4.7",
+		DefaultValue: "false",
+		Doc:          "switch to enable l0 segment row count quota",
+		Export:       true,
+	}
+	p.L0SegmentRowCountProtectionEnabled.Init(base.mgr)
+
+	p.L0SegmentRowCountLowWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.l0SegmentsRowCountProtection.lowWaterLevel",
+		Version:      "2.4.7",
+		DefaultValue: "30000000",
+		Doc:          "l0 segment row count quota, low water level",
+		Export:       true,
+	}
+	p.L0SegmentRowCountLowWaterLevel.Init(base.mgr)
+
+	p.L0SegmentRowCountHighWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.l0SegmentsRowCountProtection.highWaterLevel",
+		Version:      "2.4.7",
+		DefaultValue: "50000000",
+		Doc:          "l0 segment row count quota, high water level",
+		Export:       true,
+	}
+	p.L0SegmentRowCountHighWaterLevel.Init(base.mgr)
+
+	p.DeleteBufferRowCountProtectionEnabled = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.deleteBufferRowCountProtection.enabled",
+		Version:      "2.4.11",
+		DefaultValue: "false",
+		Doc:          "switch to enable delete buffer row count quota",
+		Export:       true,
+	}
+	p.DeleteBufferRowCountProtectionEnabled.Init(base.mgr)
+
+	p.DeleteBufferRowCountLowWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.deleteBufferRowCountProtection.lowWaterLevel",
+		Version:      "2.4.11",
+		DefaultValue: "32768",
+		Doc:          "delete buffer row count quota, low water level",
+		Export:       true,
+	}
+	p.DeleteBufferRowCountLowWaterLevel.Init(base.mgr)
+
+	p.DeleteBufferRowCountHighWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.deleteBufferRowCountProtection.highWaterLevel",
+		Version:      "2.4.11",
+		DefaultValue: "65536",
+		Doc:          "delete buffer row count quota, high water level",
+		Export:       true,
+	}
+	p.DeleteBufferRowCountHighWaterLevel.Init(base.mgr)
+
+	p.DeleteBufferSizeProtectionEnabled = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.deleteBufferSizeProtection.enabled",
+		Version:      "2.4.11",
+		DefaultValue: "false",
+		Doc:          "switch to enable delete buffer size quota",
+		Export:       true,
+	}
+	p.DeleteBufferSizeProtectionEnabled.Init(base.mgr)
+
+	p.DeleteBufferSizeLowWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.deleteBufferSizeProtection.lowWaterLevel",
+		Version:      "2.4.11",
+		DefaultValue: "134217728", // 128MB
+		Doc:          "delete buffer size quota, low water level",
+		Export:       true,
+	}
+	p.DeleteBufferSizeLowWaterLevel.Init(base.mgr)
+
+	p.DeleteBufferSizeHighWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.deleteBufferSizeProtection.highWaterLevel",
+		Version:      "2.4.11",
+		DefaultValue: "268435456", // 256MB
+		Doc:          "delete buffer size quota, high water level",
+		Export:       true,
+	}
+	p.DeleteBufferSizeHighWaterLevel.Init(base.mgr)
+
 	// limit reading
 	p.ForceDenyReading = ParamItem{
 		Key:          "quotaAndLimits.limitReading.forceDeny",
@@ -1871,159 +1986,6 @@ specific conditions, such as collection has been dropped), ` + "true" + ` means 
 		Export: true,
 	}
 	p.ForceDenyReading.Init(base.mgr)
-
-	p.QueueProtectionEnabled = ParamItem{
-		Key:          "quotaAndLimits.limitReading.queueProtection.enabled",
-		Version:      "2.2.0",
-		DefaultValue: "false",
-		Export:       true,
-	}
-	p.QueueProtectionEnabled.Init(base.mgr)
-
-	p.NQInQueueThreshold = ParamItem{
-		Key:          "quotaAndLimits.limitReading.queueProtection.nqInQueueThreshold",
-		Version:      "2.2.0",
-		DefaultValue: strconv.FormatInt(math.MaxInt64, 10),
-		Formatter: func(v string) string {
-			if !p.QueueProtectionEnabled.GetAsBool() {
-				return strconv.FormatInt(math.MaxInt64, 10)
-			}
-			threshold := getAsFloat(v)
-			// [0, inf)
-			if threshold < 0 {
-				return strconv.FormatInt(math.MaxInt64, 10)
-			}
-			return v
-		},
-		Doc: `nqInQueueThreshold indicated that the system was under backpressure for Search/Query path.
-If NQ in any QueryNode's queue is greater than nqInQueueThreshold, search&query rates would gradually cool off
-until the NQ in queue no longer exceeds nqInQueueThreshold. We think of the NQ of query request as 1.
-int, default no limit`,
-		Export: true,
-	}
-	p.NQInQueueThreshold.Init(base.mgr)
-
-	p.QueueLatencyThreshold = ParamItem{
-		Key:          "quotaAndLimits.limitReading.queueProtection.queueLatencyThreshold",
-		Version:      "2.2.0",
-		DefaultValue: max,
-		Formatter: func(v string) string {
-			if !p.QueueProtectionEnabled.GetAsBool() {
-				return max
-			}
-			level := getAsFloat(v)
-			// [0, inf)
-			if level < 0 {
-				return max
-			}
-			return v
-		},
-		Doc: `queueLatencyThreshold indicated that the system was under backpressure for Search/Query path.
-If dql latency of queuing is greater than queueLatencyThreshold, search&query rates would gradually cool off
-until the latency of queuing no longer exceeds queueLatencyThreshold.
-The latency here refers to the averaged latency over a period of time.
-milliseconds, default no limit`,
-		Export: true,
-	}
-	p.QueueLatencyThreshold.Init(base.mgr)
-
-	p.ResultProtectionEnabled = ParamItem{
-		Key:          "quotaAndLimits.limitReading.resultProtection.enabled",
-		Version:      "2.2.0",
-		DefaultValue: "false",
-		Export:       true,
-	}
-	p.ResultProtectionEnabled.Init(base.mgr)
-
-	p.MaxReadResultRate = ParamItem{
-		Key:          "quotaAndLimits.limitReading.resultProtection.maxReadResultRate",
-		Version:      "2.2.0",
-		DefaultValue: max,
-		Formatter: func(v string) string {
-			if !p.ResultProtectionEnabled.GetAsBool() {
-				return max
-			}
-			rate := getAsFloat(v)
-			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
-				return fmt.Sprintf("%f", megaBytes2Bytes(rate))
-			}
-			// [0, inf)
-			if rate < 0 {
-				return max
-			}
-			return v
-		},
-		Doc: `maxReadResultRate indicated that the system was under backpressure for Search/Query path.
-If dql result rate is greater than maxReadResultRate, search&query rates would gradually cool off
-until the read result rate no longer exceeds maxReadResultRate.
-MB/s, default no limit`,
-		Export: true,
-	}
-	p.MaxReadResultRate.Init(base.mgr)
-
-	p.MaxReadResultRatePerDB = ParamItem{
-		Key:          "quotaAndLimits.limitReading.resultProtection.maxReadResultRatePerDB",
-		Version:      "2.4.1",
-		DefaultValue: max,
-		Formatter: func(v string) string {
-			if !p.ResultProtectionEnabled.GetAsBool() {
-				return max
-			}
-			rate := getAsFloat(v)
-			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
-				return fmt.Sprintf("%f", megaBytes2Bytes(rate))
-			}
-			// [0, inf)
-			if rate < 0 {
-				return max
-			}
-			return v
-		},
-		Export: true,
-	}
-	p.MaxReadResultRatePerDB.Init(base.mgr)
-
-	p.MaxReadResultRatePerCollection = ParamItem{
-		Key:          "quotaAndLimits.limitReading.resultProtection.maxReadResultRatePerCollection",
-		Version:      "2.4.1",
-		DefaultValue: max,
-		Formatter: func(v string) string {
-			if !p.ResultProtectionEnabled.GetAsBool() {
-				return max
-			}
-			rate := getAsFloat(v)
-			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
-				return fmt.Sprintf("%f", megaBytes2Bytes(rate))
-			}
-			// [0, inf)
-			if rate < 0 {
-				return max
-			}
-			return v
-		},
-		Export: true,
-	}
-	p.MaxReadResultRatePerCollection.Init(base.mgr)
-
-	const defaultSpeed = "0.9"
-	p.CoolOffSpeed = ParamItem{
-		Key:          "quotaAndLimits.limitReading.coolOffSpeed",
-		Version:      "2.2.0",
-		DefaultValue: defaultSpeed,
-		Formatter: func(v string) string {
-			// (0, 1]
-			speed := getAsFloat(v)
-			if speed <= 0 || speed > 1 {
-				// log.Warn("CoolOffSpeed must in the range of `(0, 1]`, use default value", zap.Float64("speed", p.CoolOffSpeed), zap.Float64("default", defaultSpeed))
-				return defaultSpeed
-			}
-			return v
-		},
-		Doc: `colOffSpeed is the speed of search&query rates cool off.
-(0, 1]`,
-		Export: true,
-	}
-	p.CoolOffSpeed.Init(base.mgr)
 
 	p.AllocRetryTimes = ParamItem{
 		Key:          "quotaAndLimits.limits.allocRetryTimes",

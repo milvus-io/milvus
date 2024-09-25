@@ -392,9 +392,9 @@ func (s *CoordinatorBrokerDataCoordSuite) TestSegmentInfo() {
 				}),
 			}, nil)
 
-		resp, err := s.broker.GetSegmentInfo(ctx, segmentIDs...)
+		infos, err := s.broker.GetSegmentInfo(ctx, segmentIDs...)
 		s.NoError(err)
-		s.ElementsMatch(segmentIDs, lo.Map(resp.GetInfos(), func(info *datapb.SegmentInfo, _ int) int64 {
+		s.ElementsMatch(segmentIDs, lo.Map(infos, func(info *datapb.SegmentInfo, _ int) int64 {
 			return info.GetID()
 		}))
 		s.resetMock()
@@ -572,7 +572,7 @@ func (s *CoordinatorBrokerRootCoordSuite) TestGetCollectionLoadInfo() {
 				Properties: []*commonpb.KeyValuePair{},
 			}, nil)
 		_, _, err := s.broker.GetCollectionLoadInfo(ctx, 1)
-		s.Error(err)
+		s.NoError(err)
 		s.resetMock()
 	})
 }

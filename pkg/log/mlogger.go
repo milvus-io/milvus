@@ -21,6 +21,7 @@ import (
 
 	"github.com/uber/jaeger-client-go/utils"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // MLogger is a wrapper type of zap.Logger.
@@ -32,7 +33,9 @@ type MLogger struct {
 // With encapsulates zap.Logger With method to return MLogger instance.
 func (l *MLogger) With(fields ...zap.Field) *MLogger {
 	nl := &MLogger{
-		Logger: l.Logger.With(fields...),
+		Logger: l.Logger.WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {
+			return NewLazyWith(core, fields)
+		})),
 	}
 	return nl
 }

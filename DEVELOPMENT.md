@@ -71,22 +71,22 @@ You can use Vscode to integrate C++ and Go together. Please replace user.setting
 ```bash
 {
     "go.toolsEnvVars": {
-        "PKG_CONFIG_PATH": "/Users/zilliz/milvus/internal/core/output/lib/pkgconfig:/Users/zilliz/workspace/milvus/internal/core/output/lib64/pkgconfig",
-        "LD_LIBRARY_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64",
-        "RPATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64"
+        "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:${workspaceFolder}/internal/core/output/lib/pkgconfig:${workspaceFolder}/internal/core/output/lib64/pkgconfig",
+        "LD_LIBRARY_PATH": "${env:LD_LIBRARY_PATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
+        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
     },
     "go.testEnvVars": {
-        "PKG_CONFIG_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib/pkgconfig:/Users/zilliz/workspace/milvus/internal/core/output/lib64/pkgconfig",
-        "LD_LIBRARY_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64",
-        "RPATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64"
+        "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:${workspaceFolder}/internal/core/output/lib/pkgconfig:${workspaceFolder}/internal/core/output/lib64/pkgconfig",
+        "LD_LIBRARY_PATH": "${env:LD_LIBRARY_PATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
+        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
     },
     "go.buildFlags": [
-        "-ldflags=-r /Users/zilliz/workspace/milvus/internal/core/output/lib"
+        "-ldflags=-r=/Users/zilliz/workspace/milvus/internal/core/output/lib"
     ],
     "terminal.integrated.env.linux": {
-        "PKG_CONFIG_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib/pkgconfig:/Users/zilliz/workspace/milvus/internal/core/output/lib64/pkgconfig",
-        "LD_LIBRARY_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64",
-        "RPATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64"
+        "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:${workspaceFolder}/internal/core/output/lib/pkgconfig:${workspaceFolder}/internal/core/output/lib64/pkgconfig",
+        "LD_LIBRARY_PATH": "${env:LD_LIBRARY_PATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
+        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
     },
     "go.useLanguageServer": true,
     "gopls": {
@@ -94,7 +94,7 @@ You can use Vscode to integrate C++ and Go together. Please replace user.setting
     },
     "go.formatTool": "gofumpt",
     "go.lintTool": "golangci-lint",
-    "go.testTags": "dynamic",
+    "go.testTags": "test,dynamic",
     "go.testTimeout": "10m"
 }
 ```
@@ -164,7 +164,7 @@ Milvus uses Conan to manage third-party dependencies for c++.
 Install Conan
 
 ```shell
-pip install conan==1.61.0
+pip install conan==1.64.1
 ```
 
 Note: Conan version 2.x is not currently supported, please use version 1.61.
@@ -193,6 +193,12 @@ To build the Milvus project, run the following command:
 
 ```shell
 $ make
+```
+
+Milvus uses `conan` to manage 3rd-party dependencies. `conan` will check the consistency of these dependencies every time you run `make`. This process can take a considerable amount of time, especially if the network is poor. If you make sure that the 3rd-party dependencies are consistent, you can use the following command to skip this step:
+
+```shell
+$ make SKIP_3RDPARTY=1
 ```
 
 If this command succeeds, you will now have an executable at `bin/milvus` in your Milvus project directory.
@@ -238,15 +244,15 @@ sudo apt install -y clang-format clang-tidy ninja-build gcc g++ curl zip unzip t
 ```bash
 # Verify python3 version, need python3 version > 3.8 and version <= 3.11
 python3 --version
-# pip install conan 1.61.0
-pip3 install conan==1.61.0
+# pip install conan 1.64.1
+pip3 install conan==1.64.1
 ```
 
 #### Install GO 1.80
 
 ```bash
-wget https://go.dev/dl/go1.21.10.linux-arm64.tar.gz
-tar zxf go1.21.10.linux-arm64.tar.gz
+wget https://go.dev/dl/go1.21.11.linux-arm64.tar.gz
+tar zxf go1.21.11.linux-arm64.tar.gz
 mv ./go /usr/local
 vi /etc/profile
 export PATH=$PATH:/usr/local/go/bin
@@ -389,7 +395,7 @@ For Apple Silicon users (Apple M1):
 
 ```shell
 $ cd deployments/docker/dev
-$ docker-compose -f docker-compose-apple-silicon.yml up -d
+$ docker compose -f docker-compose-apple-silicon.yml up -d
 $ cd ../../../
 $ make unittest
 ```
@@ -398,7 +404,7 @@ For others:
 
 ```shell
 $ cd deployments/docker/dev
-$ docker-compose up -d
+$ docker compose up -d
 $ cd ../../../
 $ make unittest
 ```
@@ -467,13 +473,13 @@ Milvus Cluster includes further component — Pulsar, to be distributed through 
 ```shell
 # Running Milvus cluster
 $ cd deployments/docker/dev
-$ docker-compose up -d
+$ docker compose up -d
 $ cd ../../../
 $ ./scripts/start_cluster.sh
 
 # Or running Milvus standalone
 $ cd deployments/docker/dev
-$ docker-compose up -d
+$ docker compose up -d
 $ cd ../../../
 $ ./scripts/start_standalone.sh
 ```

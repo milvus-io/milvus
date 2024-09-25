@@ -343,7 +343,7 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
 			return
 		}
-		request.TargetNodeID = value
+		request.SegmentID = value
 	}
 
 	copyMode := req.FormValue("copy_mode")

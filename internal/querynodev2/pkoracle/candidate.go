@@ -52,7 +52,8 @@ func WithSegmentType(typ commonpb.SegmentState) CandidateFilter {
 // WithWorkerID returns CandidateFilter with provided worker id.
 func WithWorkerID(workerID int64) CandidateFilter {
 	return func(candidate candidateWithWorker) bool {
-		return candidate.workerID == workerID
+		return candidate.workerID == workerID ||
+			workerID == -1 // wildcard for offline node
 	}
 }
 

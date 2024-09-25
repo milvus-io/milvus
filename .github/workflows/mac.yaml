@@ -15,6 +15,7 @@ on:
       - 'cmd/**'
       - 'build/**'
       - 'tests/integration/**'
+      - 'tests/go_client/**'
       - '.github/workflows/mac.yaml'
       - '.env'
       - docker-compose.yml
@@ -37,18 +38,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: 'Generate CCache Hash'
-        env:
-          CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
-        run: |
-          echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
-          echo "Set CCache hash to ${CORE_HASH}"
-      - name: Mac Cache CCache Volumes
-        uses: actions/cache@v3
-        with:
-          path: /var/tmp/ccache
-          key: macos-ccache-${{ env.corehash }}
-          restore-keys: macos-ccache-
       - name: Setup Python environment
         uses: actions/setup-python@v4
         with:
@@ -56,19 +45,9 @@ jobs:
       - name: Setup Go environment
         uses: actions/setup-go@v2.2.0
         with:
-          go-version: '~1.21.10'
-      - name: Mac Cache Go Mod Volumes
-        uses: actions/cache@v3
-        with:
-          path: ~/go/pkg/mod
-          key: macos-go-mod-${{ hashFiles('**/go.sum') }}
-          restore-keys: macos-go-mod-
-      - name: Mac Cache Conan Packages
-        uses: actions/cache@v3
-        with:
-          path: ~/.conan
-          key: macos-conan-${{ hashFiles('internal/core/conanfile.*') }}
-          restore-keys: macos-conan-
+          go-version: '~1.21.11'
+      - name: Download Caches
+        uses: ./.github/actions/macos-cache-restore
       - name: Code Check
         env:
           CCACHE_DIR: /var/tmp/ccache
@@ -82,7 +61,7 @@ jobs:
           fi
           ls -alh /var/tmp/ccache
           brew install libomp ninja openblas ccache pkg-config
-          pip3 install conan==1.61.0
+          pip3 install conan==1.64.1
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
             ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
           fi
@@ -93,3 +72,6 @@ jobs:
         with:
           name: cmake-log
           path: cmake_build/CMakeFiles/*.log
+      - name: Save Caches
+        uses: ./.github/actions/macos-cache-save
+        if: github.event_name != 'pull_request'

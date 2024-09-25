@@ -24,7 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 )
 
 // unsubscribeChannels create consumer first, and unsubscribe channel through msgStream.close()
@@ -47,7 +47,7 @@ func GetChannelLatestMsgID(ctx context.Context, factory Factory, channelName str
 	defer dmlStream.Close()
 
 	subName := fmt.Sprintf("get-latest_msg_id-%s-%d", channelName, rand.Int())
-	err = dmlStream.AsConsumer(ctx, []string{channelName}, subName, mqwrapper.SubscriptionPositionUnknown)
+	err = dmlStream.AsConsumer(ctx, []string{channelName}, subName, common.SubscriptionPositionUnknown)
 	if err != nil {
 		log.Warn("fail to AsConsumer", zap.String("channelName", channelName), zap.Error(err))
 		return nil, err

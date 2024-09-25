@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
@@ -39,6 +40,7 @@ import (
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -47,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -1450,6 +1453,65 @@ func TestRootCoord_AlterCollection(t *testing.T) {
 }
 
 func TestRootCoord_CheckHealth(t *testing.T) {
+	getQueryCoordMetricsFunc := func(tt typeutil.Timestamp) (*milvuspb.GetMetricsResponse, error) {
+		clusterTopology := metricsinfo.QueryClusterTopology{
+			ConnectedNodes: []metricsinfo.QueryNodeInfos{
+				{
+					QuotaMetrics: &metricsinfo.QueryNodeQuotaMetrics{
+						Fgm: metricsinfo.FlowGraphMetric{
+							MinFlowGraphChannel: "ch1",
+							MinFlowGraphTt:      tt,
+							NumFlowGraph:        1,
+						},
+					},
+				},
+			},
+		}
+
+		resp, _ := metricsinfo.MarshalTopology(metricsinfo.QueryCoordTopology{Cluster: clusterTopology})
+		return &milvuspb.GetMetricsResponse{
+			Status:        merr.Success(),
+			Response:      resp,
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, 0),
+		}, nil
+	}
+
+	getDataCoordMetricsFunc := func(tt typeutil.Timestamp) (*milvuspb.GetMetricsResponse, error) {
+		clusterTopology := metricsinfo.DataClusterTopology{
+			ConnectedDataNodes: []metricsinfo.DataNodeInfos{
+				{
+					QuotaMetrics: &metricsinfo.DataNodeQuotaMetrics{
+						Fgm: metricsinfo.FlowGraphMetric{
+							MinFlowGraphChannel: "ch1",
+							MinFlowGraphTt:      tt,
+							NumFlowGraph:        1,
+						},
+					},
+				},
+			},
+		}
+
+		resp, _ := metricsinfo.MarshalTopology(metricsinfo.DataCoordTopology{Cluster: clusterTopology})
+		return &milvuspb.GetMetricsResponse{
+			Status:        merr.Success(),
+			Response:      resp,
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, 0),
+		}, nil
+	}
+
+	querynodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-1*time.Minute), 0)
+	datanodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-2*time.Minute), 0)
+
+	dcClient := mocks.NewMockDataCoordClient(t)
+	dcClient.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(getDataCoordMetricsFunc(datanodeTT))
+	qcClient := mocks.NewMockQueryCoordClient(t)
+	qcClient.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(getQueryCoordMetricsFunc(querynodeTT))
+
+	errDataCoordClient := mocks.NewMockDataCoordClient(t)
+	errDataCoordClient.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+	errQueryCoordClient := mocks.NewMockQueryCoordClient(t)
+	errQueryCoordClient.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+
 	t.Run("not healthy", func(t *testing.T) {
 		ctx := context.Background()
 		c := newTestCore(withAbnormalCode())
@@ -1459,10 +1521,12 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 		assert.NotEmpty(t, resp.Reasons)
 	})
 
-	t.Run("proxy health check is ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidProxyManager())
+	t.Run("ok with disabled tt lag configuration", func(t *testing.T) {
+		v := Params.QuotaConfig.MaxTimeTickDelay.GetValue()
+		Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, "-1")
+		defer Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, v)
 
+		c := newTestCore(withHealthyCode(), withValidProxyManager())
 		ctx := context.Background()
 		resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -1470,15 +1534,74 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 		assert.Empty(t, resp.Reasons)
 	})
 
-	t.Run("proxy health check is fail", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidProxyManager())
+	t.Run("proxy health check fail with invalid proxy", func(t *testing.T) {
+		v := Params.QuotaConfig.MaxTimeTickDelay.GetValue()
+		Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, "6000")
+		defer Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, v)
+
+		c := newTestCore(withHealthyCode(), withInvalidProxyManager(), withDataCoord(dcClient), withQueryCoord(qcClient))
 
 		ctx := context.Background()
 		resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, false, resp.IsHealthy)
 		assert.NotEmpty(t, resp.Reasons)
+	})
+
+	t.Run("proxy health check fail with get metrics error", func(t *testing.T) {
+		v := Params.QuotaConfig.MaxTimeTickDelay.GetValue()
+		Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, "6000")
+		defer Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, v)
+
+		{
+			c := newTestCore(withHealthyCode(),
+				withValidProxyManager(), withDataCoord(dcClient), withQueryCoord(errQueryCoordClient))
+
+			ctx := context.Background()
+			resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+			assert.NoError(t, err)
+			assert.Equal(t, false, resp.IsHealthy)
+			assert.NotEmpty(t, resp.Reasons)
+		}
+
+		{
+			c := newTestCore(withHealthyCode(),
+				withValidProxyManager(), withDataCoord(errDataCoordClient), withQueryCoord(qcClient))
+
+			ctx := context.Background()
+			resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+			assert.NoError(t, err)
+			assert.Equal(t, false, resp.IsHealthy)
+			assert.NotEmpty(t, resp.Reasons)
+		}
+	})
+
+	t.Run("ok with tt lag exceeded", func(t *testing.T) {
+		v := Params.QuotaConfig.MaxTimeTickDelay.GetValue()
+		Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, "90")
+		defer Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, v)
+
+		c := newTestCore(withHealthyCode(),
+			withValidProxyManager(), withDataCoord(dcClient), withQueryCoord(qcClient))
+		ctx := context.Background()
+		resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, false, resp.IsHealthy)
+		assert.NotEmpty(t, resp.Reasons)
+	})
+
+	t.Run("ok with tt lag checking", func(t *testing.T) {
+		v := Params.QuotaConfig.MaxTimeTickDelay.GetValue()
+		Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, "600")
+		defer Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, v)
+
+		c := newTestCore(withHealthyCode(),
+			withValidProxyManager(), withDataCoord(dcClient), withQueryCoord(qcClient))
+		ctx := context.Background()
+		resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, true, resp.IsHealthy)
+		assert.Empty(t, resp.Reasons)
 	})
 }
 
@@ -1849,6 +1972,41 @@ func TestCore_InitRBAC(t *testing.T) {
 	})
 }
 
+func TestCore_BackupRBAC(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	c := newTestCore(withHealthyCode(), withMeta(meta))
+
+	meta.EXPECT().BackupRBAC(mock.Anything, mock.Anything).Return(&milvuspb.RBACMeta{}, nil)
+	resp, err := c.BackupRBAC(context.Background(), &milvuspb.BackupRBACMetaRequest{})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp.GetStatus()))
+
+	meta.ExpectedCalls = nil
+	meta.EXPECT().BackupRBAC(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+	resp, err = c.BackupRBAC(context.Background(), &milvuspb.BackupRBACMetaRequest{})
+	assert.NoError(t, err)
+	assert.False(t, merr.Ok(resp.GetStatus()))
+}
+
+func TestCore_RestoreRBAC(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	c := newTestCore(withHealthyCode(), withMeta(meta))
+	mockProxyClientManager := proxyutil.NewMockProxyClientManager(t)
+	mockProxyClientManager.EXPECT().RefreshPolicyInfoCache(mock.Anything, mock.Anything).Return(nil)
+	c.proxyClientManager = mockProxyClientManager
+
+	meta.EXPECT().RestoreRBAC(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	resp, err := c.RestoreRBAC(context.Background(), &milvuspb.RestoreRBACMetaRequest{})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp))
+
+	meta.ExpectedCalls = nil
+	meta.EXPECT().RestoreRBAC(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
+	resp, err = c.RestoreRBAC(context.Background(), &milvuspb.RestoreRBACMetaRequest{})
+	assert.NoError(t, err)
+	assert.False(t, merr.Ok(resp))
+}
+
 type RootCoordSuite struct {
 	suite.Suite
 }
@@ -1858,7 +2016,7 @@ func (s *RootCoordSuite) TestRestore() {
 	gc := mockrootcoord.NewGarbageCollector(s.T())
 
 	finishCh := make(chan struct{}, 4)
-	gc.EXPECT().ReDropPartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Once().
+	gc.EXPECT().ReDropPartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Once().
 		Run(func(args mock.Arguments) {
 			finishCh <- struct{}{}
 		})

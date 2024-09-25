@@ -68,7 +68,7 @@ func (e sliceSparseEmbedding) Serialize() []byte {
 	for idx := 0; idx < e.Len(); idx++ {
 		pos, value, _ := e.Get(idx)
 		binary.LittleEndian.PutUint32(row[idx*8:], pos)
-		binary.LittleEndian.PutUint32(row[pos*8+4:], math.Float32bits(value))
+		binary.LittleEndian.PutUint32(row[idx*8+4:], math.Float32bits(value))
 	}
 	return row
 }
@@ -83,7 +83,7 @@ func (e sliceSparseEmbedding) Swap(i, j int) {
 	e.values[i], e.values[j] = e.values[j], e.values[i]
 }
 
-func deserializeSliceSparceEmbedding(bs []byte) (sliceSparseEmbedding, error) {
+func DeserializeSliceSparseEmbedding(bs []byte) (sliceSparseEmbedding, error) {
 	length := len(bs)
 	if length%8 != 0 {
 		return sliceSparseEmbedding{}, errors.New("not valid sparse embedding bytes")

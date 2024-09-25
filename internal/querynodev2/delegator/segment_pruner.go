@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -24,6 +24,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -41,24 +43,31 @@ func PruneSegments(ctx context.Context,
 ) {
 	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "segmentPrune")
 	defer span.End()
-	// 1. calculate filtered segments
-	filteredSegments := make(map[UniqueID]struct{}, 0)
+	if partitionStats == nil {
+		return
+	}
+	// 1. select collection, partitions and expr
 	clusteringKeyField := clustering.GetClusteringKeyField(schema)
 	if clusteringKeyField == nil {
 		// no need to prune
 		return
 	}
-
+	tr := timerecord.NewTimeRecorder("PruneSegments")
 	var collectionID int64
 	var expr []byte
+	var partitionIDs []int64
 	if searchReq != nil {
 		collectionID = searchReq.CollectionID
 		expr = searchReq.GetSerializedExprPlan()
+		partitionIDs = searchReq.GetPartitionIDs()
 	} else {
 		collectionID = queryReq.CollectionID
 		expr = queryReq.GetSerializedExprPlan()
+		partitionIDs = queryReq.GetPartitionIDs()
 	}
 
+	filteredSegments := make(map[UniqueID]struct{}, 0)
+	pruneType := "scalar"
 	// currently we only prune based on one column
 	if typeutil.IsVectorType(clusteringKeyField.GetDataType()) {
 		// parse searched vectors
@@ -80,32 +89,61 @@ func PruneSegments(ctx context.Context,
 		for _, partStats := range partitionStats {
 			FilterSegmentsByVector(partStats, searchReq, vectorsBytes, dimValue, clusteringKeyField, filteredSegments, info.filterRatio)
 		}
+		pruneType = "vector"
 	} else {
 		// 0. parse expr from plan
 		plan := planpb.PlanNode{}
 		err := proto.Unmarshal(expr, &plan)
 		if err != nil {
-			log.Error("failed to unmarshall serialized expr from bytes, failed the operation")
+			log.Ctx(ctx).Error("failed to unmarshall serialized expr from bytes, failed the operation")
 			return
 		}
-		expr, err := exprutil.ParseExprFromPlan(&plan)
+		exprPb, err := exprutil.ParseExprFromPlan(&plan)
 		if err != nil {
-			log.Error("failed to parse expr from plan, failed the operation")
+			log.Ctx(ctx).Error("failed to parse expr from plan, failed the operation")
 			return
 		}
-		targetRanges, matchALL := exprutil.ParseRanges(expr, exprutil.ClusteringKey)
-		if matchALL || targetRanges == nil {
+
+		// 1. parse expr for prune
+		expr, err := ParseExpr(exprPb, NewParseContext(clusteringKeyField.GetFieldID(), clusteringKeyField.GetDataType()))
+		if err != nil {
+			log.Ctx(ctx).RatedWarn(10, "failed to parse expr for segment prune, fallback to common search/query", zap.Error(err))
 			return
 		}
-		for _, partStats := range partitionStats {
-			FilterSegmentsOnScalarField(partStats, targetRanges, clusteringKeyField, filteredSegments)
+
+		// 2. prune segments by scalar field
+		targetSegmentStats := make([]storage.SegmentStats, 0, 32)
+		targetSegmentIDs := make([]int64, 0, 32)
+		if len(partitionIDs) > 0 {
+			for _, partID := range partitionIDs {
+				partStats, exist := partitionStats[partID]
+				if exist && partStats != nil {
+					for segID, segStat := range partStats.SegmentStats {
+						targetSegmentIDs = append(targetSegmentIDs, segID)
+						targetSegmentStats = append(targetSegmentStats, segStat)
+					}
+				}
+			}
+		} else {
+			for _, partStats := range partitionStats {
+				if partStats != nil {
+					for segID, segStat := range partStats.SegmentStats {
+						targetSegmentIDs = append(targetSegmentIDs, segID)
+						targetSegmentStats = append(targetSegmentStats, segStat)
+					}
+				}
+			}
 		}
+
+		PruneByScalarField(expr, targetSegmentStats, targetSegmentIDs, filteredSegments)
 	}
 
 	// 2. remove filtered segments from sealed segment list
 	if len(filteredSegments) > 0 {
 		realFilteredSegments := 0
 		totalSegNum := 0
+		minSegmentCount := math.MaxInt
+		maxSegmentCount := 0
 		for idx, item := range sealedSegments {
 			newSegments := make([]SegmentEntry, 0)
 			totalSegNum += len(item.Segments)
@@ -119,16 +157,45 @@ func PruneSegments(ctx context.Context,
 			}
 			item.Segments = newSegments
 			sealedSegments[idx] = item
+			segmentCount := len(item.Segments)
+			if segmentCount > maxSegmentCount {
+				maxSegmentCount = segmentCount
+			}
+			if segmentCount < minSegmentCount {
+				minSegmentCount = segmentCount
+			}
 		}
+		bias := 1.0
+		if maxSegmentCount != 0 && minSegmentCount != math.MaxInt {
+			bias = float64(maxSegmentCount) / float64(minSegmentCount)
+		}
+		metrics.QueryNodeSegmentPruneBias.
+			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+				fmt.Sprint(collectionID),
+				pruneType,
+			).Set(bias)
+
+		filterRatio := float32(realFilteredSegments) / float32(totalSegNum)
 		metrics.QueryNodeSegmentPruneRatio.
-			WithLabelValues(fmt.Sprint(collectionID), fmt.Sprint(typeutil.IsVectorType(clusteringKeyField.GetDataType()))).
-			Observe(float64(realFilteredSegments / totalSegNum))
-		log.Debug("Pruned segment for search/query",
+			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+				fmt.Sprint(collectionID),
+				pruneType,
+			).Set(float64(filterRatio))
+		log.Ctx(ctx).Debug("Pruned segment for search/query",
+			zap.Int("filtered_segment_num[stats]", len(filteredSegments)),
 			zap.Int("filtered_segment_num[excluded]", realFilteredSegments),
 			zap.Int("total_segment_num", totalSegNum),
-			zap.Float32("filtered_ratio", float32(realFilteredSegments)/float32(totalSegNum)),
+			zap.Float32("filtered_ratio", filterRatio),
 		)
 	}
+
+	metrics.QueryNodeSegmentPruneLatency.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		fmt.Sprint(collectionID),
+		pruneType).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Ctx(ctx).Debug("Pruned segment for search/query",
+		zap.Duration("duration", tr.ElapseSpan()))
 }
 
 type segmentDisStruct struct {

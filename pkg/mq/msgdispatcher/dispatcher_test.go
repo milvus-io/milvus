@@ -26,15 +26,15 @@ import (
 	"github.com/stretchr/testify/mock"
 	"golang.org/x/net/context"
 
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/lifetime"
 )
 
 func TestDispatcher(t *testing.T) {
 	ctx := context.Background()
 	t.Run("test base", func(t *testing.T) {
-		d, err := NewDispatcher(ctx, newMockFactory(), true, "mock_pchannel_0", nil,
-			"mock_subName_0", mqwrapper.SubscriptionPositionEarliest, nil, nil)
+		d, err := NewDispatcher(ctx, newMockFactory(), true, "mock_pchannel_0", nil, "mock_subName_0", common.SubscriptionPositionEarliest, nil, nil, false)
 		assert.NoError(t, err)
 		assert.NotPanics(t, func() {
 			d.Handle(start)
@@ -61,27 +61,27 @@ func TestDispatcher(t *testing.T) {
 				return ms, nil
 			},
 		}
-		d, err := NewDispatcher(ctx, factory, true, "mock_pchannel_0", nil,
-			"mock_subName_0", mqwrapper.SubscriptionPositionEarliest, nil, nil)
+		d, err := NewDispatcher(ctx, factory, true, "mock_pchannel_0", nil, "mock_subName_0", common.SubscriptionPositionEarliest, nil, nil, false)
 
 		assert.Error(t, err)
 		assert.Nil(t, d)
 	})
 
 	t.Run("test target", func(t *testing.T) {
-		d, err := NewDispatcher(ctx, newMockFactory(), true, "mock_pchannel_0", nil,
-			"mock_subName_0", mqwrapper.SubscriptionPositionEarliest, nil, nil)
+		d, err := NewDispatcher(ctx, newMockFactory(), true, "mock_pchannel_0", nil, "mock_subName_0", common.SubscriptionPositionEarliest, nil, nil, false)
 		assert.NoError(t, err)
 		output := make(chan *msgstream.MsgPack, 1024)
 		d.AddTarget(&target{
 			vchannel: "mock_vchannel_0",
 			pos:      nil,
 			ch:       output,
+			cancelCh: lifetime.NewSafeChan(),
 		})
 		d.AddTarget(&target{
 			vchannel: "mock_vchannel_1",
 			pos:      nil,
 			ch:       nil,
+			cancelCh: lifetime.NewSafeChan(),
 		})
 		num := d.TargetNum()
 		assert.Equal(t, 2, num)
@@ -110,6 +110,7 @@ func TestDispatcher(t *testing.T) {
 				vchannel: "mock_vchannel_0",
 				pos:      nil,
 				ch:       output,
+				cancelCh: lifetime.NewSafeChan(),
 			}
 			assert.Equal(t, cap(output), cap(target.ch))
 			wg := &sync.WaitGroup{}
@@ -132,8 +133,7 @@ func TestDispatcher(t *testing.T) {
 }
 
 func BenchmarkDispatcher_handle(b *testing.B) {
-	d, err := NewDispatcher(context.Background(), newMockFactory(), true, "mock_pchannel_0", nil,
-		"mock_subName_0", mqwrapper.SubscriptionPositionEarliest, nil, nil)
+	d, err := NewDispatcher(context.Background(), newMockFactory(), true, "mock_pchannel_0", nil, "mock_subName_0", common.SubscriptionPositionEarliest, nil, nil, false)
 	assert.NoError(b, err)
 
 	for i := 0; i < b.N; i++ {

@@ -1,21 +1,30 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package paramtable
 
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -71,7 +80,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 	p.IPItem = ParamItem{
 		Key:     p.Domain + ".ip",
 		Version: "2.3.3",
-		Doc:     "if not specified, use the first unicastable address",
+		Doc:     "TCP/IP address of " + p.Domain + ". If not specified, use the first unicastable address",
 		Export:  true,
 	}
 	p.IPItem.Init(base.mgr)
@@ -81,6 +90,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Key:          p.Domain + ".port",
 		Version:      "2.0.0",
 		DefaultValue: strconv.FormatInt(ProxyExternalPort, 10),
+		Doc:          "TCP port of " + p.Domain,
 		Export:       true,
 	}
 	p.Port.Init(base.mgr)
@@ -162,6 +172,7 @@ func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "The maximum size of each RPC request that the " + domain + " can send, unit: byte",
 		Export: true,
 	}
 	p.ServerMaxSendSize.Init(base.mgr)
@@ -184,6 +195,7 @@ func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "The maximum size of each RPC request that the " + domain + " can receive, unit: byte",
 		Export: true,
 	}
 	p.ServerMaxRecvSize.Init(base.mgr)
@@ -214,6 +226,7 @@ type GrpcClientConfig struct {
 	MaxAttempts             ParamItem `refreshable:"false"`
 	InitialBackoff          ParamItem `refreshable:"false"`
 	MaxBackoff              ParamItem `refreshable:"false"`
+	BackoffMultiplier       ParamItem `refreshable:"false"`
 	MinResetInterval        ParamItem `refreshable:"false"`
 	MaxCancelError          ParamItem `refreshable:"false"`
 	MinSessionCheckInterval ParamItem `refreshable:"false"`
@@ -240,6 +253,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "The maximum size of each RPC request that the clients on " + domain + " can send, unit: byte",
 		Export: true,
 	}
 	p.ClientMaxSendSize.Init(base.mgr)
@@ -262,6 +276,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "The maximum size of each RPC request that the clients on " + domain + " can receive, unit: byte",
 		Export: true,
 	}
 	p.ClientMaxRecvSize.Init(base.mgr)
@@ -392,6 +407,14 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 	}
 	p.MaxBackoff.Init(base.mgr)
 
+	p.BackoffMultiplier = ParamItem{
+		Key:          "grpc.client.backoffMultiplier",
+		Version:      "2.5.0",
+		DefaultValue: "2.0",
+		Export:       true,
+	}
+	p.BackoffMultiplier.Init(base.mgr)
+
 	compressionEnabled := fmt.Sprintf("%t", DefaultCompressionEnabled)
 	p.CompressionEnabled = ParamItem{
 		Key:     "grpc.client.compressionEnabled",
@@ -472,4 +495,43 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 		Export: true,
 	}
 	p.MaxCancelError.Init(base.mgr)
+}
+
+// GetDialOptionsFromConfig returns grpc dial options from config.
+func (p *GrpcClientConfig) GetDialOptionsFromConfig() []grpc.DialOption {
+	compress := ""
+	if p.CompressionEnabled.GetAsBool() {
+		compress = "zstd"
+	}
+	return []grpc.DialOption{
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(p.ClientMaxRecvSize.GetAsInt()),
+			grpc.MaxCallSendMsgSize(p.ClientMaxSendSize.GetAsInt()),
+			grpc.UseCompressor(compress),
+		),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                p.KeepAliveTime.GetAsDuration(time.Millisecond),
+			Timeout:             p.KeepAliveTimeout.GetAsDuration(time.Millisecond),
+			PermitWithoutStream: true,
+		}),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff: backoff.Config{
+				BaseDelay:  100 * time.Millisecond,
+				Multiplier: 1.6,
+				Jitter:     0.2,
+				MaxDelay:   3 * time.Second,
+			},
+			MinConnectTimeout: p.DialTimeout.GetAsDuration(time.Millisecond),
+		}),
+	}
+}
+
+// GetDefaultRetryPolicy returns default grpc retry policy.
+func (p *GrpcClientConfig) GetDefaultRetryPolicy() map[string]interface{} {
+	return map[string]interface{}{
+		"maxAttempts":       p.MaxAttempts.GetAsInt(),
+		"initialBackoff":    fmt.Sprintf("%fs", p.InitialBackoff.GetAsFloat()),
+		"maxBackoff":        fmt.Sprintf("%fs", p.MaxBackoff.GetAsFloat()),
+		"backoffMultiplier": p.BackoffMultiplier.GetAsFloat(),
+	}
 }

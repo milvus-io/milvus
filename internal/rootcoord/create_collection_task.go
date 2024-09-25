@@ -20,21 +20,26 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	ms "github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -81,17 +86,8 @@ func (t *createCollectionTask) validate() error {
 
 	// 2. check db-collection capacity
 	db2CollIDs := t.core.meta.ListAllAvailCollections(t.ctx)
-
-	collIDs, ok := db2CollIDs[t.dbID]
-	if !ok {
-		log.Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
-		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
-	}
-
-	maxColNumPerDB := Params.QuotaConfig.MaxCollectionNumPerDB.GetAsInt()
-	if len(collIDs) >= maxColNumPerDB {
-		log.Warn("unable to create collection because the number of collection has reached the limit in DB", zap.Int("maxCollectionNumPerDB", maxColNumPerDB))
-		return merr.WrapErrCollectionNumLimitExceeded(maxColNumPerDB, "max number of collection has reached the limit in DB")
+	if err := t.checkMaxCollectionsPerDB(db2CollIDs); err != nil {
+		return err
 	}
 
 	// 3. check total collection number
@@ -103,7 +99,7 @@ func (t *createCollectionTask) validate() error {
 	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum.GetAsInt()
 	if totalCollections >= maxCollectionNum {
 		log.Warn("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
-		return merr.WrapErrCollectionNumLimitExceeded(maxCollectionNum, "max number of collection has reached the limit")
+		return merr.WrapErrCollectionNumLimitExceeded(t.Req.GetDbName(), maxCollectionNum)
 	}
 
 	// 4. check collection * shard * partition
@@ -114,9 +110,58 @@ func (t *createCollectionTask) validate() error {
 	return checkGeneralCapacity(t.ctx, 1, newPartNum, t.Req.GetShardsNum(), t.core, t.ts)
 }
 
-func checkDefaultValue(schema *schemapb.CollectionSchema) error {
+// checkMaxCollectionsPerDB DB properties take precedence over quota configurations for max collections.
+func (t *createCollectionTask) checkMaxCollectionsPerDB(db2CollIDs map[int64][]int64) error {
+	collIDs, ok := db2CollIDs[t.dbID]
+	if !ok {
+		log.Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
+		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
+	}
+
+	db, err := t.core.meta.GetDatabaseByName(t.ctx, t.Req.GetDbName(), typeutil.MaxTimestamp)
+	if err != nil {
+		log.Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
+		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
+	}
+
+	check := func(maxColNumPerDB int) error {
+		if len(collIDs) >= maxColNumPerDB {
+			log.Warn("unable to create collection because the number of collection has reached the limit in DB", zap.Int("maxCollectionNumPerDB", maxColNumPerDB))
+			return merr.WrapErrCollectionNumLimitExceeded(t.Req.GetDbName(), maxColNumPerDB)
+		}
+		return nil
+	}
+
+	maxColNumPerDBStr := db.GetProperty(common.DatabaseMaxCollectionsKey)
+	if maxColNumPerDBStr != "" {
+		maxColNumPerDB, err := strconv.Atoi(maxColNumPerDBStr)
+		if err != nil {
+			log.Warn("parse value of property fail", zap.String("key", common.DatabaseMaxCollectionsKey),
+				zap.String("value", maxColNumPerDBStr), zap.Error(err))
+			return fmt.Errorf(fmt.Sprintf("parse value of property fail, key:%s, value:%s", common.DatabaseMaxCollectionsKey, maxColNumPerDBStr))
+		}
+		return check(maxColNumPerDB)
+	}
+
+	maxColNumPerDB := Params.QuotaConfig.MaxCollectionNumPerDB.GetAsInt()
+	return check(maxColNumPerDB)
+}
+
+func checkFieldSchema(schema *schemapb.CollectionSchema) error {
 	for _, fieldSchema := range schema.Fields {
+		if fieldSchema.GetNullable() && typeutil.IsVectorType(fieldSchema.GetDataType()) {
+			msg := fmt.Sprintf("vector type not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg(msg)
+		}
+		if fieldSchema.GetNullable() && fieldSchema.IsPrimaryKey {
+			msg := fmt.Sprintf("primary field not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg(msg)
+		}
 		if fieldSchema.GetDefaultValue() != nil {
+			if fieldSchema.IsPrimaryKey {
+				msg := fmt.Sprintf("primary field not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+				return merr.WrapErrParameterInvalidMsg(msg)
+			}
 			switch fieldSchema.GetDefaultValue().Data.(type) {
 			case *schemapb.ValueField_BoolData:
 				if fieldSchema.GetDataType() != schemapb.DataType_Bool {
@@ -199,9 +244,7 @@ func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema)
 		return merr.WrapErrParameterInvalid("collection name matches schema name", "don't match", msg)
 	}
 
-	err := checkDefaultValue(schema)
-	if err != nil {
-		log.Error("has invalid default value")
+	if err := checkFieldSchema(schema); err != nil {
 		return err
 	}
 
@@ -216,10 +259,34 @@ func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema)
 	return validateFieldDataType(schema)
 }
 
-func (t *createCollectionTask) assignFieldID(schema *schemapb.CollectionSchema) {
-	for idx := range schema.GetFields() {
-		schema.Fields[idx].FieldID = int64(idx + StartOfUserFieldID)
+func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.CollectionSchema) error {
+	name2id := map[string]int64{}
+	for idx, field := range schema.GetFields() {
+		field.FieldID = int64(idx + StartOfUserFieldID)
+		name2id[field.GetName()] = field.GetFieldID()
 	}
+
+	for fidx, function := range schema.GetFunctions() {
+		function.InputFieldIds = make([]int64, len(function.InputFieldNames))
+		function.Id = int64(fidx) + StartOfUserFunctionID
+		for idx, name := range function.InputFieldNames {
+			fieldId, ok := name2id[name]
+			if !ok {
+				return fmt.Errorf("input field %s of function %s not found", name, function.GetName())
+			}
+			function.InputFieldIds[idx] = fieldId
+		}
+
+		function.OutputFieldIds = make([]int64, len(function.OutputFieldNames))
+		for idx, name := range function.OutputFieldNames {
+			fieldId, ok := name2id[name]
+			if !ok {
+				return fmt.Errorf("output field %s of function %s not found", name, function.GetName())
+			}
+			function.OutputFieldIds[idx] = fieldId
+		}
+	}
+	return nil
 }
 
 func (t *createCollectionTask) appendDynamicField(schema *schemapb.CollectionSchema) {
@@ -260,7 +327,11 @@ func (t *createCollectionTask) prepareSchema() error {
 		return err
 	}
 	t.appendDynamicField(&schema)
-	t.assignFieldID(&schema)
+
+	if err := t.assignFieldAndFunctionID(&schema); err != nil {
+		return err
+	}
+
 	t.appendSysFields(&schema)
 	t.schema = &schema
 	return nil
@@ -329,8 +400,9 @@ func (t *createCollectionTask) assignChannels() error {
 		return fmt.Errorf("no enough channels, want: %d, got: %d", t.Req.GetShardsNum(), len(chanNames))
 	}
 
-	for i := int32(0); i < t.Req.GetShardsNum(); i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%dv%d", chanNames[i], t.collID, i)
+	shardNum := int(t.Req.GetShardsNum())
+	for i := 0; i < shardNum; i++ {
+		vchanNames[i] = funcutil.GetVirtualChannel(chanNames[i], t.collID, i)
 	}
 	t.channels = collectionChannels{
 		virtualChannels:  vchanNames,
@@ -368,13 +440,6 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 }
 
 func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context, ts uint64) *ms.MsgPack {
-	collectionID := t.collID
-	partitionIDs := t.partIDs
-	// error won't happen here.
-	marshaledSchema, _ := proto.Marshal(t.schema)
-	pChannels := t.channels.physicalChannels
-	vChannels := t.channels.virtualChannels
-
 	msgPack := ms.MsgPack{}
 	msg := &ms.CreateCollectionMsg{
 		BaseMsg: ms.BaseMsg{
@@ -383,26 +448,76 @@ func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context, ts ui
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		CreateCollectionRequest: msgpb.CreateCollectionRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),
-				commonpbutil.WithTimeStamp(ts),
-			),
-			CollectionID:         collectionID,
-			PartitionIDs:         partitionIDs,
-			Schema:               marshaledSchema,
-			VirtualChannelNames:  vChannels,
-			PhysicalChannelNames: pChannels,
-		},
+		CreateCollectionRequest: t.genCreateCollectionRequest(),
 	}
 	msgPack.Msgs = append(msgPack.Msgs, msg)
 	return &msgPack
 }
 
+func (t *createCollectionTask) genCreateCollectionRequest() *msgpb.CreateCollectionRequest {
+	collectionID := t.collID
+	partitionIDs := t.partIDs
+	// error won't happen here.
+	marshaledSchema, _ := proto.Marshal(t.schema)
+	pChannels := t.channels.physicalChannels
+	vChannels := t.channels.virtualChannels
+	return &msgpb.CreateCollectionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),
+			commonpbutil.WithTimeStamp(t.ts),
+		),
+		CollectionID:         collectionID,
+		PartitionIDs:         partitionIDs,
+		Schema:               marshaledSchema,
+		VirtualChannelNames:  vChannels,
+		PhysicalChannelNames: pChannels,
+	}
+}
+
 func (t *createCollectionTask) addChannelsAndGetStartPositions(ctx context.Context, ts uint64) (map[string][]byte, error) {
 	t.core.chanTimeTick.addDmlChannels(t.channels.physicalChannels...)
+	if streamingutil.IsStreamingServiceEnabled() {
+		return t.broadcastCreateCollectionMsgIntoStreamingService(ctx, ts)
+	}
 	msg := t.genCreateCollectionMsg(ctx, ts)
 	return t.core.chanTimeTick.broadcastMarkDmlChannels(t.channels.physicalChannels, msg)
+}
+
+func (t *createCollectionTask) broadcastCreateCollectionMsgIntoStreamingService(ctx context.Context, ts uint64) (map[string][]byte, error) {
+	req := t.genCreateCollectionRequest()
+	// dispatch the createCollectionMsg into all vchannel.
+	msgs := make([]message.MutableMessage, 0, len(req.VirtualChannelNames))
+	for _, vchannel := range req.VirtualChannelNames {
+		msg, err := message.NewCreateCollectionMessageBuilderV1().
+			WithVChannel(vchannel).
+			WithHeader(&message.CreateCollectionMessageHeader{
+				CollectionId: req.CollectionID,
+				PartitionIds: req.GetPartitionIDs(),
+			}).
+			WithBody(req).
+			BuildMutable()
+		if err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, msg)
+	}
+	// send the createCollectionMsg into streaming service.
+	// ts is used as initial checkpoint at datacoord,
+	// it must be set as barrier time tick.
+	// The timetick of create message in wal must be greater than ts, to avoid data read loss at read side.
+	resps := streaming.WAL().AppendMessagesWithOption(ctx, streaming.AppendOption{
+		BarrierTimeTick: ts,
+	}, msgs...)
+	if err := resps.UnwrapFirstError(); err != nil {
+		return nil, err
+	}
+	// make the old message stream serialized id.
+	startPositions := make(map[string][]byte)
+	for idx, resp := range resps.Responses {
+		// The key is pchannel here
+		startPositions[req.PhysicalChannelNames[idx]] = adaptor.MustGetMQWrapperIDFromMessage(resp.AppendResult.MessageID).Serialize()
+	}
+	return startPositions, nil
 }
 
 func (t *createCollectionTask) getCreateTs() (uint64, error) {
@@ -453,6 +568,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		Description:          t.schema.Description,
 		AutoID:               t.schema.AutoID,
 		Fields:               model.UnmarshalFieldModels(t.schema.Fields),
+		Functions:            model.UnmarshalFunctionModels(t.schema.Functions),
 		VirtualChannelNames:  vchanNames,
 		PhysicalChannelNames: chanNames,
 		ShardsNum:            t.Req.ShardsNum,
@@ -522,6 +638,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 				Description: collInfo.Description,
 				AutoID:      collInfo.AutoID,
 				Fields:      model.MarshalFieldModels(collInfo.Fields),
+				Functions:   model.MarshalFunctionModels(collInfo.Functions),
 			},
 		},
 	}, &nullStep{})

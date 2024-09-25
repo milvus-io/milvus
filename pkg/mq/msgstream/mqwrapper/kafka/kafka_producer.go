@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -28,7 +29,7 @@ func (kp *kafkaProducer) Topic() string {
 	return kp.topic
 }
 
-func (kp *kafkaProducer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (mqwrapper.MessageID, error) {
+func (kp *kafkaProducer) Send(ctx context.Context, message *mqcommon.ProducerMessage) (mqcommon.MessageID, error) {
 	start := timerecord.NewTimeRecorder("send msg to stream")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.TotalLabel).Inc()
 

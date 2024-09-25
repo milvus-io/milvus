@@ -22,6 +22,7 @@ const (
 	SegmentBinlogPathPrefix            = MetaPrefix + "/binlog"
 	SegmentDeltalogPathPrefix          = MetaPrefix + "/deltalog"
 	SegmentStatslogPathPrefix          = MetaPrefix + "/statslog"
+	SegmentBM25logPathPrefix           = MetaPrefix + "/bm25log"
 	ChannelRemovePrefix                = MetaPrefix + "/channel-removal"
 	ChannelCheckpointPrefix            = MetaPrefix + "/channel-cp"
 	ImportJobPrefix                    = MetaPrefix + "/import-job"
@@ -31,6 +32,7 @@ const (
 	AnalyzeTaskPrefix                  = MetaPrefix + "/analyze-task"
 	PartitionStatsInfoPrefix           = MetaPrefix + "/partition-stats"
 	PartitionStatsCurrentVersionPrefix = MetaPrefix + "/current-partition-stats-version"
+	StatsTaskPrefix                    = MetaPrefix + "/stats-task"
 
 	NonRemoveFlagTomestone = "non-removed"
 	RemoveFlagTomestone    = "removed"

@@ -104,6 +104,10 @@ class ResponseChecker:
             # describe collection interface(high level api) response check
             result = self.check_describe_collection_property(self.response, self.func_name, self.check_items)
 
+        elif self.check_task == CheckTasks.check_insert_result:
+            # check `insert` interface response
+            result = self.check_insert_response(check_items=self.check_items)
+
         # Add check_items here if something new need verify
 
         return result
@@ -293,7 +297,7 @@ class ResponseChecker:
         expected: check the search is ok
         """
         log.info("search_results_check: checking the searching results")
-        if func_name != 'search' or func_name != 'hybrid_search':
+        if func_name != 'search' and func_name != 'hybrid_search':
             log.warning("The function name is {} rather than {} or {}".format(func_name, "search", "hybrid_search"))
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
@@ -319,6 +323,7 @@ class ResponseChecker:
         for hits in search_res:
             searched_original_vectors = []
             ids = []
+            vector_id = 0
             if enable_milvus_client_api:
                 for hit in hits:
                     ids.append(hit['id'])
@@ -345,12 +350,13 @@ class ResponseChecker:
                         raise Exception("inserted vectors are needed for distance check")
                     for id in hits.ids:
                         searched_original_vectors.append(check_items["original_vectors"][id])
-                    cf.compare_distance_vector_and_vector_list(check_items["vector_nq"][i],
+                    cf.compare_distance_vector_and_vector_list(check_items["vector_nq"][vector_id],
                                                                searched_original_vectors,
                                                                check_items["metric"], hits.distances)
                     log.info("search_results_check: Checked the distances for one nq: OK")
                 else:
                     pass  # just check nq and topk, not specific ids need check
+            vector_id +=  1
         log.info("search_results_check: limit (topK) and "
                  "ids searched for %d queries are correct" % len(search_res))
 
@@ -601,4 +607,19 @@ class ResponseChecker:
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False
+        return True
+
+    def check_insert_response(self, check_items):
+        # check request successful
+        self.assert_succ(self.succ, True)
+
+        # get insert count
+        real = check_items.get("insert_count", None) if isinstance(check_items, dict) else None
+        if real is None:
+            real = len(self.kwargs_dict.get("data", [[]])[0])
+
+        # check insert count
+        error_message = "[CheckFunc] Insert count does not meet expectations, response:{0} != expected:{1}"
+        assert self.response.insert_count == real, error_message.format(self.response.insert_count, real)
+
         return True

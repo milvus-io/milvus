@@ -23,8 +23,8 @@ set(indexbuilder_bench_srcs
 
 add_executable(all_bench ${bench_srcs})
 target_link_libraries(all_bench
-        milvus_segcore
-        milvus_log
+        milvus_core
+        knowhere
         pthread
         )
 
@@ -32,12 +32,9 @@ target_link_libraries(all_bench benchmark_main)
 
 add_executable(indexbuilder_bench ${indexbuilder_bench_srcs})
 target_link_libraries(indexbuilder_bench
-        milvus_segcore
-        milvus_indexbuilder
-        milvus_index
-        milvus_log
-        pthread
+        milvus_core
         knowhere
+        pthread
         )
 
 target_link_libraries(indexbuilder_bench benchmark_main)

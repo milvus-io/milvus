@@ -25,6 +25,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 )
 
+var zero = &Resource{0, 0, 0}
+
 type Resource struct {
 	Memory int64 // Memory occupation in bytes
 	CPU    int64 // CPU in cycles per second
@@ -63,13 +65,22 @@ func (r Resource) Le(limit *Resource) bool {
 type Allocator[T comparable] interface {
 	// Allocate allocates the resource, returns true if the resource is allocated. If allocation failed, returns the short resource.
 	// The short resource is a positive value, e.g., if there is additional 8 bytes in disk needed, returns (0, 0, 8).
+	// Allocate on identical id is not allowed, in which case it returns (false, nil). Use #Reallocate instead.
 	Allocate(id T, r *Resource) (allocated bool, short *Resource)
+	// Reallocate re-allocates the resource on given id with delta resource. Delta can be negative, in which case the resource is released.
+	// If delta is negative and the allocated resource is less than the delta, returns (false, nil).
+	Reallocate(id T, delta *Resource) (allocated bool, short *Resource)
 	// Release releases the resource
-	Release(id T)
+	Release(id T) *Resource
 	// Used returns the used resource
 	Used() Resource
+	// Wait waits for new release. Releases could be initiated by #Release or #Reallocate.
+	Wait()
 	// Inspect returns the allocated resources
 	Inspect() map[T]*Resource
+
+	// notify notifies the waiters.
+	notify()
 }
 
 type FixedSizeAllocator[T comparable] struct {
@@ -78,17 +89,23 @@ type FixedSizeAllocator[T comparable] struct {
 	lock   sync.RWMutex
 	used   Resource
 	allocs map[T]*Resource
+	cond   sync.Cond
 }
 
 func (a *FixedSizeAllocator[T]) Allocate(id T, r *Resource) (allocated bool, short *Resource) {
+	if r.Le(zero) {
+		return false, nil
+	}
 	a.lock.Lock()
 	defer a.lock.Unlock()
+
+	_, ok := a.allocs[id]
+	if ok {
+		// Re-allocate on identical id is not allowed
+		return false, nil
+	}
+
 	if a.used.Add(r).Le(a.limit) {
-		_, ok := a.allocs[id]
-		if ok {
-			// Re-allocate on identical id is not allowed
-			return false, nil
-		}
 		a.allocs[id] = r
 		return true, nil
 	}
@@ -97,15 +114,47 @@ func (a *FixedSizeAllocator[T]) Allocate(id T, r *Resource) (allocated bool, sho
 	return false, short
 }
 
-func (a *FixedSizeAllocator[T]) Release(id T) {
+func (a *FixedSizeAllocator[T]) Reallocate(id T, delta *Resource) (allocated bool, short *Resource) {
+	a.lock.Lock()
+	r, ok := a.allocs[id]
+	a.lock.Unlock()
+
+	if !ok {
+		return a.Allocate(id, delta)
+	}
+
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	r.Add(delta)
+	if !zero.Le(r) {
+		r.Sub(delta)
+		return false, nil
+	}
+
+	if a.used.Add(delta).Le(a.limit) {
+		if !zero.Le(delta) {
+			// If delta is negative, notify waiters
+			a.notify()
+		}
+		return true, nil
+	}
+	short = a.used.Diff(a.limit)
+	r.Sub(delta)
+	a.used.Sub(delta)
+	return false, short
+}
+
+func (a *FixedSizeAllocator[T]) Release(id T) *Resource {
 	a.lock.Lock()
 	defer a.lock.Unlock()
 	r, ok := a.allocs[id]
 	if !ok {
-		return
+		return zero
 	}
 	delete(a.allocs, id)
 	a.used.Sub(r)
+	a.notify()
+	return r
 }
 
 func (a *FixedSizeAllocator[T]) Used() Resource {
@@ -120,14 +169,26 @@ func (a *FixedSizeAllocator[T]) Inspect() map[T]*Resource {
 	return maps.Clone(a.allocs)
 }
 
+func (a *FixedSizeAllocator[T]) Wait() {
+	a.cond.L.Lock()
+	a.cond.Wait()
+	a.cond.L.Unlock()
+}
+
+func (a *FixedSizeAllocator[T]) notify() {
+	a.cond.Broadcast()
+}
+
 func NewFixedSizeAllocator[T comparable](limit *Resource) *FixedSizeAllocator[T] {
 	return &FixedSizeAllocator[T]{
 		limit:  limit,
 		allocs: make(map[T]*Resource),
+		cond:   sync.Cond{L: &sync.Mutex{}},
 	}
 }
 
 // PhysicalAwareFixedSizeAllocator allocates resources with additional consideration of physical resource usage.
+// Note: wait on PhysicalAwareFixedSizeAllocator may only be notified if there is virtual resource released.
 type PhysicalAwareFixedSizeAllocator[T comparable] struct {
 	FixedSizeAllocator[T]
 
@@ -151,6 +212,23 @@ func (a *PhysicalAwareFixedSizeAllocator[T]) Allocate(id T, r *Resource) (alloca
 	}
 	if expected.Le(a.hwLimit) {
 		return a.FixedSizeAllocator.Allocate(id, r)
+	}
+	return false, expected.Diff(a.hwLimit)
+}
+
+func (a *PhysicalAwareFixedSizeAllocator[T]) Reallocate(id T, delta *Resource) (allocated bool, short *Resource) {
+	memoryUsage := int64(hardware.GetUsedMemoryCount())
+	diskUsage := int64(0)
+	if usageStats, err := disk.Usage(a.dir); err != nil {
+		diskUsage = int64(usageStats.Used)
+	}
+
+	expected := &Resource{
+		Memory: a.Used().Memory + delta.Memory + memoryUsage,
+		Disk:   a.Used().Disk + delta.Disk + diskUsage,
+	}
+	if expected.Le(a.hwLimit) {
+		return a.FixedSizeAllocator.Reallocate(id, delta)
 	}
 	return false, expected.Diff(a.hwLimit)
 }

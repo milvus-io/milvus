@@ -28,9 +28,41 @@
 
 namespace milvus::index {
 
+enum class ScalarIndexType {
+    NONE = 0,
+    BITMAP,
+    STLSORT,
+    MARISA,
+    INVERTED,
+    HYBRID,
+};
+
+inline std::string
+ToString(ScalarIndexType type) {
+    switch (type) {
+        case ScalarIndexType::NONE:
+            return "NONE";
+        case ScalarIndexType::BITMAP:
+            return "BITMAP";
+        case ScalarIndexType::STLSORT:
+            return "STLSORT";
+        case ScalarIndexType::MARISA:
+            return "MARISA";
+        case ScalarIndexType::INVERTED:
+            return "INVERTED";
+        case ScalarIndexType::HYBRID:
+            return "HYBRID";
+        default:
+            return "UNKNOWN";
+    }
+}
+
 template <typename T>
 class ScalarIndex : public IndexBase {
  public:
+    ScalarIndex(const std::string& index_type) : IndexBase(index_type) {
+    }
+
     void
     BuildWithRawData(size_t n,
                      const void* values,
@@ -44,11 +76,20 @@ class ScalarIndex : public IndexBase {
     };
 
  public:
+    virtual ScalarIndexType
+    GetIndexType() const = 0;
+
     virtual void
     Build(size_t n, const T* values) = 0;
 
     virtual const TargetBitmap
     In(size_t n, const T* values) = 0;
+
+    virtual const TargetBitmap
+    IsNull() = 0;
+
+    virtual const TargetBitmap
+    IsNotNull() = 0;
 
     virtual const TargetBitmap
     InApplyFilter(size_t n,
@@ -81,6 +122,16 @@ class ScalarIndex : public IndexBase {
 
     virtual const TargetBitmap
     Query(const DatasetPtr& dataset);
+
+    virtual bool
+    SupportPatternMatch() const {
+        return false;
+    }
+
+    virtual const TargetBitmap
+    PatternMatch(const std::string& pattern) {
+        PanicInfo(Unsupported, "pattern match is not supported");
+    }
 
     virtual int64_t
     Size() = 0;

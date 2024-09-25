@@ -26,18 +26,18 @@ import (
 
 // PayloadWriterInterface abstracts PayloadWriter
 type PayloadWriterInterface interface {
-	AddDataToPayload(msgs any, dim ...int) error
-	AddBoolToPayload(msgs []bool) error
-	AddByteToPayload(msgs []byte) error
-	AddInt8ToPayload(msgs []int8) error
-	AddInt16ToPayload(msgs []int16) error
-	AddInt32ToPayload(msgs []int32) error
-	AddInt64ToPayload(msgs []int64) error
-	AddFloatToPayload(msgs []float32) error
-	AddDoubleToPayload(msgs []float64) error
-	AddOneStringToPayload(msgs string) error
-	AddOneArrayToPayload(msg *schemapb.ScalarField) error
-	AddOneJSONToPayload(msg []byte) error
+	AddDataToPayload(msgs any, valids []bool) error
+	AddBoolToPayload(msgs []bool, valids []bool) error
+	AddByteToPayload(msgs []byte, valids []bool) error
+	AddInt8ToPayload(msgs []int8, valids []bool) error
+	AddInt16ToPayload(msgs []int16, valids []bool) error
+	AddInt32ToPayload(msgs []int32, valids []bool) error
+	AddInt64ToPayload(msgs []int64, valids []bool) error
+	AddFloatToPayload(msgs []float32, valids []bool) error
+	AddDoubleToPayload(msgs []float64, valids []bool) error
+	AddOneStringToPayload(msgs string, isValid bool) error
+	AddOneArrayToPayload(msg *schemapb.ScalarField, isValid bool) error
+	AddOneJSONToPayload(msg []byte, isValid bool) error
 	AddBinaryVectorToPayload(binVec []byte, dim int) error
 	AddFloatVectorToPayload(binVec []float32, dim int) error
 	AddFloat16VectorToPayload(binVec []byte, dim int) error
@@ -47,23 +47,24 @@ type PayloadWriterInterface interface {
 	GetPayloadBufferFromWriter() ([]byte, error)
 	GetPayloadLengthFromWriter() (int, error)
 	ReleasePayloadWriter()
+	Reserve(size int)
 	Close()
 }
 
 // PayloadReaderInterface abstracts PayloadReader
 type PayloadReaderInterface interface {
-	GetDataFromPayload() (any, int, error)
-	GetBoolFromPayload() ([]bool, error)
-	GetByteFromPayload() ([]byte, error)
-	GetInt8FromPayload() ([]int8, error)
-	GetInt16FromPayload() ([]int16, error)
-	GetInt32FromPayload() ([]int32, error)
-	GetInt64FromPayload() ([]int64, error)
-	GetFloatFromPayload() ([]float32, error)
-	GetDoubleFromPayload() ([]float64, error)
-	GetStringFromPayload() ([]string, error)
-	GetArrayFromPayload() ([]*schemapb.ScalarField, error)
-	GetJSONFromPayload() ([][]byte, error)
+	GetDataFromPayload() (any, []bool, int, error)
+	GetBoolFromPayload() ([]bool, []bool, error)
+	GetByteFromPayload() ([]byte, []bool, error)
+	GetInt8FromPayload() ([]int8, []bool, error)
+	GetInt16FromPayload() ([]int16, []bool, error)
+	GetInt32FromPayload() ([]int32, []bool, error)
+	GetInt64FromPayload() ([]int64, []bool, error)
+	GetFloatFromPayload() ([]float32, []bool, error)
+	GetDoubleFromPayload() ([]float64, []bool, error)
+	GetStringFromPayload() ([]string, []bool, error)
+	GetArrayFromPayload() ([]*schemapb.ScalarField, []bool, error)
+	GetJSONFromPayload() ([][]byte, []bool, error)
 	GetBinaryVectorFromPayload() ([]byte, int, error)
 	GetFloat16VectorFromPayload() ([]byte, int, error)
 	GetBFloat16VectorFromPayload() ([]byte, int, error)

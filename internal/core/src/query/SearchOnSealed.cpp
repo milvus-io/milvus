@@ -17,7 +17,7 @@
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "query/helper.h"
-#include "query/GroupByOperator.h"
+#include "exec/operator/groupby/SearchGroupByOperator.h"
 
 namespace milvus::query {
 
@@ -42,18 +42,21 @@ SearchOnSealedIndex(const Schema& schema,
     // Keep the field_indexing smart pointer, until all reference by raw dropped.
     auto field_indexing = record.get_field_indexing(field_id);
     AssertInfo(field_indexing->metric_type_ == search_info.metric_type_,
-               "Metric type of field index isn't the same with search info");
+               "Metric type of field index isn't the same with search info,"
+               "field index: {}, search info: {}",
+               field_indexing->metric_type_,
+               search_info.metric_type_);
 
     auto dataset = knowhere::GenDataSet(num_queries, dim, query_data);
     dataset->SetIsSparse(is_sparse);
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
-    if (!PrepareVectorIteratorsFromIndex(search_info,
-                                         num_queries,
-                                         dataset,
-                                         search_result,
-                                         bitset,
-                                         *vec_index)) {
+    if (!milvus::exec::PrepareVectorIteratorsFromIndex(search_info,
+                                                       num_queries,
+                                                       dataset,
+                                                       search_result,
+                                                       bitset,
+                                                       *vec_index)) {
         auto index_type = vec_index->GetIndexType();
         vec_index->Query(dataset, search_info, bitset, search_result);
         float* distances = search_result.distances_.data();

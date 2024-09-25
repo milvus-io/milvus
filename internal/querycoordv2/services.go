@@ -25,14 +25,17 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -85,6 +88,7 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 
 		collection := s.meta.CollectionManager.GetCollection(collectionID)
 		percentage := s.meta.CollectionManager.CalculateLoadPercentage(collectionID)
+		loadFields := s.meta.CollectionManager.GetLoadFields(collectionID)
 		refreshProgress := int64(0)
 		if percentage < 0 {
 			if isGetAll {
@@ -117,6 +121,9 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 		resp.InMemoryPercentages = append(resp.InMemoryPercentages, int64(percentage))
 		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, s.checkAnyReplicaAvailable(collectionID))
 		resp.RefreshProgress = append(resp.RefreshProgress, refreshProgress)
+		resp.LoadFields = append(resp.LoadFields, &schemapb.LongArray{
+			Data: loadFields,
+		})
 	}
 
 	return resp, nil
@@ -215,42 +222,77 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		return merr.Status(err), nil
 	}
 
-	if req.GetReplicaNumber() <= 0 || len(req.GetResourceGroups()) == 0 {
-		// when replica number or resource groups is not set, use database level config
+	// to be compatible with old sdk, which set replica=1 if replica is not specified
+	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info
+	if req.GetReplicaNumber() <= 0 && len(req.GetResourceGroups()) == 0 {
+		// when replica number or resource groups is not set, use pre-defined load config
 		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, req.GetCollectionID())
 		if err != nil {
-			log.Warn("failed to get data base level load info", zap.Error(err))
-		}
+			log.Warn("failed to get pre-defined load info", zap.Error(err))
+		} else {
+			if req.GetReplicaNumber() <= 0 && replicas > 0 {
+				req.ReplicaNumber = int32(replicas)
+			}
 
-		if req.GetReplicaNumber() <= 0 {
-			log.Info("load collection use database level replica number", zap.Int64("databaseLevelReplicaNum", replicas))
-			req.ReplicaNumber = int32(replicas)
-		}
-
-		if len(req.GetResourceGroups()) == 0 {
-			log.Info("load collection use database level resource groups", zap.Strings("databaseLevelResourceGroups", rgs))
-			req.ResourceGroups = rgs
+			if len(req.GetResourceGroups()) == 0 && len(rgs) > 0 {
+				req.ResourceGroups = rgs
+			}
 		}
 	}
 
-	if err := s.checkResourceGroup(req.GetCollectionID(), req.GetResourceGroups()); err != nil {
-		msg := "failed to load collection"
-		log.Warn(msg, zap.Error(err))
-		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(errors.Wrap(err, msg)), nil
+	if req.GetReplicaNumber() <= 0 {
+		log.Info("request doesn't indicate the number of replicas, set it to 1")
+		req.ReplicaNumber = 1
 	}
 
-	loadJob := job.NewLoadCollectionJob(ctx,
-		req,
-		s.dist,
-		s.meta,
-		s.broker,
-		s.cluster,
-		s.targetMgr,
-		s.targetObserver,
-		s.collectionObserver,
-		s.nodeMgr,
-	)
+	if len(req.GetResourceGroups()) == 0 {
+		log.Info(fmt.Sprintf("request doesn't indicate the resource groups, set it to %s", meta.DefaultResourceGroupName))
+		req.ResourceGroups = []string{meta.DefaultResourceGroupName}
+	}
+
+	var loadJob job.Job
+	collection := s.meta.GetCollection(req.GetCollectionID())
+	if collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded {
+		// if collection is loaded, check if collection is loaded with the same replica number and resource groups
+		// if replica number or resource group changes， switch to update load config
+		collectionUsedRG := s.meta.ReplicaManager.GetResourceGroupByCollection(collection.GetCollectionID()).Collect()
+		left, right := lo.Difference(collectionUsedRG, req.GetResourceGroups())
+		rgChanged := len(left) > 0 || len(right) > 0
+		replicaChanged := collection.GetReplicaNumber() != req.GetReplicaNumber()
+		if replicaChanged || rgChanged {
+			log.Warn("collection is loaded with different replica number or resource group, switch to update load config",
+				zap.Int32("oldReplicaNumber", collection.GetReplicaNumber()),
+				zap.Strings("oldResourceGroups", collectionUsedRG))
+			updateReq := &querypb.UpdateLoadConfigRequest{
+				CollectionIDs:  []int64{req.GetCollectionID()},
+				ReplicaNumber:  req.GetReplicaNumber(),
+				ResourceGroups: req.GetResourceGroups(),
+			}
+			loadJob = job.NewUpdateLoadConfigJob(
+				ctx,
+				updateReq,
+				s.meta,
+				s.targetMgr,
+				s.targetObserver,
+				s.collectionObserver,
+			)
+		}
+	}
+
+	if loadJob == nil {
+		loadJob = job.NewLoadCollectionJob(ctx,
+			req,
+			s.dist,
+			s.meta,
+			s.broker,
+			s.cluster,
+			s.targetMgr,
+			s.targetObserver,
+			s.collectionObserver,
+			s.nodeMgr,
+		)
+	}
+
 	s.jobScheduler.Add(loadJob)
 	err := loadJob.Wait()
 	if err != nil {
@@ -334,7 +376,9 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		return merr.Status(err), nil
 	}
 
-	if req.GetReplicaNumber() <= 0 || len(req.GetResourceGroups()) == 0 {
+	// to be compatible with old sdk, which set replica=1 if replica is not specified
+	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info
+	if req.GetReplicaNumber() <= 0 && len(req.GetResourceGroups()) == 0 {
 		// when replica number or resource groups is not set, use database level config
 		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, req.GetCollectionID())
 		if err != nil {
@@ -350,13 +394,6 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 			log.Info("load collection use database level resource groups", zap.Strings("databaseLevelResourceGroups", rgs))
 			req.ResourceGroups = rgs
 		}
-	}
-
-	if err := s.checkResourceGroup(req.GetCollectionID(), req.GetResourceGroups()); err != nil {
-		msg := "failed to load partitions"
-		log.Warn(msg, zap.Error(err))
-		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(errors.Wrap(err, msg)), nil
 	}
 
 	loadJob := job.NewLoadPartitionJob(ctx,
@@ -381,23 +418,6 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
-}
-
-func (s *Server) checkResourceGroup(collectionID int64, resourceGroups []string) error {
-	if len(resourceGroups) != 0 {
-		collectionUsedRG := s.meta.ReplicaManager.GetResourceGroupByCollection(collectionID)
-		for _, rgName := range resourceGroups {
-			if len(collectionUsedRG) > 0 && !collectionUsedRG.Contain(rgName) {
-				return merr.WrapErrParameterInvalid("created resource group(s)", rgName, "given resource group not found")
-			}
-
-			if len(resourceGroups) > 1 && rgName == meta.DefaultResourceGroupName {
-				return merr.WrapErrParameterInvalid("no default resource group mixed with the other resource group(s)", rgName)
-			}
-		}
-	}
-
-	return nil
 }
 
 func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
@@ -876,9 +896,7 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 
 	replicas := s.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
 	if len(replicas) == 0 {
-		return &milvuspb.GetReplicasResponse{
-			Replicas: make([]*milvuspb.ReplicaInfo, 0),
-		}, nil
+		return resp, nil
 	}
 
 	for _, replica := range replicas {
@@ -915,10 +933,14 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 
 	errReasons, err := s.checkNodeHealth(ctx)
 	if err != nil || len(errReasons) != 0 {
-		return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: false, Reasons: errReasons}, nil
+		return componentutil.CheckHealthRespWithErrMsg(errReasons...), nil
 	}
 
-	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: errReasons}, nil
+	if err := utils.CheckCollectionsQueryable(s.meta, s.targetMgr, s.dist, s.nodeMgr); err != nil {
+		return componentutil.CheckHealthRespWithErr(err), nil
+	}
+
+	return componentutil.CheckHealthRespWithErr(nil), nil
 }
 
 func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {
@@ -1157,4 +1179,80 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 		Nodes:            nodes,
 	}
 	return resp, nil
+}
+
+func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadConfigRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64s("collectionIDs", req.GetCollectionIDs()),
+		zap.Int32("replicaNumber", req.GetReplicaNumber()),
+		zap.Strings("resourceGroups", req.GetResourceGroups()),
+	)
+
+	log.Info("update load config request received")
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		msg := "failed to update load config"
+		log.Warn(msg, zap.Error(err))
+		return merr.Status(errors.Wrap(err, msg)), nil
+	}
+
+	jobs := make([]job.Job, 0, len(req.GetCollectionIDs()))
+	for _, collectionID := range req.GetCollectionIDs() {
+		collection := s.meta.GetCollection(collectionID)
+		if collection == nil || collection.GetStatus() != querypb.LoadStatus_Loaded {
+			err := merr.WrapErrCollectionNotLoaded(collectionID)
+			log.Warn("failed to update load config", zap.Error(err))
+			continue
+		}
+
+		collectionUsedRG := s.meta.ReplicaManager.GetResourceGroupByCollection(collection.GetCollectionID()).Collect()
+		left, right := lo.Difference(collectionUsedRG, req.GetResourceGroups())
+		rgChanged := len(left) > 0 || len(right) > 0
+		replicaChanged := collection.GetReplicaNumber() != req.GetReplicaNumber()
+
+		subReq := proto.Clone(req).(*querypb.UpdateLoadConfigRequest)
+		subReq.CollectionIDs = []int64{collectionID}
+		if len(req.ResourceGroups) == 0 {
+			subReq.ResourceGroups = collectionUsedRG
+			rgChanged = false
+		}
+
+		if subReq.GetReplicaNumber() == 0 {
+			subReq.ReplicaNumber = collection.GetReplicaNumber()
+			replicaChanged = false
+		}
+
+		if !replicaChanged && !rgChanged {
+			log.Info("no need to update load config", zap.Int64("collectionID", collectionID))
+			continue
+		}
+
+		updateJob := job.NewUpdateLoadConfigJob(
+			ctx,
+			subReq,
+			s.meta,
+			s.targetMgr,
+			s.targetObserver,
+			s.collectionObserver,
+		)
+
+		jobs = append(jobs, updateJob)
+		s.jobScheduler.Add(updateJob)
+	}
+
+	var err error
+	for _, job := range jobs {
+		subErr := job.Wait()
+		if subErr != nil {
+			err = merr.Combine(err, subErr)
+		}
+	}
+
+	if err != nil {
+		msg := "failed to update load config"
+		log.Warn(msg, zap.Error(err))
+		return merr.Status(errors.Wrap(err, msg)), nil
+	}
+	log.Info("update load config request finished")
+
+	return merr.Success(), nil
 }
