@@ -28,6 +28,7 @@
 #include "index/BoolIndex.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/HybridScalarIndex.h"
+#include "knowhere/comp/knowhere_check.h"
 
 namespace milvus::index {
 
@@ -76,6 +77,196 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
 #else
     PanicInfo(Unsupported, "unsupported platform");
 #endif
+}
+
+LoadResourceRequest*
+IndexFactory::IndexLoadResource(
+    DataType field_type,
+    IndexVersion index_version,
+    float index_size,
+    std::map<std::string, std::string>& index_params,
+    bool mmap_enable) {
+    if (milvus::IsVectorDataType(field_type)) {
+        return VecIndexLoadResource(
+            field_type, index_version, index_size, index_params, mmap_enable);
+    } else {
+        return ScalarIndexLoadResource(
+            field_type, index_version, index_size, index_params, mmap_enable);
+    }
+}
+
+LoadResourceRequest*
+IndexFactory::VecIndexLoadResource(
+    DataType field_type,
+    IndexVersion index_version,
+    float index_size,
+    std::map<std::string, std::string>& index_params,
+    bool mmap_enable) {
+    auto config = milvus::index::ParseConfigFromIndexParams(index_params);
+
+    AssertInfo(index_params.find("index_type") != index_params.end(),
+               "index type is empty");
+    std::string index_type = index_params.at("index_type");
+
+    if (mmap_enable &&
+        knowhere::KnowhereCheck::SupportMmapIndexTypeCheck(index_type)) {
+        config["enable_mmap"] = true;
+    }
+
+    knowhere::expected<knowhere::Resource> resource;
+    float index_size_gb = index_size * 1.0 / 1024.0 / 1024.0 / 1024.0;
+    float download_buffer_size_gb =
+        DEFAULT_FIELD_MAX_MEMORY_LIMIT * 1.0 / 1024.0 / 1024.0 / 1024.0;
+
+    bool has_raw_data = false;
+    switch (field_type) {
+        case milvus::DataType::VECTOR_BINARY:
+            resource = knowhere::IndexStaticFaced<
+                knowhere::bin1>::EstimateLoadResource(index_type,
+                                                      index_version,
+                                                      index_size_gb,
+                                                      config);
+            has_raw_data =
+                knowhere::IndexStaticFaced<knowhere::bin1>::HasRawData(
+                    index_type, index_version, config);
+            break;
+        case milvus::DataType::VECTOR_FLOAT:
+            resource = knowhere::IndexStaticFaced<
+                knowhere::fp32>::EstimateLoadResource(index_type,
+                                                      index_version,
+                                                      index_size_gb,
+                                                      config);
+            has_raw_data =
+                knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
+                    index_type, index_version, config);
+            break;
+        case milvus::DataType::VECTOR_FLOAT16:
+            resource = knowhere::IndexStaticFaced<
+                knowhere::fp16>::EstimateLoadResource(index_type,
+                                                      index_version,
+                                                      index_size_gb,
+                                                      config);
+            has_raw_data =
+                knowhere::IndexStaticFaced<knowhere::fp16>::HasRawData(
+                    index_type, index_version, config);
+            break;
+        case milvus::DataType::VECTOR_BFLOAT16:
+            resource = knowhere::IndexStaticFaced<
+                knowhere::bf16>::EstimateLoadResource(index_type,
+                                                      index_version,
+                                                      index_size_gb,
+                                                      config);
+            has_raw_data =
+                knowhere::IndexStaticFaced<knowhere::bf16>::HasRawData(
+                    index_type, index_version, config);
+            break;
+        case milvus::DataType::VECTOR_SPARSE_FLOAT:
+            resource = knowhere::IndexStaticFaced<
+                knowhere::fp32>::EstimateLoadResource(index_type,
+                                                      index_version,
+                                                      index_size_gb,
+                                                      config);
+            has_raw_data =
+                knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
+                    index_type, index_version, config);
+            break;
+        default:
+            PanicInfo(
+                milvus::DataTypeInvalid,
+                fmt::format(
+                    "invalid data type to estimate index load resource: {}",
+                    field_type));
+    }
+
+    LoadResourceRequest* request = new LoadResourceRequest();
+
+    request->hasRawData = has_raw_data;
+    request->finalDiskCost = resource.value().diskCost;
+    request->finalMemoryCost = resource.value().memoryCost;
+    if (knowhere::UseDiskLoad(index_type, index_version)) {
+        request->maxDiskCost = resource.value().diskCost;
+        request->maxMemoryCost =
+            std::max(resource.value().memoryCost, download_buffer_size_gb);
+    } else {
+        request->maxDiskCost = 0;
+        request->maxMemoryCost = 2 * resource.value().memoryCost;
+    }
+    return request;
+}
+
+LoadResourceRequest*
+IndexFactory::ScalarIndexLoadResource(
+    DataType field_type,
+    IndexVersion index_version,
+    float index_size,
+    std::map<std::string, std::string>& index_params,
+    bool mmap_enable) {
+    auto config = milvus::index::ParseConfigFromIndexParams(index_params);
+
+    AssertInfo(index_params.find("index_type") != index_params.end(),
+               "index type is empty");
+    std::string index_type = index_params.at("index_type");
+
+    knowhere::expected<knowhere::Resource> resource;
+    float index_size_gb = index_size * 1.0 / 1024.0 / 1024.0 / 1024.0;
+
+    LoadResourceRequest* request = new LoadResourceRequest();
+    request->hasRawData = false;
+
+    if (index_type == milvus::index::ASCENDING_SORT) {
+        request->finalMemoryCost = index_size_gb;
+        request->finalDiskCost = 0;
+        request->maxMemoryCost = 2 * index_size_gb;
+        request->maxDiskCost = 0;
+        request->hasRawData = false;
+    } else if (index_type == milvus::index::MARISA_TRIE) {
+        if (mmap_enable) {
+            request->finalMemoryCost = 0;
+            request->finalDiskCost = index_size_gb;
+        } else {
+            request->finalMemoryCost = index_size_gb;
+            request->finalDiskCost = 0;
+        }
+        request->maxMemoryCost = index_size_gb;
+        request->maxDiskCost = request->finalDiskCost;
+
+        request->hasRawData = false;
+    } else if (index_type == milvus::index::INVERTED_INDEX_TYPE) {
+        request->finalMemoryCost = 0;
+        request->finalDiskCost = index_size_gb;
+        request->maxMemoryCost = index_size_gb;
+        request->maxDiskCost = index_size_gb;
+
+        request->hasRawData = false;
+    } else if (index_type == milvus::index::BITMAP_INDEX_TYPE) {
+        if (mmap_enable) {
+            request->finalMemoryCost = 0;
+            request->finalDiskCost = index_size_gb;
+        } else {
+            request->finalMemoryCost = index_size_gb;
+            request->finalDiskCost = 0;
+        }
+        request->maxMemoryCost = index_size_gb;
+        request->maxDiskCost = request->finalDiskCost;
+
+        if (field_type == milvus::DataType::ARRAY) {
+            request->hasRawData = false;
+        } else {
+            request->hasRawData = true;
+        }
+    } else if (index_type == milvus::index::HYBRID_INDEX_TYPE) {
+        request->finalMemoryCost = index_size_gb;
+        request->finalDiskCost = index_size_gb;
+        request->maxMemoryCost = index_size_gb;
+        request->maxDiskCost = index_size_gb;
+        request->hasRawData = false;
+    } else {
+        PanicInfo(milvus::UnexpectedError,
+                  fmt::format("invalid data type to estimate scalar index "
+                              "load resource: {}",
+                              field_type));
+    }
+    return request;
 }
 
 IndexBasePtr
