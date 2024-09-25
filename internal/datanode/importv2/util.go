@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -52,6 +53,7 @@ func NewSyncTask(ctx context.Context,
 	segmentID, partitionID, collectionID int64, vchannel string,
 	insertData *storage.InsertData,
 	deleteData *storage.DeleteData,
+	bm25Stats map[int64]*storage.BM25Stats,
 ) (syncmgr.Task, error) {
 	metaCache := metaCaches[vchannel]
 	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
@@ -94,6 +96,9 @@ func NewSyncTask(ctx context.Context,
 		WithLevel(segmentLevel).
 		WithDataSource(metrics.BulkinsertDataSourceLabel).
 		WithBatchSize(int64(insertData.GetRowNum()))
+	if bm25Stats != nil {
+		syncPack.WithBM25Stats(bm25Stats)
+	}
 
 	return serializer.EncodeBuffer(ctx, syncPack)
 }
@@ -198,6 +203,49 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
 			tss[i] = ts
 		}
 		data.Data[common.TimeStampField] = &storage.Int64FieldData{Data: tss}
+	}
+	return nil
+}
+
+func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
+	fns := task.GetSchema().GetFunctions()
+	for _, fn := range fns {
+		runner, err := function.NewFunctionRunner(task.GetSchema(), fn)
+		if err != nil {
+			return err
+		}
+		inputDatas := make([]any, 0, len(fn.InputFieldIds))
+		for _, inputFieldID := range fn.InputFieldIds {
+			inputDatas = append(inputDatas, data.Data[inputFieldID].GetDataRows())
+		}
+		outputFieldData, err := runner.BatchRun(inputDatas...)
+		if err != nil {
+			return err
+		}
+		for i, outputFieldID := range fn.OutputFieldIds {
+			outputField := typeutil.GetField(task.GetSchema(), outputFieldID)
+			// TODO: added support for vector output field only, scalar output field in function is not supported yet
+			switch outputField.GetDataType() {
+			case schemapb.DataType_FloatVector:
+				data.Data[outputFieldID] = outputFieldData[i].(*storage.FloatVectorFieldData)
+			case schemapb.DataType_BFloat16Vector:
+				data.Data[outputFieldID] = outputFieldData[i].(*storage.BFloat16VectorFieldData)
+			case schemapb.DataType_Float16Vector:
+				data.Data[outputFieldID] = outputFieldData[i].(*storage.Float16VectorFieldData)
+			case schemapb.DataType_BinaryVector:
+				data.Data[outputFieldID] = outputFieldData[i].(*storage.BinaryVectorFieldData)
+			case schemapb.DataType_SparseFloatVector:
+				sparseArray := outputFieldData[i].(*schemapb.SparseFloatArray)
+				data.Data[outputFieldID] = &storage.SparseFloatVectorFieldData{
+					SparseFloatArray: schemapb.SparseFloatArray{
+						Dim:      sparseArray.GetDim(),
+						Contents: sparseArray.GetContents(),
+					},
+				}
+			default:
+				return fmt.Errorf("unsupported output data type for embedding function: %s", outputField.GetDataType().String())
+			}
+		}
 	}
 	return nil
 }

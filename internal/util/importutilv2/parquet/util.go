@@ -82,7 +82,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	}
 
 	for _, field := range nameToField {
-		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() {
+		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() {
 			continue
 		}
 		if _, ok := crs[field.GetFieldID()]; !ok {
@@ -206,10 +206,12 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 	}
 }
 
+// This method is used only by import util and related tests. Returned arrow.Schema
+// doesn't include function output fields.
 func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useNullType bool) (*arrow.Schema, error) {
 	arrFields := make([]arrow.Field, 0)
 	for _, field := range schema.GetFields() {
-		if typeutil.IsAutoPKField(field) {
+		if typeutil.IsAutoPKField(field) || field.GetIsFunctionOutput() {
 			continue
 		}
 		arrDataType, err := convertToArrowDataType(field, false)
@@ -234,7 +236,7 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 		return field.Name
 	})
 	for _, field := range schema.GetFields() {
-		if typeutil.IsAutoPKField(field) {
+		if typeutil.IsAutoPKField(field) || field.GetIsFunctionOutput() {
 			continue
 		}
 		arrField, ok := arrNameToField[field.GetName()]
