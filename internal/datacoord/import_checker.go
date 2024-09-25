@@ -206,6 +206,15 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 		}
 		log.Info("add new preimport task", WrapTaskLog(t)...)
 	}
+
+	job.(*importJob).startExecTimeOnce.Do(func() {
+		job.(*importJob).startExecTime = time.Now()
+		pendingDuration := job.(*importJob).startExecTime.Sub(job.(*importJob).startTime)
+		metrics.DataCoordImportLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
+		log.Info("import job start to execute", zap.Int64("jobID", job.GetJobID()),
+			zap.Duration("timeCost/pending", pendingDuration), zap.Time("startTime", job.(*importJob).startTime), zap.Time("startExecTime", job.(*importJob).startExecTime))
+	})
+
 	err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
 	if err != nil {
 		logger.Warn("failed to update job state to PreImporting", zap.Error(err))
@@ -244,6 +253,15 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 		}
 		log.Info("add new import task", WrapTaskLog(t)...)
 	}
+
+	job.(*importJob).preImportDoneTimeOnce.Do(func() {
+		job.(*importJob).preImportDoneTime = time.Now()
+		preImportDuration := job.(*importJob).preImportDoneTime.Sub(job.(*importJob).startExecTime)
+		metrics.DataCoordImportLatency.WithLabelValues(metrics.ImportStagePreImport).Observe(float64(preImportDuration.Milliseconds()))
+		log.Info("import job preimport done", zap.Int64("jobID", job.GetJobID()),
+			zap.Duration("timeCost/preimport", preImportDuration), zap.Time("startExecTime", job.(*importJob).startExecTime), zap.Time("preImportDoneTime", job.(*importJob).preImportDoneTime))
+	})
+
 	err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing), UpdateRequestedDiskSize(requestSize))
 	if err != nil {
 		logger.Warn("failed to update job state to Importing", zap.Error(err))

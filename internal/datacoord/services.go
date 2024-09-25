@@ -1722,6 +1722,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		return importFile
 	})
 
+	startTime := time.Now()
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
 			JobID:          idStart,
@@ -1735,8 +1736,9 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			State:          internalpb.ImportJobState_Pending,
 			Files:          files,
 			Options:        in.GetOptions(),
-			StartTime:      time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			StartTime:      startTime.Format("2006-01-02T15:04:05Z07:00"),
 		},
+		startTime: startTime,
 	}
 	err = s.importMeta.AddJob(job)
 	if err != nil {
