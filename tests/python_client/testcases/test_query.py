@@ -23,6 +23,9 @@ import numpy as np
 import pandas as pd
 from collections import Counter
 from faker import Faker
+
+Faker.seed(19530)
+
 fake_en = Faker("en_US")
 fake_zh = Faker("zh_CN")
 fake_de = Faker("de_DE")
@@ -5226,6 +5229,7 @@ class TestQueryTextMatch(TestcaseBase):
         collection_w.create_index("word", {"index_type": "INVERTED"})
         collection_w.load()
         df = pd.DataFrame(data)
+        df_split = cf.split_dataframes(df, fields=["word", "sentence", "paragraph", "text"])
         log.info(f"dataframe\n{df}")
         text_fields = ["word", "sentence", "paragraph", "text"]
         wf_map = {}
@@ -5237,8 +5241,11 @@ class TestQueryTextMatch(TestcaseBase):
             expr = f"TextMatch({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+            pandas_res = df_split[df_split.apply(lambda row: token in row[field], axis=1)]
+            log.info(f"res len {len(res)}, pandas res len {len(pandas_res)}")
+            log.info(f"pandas res\n{pandas_res}")
+            assert len(res) == len(pandas_res)
             log.info(f"res len {len(res)}")
-            assert len(res) > 0
             for r in res:
                 assert token in r[field]
             if field == "word":
