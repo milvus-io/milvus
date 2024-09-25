@@ -484,7 +484,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			return !sd.pkOracle.Exists(pkoracle.NewCandidateKey(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed), targetNodeID)
 		})
 
-		// TODO AOIASD SKIP IF COLLECTION WITHOUT BM25
 		var bm25Stats *typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats]
 		if sd.hasBM25Field {
 			bm25Stats, err = sd.loader.LoadBM25Stats(ctx, req.GetCollectionID(), infos...)

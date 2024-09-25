@@ -65,6 +65,7 @@ message QueryInfo {
   int64 group_size = 8;
   bool group_strict_size = 9;
   double bm25_avgdl = 10;
+  int64 query_field_id =11;
 }
 
 message ColumnInfo {

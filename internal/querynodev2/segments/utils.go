@@ -155,7 +155,6 @@ func getPKsFromColumnBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.C
 		return nil, err
 	}
 
-	log.Info("test--", zap.Any("schema", schema))
 	primaryFieldData, err := typeutil.GetPrimaryFieldData(msg.GetFieldsData(), primaryFieldSchema)
 	if err != nil {
 		return nil, err
