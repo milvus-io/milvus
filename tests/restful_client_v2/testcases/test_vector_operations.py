@@ -628,40 +628,8 @@ class TestInsertVector(TestBase):
 
 
 
-@pytest.mark.L1
+@pytest.mark.L0
 class TestInsertVectorNegative(TestBase):
-    def test_insert_vector_with_invalid_api_key(self):
-        """
-        Insert a vector with invalid api key
-        """
-        # create a collection
-        name = gen_collection_name()
-        dim = 128
-        payload = {
-            "collectionName": name,
-            "dimension": dim,
-        }
-        rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
-        rsp = self.collection_client.collection_describe(name)
-        assert rsp['code'] == 0
-        # insert data
-        nb = 10
-        data = [
-            {
-                "vector": [np.float64(random.random()) for _ in range(dim)],
-            } for _ in range(nb)
-        ]
-        payload = {
-            "collectionName": name,
-            "data": data,
-        }
-        body_size = sys.getsizeof(json.dumps(payload))
-        logger.info(f"body size: {body_size / 1024 / 1024} MB")
-        client = self.vector_client
-        client.api_key = "invalid_api_key"
-        rsp = client.vector_insert(payload)
-        assert rsp['code'] == 1800
 
     def test_insert_vector_with_invalid_collection_name(self):
         """
@@ -753,6 +721,7 @@ class TestInsertVectorNegative(TestBase):
         assert "fail to deal the insert data" in rsp['message']
 
 
+@pytest.mark.L0
 class TestUpsertVector(TestBase):
 
     @pytest.mark.parametrize("insert_round", [2])
@@ -919,6 +888,38 @@ class TestUpsertVector(TestBase):
         res = utility.get_query_segment_info(name)
         logger.info(f"res: {res}")
 
+
+@pytest.mark.L0
+class TestUpsertVectorNegative(TestBase):
+
+    def test_upsert_vector_with_invalid_collection_name(self):
+        """
+        upsert a vector with an invalid collection name
+        """
+
+        # create a collection
+        name = gen_collection_name()
+        dim = 128
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        assert rsp['code'] == 0
+        # insert data
+        nb = 100
+        data = get_data_by_payload(payload, nb)
+        payload = {
+            "collectionName": "invalid_collection_name",
+            "data": data,
+        }
+        body_size = sys.getsizeof(json.dumps(payload))
+        logger.info(f"body size: {body_size / 1024 / 1024} MB")
+        rsp = self.vector_client.vector_upsert(payload)
+        assert rsp['code'] == 100
+        assert "can't find collection" in rsp['message']
 
 @pytest.mark.L0
 class TestSearchVector(TestBase):
@@ -1653,7 +1654,7 @@ class TestSearchVector(TestBase):
 
 
 
-@pytest.mark.L1
+@pytest.mark.L0
 class TestSearchVectorNegative(TestBase):
 
     @pytest.mark.parametrize("metric_type", ["L2"])
@@ -1721,6 +1722,30 @@ class TestSearchVectorNegative(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 65535
+
+    def test_search_vector_with_invalid_collection_name(self):
+        """
+        Search a vector with invalid collection name
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        schema_payload, data = self.init_collection(name, dim=dim)
+        vector_field = schema_payload.get("vectorField")
+        # search data
+        vector_to_search = preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
+        output_fields = get_common_fields_by_data(data, exclude_fields=[vector_field])
+        payload = {
+            "collectionName": "invalid_collection_name",
+            "data": [vector_to_search],
+            "outputFields": output_fields,
+            "filter": "uid >= 0",
+            "limit": 100,
+            "offset": 0,
+        }
+        rsp = self.vector_client.vector_search(payload)
+        assert rsp['code'] == 100
+        assert "can't find collection" in rsp['message']
 
 
 @pytest.mark.L0
@@ -2339,7 +2364,7 @@ class TestQueryVector(TestBase):
                 assert name.startswith(prefix)
 
 
-@pytest.mark.L1
+@pytest.mark.L0
 class TestQueryVectorNegative(TestBase):
 
     def test_query_with_wrong_filter_expr(self):
@@ -2756,44 +2781,8 @@ class TestDeleteVector(TestBase):
         assert len(rsp["data"]) == 0
 
 
-@pytest.mark.L1
+@pytest.mark.L0
 class TestDeleteVectorNegative(TestBase):
-    def test_delete_vector_with_invalid_api_key(self):
-        """
-        Delete a vector with an invalid api key
-        """
-        name = gen_collection_name()
-        self.name = name
-        nb = 200
-        dim = 128
-        schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
-        output_fields = get_common_fields_by_data(data)
-        uids = []
-        for item in data:
-            uids.append(item.get("uid"))
-        payload = {
-            "collectionName": name,
-            "outputFields": output_fields,
-            "filter": f"uid in {uids}",
-        }
-        rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 0
-        res = rsp['data']
-        logger.info(f"res: {len(res)}")
-        ids = []
-        for r in res:
-            ids.append(r['id'])
-        logger.info(f"ids: {len(ids)}")
-        id_to_get = ids
-        # delete by id list
-        payload = {
-            "collectionName": name,
-            "filter": f"uid in {uids}"
-        }
-        client = self.vector_client
-        client.api_key = "invalid_api_key"
-        rsp = client.vector_delete(payload)
-        assert rsp['code'] == 1800
 
     def test_delete_vector_with_invalid_collection_name(self):
         """
@@ -2839,3 +2828,106 @@ class TestDeleteVectorNegative(TestBase):
         rsp = self.vector_client.vector_delete(payload)
         assert rsp['code'] == 100
         assert "can't find collection" in rsp['message']
+
+@pytest.mark.L1
+class TestVectorWithAuth(TestBase):
+    def test_upsert_vector_with_invalid_api_key(self):
+        """
+        Insert a vector with invalid api key
+        """
+        # create a collection
+        name = gen_collection_name()
+        dim = 128
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        assert rsp['code'] == 0
+        # insert data
+        nb = 10
+        data = [
+            {
+                "vector": [np.float64(random.random()) for _ in range(dim)],
+            } for _ in range(nb)
+        ]
+        payload = {
+            "collectionName": name,
+            "data": data,
+        }
+        body_size = sys.getsizeof(json.dumps(payload))
+        logger.info(f"body size: {body_size / 1024 / 1024} MB")
+        client = self.vector_client
+        client.api_key = "invalid_api_key"
+        rsp = client.vector_insert(payload)
+        assert rsp['code'] == 1800
+    def test_insert_vector_with_invalid_api_key(self):
+        """
+        Insert a vector with invalid api key
+        """
+        # create a collection
+        name = gen_collection_name()
+        dim = 128
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        assert rsp['code'] == 0
+        # insert data
+        nb = 10
+        data = [
+            {
+                "vector": [np.float64(random.random()) for _ in range(dim)],
+            } for _ in range(nb)
+        ]
+        payload = {
+            "collectionName": name,
+            "data": data,
+        }
+        body_size = sys.getsizeof(json.dumps(payload))
+        logger.info(f"body size: {body_size / 1024 / 1024} MB")
+        client = self.vector_client
+        client.api_key = "invalid_api_key"
+        rsp = client.vector_insert(payload)
+        assert rsp['code'] == 1800
+    def test_delete_vector_with_invalid_api_key(self):
+        """
+        Delete a vector with an invalid api key
+        """
+        name = gen_collection_name()
+        self.name = name
+        nb = 200
+        dim = 128
+        schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
+        output_fields = get_common_fields_by_data(data)
+        uids = []
+        for item in data:
+            uids.append(item.get("uid"))
+        payload = {
+            "collectionName": name,
+            "outputFields": output_fields,
+            "filter": f"uid in {uids}",
+        }
+        rsp = self.vector_client.vector_query(payload)
+        assert rsp['code'] == 0
+        res = rsp['data']
+        logger.info(f"res: {len(res)}")
+        ids = []
+        for r in res:
+            ids.append(r['id'])
+        logger.info(f"ids: {len(ids)}")
+        id_to_get = ids
+        # delete by id list
+        payload = {
+            "collectionName": name,
+            "filter": f"uid in {uids}"
+        }
+        client = self.vector_client
+        client.api_key = "invalid_api_key"
+        rsp = client.vector_delete(payload)
+        assert rsp['code'] == 1800
