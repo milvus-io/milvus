@@ -49,6 +49,7 @@ type SyncPack struct {
 	startPosition *msgpb.MsgPosition
 	checkpoint    *msgpb.MsgPosition
 	batchSize     int64 // batchSize is the row number of this sync task,not the total num of rows of segemnt
+	dataSource    string
 	isFlush       bool
 	isDrop        bool
 	// metadata
@@ -135,5 +136,10 @@ func (p *SyncPack) WithLevel(level datapb.SegmentLevel) *SyncPack {
 
 func (p *SyncPack) WithErrorHandler(handler func(err error)) *SyncPack {
 	p.errHandler = handler
+	return p
+}
+
+func (p *SyncPack) WithDataSource(source string) *SyncPack {
+	p.dataSource = source
 	return p
 }
