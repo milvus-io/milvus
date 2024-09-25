@@ -4102,6 +4102,7 @@ type dataNodeConfig struct {
 	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
 	MaxImportFileSizeInGB      ParamItem `refreshable:"true"`
 	ReadBufferSizeInMB         ParamItem `refreshable:"true"`
+	MaxTaskSlotNum             ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -4405,6 +4406,16 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.ReadBufferSizeInMB.Init(base.mgr)
+
+	p.MaxTaskSlotNum = ParamItem{
+		Key:          "dataNode.import.maxTaskSlotNum",
+		Version:      "2.4.13",
+		Doc:          "The maximum number of slots occupied by each import/pre-import task.",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxTaskSlotNum.Init(base.mgr)
 
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",

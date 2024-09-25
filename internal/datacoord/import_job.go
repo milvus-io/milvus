@@ -17,7 +17,10 @@
 package datacoord
 
 import (
+	"fmt"
 	"time"
+
+	"github.com/milvus-io/milvus/pkg/metrics"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -27,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -91,15 +95,36 @@ type ImportJob interface {
 	GetCompleteTime() string
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
+	Record(stage string, msg string, elapse bool)
 	Clone() ImportJob
 }
 
 type importJob struct {
 	*datapb.ImportJob
+
+	hasRecorded map[string]bool
+	tr          *timerecord.TimeRecorder
+}
+
+func (j *importJob) Record(stage string, msg string, elapse bool) {
+	if j.hasRecorded[stage] {
+		return
+	}
+	var duration time.Duration
+	if elapse {
+		duration = j.tr.ElapseSpan()
+	} else {
+		duration = j.tr.RecordSpan()
+	}
+	metrics.ImportJobLatency.WithLabelValues(stage).Observe(float64(duration.Milliseconds()))
+	log.Info(msg, zap.Duration(fmt.Sprintf("jobTimeCost/%s", stage), duration))
+	j.hasRecorded[stage] = true
 }
 
 func (j *importJob) Clone() ImportJob {
 	return &importJob{
-		ImportJob: proto.Clone(j.ImportJob).(*datapb.ImportJob),
+		ImportJob:   proto.Clone(j.ImportJob).(*datapb.ImportJob),
+		hasRecorded: j.hasRecorded,
+		tr:          j.tr,
 	}
 }

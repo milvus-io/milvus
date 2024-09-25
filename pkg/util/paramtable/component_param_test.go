@@ -554,6 +554,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 16, maxConcurrentImportTaskNum)
 		assert.Equal(t, int64(16), Params.MaxImportFileSizeInGB.GetAsInt64())
 		assert.Equal(t, 16, Params.ReadBufferSizeInMB.GetAsInt())
+		assert.Equal(t, 16, Params.MaxTaskSlotNum.GetAsInt())
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())

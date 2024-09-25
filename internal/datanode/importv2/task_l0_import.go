@@ -93,6 +93,10 @@ func (t *L0ImportTask) GetSchema() *schemapb.CollectionSchema {
 	return t.req.GetSchema()
 }
 
+func (t *L0ImportTask) GetSlots() int64 {
+	return 1
+}
+
 func (t *L0ImportTask) Cancel() {
 	t.cancel()
 }
