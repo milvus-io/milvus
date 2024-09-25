@@ -280,8 +280,7 @@ func (s *Server) GetQueryCoord() types.QueryCoordComponent {
 
 // Stop stops QueryCoord's grpc service.
 func (s *Server) Stop() (err error) {
-	Params := &paramtable.Get().QueryCoordGrpcServerCfg
-	logger := log.With(zap.String("address", Params.GetAddress()))
+	logger := log.With(zap.String("address", s.listener.Address()))
 	logger.Info("QueryCoord stopping")
 	defer func() {
 		logger.Info("QueryCoord stopped", zap.Error(err))
