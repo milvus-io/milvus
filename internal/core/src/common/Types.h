@@ -128,10 +128,10 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
         case DataType::VECTOR_BFLOAT16: {
             return sizeof(bfloat16) * dim;
         }
-        // Not supporting VECTOR_SPARSE_FLOAT here intentionally. We can't
-        // easily estimately the size of a sparse float vector. Caller of this
-        // method must handle this case themselves and must not pass
-        // VECTOR_SPARSE_FLOAT data_type.
+        // Not supporting variable length types(such as VECTOR_SPARSE_FLOAT and
+        // VARCHAR) here intentionally. We can't easily estimate the size of
+        // them. Caller of this method must handle this case themselves and must
+        // not pass variable length types to this method.
         default: {
             PanicInfo(
                 DataTypeInvalid,

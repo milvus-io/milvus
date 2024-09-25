@@ -869,7 +869,7 @@ func (suite *ServiceSuite) TestLoadCollectionFailed() {
 	}
 
 	req := &querypb.LoadCollectionRequest{
-		CollectionID:   0,
+		CollectionID:   1001,
 		ReplicaNumber:  2,
 		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
 	}
