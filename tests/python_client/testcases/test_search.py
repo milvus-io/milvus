@@ -13211,7 +13211,7 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
             collection_w.flush()
         collection_w.create_index(
             "emb",
-            {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}},
+            {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
         )
         if enable_inverted_index:
             collection_w.create_index("word", {"index_type": "INVERTED"})
@@ -13222,10 +13222,15 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
         for field in text_fields:
             wf_map[field] = cf.analyze_documents(df[field].tolist(), language=language)
         # query single field for one token
+        df_split = cf.split_dataframes(df, text_fields, language=language)
+        log.info(f"df_split\n{df_split}")
         for field in text_fields:
             token = wf_map[field].most_common()[0][0]
             expr = f"TextMatch({field}, '{token}')"
-            log.info(f"expr: {expr}")
+            manual_result = df_split[
+                df_split.apply(lambda row: token in row[field], axis=1)
+            ]
+            log.info(f"expr: {expr}, manual_check_result\n: {manual_result}")
             res_list, _ = collection_w.search(
                 data=[[random.random() for _ in range(dim)]],
                 anns_field="emb",
