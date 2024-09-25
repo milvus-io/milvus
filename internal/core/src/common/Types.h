@@ -683,29 +683,35 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
     }
 };
 
-template <milvus::DataType T> class KnowhereDataTypeTraits {};
+template <milvus::DataType T>
+class KnowhereDataTypeTraits {};
 
-template <> class KnowhereDataTypeTraits<milvus::DataType::VECTOR_BINARY> {
-public:
+template <>
+class KnowhereDataTypeTraits<milvus::DataType::VECTOR_BINARY> {
+ public:
     using value_type = knowhere::bin1;
 };
 
-template <> class KnowhereDataTypeTraits<milvus::DataType::VECTOR_FLOAT> {
-public:
+template <>
+class KnowhereDataTypeTraits<milvus::DataType::VECTOR_FLOAT> {
+ public:
     using value_type = knowhere::fp32;
 };
 
-template <> class KnowhereDataTypeTraits<milvus::DataType::VECTOR_FLOAT16> {
-public:
+template <>
+class KnowhereDataTypeTraits<milvus::DataType::VECTOR_FLOAT16> {
+ public:
     using value_type = knowhere::fp16;
 };
 
-template <> class KnowhereDataTypeTraits<milvus::DataType::VECTOR_BFLOAT16> {
-public:
+template <>
+class KnowhereDataTypeTraits<milvus::DataType::VECTOR_BFLOAT16> {
+ public:
     using value_type = knowhere::bf16;
 };
 
-template <> class KnowhereDataTypeTraits<milvus::DataType::VECTOR_SPARSE_FLOAT> {
-public:
+template <>
+class KnowhereDataTypeTraits<milvus::DataType::VECTOR_SPARSE_FLOAT> {
+ public:
     using value_type = knowhere::fp32;
 };
