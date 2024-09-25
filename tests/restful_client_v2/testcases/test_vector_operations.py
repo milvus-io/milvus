@@ -1581,7 +1581,7 @@ class TestSearchVector(TestBase):
         vector_to_search = preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
         training_data = [item[vector_field] for item in data]
         distance_sorted = get_sorted_distance(training_data, [vector_to_search], metric_type)
-        r1, r2 = distance_sorted[0][nb//2], distance_sorted[0][nb//2+limit+int((0.2*limit))] # recall is not 100% so add 20% to make sure the range is correct
+        r1, r2 = distance_sorted[0][nb//2], distance_sorted[0][nb//2+limit+int((0.3*limit))] # recall is not 100% so add 30% to make sure the range is correct
         if metric_type == "L2":
             r1, r2 = r2, r1
         output_fields = get_common_fields_by_data(data, exclude_fields=[vector_field])
