@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <pthread.h>
 #include <functional>
 #include <future>
 #include <mutex>
@@ -104,6 +105,13 @@ class ThreadPool {
             // Dynamic increase thread number
             std::thread t(&ThreadPool::Worker, this);
             assert(threads_.find(t.get_id()) == threads_.end());
+            // Setup thread priority
+            int policy;
+            sched_param sch;
+            pthread_getschedparam(t.native_handle(), &policy, &sch);
+            sch.sched_priority = 15;
+            pthread_setschedparam(t.native_handle(), policy, &sch);
+
             threads_[t.get_id()] = std::move(t);
             current_threads_size_++;
         }
