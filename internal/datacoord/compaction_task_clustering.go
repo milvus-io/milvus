@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -55,6 +56,7 @@ type clusteringCompactionTask struct {
 	analyzeScheduler *taskScheduler
 
 	maxRetryTimes int32
+	slotUsage     int64
 }
 
 func newClusteringCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, session session.DataNodeManager, handler Handler, analyzeScheduler *taskScheduler) *clusteringCompactionTask {
@@ -66,6 +68,7 @@ func newClusteringCompactionTask(t *datapb.CompactionTask, allocator allocator.A
 		handler:          handler,
 		analyzeScheduler: analyzeScheduler,
 		maxRetryTimes:    3,
+		slotUsage:        paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64(),
 	}
 }
 
@@ -179,7 +182,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			Begin: t.GetResultSegments()[0],
 			End:   t.GetResultSegments()[1],
 		},
-		SlotUsage: Params.DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64(),
+		SlotUsage: t.GetSlotUsage(),
 	}
 	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 
@@ -613,6 +616,10 @@ func (t *clusteringCompactionTask) GetLabel() string {
 
 func (t *clusteringCompactionTask) NeedReAssignNodeID() bool {
 	return t.GetState() == datapb.CompactionTaskState_pipelining && (t.GetNodeID() == 0 || t.GetNodeID() == NullNodeID)
+}
+
+func (t *clusteringCompactionTask) GetSlotUsage() int64 {
+	return t.slotUsage
 }
 
 func (t *clusteringCompactionTask) CleanLogPath() {

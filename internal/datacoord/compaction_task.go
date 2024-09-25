@@ -26,6 +26,7 @@ import (
 type CompactionTask interface {
 	Process() bool
 	BuildCompactionRequest() (*datapb.CompactionPlan, error)
+	GetSlotUsage() int64
 
 	GetTriggerID() UniqueID
 	GetPlanID() UniqueID
