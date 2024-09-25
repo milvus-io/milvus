@@ -11,8 +11,49 @@ import requests
 from loguru import logger
 import datetime
 from sklearn.metrics import pairwise_distances
+from collections import Counter
+import bm25s
+import jieba
 fake = Faker()
 rng = np.random.default_rng()
+
+
+def analyze_documents(texts, language="en"):
+    stopwords = "en"
+    if language in ["en", "english"]:
+        stopwords = "en"
+    if language in ["zh", "cn", "chinese"]:
+        stopword = " "
+        new_texts = []
+        for doc in texts:
+            seg_list = jieba.cut(doc, cut_all=True)
+            new_texts.append(" ".join(seg_list))
+        texts = new_texts
+        stopwords = [stopword]
+    # Start timing
+    t0 = time.time()
+
+    # Tokenize the corpus
+    tokenized = bm25s.tokenize(texts, lower=True, stopwords=stopwords)
+    # log.info(f"Tokenized: {tokenized}")
+    # Create a frequency counter
+    freq = Counter()
+
+    # Count the frequency of each token
+    for doc_ids in tokenized.ids:
+        freq.update(doc_ids)
+    # Create a reverse vocabulary mapping
+    id_to_word = {id: word for word, id in tokenized.vocab.items()}
+
+    # Convert token ids back to words
+    word_freq = Counter({id_to_word[token_id]: count for token_id, count in freq.items()})
+
+    # End timing
+    tt = time.time() - t0
+    logger.info(f"Analyze document cost time: {tt}")
+
+    return word_freq
+
 
 def random_string(length=8):
     letters = string.ascii_letters
