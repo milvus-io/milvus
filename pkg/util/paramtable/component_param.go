@@ -69,18 +69,17 @@ type ComponentParam struct {
 	GpuConfig       gpuConfig
 	TraceCfg        traceConfig
 
-	RootCoordCfg      rootCoordConfig
-	ProxyCfg          proxyConfig
-	QueryCoordCfg     queryCoordConfig
-	QueryNodeCfg      queryNodeConfig
-	DataCoordCfg      dataCoordConfig
-	DataNodeCfg       dataNodeConfig
-	IndexNodeCfg      indexNodeConfig
-	HTTPCfg           httpConfig
-	LogCfg            logConfig
-	RoleCfg           roleConfig
-	StreamingCoordCfg streamingCoordConfig
-	StreamingNodeCfg  streamingNodeConfig
+	RootCoordCfg  rootCoordConfig
+	ProxyCfg      proxyConfig
+	QueryCoordCfg queryCoordConfig
+	QueryNodeCfg  queryNodeConfig
+	DataCoordCfg  dataCoordConfig
+	DataNodeCfg   dataNodeConfig
+	IndexNodeCfg  indexNodeConfig
+	HTTPCfg       httpConfig
+	LogCfg        logConfig
+	RoleCfg       roleConfig
+	StreamingCfg  streamingConfig
 
 	RootCoordGrpcServerCfg     GrpcServerConfig
 	ProxyGrpcServerCfg         GrpcServerConfig
@@ -130,14 +129,11 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
 	p.IndexNodeCfg.init(bt)
-	p.StreamingCoordCfg.init(bt)
-	p.StreamingNodeCfg.init(bt)
+	p.StreamingCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
 	p.GpuConfig.init(bt)
-	p.StreamingCoordCfg.init(bt)
-	p.StreamingNodeCfg.init(bt)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
 	p.ProxyGrpcServerCfg.Init("proxy", bt)
@@ -4634,44 +4630,54 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 	p.GracefulStopTimeout.Init(base.mgr)
 }
 
-type streamingCoordConfig struct {
-	AutoBalanceTriggerInterval        ParamItem `refreshable:"true"`
-	AutoBalanceBackoffInitialInterval ParamItem `refreshable:"true"`
-	AutoBalanceBackoffMultiplier      ParamItem `refreshable:"true"`
+type streamingConfig struct {
+	// balancer
+	WALBalancerTriggerInterval        ParamItem `refreshable:"true"`
+	WALBalancerBackoffInitialInterval ParamItem `refreshable:"true"`
+	WALBalancerBackoffMultiplier      ParamItem `refreshable:"true"`
+
+	// txn
+	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
 }
 
-func (p *streamingCoordConfig) init(base *BaseTable) {
-	p.AutoBalanceTriggerInterval = ParamItem{
-		Key:     "streamingCoord.autoBalanceTriggerInterval",
+func (p *streamingConfig) init(base *BaseTable) {
+	// balancer
+	p.WALBalancerTriggerInterval = ParamItem{
+		Key:     "streaming.walBalancer.triggerInterval",
 		Version: "2.5.0",
 		Doc: `The interval of balance task trigger at background, 1 min by default. 
 It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
 		DefaultValue: "1m",
 		Export:       true,
 	}
-	p.AutoBalanceTriggerInterval.Init(base.mgr)
-	p.AutoBalanceBackoffInitialInterval = ParamItem{
-		Key:     "streamingCoord.autoBalanceBackoffInitialInterval",
+	p.WALBalancerTriggerInterval.Init(base.mgr)
+	p.WALBalancerBackoffInitialInterval = ParamItem{
+		Key:     "streaming.walBalancer.backoffInitialInterval",
 		Version: "2.5.0",
 		Doc: `The initial interval of balance task trigger backoff, 50 ms by default. 
 It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
 		DefaultValue: "50ms",
 		Export:       true,
 	}
-	p.AutoBalanceBackoffInitialInterval.Init(base.mgr)
-	p.AutoBalanceBackoffMultiplier = ParamItem{
-		Key:          "streamingCoord.autoBalanceBackoffMultiplier",
+	p.WALBalancerBackoffInitialInterval.Init(base.mgr)
+	p.WALBalancerBackoffMultiplier = ParamItem{
+		Key:          "streaming.walBalancer.backoffMultiplier",
 		Version:      "2.5.0",
 		Doc:          "The multiplier of balance task trigger backoff, 2 by default",
 		DefaultValue: "2",
 		Export:       true,
 	}
-	p.AutoBalanceBackoffMultiplier.Init(base.mgr)
-}
+	p.WALBalancerBackoffMultiplier.Init(base.mgr)
 
-type streamingNodeConfig struct{}
-
-func (p *streamingNodeConfig) init(base *BaseTable) {
+	// txn
+	p.TxnDefaultKeepaliveTimeout = ParamItem{
+		Key:          "streaming.txn.defaultKeepaliveTimeout",
+		Version:      "2.5.0",
+		Doc:          "The default keepalive timeout for wal txn, 10s by default",
+		DefaultValue: "10s",
+		Export:       true,
+	}
+	p.TxnDefaultKeepaliveTimeout.Init(base.mgr)
 }
 
 type runtimeConfig struct {
