@@ -47,7 +47,7 @@ type L0CompactionPolicySuite struct {
 const MB = 1024 * 1024
 
 func (s *L0CompactionPolicySuite) TestTrigger() {
-	s.Require().Empty(s.l0_policy.view.collections)
+	s.Require().Empty(s.l0_policy.view)
 
 	events, err := s.l0_policy.Trigger()
 	s.NoError(err)
@@ -122,18 +122,18 @@ func (s *L0CompactionPolicySuite) TestTrigger() {
 }
 
 func (s *L0CompactionPolicySuite) TestGenerateEventForLevelZeroViewChange() {
-	s.Require().Empty(s.l0_policy.view.collections)
+	s.Require().Empty(s.l0_policy.view)
 
 	events := s.l0_policy.generateEventForLevelZeroViewChange()
 	s.NotEmpty(events)
-	s.NotEmpty(s.l0_policy.view.collections)
+	s.NotEmpty(s.l0_policy.view)
 
 	gotViews, ok := events[TriggerTypeLevelZeroViewChange]
 	s.True(ok)
 	s.NotNil(gotViews)
 	s.Equal(1, len(gotViews))
 
-	storedViews, ok := s.l0_policy.view.collections[s.testLabel.CollectionID]
+	storedViews, ok := s.l0_policy.view[s.testLabel.CollectionID]
 	s.True(ok)
 	s.NotNil(storedViews)
 	s.Equal(4, len(storedViews))
