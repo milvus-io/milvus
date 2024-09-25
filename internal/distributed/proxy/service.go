@@ -634,9 +634,12 @@ func (s *Server) start() error {
 
 // Stop stop the Proxy Server
 func (s *Server) Stop() (err error) {
-	logger := log.With(
-		zap.String("internal address", s.listenerManager.internalGrpcListener.Address()),
-		zap.String("external address", s.listenerManager.externalGrpcListener.Address()))
+	logger := log.With()
+	if s.listenerManager != nil {
+		logger = log.With(
+			zap.String("internal address", s.listenerManager.internalGrpcListener.Address()),
+			zap.String("external address", s.listenerManager.externalGrpcListener.Address()))
+	}
 	logger.Info("Proxy stopping")
 	defer func() {
 		logger.Info("Proxy stopped", zap.Error(err))
