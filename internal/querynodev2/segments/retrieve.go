@@ -124,7 +124,8 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 					CostAggregation: &internalpb.CostAggregation{
 						TotalRelatedDataSize: GetSegmentRelatedDataSize(segment),
 					},
-					AllRetrieveCount: result.GetAllRetrieveCount(),
+					SealedSegmentIDsRetrieved: []int64{segment.ID()},
+					AllRetrieveCount:          result.GetAllRetrieveCount(),
 				}); err != nil {
 					errs[i] = err
 				}
