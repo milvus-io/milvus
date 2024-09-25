@@ -18,6 +18,7 @@ package grpcindexnode
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
 
@@ -75,6 +76,9 @@ func (s *Server) Prepare() error {
 	}
 	s.listener = listener
 	log.Info("IndexNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	paramtable.Get().Save(
+		paramtable.Get().IndexNodeGrpcServerCfg.Port.Key,
+		strconv.FormatInt(int64(listener.Port()), 10))
 	return nil
 }
 
@@ -211,8 +215,7 @@ func (s *Server) start() error {
 
 // Stop stops IndexNode's grpc service.
 func (s *Server) Stop() (err error) {
-	Params := &paramtable.Get().IndexNodeGrpcServerCfg
-	logger := log.With(zap.String("address", Params.GetAddress()))
+	logger := log.With(zap.String("address", s.listener.Address()))
 	logger.Info("IndexNode stopping")
 	defer func() {
 		logger.Info("IndexNode stopped", zap.Error(err))

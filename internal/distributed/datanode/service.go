@@ -18,6 +18,7 @@ package grpcdatanode
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
 
@@ -100,6 +101,9 @@ func (s *Server) Prepare() error {
 	}
 	log.Info("DataNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
 	s.listener = listener
+	paramtable.Get().Save(
+		paramtable.Get().DataNodeGrpcServerCfg.Port.Key,
+		strconv.FormatInt(int64(listener.Port()), 10))
 	return nil
 }
 
@@ -192,8 +196,7 @@ func (s *Server) Run() error {
 
 // Stop stops Datanode's grpc service.
 func (s *Server) Stop() (err error) {
-	Params := &paramtable.Get().DataNodeGrpcServerCfg
-	logger := log.With(zap.String("address", Params.GetAddress()))
+	logger := log.With(zap.String("address", s.listener.Address()))
 	logger.Info("datanode stopping")
 	defer func() {
 		logger.Info("datanode stopped", zap.Error(err))

@@ -328,8 +328,7 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() (err error) {
-	Params := &paramtable.Get().RootCoordGrpcServerCfg
-	logger := log.With(zap.String("address", Params.GetAddress()))
+	logger := log.With(zap.String("address", s.listener.Address()))
 	logger.Info("Rootcoord stopping")
 	defer func() {
 		logger.Info("Rootcoord stopped", zap.Error(err))

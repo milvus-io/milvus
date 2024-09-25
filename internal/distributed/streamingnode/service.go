@@ -19,6 +19,7 @@ package streamingnode
 import (
 	"context"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -106,6 +107,9 @@ func (s *Server) Prepare() error {
 	}
 	s.listener = listener
 	log.Info("StreamingNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	paramtable.Get().Save(
+		paramtable.Get().StreamingNodeGrpcServerCfg.Port.Key,
+		strconv.FormatInt(int64(listener.Port()), 10))
 	return nil
 }
 
