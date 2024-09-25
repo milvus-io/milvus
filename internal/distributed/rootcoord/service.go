@@ -328,7 +328,10 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() (err error) {
-	logger := log.With(zap.String("address", s.listener.Address()))
+	logger := log.With()
+	if s.listener != nil {
+		logger = log.With(zap.String("address", s.listener.Address()))
+	}
 	logger.Info("Rootcoord stopping")
 	defer func() {
 		logger.Info("Rootcoord stopped", zap.Error(err))
