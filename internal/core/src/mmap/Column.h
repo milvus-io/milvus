@@ -461,6 +461,7 @@ class SparseFloatColumn : public ColumnBase {
         // so that indices[num_rows_] - indices[num_rows_ - 1] is the byte size of
         // the last row.
         indices.push_back(data_size_);
+        dim_ = 0;
         for (size_t i = 0; i < num_rows_; i++) {
             auto vec_size = indices[i + 1] - indices[i];
             AssertInfo(
@@ -472,6 +473,7 @@ class SparseFloatColumn : public ColumnBase {
                 vec_size / knowhere::sparse::SparseRow<float>::element_size(),
                 (uint8_t*)(data_) + indices[i],
                 false);
+            dim_ = std::max(dim_, vec_.back().dim());
         }
     }
 
