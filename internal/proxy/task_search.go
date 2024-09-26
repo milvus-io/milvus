@@ -80,6 +80,8 @@ type searchTask struct {
 	reScorers   []reScorer
 	rankParams  *rankParams
 	groupScorer func(group *Group) error
+
+	isIterator bool
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -249,6 +251,10 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	t.SearchRequest.GuaranteeTimestamp = guaranteeTs
 	t.SearchRequest.ConsistencyLevel = consistencyLevel
+	if t.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
+		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
+		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
+	}
 
 	if deadline, ok := t.TraceCtx().Deadline(); ok {
 		t.SearchRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
@@ -351,7 +357,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.SearchRequest.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
 	for index, subReq := range t.request.GetSubReqs() {
-		plan, queryInfo, offset, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl())
+		plan, queryInfo, offset, _, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl())
 		if err != nil {
 			return err
 		}
@@ -444,11 +450,12 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
 	// fetch search_growing from search param
 
-	plan, queryInfo, offset, err := t.tryGeneratePlan(t.request.GetSearchParams(), t.request.GetDsl())
+	plan, queryInfo, offset, isIterator, err := t.tryGeneratePlan(t.request.GetSearchParams(), t.request.GetDsl())
 	if err != nil {
 		return err
 	}
 
+	t.isIterator = isIterator
 	t.SearchRequest.Offset = offset
 	t.SearchRequest.FieldId = queryInfo.GetQueryFieldId()
 
@@ -492,40 +499,40 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	return nil
 }
 
-func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string) (*planpb.PlanNode, *planpb.QueryInfo, int64, error) {
+func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, error) {
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, params)
 	if err != nil || len(annsFieldName) == 0 {
 		vecFields := typeutil.GetVectorFieldSchemas(t.schema.CollectionSchema)
 		if len(vecFields) == 0 {
-			return nil, nil, 0, errors.New(AnnsFieldKey + " not found in schema")
+			return nil, nil, 0, false, errors.New(AnnsFieldKey + " not found in schema")
 		}
 
 		if enableMultipleVectorFields && len(vecFields) > 1 {
-			return nil, nil, 0, errors.New("multiple anns_fields exist, please specify a anns_field in search_params")
+			return nil, nil, 0, false, errors.New("multiple anns_fields exist, please specify a anns_field in search_params")
 		}
 		annsFieldName = vecFields[0].Name
 	}
-	queryInfo, offset, parseErr := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
-	if parseErr != nil {
-		return nil, nil, 0, parseErr
+	searchInfo := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
+	if searchInfo.parseError != nil {
+		return nil, nil, 0, false, searchInfo.parseError
 	}
 	annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
-	if queryInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
-		return nil, nil, 0, errors.New("not support search_group_by operation based on binary vector column")
+	if searchInfo.planInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
+		return nil, nil, 0, false, errors.New("not support search_group_by operation based on binary vector column")
 	}
 
-	queryInfo.QueryFieldId = annField.GetFieldID()
-	plan, planErr := planparserv2.CreateSearchPlan(t.schema.schemaHelper, dsl, annsFieldName, queryInfo)
+	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
+	plan, planErr := planparserv2.CreateSearchPlan(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo)
 	if planErr != nil {
 		log.Warn("failed to create query plan", zap.Error(planErr),
 			zap.String("dsl", dsl), // may be very large if large term passed.
-			zap.String("anns field", annsFieldName), zap.Any("query info", queryInfo))
-		return nil, nil, 0, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", planErr)
+			zap.String("anns field", annsFieldName), zap.Any("query info", searchInfo.planInfo))
+		return nil, nil, 0, false, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", planErr)
 	}
 	log.Debug("create query plan",
 		zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
-		zap.String("anns field", annsFieldName), zap.Any("query info", queryInfo))
-	return plan, queryInfo, offset, nil
+		zap.String("anns field", annsFieldName), zap.Any("query info", searchInfo.planInfo))
+	return plan, searchInfo.planInfo, searchInfo.offset, searchInfo.isIterator, nil
 }
 
 func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int64, error) {
@@ -718,6 +725,10 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 	t.result.Results.OutputFields = t.userOutputFields
 	t.result.CollectionName = t.request.GetCollectionName()
+	if t.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
+		// first page for iteration, need to set up sessionTs for iterator
+		t.result.SessionTs = t.BeginTs()
+	}
 
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
