@@ -119,8 +119,8 @@ def split_dataframes(df, fields, language="en"):
         for col in fields:
             new_texts = []
             for doc in df[col]:
-                seg_list = jieba.cut(doc)
-                new_texts.append(seg_list)
+                seg_list = jieba.cut(doc, cut_all=True)
+                new_texts.append(list(seg_list))
             df_copy[col] = new_texts
         return df_copy
     for col in fields:
