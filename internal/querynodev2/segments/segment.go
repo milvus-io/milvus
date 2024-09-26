@@ -1078,7 +1078,8 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	fieldSchema *schemapb.FieldSchema,
 	s *querypb.SegmentLoadInfo,
 	indexInfo *querypb.FieldIndexInfo,
-	f func(c *LoadIndexInfo) error) error {
+	f func(c *LoadIndexInfo) error,
+) error {
 	// 1.
 	loadIndexInfo, err := newLoadIndexInfo(ctx)
 	if err != nil {

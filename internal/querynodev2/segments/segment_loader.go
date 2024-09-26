@@ -54,7 +54,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
@@ -1413,10 +1412,6 @@ func DoubleMemorySystemField(fieldID int64) bool {
 func SupportInterimIndexDataType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_FloatVector ||
 		dataType == schemapb.DataType_SparseFloatVector
-}
-
-func NoEffectWhenMMap(indexType string) bool {
-	return indexType == indexparamcheck.IndexSTLSORT || indexType == indexparamcheck.IndexINVERTED
 }
 
 func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb.DataType, error) {
