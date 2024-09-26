@@ -480,10 +480,8 @@ class SparseFloatColumn : public ColumnBase {
     // MAP_WITH_MANAGER ctor
     SparseFloatColumn(storage::MmapChunkManagerPtr mcm,
                       storage::MmapChunkDescriptorPtr descriptor)
-        : ColumnBase(/*reserve= */ 0,
-                     DataType::VECTOR_SPARSE_FLOAT,
-                     mcm,
-                     descriptor) {
+        : ColumnBase(
+              /*reserve= */ 0, DataType::VECTOR_SPARSE_FLOAT, mcm, descriptor) {
     }
 
     ~SparseFloatColumn() override = default;
@@ -675,10 +673,12 @@ class VariableColumn : public ColumnBase {
                 // data_ as: |size|data|size|data......
                 for (auto i = 0; i < chunk->get_num_rows(); i++) {
                     auto current_size = (uint32_t)chunk->Size(i);
-                    std::memcpy(data_ + data_size_, &current_size, sizeof(uint32_t));
+                    std::memcpy(
+                        data_ + data_size_, &current_size, sizeof(uint32_t));
                     data_size_ += sizeof(uint32_t);
                     auto data = static_cast<const T*>(chunk->RawValue(i));
-                    std::memcpy(data_ + data_size_, data->c_str(), data->size());
+                    std::memcpy(
+                        data_ + data_size_, data->c_str(), data->size());
                     data_size_ += data->size();
                 }
             }
