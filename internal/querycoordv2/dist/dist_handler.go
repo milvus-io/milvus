@@ -225,6 +225,11 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 		// todo by weiliu1031: serviceable status should be maintained by delegator, to avoid heavy check here
 		if err := utils.CheckLeaderAvailable(dh.nodeManager, dh.target, view); err != nil {
 			view.UnServiceableError = err
+			log.Info("leader is not available",
+				zap.Int64("collectionID", view.CollectionID),
+				zap.Int64("nodeID", view.ID),
+				zap.String("channel", view.Channel),
+				zap.Error(err))
 		}
 		updates = append(updates, view)
 	}
