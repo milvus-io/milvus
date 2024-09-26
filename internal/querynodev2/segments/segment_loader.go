@@ -91,6 +91,7 @@ type Loader interface {
 }
 
 type ResourceEstimate struct {
+	Success         bool
 	MaxMemoryCost   uint64
 	MaxDiskCost     uint64
 	FinalMemoryCost uint64
@@ -99,11 +100,17 @@ type ResourceEstimate struct {
 }
 
 func GetResourceEstimate(estimate *C.LoadResourceRequest) ResourceEstimate {
+	if int(estimate.max_memory_cost) < 0 {
+		return ResourceEstimate{
+			Success: false,
+		}
+	}
 	return ResourceEstimate{
-		MaxMemoryCost:   uint64(estimate.max_memory_cost * util.GB),
-		MaxDiskCost:     uint64(estimate.max_disk_cost * util.GB),
-		FinalMemoryCost: uint64(estimate.final_memory_cost * util.GB),
-		FinalDiskCost:   uint64(estimate.final_disk_cost * util.GB),
+		Success:         true,
+		MaxMemoryCost:   uint64(float64(estimate.max_memory_cost) * util.GB),
+		MaxDiskCost:     uint64(float64(estimate.max_disk_cost) * util.GB),
+		FinalMemoryCost: uint64(float64(estimate.final_memory_cost) * util.GB),
+		FinalDiskCost:   uint64(float64(estimate.final_disk_cost) * util.GB),
 		HasRawData:      bool(estimate.has_raw_data),
 	}
 }
@@ -1323,6 +1330,9 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			err := GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
 				loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
 				estimateResult = GetResourceEstimate(&loadResourceRequest)
+				if !estimateResult.Success {
+					return errors.New("failed to estimate resource usage of index")
+				}
 				return nil
 			})
 			if err != nil {
@@ -1332,33 +1342,6 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 					fieldIndexInfo.GetBuildID())
 			}
 
-			// indexType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, fieldIndexInfo.IndexParams)
-			// if err != nil {
-			// 	return nil, errors.Wrapf(err, "index type not exist in index params, collection %d, segment %d, indexBuildID %d",
-			// 		loadInfo.GetCollectionID(),
-			// 		loadInfo.GetSegmentID(),
-			// 		fieldIndexInfo.GetBuildID())
-			// }
-			//
-			// mmapEnabled = isIndexMmapEnable(fieldSchema, fieldIndexInfo)
-			// neededMemSize, neededDiskSize, err := getIndexAttrCache().GetIndexResourceUsage(fieldIndexInfo, multiplyFactor.memoryIndexUsageFactor, fieldBinlog)
-			// if err != nil {
-			// 	return nil, errors.Wrapf(err, "failed to get index size collection %d, segment %d, indexBuildID %d",
-			// 		loadInfo.GetCollectionID(),
-			// 		loadInfo.GetSegmentID(),
-			// 		fieldIndexInfo.GetBuildID())
-			// }
-			//
-			// if NoEffectWhenMMap(indexType) {
-			// 	indexMemorySize += neededMemSize
-			// 	segmentDiskSize += neededDiskSize
-			// } else {
-			// 	if mmapEnabled {
-			// 		segmentDiskSize += neededDiskSize
-			// 	} else {
-			// 		indexMemorySize += neededMemSize
-			// 	}
-			// }
 			indexMemorySize += estimateResult.MaxMemoryCost
 			segmentDiskSize += estimateResult.MaxDiskCost
 			if !estimateResult.HasRawData {
@@ -1390,21 +1373,10 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 		}
 	}
 
-	// common part for the load data, including the download buffer and channel buffer
-	// 1. batch download buffer size, 10 thread, the max file size is 16MB
-	commonDownloadDataBufferSize := 10 * 16 * 1024 * 1024 // 10 * 16MB
-	// 2. max channel cnt is 5, max channel capacity is 16, the max file size is 16MB
-	commonChannelDataBufferSize := min(calculateDataSizeCount, 5) * 16 * 16 * 1024 * 1024
-	segmentMemorySize += uint64(commonDownloadDataBufferSize + commonChannelDataBufferSize)
-
 	// get size of stats data
 	for _, fieldBinlog := range loadInfo.Statslogs {
 		segmentMemorySize += uint64(getBinlogDataMemorySize(fieldBinlog))
 	}
-
-	// binlog & statslog use general load factor
-	// TODO fubang delete it?
-	// segmentMemorySize = uint64(float64(segmentMemorySize) * multiplyFactor.memoryUsageFactor)
 
 	// get size of delete data
 	for _, fieldBinlog := range loadInfo.Deltalogs {

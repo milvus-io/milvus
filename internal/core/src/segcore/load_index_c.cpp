@@ -230,7 +230,7 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
         LOG_ERROR(
             "failed to estimate index load resource, encounter exception : {}",
             e.what());
-        return LoadResourceRequest{};
+        return LoadResourceRequest{-1, 0, 0, 0, false};
     }
 }
 
