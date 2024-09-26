@@ -110,7 +110,12 @@ class ThreadPool {
             sched_param sch;
             pthread_getschedparam(t.native_handle(), &policy, &sch);
             sch.sched_priority = 15;
-            pthread_setschedparam(t.native_handle(), policy, &sch);
+            if (pthread_setschedparam(t.native_handle(), policy, &sch) != 0) {
+                // in Docker env without SYS_NICE, setting priority other than 0,19 may fail when thread not main
+                // this part fallback to 19 (lowest) to achieve the non-worst effect
+                sch.sched_priority = 19;
+                pthread_setschedparam(t.native_handle(), policy, &sch);
+            }
 
             threads_[t.get_id()] = std::move(t);
             current_threads_size_++;
