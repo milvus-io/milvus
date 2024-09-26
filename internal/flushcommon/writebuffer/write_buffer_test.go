@@ -75,7 +75,7 @@ func (s *WriteBufferSuite) TestFlushSegments() {
 
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything, mock.Anything, mock.Anything).Return(nil, true)
-	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, WithIDAllocator(allocator.NewMockAllocator(s.T())))
+	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithIDAllocator(allocator.NewMockAllocator(s.T())))
 	s.NoError(err)
 
 	err = wb.SealSegments(context.Background(), []int64{segmentID})
