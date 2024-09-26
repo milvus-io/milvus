@@ -449,7 +449,7 @@ func TestInsertCodec(t *testing.T) {
 		0, 255, 0, 255, 0, 255, 0, 255,
 	}, resultData.Data[BFloat16VectorField].(*BFloat16VectorFieldData).Data)
 
-	assert.Equal(t, schemapb.SparseFloatArray{
+	assert.EqualExportedValues(t, &schemapb.SparseFloatArray{
 		// merged dim should be max of all dims
 		Dim: 600,
 		Contents: [][]byte{
@@ -460,7 +460,7 @@ func TestInsertCodec(t *testing.T) {
 			typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
 			typeutil.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
 		},
-	}, resultData.Data[SparseFloatVectorField].(*SparseFloatVectorFieldData).SparseFloatArray)
+	}, &resultData.Data[SparseFloatVectorField].(*SparseFloatVectorFieldData).SparseFloatArray)
 
 	int32ArrayList := [][]int32{{1, 2, 3}, {4, 5, 6}, {3, 2, 1}, {6, 5, 4}}
 	resultArrayList := [][]int32{}
@@ -917,4 +917,52 @@ func TestDeleteData(t *testing.T) {
 		assert.EqualValues(t, dData.RowCount, 3)
 		assert.EqualValues(t, dData.Size(), 72)
 	})
+}
+
+func TestAddFieldDataToPayload(t *testing.T) {
+	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
+	e, _ := w.NextInsertEventWriter()
+	var err error
+	err = AddFieldDataToPayload(e, schemapb.DataType_Bool, &BoolFieldData{[]bool{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int8, &Int8FieldData{[]int8{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int16, &Int16FieldData{[]int16{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int32, &Int32FieldData{[]int32{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int64, &Int64FieldData{[]int64{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Float, &FloatFieldData{[]float32{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Double, &DoubleFieldData{[]float64{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_String, &StringFieldData{[]string{"test"}, schemapb.DataType_VarChar})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Array, &ArrayFieldData{
+		ElementType: schemapb.DataType_VarChar,
+		Data: []*schemapb.ScalarField{{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+			},
+		}},
+	})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_JSON, &JSONFieldData{[][]byte{[]byte(`"batch":2}`)}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_BinaryVector, &BinaryVectorFieldData{[]byte{}, 8})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_FloatVector, &FloatVectorFieldData{[]float32{}, 4})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Float16Vector, &Float16VectorFieldData{[]byte{}, 4})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_BFloat16Vector, &BFloat16VectorFieldData{[]byte{}, 8})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_SparseFloatVector, &SparseFloatVectorFieldData{
+		SparseFloatArray: schemapb.SparseFloatArray{
+			Dim:      0,
+			Contents: [][]byte{},
+		},
+	})
+	assert.Error(t, err)
 }

@@ -31,7 +31,7 @@ class ExprSet;
 class EvalCtx {
  public:
     EvalCtx(ExecContext* exec_ctx, ExprSet* expr_set, RowVector* row)
-        : exec_ctx_(exec_ctx), expr_set_(expr_set_), row_(row) {
+        : exec_ctx_(exec_ctx), expr_set_(expr_set), row_(row) {
         assert(exec_ctx_ != nullptr);
         assert(expr_set_ != nullptr);
         // assert(row_ != nullptr);

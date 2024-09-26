@@ -71,3 +71,11 @@ target_link_libraries(bench_tantivy
         boost_filesystem
         dl
         )
+
+add_executable(ffi_demo ffi_demo.cpp)
+target_link_libraries(ffi_demo
+        tantivy_binding
+        dl
+        )
+
+set( TANTIVY_INCLUDE_DIR ${LIB_HEADER_FOLDER};${CMAKE_CURRENT_SOURCE_DIR} CACHE INTERNAL "Path to tantivy include directory" )

@@ -221,18 +221,17 @@ func (suite *ClusterTestSuite) TestLoadSegments() {
 		Base:  &commonpb.MsgBase{},
 		Infos: []*querypb.SegmentLoadInfo{{}},
 	})
+
 	suite.NoError(err)
-	suite.Equal(merr.Success(), status)
+	merr.Ok(status)
 
 	status, err = suite.cluster.LoadSegments(ctx, 1, &querypb.LoadSegmentsRequest{
 		Base:  &commonpb.MsgBase{},
 		Infos: []*querypb.SegmentLoadInfo{{}},
 	})
 	suite.NoError(err)
-	suite.Equal(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "unexpected error",
-	}, status)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal("unexpected error", status.GetReason())
 
 	_, err = suite.cluster.LoadSegments(ctx, 3, &querypb.LoadSegmentsRequest{
 		Base:  &commonpb.MsgBase{},
@@ -248,16 +247,14 @@ func (suite *ClusterTestSuite) TestWatchDmChannels() {
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)
-	suite.Equal(merr.Success(), status)
+	merr.Ok(status)
 
 	status, err = suite.cluster.WatchDmChannels(ctx, 1, &querypb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)
-	suite.Equal(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "unexpected error",
-	}, status)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal("unexpected error", status.GetReason())
 }
 
 func (suite *ClusterTestSuite) TestUnsubDmChannel() {
@@ -266,16 +263,14 @@ func (suite *ClusterTestSuite) TestUnsubDmChannel() {
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)
-	suite.Equal(merr.Success(), status)
+	merr.Ok(status)
 
 	status, err = suite.cluster.UnsubDmChannel(ctx, 1, &querypb.UnsubDmChannelRequest{
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)
-	suite.Equal(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "unexpected error",
-	}, status)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal("unexpected error", status.GetReason())
 }
 
 func (suite *ClusterTestSuite) TestReleaseSegments() {
@@ -284,16 +279,14 @@ func (suite *ClusterTestSuite) TestReleaseSegments() {
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)
-	suite.Equal(merr.Success(), status)
+	merr.Ok(status)
 
 	status, err = suite.cluster.ReleaseSegments(ctx, 1, &querypb.ReleaseSegmentsRequest{
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)
-	suite.Equal(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "unexpected error",
-	}, status)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal("unexpected error", status.GetReason())
 }
 
 func (suite *ClusterTestSuite) TestLoadAndReleasePartitions() {
@@ -302,31 +295,27 @@ func (suite *ClusterTestSuite) TestLoadAndReleasePartitions() {
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)
-	suite.Equal(merr.Success(), status)
+	merr.Ok(status)
 
 	status, err = suite.cluster.LoadPartitions(ctx, 1, &querypb.LoadPartitionsRequest{
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)
-	suite.Equal(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "unexpected error",
-	}, status)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal("unexpected error", status.GetReason())
 
 	status, err = suite.cluster.ReleasePartitions(ctx, 0, &querypb.ReleasePartitionsRequest{
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)
-	suite.Equal(merr.Success(), status)
+	merr.Ok(status)
 
 	status, err = suite.cluster.ReleasePartitions(ctx, 1, &querypb.ReleasePartitionsRequest{
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)
-	suite.Equal(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "unexpected error",
-	}, status)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal("unexpected error", status.GetReason())
 }
 
 func (suite *ClusterTestSuite) TestGetDataDistribution() {
@@ -342,10 +331,8 @@ func (suite *ClusterTestSuite) TestGetDataDistribution() {
 	})
 
 	suite.NoError(err)
-	suite.Equal(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "unexpected error",
-	}, resp.GetStatus())
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	suite.Equal("unexpected error", resp.GetStatus().GetReason())
 }
 
 func (suite *ClusterTestSuite) TestGetMetrics() {
@@ -356,10 +343,8 @@ func (suite *ClusterTestSuite) TestGetMetrics() {
 
 	resp, err = suite.cluster.GetMetrics(ctx, 1, &milvuspb.GetMetricsRequest{})
 	suite.NoError(err)
-	suite.Equal(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "unexpected error",
-	}, resp.GetStatus())
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	suite.Equal("unexpected error", resp.GetStatus().GetReason())
 }
 
 func (suite *ClusterTestSuite) TestSyncDistribution() {
@@ -368,16 +353,14 @@ func (suite *ClusterTestSuite) TestSyncDistribution() {
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)
-	suite.Equal(merr.Success(), status)
+	merr.Ok(status)
 
 	status, err = suite.cluster.SyncDistribution(ctx, 1, &querypb.SyncDistributionRequest{
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)
-	suite.Equal(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "unexpected error",
-	}, status)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal("unexpected error", status.GetReason())
 }
 
 func (suite *ClusterTestSuite) TestGetComponentStates() {

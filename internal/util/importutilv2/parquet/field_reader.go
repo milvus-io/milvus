@@ -29,7 +29,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -95,7 +97,7 @@ func (c *FieldReader) Next(count int64) (any, error) {
 		}
 		return data, typeutil.VerifyFloats64(data.([]float64))
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		return ReadStringData(c, count)
+		return ReadVarcharData(c, count)
 	case schemapb.DataType_JSON:
 		return ReadJSONData(c, count)
 	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
@@ -215,6 +217,35 @@ func ReadStringData(pcr *FieldReader, count int64) (any, error) {
 	return data, nil
 }
 
+func ReadVarcharData(pcr *FieldReader, count int64) (any, error) {
+	chunked, err := pcr.columnReader.NextBatch(count)
+	if err != nil {
+		return nil, err
+	}
+	data := make([]string, 0, count)
+	maxLength, err := parameterutil.GetMaxLength(pcr.field)
+	if err != nil {
+		return nil, err
+	}
+	for _, chunk := range chunked.Chunks() {
+		dataNums := chunk.Data().Len()
+		stringReader, ok := chunk.(*array.String)
+		if !ok {
+			return nil, WrapTypeErr("string", chunk.DataType().Name(), pcr.field)
+		}
+		for i := 0; i < dataNums; i++ {
+			if err = common.CheckVarcharLength(stringReader.Value(i), maxLength); err != nil {
+				return nil, err
+			}
+			data = append(data, stringReader.Value(i))
+		}
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	return data, nil
+}
+
 func ReadJSONData(pcr *FieldReader, count int64) (any, error) {
 	// JSON field read data from string array Parquet
 	data, err := ReadStringData(pcr, count)
@@ -260,8 +291,8 @@ func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 			}
 		case arrow.LIST:
 			listReader := chunk.(*array.List)
-			if !isVectorAligned(listReader.Offsets(), pcr.dim, dataType) {
-				return nil, merr.WrapErrImportFailed("%s not aligned", dataType.String())
+			if err = checkVectorAligned(listReader.Offsets(), pcr.dim, dataType); err != nil {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
 			}
 			uint8Reader, ok := listReader.ListValues().(*array.Uint8)
 			if !ok {
@@ -308,18 +339,18 @@ func ReadSparseFloatVectorData(pcr *FieldReader, count int64) (any, error) {
 	}, nil
 }
 
-func checkVectorAlignWithDim(offsets []int32, dim int32) bool {
+func checkVectorAlignWithDim(offsets []int32, dim int32) error {
 	for i := 1; i < len(offsets); i++ {
 		if offsets[i]-offsets[i-1] != dim {
-			return false
+			return fmt.Errorf("expected %d but got %d", dim, offsets[i]-offsets[i-1])
 		}
 	}
-	return true
+	return nil
 }
 
-func isVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) bool {
+func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) error {
 	if len(offsets) < 1 {
-		return false
+		return fmt.Errorf("empty offsets")
 	}
 	switch dataType {
 	case schemapb.DataType_BinaryVector:
@@ -330,9 +361,9 @@ func isVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) bool 
 		return checkVectorAlignWithDim(offsets, int32(dim*2))
 	case schemapb.DataType_SparseFloatVector:
 		// JSON format, skip alignment check
-		return true
+		return nil
 	default:
-		return false
+		return fmt.Errorf("unexpected vector data type %s", dataType.String())
 	}
 }
 
@@ -391,8 +422,10 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 		}
 		offsets := listReader.Offsets()
 		dataType := pcr.field.GetDataType()
-		if typeutil.IsVectorType(dataType) && !isVectorAligned(offsets, pcr.dim, dataType) {
-			return nil, merr.WrapErrImportFailed("%s not aligned", dataType.String())
+		if typeutil.IsVectorType(dataType) {
+			if err = checkVectorAligned(offsets, pcr.dim, dataType); err != nil {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
+			}
 		}
 		valueReader := listReader.ListValues()
 		switch valueReader.DataType().ID() {
@@ -469,6 +502,10 @@ func ReadStringArrayData(pcr *FieldReader, count int64) (any, error) {
 
 func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 	data := make([]*schemapb.ScalarField, 0, count)
+	maxCapacity, err := parameterutil.GetMaxCapacity(pcr.field)
+	if err != nil {
+		return nil, err
+	}
 	elementType := pcr.field.GetElementType()
 	switch elementType {
 	case schemapb.DataType_Bool:
@@ -480,6 +517,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range boolArray.([][]bool) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_BoolData{
 					BoolData: &schemapb.BoolArray{
@@ -497,6 +537,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range int8Array.([][]int32) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_IntData{
 					IntData: &schemapb.IntArray{
@@ -514,6 +557,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range int16Array.([][]int32) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_IntData{
 					IntData: &schemapb.IntArray{
@@ -531,6 +577,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range int32Array.([][]int32) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_IntData{
 					IntData: &schemapb.IntArray{
@@ -548,6 +597,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range int64Array.([][]int64) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
@@ -565,6 +617,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range float32Array.([][]float32) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_FloatData{
 					FloatData: &schemapb.FloatArray{
@@ -582,6 +637,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range float64Array.([][]float64) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_DoubleData{
 					DoubleData: &schemapb.DoubleArray{
@@ -599,6 +657,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range stringArray.([][]string) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{

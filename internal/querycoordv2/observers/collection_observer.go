@@ -26,13 +26,18 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -49,7 +54,10 @@ type CollectionObserver struct {
 
 	loadTasks *typeutil.ConcurrentMap[string, LoadTask]
 
-	stopOnce sync.Once
+	proxyManager proxyutil.ProxyClientManagerInterface
+
+	startOnce sync.Once
+	stopOnce  sync.Once
 }
 
 type LoadTask struct {
@@ -64,6 +72,7 @@ func NewCollectionObserver(
 	targetMgr *meta.TargetManager,
 	targetObserver *TargetObserver,
 	checherController *checkers.CheckerController,
+	proxyManager proxyutil.ProxyClientManagerInterface,
 ) *CollectionObserver {
 	ob := &CollectionObserver{
 		dist:                 dist,
@@ -73,6 +82,7 @@ func NewCollectionObserver(
 		checkerController:    checherController,
 		partitionLoadedCount: make(map[int64]int),
 		loadTasks:            typeutil.NewConcurrentMap[string, LoadTask](),
+		proxyManager:         proxyManager,
 	}
 
 	// Add load task for collection recovery
@@ -85,27 +95,29 @@ func NewCollectionObserver(
 }
 
 func (ob *CollectionObserver) Start() {
-	ctx, cancel := context.WithCancel(context.Background())
-	ob.cancel = cancel
+	ob.startOnce.Do(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		ob.cancel = cancel
 
-	observePeriod := Params.QueryCoordCfg.CollectionObserverInterval.GetAsDuration(time.Millisecond)
-	ob.wg.Add(1)
-	go func() {
-		defer ob.wg.Done()
+		observePeriod := Params.QueryCoordCfg.CollectionObserverInterval.GetAsDuration(time.Millisecond)
+		ob.wg.Add(1)
+		go func() {
+			defer ob.wg.Done()
 
-		ticker := time.NewTicker(observePeriod)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				log.Info("CollectionObserver stopped")
-				return
+			ticker := time.NewTicker(observePeriod)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					log.Info("CollectionObserver stopped")
+					return
 
-			case <-ticker.C:
-				ob.Observe(ctx)
+				case <-ticker.C:
+					ob.Observe(ctx)
+				}
 			}
-		}
-	}()
+		}()
+	})
 }
 
 func (ob *CollectionObserver) Stop() {
@@ -168,7 +180,7 @@ func (ob *CollectionObserver) observeTimeout() {
 					zap.Duration("loadTime", time.Since(collection.CreatedAt)))
 				ob.meta.CollectionManager.RemoveCollection(collection.GetCollectionID())
 				ob.meta.ReplicaManager.RemoveCollection(collection.GetCollectionID())
-				ob.targetMgr.RemoveCollection(collection.GetCollectionID())
+				ob.targetObserver.ReleaseCollection(collection.GetCollectionID())
 				ob.loadTasks.Remove(traceID)
 			}
 		case querypb.LoadType_LoadPartition:
@@ -202,7 +214,7 @@ func (ob *CollectionObserver) observeTimeout() {
 					zap.Int64s("partitionIDs", task.PartitionIDs))
 				for _, partition := range partitions {
 					ob.meta.CollectionManager.RemovePartition(partition.CollectionID, partition.GetPartitionID())
-					ob.targetMgr.RemovePartition(partition.GetCollectionID(), partition.GetPartitionID())
+					ob.targetObserver.ReleasePartition(partition.GetCollectionID(), partition.GetPartitionID())
 				}
 
 				// all partition timeout, remove collection
@@ -211,7 +223,7 @@ func (ob *CollectionObserver) observeTimeout() {
 
 					ob.meta.CollectionManager.RemoveCollection(task.CollectionID)
 					ob.meta.ReplicaManager.RemoveCollection(task.CollectionID)
-					ob.targetMgr.RemoveCollection(task.CollectionID)
+					ob.targetObserver.ReleaseCollection(task.CollectionID)
 				}
 			}
 		}
@@ -221,7 +233,7 @@ func (ob *CollectionObserver) observeTimeout() {
 
 func (ob *CollectionObserver) readyToObserve(collectionID int64) bool {
 	metaExist := (ob.meta.GetCollection(collectionID) != nil)
-	targetExist := ob.targetMgr.IsNextTargetExist(collectionID) || ob.targetMgr.IsCurrentTargetExist(collectionID)
+	targetExist := ob.targetMgr.IsNextTargetExist(collectionID) || ob.targetMgr.IsCurrentTargetExist(collectionID, common.AllPartitionsID)
 
 	return metaExist && targetExist
 }
@@ -332,7 +344,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
 	if loadPercentage == 100 {
-		if !ob.targetObserver.Check(ctx, partition.GetCollectionID()) {
+		if !ob.targetObserver.Check(ctx, partition.GetCollectionID(), partition.PartitionID) {
 			log.Warn("failed to manual check current target, skip update load status")
 			return
 		}
@@ -346,5 +358,20 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 		zap.Int32("partitionLoadPercentage", loadPercentage),
 		zap.Int32("collectionLoadPercentage", collectionPercentage),
 	)
+	if collectionPercentage == 100 {
+		ob.invalidateCache(ctx, partition.GetCollectionID())
+	}
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("collection %d load percentage update: %d", partition.CollectionID, loadPercentage)))
+}
+
+func (ob *CollectionObserver) invalidateCache(ctx context.Context, collectionID int64) {
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Second))
+	defer cancel()
+	err := ob.proxyManager.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+		CollectionID: collectionID,
+	}, proxyutil.SetMsgType(commonpb.MsgType_LoadCollection))
+	if err != nil {
+		log.Warn("failed to invalidate proxy's shard leader cache", zap.Error(err))
+		return
+	}
 }

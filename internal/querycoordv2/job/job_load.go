@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -91,6 +92,10 @@ func (job *LoadCollectionJob) PreExecute() error {
 		req.ReplicaNumber = 1
 	}
 
+	if len(req.GetResourceGroups()) == 0 {
+		req.ResourceGroups = []string{meta.DefaultResourceGroupName}
+	}
+
 	collection := job.meta.GetCollection(req.GetCollectionID())
 	if collection == nil {
 		return nil
@@ -102,11 +107,22 @@ func (job *LoadCollectionJob) PreExecute() error {
 		)
 		log.Warn(msg)
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded collection")
-	} else if !typeutil.MapEqual(collection.GetFieldIndexID(), req.GetFieldIndexID()) {
-		msg := fmt.Sprintf("collection with different index %v existed, release this collection first before changing its index",
-			collection.GetFieldIndexID())
+	}
+
+	if !funcutil.SliceSetEqual(collection.GetLoadFields(), req.GetLoadFields()) {
+		log.Warn("collection with different load field list exists, release this collection first before chaning its replica number",
+			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
+			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
+		)
+		return merr.WrapErrParameterInvalid(collection.GetLoadFields(), req.GetLoadFields(), "can't change the load field list for loaded collection")
+	}
+	collectionUsedRG := job.meta.ReplicaManager.GetResourceGroupByCollection(collection.GetCollectionID()).Collect()
+	left, right := lo.Difference(collectionUsedRG, req.GetResourceGroups())
+	if len(left) > 0 || len(right) > 0 {
+		msg := fmt.Sprintf("collection with different resource groups %v existed, release this collection first before changing its resource groups",
+			collectionUsedRG)
 		log.Warn(msg)
-		return merr.WrapErrParameterInvalid(collection.GetFieldIndexID(), req.GetFieldIndexID(), "can't change the index for loaded collection")
+		return merr.WrapErrParameterInvalid(collectionUsedRG, req.GetResourceGroups(), "can't change the resource groups for loaded partitions")
 	}
 
 	return nil
@@ -196,6 +212,7 @@ func (job *LoadCollectionJob) Execute() error {
 			Status:        querypb.LoadStatus_Loading,
 			FieldIndexID:  req.GetFieldIndexID(),
 			LoadType:      querypb.LoadType_LoadCollection,
+			LoadFields:    req.GetLoadFields(),
 		},
 		CreatedAt: time.Now(),
 		LoadSpan:  sp,
@@ -282,6 +299,10 @@ func (job *LoadPartitionJob) PreExecute() error {
 		req.ReplicaNumber = 1
 	}
 
+	if len(req.GetResourceGroups()) == 0 {
+		req.ResourceGroups = []string{meta.DefaultResourceGroupName}
+	}
+
 	collection := job.meta.GetCollection(req.GetCollectionID())
 	if collection == nil {
 		return nil
@@ -291,11 +312,22 @@ func (job *LoadPartitionJob) PreExecute() error {
 		msg := "collection with different replica number existed, release this collection first before changing its replica number"
 		log.Warn(msg)
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded partitions")
-	} else if !typeutil.MapEqual(collection.GetFieldIndexID(), req.GetFieldIndexID()) {
-		msg := fmt.Sprintf("collection with different index %v existed, release this collection first before changing its index",
-			job.meta.GetFieldIndex(req.GetCollectionID()))
+	}
+
+	if !funcutil.SliceSetEqual(collection.GetLoadFields(), req.GetLoadFields()) {
+		log.Warn("collection with different load field list exists, release this collection first before chaning its replica number",
+			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
+			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
+		)
+		return merr.WrapErrParameterInvalid(collection.GetLoadFields(), req.GetLoadFields(), "can't change the load field list for loaded collection")
+	}
+	collectionUsedRG := job.meta.ReplicaManager.GetResourceGroupByCollection(collection.GetCollectionID()).Collect()
+	left, right := lo.Difference(collectionUsedRG, req.GetResourceGroups())
+	if len(left) > 0 || len(right) > 0 {
+		msg := fmt.Sprintf("collection with different resource groups %v existed, release this collection first before changing its resource groups",
+			collectionUsedRG)
 		log.Warn(msg)
-		return merr.WrapErrParameterInvalid(collection.GetFieldIndexID(), req.GetFieldIndexID(), "can't change the index for loaded partitions")
+		return merr.WrapErrParameterInvalid(collectionUsedRG, req.GetResourceGroups(), "can't change the resource groups for loaded partitions")
 	}
 
 	return nil
@@ -381,6 +413,7 @@ func (job *LoadPartitionJob) Execute() error {
 				Status:        querypb.LoadStatus_Loading,
 				FieldIndexID:  req.GetFieldIndexID(),
 				LoadType:      querypb.LoadType_LoadPartition,
+				LoadFields:    req.GetLoadFields(),
 			},
 			CreatedAt: time.Now(),
 			LoadSpan:  sp,

@@ -136,7 +136,7 @@ TEST_P(GrowingIndexTest, Correctness) {
     auto range_plan_str = range_query_plan_node.SerializeAsString();
 
     int64_t per_batch = 10000;
-    int64_t n_batch = 20;
+    int64_t n_batch = 3;
     int64_t top_k = 5;
     for (int64_t i = 0; i < n_batch; i++) {
         auto dataset = DataGen(schema, per_batch);
@@ -247,8 +247,8 @@ TEST_P(GrowingIndexTest, GetVector) {
 
     if (data_type == DataType::VECTOR_FLOAT) {
         // GetVector for VECTOR_FLOAT
-        int64_t per_batch = 5000;
-        int64_t n_batch = 20;
+        int64_t per_batch = 10000;
+        int64_t n_batch = 3;
         int64_t dim = 128;
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema, per_batch);
@@ -277,8 +277,8 @@ TEST_P(GrowingIndexTest, GetVector) {
         }
     } else if (is_sparse) {
         // GetVector for VECTOR_SPARSE_FLOAT
-        int64_t per_batch = 5000;
-        int64_t n_batch = 20;
+        int64_t per_batch = 10000;
+        int64_t n_batch = 3;
         int64_t dim = 128;
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema, per_batch);

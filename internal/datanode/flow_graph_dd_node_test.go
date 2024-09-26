@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -76,12 +77,12 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 				droppedSegIDs,
 				test.inSealedSegs,
 				test.inGrowingSegs,
-				newCompactionExecutor(),
+				compaction.NewExecutor(),
 			)
 			require.NoError(t, err)
 			require.NotNil(t, ddNode)
 
-			assert.Equal(t, fmt.Sprintf("ddNode-%d-%s", ddNode.collectionID, ddNode.vChannelName), ddNode.Name())
+			assert.Equal(t, fmt.Sprintf("ddNode-%s", ddNode.vChannelName), ddNode.Name())
 
 			assert.Equal(t, len(test.inSealedSegs), len(ddNode.sealedSegInfo))
 			assert.Equal(t, len(test.inGrowingSegs), len(ddNode.growingSegInfo))
@@ -141,11 +142,11 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 					ctx:                context.Background(),
 					collectionID:       test.ddnCollID,
 					vChannelName:       "ddn_drop_msg",
-					compactionExecutor: newCompactionExecutor(),
+					compactionExecutor: compaction.NewExecutor(),
 				}
 
 				var dropCollMsg msgstream.TsMsg = &msgstream.DropCollectionMsg{
-					DropCollectionRequest: msgpb.DropCollectionRequest{
+					DropCollectionRequest: &msgpb.DropCollectionRequest{
 						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 						CollectionID: test.msgCollID,
 					},
@@ -194,11 +195,11 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 					ctx:                context.Background(),
 					collectionID:       test.ddnCollID,
 					vChannelName:       "ddn_drop_msg",
-					compactionExecutor: newCompactionExecutor(),
+					compactionExecutor: compaction.NewExecutor(),
 				}
 
 				var dropPartMsg msgstream.TsMsg = &msgstream.DropPartitionMsg{
-					DropPartitionRequest: msgpb.DropPartitionRequest{
+					DropPartitionRequest: &msgpb.DropPartitionRequest{
 						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 						CollectionID: test.msgCollID,
 						PartitionID:  test.msgPartID,
@@ -227,7 +228,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 		}
 
 		tsMessages := []msgstream.TsMsg{getInsertMsg(100, 10000), getInsertMsg(200, 20000)}
-		var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
+		var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, []*msgpb.MsgPosition{{Timestamp: 20000}}, []*msgpb.MsgPosition{{Timestamp: 20000}})
 
 		rt := ddn.Operate([]Msg{msgStreamMsg})
 		assert.Equal(t, 1, len(rt[0].(*flowGraphMsg).insertMessages))
@@ -260,7 +261,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 						EndTimestamp: test.MsgEndTs,
 						HashValues:   []uint32{0},
 					},
-					DeleteRequest: msgpb.DeleteRequest{
+					DeleteRequest: &msgpb.DeleteRequest{
 						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
 						ShardName:    "by-dev-rootcoord-dml-mock-0",
 						CollectionID: test.inMsgCollID,
@@ -594,7 +595,7 @@ func getInsertMsg(segmentID UniqueID, ts Timestamp) *msgstream.InsertMsg {
 func getInsertMsgWithChannel(segmentID UniqueID, ts Timestamp, vChannelName string) *msgstream.InsertMsg {
 	return &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{EndTimestamp: ts},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
 			SegmentID:    segmentID,
 			CollectionID: 1,

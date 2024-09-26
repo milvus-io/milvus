@@ -24,10 +24,10 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -543,7 +543,7 @@ func genRowBasedInsertMsg(numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim int) 
 			HashValues:     nil,
 			MsgPosition:    nil,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -581,7 +581,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 			HashValues:     nil,
 			MsgPosition:    nil,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -924,7 +924,7 @@ func TestRowBasedInsertMsgToInsertFloat16VectorDataError(t *testing.T) {
 			HashValues:     nil,
 			MsgPosition:    nil,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -967,7 +967,7 @@ func TestRowBasedInsertMsgToInsertBFloat16VectorDataError(t *testing.T) {
 			HashValues:     nil,
 			MsgPosition:    nil,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -1028,7 +1028,7 @@ func TestColumnBasedInsertMsgToInsertFloat16VectorDataError(t *testing.T) {
 			HashValues:     nil,
 			MsgPosition:    nil,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -1072,7 +1072,7 @@ func TestColumnBasedInsertMsgToInsertBFloat16VectorDataError(t *testing.T) {
 			HashValues:     nil,
 			MsgPosition:    nil,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -1549,94 +1549,6 @@ func Test_stringFieldDataToBytes(t *testing.T) {
 func binaryRead(endian binary.ByteOrder, bs []byte, receiver interface{}) error {
 	reader := bytes.NewReader(bs)
 	return binary.Read(reader, endian, receiver)
-}
-
-func TestFieldDataToBytes(t *testing.T) {
-	// TODO: test big endian.
-	endian := common.Endian
-
-	var bs []byte
-	var err error
-	var receiver interface{}
-
-	f1 := &BoolFieldData{Data: []bool{true, false}}
-	bs, err = FieldDataToBytes(endian, f1)
-	assert.NoError(t, err)
-	var barr schemapb.BoolArray
-	err = proto.Unmarshal(bs, &barr)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f1.Data, barr.Data)
-
-	f2 := &StringFieldData{Data: []string{"true", "false"}}
-	bs, err = FieldDataToBytes(endian, f2)
-	assert.NoError(t, err)
-	var sarr schemapb.StringArray
-	err = proto.Unmarshal(bs, &sarr)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f2.Data, sarr.Data)
-
-	f3 := &Int8FieldData{Data: []int8{0, 1}}
-	bs, err = FieldDataToBytes(endian, f3)
-	assert.NoError(t, err)
-	receiver = make([]int8, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f3.Data, receiver)
-
-	f4 := &Int16FieldData{Data: []int16{0, 1}}
-	bs, err = FieldDataToBytes(endian, f4)
-	assert.NoError(t, err)
-	receiver = make([]int16, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f4.Data, receiver)
-
-	f5 := &Int32FieldData{Data: []int32{0, 1}}
-	bs, err = FieldDataToBytes(endian, f5)
-	assert.NoError(t, err)
-	receiver = make([]int32, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f5.Data, receiver)
-
-	f6 := &Int64FieldData{Data: []int64{0, 1}}
-	bs, err = FieldDataToBytes(endian, f6)
-	assert.NoError(t, err)
-	receiver = make([]int64, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f6.Data, receiver)
-
-	// in fact, hard to compare float point value.
-
-	f7 := &FloatFieldData{Data: []float32{0, 1}}
-	bs, err = FieldDataToBytes(endian, f7)
-	assert.NoError(t, err)
-	receiver = make([]float32, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f7.Data, receiver)
-
-	f8 := &DoubleFieldData{Data: []float64{0, 1}}
-	bs, err = FieldDataToBytes(endian, f8)
-	assert.NoError(t, err)
-	receiver = make([]float64, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f8.Data, receiver)
-
-	f9 := &BinaryVectorFieldData{Data: []byte{0, 1, 0}}
-	bs, err = FieldDataToBytes(endian, f9)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f9.Data, bs)
-
-	f10 := &FloatVectorFieldData{Data: []float32{0, 1}}
-	bs, err = FieldDataToBytes(endian, f10)
-	assert.NoError(t, err)
-	receiver = make([]float32, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f10.Data, receiver)
 }
 
 func TestJson(t *testing.T) {

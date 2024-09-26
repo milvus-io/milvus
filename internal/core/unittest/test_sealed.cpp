@@ -17,7 +17,7 @@
 #include "index/IndexFactory.h"
 #include "knowhere/version.h"
 #include "segcore/SegmentSealedImpl.h"
-#include "storage/ChunkCacheSingleton.h"
+#include "storage/MmapManager.h"
 #include "storage/MinioChunkManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
@@ -498,7 +498,8 @@ TEST(Sealed, LoadFieldData) {
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
-    auto chunk_span3 = segment->chunk_data<std::string_view>(str_id, 0);
+    auto chunk_span3 =
+        segment->get_batch_views<std::string_view>(str_id, 0, 0, N);
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
@@ -624,7 +625,8 @@ TEST(Sealed, ClearData) {
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
-    auto chunk_span3 = segment->chunk_data<std::string_view>(str_id, 0);
+    auto chunk_span3 =
+        segment->get_batch_views<std::string_view>(str_id, 0, 0, N);
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
@@ -726,7 +728,8 @@ TEST(Sealed, LoadFieldDataMmap) {
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
-    auto chunk_span3 = segment->chunk_data<std::string_view>(str_id, 0);
+    auto chunk_span3 =
+        segment->get_batch_views<std::string_view>(str_id, 0, 0, N);
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
@@ -1375,7 +1378,6 @@ TEST(Sealed, GetVectorFromChunkCache) {
     auto metric_type = knowhere::metric::L2;
     auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
 
-    auto mmap_dir = "/tmp/mmap";
     auto file_name = std::string(
         "sealed_test_get_vector_from_chunk_cache/insert_log/1/101/1000000");
 
@@ -1439,11 +1441,9 @@ TEST(Sealed, GetVectorFromChunkCache) {
                         std::vector<int64_t>{N},
                         false,
                         std::vector<std::string>{file_name}};
-    segment_sealed->AddFieldDataInfoForSealed(LoadFieldDataInfo{
-        std::map<int64_t, FieldBinlogInfo>{
-            {fakevec_id.get(), field_binlog_info}},
-        mmap_dir,
-    });
+    segment_sealed->AddFieldDataInfoForSealed(
+        LoadFieldDataInfo{std::map<int64_t, FieldBinlogInfo>{
+            {fakevec_id.get(), field_binlog_info}}});
 
     auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
     auto has = segment->HasRawData(vec_info.field_id);
@@ -1466,10 +1466,7 @@ TEST(Sealed, GetVectorFromChunkCache) {
     }
 
     rcm->Remove(file_name);
-    std::filesystem::remove_all(mmap_dir);
     auto exist = rcm->Exist(file_name);
-    Assert(!exist);
-    exist = std::filesystem::exists(mmap_dir);
     Assert(!exist);
 }
 
@@ -1485,15 +1482,12 @@ TEST(Sealed, GetSparseVectorFromChunkCache) {
     // we have a type of sparse index that doesn't include raw data.
     auto index_type = knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX;
 
-    auto mmap_dir = "/tmp/mmap";
     auto file_name = std::string(
         "sealed_test_get_vector_from_chunk_cache/insert_log/1/101/1000000");
 
     auto sc = milvus::storage::StorageConfig{};
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(sc);
     auto mcm = std::make_unique<milvus::storage::MinioChunkManager>(sc);
-    milvus::storage::ChunkCacheSingleton::GetInstance().Init(mmap_dir,
-                                                             "willneed");
 
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
@@ -1551,11 +1545,9 @@ TEST(Sealed, GetSparseVectorFromChunkCache) {
                         std::vector<int64_t>{N},
                         false,
                         std::vector<std::string>{file_name}};
-    segment_sealed->AddFieldDataInfoForSealed(LoadFieldDataInfo{
-        std::map<int64_t, FieldBinlogInfo>{
-            {fakevec_id.get(), field_binlog_info}},
-        mmap_dir,
-    });
+    segment_sealed->AddFieldDataInfoForSealed(
+        LoadFieldDataInfo{std::map<int64_t, FieldBinlogInfo>{
+            {fakevec_id.get(), field_binlog_info}}});
 
     auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
 
@@ -1580,10 +1572,7 @@ TEST(Sealed, GetSparseVectorFromChunkCache) {
     }
 
     rcm->Remove(file_name);
-    std::filesystem::remove_all(mmap_dir);
     auto exist = rcm->Exist(file_name);
-    Assert(!exist);
-    exist = std::filesystem::exists(mmap_dir);
     Assert(!exist);
 }
 
@@ -1658,11 +1647,9 @@ TEST(Sealed, WarmupChunkCache) {
                         std::vector<int64_t>{N},
                         false,
                         std::vector<std::string>{file_name}};
-    segment_sealed->AddFieldDataInfoForSealed(LoadFieldDataInfo{
-        std::map<int64_t, FieldBinlogInfo>{
-            {fakevec_id.get(), field_binlog_info}},
-        mmap_dir,
-    });
+    segment_sealed->AddFieldDataInfoForSealed(
+        LoadFieldDataInfo{std::map<int64_t, FieldBinlogInfo>{
+            {fakevec_id.get(), field_binlog_info}}});
 
     auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
     auto has = segment->HasRawData(vec_info.field_id);

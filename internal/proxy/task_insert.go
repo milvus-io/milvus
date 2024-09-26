@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -91,6 +92,11 @@ func (it *insertTask) getChannels() []pChan {
 }
 
 func (it *insertTask) OnEnqueue() error {
+	if it.insertMsg.Base == nil {
+		it.insertMsg.Base = commonpbutil.NewMsgBase()
+	}
+	it.insertMsg.Base.MsgType = commonpb.MsgType_Insert
+	it.insertMsg.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
@@ -116,13 +122,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	if maxInsertSize != -1 && it.insertMsg.Size() > maxInsertSize {
 		log.Warn("insert request size exceeds maxInsertSize",
 			zap.Int("request size", it.insertMsg.Size()), zap.Int("maxInsertSize", maxInsertSize))
-		return merr.WrapErrParameterTooLarge("insert request size exceeds maxInsertSize")
+		return merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge("insert request size exceeds maxInsertSize"))
 	}
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
-		return err
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
 	it.schema = schema.CollectionSchema
 
@@ -163,7 +169,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	// check primaryFieldData whether autoID is true or not
 	// set rowIDs as primary data if autoID == true
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
-	it.result.IDs, err = checkPrimaryFieldData(it.schema, it.result, it.insertMsg, true)
+	it.result.IDs, err = checkPrimaryFieldData(it.schema, it.insertMsg)
 	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName))
 	if err != nil {
 		log.Warn("check primary field data and hash primary key failed",
@@ -172,7 +178,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	// set field ID to insert field data
-	err = fillFieldIDBySchema(it.insertMsg.GetFieldsData(), schema.CollectionSchema)
+	err = fillFieldPropertiesBySchema(it.insertMsg.GetFieldsData(), schema.CollectionSchema)
 	if err != nil {
 		log.Info("set fieldID to fieldData failed",
 			zap.Error(err))
@@ -207,8 +213,8 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
-		Validate(it.insertMsg.GetFieldsData(), schema.CollectionSchema, it.insertMsg.NRows()); err != nil {
-		return err
+		Validate(it.insertMsg.GetFieldsData(), schema.schemaHelper, it.insertMsg.NRows()); err != nil {
+		return merr.WrapErrAsInputError(err)
 	}
 
 	log.Debug("Proxy Insert PreExecute done")

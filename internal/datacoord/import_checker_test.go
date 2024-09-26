@@ -52,6 +52,9 @@ func (s *ImportCheckerSuite) SetupTest() {
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 
 	cluster := NewMockCluster(s.T())
 	alloc := NewNMockAllocator(s.T())
@@ -217,6 +220,7 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	alloc.EXPECT().allocN(mock.Anything).Return(0, 0, nil)
 	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(mockErr)
+
 	s.checker.checkPendingJob(job)
 	preimportTasks := s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
 	s.Equal(0, len(preimportTasks))
@@ -272,6 +276,7 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 func (s *ImportCheckerSuite) TestCheckTimeout() {
 	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
+
 	var task ImportTask = &preImportTask{
 		PreImportTask: &datapb.PreImportTask{
 			JobID:  s.jobID,
@@ -291,6 +296,7 @@ func (s *ImportCheckerSuite) TestCheckTimeout() {
 func (s *ImportCheckerSuite) TestCheckFailure() {
 	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
+
 	pit1 := &preImportTask{
 		PreImportTask: &datapb.PreImportTask{
 			JobID:  s.jobID,

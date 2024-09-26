@@ -28,8 +28,8 @@ func (c floatVectorBaseChecker) CheckTrain(params map[string]string) error {
 	return c.staticCheck(params)
 }
 
-func (c floatVectorBaseChecker) CheckValidDataType(dType schemapb.DataType) error {
-	if !typeutil.IsDenseFloatVectorType(dType) {
+func (c floatVectorBaseChecker) CheckValidDataType(field *schemapb.FieldSchema) error {
+	if !typeutil.IsDenseFloatVectorType(field.GetDataType()) {
 		return fmt.Errorf("data type should be FloatVector, Float16Vector or BFloat16Vector")
 	}
 	return nil

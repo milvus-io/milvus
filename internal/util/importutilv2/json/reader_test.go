@@ -93,6 +93,10 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 						Key:   common.MaxLengthKey,
 						Value: "128",
 					},
+					{
+						Key:   common.MaxCapacityKey,
+						Value: "128",
+					},
 				},
 			},
 		},

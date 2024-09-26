@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
@@ -30,7 +31,7 @@ import (
 func TestConfigFromEnv(t *testing.T) {
 	mgr, _ := Init()
 	_, err := mgr.GetConfig("test.env")
-	assert.EqualError(t, err, "key not found: test.env")
+	assert.ErrorIs(t, err, ErrKeyNotFound)
 
 	t.Setenv("TEST_ENV", "value")
 	mgr, _ = Init(WithEnvSource(formatKey))
@@ -67,7 +68,7 @@ func TestConfigFromRemote(t *testing.T) {
 
 	t.Run("origin is empty", func(t *testing.T) {
 		_, err = mgr.GetConfig("test.etcd")
-		assert.EqualError(t, err, "key not found: test.etcd")
+		assert.ErrorIs(t, err, ErrKeyNotFound)
 
 		client.KV.Put(ctx, "test/config/test/etcd", "value")
 
@@ -84,7 +85,7 @@ func TestConfigFromRemote(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 
 		_, err = mgr.GetConfig("TEST_ETCD")
-		assert.EqualError(t, err, "key not found: TEST_ETCD")
+		assert.ErrorIs(t, err, ErrKeyNotFound)
 	})
 
 	t.Run("override origin value", func(t *testing.T) {
@@ -134,7 +135,7 @@ func TestConfigFromRemote(t *testing.T) {
 		client.KV.Put(ctx, "test/config/test/etcd", "value2")
 		assert.Eventually(t, func() bool {
 			_, err = mgr.GetConfig("test.etcd")
-			return err != nil && err.Error() == "key not found: test.etcd"
+			return err != nil && errors.Is(err, ErrKeyNotFound)
 		}, 300*time.Millisecond, 10*time.Millisecond)
 	})
 }

@@ -62,7 +62,7 @@ TEST(Util, GetDeleteBitmap) {
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto N = 10;
-
+    uint64_t seg_id = 101;
     InsertRecord insert_record(*schema, N);
     DeletedRecord delete_record;
 

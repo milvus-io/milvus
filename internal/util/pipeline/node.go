@@ -24,21 +24,20 @@ type Node interface {
 	Name() string
 	MaxQueueLength() int32
 	Operate(in Msg) Msg
-	Start()
-	Close()
 }
 
 type nodeCtx struct {
 	node         Node
-	inputChannel chan Msg
-	next         *nodeCtx
-	checker      *timerecord.GroupChecker
+	InputChannel chan Msg
+
+	Next    *nodeCtx
+	Checker *timerecord.Checker
 }
 
-func newNodeCtx(node Node) *nodeCtx {
+func NewNodeCtx(node Node) *nodeCtx {
 	return &nodeCtx{
 		node:         node,
-		inputChannel: make(chan Msg, node.MaxQueueLength()),
+		InputChannel: make(chan Msg, node.MaxQueueLength()),
 	}
 }
 
@@ -56,12 +55,6 @@ func (node *BaseNode) Name() string {
 func (node *BaseNode) MaxQueueLength() int32 {
 	return node.maxQueueLength
 }
-
-// Start implementing Node, base node does nothing when starts
-func (node *BaseNode) Start() {}
-
-// Close implementing Node, base node does nothing when stops
-func (node *BaseNode) Close() {}
 
 func NewBaseNode(name string, maxQueryLength int32) *BaseNode {
 	return &BaseNode{

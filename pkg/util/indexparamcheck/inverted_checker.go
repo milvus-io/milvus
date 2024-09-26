@@ -16,8 +16,10 @@ func (c *INVERTEDChecker) CheckTrain(params map[string]string) error {
 	return c.scalarIndexChecker.CheckTrain(params)
 }
 
-func (c *INVERTEDChecker) CheckValidDataType(dType schemapb.DataType) error {
-	if !typeutil.IsBoolType(dType) && !typeutil.IsArithmetic(dType) && !typeutil.IsStringType(dType) {
+func (c *INVERTEDChecker) CheckValidDataType(field *schemapb.FieldSchema) error {
+	dType := field.GetDataType()
+	if !typeutil.IsBoolType(dType) && !typeutil.IsArithmetic(dType) && !typeutil.IsStringType(dType) &&
+		!typeutil.IsArrayType(dType) {
 		return fmt.Errorf("INVERTED are not supported on %s field", dType.String())
 	}
 	return nil

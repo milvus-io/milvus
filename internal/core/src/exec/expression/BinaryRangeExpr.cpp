@@ -53,7 +53,10 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VARCHAR: {
-            if (segment_->type() == SegmentType::Growing) {
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
                 result = ExecRangeVisitorImpl<std::string>();
             } else {
                 result = ExecRangeVisitorImpl<std::string_view>();
@@ -88,14 +91,17 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto value_type = expr_->lower_val_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplForArray<int64_t>();
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplForArray<double>();
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kStringVal: {
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplForArray<std::string>();
                     break;
                 }

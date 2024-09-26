@@ -27,7 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -38,7 +38,7 @@ func TestInputNode(t *testing.T) {
 
 	msgStream, _ := factory.NewMsgStream(context.TODO())
 	channels := []string{"cc"}
-	msgStream.AsConsumer(context.Background(), channels, "sub", mqwrapper.SubscriptionPositionEarliest)
+	msgStream.AsConsumer(context.Background(), channels, "sub", common.SubscriptionPositionEarliest)
 
 	msgPack := generateMsgPack()
 	produceStream, _ := factory.NewMsgStream(context.TODO())
@@ -81,7 +81,7 @@ func Test_InputNodeSkipMode(t *testing.T) {
 
 	msgStream, _ := factory.NewMsgStream(context.TODO())
 	channels := []string{"cc" + fmt.Sprint(rand.Int())}
-	msgStream.AsConsumer(context.Background(), channels, "sub", mqwrapper.SubscriptionPositionEarliest)
+	msgStream.AsConsumer(context.Background(), channels, "sub", common.SubscriptionPositionEarliest)
 
 	produceStream, _ := factory.NewMsgStream(context.TODO())
 	produceStream.AsProducer(channels)

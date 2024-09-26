@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+//go:generate mockery --name=MetaCache --structname=MockMetaCache --output=./  --filename=mock_meta_cache.go --with-expecter --inpackage
 type MetaCache interface {
 	// Collection returns collection id of metacache.
 	Collection() int64
@@ -41,8 +42,6 @@ type MetaCache interface {
 	UpdateSegments(action SegmentAction, filters ...SegmentFilter)
 	// RemoveSegments removes segments matches the provided filter.
 	RemoveSegments(filters ...SegmentFilter) []int64
-	// CompactSegments transfers compaction segment results inside the metacache.
-	CompactSegments(newSegmentID, partitionID int64, numRows int64, bfs *BloomFilterSet, oldSegmentIDs ...int64)
 	// GetSegmentsBy returns segments statify the provided filters.
 	GetSegmentsBy(filters ...SegmentFilter) []*SegmentInfo
 	// GetSegmentByID returns segment with provided segment id if exists.
@@ -51,6 +50,10 @@ type MetaCache interface {
 	GetSegmentIDsBy(filters ...SegmentFilter) []int64
 	// PredictSegments returns the segment ids which may contain the provided primary key.
 	PredictSegments(pk storage.PrimaryKey, filters ...SegmentFilter) ([]int64, bool)
+	// DetectMissingSegments returns the segment ids which is missing in datanode.
+	DetectMissingSegments(segments map[int64]struct{}) []int64
+	// UpdateSegmentView updates the segments BF from datacoord view.
+	UpdateSegmentView(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*BloomFilterSet, allSegments map[int64]struct{})
 }
 
 var _ MetaCache = (*metaCacheImpl)(nil)
@@ -111,42 +114,6 @@ func (c *metaCacheImpl) AddSegment(segInfo *datapb.SegmentInfo, factory PkStatsF
 	defer c.mu.Unlock()
 
 	c.segmentInfos[segInfo.GetID()] = segment
-}
-
-func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, numOfRows int64, bfs *BloomFilterSet, oldSegmentIDs ...int64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	compactTo := NullSegment
-	if numOfRows > 0 {
-		compactTo = newSegmentID
-		if _, ok := c.segmentInfos[newSegmentID]; !ok {
-			c.segmentInfos[newSegmentID] = &SegmentInfo{
-				segmentID:        newSegmentID,
-				partitionID:      partitionID,
-				state:            commonpb.SegmentState_Flushed,
-				level:            datapb.SegmentLevel_L1,
-				flushedRows:      numOfRows,
-				startPosRecorded: true,
-				bfs:              bfs,
-			}
-		}
-		log.Info("add compactTo segment info metacache", zap.Int64("segmentID", compactTo))
-	}
-
-	oldSet := typeutil.NewSet(oldSegmentIDs...)
-	for _, segment := range c.segmentInfos {
-		if oldSet.Contain(segment.segmentID) ||
-			oldSet.Contain(segment.compactTo) {
-			updated := segment.Clone()
-			updated.compactTo = compactTo
-			c.segmentInfos[segment.segmentID] = updated
-			log.Info("update segment compactTo",
-				zap.Int64("segmentID", segment.segmentID),
-				zap.Int64("originalCompactTo", segment.compactTo),
-				zap.Int64("compactTo", compactTo))
-		}
-	}
 }
 
 func (c *metaCacheImpl) RemoveSegments(filters ...SegmentFilter) []int64 {
@@ -256,6 +223,60 @@ func (c *metaCacheImpl) rangeWithFilter(fn func(id int64, info *SegmentInfo), fi
 			if mergedFilter(info) {
 				fn(id, info)
 			}
+		}
+	}
+}
+
+func (c *metaCacheImpl) DetectMissingSegments(segments map[int64]struct{}) []int64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	missingSegments := make([]int64, 0)
+
+	for segID := range segments {
+		if _, ok := c.segmentInfos[segID]; !ok {
+			missingSegments = append(missingSegments, segID)
+		}
+	}
+
+	return missingSegments
+}
+
+func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
+	newSegments []*datapb.SyncSegmentInfo,
+	newSegmentsBF []*BloomFilterSet,
+	allSegments map[int64]struct{},
+) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for i, info := range newSegments {
+		// check again
+		if _, ok := c.segmentInfos[info.GetSegmentId()]; !ok {
+			segInfo := &SegmentInfo{
+				segmentID:        info.GetSegmentId(),
+				partitionID:      partitionID,
+				state:            info.GetState(),
+				level:            info.GetLevel(),
+				flushedRows:      info.GetNumOfRows(),
+				startPosRecorded: true,
+				bfs:              newSegmentsBF[i],
+			}
+			c.segmentInfos[info.GetSegmentId()] = segInfo
+			log.Info("metacache does not have segment, add it", zap.Int64("segmentID", info.GetSegmentId()))
+		}
+	}
+
+	for segID, info := range c.segmentInfos {
+		// only check flushed segments
+		// 1. flushing may be compacted on datacoord
+		// 2. growing may doesn't have stats log, it won't include in sync views
+		if info.partitionID != partitionID || info.state != commonpb.SegmentState_Flushed {
+			continue
+		}
+		if _, ok := allSegments[segID]; !ok {
+			log.Info("remove dropped segment", zap.Int64("segmentID", segID))
+			delete(c.segmentInfos, segID)
 		}
 	}
 }

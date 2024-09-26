@@ -35,6 +35,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -77,14 +78,14 @@ func BytesToInt(b []byte) int {
 }
 
 func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, arr []int) {
-	producer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	producer, err := pc.CreateProducer(mqcommon.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
 	log.Info("Produce start")
 
 	for _, v := range arr {
-		msg := &mqwrapper.ProducerMessage{
+		msg := &mqcommon.ProducerMessage{
 			Payload:    IntToBytes(v),
 			Properties: map[string]string{},
 		}
@@ -96,7 +97,7 @@ func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, 
 	log.Info("Produce done")
 }
 
-func VerifyMessage(t *testing.T, msg mqwrapper.Message) {
+func VerifyMessage(t *testing.T, msg mqcommon.Message) {
 	pload := BytesToInt(msg.Payload())
 	log.Info("RECV", zap.Any("v", pload))
 	pm := msg.(*pulsarMessage)
@@ -108,12 +109,12 @@ func VerifyMessage(t *testing.T, msg mqwrapper.Message) {
 }
 
 // Consume1 will consume random messages and record the last MessageID it received
-func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, c chan mqwrapper.MessageID, total *int) {
+func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, c chan mqcommon.MessageID, total *int) {
 	consumer, err := pc.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
@@ -125,7 +126,7 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 	rand.Seed(time.Now().UnixNano())
 	cnt := 1 + rand.Int()%5
 
-	var msg mqwrapper.Message
+	var msg mqcommon.Message
 	for i := 0; i < cnt; i++ {
 		select {
 		case <-ctx.Done():
@@ -145,12 +146,12 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 }
 
 // Consume2 will consume messages from specified MessageID
-func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, msgID mqwrapper.MessageID, total *int) {
+func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, msgID mqcommon.MessageID, total *int) {
 	consumer, err := pc.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
@@ -184,7 +185,7 @@ func Consume3(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
@@ -217,7 +218,7 @@ func TestPulsarClient_Consume1(t *testing.T) {
 	topic := fmt.Sprintf("test-topic-%d", rand.Int())
 	subName := fmt.Sprintf("test-subname-%d", rand.Int())
 	arr := []int{111, 222, 333, 444, 555, 666, 777}
-	c := make(chan mqwrapper.MessageID, 1)
+	c := make(chan mqcommon.MessageID, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -256,7 +257,7 @@ func TestPulsarClient_Consume1(t *testing.T) {
 	log.Info("main done")
 }
 
-func Consume21(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, c chan mqwrapper.MessageID, total *int) {
+func Consume21(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, c chan mqcommon.MessageID, total *int) {
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
@@ -294,7 +295,7 @@ func Consume21(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 }
 
 // Consume2 will consume messages from specified MessageID
-func Consume22(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, msgID mqwrapper.MessageID, total *int) {
+func Consume22(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, msgID mqcommon.MessageID, total *int) {
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
@@ -368,7 +369,7 @@ func TestPulsarClient_Consume2(t *testing.T) {
 	topic := fmt.Sprintf("test-topic-%d", rand.Int())
 	subName := fmt.Sprintf("test-subname-%d", rand.Int())
 	arr := []int{111, 222, 333, 444, 555, 666, 777}
-	c := make(chan mqwrapper.MessageID, 1)
+	c := make(chan mqcommon.MessageID, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -419,16 +420,16 @@ func TestPulsarClient_SeekPosition(t *testing.T) {
 	topic := fmt.Sprintf("test-topic-%d", rand.Int())
 	subName := fmt.Sprintf("test-subname-%d", rand.Int())
 
-	producer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	producer, err := pc.CreateProducer(mqcommon.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
 	log.Info("Produce start")
-	ids := []mqwrapper.MessageID{}
+	ids := []mqcommon.MessageID{}
 	arr1 := []int{1, 2, 3}
 	arr2 := []string{"1", "2", "3"}
 	for k, v := range arr1 {
-		msg := &mqwrapper.ProducerMessage{
+		msg := &mqcommon.ProducerMessage{
 			Payload: IntToBytes(v),
 			Properties: map[string]string{
 				common.TraceIDKey: arr2[k],
@@ -497,7 +498,7 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 	topic := fmt.Sprintf("test-topic-%d", rand.Int())
 	subName := fmt.Sprintf("test-subname-%d", rand.Int())
 
-	producer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	producer, err := pc.CreateProducer(mqcommon.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
@@ -505,7 +506,7 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 
 	arr := []int{1, 2, 3}
 	for _, v := range arr {
-		msg := &mqwrapper.ProducerMessage{
+		msg := &mqcommon.ProducerMessage{
 			Payload:    IntToBytes(v),
 			Properties: map[string]string{},
 		}
@@ -539,7 +540,7 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 			loop = false
 		case <-ticker.C:
 			log.Info("after 2 seconds")
-			msg := &mqwrapper.ProducerMessage{
+			msg := &mqcommon.ProducerMessage{
 				Payload:    IntToBytes(4),
 				Properties: map[string]string{},
 			}
@@ -681,7 +682,7 @@ func TestPulsarClient_WithTenantAndNamespace(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
 	pc, err := NewClient(tenant, namespace, pulsar.ClientOptions{URL: pulsarAddress})
 	assert.NoError(t, err)
-	producer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	producer, err := pc.CreateProducer(mqcommon.ProducerOptions{Topic: topic})
 	defer producer.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
@@ -694,7 +695,7 @@ func TestPulsarClient_WithTenantAndNamespace(t *testing.T) {
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
 	})
 	defer consumer.Close()
 	assert.NoError(t, err)
@@ -712,7 +713,7 @@ func TestPulsarCtl(t *testing.T) {
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
@@ -722,7 +723,7 @@ func TestPulsarCtl(t *testing.T) {
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
 	})
 
 	assert.Error(t, err)
@@ -731,7 +732,7 @@ func TestPulsarCtl(t *testing.T) {
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
 	})
 	assert.Error(t, err)
 
@@ -761,7 +762,7 @@ func TestPulsarCtl(t *testing.T) {
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer2)

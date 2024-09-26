@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -48,7 +49,7 @@
 #include "query/SearchOnSealed.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
-#include "storage/ChunkCacheSingleton.h"
+#include "storage/MmapManager.h"
 
 namespace milvus::segcore {
 
@@ -151,9 +152,10 @@ SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
                id_);
     auto field_info = it->second;
 
-    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    auto cc = storage::MmapManager::GetInstance().GetChunkCache();
+    const bool mmap_rss_not_need = true;
     for (const auto& data_path : field_info.insert_files) {
-        auto column = cc->Read(data_path);
+        auto column = cc->Read(data_path, mmap_descriptor_, mmap_rss_not_need);
     }
 }
 
@@ -379,6 +381,11 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         // Don't allow raw data and index exist at the same time
         //        AssertInfo(!get_bit(index_ready_bitset_, field_id),
         //                   "field data can't be loaded when indexing exists");
+        auto get_block_size = [&]() -> size_t {
+            return schema_->get_primary_field_id() == field_id
+                       ? DEFAULT_PK_VRCOL_BLOCK_SIZE
+                       : DEFAULT_MEM_VRCOL_BLOCK_SIZE;
+        };
 
         std::shared_ptr<ColumnBase> column{};
         if (IsVariableDataType(data_type)) {
@@ -388,7 +395,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                 case milvus::DataType::VARCHAR: {
                     auto var_column =
                         std::make_shared<VariableColumn<std::string>>(
-                            num_rows, field_meta);
+                            num_rows, field_meta, get_block_size());
                     FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
                         var_column->Append(std::move(field_data));
@@ -403,7 +410,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                 case milvus::DataType::JSON: {
                     auto var_column =
                         std::make_shared<VariableColumn<milvus::Json>>(
-                            num_rows, field_meta);
+                            num_rows, field_meta, get_block_size());
                     FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
                         var_column->Append(std::move(field_data));
@@ -514,7 +521,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
 
 void
 SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
-    auto filepath = std::filesystem::path(data.mmap_dir_path) /
+    auto filepath = std::filesystem::path(data.mmap_dir_path) / "raw_data" /
                     std::to_string(get_segment_id()) /
                     std::to_string(field_id.get());
     auto dir = filepath.parent_path();
@@ -526,28 +533,19 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     auto data_type = field_meta.get_data_type();
 
     // write the field data to disk
+    FieldDataPtr field_data;
+    uint64_t total_written = 0;
     std::vector<uint64_t> indices{};
     std::vector<std::vector<uint64_t>> element_indices{};
-    FieldDataPtr field_data;
-    size_t total_written = 0;
     while (data.channel->pop(field_data)) {
-        auto written =
-            WriteFieldData(file, data_type, field_data, element_indices);
-
-        AssertInfo(written == field_data->Size(),
-                   fmt::format("failed to write data file {}, written {} but "
-                               "total {}, err: {}",
-                               filepath.c_str(),
-                               written,
-                               field_data->Size(),
-                               strerror(errno)));
-
-        for (auto i = 0; i < field_data->get_num_rows(); i++) {
-            auto size = field_data->Size(i);
-            indices.emplace_back(total_written);
-            total_written += size;
-        }
+        WriteFieldData(file,
+                       data_type,
+                       field_data,
+                       total_written,
+                       indices,
+                       element_indices);
     }
+    WriteFieldPadding(file, data_type, total_written);
 
     auto num_rows = data.row_count;
     std::shared_ptr<ColumnBase> column{};
@@ -556,7 +554,10 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             case milvus::DataType::STRING:
             case milvus::DataType::VARCHAR: {
                 auto var_column = std::make_shared<VariableColumn<std::string>>(
-                    file, total_written, field_meta);
+                    file,
+                    total_written,
+                    field_meta,
+                    DEFAULT_MMAP_VRCOL_BLOCK_SIZE);
                 var_column->Seal(std::move(indices));
                 column = std::move(var_column);
                 break;
@@ -564,7 +565,10 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             case milvus::DataType::JSON: {
                 auto var_column =
                     std::make_shared<VariableColumn<milvus::Json>>(
-                        file, total_written, field_meta);
+                        file,
+                        total_written,
+                        field_meta,
+                        DEFAULT_MMAP_VRCOL_BLOCK_SIZE);
                 var_column->Seal(std::move(indices));
                 column = std::move(var_column);
                 break;
@@ -596,6 +600,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     {
         std::unique_lock lck(mutex_);
         fields_.emplace(field_id, column);
+        mmap_fields_.insert(field_id);
     }
 
     auto ok = unlink(filepath.c_str());
@@ -630,8 +635,38 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     ParsePksFromIDs(pks, field_meta.get_data_type(), *info.primary_keys);
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
-    // step 2: fill pks and timestamps
-    deleted_record_.push(pks, timestamps);
+    std::vector<std::tuple<Timestamp, PkType>> ordering(size);
+    for (int i = 0; i < size; i++) {
+        ordering[i] = std::make_tuple(timestamps[i], pks[i]);
+    }
+
+    if (!insert_record_.empty_pks()) {
+        auto end = std::remove_if(
+            ordering.begin(),
+            ordering.end(),
+            [&](const std::tuple<Timestamp, PkType>& record) {
+                return !insert_record_.contain(std::get<1>(record));
+            });
+        size = end - ordering.begin();
+        ordering.resize(size);
+    }
+
+    // all record filtered
+    if (size == 0) {
+        return;
+    }
+
+    std::sort(ordering.begin(), ordering.end());
+    std::vector<PkType> sort_pks(size);
+    std::vector<Timestamp> sort_timestamps(size);
+
+    for (int i = 0; i < size; i++) {
+        auto [t, pk] = ordering[i];
+        sort_timestamps[i] = t;
+        sort_pks[i] = pk;
+    }
+
+    deleted_record_.push(sort_pks, sort_timestamps.data());
 }
 
 void
@@ -667,6 +702,29 @@ SegmentSealedImpl::size_per_chunk() const {
     return get_row_count();
 }
 
+BufferView
+SegmentSealedImpl::get_chunk_buffer(FieldId field_id,
+                                    int64_t chunk_id,
+                                    int64_t start_offset,
+                                    int64_t length) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    auto& field_meta = schema_->operator[](field_id);
+    if (auto it = fields_.find(field_id); it != fields_.end()) {
+        auto& field_data = it->second;
+        return field_data->GetBatchBuffer(start_offset, length);
+    }
+    PanicInfo(ErrorCode::UnexpectedError,
+              "get_chunk_buffer only used for  variable column field");
+}
+
+bool
+SegmentSealedImpl::is_mmap_field(FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    return mmap_fields_.find(field_id) != mmap_fields_.end();
+}
+
 SpanBase
 SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     std::shared_lock lck(mutex_);
@@ -681,6 +739,20 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     AssertInfo(field_data->num_chunk() == 1,
                "num chunk not equal to 1 for sealed segment");
     return field_data->get_span_base(0);
+}
+
+std::vector<std::string_view>
+SegmentSealedImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    auto& field_meta = schema_->operator[](field_id);
+    if (auto it = fields_.find(field_id); it != fields_.end()) {
+        auto& field_data = it->second;
+        return field_data->StringViews();
+    }
+    PanicInfo(ErrorCode::UnexpectedError,
+              "chunk_view_impl only used for variable column field ");
 }
 
 const index::IndexBase*
@@ -819,8 +891,10 @@ SegmentSealedImpl::GetFieldDataPath(FieldId field_id, int64_t offset) const {
 }
 
 std::tuple<std::string, std::shared_ptr<ColumnBase>> static ReadFromChunkCache(
-    const storage::ChunkCachePtr& cc, const std::string& data_path) {
-    auto column = cc->Read(data_path);
+    const storage::ChunkCachePtr& cc,
+    const std::string& data_path,
+    const storage::MmapChunkDescriptorPtr& descriptor) {
+    auto column = cc->Read(data_path, descriptor);
     cc->Prefetch(data_path);
     return {data_path, column};
 }
@@ -864,7 +938,7 @@ SegmentSealedImpl::get_vector(FieldId field_id,
     }
 
     // If index doesn't have raw data, get vector from chunk cache.
-    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    auto cc = storage::MmapManager::GetInstance().GetChunkCache();
 
     // group by data_path
     auto id_to_data_path =
@@ -885,7 +959,8 @@ SegmentSealedImpl::get_vector(FieldId field_id,
     futures.reserve(path_to_column.size());
     for (const auto& iter : path_to_column) {
         const auto& data_path = iter.first;
-        futures.emplace_back(pool.Submit(ReadFromChunkCache, cc, data_path));
+        futures.emplace_back(
+            pool.Submit(ReadFromChunkCache, cc, data_path, mmap_descriptor_));
     }
 
     for (int i = 0; i < futures.size(); ++i) {
@@ -1029,10 +1104,14 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
       id_(segment_id),
       col_index_meta_(index_meta),
       TEST_skip_index_for_retrieve_(TEST_skip_index_for_retrieve) {
+    mmap_descriptor_ = std::shared_ptr<storage::MmapChunkDescriptor>(
+        new storage::MmapChunkDescriptor({segment_id, SegmentType::Sealed}));
+    auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
+    mcm->Register(mmap_descriptor_);
 }
 
 SegmentSealedImpl::~SegmentSealedImpl() {
-    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     if (cc == nullptr) {
         return;
     }
@@ -1041,6 +1120,10 @@ SegmentSealedImpl::~SegmentSealedImpl() {
         for (const auto& binlog : iter.second.insert_files) {
             cc->Remove(binlog);
         }
+    }
+    if (mmap_descriptor_ != nullptr) {
+        auto mm = storage::MmapManager::GetInstance().GetMmapChunkManager();
+        mm->UnRegister(mmap_descriptor_);
     }
 }
 
@@ -1161,7 +1244,7 @@ SegmentSealedImpl::ClearData() {
         variable_fields_avg_size_.clear();
         stats_.mem_size = 0;
     }
-    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     if (cc == nullptr) {
         return;
     }
@@ -1384,6 +1467,30 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
     return get_raw_data(field_id, field_meta, seg_offsets, count);
 }
 
+std::unique_ptr<DataArray>
+SegmentSealedImpl::bulk_subscript(
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count,
+    const std::vector<std::string>& dynamic_field_names) const {
+    Assert(!dynamic_field_names.empty());
+    auto& field_meta = schema_->operator[](field_id);
+    if (count == 0) {
+        return fill_with_empty(field_id, 0);
+    }
+
+    auto column = fields_.at(field_id);
+    auto ret = fill_with_empty(field_id, count);
+    auto dst = ret->mutable_scalars()->mutable_json_data()->mutable_data();
+    auto field = reinterpret_cast<const VariableColumn<Json>*>(column.get());
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        dst->at(i) = ExtractSubJson(std::string(field->RawAt(offset)),
+                                    dynamic_field_names);
+    }
+    return ret;
+}
+
 bool
 SegmentSealedImpl::HasIndex(FieldId field_id) const {
     std::shared_lock lck(mutex_);
@@ -1549,17 +1656,20 @@ SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk,
     // TODO change the
     AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
                "num chunk not equal to 1 for sealed segment");
-    const auto& timestamps_data = insert_record_.timestamps_.get_chunk(0);
-    AssertInfo(timestamps_data.size() == get_row_count(),
+    auto timestamps_data =
+        (const milvus::Timestamp*)insert_record_.timestamps_.get_chunk_data(0);
+    auto timestamps_data_size = insert_record_.timestamps_.get_chunk_size(0);
+
+    AssertInfo(timestamps_data_size == get_row_count(),
                fmt::format("Timestamp size not equal to row count: {}, {}",
-                           timestamps_data.size(),
+                           timestamps_data_size,
                            get_row_count()));
     auto range = insert_record_.timestamp_index_.get_active_range(timestamp);
 
     // range == (size_, size_) and size_ is this->timestamps_.size().
     // it means these data are all useful, we don't need to update bitset_chunk.
     // It can be thought of as an OR operation with another bitmask that is all 0s, but it is not necessary to do so.
-    if (range.first == range.second && range.first == timestamps_data.size()) {
+    if (range.first == range.second && range.first == timestamps_data_size) {
         // just skip
         return;
     }
@@ -1570,7 +1680,7 @@ SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk,
         return;
     }
     auto mask = TimestampIndex::GenerateBitset(
-        timestamp, range, timestamps_data.data(), timestamps_data.size());
+        timestamp, range, timestamps_data, timestamps_data_size);
     bitset_chunk |= mask;
 }
 
@@ -1674,7 +1784,7 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
 }
 void
 SegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
-    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     if (cc == nullptr) {
         return;
     }

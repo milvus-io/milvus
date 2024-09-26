@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -49,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -751,7 +751,7 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstrea
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{uint32(idx)},
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -781,7 +781,7 @@ func (df *DataFactory) GenMsgStreamInsertMsgWithTs(idx int, chanName string, ts 
 			BeginTimestamp: ts,
 			EndTimestamp:   ts,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -831,7 +831,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []storage.PrimaryKey, chanName 
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{uint32(idx)},
 		},
-		DeleteRequest: msgpb.DeleteRequest{
+		DeleteRequest: &msgpb.DeleteRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Delete,
 				MsgID:     0,
@@ -857,7 +857,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsgWithTs(idx int, pks []storage.Primar
 			BeginTimestamp: ts,
 			EndTimestamp:   ts,
 		},
-		DeleteRequest: msgpb.DeleteRequest{
+		DeleteRequest: &msgpb.DeleteRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Delete,
 				MsgID:     1,
@@ -1186,57 +1186,6 @@ func genEmptyInsertData() *InsertData {
 			},
 		},
 	}
-}
-
-func genInsertDataWithExpiredTS() *InsertData {
-	return &InsertData{
-		Data: map[int64]storage.FieldData{
-			0: &storage.Int64FieldData{
-				Data: []int64{11, 22},
-			},
-			1: &storage.Int64FieldData{
-				Data: []int64{329749364736000000, 329500223078400000}, // 2009-11-10 23:00:00 +0000 UTC, 2009-10-31 23:00:00 +0000 UTC
-			},
-			100: &storage.FloatVectorFieldData{
-				Data: []float32{1.0, 6.0, 7.0, 8.0},
-				Dim:  2,
-			},
-			101: &storage.BinaryVectorFieldData{
-				Data: []byte{0, 255, 255, 255, 128, 128, 128, 0},
-				Dim:  32,
-			},
-			102: &storage.BoolFieldData{
-				Data: []bool{true, false},
-			},
-			103: &storage.Int8FieldData{
-				Data: []int8{5, 6},
-			},
-			104: &storage.Int16FieldData{
-				Data: []int16{7, 8},
-			},
-			105: &storage.Int32FieldData{
-				Data: []int32{9, 10},
-			},
-			106: &storage.Int64FieldData{
-				Data: []int64{1, 2},
-			},
-			107: &storage.FloatFieldData{
-				Data: []float32{2.333, 2.334},
-			},
-			108: &storage.DoubleFieldData{
-				Data: []float64{3.333, 3.334},
-			},
-			109: &storage.StringFieldData{
-				Data: []string{"test1", "test2"},
-			},
-		},
-	}
-}
-
-func genTimestamp() typeutil.Timestamp {
-	// Generate birthday of Golang
-	gb := time.Date(2009, time.Month(11), 10, 23, 0, 0, 0, time.UTC)
-	return tsoutil.ComposeTSByTime(gb, 0)
 }
 
 func genTestTickler() *etcdTickler {

@@ -411,14 +411,50 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     ParsePksFromIDs(pks, field_meta.get_data_type(), *info.primary_keys);
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
-    // step 2: fill pks and timestamps
-    deleted_record_.push(pks, timestamps);
+    std::vector<std::tuple<Timestamp, PkType>> ordering(size);
+    for (int i = 0; i < size; i++) {
+        ordering[i] = std::make_tuple(timestamps[i], pks[i]);
+    }
+
+    if (!insert_record_.empty_pks()) {
+        auto end = std::remove_if(
+            ordering.begin(),
+            ordering.end(),
+            [&](const std::tuple<Timestamp, PkType>& record) {
+                return !insert_record_.contain(std::get<1>(record));
+            });
+        size = end - ordering.begin();
+        ordering.resize(size);
+    }
+
+    // all record filtered
+    if (size == 0) {
+        return;
+    }
+
+    std::sort(ordering.begin(), ordering.end());
+    std::vector<PkType> sort_pks(size);
+    std::vector<Timestamp> sort_timestamps(size);
+
+    for (int i = 0; i < size; i++) {
+        auto [t, pk] = ordering[i];
+        sort_timestamps[i] = t;
+        sort_pks[i] = pk;
+    }
+
+    deleted_record_.push(sort_pks, sort_timestamps.data());
 }
 
 SpanBase
 SegmentGrowingImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     auto vec = get_insert_record().get_field_data_base(field_id);
     return vec->get_span_base(chunk_id);
+}
+
+std::vector<std::string_view>
+SegmentGrowingImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
+    PanicInfo(ErrorCode::NotImplemented,
+              "chunk view impl not implement for growing segment");
 }
 
 int64_t
@@ -442,6 +478,27 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   SearchResult& output) const {
     query::SearchOnGrowing(
         *this, search_info, query_data, query_count, timestamp, bitset, output);
+}
+
+std::unique_ptr<DataArray>
+SegmentGrowingImpl::bulk_subscript(
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count,
+    const std::vector<std::string>& dynamic_field_names) const {
+    Assert(!dynamic_field_names.empty());
+    auto& field_meta = schema_->operator[](field_id);
+    auto vec_ptr = insert_record_.get_field_data_base(field_id);
+    auto result = CreateScalarDataArray(count, field_meta);
+    auto vec = dynamic_cast<const ConcurrentVector<Json>*>(vec_ptr);
+    auto dst = result->mutable_scalars()->mutable_json_data()->mutable_data();
+    auto& src = *vec;
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        dst->at(i) =
+            ExtractSubJson(std::string(src[offset]), dynamic_field_names);
+    }
+    return result;
 }
 
 std::unique_ptr<DataArray>
@@ -663,7 +720,11 @@ SegmentGrowingImpl::bulk_subscript_ptr_impl(
     auto& src = *vec;
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        dst->at(i) = std::move(T(src[offset]));
+        if (IsVariableTypeSupportInChunk<S> && mmap_descriptor_ != nullptr) {
+            dst->at(i) = std::move(T(src.view_element(offset)));
+        } else {
+            dst->at(i) = std::move(T(src[offset]));
+        }
     }
 }
 

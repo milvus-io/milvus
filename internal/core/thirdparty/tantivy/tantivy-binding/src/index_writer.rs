@@ -1,10 +1,11 @@
-use futures::executor::block_on;
+use std::ffi::CStr;
 
+use libc::c_char;
 use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, INDEXED};
-use tantivy::{doc, tokenizer, Index, IndexWriter, SingleSegmentIndexWriter};
+use tantivy::{doc, tokenizer, Index, SingleSegmentIndexWriter, Document};
 
 use crate::data_type::TantivyDataType;
-use crate::index_writer;
+
 use crate::log::init_log;
 
 pub struct IndexWriterWrapper {
@@ -98,7 +99,74 @@ impl IndexWriterWrapper {
             .unwrap();
     }
 
-    pub fn finish(mut self) {
+    pub fn add_multi_i8s(&mut self, datas: &[i8]) {
+        let mut document = Document::default();
+        for data in datas {
+            document.add_field_value(self.field, *data as i64);
+        }
+        self.index_writer.add_document(document).unwrap();
+    }
+
+    pub fn add_multi_i16s(&mut self, datas: &[i16]) {
+        let mut document = Document::default();
+        for data in datas {
+            document.add_field_value(self.field, *data as i64);
+        }
+        self.index_writer.add_document(document).unwrap();
+    }
+
+    pub fn add_multi_i32s(&mut self, datas: &[i32]) {
+        let mut document = Document::default();
+        for data in datas {
+            document.add_field_value(self.field, *data as i64);
+        }
+        self.index_writer.add_document(document).unwrap();
+    }
+
+    pub fn add_multi_i64s(&mut self, datas: &[i64]) {
+        let mut document = Document::default();
+        for data in datas {
+            document.add_field_value(self.field, *data);
+        }
+        self.index_writer.add_document(document).unwrap();
+    }
+
+    pub fn add_multi_f32s(&mut self, datas: &[f32]) {
+        let mut document = Document::default();
+        for data in datas {
+            document.add_field_value(self.field, *data as f64);
+        }
+        self.index_writer.add_document(document).unwrap();
+    }
+
+    pub fn add_multi_f64s(&mut self, datas: &[f64]) {
+        let mut document = Document::default();
+        for data in datas {
+            document.add_field_value(self.field, *data);
+        }
+        self.index_writer.add_document(document).unwrap();
+    }
+
+    pub fn add_multi_bools(&mut self, datas: &[bool]) {
+        let mut document = Document::default();
+        for data in datas {
+            document.add_field_value(self.field, *data);
+        }
+        self.index_writer.add_document(document).unwrap();
+    }
+
+    pub fn add_multi_keywords(&mut self, datas: &[*const c_char]) {
+        let mut document = Document::default();
+        for element in datas {
+            let data = unsafe {
+                CStr::from_ptr(*element)
+            };
+            document.add_field_value(self.field, data.to_str().unwrap());
+        }
+        self.index_writer.add_document(document).unwrap();
+    }
+
+    pub fn finish(self) {
         self.index_writer
             .finalize()
             .expect("failed to build inverted index");

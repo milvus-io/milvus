@@ -51,6 +51,15 @@ class Schema {
         return field_id;
     }
 
+    FieldId
+    AddDebugArrayField(const std::string& name, DataType element_type) {
+        auto field_id = FieldId(debug_id);
+        debug_id++;
+        this->AddField(
+            FieldName(name), field_id, DataType::ARRAY, element_type);
+        return field_id;
+    }
+
     // auto gen field_id for convenience
     FieldId
     AddDebugField(const std::string& name,
@@ -108,6 +117,11 @@ class Schema {
         this->primary_field_id_opt_ = field_id;
     }
 
+    void
+    set_dynamic_field_id(FieldId field_id) {
+        this->dynamic_field_id_opt_ = field_id;
+    }
+
     auto
     begin() const {
         return fields_.begin();
@@ -161,6 +175,11 @@ class Schema {
         return primary_field_id_opt_;
     }
 
+    std::optional<FieldId>
+    get_dynamic_field_id() const {
+        return dynamic_field_id_opt_;
+    }
+
  public:
     static std::shared_ptr<Schema>
     ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto);
@@ -190,6 +209,7 @@ class Schema {
     std::unordered_map<FieldId, FieldName> id_names_;  // field_id -> field_name
 
     std::optional<FieldId> primary_field_id_opt_;
+    std::optional<FieldId> dynamic_field_id_opt_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;

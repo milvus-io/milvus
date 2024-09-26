@@ -21,11 +21,16 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type alterDatabaseTask struct {
@@ -55,7 +60,7 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 	}
 
 	newDB := oldDB.Clone()
-	ret := updateProperties(oldDB.Properties, a.Req.GetProperties())
+	ret := MergeProperties(oldDB.Properties, a.Req.GetProperties())
 	newDB.Properties = ret
 
 	ts := a.GetTs()
@@ -67,10 +72,48 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 		ts:       ts,
 	})
 
+	oldReplicaNumber, _ := common.DatabaseLevelReplicaNumber(oldDB.Properties)
+	oldResourceGroups, _ := common.DatabaseLevelResourceGroups(oldDB.Properties)
+	newReplicaNumber, _ := common.DatabaseLevelReplicaNumber(newDB.Properties)
+	newResourceGroups, _ := common.DatabaseLevelResourceGroups(newDB.Properties)
+	left, right := lo.Difference(oldResourceGroups, newResourceGroups)
+	rgChanged := len(left) > 0 || len(right) > 0
+	replicaChanged := oldReplicaNumber != newReplicaNumber
+	if rgChanged || replicaChanged {
+		log.Ctx(ctx).Warn("alter database trigger update load config",
+			zap.Int64("dbID", oldDB.ID),
+			zap.Int64("oldReplicaNumber", oldReplicaNumber),
+			zap.Int64("newReplicaNumber", newReplicaNumber),
+			zap.Strings("oldResourceGroups", oldResourceGroups),
+			zap.Strings("newResourceGroups", newResourceGroups),
+		)
+		redoTask.AddAsyncStep(NewSimpleStep("", func(ctx context.Context) ([]nestedStep, error) {
+			colls, err := a.core.meta.ListCollections(ctx, oldDB.Name, a.ts, true)
+			if err != nil {
+				log.Warn("failed to trigger update load config for database", zap.Int64("dbID", oldDB.ID), zap.Error(err))
+				return nil, err
+			}
+			if len(colls) == 0 {
+				return nil, nil
+			}
+
+			resp, err := a.core.queryCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
+				CollectionIDs:  lo.Map(colls, func(coll *model.Collection, _ int) int64 { return coll.CollectionID }),
+				ReplicaNumber:  int32(newReplicaNumber),
+				ResourceGroups: newResourceGroups,
+			})
+			if err := merr.CheckRPCCall(resp, err); err != nil {
+				log.Warn("failed to trigger update load config for database", zap.Int64("dbID", oldDB.ID), zap.Error(err))
+				return nil, err
+			}
+			return nil, nil
+		}))
+	}
+
 	return redoTask.Execute(ctx)
 }
 
-func updateProperties(oldProps []*commonpb.KeyValuePair, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+func MergeProperties(oldProps []*commonpb.KeyValuePair, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
 	props := make(map[string]string)
 	for _, prop := range oldProps {
 		props[prop.Key] = prop.Value

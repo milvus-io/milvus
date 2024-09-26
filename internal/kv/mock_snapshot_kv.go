@@ -1,11 +1,12 @@
 package kv
 
 import (
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type mockSnapshotKV struct {
-	SnapShotKV
+	kv.SnapShotKV
 	SaveFunc                         func(key string, value string, ts typeutil.Timestamp) error
 	LoadFunc                         func(key string, ts typeutil.Timestamp) (string, error)
 	MultiSaveFunc                    func(kvs map[string]string, ts typeutil.Timestamp) error

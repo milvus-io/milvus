@@ -5,9 +5,11 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 func TestInsertBinlogIteratorSuite(t *testing.T) {
@@ -223,6 +225,9 @@ func genTestInsertData() (*storage.InsertData, *etcdpb.CollectionMeta) {
 					IsPrimaryKey: false,
 					Description:  "binary_vector",
 					DataType:     schemapb.DataType_BinaryVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "8"},
+					},
 				},
 				{
 					FieldID:      FloatVectorField,
@@ -230,6 +235,9 @@ func genTestInsertData() (*storage.InsertData, *etcdpb.CollectionMeta) {
 					IsPrimaryKey: false,
 					Description:  "float_vector",
 					DataType:     schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4"},
+					},
 				},
 				{
 					FieldID:      Float16VectorField,
@@ -237,6 +245,9 @@ func genTestInsertData() (*storage.InsertData, *etcdpb.CollectionMeta) {
 					IsPrimaryKey: false,
 					Description:  "float16_vector",
 					DataType:     schemapb.DataType_Float16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4"},
+					},
 				},
 				{
 					FieldID:      BFloat16VectorField,
@@ -244,6 +255,9 @@ func genTestInsertData() (*storage.InsertData, *etcdpb.CollectionMeta) {
 					IsPrimaryKey: false,
 					Description:  "bfloat16_vector",
 					DataType:     schemapb.DataType_BFloat16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4"},
+					},
 				},
 			},
 		},

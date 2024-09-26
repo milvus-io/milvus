@@ -17,8 +17,9 @@
 package segments
 
 /*
-#cgo pkg-config: milvus_segcore
+#cgo pkg-config: milvus_core
 
+#include "futures/future_c.h"
 #include "segcore/collection_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
@@ -35,16 +36,17 @@ import (
 
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
 	"github.com/milvus-io/milvus-storage/go/storage/options"
+	"github.com/milvus-io/milvus/internal/proto/cgopb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
@@ -52,10 +54,14 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/cgo"
 	typeutil_internal "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -233,7 +239,7 @@ func (s *baseSegment) SetNeedUpdatedVersion(version int64) {
 }
 
 type FieldInfo struct {
-	datapb.FieldBinlog
+	*datapb.FieldBinlog
 	RowCount int64
 }
 
@@ -420,7 +426,7 @@ func (s *LocalSegment) initializeSegment() error {
 		})
 		if !typeutil.IsVectorType(field.GetDataType()) && !s.HasRawData(fieldID) {
 			s.fields.Insert(fieldID, &FieldInfo{
-				FieldBinlog: *info.FieldBinlog,
+				FieldBinlog: info.FieldBinlog,
 				RowCount:    loadInfo.GetNumOfRows(),
 			})
 		}
@@ -428,7 +434,7 @@ func (s *LocalSegment) initializeSegment() error {
 
 	for _, binlogs := range fieldBinlogs {
 		s.fields.Insert(binlogs.FieldID, &FieldInfo{
-			FieldBinlog: *binlogs,
+			FieldBinlog: binlogs,
 			RowCount:    loadInfo.GetNumOfRows(),
 		})
 	}
@@ -561,34 +567,39 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	defer s.ptrLock.RUnlock()
 
 	traceCtx := ParseCTraceContext(ctx)
+	defer runtime.KeepAlive(traceCtx)
+	defer runtime.KeepAlive(searchReq)
 
 	hasIndex := s.ExistIndex(searchReq.searchFieldID)
 	log = log.With(zap.Bool("withIndex", hasIndex))
 	log.Debug("search segment...")
 
-	var searchResult SearchResult
-	var status C.CStatus
-	GetSQPool().Submit(func() (any, error) {
-		tr := timerecord.NewTimeRecorder("cgoSearch")
-		status = C.Search(traceCtx.ctx,
-			s.ptr,
-			searchReq.plan.cSearchPlan,
-			searchReq.cPlaceholderGroup,
-			C.uint64_t(searchReq.mvccTimestamp),
-			&searchResult.cSearchResult,
-		)
-		runtime.KeepAlive(traceCtx)
-		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return nil, nil
-	}).Await()
-	if err := HandleCStatus(ctx, &status, "Search failed",
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("segmentID", s.ID()),
-		zap.String("segmentType", s.segmentType.String())); err != nil {
+	tr := timerecord.NewTimeRecorder("cgoSearch")
+
+	future := cgo.Async(
+		ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncSearch(
+				traceCtx.ctx,
+				s.ptr,
+				searchReq.plan.cSearchPlan,
+				searchReq.cPlaceholderGroup,
+				C.uint64_t(searchReq.mvccTimestamp),
+			))
+		},
+		cgo.WithName("search"),
+	)
+	defer future.Release()
+	result, err := future.BlockAndLeakyGet()
+	if err != nil {
+		log.Warn("Search failed")
 		return nil, err
 	}
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Debug("search segment done")
-	return &searchResult, nil
+	return &SearchResult{
+		cSearchResult: (C.CSearchResult)(result),
+	}, nil
 }
 
 func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
@@ -608,68 +619,64 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	log.Debug("begin to retrieve")
 
 	traceCtx := ParseCTraceContext(ctx)
+	defer runtime.KeepAlive(traceCtx)
+	defer runtime.KeepAlive(plan)
 
 	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	var retrieveResult RetrieveResult
-	var status C.CStatus
-	GetSQPool().Submit(func() (any, error) {
-		ts := C.uint64_t(plan.Timestamp)
-		tr := timerecord.NewTimeRecorder("cgoRetrieve")
-		status = C.Retrieve(traceCtx.ctx,
-			s.ptr,
-			plan.cRetrievePlan,
-			ts,
-			&retrieveResult.cRetrieveResult,
-			C.int64_t(maxLimitSize),
-			C.bool(plan.ignoreNonPk))
-		runtime.KeepAlive(traceCtx)
+	tr := timerecord.NewTimeRecorder("cgoRetrieve")
 
-		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("cgo retrieve done", zap.Duration("timeTaken", tr.ElapseSpan()))
-		return nil, nil
-	}).Await()
-
-	if err := HandleCStatus(ctx, &status, "Retrieve failed",
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-		zap.Int64("msgID", plan.msgID),
-		zap.String("segmentType", s.segmentType.String())); err != nil {
+	future := cgo.Async(
+		ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncRetrieve(
+				traceCtx.ctx,
+				s.ptr,
+				plan.cRetrievePlan,
+				C.uint64_t(plan.Timestamp),
+				C.int64_t(maxLimitSize),
+				C.bool(plan.ignoreNonPk),
+			))
+		},
+		cgo.WithName("retrieve"),
+	)
+	defer future.Release()
+	result, err := future.BlockAndLeakyGet()
+	if err != nil {
+		log.Warn("Retrieve failed")
 		return nil, err
 	}
+	defer C.DeleteRetrieveResult((*C.CRetrieveResult)(result))
+
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "partial-segcore-results-deserialization")
 	defer span.End()
 
-	result := new(segcorepb.RetrieveResults)
-	if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
+	retrieveResult := new(segcorepb.RetrieveResults)
+	if err := UnmarshalCProto((*C.CRetrieveResult)(result), retrieveResult); err != nil {
+		log.Warn("unmarshal retrieve result failed", zap.Error(err))
 		return nil, err
 	}
 
 	log.Debug("retrieve segment done",
-		zap.Int("resultNum", len(result.Offset)),
+		zap.Int("resultNum", len(retrieveResult.Offset)),
 	)
-
 	// Sort was done by the segcore.
 	// sort.Sort(&byPK{result})
-	return result, nil
+	return retrieveResult, nil
 }
 
 func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan, offsets []int64) (*segcorepb.RetrieveResults, error) {
+	if len(offsets) == 0 {
+		return nil, merr.WrapErrParameterInvalid("segment offsets", "empty offsets")
+	}
+
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
-
-	if s.ptr == nil {
-		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
-	}
-
-	if len(offsets) == 0 {
-		return nil, merr.WrapErrParameterInvalid("segment offsets", "empty offsets")
-	}
 
 	fields := []zap.Field{
 		zap.Int64("collectionID", s.Collection()),
@@ -682,40 +689,49 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan
 
 	log := log.Ctx(ctx).With(fields...)
 	log.Debug("begin to retrieve by offsets")
-
-	traceCtx := ParseCTraceContext(ctx)
-
-	var retrieveResult RetrieveResult
-	var status C.CStatus
-
 	tr := timerecord.NewTimeRecorder("cgoRetrieveByOffsets")
-	status = C.RetrieveByOffsets(traceCtx.ctx,
-		s.ptr,
-		plan.cRetrievePlan,
-		&retrieveResult.cRetrieveResult,
-		(*C.int64_t)(unsafe.Pointer(&offsets[0])),
-		C.int64_t(len(offsets)))
-	runtime.KeepAlive(traceCtx)
+	traceCtx := ParseCTraceContext(ctx)
+	defer runtime.KeepAlive(traceCtx)
+	defer runtime.KeepAlive(plan)
+	defer runtime.KeepAlive(offsets)
+
+	future := cgo.Async(
+		ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncRetrieveByOffsets(
+				traceCtx.ctx,
+				s.ptr,
+				plan.cRetrievePlan,
+				(*C.int64_t)(unsafe.Pointer(&offsets[0])),
+				C.int64_t(len(offsets)),
+			))
+		},
+		cgo.WithName("retrieve-by-offsets"),
+	)
+	defer future.Release()
+	result, err := future.BlockAndLeakyGet()
+	if err != nil {
+		log.Warn("RetrieveByOffsets failed")
+		return nil, err
+	}
+	defer C.DeleteRetrieveResult((*C.CRetrieveResult)(result))
 
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	log.Debug("cgo retrieve by offsets done", zap.Duration("timeTaken", tr.ElapseSpan()))
-
-	if err := HandleCStatus(ctx, &status, "RetrieveByOffsets failed", fields...); err != nil {
-		return nil, err
-	}
 
 	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "reduced-segcore-results-deserialization")
 	defer span.End()
 
-	result := new(segcorepb.RetrieveResults)
-	if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
+	retrieveResult := new(segcorepb.RetrieveResults)
+	if err := UnmarshalCProto((*C.CRetrieveResult)(result), retrieveResult); err != nil {
+		log.Warn("unmarshal retrieve by offsets result failed", zap.Error(err))
 		return nil, err
 	}
 
-	log.Debug("retrieve by segment offsets done")
-
-	return result, nil
+	log.Debug("retrieve by segment offsets done",
+		zap.Int("resultNum", len(retrieveResult.Offset)),
+	)
+	return retrieveResult, nil
 }
 
 func (s *LocalSegment) GetFieldDataPath(index *IndexedFieldInfo, offset int64) (dataPath string, offsetInBinlog int64) {
@@ -944,7 +960,7 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	return nil
 }
 
-func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog, useMmap bool) error {
+func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
@@ -982,9 +998,13 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		}
 	}
 
+	// TODO retrieve_enable should be considered
 	collection := s.collection
-	mmapEnabled := useMmap || common.IsFieldMmapEnabled(collection.Schema(), fieldID) ||
-		(!common.FieldHasMmapKey(collection.Schema(), fieldID) && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool())
+	fieldSchema, err := getFieldSchema(collection.Schema(), fieldID)
+	if err != nil {
+		return err
+	}
+	mmapEnabled := isDataMmapEnable(fieldSchema)
 	loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
 	loadFieldDataInfo.enableMmap(fieldID, mmapEnabled)
 
@@ -1262,18 +1282,60 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		return err
 	}
 	defer deleteLoadIndexInfo(loadIndexInfo)
+
+	schema, err := typeutil.CreateSchemaHelper(s.GetCollection().Schema())
+	if err != nil {
+		return err
+	}
+	fieldSchema, err := schema.GetFieldFromID(indexInfo.GetFieldID())
+	if err != nil {
+		return err
+	}
+
+	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+	// as Knowhere reports error if encounter an unknown param, we need to delete it
+	delete(indexParams, common.MmapEnabledKey)
+
+	// some build params also exist in indexParams, which are useless during loading process
+	if indexParams["index_type"] == indexparamcheck.IndexDISKANN {
+		if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
+			return err
+		}
+	}
+
+	if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+		return err
+	}
+
+	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
+
+	indexInfoProto := &cgopb.LoadIndexInfo{
+		CollectionID:       s.Collection(),
+		PartitionID:        s.Partition(),
+		SegmentID:          s.ID(),
+		Field:              fieldSchema,
+		EnableMmap:         enableMmap,
+		MmapDirPath:        paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
+		IndexID:            indexInfo.GetIndexID(),
+		IndexBuildID:       indexInfo.GetBuildID(),
+		IndexVersion:       indexInfo.GetIndexVersion(),
+		IndexParams:        indexParams,
+		IndexFiles:         indexInfo.GetIndexFilePaths(),
+		IndexEngineVersion: indexInfo.GetCurrentIndexVersion(),
+		IndexStoreVersion:  indexInfo.GetIndexStoreVersion(),
+	}
+
 	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
 		uri, err := typeutil_internal.GetStorageURI(paramtable.Get().CommonCfg.StorageScheme.GetValue(), paramtable.Get().CommonCfg.StoragePathPrefix.GetValue(), s.ID())
 		if err != nil {
 			return err
 		}
-		loadIndexInfo.appendStorageInfo(uri, indexInfo.IndexStoreVersion)
+		indexInfoProto.Uri = uri
 	}
 	newLoadIndexInfoSpan := tr.RecordSpan()
 
 	// 2.
-	err = loadIndexInfo.appendLoadIndexInfo(ctx, indexInfo, s.Collection(), s.Partition(), s.ID(), fieldType)
-	if err != nil {
+	if err := loadIndexInfo.finish(ctx, indexInfoProto); err != nil {
 		if loadIndexInfo.cleanLocalData(ctx) != nil {
 			log.Warn("failed to clean cached data on disk after append index failed",
 				zap.Int64("buildID", indexInfo.BuildID),
@@ -1304,7 +1366,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
 		zap.Duration("appendLoadIndexInfoSpan", appendLoadIndexInfoSpan),
 		zap.Duration("updateIndexInfoSpan", updateIndexInfoSpan),
-		zap.Duration("updateIndexInfoSpan", warmupChunkCacheSpan),
+		zap.Duration("warmupChunkCacheSpan", warmupChunkCacheSpan),
 	)
 	return nil
 }

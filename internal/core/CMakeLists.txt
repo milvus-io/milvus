@@ -129,6 +129,11 @@ if (LINUX OR MSYS)
                   "-Wno-error"
                   "-Wno-all"
                   )
+    if (USE_ASAN STREQUAL "ON") 
+        message( STATUS "Building Milvus Core Using AddressSanitizer")
+        add_compile_options(-fno-omit-frame-pointer -fsanitize=address)
+        add_link_options(-fno-omit-frame-pointer -fsanitize=address)
+    endif()
     if (CMAKE_BUILD_TYPE STREQUAL "Release")
         append_flags( CMAKE_CXX_FLAGS
                 "-O3"
@@ -293,13 +298,29 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/indexbuilder/
         FILES_MATCHING PATTERN "*_c.h"
 )
 
+# Install clustering
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/clustering/
+        DESTINATION include/clustering
+        FILES_MATCHING PATTERN "*_c.h"
+)
+
 # Install common
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
         DESTINATION include/common
         FILES_MATCHING PATTERN "*_c.h"
 )
 
+# Install monitor
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/monitor/
+        DESTINATION include/monitor
+        FILES_MATCHING PATTERN "*_c.h"
+)
+
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/futures/
+        DESTINATION include/futures
+        FILES_MATCHING PATTERN "*.h"
+)
+
 install(DIRECTORY ${CMAKE_BINARY_DIR}/lib/
         DESTINATION ${CMAKE_INSTALL_FULL_LIBDIR}
 )
-

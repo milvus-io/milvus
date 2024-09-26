@@ -66,7 +66,7 @@ func Test_NewClient(t *testing.T) {
 		r5, err := client.GetMetrics(ctx, nil)
 		retCheck(retNotNil, r5, err)
 
-		r6, err := client.Compaction(ctx, nil)
+		r6, err := client.CompactionV2(ctx, nil)
 		retCheck(retNotNil, r6, err)
 
 		r8, err := client.ResendSegmentStats(ctx, nil)
@@ -83,6 +83,9 @@ func Test_NewClient(t *testing.T) {
 
 		r13, err := client.CheckChannelOperationProgress(ctx, nil)
 		retCheck(retNotNil, r13, err)
+
+		r14, err := client.DropCompactionPlan(ctx, nil)
+		retCheck(retNotNil, r14, err)
 	}
 
 	client.(*Client).grpcClient = &mock.GRPCClientBase[datapb.DataNodeClient]{

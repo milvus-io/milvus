@@ -77,32 +77,8 @@ ScalarIndexSort<T>::BuildV2(const Config& config) {
         field_data->FillFieldData(col_data);
         field_datas.push_back(field_data);
     }
-    int64_t total_num_rows = 0;
-    for (const auto& data : field_datas) {
-        total_num_rows += data->get_num_rows();
-    }
-    if (total_num_rows == 0) {
-        throw SegcoreError(DataIsEmpty,
-                           "ScalarIndexSort cannot build null values!");
-    }
 
-    data_.reserve(total_num_rows);
-    int64_t offset = 0;
-    for (const auto& data : field_datas) {
-        auto slice_num = data->get_num_rows();
-        for (size_t i = 0; i < slice_num; ++i) {
-            auto value = reinterpret_cast<const T*>(data->RawValue(i));
-            data_.emplace_back(IndexStructure(*value, offset));
-            offset++;
-        }
-    }
-
-    std::sort(data_.begin(), data_.end());
-    idx_to_offsets_.resize(total_num_rows);
-    for (size_t i = 0; i < total_num_rows; ++i) {
-        idx_to_offsets_[data_[i].idx_] = i;
-    }
-    is_built_ = true;
+    BuildWithFieldData(field_datas);
 }
 
 template <typename T>
@@ -122,8 +98,7 @@ ScalarIndexSort<T>::Build(const Config& config) {
         total_num_rows += data->get_num_rows();
     }
     if (total_num_rows == 0) {
-        throw SegcoreError(DataIsEmpty,
-                           "ScalarIndexSort cannot build null values!");
+        PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
     }
 
     data_.reserve(total_num_rows);
@@ -268,6 +243,37 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
 
 template <typename T>
 void
+ScalarIndexSort<T>::BuildWithFieldData(
+    const std::vector<milvus::FieldDataPtr>& field_datas) {
+    int64_t total_num_rows = 0;
+    for (const auto& data : field_datas) {
+        total_num_rows += data->get_num_rows();
+    }
+    if (total_num_rows == 0) {
+        PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
+    }
+
+    data_.reserve(total_num_rows);
+    int64_t offset = 0;
+    for (const auto& data : field_datas) {
+        auto slice_num = data->get_num_rows();
+        for (size_t i = 0; i < slice_num; ++i) {
+            auto value = reinterpret_cast<const T*>(data->RawValue(i));
+            data_.emplace_back(IndexStructure(*value, offset));
+            offset++;
+        }
+    }
+
+    std::sort(data_.begin(), data_.end());
+    idx_to_offsets_.resize(total_num_rows);
+    for (size_t i = 0; i < total_num_rows; ++i) {
+        idx_to_offsets_[data_[i].idx_] = i;
+    }
+    is_built_ = true;
+}
+
+template <typename T>
+void
 ScalarIndexSort<T>::LoadV2(const Config& config) {
     auto blobs = space_->StatisticsBlobs();
     std::vector<std::string> index_files;
@@ -379,8 +385,8 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
                 data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         default:
-            throw SegcoreError(OpTypeInvalid,
-                               fmt::format("Invalid OperatorType: {}", op));
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("Invalid OperatorType: {}", op));
     }
     for (; lb < ub; ++lb) {
         bitset[lb->idx_] = true;
@@ -468,11 +474,10 @@ ScalarIndexSort<T>::ShouldSkip(const T lower_value,
                 break;
             }
             default:
-                throw SegcoreError(
-                    OpTypeInvalid,
-                    fmt::format("Invalid OperatorType for "
-                                "checking scalar index optimization: {}",
-                                op));
+                PanicInfo(OpTypeInvalid,
+                          fmt::format("Invalid OperatorType for "
+                                      "checking scalar index optimization: {}",
+                                      op));
         }
         return shouldSkip;
     }

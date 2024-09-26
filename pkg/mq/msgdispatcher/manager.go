@@ -27,8 +27,8 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -182,7 +182,7 @@ func (c *dispatcherManager) tryMerge() {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.mainDispatcher == nil {
+	if c.mainDispatcher == nil || c.mainDispatcher.CurTs() == 0 {
 		return
 	}
 	candidates := make(map[string]struct{})
@@ -205,6 +205,7 @@ func (c *dispatcherManager) tryMerge() {
 			delete(candidates, vchannel)
 		}
 	}
+	mergeTs := c.mainDispatcher.CurTs()
 	for vchannel := range candidates {
 		t, err := c.soloDispatchers[vchannel].GetTarget(vchannel)
 		if err == nil {
@@ -215,7 +216,7 @@ func (c *dispatcherManager) tryMerge() {
 		c.deleteMetric(vchannel)
 	}
 	c.mainDispatcher.Handle(resume)
-	log.Info("merge done", zap.Any("vchannel", candidates))
+	log.Info("merge done", zap.Any("vchannel", candidates), zap.Uint64("mergeTs", mergeTs))
 }
 
 func (c *dispatcherManager) split(t *target) {
@@ -234,7 +235,7 @@ func (c *dispatcherManager) split(t *target) {
 	err := retry.Do(context.Background(), func() error {
 		var err error
 		newSolo, err = NewDispatcher(context.Background(), c.factory, false, c.pchannel, t.pos,
-			c.constructSubName(t.vchannel, false), mqwrapper.SubscriptionPositionUnknown, c.lagNotifyChan, c.lagTargets)
+			c.constructSubName(t.vchannel, false), common.SubscriptionPositionUnknown, c.lagNotifyChan, c.lagTargets)
 		return err
 	}, retry.Attempts(10))
 	if err != nil {

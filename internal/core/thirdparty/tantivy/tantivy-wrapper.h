@@ -1,5 +1,7 @@
 #include <sstream>
 #include <fmt/format.h>
+#include <set>
+#include <iostream>
 #include "tantivy-binding.h"
 
 namespace milvus::tantivy {
@@ -184,6 +186,60 @@ struct TantivyIndexWrapper {
 
         throw fmt::format("InvertedIndex.add_data: unsupported data type: {}",
                           typeid(T).name());
+    }
+
+    template <typename T>
+    void
+    add_multi_data(const T* array, uintptr_t len) {
+        assert(!finished_);
+
+        if constexpr (std::is_same_v<T, bool>) {
+            tantivy_index_add_multi_bools(writer_, array, len);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, int8_t>) {
+            tantivy_index_add_multi_int8s(writer_, array, len);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, int16_t>) {
+            tantivy_index_add_multi_int16s(writer_, array, len);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, int32_t>) {
+            tantivy_index_add_multi_int32s(writer_, array, len);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, int64_t>) {
+            tantivy_index_add_multi_int64s(writer_, array, len);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, float>) {
+            tantivy_index_add_multi_f32s(writer_, array, len);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, double>) {
+            tantivy_index_add_multi_f64s(writer_, array, len);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, std::string>) {
+            std::vector<const char*> views;
+            for (uintptr_t i = 0; i < len; i++) {
+                views.push_back(array[i].c_str());
+            }
+            tantivy_index_add_multi_keywords(writer_, views.data(), len);
+            return;
+        }
+
+        throw fmt::format(
+            "InvertedIndex.add_multi_data: unsupported data type: {}",
+            typeid(T).name());
     }
 
     inline void

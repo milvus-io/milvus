@@ -27,20 +27,20 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"golang.org/x/exp/maps"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
-	"github.com/milvus-io/milvus/internal/kv/predicates"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -312,6 +312,53 @@ func Test_AddSegments(t *testing.T) {
 		assert.False(t, ok)
 		assert.Equal(t, 4, len(savedKvs))
 		verifySavedKvsForSegment(t, savedKvs)
+	})
+
+	t.Run("no need to store log path", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		catalog := NewCatalog(metakv, rootPath, "")
+
+		validFieldBinlog := []*datapb.FieldBinlog{{
+			FieldID: 1,
+			Binlogs: []*datapb.Binlog{
+				{
+					LogID:   1,
+					LogPath: "",
+				},
+			},
+		}}
+
+		invalidFieldBinlog := []*datapb.FieldBinlog{{
+			FieldID: 1,
+			Binlogs: []*datapb.Binlog{
+				{
+					LogID:   1,
+					LogPath: "no need to store",
+				},
+			},
+		}}
+
+		segment := &datapb.SegmentInfo{
+			ID:           segmentID,
+			CollectionID: collectionID,
+			PartitionID:  partitionID,
+			NumOfRows:    100,
+			State:        commonpb.SegmentState_Flushed,
+		}
+
+		segment.Statslogs = invalidFieldBinlog
+		err := catalog.AddSegment(context.TODO(), segment)
+		assert.Error(t, err)
+		segment.Statslogs = validFieldBinlog
+
+		segment.Binlogs = invalidFieldBinlog
+		err = catalog.AddSegment(context.TODO(), segment)
+		assert.Error(t, err)
+		segment.Binlogs = validFieldBinlog
+
+		segment.Deltalogs = invalidFieldBinlog
+		err = catalog.AddSegment(context.TODO(), segment)
+		assert.Error(t, err)
 	})
 }
 
@@ -1317,7 +1364,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = kc.SaveImportJob(nil)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
@@ -1371,7 +1418,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = kc.SavePreImportTask(nil)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
@@ -1425,7 +1472,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = kc.SaveImportTask(nil)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)

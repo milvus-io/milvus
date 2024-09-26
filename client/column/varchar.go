@@ -17,8 +17,9 @@
 package column
 
 import (
-	"errors"
 	"fmt"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/entity"
@@ -70,7 +71,7 @@ func (c *ColumnVarChar) FieldData() *schemapb.FieldData {
 	}
 	data := make([]string, 0, c.Len())
 	for i := 0; i < c.Len(); i++ {
-		data = append(data, string(c.values[i]))
+		data = append(data, c.values[i])
 	}
 	fd.Field = &schemapb.FieldData_Scalars{
 		Scalars: &schemapb.ScalarField{

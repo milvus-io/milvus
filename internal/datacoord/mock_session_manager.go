@@ -264,6 +264,49 @@ func (_c *MockSessionManager_DeleteSession_Call) RunAndReturn(run func(*NodeInfo
 	return _c
 }
 
+// DropCompactionPlan provides a mock function with given fields: nodeID, req
+func (_m *MockSessionManager) DropCompactionPlan(nodeID int64, req *datapb.DropCompactionPlanRequest) error {
+	ret := _m.Called(nodeID, req)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.DropCompactionPlanRequest) error); ok {
+		r0 = rf(nodeID, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockSessionManager_DropCompactionPlan_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCompactionPlan'
+type MockSessionManager_DropCompactionPlan_Call struct {
+	*mock.Call
+}
+
+// DropCompactionPlan is a helper method to define mock.On call
+//   - nodeID int64
+//   - req *datapb.DropCompactionPlanRequest
+func (_e *MockSessionManager_Expecter) DropCompactionPlan(nodeID interface{}, req interface{}) *MockSessionManager_DropCompactionPlan_Call {
+	return &MockSessionManager_DropCompactionPlan_Call{Call: _e.mock.On("DropCompactionPlan", nodeID, req)}
+}
+
+func (_c *MockSessionManager_DropCompactionPlan_Call) Run(run func(nodeID int64, req *datapb.DropCompactionPlanRequest)) *MockSessionManager_DropCompactionPlan_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.DropCompactionPlanRequest))
+	})
+	return _c
+}
+
+func (_c *MockSessionManager_DropCompactionPlan_Call) Return(_a0 error) *MockSessionManager_DropCompactionPlan_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSessionManager_DropCompactionPlan_Call) RunAndReturn(run func(int64, *datapb.DropCompactionPlanRequest) error) *MockSessionManager_DropCompactionPlan_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropImport provides a mock function with given fields: nodeID, in
 func (_m *MockSessionManager) DropImport(nodeID int64, in *datapb.DropImportRequest) error {
 	ret := _m.Called(nodeID, in)
@@ -386,6 +429,61 @@ func (_c *MockSessionManager_FlushChannels_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// GetCompactionPlanResult provides a mock function with given fields: nodeID, planID
+func (_m *MockSessionManager) GetCompactionPlanResult(nodeID int64, planID int64) (*datapb.CompactionPlanResult, error) {
+	ret := _m.Called(nodeID, planID)
+
+	var r0 *datapb.CompactionPlanResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int64, int64) (*datapb.CompactionPlanResult, error)); ok {
+		return rf(nodeID, planID)
+	}
+	if rf, ok := ret.Get(0).(func(int64, int64) *datapb.CompactionPlanResult); ok {
+		r0 = rf(nodeID, planID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.CompactionPlanResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, int64) error); ok {
+		r1 = rf(nodeID, planID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockSessionManager_GetCompactionPlanResult_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCompactionPlanResult'
+type MockSessionManager_GetCompactionPlanResult_Call struct {
+	*mock.Call
+}
+
+// GetCompactionPlanResult is a helper method to define mock.On call
+//   - nodeID int64
+//   - planID int64
+func (_e *MockSessionManager_Expecter) GetCompactionPlanResult(nodeID interface{}, planID interface{}) *MockSessionManager_GetCompactionPlanResult_Call {
+	return &MockSessionManager_GetCompactionPlanResult_Call{Call: _e.mock.On("GetCompactionPlanResult", nodeID, planID)}
+}
+
+func (_c *MockSessionManager_GetCompactionPlanResult_Call) Run(run func(nodeID int64, planID int64)) *MockSessionManager_GetCompactionPlanResult_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockSessionManager_GetCompactionPlanResult_Call) Return(_a0 *datapb.CompactionPlanResult, _a1 error) *MockSessionManager_GetCompactionPlanResult_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockSessionManager_GetCompactionPlanResult_Call) RunAndReturn(run func(int64, int64) (*datapb.CompactionPlanResult, error)) *MockSessionManager_GetCompactionPlanResult_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCompactionPlansResults provides a mock function with given fields:
 func (_m *MockSessionManager) GetCompactionPlansResults() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error) {
 	ret := _m.Called()
@@ -435,6 +533,60 @@ func (_c *MockSessionManager_GetCompactionPlansResults_Call) Return(_a0 map[int6
 }
 
 func (_c *MockSessionManager_GetCompactionPlansResults_Call) RunAndReturn(run func() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error)) *MockSessionManager_GetCompactionPlansResults_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetSession provides a mock function with given fields: _a0
+func (_m *MockSessionManager) GetSession(_a0 int64) (*Session, bool) {
+	ret := _m.Called(_a0)
+
+	var r0 *Session
+	var r1 bool
+	if rf, ok := ret.Get(0).(func(int64) (*Session, bool)); ok {
+		return rf(_a0)
+	}
+	if rf, ok := ret.Get(0).(func(int64) *Session); ok {
+		r0 = rf(_a0)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*Session)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64) bool); ok {
+		r1 = rf(_a0)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	return r0, r1
+}
+
+// MockSessionManager_GetSession_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSession'
+type MockSessionManager_GetSession_Call struct {
+	*mock.Call
+}
+
+// GetSession is a helper method to define mock.On call
+//   - _a0 int64
+func (_e *MockSessionManager_Expecter) GetSession(_a0 interface{}) *MockSessionManager_GetSession_Call {
+	return &MockSessionManager_GetSession_Call{Call: _e.mock.On("GetSession", _a0)}
+}
+
+func (_c *MockSessionManager_GetSession_Call) Run(run func(_a0 int64)) *MockSessionManager_GetSession_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockSessionManager_GetSession_Call) Return(_a0 *Session, _a1 bool) *MockSessionManager_GetSession_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockSessionManager_GetSession_Call) RunAndReturn(run func(int64) (*Session, bool)) *MockSessionManager_GetSession_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -761,6 +913,60 @@ func (_c *MockSessionManager_QueryPreImport_Call) Return(_a0 *datapb.QueryPreImp
 }
 
 func (_c *MockSessionManager_QueryPreImport_Call) RunAndReturn(run func(int64, *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)) *MockSessionManager_QueryPreImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QuerySlot provides a mock function with given fields: nodeID
+func (_m *MockSessionManager) QuerySlot(nodeID int64) (*datapb.QuerySlotResponse, error) {
+	ret := _m.Called(nodeID)
+
+	var r0 *datapb.QuerySlotResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int64) (*datapb.QuerySlotResponse, error)); ok {
+		return rf(nodeID)
+	}
+	if rf, ok := ret.Get(0).(func(int64) *datapb.QuerySlotResponse); ok {
+		r0 = rf(nodeID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.QuerySlotResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64) error); ok {
+		r1 = rf(nodeID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockSessionManager_QuerySlot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QuerySlot'
+type MockSessionManager_QuerySlot_Call struct {
+	*mock.Call
+}
+
+// QuerySlot is a helper method to define mock.On call
+//   - nodeID int64
+func (_e *MockSessionManager_Expecter) QuerySlot(nodeID interface{}) *MockSessionManager_QuerySlot_Call {
+	return &MockSessionManager_QuerySlot_Call{Call: _e.mock.On("QuerySlot", nodeID)}
+}
+
+func (_c *MockSessionManager_QuerySlot_Call) Run(run func(nodeID int64)) *MockSessionManager_QuerySlot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockSessionManager_QuerySlot_Call) Return(_a0 *datapb.QuerySlotResponse, _a1 error) *MockSessionManager_QuerySlot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockSessionManager_QuerySlot_Call) RunAndReturn(run func(int64) (*datapb.QuerySlotResponse, error)) *MockSessionManager_QuerySlot_Call {
 	_c.Call.Return(run)
 	return _c
 }

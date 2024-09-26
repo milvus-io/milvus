@@ -10,10 +10,15 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
+	return handleExprWithErrorListener(schema, exprStr, &errorListenerImpl{})
+}
+
+func handleExprWithErrorListener(schema *typeutil.SchemaHelper, exprStr string, errorListener errorListener) interface{} {
 	if isEmptyExpression(exprStr) {
 		return &ExprWithType{
 			dataType: schemapb.DataType_Bool,
@@ -22,21 +27,19 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
 	}
 
 	inputStream := antlr.NewInputStream(exprStr)
-	errorListener := &errorListener{}
-
 	lexer := getLexer(inputStream, errorListener)
-	if errorListener.err != nil {
-		return errorListener.err
+	if errorListener.Error() != nil {
+		return errorListener.Error()
 	}
 
 	parser := getParser(lexer, errorListener)
-	if errorListener.err != nil {
-		return errorListener.err
+	if errorListener.Error() != nil {
+		return errorListener.Error()
 	}
 
 	ast := parser.Expr()
-	if errorListener.err != nil {
-		return errorListener.err
+	if errorListener.Error() != nil {
+		return errorListener.Error()
 	}
 
 	if parser.GetCurrentToken().GetTokenType() != antlr.TokenEOF {
@@ -121,6 +124,10 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 	if err != nil {
 		log.Info("CreateSearchPlan failed", zap.Error(err))
 		return nil, err
+	}
+	// plan ok with schema, check ann field
+	if !schema.IsFieldLoaded(vectorField.GetFieldID()) {
+		return nil, merr.WrapErrParameterInvalidMsg("ann field \"%s\" not loaded", vectorFieldName)
 	}
 	fieldID := vectorField.FieldID
 	dataType := vectorField.DataType

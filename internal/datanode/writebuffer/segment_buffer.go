@@ -32,7 +32,7 @@ func (buf *segmentBuffer) IsFull() bool {
 	return buf.insertBuffer.IsFull() || buf.deltaBuffer.IsFull()
 }
 
-func (buf *segmentBuffer) Yield() (insert *storage.InsertData, delete *storage.DeleteData) {
+func (buf *segmentBuffer) Yield() (insert []*storage.InsertData, delete *storage.DeleteData) {
 	return buf.insertBuffer.Yield(), buf.deltaBuffer.Yield()
 }
 

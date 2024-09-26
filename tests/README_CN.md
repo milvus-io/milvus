@@ -49,9 +49,9 @@ $ docker info
   2. 确认 Docker Compose 版本
 
 ```shell
-$ docker-compose version
+$ docker compose version
 
-docker-compose version 1.25.5, build 8a1c60f6
+docker compose version 1.25.5, build 8a1c60f6
 docker-py version: 4.1.0
 CPython version: 3.7.5
 OpenSSL version: OpenSSL 1.1.1f  31 Mar 2020

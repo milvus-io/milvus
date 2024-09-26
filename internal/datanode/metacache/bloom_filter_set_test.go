@@ -47,7 +47,7 @@ func (s *BloomFilterSetSuite) GetFieldData(ids []int64) storage.FieldData {
 		Name:         "ID",
 		IsPrimaryKey: true,
 		DataType:     schemapb.DataType_Int64,
-	})
+	}, len(ids))
 	s.Require().NoError(err)
 
 	for _, id := range ids {

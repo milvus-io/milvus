@@ -19,12 +19,12 @@ package pkoracle
 import (
 	"sync"
 
-	bloom "github.com/bits-and-blooms/bloom/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -40,8 +40,6 @@ type BloomFilterSet struct {
 	segType      commonpb.SegmentState
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
-
-	kHashFunc uint
 }
 
 // MayPkExist returns whether any bloom filters returns positive.
@@ -97,11 +95,12 @@ func (s *BloomFilterSet) UpdateBloomFilter(pks []storage.PrimaryKey) {
 	defer s.statsMutex.Unlock()
 
 	if s.currentStat == nil {
+		bf := bloomfilter.NewBloomFilterWithType(
+			paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+			paramtable.Get().CommonCfg.BloomFilterType.GetValue())
 		s.currentStat = &storage.PkStatistics{
-			PkFilter: bloom.NewWithEstimates(
-				paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
-				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
-			),
+			PkFilter: bf,
 		}
 	}
 
@@ -128,9 +127,6 @@ func (s *BloomFilterSet) AddHistoricalStats(stats *storage.PkStatistics) {
 	s.statsMutex.Lock()
 	defer s.statsMutex.Unlock()
 
-	if stats.PkFilter.K() > s.kHashFunc {
-		s.kHashFunc = stats.PkFilter.K()
-	}
 	s.historyStats = append(s.historyStats, stats)
 }
 

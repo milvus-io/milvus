@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
+	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -62,12 +63,12 @@ func BytesToInt(b []byte) int {
 }
 
 // Consume1 will consume random messages and record the last MessageID it received
-func Consume1(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, subName string, c chan mqwrapper.MessageID, total *int) {
+func Consume1(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, subName string, c chan mqcommon.MessageID, total *int) {
 	consumer, err := kc.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
@@ -78,7 +79,7 @@ func Consume1(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 	cnt := 1 + rand.Int()%5
 
 	log.Info("Consume1 start")
-	var msg mqwrapper.Message
+	var msg mqcommon.Message
 	for i := 0; i < cnt; i++ {
 		select {
 		case <-ctx.Done():
@@ -101,12 +102,12 @@ func Consume1(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 }
 
 // Consume2 will consume messages from specified MessageID
-func Consume2(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, subName string, msgID mqwrapper.MessageID, total *int) {
+func Consume2(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, subName string, msgID mqcommon.MessageID, total *int) {
 	consumer, err := kc.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionUnknown,
+		SubscriptionInitialPosition: mqcommon.SubscriptionPositionUnknown,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
@@ -142,7 +143,7 @@ func Consume3(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
@@ -177,7 +178,7 @@ func TestKafkaClient_ConsumeWithAck(t *testing.T) {
 	arr1 := []int{111, 222, 333, 444, 555, 666, 777}
 	arr2 := []string{"111", "222", "333", "444", "555", "666", "777"}
 
-	c := make(chan mqwrapper.MessageID, 1)
+	c := make(chan mqcommon.MessageID, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -228,7 +229,7 @@ func TestKafkaClient_SeekPosition(t *testing.T) {
 	data2 := []string{"1", "2", "3"}
 	ids := produceData(ctx, t, producer, data1, data2)
 
-	consumer := createConsumer(t, kc, topic, subName, mqwrapper.SubscriptionPositionUnknown)
+	consumer := createConsumer(t, kc, topic, subName, mqcommon.SubscriptionPositionUnknown)
 	defer consumer.Close()
 
 	err := consumer.Seek(ids[2], true)
@@ -260,7 +261,7 @@ func TestKafkaClient_ConsumeFromLatest(t *testing.T) {
 	data2 := []string{"1", "2"}
 	produceData(ctx, t, producer, data1, data2)
 
-	consumer := createConsumer(t, kc, topic, subName, mqwrapper.SubscriptionPositionLatest)
+	consumer := createConsumer(t, kc, topic, subName, mqcommon.SubscriptionPositionLatest)
 	defer consumer.Close()
 
 	go func() {
@@ -354,6 +355,12 @@ func withProtocol(v string) kafkaCfgOption {
 	}
 }
 
+func withKafkaUseSSL(v string) kafkaCfgOption {
+	return func(cfg *paramtable.KafkaConfig) {
+		initParamItem(&cfg.KafkaUseSSL, v)
+	}
+}
+
 func createKafkaConfig(opts ...kafkaCfgOption) *paramtable.KafkaConfig {
 	cfg := &paramtable.KafkaConfig{}
 	for _, opt := range opts {
@@ -375,7 +382,8 @@ func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
 	consumerConfig := make(map[string]string)
 	consumerConfig["client.id"] = "dc"
 
-	config := createKafkaConfig(withAddr("addr"), withUsername("username"), withPasswd("password"), withMechanism("sasl"), withProtocol("plain"))
+	config := createKafkaConfig(withKafkaUseSSL("false"), withAddr("addr"), withUsername("username"),
+		withPasswd("password"), withMechanism("sasl"), withProtocol("plain"))
 	config.ConsumerExtraConfig = paramtable.ParamGroup{GetFunc: func() map[string]string { return consumerConfig }}
 	config.ProducerExtraConfig = paramtable.ParamGroup{GetFunc: func() map[string]string { return producerConfig }}
 
@@ -408,7 +416,7 @@ func createConsumer(t *testing.T,
 	kc *kafkaClient,
 	topic string,
 	groupID string,
-	initPosition mqwrapper.SubscriptionInitialPosition,
+	initPosition mqcommon.SubscriptionInitialPosition,
 ) mqwrapper.Consumer {
 	consumer, err := kc.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
@@ -421,16 +429,16 @@ func createConsumer(t *testing.T,
 }
 
 func createProducer(t *testing.T, kc *kafkaClient, topic string) mqwrapper.Producer {
-	producer, err := kc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	producer, err := kc.CreateProducer(mqcommon.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 	return producer
 }
 
-func produceData(ctx context.Context, t *testing.T, producer mqwrapper.Producer, arr []int, pArr []string) []mqwrapper.MessageID {
-	var msgIDs []mqwrapper.MessageID
+func produceData(ctx context.Context, t *testing.T, producer mqwrapper.Producer, arr []int, pArr []string) []mqcommon.MessageID {
+	var msgIDs []mqcommon.MessageID
 	for k, v := range arr {
-		msg := &mqwrapper.ProducerMessage{
+		msg := &mqcommon.ProducerMessage{
 			Payload: IntToBytes(v),
 			Properties: map[string]string{
 				common.TraceIDKey: pArr[k],

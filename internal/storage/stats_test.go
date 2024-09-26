@@ -20,12 +20,13 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestStatsWriter_Int64PrimaryKey(t *testing.T) {
@@ -124,11 +125,13 @@ func TestStatsWriter_UpgradePrimaryKey(t *testing.T) {
 		Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
 	}
 
+	bfType := paramtable.Get().CommonCfg.BloomFilterType.GetValue()
 	stats := &PrimaryKeyStats{
 		FieldID: common.RowIDField,
 		Min:     1,
 		Max:     9,
-		BF:      bloom.NewWithEstimates(100000, 0.05),
+		BFType:  bloomfilter.BFTypeFromString(bfType),
+		BF:      bloomfilter.NewBloomFilterWithType(100000, 0.05, bfType),
 	}
 
 	b := make([]byte, 8)
@@ -173,4 +176,31 @@ func TestDeserializeEmptyStats(t *testing.T) {
 
 	_, err := DeserializeStats([]*Blob{blob})
 	assert.NoError(t, err)
+}
+
+func TestMarshalStats(t *testing.T) {
+	stat, err := NewPrimaryKeyStats(1, int64(schemapb.DataType_Int64), 100000)
+	assert.NoError(t, err)
+
+	for i := 0; i < 10000; i++ {
+		stat.Update(NewInt64PrimaryKey(int64(i)))
+	}
+
+	sw := &StatsWriter{}
+	sw.GenerateList([]*PrimaryKeyStats{stat})
+	bytes := sw.GetBuffer()
+
+	sr := &StatsReader{}
+	sr.SetBuffer(bytes)
+	stat1, err := sr.GetPrimaryKeyStatsList()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(stat1))
+	assert.Equal(t, stat.Min, stat1[0].Min)
+	assert.Equal(t, stat.Max, stat1[0].Max)
+
+	for i := 0; i < 10000; i++ {
+		b := make([]byte, 8)
+		common.Endian.PutUint64(b, uint64(i))
+		assert.True(t, stat1[0].BF.Test(b))
+	}
 }

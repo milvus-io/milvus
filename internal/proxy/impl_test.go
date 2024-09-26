@@ -45,8 +45,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -80,7 +80,7 @@ func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 func TestProxy_CheckHealth(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		node.simpleLimiter = NewSimpleLimiter()
+		node.simpleLimiter = NewSimpleLimiter(0, 0)
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -98,7 +98,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			dataCoord:  NewDataCoordMock(),
 			session:    &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 		}
-		node.simpleLimiter = NewSimpleLimiter()
+		node.simpleLimiter = NewSimpleLimiter(0, 0)
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -131,7 +131,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			queryCoord: qc,
 			dataCoord:  dataCoordMock,
 		}
-		node.simpleLimiter = NewSimpleLimiter()
+		node.simpleLimiter = NewSimpleLimiter(0, 0)
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -148,7 +148,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			dataCoord:  NewDataCoordMock(),
 			queryCoord: qc,
 		}
-		node.simpleLimiter = NewSimpleLimiter()
+		node.simpleLimiter = NewSimpleLimiter(0, 0)
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := node.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -243,11 +243,13 @@ func TestProxy_ResourceGroup(t *testing.T) {
 
 	node, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	qc := mocks.NewMockQueryCoordClient(t)
 	node.SetQueryCoordClient(qc)
+
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	tsoAllocatorIns := newMockTsoAllocator()
 	node.sched, err = newTaskScheduler(node.ctx, tsoAllocatorIns, node.factory)
@@ -335,7 +337,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 
 	node, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	qc := mocks.NewMockQueryCoordClient(t)
@@ -936,7 +938,7 @@ func TestProxyCreateDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -996,7 +998,7 @@ func TestProxyDropDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -1055,7 +1057,7 @@ func TestProxyListDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -1111,7 +1113,7 @@ func TestProxyAlterDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -1164,7 +1166,7 @@ func TestProxyDescribeDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -1287,6 +1289,7 @@ func TestProxy_Delete(t *testing.T) {
 			Expr:           "pk in [1, 2, 3]",
 		}
 		cache := NewMockCache(t)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
@@ -1378,7 +1381,7 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 
 		factory := dependency.NewMockFactory(t)
 		stream := msgstream.NewMockMsgStream(t)
-		mockMsgID := mqwrapper.NewMockMessageID(t)
+		mockMsgID := mqcommon.NewMockMessageID(t)
 
 		factory.EXPECT().NewMsgStream(mock.Anything).Return(stream, nil).Once()
 		mockMsgID.EXPECT().Serialize().Return([]byte("mock")).Once()
@@ -1420,14 +1423,13 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 		}
 
 		{
-			timeTickResult := msgpb.TimeTickMsg{}
 			timeTickMsg := &msgstream.TimeTickMsg{
 				BaseMsg: msgstream.BaseMsg{
 					BeginTimestamp: 1,
 					EndTimestamp:   10,
 					HashValues:     []uint32{0},
 				},
-				TimeTickMsg: timeTickResult,
+				TimeTickMsg: &msgpb.TimeTickMsg{},
 			}
 			msgBytes, _ := timeTickMsg.Marshal(timeTickMsg)
 			resp, err := node.ReplicateMessage(context.TODO(), &milvuspb.ReplicateMessageRequest{
@@ -1440,20 +1442,19 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 		}
 
 		{
-			timeTickResult := msgpb.TimeTickMsg{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType(-1)),
-					commonpbutil.WithTimeStamp(10),
-					commonpbutil.WithSourceID(-1),
-				),
-			}
 			timeTickMsg := &msgstream.TimeTickMsg{
 				BaseMsg: msgstream.BaseMsg{
 					BeginTimestamp: 1,
 					EndTimestamp:   10,
 					HashValues:     []uint32{0},
 				},
-				TimeTickMsg: timeTickResult,
+				TimeTickMsg: &msgpb.TimeTickMsg{
+					Base: commonpbutil.NewMsgBase(
+						commonpbutil.WithMsgType(commonpb.MsgType(-1)),
+						commonpbutil.WithTimeStamp(10),
+						commonpbutil.WithSourceID(-1),
+					),
+				},
 			}
 			msgBytes, _ := timeTickMsg.Marshal(timeTickMsg)
 			resp, err := node.ReplicateMessage(context.TODO(), &milvuspb.ReplicateMessageRequest{
@@ -1474,10 +1475,10 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 		msgStreamObj.EXPECT().AsProducer(mock.Anything).Return()
 		msgStreamObj.EXPECT().EnableProduce(mock.Anything).Return()
 		msgStreamObj.EXPECT().Close().Return()
-		mockMsgID1 := mqwrapper.NewMockMessageID(t)
-		mockMsgID2 := mqwrapper.NewMockMessageID(t)
+		mockMsgID1 := mqcommon.NewMockMessageID(t)
+		mockMsgID2 := mqcommon.NewMockMessageID(t)
 		mockMsgID2.EXPECT().Serialize().Return([]byte("mock message id 2"))
-		broadcastMock := msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(map[string][]mqwrapper.MessageID{
+		broadcastMock := msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(map[string][]mqcommon.MessageID{
 			"unit_test_replicate_message": {mockMsgID1, mockMsgID2},
 		}, nil)
 
@@ -1511,7 +1512,7 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 					MsgID:       []byte("mock message id 2"),
 				},
 			},
-			InsertRequest: msgpb.InsertRequest{
+			InsertRequest: &msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     10001,
@@ -1565,7 +1566,7 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 		}
 		{
 			broadcastMock.Unset()
-			broadcastMock = msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(map[string][]mqwrapper.MessageID{
+			broadcastMock = msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(map[string][]mqcommon.MessageID{
 				"unit_test_replicate_message": {},
 			}, nil)
 			resp, err := node.ReplicateMessage(context.TODO(), replicateRequest)

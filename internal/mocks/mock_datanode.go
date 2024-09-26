@@ -87,8 +87,8 @@ func (_c *MockDataNode_CheckChannelOperationProgress_Call) RunAndReturn(run func
 	return _c
 }
 
-// Compaction provides a mock function with given fields: _a0, _a1
-func (_m *MockDataNode) Compaction(_a0 context.Context, _a1 *datapb.CompactionPlan) (*commonpb.Status, error) {
+// CompactionV2 provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) CompactionV2(_a0 context.Context, _a1 *datapb.CompactionPlan) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
@@ -113,31 +113,86 @@ func (_m *MockDataNode) Compaction(_a0 context.Context, _a1 *datapb.CompactionPl
 	return r0, r1
 }
 
-// MockDataNode_Compaction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Compaction'
-type MockDataNode_Compaction_Call struct {
+// MockDataNode_CompactionV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CompactionV2'
+type MockDataNode_CompactionV2_Call struct {
 	*mock.Call
 }
 
-// Compaction is a helper method to define mock.On call
+// CompactionV2 is a helper method to define mock.On call
 //   - _a0 context.Context
 //   - _a1 *datapb.CompactionPlan
-func (_e *MockDataNode_Expecter) Compaction(_a0 interface{}, _a1 interface{}) *MockDataNode_Compaction_Call {
-	return &MockDataNode_Compaction_Call{Call: _e.mock.On("Compaction", _a0, _a1)}
+func (_e *MockDataNode_Expecter) CompactionV2(_a0 interface{}, _a1 interface{}) *MockDataNode_CompactionV2_Call {
+	return &MockDataNode_CompactionV2_Call{Call: _e.mock.On("CompactionV2", _a0, _a1)}
 }
 
-func (_c *MockDataNode_Compaction_Call) Run(run func(_a0 context.Context, _a1 *datapb.CompactionPlan)) *MockDataNode_Compaction_Call {
+func (_c *MockDataNode_CompactionV2_Call) Run(run func(_a0 context.Context, _a1 *datapb.CompactionPlan)) *MockDataNode_CompactionV2_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.CompactionPlan))
 	})
 	return _c
 }
 
-func (_c *MockDataNode_Compaction_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNode_Compaction_Call {
+func (_c *MockDataNode_CompactionV2_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNode_CompactionV2_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockDataNode_Compaction_Call) RunAndReturn(run func(context.Context, *datapb.CompactionPlan) (*commonpb.Status, error)) *MockDataNode_Compaction_Call {
+func (_c *MockDataNode_CompactionV2_Call) RunAndReturn(run func(context.Context, *datapb.CompactionPlan) (*commonpb.Status, error)) *MockDataNode_CompactionV2_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropCompactionPlan provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) DropCompactionPlan(_a0 context.Context, _a1 *datapb.DropCompactionPlanRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropCompactionPlanRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropCompactionPlanRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.DropCompactionPlanRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNode_DropCompactionPlan_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCompactionPlan'
+type MockDataNode_DropCompactionPlan_Call struct {
+	*mock.Call
+}
+
+// DropCompactionPlan is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.DropCompactionPlanRequest
+func (_e *MockDataNode_Expecter) DropCompactionPlan(_a0 interface{}, _a1 interface{}) *MockDataNode_DropCompactionPlan_Call {
+	return &MockDataNode_DropCompactionPlan_Call{Call: _e.mock.On("DropCompactionPlan", _a0, _a1)}
+}
+
+func (_c *MockDataNode_DropCompactionPlan_Call) Run(run func(_a0 context.Context, _a1 *datapb.DropCompactionPlanRequest)) *MockDataNode_DropCompactionPlan_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.DropCompactionPlanRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataNode_DropCompactionPlan_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNode_DropCompactionPlan_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNode_DropCompactionPlan_Call) RunAndReturn(run func(context.Context, *datapb.DropCompactionPlanRequest) (*commonpb.Status, error)) *MockDataNode_DropCompactionPlan_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -962,6 +1017,61 @@ func (_c *MockDataNode_QueryPreImport_Call) Return(_a0 *datapb.QueryPreImportRes
 }
 
 func (_c *MockDataNode_QueryPreImport_Call) RunAndReturn(run func(context.Context, *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)) *MockDataNode_QueryPreImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QuerySlot provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) QuerySlot(_a0 context.Context, _a1 *datapb.QuerySlotRequest) (*datapb.QuerySlotResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *datapb.QuerySlotResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QuerySlotRequest) (*datapb.QuerySlotResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QuerySlotRequest) *datapb.QuerySlotResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.QuerySlotResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.QuerySlotRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNode_QuerySlot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QuerySlot'
+type MockDataNode_QuerySlot_Call struct {
+	*mock.Call
+}
+
+// QuerySlot is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.QuerySlotRequest
+func (_e *MockDataNode_Expecter) QuerySlot(_a0 interface{}, _a1 interface{}) *MockDataNode_QuerySlot_Call {
+	return &MockDataNode_QuerySlot_Call{Call: _e.mock.On("QuerySlot", _a0, _a1)}
+}
+
+func (_c *MockDataNode_QuerySlot_Call) Run(run func(_a0 context.Context, _a1 *datapb.QuerySlotRequest)) *MockDataNode_QuerySlot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.QuerySlotRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataNode_QuerySlot_Call) Return(_a0 *datapb.QuerySlotResponse, _a1 error) *MockDataNode_QuerySlot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNode_QuerySlot_Call) RunAndReturn(run func(context.Context, *datapb.QuerySlotRequest) (*datapb.QuerySlotResponse, error)) *MockDataNode_QuerySlot_Call {
 	_c.Call.Return(run)
 	return _c
 }

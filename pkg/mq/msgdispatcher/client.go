@@ -24,15 +24,15 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
 type (
 	Pos     = msgpb.MsgPosition
 	MsgPack = msgstream.MsgPack
-	SubPos  = mqwrapper.SubscriptionInitialPosition
+	SubPos  = common.SubscriptionInitialPosition
 )
 
 type Client interface {

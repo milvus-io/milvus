@@ -1,0 +1,11 @@
+include:
+  - "../../.golangci.yml"
+
+linters-settings:
+  gocritic:
+  enabled-checks:
+    - ruleguard
+  settings:
+    ruleguard:
+      failOnError: true
+      rules: "ruleguard/rules.go"

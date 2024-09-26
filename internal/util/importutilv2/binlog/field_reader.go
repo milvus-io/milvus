@@ -40,7 +40,7 @@ func newFieldReader(ctx context.Context, cm storage.ChunkManager, fieldSchema *s
 }
 
 func (r *fieldReader) Next() (storage.FieldData, error) {
-	fieldData, err := storage.NewFieldData(r.fieldSchema.GetDataType(), r.fieldSchema)
+	fieldData, err := storage.NewFieldData(r.fieldSchema.GetDataType(), r.fieldSchema, 0)
 	if err != nil {
 		return nil, err
 	}

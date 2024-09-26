@@ -55,7 +55,10 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VARCHAR: {
-            if (segment_->type() == SegmentType::Growing) {
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
                 result = ExecVisitorImpl<std::string>();
             } else {
                 result = ExecVisitorImpl<std::string_view>();
@@ -88,21 +91,26 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::ARRAY: {
             if (expr_->vals_.size() == 0) {
+                SetNotUseIndex();
                 result = ExecVisitorImplTemplateArray<bool>();
                 break;
             }
             auto type = expr_->vals_[0].val_case();
             switch (type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal:
+                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<bool>();
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
+                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<int64_t>();
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
+                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<double>();
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
+                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<std::string>();
                     break;
                 default:

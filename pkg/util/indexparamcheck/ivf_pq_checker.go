@@ -33,9 +33,13 @@ func (c *ivfPQChecker) checkPQParams(params map[string]string) error {
 	// nbits can be set to default: 8
 	nbitsStr, nbitsExist := params[NBITS]
 	if nbitsExist {
-		_, err := strconv.Atoi(nbitsStr)
+		nbits, err := strconv.Atoi(nbitsStr)
 		if err != nil { // invalid nbits
 			return fmt.Errorf("invalid nbits: %s", nbitsStr)
+		}
+
+		if nbits < 1 || nbits > 64 {
+			return fmt.Errorf("parameter `nbits` out of range, expect range [1,64], current value: %d", nbits)
 		}
 	}
 

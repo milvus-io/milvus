@@ -75,6 +75,9 @@ std::string
 GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
 
 std::string
+GenIndexPathIdentifier(int64_t build_id, int64_t index_version);
+
+std::string
 GenIndexPathPrefix(ChunkManagerPtr cm, int64_t build_id, int64_t index_version);
 
 std::string

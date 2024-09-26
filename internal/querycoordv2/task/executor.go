@@ -35,6 +35,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -197,6 +198,8 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		return err
 	}
 
+	ex.setMetricTypeForMetaInfo(loadMeta, indexInfos)
+
 	req := packLoadSegmentRequest(
 		task,
 		action,
@@ -276,22 +279,23 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 			// get segment's replica first, then get shard leader by replica
 			replica := ex.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
 			if replica == nil {
-				msg := "node doesn't belong to any replica"
+				msg := "node doesn't belong to any replica, try to send release to worker"
 				err := merr.WrapErrNodeNotAvailable(action.Node())
 				log.Warn(msg, zap.Error(err))
-				return
+				dstNode = action.Node()
+				req.NeedTransfer = false
+			} else {
+				view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard()))
+				if view == nil {
+					msg := "no shard leader for the segment to execute releasing"
+					err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
+					log.Warn(msg, zap.Error(err))
+					return
+				}
+				dstNode = view.ID
+				log = log.With(zap.Int64("shardLeader", view.ID))
+				req.NeedTransfer = true
 			}
-			view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard()))
-			if view == nil {
-				msg := "no shard leader for the segment to execute releasing"
-				err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
-				log.Warn(msg, zap.Error(err))
-				return
-			}
-
-			dstNode = view.ID
-			log = log.With(zap.Int64("shardLeader", view.ID))
-			req.NeedTransfer = true
 		}
 	}
 
@@ -343,6 +347,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		log.Warn("failed to get collection info")
 		return err
 	}
+	loadFields := ex.meta.GetLoadFields(task.CollectionID())
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, task.CollectionID())
 	if err != nil {
 		log.Warn("failed to get partitions of collection")
@@ -358,8 +363,11 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		task.CollectionID(),
 		collectionInfo.GetDbName(),
 		task.ResourceGroup(),
+		loadFields,
 		partitions...,
 	)
+
+	ex.setMetricTypeForMetaInfo(loadMeta, indexInfo)
 
 	dmChannel := ex.targetMgr.GetDmChannel(task.CollectionID(), action.ChannelName(), meta.NextTarget)
 	if dmChannel == nil {
@@ -452,12 +460,68 @@ func (ex *Executor) unsubscribeChannel(task *ChannelTask, step int) error {
 
 func (ex *Executor) executeLeaderAction(task *LeaderTask, step int) {
 	switch task.Actions()[step].Type() {
-	case ActionTypeGrow, ActionTypeUpdate:
+	case ActionTypeGrow:
 		ex.setDistribution(task, step)
 
 	case ActionTypeReduce:
 		ex.removeDistribution(task, step)
+
+	case ActionTypeUpdate:
+		ex.updatePartStatsVersions(task, step)
 	}
+}
+
+func (ex *Executor) updatePartStatsVersions(task *LeaderTask, step int) error {
+	action := task.Actions()[step].(*LeaderAction)
+	defer action.rpcReturned.Store(true)
+	ctx := task.Context()
+	log := log.Ctx(ctx).With(
+		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
+		zap.Int64("leader", action.leaderID),
+		zap.Int64("node", action.Node()),
+		zap.String("source", task.Source().String()),
+	)
+	var err error
+	defer func() {
+		if err != nil {
+			task.Fail(err)
+		}
+		ex.removeTask(task, step)
+	}()
+
+	req := &querypb.SyncDistributionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_SyncDistribution),
+			commonpbutil.WithMsgID(task.ID()),
+		),
+		CollectionID: task.collectionID,
+		Channel:      task.Shard(),
+		ReplicaID:    task.ReplicaID(),
+		Actions: []*querypb.SyncAction{
+			{
+				Type:                   querypb.SyncType_UpdatePartitionStats,
+				SegmentID:              action.SegmentID(),
+				NodeID:                 action.Node(),
+				Version:                action.Version(),
+				PartitionStatsVersions: action.partStatsVersions,
+			},
+		},
+	}
+	startTs := time.Now()
+	log.Debug("Update partition stats versions...")
+	status, err := ex.cluster.SyncDistribution(task.Context(), task.leaderID, req)
+	err = merr.CheckRPCCall(status, err)
+	if err != nil {
+		log.Warn("failed to update partition stats versions", zap.Error(err))
+		return err
+	}
+
+	elapsed := time.Since(startTs)
+	log.Debug("update partition stats done", zap.Duration("elapsed", elapsed))
+
+	return nil
 }
 
 func (ex *Executor) setDistribution(task *LeaderTask, step int) error {
@@ -491,6 +555,8 @@ func (ex *Executor) setDistribution(task *LeaderTask, step int) error {
 	if err != nil {
 		return err
 	}
+
+	ex.setMetricTypeForMetaInfo(loadMeta, indexInfo)
 
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -593,6 +659,7 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		log.Warn("failed to get collection info", zap.Error(err))
 		return nil, nil, nil, err
 	}
+	loadFields := ex.meta.GetLoadFields(task.CollectionID())
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, collectionID)
 	if err != nil {
 		log.Warn("failed to get partitions of collection", zap.Error(err))
@@ -604,6 +671,7 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		task.CollectionID(),
 		collectionInfo.GetDbName(),
 		task.ResourceGroup(),
+		loadFields,
 		partitions...,
 	)
 
@@ -618,12 +686,12 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 
 func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int64, channel *meta.DmChannel) (*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
 	log := log.Ctx(ctx)
-	resp, err := ex.broker.GetSegmentInfo(ctx, segmentID)
-	if err != nil || len(resp.GetInfos()) == 0 {
+	segmentInfos, err := ex.broker.GetSegmentInfo(ctx, segmentID)
+	if err != nil || len(segmentInfos) == 0 {
 		log.Warn("failed to get segment info from DataCoord", zap.Error(err))
 		return nil, nil, err
 	}
-	segment := resp.GetInfos()[0]
+	segment := segmentInfos[0]
 	log = log.With(zap.String("level", segment.GetLevel().String()))
 
 	indexes, err := ex.broker.GetIndexInfo(ctx, collectionID, segment.GetID())
@@ -661,4 +729,17 @@ func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int
 
 	loadInfo := utils.PackSegmentLoadInfo(segment, channel.GetSeekPosition(), indexes)
 	return loadInfo, indexInfos, nil
+}
+
+// setMetricTypeForMetaInfo it's a compatibility method for rolling upgrade from 2.3.x to 2.4
+func (ex *Executor) setMetricTypeForMetaInfo(metaInfo *querypb.LoadMetaInfo, indexInfos []*indexpb.IndexInfo) {
+	for _, info := range indexInfos {
+		for _, param := range info.IndexParams {
+			if param.GetKey() == common.MetricTypeKey {
+				metaInfo.MetricType = param.GetValue()
+				return
+			}
+		}
+	}
+	log.Warn("metric type not found in index info, set it to default", zap.Any("indexInfos", indexInfos), zap.Any("metaInfo", metaInfo))
 }

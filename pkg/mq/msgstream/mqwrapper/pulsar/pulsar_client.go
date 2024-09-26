@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -65,7 +66,7 @@ func NewClient(tenant string, namespace string, opts pulsar.ClientOptions) (*pul
 }
 
 // CreateProducer create a pulsar producer from options
-func (pc *pulsarClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrapper.Producer, error) {
+func (pc *pulsarClient) CreateProducer(options mqcommon.ProducerOptions) (mqwrapper.Producer, error) {
 	start := timerecord.NewTimeRecorder("create producer")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.TotalLabel).Inc()
 
@@ -125,7 +126,7 @@ func (pc *pulsarClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.
 
 	pConsumer := &Consumer{c: consumer, closeCh: make(chan struct{})}
 	// prevent seek to earliest patch applied when using latest position options
-	if options.SubscriptionInitialPosition == mqwrapper.SubscriptionPositionLatest {
+	if options.SubscriptionInitialPosition == mqcommon.SubscriptionPositionLatest {
 		pConsumer.AtLatest = true
 	}
 
@@ -162,13 +163,13 @@ func NewAdminClient(address, authPlugin, authParams string) (pulsarctl.Client, e
 }
 
 // EarliestMessageID returns the earliest message id
-func (pc *pulsarClient) EarliestMessageID() mqwrapper.MessageID {
+func (pc *pulsarClient) EarliestMessageID() mqcommon.MessageID {
 	msgID := pulsar.EarliestMessageID()
 	return &pulsarID{messageID: msgID}
 }
 
 // StringToMsgID converts the string id to MessageID type
-func (pc *pulsarClient) StringToMsgID(id string) (mqwrapper.MessageID, error) {
+func (pc *pulsarClient) StringToMsgID(id string) (mqcommon.MessageID, error) {
 	pID, err := stringToMsgID(id)
 	if err != nil {
 		return nil, err
@@ -177,7 +178,7 @@ func (pc *pulsarClient) StringToMsgID(id string) (mqwrapper.MessageID, error) {
 }
 
 // BytesToMsgID converts []byte id to MessageID type
-func (pc *pulsarClient) BytesToMsgID(id []byte) (mqwrapper.MessageID, error) {
+func (pc *pulsarClient) BytesToMsgID(id []byte) (mqcommon.MessageID, error) {
 	pID, err := DeserializePulsarMsgID(id)
 	if err != nil {
 		return nil, err

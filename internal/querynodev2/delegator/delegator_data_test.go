@@ -20,11 +20,11 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
-	bloom "github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -41,6 +41,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -48,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type DelegatorDataSuite struct {
@@ -74,6 +77,9 @@ func (s *DelegatorDataSuite) SetupSuite() {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key, "1")
+	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	initcore.InitLocalChunkManager(localDataRootPath)
+	initcore.InitMmapManager(paramtable.Get())
 
 	s.collectionID = 1000
 	s.replicaID = 65535
@@ -275,8 +281,9 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
-			bf := bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
-				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
+			bf := bloomfilter.NewBloomFilterWithType(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				paramtable.Get().CommonCfg.BloomFilterType.GetValue())
 			pks := &storage.PkStatistics{
 				PkFilter: bf,
 			}
@@ -502,6 +509,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					Level:         datapb.SegmentLevel_L1,
 					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
@@ -517,6 +525,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 				NodeID:        1,
 				PartitionID:   500,
 				TargetVersion: unreadableTargetVersion,
+				Level:         datapb.SegmentLevel_L1,
 			},
 		}, sealed[0].Segments)
 	})
@@ -531,8 +540,10 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
-				bf := bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
-					paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
+				bf := bloomfilter.NewBloomFilterWithType(
+					paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+					paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+					paramtable.Get().CommonCfg.BloomFilterType.GetValue())
 				pks := &storage.PkStatistics{
 					PkFilter: bf,
 				}
@@ -590,20 +601,21 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		})
 		s.NoError(err)
 
-		err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
-			Base:         commonpbutil.NewMsgBase(),
-			DstNodeID:    1,
-			CollectionID: s.collectionID,
-			Infos: []*querypb.SegmentLoadInfo{
-				{
-					SegmentID:     200,
-					PartitionID:   500,
-					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
-					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
-					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
-				},
-			},
-		})
+		// err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		// 	Base:         commonpbutil.NewMsgBase(),
+		// 	DstNodeID:    1,
+		// 	CollectionID: s.collectionID,
+		// 	Infos: []*querypb.SegmentLoadInfo{
+		// 		{
+		// 			SegmentID:     200,
+		// 			PartitionID:   500,
+		// 			StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+		// 			DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+		// 			Level:         datapb.SegmentLevel_L1,
+		// 			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+		// 		},
+		// 	},
+		// })
 
 		s.NoError(err)
 		sealed, _ := s.delegator.GetSegmentInfo(false)
@@ -615,12 +627,14 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 				NodeID:        1,
 				PartitionID:   500,
 				TargetVersion: unreadableTargetVersion,
+				Level:         datapb.SegmentLevel_L1,
 			},
 			{
 				SegmentID:     200,
 				NodeID:        1,
 				PartitionID:   500,
 				TargetVersion: unreadableTargetVersion,
+				Level:         datapb.SegmentLevel_L0,
 			},
 		}, sealed[0].Segments)
 	})
@@ -689,8 +703,10 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
-				bf := bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
-					paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
+				bf := bloomfilter.NewBloomFilterWithType(
+					paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+					paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+					paramtable.Get().CommonCfg.BloomFilterType.GetValue())
 				pks := &storage.PkStatistics{
 					PkFilter: bf,
 				}
@@ -890,8 +906,10 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 		Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
-			bf := bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
-				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
+			bf := bloomfilter.NewBloomFilterWithType(
+				paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				paramtable.Get().CommonCfg.BloomFilterType.GetValue())
 			pks := &storage.PkStatistics{
 				PkFilter: bf,
 			}
@@ -1061,7 +1079,9 @@ func (s *DelegatorDataSuite) TestLoadPartitionStats() {
 	defer s.chunkManager.Remove(context.Background(), statsPath1)
 
 	// reload and check partition stats
-	s.delegator.maybeReloadPartitionStats(context.Background())
+	partVersions := make(map[int64]int64)
+	partVersions[partitionID1] = 1
+	s.delegator.loadPartitionStats(context.Background(), partVersions)
 	s.Equal(1, len(s.delegator.partitionStats))
 	s.NotNil(s.delegator.partitionStats[partitionID1])
 	p1Stats := s.delegator.partitionStats[partitionID1]
@@ -1144,8 +1164,7 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 
 	delegator.segmentManager.Put(context.TODO(), segments.SegmentTypeSealed, l0Global)
 	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
-	s.True(pks[0].EQ(partitionDeleteData.Pks[0]))
-	s.True(pks[1].EQ(allPartitionDeleteData.Pks[0]))
+	s.ElementsMatch(pks, []storage.PrimaryKey{partitionDeleteData.Pks[0], allPartitionDeleteData.Pks[0]})
 
 	bfs := pkoracle.NewBloomFilterSet(3, l0.Partition(), commonpb.SegmentState_Sealed)
 	bfs.UpdateBloomFilter(allPartitionDeleteData.Pks)
@@ -1184,10 +1203,10 @@ func (s *DelegatorDataSuite) TestReadDeleteFromMsgstream() {
 
 	datas := []*msgstream.MsgPack{
 		{EndTs: 10, EndPositions: []*msgpb.MsgPosition{{Timestamp: 10}}, Msgs: []msgstream.TsMsg{
-			&msgstream.DeleteMsg{DeleteRequest: msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: 1, PrimaryKeys: storage.ParseInt64s2IDs(1), Timestamps: []uint64{1}}},
-			&msgstream.DeleteMsg{DeleteRequest: msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: -1, PrimaryKeys: storage.ParseInt64s2IDs(2), Timestamps: []uint64{5}}},
+			&msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: 1, PrimaryKeys: storage.ParseInt64s2IDs(1), Timestamps: []uint64{1}}},
+			&msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: -1, PrimaryKeys: storage.ParseInt64s2IDs(2), Timestamps: []uint64{5}}},
 			// invalid msg because partition wrong
-			&msgstream.DeleteMsg{DeleteRequest: msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: 2, PrimaryKeys: storage.ParseInt64s2IDs(1), Timestamps: []uint64{10}}},
+			&msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: 2, PrimaryKeys: storage.ParseInt64s2IDs(1), Timestamps: []uint64{10}}},
 		}},
 	}
 

@@ -6,10 +6,10 @@ import (
 	"io"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -98,6 +98,11 @@ func (dt *deleteTask) SetTs(ts Timestamp) {
 }
 
 func (dt *deleteTask) OnEnqueue() error {
+	if dt.req.Base == nil {
+		dt.req.Base = commonpbutil.NewMsgBase()
+	}
+	dt.req.Base.MsgType = commonpb.MsgType_Delete
+	dt.req.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
@@ -197,26 +202,25 @@ func (dt *deleteTask) newDeleteMsg(ctx context.Context) (*msgstream.DeleteMsg, e
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to allocate MsgID of delete")
 	}
-	sliceRequest := msgpb.DeleteRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_Delete),
-			// msgid of delete msg must be set
-			// or it will be seen as duplicated msg in mq
-			commonpbutil.WithMsgID(msgid),
-			commonpbutil.WithTimeStamp(dt.ts),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		CollectionID:   dt.collectionID,
-		PartitionID:    dt.partitionID,
-		CollectionName: dt.req.GetCollectionName(),
-		PartitionName:  dt.req.GetPartitionName(),
-		PrimaryKeys:    &schemapb.IDs{},
-	}
 	return &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{
 			Ctx: ctx,
 		},
-		DeleteRequest: sliceRequest,
+		DeleteRequest: &msgpb.DeleteRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Delete),
+				// msgid of delete msg must be set
+				// or it will be seen as duplicated msg in mq
+				commonpbutil.WithMsgID(msgid),
+				commonpbutil.WithTimeStamp(dt.ts),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			CollectionID:   dt.collectionID,
+			PartitionID:    dt.partitionID,
+			CollectionName: dt.req.GetCollectionName(),
+			PartitionName:  dt.req.GetPartitionName(),
+			PrimaryKeys:    &schemapb.IDs{},
+		},
 	}, nil
 }
 
@@ -231,9 +235,11 @@ type deleteRunner struct {
 
 	idAllocator     allocator.Interface
 	tsoAllocatorIns tsoAllocator
+	limiter         types.Limiter
 
 	// delete info
 	schema           *schemaInfo
+	dbID             UniqueID
 	collectionID     UniqueID
 	partitionID      UniqueID
 	partitionKeyMode bool
@@ -243,7 +249,6 @@ type deleteRunner struct {
 	ts    uint64
 	lb    LBPolicy
 	count atomic.Int64
-	err   error
 
 	// task queue
 	queue *dmTaskQueue
@@ -259,9 +264,16 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err := validateCollectionName(collName); err != nil {
 		return ErrWithLog(log, "Invalid collection name", err)
 	}
+
+	db, err := globalMetaCache.GetDatabaseInfo(ctx, dr.req.GetDbName())
+	if err != nil {
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrDatabaseNotFound)
+	}
+	dr.dbID = db.dbID
+
 	dr.collectionID, err = globalMetaCache.GetCollectionID(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
-		return ErrWithLog(log, "Failed to get collection id", err)
+		return ErrWithLog(log, "Failed to get collection id", merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound))
 	}
 
 	dr.schema, err = globalMetaCache.GetCollectionSchema(ctx, dr.req.GetDbName(), collName)
@@ -307,11 +319,11 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 func (dr *deleteRunner) Run(ctx context.Context) error {
 	plan, err := planparserv2.CreateRetrievePlan(dr.schema.schemaHelper, dr.req.GetExpr())
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err)
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))
 	}
 
 	if planparserv2.IsAlwaysTruePlan(plan) {
-		return merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr())
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 
 	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, plan)
@@ -428,7 +440,11 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 		}
 
 		taskCh := make(chan *deleteTask, 256)
-		go dr.receiveQueryResult(ctx, client, taskCh)
+		var receiveErr error
+		go func() {
+			receiveErr = dr.receiveQueryResult(ctx, client, taskCh, partitionIDs)
+			close(taskCh)
+		}()
 		var allQueryCnt int64
 		// wait all task finish
 		for task := range taskCh {
@@ -441,42 +457,43 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 		}
 
 		// query or produce task failed
-		if dr.err != nil {
-			return dr.err
+		if receiveErr != nil {
+			return receiveErr
 		}
 		dr.allQueryCnt.Add(allQueryCnt)
 		return nil
 	}
 }
 
-func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient, taskCh chan *deleteTask) {
-	defer func() {
-		close(taskCh)
-	}()
-
+func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient, taskCh chan *deleteTask, partitionIDs []int64) error {
 	for {
 		result, err := client.Recv()
 		if err != nil {
 			if err == io.EOF {
 				log.Debug("query stream for delete finished", zap.Int64("msgID", dr.msgID))
-				return
+				return nil
 			}
-			dr.err = err
-			return
+			return err
 		}
 
 		err = merr.Error(result.GetStatus())
 		if err != nil {
-			dr.err = err
 			log.Warn("query stream for delete get error status", zap.Int64("msgID", dr.msgID), zap.Error(err))
-			return
+			return err
+		}
+
+		if dr.limiter != nil {
+			err := dr.limiter.Alloc(ctx, dr.dbID, map[int64][]int64{dr.collectionID: partitionIDs}, internalpb.RateType_DMLDelete, proto.Size(result.GetIds()))
+			if err != nil {
+				log.Warn("query stream for delete failed because rate limiter", zap.Int64("msgID", dr.msgID), zap.Error(err))
+				return err
+			}
 		}
 
 		task, err := dr.produce(ctx, result.GetIds())
 		if err != nil {
-			dr.err = err
 			log.Warn("produce delete task failed", zap.Error(err))
-			return
+			return err
 		}
 		task.allQueryCnt = result.GetAllRetrieveCount()
 

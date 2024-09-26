@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -34,17 +34,19 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type IndexCheckerSuite struct {
 	suite.Suite
-	kv      kv.MetaKv
-	checker *IndexChecker
-	meta    *meta.Meta
-	broker  *meta.MockBroker
-	nodeMgr *session.NodeManager
+	kv        kv.MetaKv
+	checker   *IndexChecker
+	meta      *meta.Meta
+	broker    *meta.MockBroker
+	nodeMgr   *session.NodeManager
+	targetMgr *meta.MockTargetManager
 }
 
 func (suite *IndexCheckerSuite) SetupSuite() {
@@ -73,7 +75,15 @@ func (suite *IndexCheckerSuite) SetupTest() {
 	distManager := meta.NewDistributionManager()
 	suite.broker = meta.NewMockBroker(suite.T())
 
-	suite.checker = NewIndexChecker(suite.meta, distManager, suite.broker, suite.nodeMgr)
+	suite.targetMgr = meta.NewMockTargetManager(suite.T())
+	suite.checker = NewIndexChecker(suite.meta, distManager, suite.broker, suite.nodeMgr, suite.targetMgr)
+
+	suite.targetMgr.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(cid, sid int64, i3 int32) *datapb.SegmentInfo {
+		return &datapb.SegmentInfo{
+			ID:    sid,
+			Level: datapb.SegmentLevel_L1,
+		}
+	}).Maybe()
 }
 
 func (suite *IndexCheckerSuite) TearDownTest() {

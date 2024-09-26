@@ -19,8 +19,8 @@ package datacoord
 import (
 	"fmt"
 
-	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -85,6 +85,9 @@ func (ch *channelMeta) UpdateWatchInfo(info *datapb.ChannelWatchInfo) {
 		zap.Any("old watch info", ch.WatchInfo),
 		zap.Any("new watch info", info))
 	ch.WatchInfo = proto.Clone(info).(*datapb.ChannelWatchInfo)
+	if ch.Schema == nil {
+		ch.Schema = info.GetSchema()
+	}
 }
 
 func (ch *channelMeta) GetWatchInfo() *datapb.ChannelWatchInfo {
@@ -232,7 +235,7 @@ func (c *StateChannel) Clone() *StateChannel {
 
 func (c *StateChannel) String() string {
 	// schema maybe too large to print
-	return fmt.Sprintf("Name: %s, CollectionID: %d, StartPositions: %v", c.Name, c.CollectionID, c.StartPositions)
+	return fmt.Sprintf("Name: %s, CollectionID: %d, StartPositions: %v, Schema: %v", c.Name, c.CollectionID, c.StartPositions, c.Schema)
 }
 
 func (c *StateChannel) GetName() string {
@@ -270,6 +273,12 @@ func (c *StateChannel) UpdateWatchInfo(info *datapb.ChannelWatchInfo) {
 	}
 
 	c.Info = proto.Clone(info).(*datapb.ChannelWatchInfo)
+	if c.Schema == nil {
+		log.Info("Channel updating watch info for nil schema in old info",
+			zap.Any("old watch info", c.Info),
+			zap.Any("new watch info", info))
+		c.Schema = info.GetSchema()
+	}
 }
 
 func (c *StateChannel) Assign(nodeID int64) {

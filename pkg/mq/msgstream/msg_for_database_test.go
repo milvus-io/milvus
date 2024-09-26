@@ -29,7 +29,7 @@ import (
 
 func TestCreateDatabase(t *testing.T) {
 	var msg TsMsg = &CreateDatabaseMsg{
-		CreateDatabaseRequest: milvuspb.CreateDatabaseRequest{
+		CreateDatabaseRequest: &milvuspb.CreateDatabaseRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:       commonpb.MsgType_CreateDatabase,
 				MsgID:         100,
@@ -66,7 +66,7 @@ func TestCreateDatabase(t *testing.T) {
 
 func TestDropDatabase(t *testing.T) {
 	var msg TsMsg = &DropDatabaseMsg{
-		DropDatabaseRequest: milvuspb.DropDatabaseRequest{
+		DropDatabaseRequest: &milvuspb.DropDatabaseRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:       commonpb.MsgType_DropDatabase,
 				MsgID:         100,
@@ -99,4 +99,47 @@ func TestDropDatabase(t *testing.T) {
 	assert.EqualValues(t, "unit_db", newMsg.(*DropDatabaseMsg).DbName)
 
 	assert.True(t, msg.Size() > 0)
+}
+
+func TestAlterDatabase(t *testing.T) {
+	var msg TsMsg = &AlterDatabaseMsg{
+		AlterDatabaseRequest: &milvuspb.AlterDatabaseRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:       commonpb.MsgType_AlterDatabase,
+				MsgID:         100,
+				Timestamp:     1000,
+				SourceID:      10000,
+				TargetID:      100000,
+				ReplicateInfo: nil,
+			},
+			DbName: "unit_db",
+			Properties: []*commonpb.KeyValuePair{
+				{
+					Key:   "key",
+					Value: "value",
+				},
+			},
+		},
+	}
+	assert.EqualValues(t, 100, msg.ID())
+	msg.SetID(200)
+	assert.EqualValues(t, 200, msg.ID())
+	assert.Equal(t, commonpb.MsgType_AlterDatabase, msg.Type())
+	assert.EqualValues(t, 10000, msg.SourceID())
+
+	msgBytes, err := msg.Marshal(msg)
+	assert.NoError(t, err)
+
+	var newMsg TsMsg = &AlterDatabaseMsg{}
+	_, err = newMsg.Unmarshal("1")
+	assert.Error(t, err)
+
+	newMsg, err = newMsg.Unmarshal(msgBytes)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 200, newMsg.ID())
+	assert.EqualValues(t, 1000, newMsg.BeginTs())
+	assert.EqualValues(t, 1000, newMsg.EndTs())
+	assert.EqualValues(t, "unit_db", newMsg.(*AlterDatabaseMsg).DbName)
+	assert.EqualValues(t, "key", newMsg.(*AlterDatabaseMsg).Properties[0].Key)
+	assert.EqualValues(t, "value", newMsg.(*AlterDatabaseMsg).Properties[0].Value)
 }

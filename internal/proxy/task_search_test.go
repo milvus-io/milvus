@@ -23,12 +23,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -60,6 +60,9 @@ func TestSearchTask_PostExecute(t *testing.T) {
 	defer rc.Close()
 	require.NoError(t, err)
 	mgr := newShardClientMgr()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	require.NoError(t, err)
 
@@ -191,6 +194,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 	defer rc.Close()
 	require.NoError(t, err)
 	mgr := newShardClientMgr()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	require.NoError(t, err)
 
@@ -335,6 +339,7 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 
 	defer rc.Close()
 	mgr := newShardClientMgr()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	require.NoError(t, err)
 
@@ -1786,6 +1791,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	)
 
 	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	mgr := NewMockShardClientManager(t)
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
@@ -1929,7 +1935,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	assert.NoError(t, task.Execute(ctx))
 }
 
-func TestTaskSearch_parseQueryInfo(t *testing.T) {
+func TestTaskSearch_parseSearchInfo(t *testing.T) {
 	t.Run("parseSearchInfo no error", func(t *testing.T) {
 		var targetOffset int64 = 200
 
@@ -1965,7 +1971,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.validParams, nil, false)
+				info, offset, err := parseSearchInfo(test.validParams, nil, nil)
 				assert.NoError(t, err)
 				assert.NotNil(t, info)
 				if test.description == "offsetParam" {
@@ -1973,6 +1979,24 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 				}
 			})
 		}
+	})
+
+	t.Run("parseSearchInfo externalLimit", func(t *testing.T) {
+		var externalLimit int64 = 200
+		offsetParam := getValidSearchParams()
+		offsetParam = append(offsetParam, &commonpb.KeyValuePair{
+			Key:   OffsetKey,
+			Value: strconv.FormatInt(10, 10),
+		})
+		rank := &rankParams{
+			limit: externalLimit,
+		}
+
+		info, offset, err := parseSearchInfo(offsetParam, nil, rank)
+		assert.NoError(t, err)
+		assert.NotNil(t, info)
+		assert.Equal(t, int64(10), info.GetTopk())
+		assert.Equal(t, int64(0), offset)
 	})
 
 	t.Run("parseSearchInfo error", func(t *testing.T) {
@@ -2054,7 +2078,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.invalidParams, nil, false)
+				info, offset, err := parseSearchInfo(test.invalidParams, nil, nil)
 				assert.Error(t, err)
 				assert.Nil(t, info)
 				assert.Zero(t, offset)
@@ -2081,7 +2105,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, false)
+		info, _, err := parseSearchInfo(normalParam, schema, nil)
 		assert.Nil(t, info)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
@@ -2100,9 +2124,29 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, false)
+		info, _, err := parseSearchInfo(normalParam, schema, nil)
 		assert.Nil(t, info)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+	t.Run("check iterator and topK", func(t *testing.T) {
+		normalParam := getValidSearchParams()
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   IteratorField,
+			Value: "True",
+		})
+		resetSearchParamsValue(normalParam, TopKKey, `1024000`)
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		schema := &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		info, _, err := parseSearchInfo(normalParam, schema, nil)
+		assert.NotNil(t, info)
+		assert.NoError(t, err)
+		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), info.Topk)
 	})
 }
 
@@ -2533,6 +2577,29 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.False(t, skip)
 	})
 
+	t.Run("legacy_guarantee_ts", func(t *testing.T) {
+		st := &searchTask{
+			request: &milvuspb.SearchRequest{
+				Base:                  nil,
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: false,
+				ConsistencyLevel:      commonpb.ConsistencyLevel_Strong,
+			},
+		}
+
+		skip := st.CanSkipAllocTimestamp()
+		assert.False(t, skip)
+
+		st.request.GuaranteeTimestamp = 1 // eventually
+		skip = st.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+
+		st.request.GuaranteeTimestamp = 2 // bounded
+		skip = st.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+	})
+
 	t.Run("failed", func(t *testing.T) {
 		mockMetaCache.ExpectedCalls = nil
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
@@ -2608,11 +2675,12 @@ func (s *MaterializedViewTestSuite) TearDownSuite() {
 
 func (s *MaterializedViewTestSuite) SetupTest() {
 	s.mockMetaCache = NewMockCache(s.T())
-	s.mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.colID, nil).Maybe()
+	s.mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.colID, nil)
 	s.mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 		&collectionBasicInfo{
-			collID: s.colID,
-		}, nil).Maybe()
+			collID:                s.colID,
+			partitionKeyIsolation: true,
+		}, nil)
 	globalMetaCache = s.mockMetaCache
 }
 
@@ -2692,7 +2760,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnInt64() {
 	err := task.PreExecute(s.ctx)
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
-	s.Equal(false, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
 }
 
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
@@ -2709,6 +2777,53 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
 	s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+}
+
+func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolation() {
+	isAdanceds := []bool{true, false}
+	for _, isAdvanced := range isAdanceds {
+		task := s.getSearchTask()
+		task.enableMaterializedView = true
+		task.request.Dsl = testVarCharField + " == \"a\""
+		task.IsAdvanced = isAdvanced
+		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
+		schemaInfo := newSchemaInfo(schema)
+		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+		s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
+		s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
+		err := task.PreExecute(s.ctx)
+		s.NoError(err)
+		s.NotZero(len(task.queryInfos))
+		s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+	}
+}
+
+func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolationInvalid() {
+	isAdanceds := []bool{true, false}
+	for _, isAdvanced := range isAdanceds {
+		task := s.getSearchTask()
+		task.enableMaterializedView = true
+		task.IsAdvanced = isAdvanced
+		task.request.Dsl = testVarCharField + " in [\"a\", \"b\"]"
+		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
+		schemaInfo := newSchemaInfo(schema)
+		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support IN")
+	}
+}
+
+func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolationInvalidOr() {
+	isAdanceds := []bool{true, false}
+	for _, isAdvanced := range isAdanceds {
+		task := s.getSearchTask()
+		task.enableMaterializedView = true
+		task.IsAdvanced = isAdvanced
+		task.request.Dsl = testVarCharField + " == \"a\" || " + testVarCharField + "  == \"b\""
+		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
+		schemaInfo := newSchemaInfo(schema)
+		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support OR")
+	}
 }
 
 func TestMaterializedView(t *testing.T) {

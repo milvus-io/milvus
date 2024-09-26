@@ -11,13 +11,5 @@
 
 find_package(Protobuf REQUIRED)
 
-add_library(milvus_proto STATIC
-    common.pb.cc
-    index_cgo_msg.pb.cc
-    plan.pb.cc
-    schema.pb.cc
-    segcore.pb.cc
-    )
-message(STATUS "milvus proto sources: " ${milvus_proto_srcs})
-
-target_link_libraries( milvus_proto PUBLIC ${CONAN_LIBS} )
+add_source_at_current_directory_recursively()
+add_library(milvus_pb OBJECT ${SOURCE_FILES})

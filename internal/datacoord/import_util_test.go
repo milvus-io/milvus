@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -153,6 +154,9 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 
 	alloc := NewNMockAllocator(t)
 	alloc.EXPECT().allocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
@@ -204,7 +208,8 @@ func TestImportUtil_RegroupImportFiles(t *testing.T) {
 			Vchannels:    []string{"v0", "v1", "v2", "v3"},
 		},
 	}
-	groups := RegroupImportFiles(job, files)
+
+	groups := RegroupImportFiles(job, files, false)
 	total := 0
 	for i, fs := range groups {
 		sum := lo.SumBy(fs, func(f *datapb.ImportFileStats) int64 {
@@ -232,6 +237,9 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 
 	imeta, err := NewImportMeta(catalog)
 	assert.NoError(t, err)
@@ -274,6 +282,14 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	assert.NoError(t, err)
 
 	Params.Save(Params.QuotaConfig.DiskProtectionEnabled.Key, "true")
+	job.Options = []*commonpb.KeyValuePair{
+		{Key: importutilv2.BackupFlag, Value: "true"},
+		{Key: importutilv2.SkipDQC, Value: "true"},
+	}
+	_, err = CheckDiskQuota(job, meta, imeta)
+	assert.NoError(t, err)
+
+	job.Options = nil
 	Params.Save(Params.QuotaConfig.DiskQuota.Key, "10000")
 	Params.Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "10000")
 	defer Params.Reset(Params.QuotaConfig.DiskQuota.Key)
@@ -406,6 +422,9 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 
 	imeta, err := NewImportMeta(catalog)
 	assert.NoError(t, err)

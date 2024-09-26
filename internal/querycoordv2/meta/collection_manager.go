@@ -23,13 +23,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -47,6 +50,7 @@ type Collection struct {
 	mut             sync.RWMutex
 	refreshNotifier chan struct{}
 	LoadSpan        trace.Span
+	isReleasing     bool
 }
 
 func (collection *Collection) SetRefreshNotifier(notifier chan struct{}) {
@@ -54,6 +58,18 @@ func (collection *Collection) SetRefreshNotifier(notifier chan struct{}) {
 	defer collection.mut.Unlock()
 
 	collection.refreshNotifier = notifier
+}
+
+func (collection *Collection) SetReleasing() {
+	collection.mut.Lock()
+	defer collection.mut.Unlock()
+	collection.isReleasing = true
+}
+
+func (collection *Collection) IsReleasing() bool {
+	collection.mut.RLock()
+	defer collection.mut.RUnlock()
+	return collection.isReleasing
 }
 
 func (collection *Collection) IsRefreshed() bool {
@@ -156,6 +172,16 @@ func (m *CollectionManager) Recover(broker Broker) error {
 			continue
 		}
 
+		err := m.upgradeLoadFields(collection, broker)
+		if err != nil {
+			if errors.Is(err, merr.ErrCollectionNotFound) {
+				log.Warn("collection not found, skip upgrade logic and wait for release")
+			} else {
+				log.Warn("upgrade load field failed", zap.Error(err))
+				return err
+			}
+		}
+
 		m.collections[collection.CollectionID] = &Collection{
 			CollectionLoadInfo: collection,
 		}
@@ -191,6 +217,36 @@ func (m *CollectionManager) Recover(broker Broker) error {
 		log.Warn("upgrade recover failed", zap.Error(err))
 		return err
 	}
+	return nil
+}
+
+func (m *CollectionManager) upgradeLoadFields(collection *querypb.CollectionLoadInfo, broker Broker) error {
+	// only fill load fields when value is nil
+	if collection.LoadFields != nil {
+		return nil
+	}
+
+	// invoke describe collection to get collection schema
+	resp, err := broker.DescribeCollection(context.Background(), collection.CollectionID)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return err
+	}
+
+	// fill all field id as legacy default behavior
+	collection.LoadFields = lo.FilterMap(resp.GetSchema().GetFields(), func(fieldSchema *schemapb.FieldSchema, _ int) (int64, bool) {
+		// load fields list excludes system fields
+		return fieldSchema.GetFieldID(), !common.IsSystemField(fieldSchema.GetFieldID())
+	})
+
+	// put updated meta back to store
+	err = m.putCollection(true, &Collection{
+		CollectionLoadInfo: collection,
+		LoadPercentage:     100,
+	})
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -356,12 +412,32 @@ func (m *CollectionManager) GetFieldIndex(collectionID typeutil.UniqueID) map[in
 	return nil
 }
 
+func (m *CollectionManager) GetLoadFields(collectionID typeutil.UniqueID) []int64 {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	collection, ok := m.collections[collectionID]
+	if ok {
+		return collection.GetLoadFields()
+	}
+	return nil
+}
+
 func (m *CollectionManager) Exist(collectionID typeutil.UniqueID) bool {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
 	_, ok := m.collections[collectionID]
 	return ok
+}
+
+func (m *CollectionManager) SetReleasing(collectionID typeutil.UniqueID) {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+	coll, ok := m.collections[collectionID]
+	if ok {
+		coll.SetReleasing()
+	}
 }
 
 // GetAll returns the collection ID of all loaded collections
@@ -582,4 +658,26 @@ func (m *CollectionManager) removePartition(collectionID typeutil.UniqueID, part
 	}
 
 	return nil
+}
+
+func (m *CollectionManager) UpdateReplicaNumber(collectionID typeutil.UniqueID, replicaNumber int32) error {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	collection, ok := m.collections[collectionID]
+	if !ok {
+		return merr.WrapErrCollectionNotFound(collectionID)
+	}
+	newCollection := collection.Clone()
+	newCollection.ReplicaNumber = replicaNumber
+
+	partitions := m.getPartitionsByCollection(collectionID)
+	newPartitions := make([]*Partition, 0, len(partitions))
+	for _, partition := range partitions {
+		newPartition := partition.Clone()
+		newPartition.ReplicaNumber = replicaNumber
+		newPartitions = append(newPartitions, newPartition)
+	}
+
+	return m.putCollection(true, newCollection, newPartitions...)
 }

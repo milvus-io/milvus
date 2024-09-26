@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -448,12 +448,64 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(1, action.SegmentID())
 	suite.EqualValues(1, action.Node())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
+	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 
 	// test less version exist on leader
 	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 1}, map[int64]*meta.Segment{}))
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 0)
+}
+
+func (suite *SegmentCheckerTestSuite) TestReleaseDirtySegments() {
+	checker := suite.checker
+	// set meta
+	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+
+	// set target
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			PartitionID:   1,
+			InsertChannel: "test-insert-channel",
+		},
+	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
+		channels, segments, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
+
+	// set dist
+	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
+	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}))
+	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
+
+	tasks := checker.Check(context.TODO())
+	suite.Len(tasks, 1)
+	suite.Len(tasks[0].Actions(), 1)
+	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
+	suite.True(ok)
+	suite.EqualValues(-1, tasks[0].ReplicaID())
+	suite.Equal(task.ActionTypeReduce, action.Type())
+	suite.EqualValues(1, action.SegmentID())
+	suite.EqualValues(2, action.Node())
+	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
 }
 
 func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {

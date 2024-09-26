@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 )
 
 func TestPulsarConsumer_Subscription(t *testing.T) {
@@ -41,7 +41,7 @@ func TestPulsarConsumer_Subscription(t *testing.T) {
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       "Topic",
 		SubscriptionName:            "SubName",
-		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqwrapper.SubscriptionPositionEarliest),
+		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqcommon.SubscriptionPositionEarliest),
 		MessageChannel:              receiveChannel,
 	})
 	assert.NoError(t, err)
@@ -74,21 +74,21 @@ func TestComsumeCompressedMessage(t *testing.T) {
 		Topic:                       "TestTopics",
 		SubscriptionName:            "SubName",
 		Type:                        pulsar.Exclusive,
-		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqwrapper.SubscriptionPositionEarliest),
+		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqcommon.SubscriptionPositionEarliest),
 		MessageChannel:              receiveChannel,
 	})
 	assert.NoError(t, err)
 	defer consumer.Close()
 
-	producer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: "TestTopics"})
+	producer, err := pc.CreateProducer(mqcommon.ProducerOptions{Topic: "TestTopics"})
 	assert.NoError(t, err)
-	compressProducer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: "TestTopics", EnableCompression: true})
+	compressProducer, err := pc.CreateProducer(mqcommon.ProducerOptions{Topic: "TestTopics", EnableCompression: true})
 	assert.NoError(t, err)
 
 	msg := []byte("test message")
 	compressedMsg := []byte("test compressed message")
 	traceValue := "test compressed message id"
-	_, err = producer.Send(context.Background(), &mqwrapper.ProducerMessage{
+	_, err = producer.Send(context.Background(), &mqcommon.ProducerMessage{
 		Payload:    msg,
 		Properties: map[string]string{},
 	})
@@ -98,7 +98,7 @@ func TestComsumeCompressedMessage(t *testing.T) {
 	consumer.Ack(recvMsg)
 	assert.Equal(t, msg, recvMsg.Payload())
 
-	_, err = compressProducer.Send(context.Background(), &mqwrapper.ProducerMessage{
+	_, err = compressProducer.Send(context.Background(), &mqcommon.ProducerMessage{
 		Payload: compressedMsg,
 		Properties: map[string]string{
 			common.TraceIDKey: traceValue,
@@ -124,7 +124,7 @@ func TestPulsarConsumer_Close(t *testing.T) {
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       "Topic-1",
 		SubscriptionName:            "SubName-1",
-		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqwrapper.SubscriptionPositionEarliest),
+		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqcommon.SubscriptionPositionEarliest),
 		MessageChannel:              receiveChannel,
 	})
 	assert.NoError(t, err)
@@ -228,7 +228,7 @@ func TestCheckPreTopicValid(t *testing.T) {
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       "Topic-1",
 		SubscriptionName:            "SubName-1",
-		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqwrapper.SubscriptionPositionEarliest),
+		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqcommon.SubscriptionPositionEarliest),
 		MessageChannel:              receiveChannel,
 	})
 	assert.NoError(t, err)

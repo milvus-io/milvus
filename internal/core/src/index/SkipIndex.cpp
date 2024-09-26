@@ -123,8 +123,8 @@ SkipIndex::LoadString(milvus::FieldId field_id,
                 max_string = val;
             }
         }
-        chunkMetrics->min_ = Metrics(min_string);
-        chunkMetrics->max_ = Metrics(max_string);
+        chunkMetrics->min_ = Metrics(std::string(min_string));
+        chunkMetrics->max_ = Metrics(std::string(max_string));
     }
     std::unique_lock lck(mutex_);
     if (fieldChunkMetrics_.count(field_id) == 0) {

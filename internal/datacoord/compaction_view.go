@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package datacoord
 
 import (
@@ -84,10 +100,16 @@ type SegmentView struct {
 	ExpireSize float64
 	DeltaSize  float64
 
+	NumOfRows int64
+	MaxRowNum int64
+
 	// file numbers
 	BinlogCount   int
 	StatslogCount int
 	DeltalogCount int
+
+	// row count
+	DeltaRowCount int
 }
 
 func (s *SegmentView) Clone() *SegmentView {
@@ -104,6 +126,9 @@ func (s *SegmentView) Clone() *SegmentView {
 		BinlogCount:   s.BinlogCount,
 		StatslogCount: s.StatslogCount,
 		DeltalogCount: s.DeltalogCount,
+		DeltaRowCount: s.DeltaRowCount,
+		NumOfRows:     s.NumOfRows,
+		MaxRowNum:     s.MaxRowNum,
 	}
 }
 
@@ -126,11 +151,14 @@ func GetViewsByInfo(segments ...*SegmentInfo) []*SegmentView {
 
 			DeltaSize:     GetBinlogSizeAsBytes(segment.GetDeltalogs()),
 			DeltalogCount: GetBinlogCount(segment.GetDeltalogs()),
+			DeltaRowCount: GetBinlogEntriesNum(segment.GetDeltalogs()),
 
 			Size:          GetBinlogSizeAsBytes(segment.GetBinlogs()),
 			BinlogCount:   GetBinlogCount(segment.GetBinlogs()),
 			StatslogCount: GetBinlogCount(segment.GetStatslogs()),
 
+			NumOfRows: segment.NumOfRows,
+			MaxRowNum: segment.MaxRowNum,
 			// TODO: set the following
 			// ExpireSize float64
 		}
@@ -143,17 +171,19 @@ func (v *SegmentView) Equal(other *SegmentView) bool {
 		v.DeltaSize == other.DeltaSize &&
 		v.BinlogCount == other.BinlogCount &&
 		v.StatslogCount == other.StatslogCount &&
-		v.DeltalogCount == other.DeltalogCount
+		v.DeltalogCount == other.DeltalogCount &&
+		v.NumOfRows == other.NumOfRows &&
+		v.DeltaRowCount == other.DeltaRowCount
 }
 
 func (v *SegmentView) String() string {
-	return fmt.Sprintf("ID=%d, label=<%s>, state=%s, level=%s, binlogSize=%.2f, binlogCount=%d, deltaSize=%.2f, deltaCount=%d, expireSize=%.2f",
-		v.ID, v.label, v.State.String(), v.Level.String(), v.Size, v.BinlogCount, v.DeltaSize, v.DeltalogCount, v.ExpireSize)
+	return fmt.Sprintf("ID=%d, label=<%s>, state=%s, level=%s, binlogSize=%.2f, binlogCount=%d, deltaSize=%.2f, deltalogCount=%d, deltaRowCount=%d, expireSize=%.2f",
+		v.ID, v.label, v.State.String(), v.Level.String(), v.Size, v.BinlogCount, v.DeltaSize, v.DeltalogCount, v.DeltaRowCount, v.ExpireSize)
 }
 
 func (v *SegmentView) LevelZeroString() string {
-	return fmt.Sprintf("<ID=%d, level=%s, deltaSize=%.2f, deltaCount=%d>",
-		v.ID, v.Level.String(), v.DeltaSize, v.DeltalogCount)
+	return fmt.Sprintf("<ID=%d, level=%s, deltaSize=%.2f, deltaLogCount=%d, deltaRowCount=%d>",
+		v.ID, v.Level.String(), v.DeltaSize, v.DeltalogCount, v.DeltaRowCount)
 }
 
 func GetBinlogCount(fieldBinlogs []*datapb.FieldBinlog) int {
@@ -164,9 +194,19 @@ func GetBinlogCount(fieldBinlogs []*datapb.FieldBinlog) int {
 	return num
 }
 
-func GetBinlogSizeAsBytes(deltaBinlogs []*datapb.FieldBinlog) float64 {
+func GetBinlogEntriesNum(fieldBinlogs []*datapb.FieldBinlog) int {
+	var num int
+	for _, fbinlog := range fieldBinlogs {
+		for _, binlog := range fbinlog.GetBinlogs() {
+			num += int(binlog.GetEntriesNum())
+		}
+	}
+	return num
+}
+
+func GetBinlogSizeAsBytes(fieldBinlogs []*datapb.FieldBinlog) float64 {
 	var deltaSize float64
-	for _, deltaLogs := range deltaBinlogs {
+	for _, deltaLogs := range fieldBinlogs {
 		for _, l := range deltaLogs.GetBinlogs() {
 			deltaSize += float64(l.GetMemorySize())
 		}

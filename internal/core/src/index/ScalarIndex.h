@@ -23,10 +23,19 @@
 
 #include "common/Types.h"
 #include "common/EasyAssert.h"
+#include "common/FieldData.h"
 #include "index/Index.h"
 #include "fmt/format.h"
 
 namespace milvus::index {
+
+enum class ScalarIndexType {
+    NONE = 0,
+    BITMAP,
+    STLSORT,
+    MARISA,
+    INVERTED,
+};
 
 template <typename T>
 class ScalarIndex : public IndexBase {
@@ -44,11 +53,28 @@ class ScalarIndex : public IndexBase {
     };
 
  public:
+    virtual ScalarIndexType
+    GetIndexType() const = 0;
+
     virtual void
     Build(size_t n, const T* values) = 0;
 
     virtual const TargetBitmap
     In(size_t n, const T* values) = 0;
+
+    virtual const TargetBitmap
+    InApplyFilter(size_t n,
+                  const T* values,
+                  const std::function<bool(size_t /* offset */)>& filter) {
+        PanicInfo(ErrorCode::Unsupported, "InApplyFilter is not implemented");
+    }
+
+    virtual void
+    InApplyCallback(size_t n,
+                    const T* values,
+                    const std::function<void(size_t /* offset */)>& callback) {
+        PanicInfo(ErrorCode::Unsupported, "InApplyCallback is not implemented");
+    }
 
     virtual const TargetBitmap
     NotIn(size_t n, const T* values) = 0;
@@ -68,6 +94,11 @@ class ScalarIndex : public IndexBase {
     virtual const TargetBitmap
     Query(const DatasetPtr& dataset);
 
+    virtual bool
+    SupportPatternMatch() const {
+        return false;
+    }
+
     virtual int64_t
     Size() = 0;
 
@@ -79,6 +110,21 @@ class ScalarIndex : public IndexBase {
     virtual const TargetBitmap
     RegexQuery(const std::string& pattern) {
         PanicInfo(Unsupported, "regex query is not supported");
+    }
+
+    virtual const TargetBitmap
+    PatternMatch(const std::string& pattern) {
+        PanicInfo(Unsupported, "pattern match is not supported");
+    }
+
+    virtual void
+    BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas) {
+        PanicInfo(Unsupported, "BuildwithFieldData is not supported");
+    }
+
+    virtual void
+    LoadWithoutAssemble(const BinarySet& binary_set, const Config& config) {
+        PanicInfo(Unsupported, "LoadWithoutAssemble is not supported");
     }
 };
 

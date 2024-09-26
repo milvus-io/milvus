@@ -128,12 +128,3 @@ func convertToArrowType(dataType schemapb.DataType) (arrow.DataType, error) {
 		return nil, merr.WrapErrParameterInvalidMsg("unknown type %v", dataType.String())
 	}
 }
-
-func GetClusteringKeyField(fields []*schemapb.FieldSchema) *schemapb.FieldSchema {
-	for _, field := range fields {
-		if field.IsClusteringKey {
-			return field
-		}
-	}
-	return nil
-}

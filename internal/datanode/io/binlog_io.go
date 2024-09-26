@@ -18,7 +18,7 @@ package io
 
 import (
 	"context"
-	"path"
+	"time"
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -34,8 +34,6 @@ import (
 type BinlogIO interface {
 	Download(ctx context.Context, paths []string) ([][]byte, error)
 	Upload(ctx context.Context, kvs map[string][]byte) error
-	// JoinFullPath returns the full path by join the paths with the chunkmanager's rootpath
-	JoinFullPath(paths ...string) string
 }
 
 type BinlogIoImpl struct {
@@ -43,8 +41,8 @@ type BinlogIoImpl struct {
 	pool *conc.Pool[any]
 }
 
-func NewBinlogIO(cm storage.ChunkManager, ioPool *conc.Pool[any]) BinlogIO {
-	return &BinlogIoImpl{cm, ioPool}
+func NewBinlogIO(cm storage.ChunkManager) BinlogIO {
+	return &BinlogIoImpl{cm, GetOrCreateIOPool()}
 }
 
 func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, error) {
@@ -58,6 +56,7 @@ func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, 
 			var val []byte
 			var err error
 
+			start := time.Now()
 			log.Debug("BinlogIO download", zap.String("path", path))
 			err = retry.Do(ctx, func() error {
 				val, err = b.Read(ctx, path)
@@ -66,6 +65,9 @@ func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, 
 				}
 				return err
 			})
+
+			log.Debug("BinlogIO download success", zap.String("path", path), zap.Int64("cost", time.Since(start).Milliseconds()),
+				zap.Error(err))
 
 			return val, err
 		})
@@ -91,6 +93,7 @@ func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error 
 		innerK, innerV := k, v
 		future := b.pool.Submit(func() (any, error) {
 			var err error
+			start := time.Now()
 			log.Debug("BinlogIO upload", zap.String("paths", innerK))
 			err = retry.Do(ctx, func() error {
 				err = b.Write(ctx, innerK, innerV)
@@ -99,16 +102,11 @@ func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error 
 				}
 				return err
 			})
-
+			log.Debug("BinlogIO upload success", zap.String("paths", innerK), zap.Int64("cost", time.Since(start).Milliseconds()), zap.Error(err))
 			return struct{}{}, err
 		})
-
 		futures = append(futures, future)
 	}
 
 	return conc.AwaitAll(futures...)
-}
-
-func (b *BinlogIoImpl) JoinFullPath(paths ...string) string {
-	return path.Join(b.ChunkManager.RootPath(), path.Join(paths...))
 }

@@ -20,10 +20,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/bits-and-blooms/bloom/v3"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -31,12 +33,25 @@ import (
 // FieldStats contains statistics data for any column
 // todo: compatible to PrimaryKeyStats
 type FieldStats struct {
-	FieldID   int64              `json:"fieldID"`
-	Type      schemapb.DataType  `json:"type"`
-	Max       ScalarFieldValue   `json:"max"`       // for scalar field
-	Min       ScalarFieldValue   `json:"min"`       // for scalar field
-	BF        *bloom.BloomFilter `json:"bf"`        // for scalar field
-	Centroids []VectorFieldValue `json:"centroids"` // for vector field
+	FieldID   int64                            `json:"fieldID"`
+	Type      schemapb.DataType                `json:"type"`
+	Max       ScalarFieldValue                 `json:"max"`       // for scalar field
+	Min       ScalarFieldValue                 `json:"min"`       // for scalar field
+	BFType    bloomfilter.BFType               `json:"bfType"`    // for scalar field
+	BF        bloomfilter.BloomFilterInterface `json:"bf"`        // for scalar field
+	Centroids []VectorFieldValue               `json:"centroids"` // for vector field
+}
+
+func (stats *FieldStats) Clone() FieldStats {
+	return FieldStats{
+		FieldID:   stats.FieldID,
+		Type:      stats.Type,
+		Max:       stats.Max,
+		Min:       stats.Min,
+		BFType:    stats.BFType,
+		BF:        stats.BF,
+		Centroids: stats.Centroids,
+	}
 }
 
 // UnmarshalJSON unmarshal bytes to FieldStats
@@ -141,12 +156,22 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 			}
 		}
 
-		if bfMessage, ok := messageMap["bf"]; ok && bfMessage != nil {
-			stats.BF = &bloom.BloomFilter{}
-			err = stats.BF.UnmarshalJSON(*bfMessage)
+		bfType := bloomfilter.BasicBF
+		if bfTypeMessage, ok := messageMap["bfType"]; ok && bfTypeMessage != nil {
+			err := json.Unmarshal(*bfTypeMessage, &bfType)
 			if err != nil {
 				return err
 			}
+			stats.BFType = bfType
+		}
+
+		if bfMessage, ok := messageMap["bf"]; ok && bfMessage != nil {
+			bf, err := bloomfilter.UnmarshalJSON(*bfMessage, bfType)
+			if err != nil {
+				log.Warn("Failed to unmarshal bloom filter, use AlwaysTrueBloomFilter instead of return err", zap.Error(err))
+				bf = bloomfilter.AlwaysTrueBloomFilter
+			}
+			stats.BF = bf
 		}
 	} else {
 		stats.initCentroids(data, stats.Type)
@@ -161,12 +186,12 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 
 func (stats *FieldStats) initCentroids(data []byte, dataType schemapb.DataType) {
 	type FieldStatsAux struct {
-		FieldID   int64              `json:"fieldID"`
-		Type      schemapb.DataType  `json:"type"`
-		Max       json.RawMessage    `json:"max"`
-		Min       json.RawMessage    `json:"min"`
-		BF        *bloom.BloomFilter `json:"bf"`
-		Centroids []json.RawMessage  `json:"centroids"`
+		FieldID   int64                            `json:"fieldID"`
+		Type      schemapb.DataType                `json:"type"`
+		Max       json.RawMessage                  `json:"max"`
+		Min       json.RawMessage                  `json:"min"`
+		BF        bloomfilter.BloomFilterInterface `json:"bf"`
+		Centroids []json.RawMessage                `json:"centroids"`
 	}
 	// Unmarshal JSON into the auxiliary struct
 	var aux FieldStatsAux
@@ -361,10 +386,15 @@ func NewFieldStats(fieldID int64, pkType schemapb.DataType, rowNum int64) (*Fiel
 			Type:    pkType,
 		}, nil
 	}
+	bfType := paramtable.Get().CommonCfg.BloomFilterType.GetValue()
 	return &FieldStats{
 		FieldID: fieldID,
 		Type:    pkType,
-		BF:      bloom.NewWithEstimates(uint(rowNum), paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
+		BFType:  bloomfilter.BFTypeFromString(bfType),
+		BF: bloomfilter.NewBloomFilterWithType(
+			uint(rowNum),
+			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+			bfType),
 	}, nil
 }
 
@@ -391,11 +421,17 @@ func (sw *FieldStatsWriter) GenerateList(stats []*FieldStats) error {
 // GenerateByData writes data from @msgs with @fieldID to @buffer
 func (sw *FieldStatsWriter) GenerateByData(fieldID int64, pkType schemapb.DataType, msgs ...FieldData) error {
 	statsList := make([]*FieldStats, 0)
+
+	bfType := paramtable.Get().CommonCfg.BloomFilterType.GetValue()
 	for _, msg := range msgs {
 		stats := &FieldStats{
 			FieldID: fieldID,
 			Type:    pkType,
-			BF:      bloom.NewWithEstimates(uint(msg.RowNum()), paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
+			BFType:  bloomfilter.BFTypeFromString(bfType),
+			BF: bloomfilter.NewBloomFilterWithType(
+				uint(msg.RowNum()),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				bfType),
 		}
 
 		stats.UpdateByMsgs(msg)

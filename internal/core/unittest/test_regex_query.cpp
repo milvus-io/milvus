@@ -501,5 +501,11 @@ TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnUnsupportedIndex) {
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    ASSERT_ANY_THROW(visitor.ExecuteExprNode(parsed, segpromote, N, final));
+    // regex query under this index will be executed using raw data (brute force).
+    visitor.ExecuteExprNode(parsed, segpromote, N, final);
+    ASSERT_FALSE(final[0]);
+    ASSERT_TRUE(final[1]);
+    ASSERT_TRUE(final[2]);
+    ASSERT_TRUE(final[3]);
+    ASSERT_TRUE(final[4]);
 }

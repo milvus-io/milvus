@@ -26,7 +26,6 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -105,14 +104,12 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	opts := tracer.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
@@ -123,7 +120,6 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			otelgrpc.StreamServerInterceptor(opts...),
 			logutil.StreamTraceLoggerInterceptor,
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
@@ -132,7 +128,9 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 				}
 				return s.serverID.Load()
 			}),
-		)))
+		)),
+		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()))
+
 	indexpb.RegisterIndexNodeServer(s.grpcServer, s)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
@@ -287,6 +285,18 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 // GetMetrics gets the metrics info of IndexNode.
 func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.indexnode.GetMetrics(ctx, request)
+}
+
+func (s *Server) CreateJobV2(ctx context.Context, request *indexpb.CreateJobV2Request) (*commonpb.Status, error) {
+	return s.indexnode.CreateJobV2(ctx, request)
+}
+
+func (s *Server) QueryJobsV2(ctx context.Context, request *indexpb.QueryJobsV2Request) (*indexpb.QueryJobsV2Response, error) {
+	return s.indexnode.QueryJobsV2(ctx, request)
+}
+
+func (s *Server) DropJobsV2(ctx context.Context, request *indexpb.DropJobsV2Request) (*commonpb.Status, error) {
+	return s.indexnode.DropJobsV2(ctx, request)
 }
 
 // NewServer create a new IndexNode grpc server.

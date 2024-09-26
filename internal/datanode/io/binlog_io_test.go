@@ -9,7 +9,7 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const binlogIOTestDir = "/tmp/milvus_test/binlog_io"
@@ -26,11 +26,10 @@ type BinlogIOSuite struct {
 }
 
 func (s *BinlogIOSuite) SetupTest() {
-	pool := conc.NewDefaultPool[any]()
-
+	paramtable.Init()
 	s.cm = storage.NewLocalChunkManager(storage.RootPath(binlogIOTestDir))
 
-	s.b = NewBinlogIO(s.cm, pool)
+	s.b = NewBinlogIO(s.cm)
 }
 
 func (s *BinlogIOSuite) TeardownTest() {
@@ -51,23 +50,4 @@ func (s *BinlogIOSuite) TestUploadDownload() {
 	vs, err := s.b.Download(ctx, lo.Keys(kvs))
 	s.NoError(err)
 	s.ElementsMatch(lo.Values(kvs), vs)
-}
-
-func (s *BinlogIOSuite) TestJoinFullPath() {
-	tests := []struct {
-		description string
-		inPaths     []string
-		outPath     string
-	}{
-		{"no input", nil, path.Join(binlogIOTestDir)},
-		{"input one", []string{"a"}, path.Join(binlogIOTestDir, "a")},
-		{"input two", []string{"a", "b"}, path.Join(binlogIOTestDir, "a/b")},
-	}
-
-	for _, test := range tests {
-		s.Run(test.description, func() {
-			out := s.b.JoinFullPath(test.inPaths...)
-			s.Equal(test.outPath, out)
-		})
-	}
 }

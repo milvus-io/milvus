@@ -110,14 +110,16 @@ func WithSegment2LeaderView(segmentID int64, isGrowing bool) LeaderViewFilter {
 }
 
 type LeaderView struct {
-	ID               int64
-	CollectionID     int64
-	Channel          string
-	Version          int64
-	Segments         map[int64]*querypb.SegmentDist
-	GrowingSegments  map[int64]*Segment
-	TargetVersion    int64
-	NumOfGrowingRows int64
+	ID                     int64
+	CollectionID           int64
+	Channel                string
+	Version                int64
+	Segments               map[int64]*querypb.SegmentDist
+	GrowingSegments        map[int64]*Segment
+	TargetVersion          int64
+	NumOfGrowingRows       int64
+	PartitionStatsVersions map[int64]int64
+	UnServiceableError     error
 }
 
 func (view *LeaderView) Clone() *LeaderView {
@@ -132,14 +134,15 @@ func (view *LeaderView) Clone() *LeaderView {
 	}
 
 	return &LeaderView{
-		ID:               view.ID,
-		CollectionID:     view.CollectionID,
-		Channel:          view.Channel,
-		Version:          view.Version,
-		Segments:         segments,
-		GrowingSegments:  growings,
-		TargetVersion:    view.TargetVersion,
-		NumOfGrowingRows: view.NumOfGrowingRows,
+		ID:                     view.ID,
+		CollectionID:           view.CollectionID,
+		Channel:                view.Channel,
+		Version:                view.Version,
+		Segments:               segments,
+		GrowingSegments:        growings,
+		TargetVersion:          view.TargetVersion,
+		NumOfGrowingRows:       view.NumOfGrowingRows,
+		PartitionStatsVersions: view.PartitionStatsVersions,
 	}
 }
 
@@ -229,6 +232,9 @@ func (mgr *LeaderViewManager) Update(leaderID int64, views ...*LeaderView) {
 	mgr.views[leaderID] = composeNodeViews(views...)
 
 	// compute leader location change, find it's correspond collection
+	// 1. leader has been released from node
+	// 2. leader has been loaded to node
+	// 3. leader serviceable status changed
 	if mgr.notifyFunc != nil {
 		viewChanges := typeutil.NewUniqueSet()
 		for channel, oldView := range oldViews {
@@ -238,9 +244,17 @@ func (mgr *LeaderViewManager) Update(leaderID int64, views ...*LeaderView) {
 			}
 		}
 
+		serviceableChange := func(old, new *LeaderView) bool {
+			if old == nil || new == nil {
+				return true
+			}
+
+			return (old.UnServiceableError == nil) != (new.UnServiceableError == nil)
+		}
+
 		for channel, newView := range newViews {
 			// if channel loaded to current node
-			if _, ok := oldViews[channel]; !ok {
+			if oldView, ok := oldViews[channel]; !ok || serviceableChange(oldView, newView) {
 				viewChanges.Insert(newView.CollectionID)
 			}
 		}

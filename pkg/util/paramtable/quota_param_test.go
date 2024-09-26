@@ -17,7 +17,6 @@
 package paramtable
 
 import (
-	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -190,7 +189,7 @@ func TestQuotaParam(t *testing.T) {
 	t.Run("test limit writing", func(t *testing.T) {
 		assert.False(t, qc.ForceDenyWriting.GetAsBool())
 		assert.Equal(t, false, qc.TtProtectionEnabled.GetAsBool())
-		assert.Equal(t, math.MaxInt64, qc.MaxTimeTickDelay.GetAsInt())
+		assert.Equal(t, 300, qc.MaxTimeTickDelay.GetAsInt())
 		assert.Equal(t, defaultLowWaterLevel, qc.DataNodeMemoryLowWaterLevel.GetAsFloat())
 		assert.Equal(t, defaultHighWaterLevel, qc.DataNodeMemoryHighWaterLevel.GetAsFloat())
 		assert.Equal(t, defaultLowWaterLevel, qc.QueryNodeMemoryLowWaterLevel.GetAsFloat())
@@ -206,12 +205,6 @@ func TestQuotaParam(t *testing.T) {
 
 	t.Run("test limit reading", func(t *testing.T) {
 		assert.False(t, qc.ForceDenyReading.GetAsBool())
-		assert.Equal(t, false, qc.QueueProtectionEnabled.GetAsBool())
-		assert.Equal(t, int64(math.MaxInt64), qc.NQInQueueThreshold.GetAsInt64())
-		assert.Equal(t, defaultMax, qc.QueueLatencyThreshold.GetAsFloat())
-		assert.Equal(t, false, qc.ResultProtectionEnabled.GetAsBool())
-		assert.Equal(t, defaultMax, qc.MaxReadResultRate.GetAsFloat())
-		assert.Equal(t, 0.9, qc.CoolOffSpeed.GetAsFloat())
 	})
 
 	t.Run("test disk quota", func(t *testing.T) {

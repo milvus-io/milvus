@@ -19,10 +19,13 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type ScalarFieldValue interface {
@@ -37,6 +40,20 @@ type ScalarFieldValue interface {
 	GetValue() interface{}
 	Type() schemapb.DataType
 	Size() int64
+}
+
+func MaxScalar(val1 ScalarFieldValue, val2 ScalarFieldValue) ScalarFieldValue {
+	if val1.GE(val2) {
+		return val1
+	}
+	return val2
+}
+
+func MinScalar(val1 ScalarFieldValue, val2 ScalarFieldValue) ScalarFieldValue {
+	if (val1).LE(val2) {
+		return val1
+	}
+	return val2
 }
 
 // DataType_Int8
@@ -1012,4 +1029,81 @@ func (ifv *FloatVectorFieldValue) GetValue() interface{} {
 
 func (ifv *FloatVectorFieldValue) Size() int64 {
 	return int64(len(ifv.Value) * 8)
+}
+
+func NewScalarFieldValueFromGenericValue(dtype schemapb.DataType, gVal *planpb.GenericValue) (ScalarFieldValue, error) {
+	switch dtype {
+	case schemapb.DataType_Int8:
+		i64Val := gVal.Val.(*planpb.GenericValue_Int64Val)
+		if i64Val.Int64Val > math.MaxInt8 || i64Val.Int64Val < math.MinInt8 {
+			return nil, merr.WrapErrParameterInvalidRange(math.MinInt8, math.MaxInt8, i64Val.Int64Val, "expr value out of bound")
+		}
+		return NewInt8FieldValue(int8(i64Val.Int64Val)), nil
+
+	case schemapb.DataType_Int16:
+		i64Val := gVal.Val.(*planpb.GenericValue_Int64Val)
+		if i64Val.Int64Val > math.MaxInt16 || i64Val.Int64Val < math.MinInt16 {
+			return nil, merr.WrapErrParameterInvalidRange(math.MinInt16, math.MaxInt16, i64Val.Int64Val, "expr value out of bound")
+		}
+		return NewInt16FieldValue(int16(i64Val.Int64Val)), nil
+
+	case schemapb.DataType_Int32:
+		i64Val := gVal.Val.(*planpb.GenericValue_Int64Val)
+		if i64Val.Int64Val > math.MaxInt32 || i64Val.Int64Val < math.MinInt32 {
+			return nil, merr.WrapErrParameterInvalidRange(math.MinInt32, math.MaxInt32, i64Val.Int64Val, "expr value out of bound")
+		}
+		return NewInt32FieldValue(int32(i64Val.Int64Val)), nil
+	case schemapb.DataType_Int64:
+		i64Val := gVal.Val.(*planpb.GenericValue_Int64Val)
+		return NewInt64FieldValue(i64Val.Int64Val), nil
+	case schemapb.DataType_Float:
+		floatVal := gVal.Val.(*planpb.GenericValue_FloatVal)
+		return NewFloatFieldValue(float32(floatVal.FloatVal)), nil
+	case schemapb.DataType_Double:
+		floatVal := gVal.Val.(*planpb.GenericValue_FloatVal)
+		return NewDoubleFieldValue(floatVal.FloatVal), nil
+	case schemapb.DataType_String:
+		strVal := gVal.Val.(*planpb.GenericValue_StringVal)
+		return NewStringFieldValue(strVal.StringVal), nil
+	case schemapb.DataType_VarChar:
+		strVal := gVal.Val.(*planpb.GenericValue_StringVal)
+		return NewVarCharFieldValue(strVal.StringVal), nil
+	default:
+		// should not be reach
+		panic(fmt.Sprintf("not supported datatype: %s", dtype.String()))
+	}
+}
+
+func NewScalarFieldValue(dtype schemapb.DataType, data interface{}) ScalarFieldValue {
+	switch dtype {
+	case schemapb.DataType_Int8:
+		return NewInt8FieldValue(data.(int8))
+	case schemapb.DataType_Int16:
+		return NewInt16FieldValue(data.(int16))
+	case schemapb.DataType_Int32:
+		return NewInt32FieldValue(data.(int32))
+	case schemapb.DataType_Int64:
+		return NewInt64FieldValue(data.(int64))
+	case schemapb.DataType_Float:
+		return NewFloatFieldValue(data.(float32))
+	case schemapb.DataType_Double:
+		return NewDoubleFieldValue(data.(float64))
+	case schemapb.DataType_String:
+		return NewStringFieldValue(data.(string))
+	case schemapb.DataType_VarChar:
+		return NewVarCharFieldValue(data.(string))
+	default:
+		// should not be reach
+		panic(fmt.Sprintf("not supported datatype: %s", dtype.String()))
+	}
+}
+
+func NewVectorFieldValue(dtype schemapb.DataType, data *schemapb.VectorField) VectorFieldValue {
+	switch dtype {
+	case schemapb.DataType_FloatVector:
+		return NewFloatVectorFieldValue(data.GetFloatVector().GetData())
+	default:
+		// should not be reach
+		panic(fmt.Sprintf("not supported datatype: %s", dtype.String()))
+	}
 }

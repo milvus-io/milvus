@@ -125,6 +125,49 @@ func (_c *MockScheduler_Dispatch_Call) RunAndReturn(run func(int64)) *MockSchedu
 	return _c
 }
 
+// GetChannelTaskDelta provides a mock function with given fields: nodeID, collectionID
+func (_m *MockScheduler) GetChannelTaskDelta(nodeID int64, collectionID int64) int {
+	ret := _m.Called(nodeID, collectionID)
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func(int64, int64) int); ok {
+		r0 = rf(nodeID, collectionID)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// MockScheduler_GetChannelTaskDelta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetChannelTaskDelta'
+type MockScheduler_GetChannelTaskDelta_Call struct {
+	*mock.Call
+}
+
+// GetChannelTaskDelta is a helper method to define mock.On call
+//   - nodeID int64
+//   - collectionID int64
+func (_e *MockScheduler_Expecter) GetChannelTaskDelta(nodeID interface{}, collectionID interface{}) *MockScheduler_GetChannelTaskDelta_Call {
+	return &MockScheduler_GetChannelTaskDelta_Call{Call: _e.mock.On("GetChannelTaskDelta", nodeID, collectionID)}
+}
+
+func (_c *MockScheduler_GetChannelTaskDelta_Call) Run(run func(nodeID int64, collectionID int64)) *MockScheduler_GetChannelTaskDelta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockScheduler_GetChannelTaskDelta_Call) Return(_a0 int) *MockScheduler_GetChannelTaskDelta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockScheduler_GetChannelTaskDelta_Call) RunAndReturn(run func(int64, int64) int) *MockScheduler_GetChannelTaskDelta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetChannelTaskNum provides a mock function with given fields:
 func (_m *MockScheduler) GetChannelTaskNum() int {
 	ret := _m.Called()
@@ -210,13 +253,13 @@ func (_c *MockScheduler_GetExecutedFlag_Call) RunAndReturn(run func(int64) <-cha
 	return _c
 }
 
-// GetNodeChannelDelta provides a mock function with given fields: nodeID
-func (_m *MockScheduler) GetNodeChannelDelta(nodeID int64) int {
-	ret := _m.Called(nodeID)
+// GetSegmentTaskDelta provides a mock function with given fields: nodeID, collectionID
+func (_m *MockScheduler) GetSegmentTaskDelta(nodeID int64, collectionID int64) int {
+	ret := _m.Called(nodeID, collectionID)
 
 	var r0 int
-	if rf, ok := ret.Get(0).(func(int64) int); ok {
-		r0 = rf(nodeID)
+	if rf, ok := ret.Get(0).(func(int64, int64) int); ok {
+		r0 = rf(nodeID, collectionID)
 	} else {
 		r0 = ret.Get(0).(int)
 	}
@@ -224,72 +267,31 @@ func (_m *MockScheduler) GetNodeChannelDelta(nodeID int64) int {
 	return r0
 }
 
-// MockScheduler_GetNodeChannelDelta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNodeChannelDelta'
-type MockScheduler_GetNodeChannelDelta_Call struct {
+// MockScheduler_GetSegmentTaskDelta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSegmentTaskDelta'
+type MockScheduler_GetSegmentTaskDelta_Call struct {
 	*mock.Call
 }
 
-// GetNodeChannelDelta is a helper method to define mock.On call
+// GetSegmentTaskDelta is a helper method to define mock.On call
 //   - nodeID int64
-func (_e *MockScheduler_Expecter) GetNodeChannelDelta(nodeID interface{}) *MockScheduler_GetNodeChannelDelta_Call {
-	return &MockScheduler_GetNodeChannelDelta_Call{Call: _e.mock.On("GetNodeChannelDelta", nodeID)}
+//   - collectionID int64
+func (_e *MockScheduler_Expecter) GetSegmentTaskDelta(nodeID interface{}, collectionID interface{}) *MockScheduler_GetSegmentTaskDelta_Call {
+	return &MockScheduler_GetSegmentTaskDelta_Call{Call: _e.mock.On("GetSegmentTaskDelta", nodeID, collectionID)}
 }
 
-func (_c *MockScheduler_GetNodeChannelDelta_Call) Run(run func(nodeID int64)) *MockScheduler_GetNodeChannelDelta_Call {
+func (_c *MockScheduler_GetSegmentTaskDelta_Call) Run(run func(nodeID int64, collectionID int64)) *MockScheduler_GetSegmentTaskDelta_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(int64), args[1].(int64))
 	})
 	return _c
 }
 
-func (_c *MockScheduler_GetNodeChannelDelta_Call) Return(_a0 int) *MockScheduler_GetNodeChannelDelta_Call {
+func (_c *MockScheduler_GetSegmentTaskDelta_Call) Return(_a0 int) *MockScheduler_GetSegmentTaskDelta_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockScheduler_GetNodeChannelDelta_Call) RunAndReturn(run func(int64) int) *MockScheduler_GetNodeChannelDelta_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetNodeSegmentDelta provides a mock function with given fields: nodeID
-func (_m *MockScheduler) GetNodeSegmentDelta(nodeID int64) int {
-	ret := _m.Called(nodeID)
-
-	var r0 int
-	if rf, ok := ret.Get(0).(func(int64) int); ok {
-		r0 = rf(nodeID)
-	} else {
-		r0 = ret.Get(0).(int)
-	}
-
-	return r0
-}
-
-// MockScheduler_GetNodeSegmentDelta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNodeSegmentDelta'
-type MockScheduler_GetNodeSegmentDelta_Call struct {
-	*mock.Call
-}
-
-// GetNodeSegmentDelta is a helper method to define mock.On call
-//   - nodeID int64
-func (_e *MockScheduler_Expecter) GetNodeSegmentDelta(nodeID interface{}) *MockScheduler_GetNodeSegmentDelta_Call {
-	return &MockScheduler_GetNodeSegmentDelta_Call{Call: _e.mock.On("GetNodeSegmentDelta", nodeID)}
-}
-
-func (_c *MockScheduler_GetNodeSegmentDelta_Call) Run(run func(nodeID int64)) *MockScheduler_GetNodeSegmentDelta_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
-	})
-	return _c
-}
-
-func (_c *MockScheduler_GetNodeSegmentDelta_Call) Return(_a0 int) *MockScheduler_GetNodeSegmentDelta_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockScheduler_GetNodeSegmentDelta_Call) RunAndReturn(run func(int64) int) *MockScheduler_GetNodeSegmentDelta_Call {
+func (_c *MockScheduler_GetSegmentTaskDelta_Call) RunAndReturn(run func(int64, int64) int) *MockScheduler_GetSegmentTaskDelta_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -29,12 +30,14 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
-	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -42,10 +45,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	rocksmqimpl "github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/nmq"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/expr"
+	"github.com/milvus-io/milvus/pkg/util/gc"
 	"github.com/milvus-io/milvus/pkg/util/generic"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -74,6 +79,10 @@ type component interface {
 	Run() error
 	Stop() error
 }
+
+const (
+	TmpInvertedIndexPrefix = "/tmp/milvus/inverted-index/"
+)
 
 func cleanLocalDir(path string) {
 	_, statErr := os.Stat(path)
@@ -196,6 +205,7 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, wg *sync
 	if len(mmapDir) > 0 {
 		cleanLocalDir(mmapDir)
 	}
+	cleanLocalDir(TmpInvertedIndexPrefix)
 
 	return runComponent(ctx, localMsg, wg, components.NewQueryNode, metrics.RegisterQueryNode)
 }
@@ -220,6 +230,7 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, wg *sync
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 	indexDataLocalPath := filepath.Join(rootPath, typeutil.IndexNodeRole)
 	cleanLocalDir(indexDataLocalPath)
+	cleanLocalDir(TmpInvertedIndexPrefix)
 
 	return runComponent(ctx, localMsg, wg, components.NewIndexNode, metrics.RegisterIndexNode)
 }
@@ -248,17 +259,29 @@ func (mr *MilvusRoles) setupLogger() {
 	}
 
 	logutil.SetupLogger(&logConfig)
+	params.Watch(params.LogCfg.Level.Key, config.NewHandler("log.level", func(event *config.Event) {
+		if !event.HasUpdated || event.EventType == config.DeleteType {
+			return
+		}
+		logLevel, err := zapcore.ParseLevel(event.Value)
+		if err != nil {
+			log.Warn("failed to parse log level", zap.Error(err))
+			return
+		}
+		log.SetLevel(logLevel)
+		log.Info("log level changed", zap.String("level", event.Value))
+	}))
 }
 
 // Register serves prometheus http service
 func setupPrometheusHTTPServer(r *internalmetrics.MilvusRegistry) {
 	log.Info("setupPrometheusHTTPServer")
 	http.Register(&http.Handler{
-		Path:    "/metrics",
+		Path:    http.MetricsPath,
 		Handler: promhttp.HandlerFor(r, promhttp.HandlerOpts{}),
 	})
 	http.Register(&http.Handler{
-		Path:    "/metrics_default",
+		Path:    http.MetricsDefaultPath,
 		Handler: promhttp.Handler(),
 	})
 }
@@ -349,50 +372,110 @@ func (mr *MilvusRoles) Run() {
 		paramtable.SetRole(mr.ServerType)
 	}
 
+	enableComponents := []bool{
+		mr.EnableRootCoord,
+		mr.EnableProxy,
+		mr.EnableQueryCoord,
+		mr.EnableQueryNode,
+		mr.EnableDataCoord,
+		mr.EnableDataNode,
+		mr.EnableIndexCoord,
+		mr.EnableIndexNode,
+	}
+	enableComponents = lo.Filter(enableComponents, func(v bool, _ int) bool {
+		return v
+	})
+	healthz.SetComponentNum(len(enableComponents))
+
 	expr.Init()
 	expr.Register("param", paramtable.Get())
+	mr.setupLogger()
 	http.ServeHTTP()
 	setupPrometheusHTTPServer(Registry)
+
+	if paramtable.Get().CommonCfg.GCEnabled.GetAsBool() {
+		if paramtable.Get().CommonCfg.GCHelperEnabled.GetAsBool() {
+			action := func(GOGC uint32) {
+				debug.SetGCPercent(int(GOGC))
+			}
+			gc.NewTuner(paramtable.Get().CommonCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(), uint32(paramtable.Get().QueryNodeCfg.MinimumGOGCConfig.GetAsInt()), uint32(paramtable.Get().QueryNodeCfg.MaximumGOGCConfig.GetAsInt()), action)
+		} else {
+			action := func(uint32) {}
+			gc.NewTuner(paramtable.Get().CommonCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(), uint32(paramtable.Get().QueryNodeCfg.MinimumGOGCConfig.GetAsInt()), uint32(paramtable.Get().QueryNodeCfg.MaximumGOGCConfig.GetAsInt()), action)
+		}
+	}
 
 	var wg sync.WaitGroup
 	local := mr.Local
 
+	componentMap := make(map[string]component)
 	var rootCoord, queryCoord, indexCoord, dataCoord component
 	var proxy, dataNode, indexNode, queryNode component
 	if mr.EnableRootCoord {
 		rootCoord = mr.runRootCoord(ctx, local, &wg)
+		componentMap[typeutil.RootCoordRole] = rootCoord
 	}
 
 	if mr.EnableDataCoord {
 		dataCoord = mr.runDataCoord(ctx, local, &wg)
+		componentMap[typeutil.DataCoordRole] = dataCoord
 	}
 
 	if mr.EnableIndexCoord {
 		indexCoord = mr.runIndexCoord(ctx, local, &wg)
+		componentMap[typeutil.IndexCoordRole] = indexCoord
 	}
 
 	if mr.EnableQueryCoord {
 		queryCoord = mr.runQueryCoord(ctx, local, &wg)
+		componentMap[typeutil.QueryCoordRole] = queryCoord
 	}
 
 	if mr.EnableQueryNode {
 		queryNode = mr.runQueryNode(ctx, local, &wg)
+		componentMap[typeutil.QueryNodeRole] = queryNode
 	}
 
 	if mr.EnableDataNode {
 		dataNode = mr.runDataNode(ctx, local, &wg)
+		componentMap[typeutil.DataNodeRole] = dataNode
 	}
 	if mr.EnableIndexNode {
 		indexNode = mr.runIndexNode(ctx, local, &wg)
+		componentMap[typeutil.IndexNodeRole] = indexNode
 	}
 
 	if mr.EnableProxy {
 		proxy = mr.runProxy(ctx, local, &wg)
+		componentMap[typeutil.ProxyRole] = proxy
 	}
 
 	wg.Wait()
 
-	mr.setupLogger()
+	http.RegisterStopComponent(func(role string) error {
+		if len(role) == 0 || componentMap[role] == nil {
+			return fmt.Errorf("stop component [%s] in [%s] is not supported", role, mr.ServerType)
+		}
+
+		log.Info("unregister component before stop", zap.String("role", role))
+		healthz.UnRegister(role)
+		return componentMap[role].Stop()
+	})
+
+	http.RegisterCheckComponentReady(func(role string) error {
+		if len(role) == 0 || componentMap[role] == nil {
+			return fmt.Errorf("check component state for [%s] in [%s] is not supported", role, mr.ServerType)
+		}
+
+		// for coord component, if it's in standby state, it will return StateCode_StandBy
+		code := componentMap[role].Health(context.TODO())
+		if code != commonpb.StateCode_Healthy {
+			return fmt.Errorf("component [%s] in [%s] is not healthy", role, mr.ServerType)
+		}
+
+		return nil
+	})
+
 	tracer.Init()
 	paramtable.Get().WatchKeyPrefix("trace", config.NewHandler("tracing handler", func(e *config.Event) {
 		params := paramtable.Get()
@@ -413,8 +496,10 @@ func (mr *MilvusRoles) Run() {
 		tracer.SetTracerProvider(exp, params.TraceCfg.SampleFraction.GetAsFloat())
 		log.Info("Reset tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()), zap.Float64("SampleFraction", params.TraceCfg.SampleFraction.GetAsFloat()))
 
+		tracer.NotifyTracerProviderUpdated()
+
 		if paramtable.GetRole() == typeutil.QueryNodeRole || paramtable.GetRole() == typeutil.StandaloneRole {
-			initcore.InitTraceConfig(params)
+			initcore.ResetTraceConfig(params)
 			log.Info("Reset segcore tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()))
 		}
 	}))

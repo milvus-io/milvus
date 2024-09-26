@@ -173,10 +173,10 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	})
 }
 
-// Compaction return compaction by given plan
-func (c *Client) Compaction(ctx context.Context, req *datapb.CompactionPlan, opts ...grpc.CallOption) (*commonpb.Status, error) {
+// CompactionV2 return compaction by given plan
+func (c *Client) CompactionV2(ctx context.Context, req *datapb.CompactionPlan, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
-		return client.Compaction(ctx, req)
+		return client.CompactionV2(ctx, req)
 	})
 }
 
@@ -253,5 +253,17 @@ func (c *Client) QueryImport(ctx context.Context, req *datapb.QueryImportRequest
 func (c *Client) DropImport(ctx context.Context, req *datapb.DropImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
 		return client.DropImport(ctx, req)
+	})
+}
+
+func (c *Client) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest, opts ...grpc.CallOption) (*datapb.QuerySlotResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.QuerySlotResponse, error) {
+		return client.QuerySlot(ctx, req)
+	})
+}
+
+func (c *Client) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
+		return client.DropCompactionPlan(ctx, req)
 	})
 }

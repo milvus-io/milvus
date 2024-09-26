@@ -17,7 +17,7 @@
 package segments
 
 /*
-#cgo pkg-config: milvus_segcore
+#cgo pkg-config: milvus_core
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
@@ -28,10 +28,10 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -143,9 +144,11 @@ type Collection struct {
 	// but Collection in Manager will be released before assign new replica of new resource group on these node.
 	// so we don't need to update resource group in Collection.
 	// if resource group is not updated, the reference count of collection manager works failed.
-	metricType atomic.String // deprecated
+	// Deprecated
+	metricType *atomic.String
 	schema     atomic.Pointer[schemapb.CollectionSchema]
 	isGpuIndex bool
+	loadFields typeutil.Set[int64]
 
 	refCount *atomic.Uint32
 }
@@ -158,6 +161,12 @@ func (c *Collection) GetDBName() string {
 // GetResourceGroup returns the resource group of collection.
 func (c *Collection) GetResourceGroup() string {
 	return c.resourceGroup
+}
+
+// Deprecated
+// GetMetricType it'll deprecate in the 2.5.x, please don't use it
+func (c *Collection) GetMetricType() string {
+	return c.metricType.Load()
 }
 
 // ID returns collection id
@@ -227,7 +236,23 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		CCollection
 		NewCollection(const char* schema_proto_blob);
 	*/
-	schemaBlob, err := proto.Marshal(schema)
+
+	var loadFieldIDs typeutil.Set[int64]
+	loadSchema := typeutil.Clone(schema)
+
+	// if load fields is specified, do filtering logic
+	// otherwise use all fields for backward compatibility
+	if len(loadMetaInfo.GetLoadFields()) > 0 {
+		loadFieldIDs = typeutil.NewSet(loadMetaInfo.GetLoadFields()...)
+		loadSchema.Fields = lo.Filter(loadSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+			// system field shall always be loaded for now
+			return loadFieldIDs.Contain(field.GetFieldID()) || common.IsSystemField(field.GetFieldID())
+		})
+	} else {
+		loadFieldIDs = typeutil.NewSet(lo.Map(loadSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })...)
+	}
+
+	schemaBlob, err := proto.Marshal(loadSchema)
 	if err != nil {
 		log.Warn("marshal schema failed", zap.Error(err))
 		return nil
@@ -263,6 +288,8 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		resourceGroup: loadMetaInfo.GetResourceGroup(),
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
+		loadFields:    loadFieldIDs,
+		metricType:    atomic.NewString(GetMetricType(schema, indexMeta)), // only for compatibility of rolling upgrade from 2.3.x to 2.4
 	}
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)
@@ -270,6 +297,29 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	coll.schema.Store(schema)
 
 	return coll
+}
+
+func GetMetricType(schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta) string {
+	vecFields := typeutil.GetVectorFieldSchemas(schema)
+	// if vector field is not found or more than one, return empty string
+	// because we don't need the metric type for more than one vector fields
+	if len(vecFields) == 0 || len(vecFields) > 1 {
+		return ""
+	}
+	vecField := vecFields[0]
+	vecIndexMeta, ok := lo.Find(indexMeta.GetIndexMetas(), func(fieldIndexMeta *segcorepb.FieldIndexMeta) bool {
+		return fieldIndexMeta.GetFieldID() == vecField.GetFieldID()
+	})
+	if !ok || vecIndexMeta == nil {
+		log.Warn("cannot find index info for field", zap.String("field", vecField.GetName()), zap.String("collection", schema.GetName()))
+		return ""
+	}
+	metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, vecIndexMeta.GetIndexParams())
+	if err != nil {
+		log.Warn("get metric type failed", zap.String("collection", schema.GetName()), zap.Error(err))
+		return ""
+	}
+	return metricType
 }
 
 func NewCollectionWithoutSchema(collectionID int64, loadType querypb.LoadType) *Collection {

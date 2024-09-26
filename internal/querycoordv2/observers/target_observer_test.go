@@ -21,10 +21,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -33,6 +33,8 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -213,6 +215,20 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 	}, 7*time.Second, 1*time.Second)
 }
 
+func (suite *TargetObserverSuite) TestTriggerRelease() {
+	// Manually update next target
+	_, err := suite.observer.UpdateNextTarget(suite.collectionID)
+	suite.NoError(err)
+
+	// manually release partition
+	partitions := suite.meta.CollectionManager.GetPartitionsByCollection(suite.collectionID)
+	partitionIDs := lo.Map(partitions, func(partition *meta.Partition, _ int) int64 { return partition.PartitionID })
+	suite.observer.ReleasePartition(suite.collectionID, partitionIDs[0])
+
+	// manually release collection
+	suite.observer.ReleaseCollection(suite.collectionID)
+}
+
 func (suite *TargetObserverSuite) TearDownTest() {
 	suite.kv.Close()
 	suite.observer.Stop()
@@ -284,7 +300,7 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 }
 
 func (s *TargetObserverCheckSuite) TestCheck() {
-	r := s.observer.Check(context.Background(), s.collectionID)
+	r := s.observer.Check(context.Background(), s.collectionID, common.AllPartitionsID)
 	s.False(r)
 	s.True(s.observer.dispatcher.tasks.Contain(s.collectionID))
 }

@@ -24,13 +24,13 @@ FLOAT = "float"
 class DataField:
     pk_field = "uid"
     vec_field = "vectors"
-    float_vec_field = "float_vectors"
+    float_vec_field = "float32_vectors"
     sparse_vec_field = "sparse_vectors"
     image_float_vec_field = "image_float_vec_field"
     text_float_vec_field = "text_float_vec_field"
     binary_vec_field = "binary_vec_field"
-    bf16_vec_field = "bf16_vec_field"
-    fp16_vec_field = "fp16_vec_field"
+    bf16_vec_field = "brain_float16_vec_field"
+    fp16_vec_field = "float16_vec_field"
     int_field = "int_scalar"
     string_field = "string_scalar"
     bool_field = "bool_scalar"
@@ -504,16 +504,16 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
     data = []
     if rows > 0:
         if "vec" in data_field:
-            if "float" in data_field:
+            if "float" in data_field and "16" not in data_field:
                 data = gen_vectors(float_vector=True, rows=rows, dim=dim)
                 data = pd.Series([np.array(x, dtype=np.dtype("float32")) for x in data])
             elif "sparse" in data_field:
                 data = gen_sparse_vectors(rows, sparse_format=sparse_format)
                 data = pd.Series([json.dumps(x) for x in data], dtype=np.dtype("str"))
-            elif "fp16" in data_field:
+            elif "float16" in data_field:
                 data = gen_fp16_vectors(rows, dim)[1]
                 data = pd.Series([np.array(x, dtype=np.dtype("uint8")) for x in data])
-            elif "bf16" in data_field:
+            elif "brain_float16" in data_field:
                 data = gen_bf16_vectors(rows, dim)[1]
                 data = pd.Series([np.array(x, dtype=np.dtype("uint8")) for x in data])
             elif "binary" in data_field:
@@ -758,10 +758,10 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
                 if "binary" in data_field:
                     float_vector = False
                     vector_type = "binary"
-                if "bf16" in data_field:
+                if "brain_float16" in data_field:
                     float_vector = True
                     vector_type = "bf16"
-                if "fp16" in data_field:
+                if "float16" in data_field:
                     float_vector = True
                     vector_type = "fp16"
 

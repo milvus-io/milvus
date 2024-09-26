@@ -31,7 +31,7 @@ func (s *ClientSuite) TestNewClient() {
 		s.NotNil(c)
 	})
 
-	s.Run("emtpy_addr", func() {
+	s.Run("empty_addr", func() {
 		_, err := New(ctx, &ClientConfig{})
 		s.Error(err)
 		s.T().Log(err)

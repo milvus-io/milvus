@@ -16,7 +16,11 @@
 
 package storage
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"path"
+	"strconv"
+)
 
 type SegmentStats struct {
 	FieldStats []FieldStats `json:"fieldStats"`
@@ -42,6 +46,9 @@ func NewPartitionStatsSnapshot() *PartitionStatsSnapshot {
 }
 
 func (ps *PartitionStatsSnapshot) GetVersion() int64 {
+	if ps == nil {
+		return 0
+	}
 	return ps.Version
 }
 
@@ -76,4 +83,21 @@ func SerializePartitionStatsSnapshot(partStats *PartitionStatsSnapshot) ([]byte,
 		return nil, err
 	}
 	return partData, nil
+}
+
+func FindPartitionStatsMaxVersion(filePaths []string) (int64, string) {
+	maxVersion := int64(-1)
+	maxVersionFilePath := ""
+	for _, filePath := range filePaths {
+		versionStr := path.Base(filePath)
+		version, err := strconv.ParseInt(versionStr, 10, 64)
+		if err != nil {
+			continue
+		}
+		if version > maxVersion {
+			maxVersion = version
+			maxVersionFilePath = filePath
+		}
+	}
+	return maxVersion, maxVersionFilePath
 }

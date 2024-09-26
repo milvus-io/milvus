@@ -6,15 +6,15 @@ import (
 	"io"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pingcap/log"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/compressor"
 )
 
@@ -240,9 +240,26 @@ func (s Catalog) ReleaseReplicas(collectionID int64) error {
 	return s.cli.RemoveWithPrefix(key)
 }
 
-func (s Catalog) ReleaseReplica(collection, replica int64) error {
-	key := encodeReplicaKey(collection, replica)
-	return s.cli.Remove(key)
+func (s Catalog) ReleaseReplica(collection int64, replicas ...int64) error {
+	keys := lo.Map(replicas, func(replica int64, _ int) string {
+		return encodeReplicaKey(collection, replica)
+	})
+	if len(replicas) >= MetaOpsBatchSize {
+		index := 0
+		for index < len(replicas) {
+			endIndex := index + MetaOpsBatchSize
+			if endIndex > len(replicas) {
+				endIndex = len(replicas)
+			}
+			err := s.cli.MultiRemove(keys[index:endIndex])
+			if err != nil {
+				return err
+			}
+			index = endIndex
+		}
+		return nil
+	}
+	return s.cli.MultiRemove(keys)
 }
 
 func (s Catalog) SaveCollectionTargets(targets ...*querypb.CollectionTarget) error {

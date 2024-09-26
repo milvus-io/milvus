@@ -94,6 +94,8 @@ type IMetaTable interface {
 	DropGrant(tenant string, role *milvuspb.RoleEntity) error
 	ListPolicy(tenant string) ([]string, error)
 	ListUserRole(tenant string) ([]string, error)
+	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)
+	RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error
 }
 
 type MetaTable struct {
@@ -135,10 +137,9 @@ func (mt *MetaTable) reload() error {
 	mt.names = newNameDb()
 	mt.aliases = newNameDb()
 
-	partitionNum := int64(0)
-
 	metrics.RootCoordNumOfCollections.Reset()
 	metrics.RootCoordNumOfPartitions.Reset()
+	metrics.RootCoordNumOfDatabases.Set(0)
 
 	// recover databases.
 	dbs, err := mt.catalog.ListDatabases(mt.ctx, typeutil.MaxTimestamp)
@@ -169,12 +170,14 @@ func (mt *MetaTable) reload() error {
 
 	// recover collections from db namespace
 	for dbName, db := range mt.dbName2Meta {
+		partitionNum := int64(0)
+		collectionNum := int64(0)
+
 		mt.names.createDbIfNotExist(dbName)
 		collections, err := mt.catalog.ListCollections(mt.ctx, db.ID, typeutil.MaxTimestamp)
 		if err != nil {
 			return err
 		}
-		collectionNum := int64(0)
 		for _, collection := range collections {
 			mt.collID2Meta[collection.CollectionID] = collection
 			if collection.Available() {
@@ -184,7 +187,9 @@ func (mt *MetaTable) reload() error {
 			}
 		}
 
+		metrics.RootCoordNumOfDatabases.Inc()
 		metrics.RootCoordNumOfCollections.WithLabelValues(dbName).Add(float64(collectionNum))
+		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 		log.Info("collections recovered from db", zap.String("db_name", dbName),
 			zap.Int64("collection_num", collectionNum),
 			zap.Int64("partition_num", partitionNum))
@@ -201,8 +206,6 @@ func (mt *MetaTable) reload() error {
 			mt.aliases.insert(dbName, alias.Name, alias.CollectionID)
 		}
 	}
-
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 	log.Info("RootCoord meta table reload done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
@@ -255,7 +258,11 @@ func (mt *MetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts 
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	return mt.createDatabasePrivate(ctx, db, ts)
+	if err := mt.createDatabasePrivate(ctx, db, ts); err != nil {
+		return err
+	}
+	metrics.RootCoordNumOfDatabases.Inc()
+	return nil
 }
 
 func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
@@ -271,8 +278,8 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 	mt.names.createDbIfNotExist(dbName)
 	mt.aliases.createDbIfNotExist(dbName)
 	mt.dbName2Meta[dbName] = db
-	log.Ctx(ctx).Info("create database", zap.String("db", dbName), zap.Uint64("ts", ts))
 
+	log.Ctx(ctx).Info("create database", zap.String("db", dbName), zap.Uint64("ts", ts))
 	return nil
 }
 
@@ -322,8 +329,9 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 	mt.names.dropDb(dbName)
 	mt.aliases.dropDb(dbName)
 	delete(mt.dbName2Meta, dbName)
-	log.Ctx(ctx).Info("drop database", zap.String("db", dbName), zap.Uint64("ts", ts))
 
+	metrics.RootCoordNumOfDatabases.Dec()
+	log.Ctx(ctx).Info("drop database", zap.String("db", dbName), zap.Uint64("ts", ts))
 	return nil
 }
 
@@ -1396,4 +1404,18 @@ func (mt *MetaTable) ListUserRole(tenant string) ([]string, error) {
 	defer mt.permissionLock.RUnlock()
 
 	return mt.catalog.ListUserRole(mt.ctx, tenant)
+}
+
+func (mt *MetaTable) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error) {
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	return mt.catalog.BackupRBAC(mt.ctx, tenant)
+}
+
+func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	return mt.catalog.RestoreRBAC(mt.ctx, tenant, meta)
 }

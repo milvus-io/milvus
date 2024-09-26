@@ -93,16 +93,6 @@ func (s *SyncPolicySuite) TestSealedSegmentsPolicy() {
 	s.ElementsMatch(ids, result)
 }
 
-func (s *SyncPolicySuite) TestCompactedSegmentsPolicy() {
-	metacache := metacache.NewMockMetaCache(s.T())
-	policy := GetCompactedSegmentsPolicy(metacache)
-	ids := []int64{1, 2}
-	metacache.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return(ids)
-
-	result := policy.SelectSegments([]*segmentBuffer{{segmentID: 1}, {segmentID: 2}}, tsoutil.ComposeTSByTime(time.Now(), 0))
-	s.ElementsMatch(ids, result)
-}
-
 func (s *SyncPolicySuite) TestOlderBufferPolicy() {
 	policy := GetOldestBufferPolicy(2)
 

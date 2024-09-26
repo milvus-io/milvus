@@ -118,8 +118,7 @@ class MinioChunkManager : public ChunkManager {
          uint64_t offset,
          void* buf,
          uint64_t len) {
-        throw SegcoreError(NotImplemented,
-                           GetName() + "Read with offset not implement");
+        PanicInfo(NotImplemented, GetName() + "Read with offset not implement");
     }
 
     virtual void
@@ -127,8 +126,8 @@ class MinioChunkManager : public ChunkManager {
           uint64_t offset,
           void* buf,
           uint64_t len) {
-        throw SegcoreError(NotImplemented,
-                           GetName() + "Write with offset not implement");
+        PanicInfo(NotImplemented,
+                  GetName() + "Write with offset not implement");
     }
 
     virtual uint64_t
@@ -316,7 +315,7 @@ class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
         request->SetResponseStreamFactory(streamFactory);
         auto auth_header = credentials_->AuthorizationHeader();
         if (!auth_header.ok()) {
-            throw SegcoreError(
+            PanicInfo(
                 S3Error,
                 fmt::format("get authorization failed, errcode: {}",
                             StatusCodeToString(auth_header.status().code())));

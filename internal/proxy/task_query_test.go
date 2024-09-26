@@ -22,11 +22,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -72,6 +72,9 @@ func TestQueryTask_all(t *testing.T) {
 				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
 			},
 		},
+	}, nil).Maybe()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: &successStatus,
 	}, nil).Maybe()
 
 	mgr := NewMockShardClientManager(t)
@@ -1043,6 +1046,29 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		qt.request.ConsistencyLevel = commonpb.ConsistencyLevel_Strong
 		skip = qt.CanSkipAllocTimestamp()
 		assert.False(t, skip)
+	})
+
+	t.Run("legacy_guarantee_ts", func(t *testing.T) {
+		qt := &queryTask{
+			request: &milvuspb.QueryRequest{
+				Base:                  nil,
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: false,
+				ConsistencyLevel:      commonpb.ConsistencyLevel_Strong,
+			},
+		}
+
+		skip := qt.CanSkipAllocTimestamp()
+		assert.False(t, skip)
+
+		qt.request.GuaranteeTimestamp = 1 // eventually
+		skip = qt.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+
+		qt.request.GuaranteeTimestamp = 2 // bounded
+		skip = qt.CanSkipAllocTimestamp()
+		assert.True(t, skip)
 	})
 
 	t.Run("failed", func(t *testing.T) {

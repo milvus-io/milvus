@@ -20,7 +20,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -37,7 +37,7 @@ type IntPrimaryKey = typeutil.IntPrimaryKey
 type MsgPosition = msgpb.MsgPosition
 
 // MessageID is an alias for short
-type MessageID = mqwrapper.MessageID
+type MessageID = common.MessageID
 
 // MsgPack represents a batch of msg in msgstream
 type MsgPack struct {
@@ -61,7 +61,7 @@ type MsgStream interface {
 	GetProduceChannels() []string
 	Broadcast(*MsgPack) (map[string][]MessageID, error)
 
-	AsConsumer(ctx context.Context, channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) error
+	AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error
 	Chan() <-chan *MsgPack
 	// Seek consume message from the specified position
 	// includeCurrentMsg indicates whether to consume the current message, and in the milvus system, it should be always false

@@ -384,13 +384,20 @@ func (_c *QueryCoordCatalog_ReleasePartition_Call) RunAndReturn(run func(int64, 
 	return _c
 }
 
-// ReleaseReplica provides a mock function with given fields: collection, replica
-func (_m *QueryCoordCatalog) ReleaseReplica(collection int64, replica int64) error {
-	ret := _m.Called(collection, replica)
+// ReleaseReplica provides a mock function with given fields: collection, replicas
+func (_m *QueryCoordCatalog) ReleaseReplica(collection int64, replicas ...int64) error {
+	_va := make([]interface{}, len(replicas))
+	for _i := range replicas {
+		_va[_i] = replicas[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, collection)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, int64) error); ok {
-		r0 = rf(collection, replica)
+	if rf, ok := ret.Get(0).(func(int64, ...int64) error); ok {
+		r0 = rf(collection, replicas...)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -405,14 +412,21 @@ type QueryCoordCatalog_ReleaseReplica_Call struct {
 
 // ReleaseReplica is a helper method to define mock.On call
 //   - collection int64
-//   - replica int64
-func (_e *QueryCoordCatalog_Expecter) ReleaseReplica(collection interface{}, replica interface{}) *QueryCoordCatalog_ReleaseReplica_Call {
-	return &QueryCoordCatalog_ReleaseReplica_Call{Call: _e.mock.On("ReleaseReplica", collection, replica)}
+//   - replicas ...int64
+func (_e *QueryCoordCatalog_Expecter) ReleaseReplica(collection interface{}, replicas ...interface{}) *QueryCoordCatalog_ReleaseReplica_Call {
+	return &QueryCoordCatalog_ReleaseReplica_Call{Call: _e.mock.On("ReleaseReplica",
+		append([]interface{}{collection}, replicas...)...)}
 }
 
-func (_c *QueryCoordCatalog_ReleaseReplica_Call) Run(run func(collection int64, replica int64)) *QueryCoordCatalog_ReleaseReplica_Call {
+func (_c *QueryCoordCatalog_ReleaseReplica_Call) Run(run func(collection int64, replicas ...int64)) *QueryCoordCatalog_ReleaseReplica_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int64))
+		variadicArgs := make([]int64, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(int64)
+			}
+		}
+		run(args[0].(int64), variadicArgs...)
 	})
 	return _c
 }
@@ -422,7 +436,7 @@ func (_c *QueryCoordCatalog_ReleaseReplica_Call) Return(_a0 error) *QueryCoordCa
 	return _c
 }
 
-func (_c *QueryCoordCatalog_ReleaseReplica_Call) RunAndReturn(run func(int64, int64) error) *QueryCoordCatalog_ReleaseReplica_Call {
+func (_c *QueryCoordCatalog_ReleaseReplica_Call) RunAndReturn(run func(int64, ...int64) error) *QueryCoordCatalog_ReleaseReplica_Call {
 	_c.Call.Return(run)
 	return _c
 }

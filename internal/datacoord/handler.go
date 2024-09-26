@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -57,9 +56,7 @@ func newServerHandler(s *Server) *ServerHandler {
 
 // GetDataVChanPositions gets vchannel latest positions with provided dml channel names for DataNode.
 func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID UniqueID) *datapb.VchannelInfo {
-	segments := h.s.meta.SelectSegments(SegmentFilterFunc(func(s *SegmentInfo) bool {
-		return s.InsertChannel == channel.GetName() && !s.GetIsFake()
-	}))
+	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 	log.Info("GetDataVChanPositions",
 		zap.Int64("collectionID", channel.GetCollectionID()),
 		zap.String("channel", channel.GetName()),
@@ -105,43 +102,62 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 // the unflushed segments are actually the segments without index, even they are flushed.
 func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs ...UniqueID) *datapb.VchannelInfo {
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
-	segments := h.s.meta.SelectSegments(SegmentFilterFunc(func(s *SegmentInfo) bool {
-		return s.InsertChannel == channel.GetName() && !s.GetIsFake()
-	}))
+	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
+	if len(validPartitions) <= 0 {
+		collInfo, err := h.s.handler.GetCollection(h.s.ctx, channel.GetCollectionID())
+		if err != nil || collInfo == nil {
+			log.Warn("collectionInfo is nil")
+			return nil
+		}
+		validPartitions = collInfo.Partitions
+	}
+	partStatsVersionsMap := make(map[int64]int64)
+	var (
+		indexedIDs   = make(typeutil.UniqueSet)
+		droppedIDs   = make(typeutil.UniqueSet)
+		growingIDs   = make(typeutil.UniqueSet)
+		levelZeroIDs = make(typeutil.UniqueSet)
+	)
+
+	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
+
 	segmentInfos := make(map[int64]*SegmentInfo)
 	indexedSegments := FilterInIndexedSegments(h, h.s.meta, segments...)
 	indexed := make(typeutil.UniqueSet)
 	for _, segment := range indexedSegments {
 		indexed.Insert(segment.GetID())
 	}
-	log.Info("GetQueryVChanPositions",
-		zap.Int64("collectionID", channel.GetCollectionID()),
-		zap.String("channel", channel.GetName()),
-		zap.Int("numOfSegments", len(segments)),
-		zap.Int("indexed segment", len(indexedSegments)),
-	)
-	var (
-		indexedIDs   = make(typeutil.UniqueSet)
-		unIndexedIDs = make(typeutil.UniqueSet)
-		droppedIDs   = make(typeutil.UniqueSet)
-		growingIDs   = make(typeutil.UniqueSet)
-		levelZeroIDs = make(typeutil.UniqueSet)
-	)
 
-	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
-	partitionSet := typeutil.NewUniqueSet(validPartitions...)
+	unIndexedIDs := make(typeutil.UniqueSet)
+
 	for _, s := range segments {
-		if (partitionSet.Len() > 0 && !partitionSet.Contain(s.PartitionID) && s.GetPartitionID() != common.AllPartitionsID) ||
-			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
+		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil {
 			continue
 		}
 		if s.GetIsImporting() {
 			// Skip bulk insert segments.
 			continue
 		}
+
+		currentPartitionStatsVersion := h.s.meta.partitionStatsMeta.GetCurrentPartitionStatsVersion(channel.GetCollectionID(), s.GetPartitionID(), channel.GetName())
+		if s.GetLevel() == datapb.SegmentLevel_L2 && s.GetPartitionStatsVersion() != currentPartitionStatsVersion {
+			// in the process of L2 compaction, newly generated segment may be visible before the whole L2 compaction Plan
+			// is finished, we have to skip these fast-finished segment because all segments in one L2 Batch must be
+			// seen atomically, otherwise users will see intermediate result
+			continue
+		}
+
 		segmentInfos[s.GetID()] = s
 		switch {
 		case s.GetState() == commonpb.SegmentState_Dropped:
+			if s.GetLevel() == datapb.SegmentLevel_L2 && s.GetPartitionStatsVersion() == currentPartitionStatsVersion {
+				// if segment.partStatsVersion is equal to currentPartitionStatsVersion,
+				// it must have been indexed, this is guaranteed by clustering compaction process
+				// this is to ensure that the current valid L2 compaction produce is available to search/query
+				// to avoid insufficient data
+				indexedIDs.Insert(s.GetID())
+				continue
+			}
 			droppedIDs.Insert(s.GetID())
 		case !isFlushState(s.GetState()):
 			growingIDs.Insert(s.GetID())
@@ -155,6 +171,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 			unIndexedIDs.Insert(s.GetID())
 		}
 	}
+
 	// ================================================
 	// Segments blood relationship:
 	//          a   b
@@ -206,14 +223,31 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	// unindexed is flushed segments as well
 	indexedIDs.Insert(unIndexedIDs.Collect()...)
 
+	for _, partitionID := range validPartitions {
+		currentPartitionStatsVersion := h.s.meta.partitionStatsMeta.GetCurrentPartitionStatsVersion(channel.GetCollectionID(), partitionID, channel.GetName())
+		partStatsVersionsMap[partitionID] = currentPartitionStatsVersion
+	}
+
+	log.Info("GetQueryVChanPositions",
+		zap.Int64("collectionID", channel.GetCollectionID()),
+		zap.String("channel", channel.GetName()),
+		zap.Int("numOfSegments", len(segments)),
+		zap.Int("indexed segment", len(indexedSegments)),
+		zap.Int("result indexed", len(indexedIDs)),
+		zap.Int("result unIndexed", len(unIndexedIDs)),
+		zap.Int("result growing", len(growingIDs)),
+		zap.Any("partition stats", partStatsVersionsMap),
+	)
+
 	return &datapb.VchannelInfo{
-		CollectionID:        channel.GetCollectionID(),
-		ChannelName:         channel.GetName(),
-		SeekPosition:        h.GetChannelSeekPosition(channel, partitionIDs...),
-		FlushedSegmentIds:   indexedIDs.Collect(),
-		UnflushedSegmentIds: growingIDs.Collect(),
-		DroppedSegmentIds:   droppedIDs.Collect(),
-		LevelZeroSegmentIds: levelZeroIDs.Collect(),
+		CollectionID:           channel.GetCollectionID(),
+		ChannelName:            channel.GetName(),
+		SeekPosition:           h.GetChannelSeekPosition(channel, partitionIDs...),
+		FlushedSegmentIds:      indexedIDs.Collect(),
+		UnflushedSegmentIds:    growingIDs.Collect(),
+		DroppedSegmentIds:      droppedIDs.Collect(),
+		LevelZeroSegmentIds:    levelZeroIDs.Collect(),
+		PartitionStatsVersions: partStatsVersionsMap,
 	}
 }
 
@@ -424,7 +458,12 @@ func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) er
 		log.Warn("DropChannel failed", zap.String("vChannel", channel), zap.Error(err))
 		return err
 	}
-	log.Info("DropChannel succeeded", zap.String("vChannel", channel))
+	err = h.s.meta.DropChannelCheckpoint(channel)
+	if err != nil {
+		log.Warn("DropChannel failed to drop channel checkpoint", zap.String("channel", channel), zap.Error(err))
+		return err
+	}
+	log.Info("DropChannel succeeded", zap.String("channel", channel))
 	// Channel checkpoints are cleaned up during garbage collection.
 
 	// clean collection info cache when meet drop collection info

@@ -50,6 +50,7 @@ vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 max_vector_field_num = ct.max_vector_field_num
+SPARSE_FLOAT_VECTOR_data_type = "SPARSE_FLOAT_VECTOR"
 
 
 class TestCollectionParams(TestcaseBase):
@@ -615,7 +616,7 @@ class TestCollectionParams(TestcaseBase):
         int_field = cf.gen_int64_field(is_primary=True, auto_id=auto_id)
         vec_field = cf.gen_float_vec_field(name='vec')
         schema, _ = self.collection_schema_wrap.init_collection_schema([int_field, vec_field], auto_id=not auto_id)
-        collection_w = self.collection_wrap.init_collection(cf.gen_unique_str(prefix), schema=schema)[0]
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), schema=schema)
 
         assert collection_w.schema.auto_id is auto_id
 
@@ -1046,6 +1047,24 @@ class TestCollectionParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=int_fields)
         error = {ct.err_code: 65535, ct.err_msg: "maximum field's number should be limited to 64"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_collection_multi_sparse_vectors(self):
+        """
+        target: Test multiple sparse vectors in a collection
+        method: create 2 sparse vectors in a collection
+        expected: successful creation of a collection
+        """
+        # 1. connect
+        self._connect()
+        # 2. create collection with multiple vectors
+        c_name = cf.gen_unique_str(prefix)
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
+                  cf.gen_float_vec_field(vector_data_type=ct.sparse_vector), cf.gen_float_vec_field(name="vec_sparse", vector_data_type=ct.sparse_vector)]
+        schema = cf.gen_collection_schema(fields=fields)
+        self.collection_wrap.init_collection(c_name, schema=schema,
+                                             check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
 
 
 class TestCollectionOperation(TestcaseBase):
@@ -2813,8 +2832,8 @@ class TestLoadCollection(TestcaseBase):
         assert loading_progress == {'loading_progress': '100%'}
 
         # verify load different replicas thrown an exception
-        error = {ct.err_code: 1100, ct.err_msg: "failed to load collection: can't change the replica number for "
-                                                "loaded collection: expected=1, actual=2: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: "call query coordinator LoadCollection: can't change the replica "
+                                                "number for loaded collection: invalid parameter[expected=1][actual=2]"}
         collection_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
         one_replica, _ = collection_w.get_replicas()
         assert len(one_replica.groups) == 1

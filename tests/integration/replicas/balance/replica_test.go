@@ -50,7 +50,6 @@ func (s *ReplicaTestSuit) SetupSuite() {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
-
 	s.Require().NoError(s.SetupEmbedEtcd())
 }
 

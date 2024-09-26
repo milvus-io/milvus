@@ -56,7 +56,7 @@ func (e sliceSparseEmbedding) FieldType() FieldType {
 }
 
 func (e sliceSparseEmbedding) Get(idx int) (uint32, float32, bool) {
-	if idx < 0 || idx >= int(e.len) {
+	if idx < 0 || idx >= e.len {
 		return 0, 0, false
 	}
 	return e.positions[idx], e.values[idx], true

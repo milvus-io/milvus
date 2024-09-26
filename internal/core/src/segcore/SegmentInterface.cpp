@@ -56,10 +56,21 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
     AssertInfo(results.seg_offsets_.size() == size,
                "Size of result distances is not equal to size of ids");
 
+    std::unique_ptr<DataArray> field_data;
     // fill other entries except primary key by result_offset
     for (auto field_id : plan->target_entries_) {
-        auto field_data =
-            bulk_subscript(field_id, results.seg_offsets_.data(), size);
+        if (plan->schema_.get_dynamic_field_id().has_value() &&
+            plan->schema_.get_dynamic_field_id().value() == field_id &&
+            !plan->target_dynamic_fields_.empty()) {
+            auto& target_dynamic_fields = plan->target_dynamic_fields_;
+            field_data = std::move(bulk_subscript(field_id,
+                                                  results.seg_offsets_.data(),
+                                                  size,
+                                                  target_dynamic_fields));
+        } else {
+            field_data = std::move(
+                bulk_subscript(field_id, results.seg_offsets_.data(), size));
+        }
         results.output_fields_data_[field_id] = std::move(field_data);
     }
 }
@@ -99,7 +110,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         output_data_size += get_field_avg_size(field_id) * result_rows;
     }
     if (output_data_size > limit_size) {
-        throw SegcoreError(
+        PanicInfo(
             RetrieveError,
             fmt::format("query results exceed the limit size ", limit_size));
     }
@@ -164,6 +175,16 @@ SegmentInternalInterface::FillTargetEntry(
         }
 
         if (ignore_non_pk && !is_pk_field(field_id)) {
+            continue;
+        }
+
+        if (plan->schema_.get_dynamic_field_id().has_value() &&
+            plan->schema_.get_dynamic_field_id().value() == field_id &&
+            !plan->target_dynamic_fields_.empty()) {
+            auto& target_dynamic_fields = plan->target_dynamic_fields_;
+            auto col =
+                bulk_subscript(field_id, offsets, size, target_dynamic_fields);
+            fields_data->AddAllocated(col.release());
             continue;
         }
 
@@ -258,7 +279,7 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
             return sizeof(int64_t);
         }
 
-        throw SegcoreError(FieldIDInvalid, "unsupported system field id");
+        PanicInfo(FieldIDInvalid, "unsupported system field id");
     }
 
     auto schema = get_schema();

@@ -128,7 +128,14 @@ int64_t
 GetDimFromConfig(const Config& config) {
     auto dimension = GetValueFromConfig<std::string>(config, "dim");
     AssertInfo(dimension.has_value(), "dimension not exist in config");
-    return (std::stoi(dimension.value()));
+    try {
+        return (std::stoi(dimension.value()));
+    } catch (const std::logic_error& e) {
+        auto err_message = fmt::format(
+            "invalided dimension:{}, error:{}", dimension.value(), e.what());
+        LOG_ERROR(err_message);
+        throw std::logic_error(err_message);
+    }
 }
 
 std::string
@@ -151,7 +158,16 @@ GetIndexEngineVersionFromConfig(const Config& config) {
         GetValueFromConfig<std::string>(config, INDEX_ENGINE_VERSION);
     AssertInfo(index_engine_version.has_value(),
                "index_engine not exist in config");
-    return (std::stoi(index_engine_version.value()));
+    try {
+        return (std::stoi(index_engine_version.value()));
+    } catch (const std::logic_error& e) {
+        auto err_message =
+            fmt::format("invalided index engine version:{}, error:{}",
+                        index_engine_version.value(),
+                        e.what());
+        LOG_ERROR(err_message);
+        throw std::logic_error(err_message);
+    }
 }
 
 // TODO :: too ugly
@@ -318,10 +334,9 @@ ReadDataFromFD(int fd, void* buf, size_t size, size_t chunk_size) {
         const size_t count = (size < chunk_size) ? size : chunk_size;
         const ssize_t size_read = read(fd, buf, count);
         if (size_read != count) {
-            throw SegcoreError(
-                ErrorCode::UnistdError,
-                "read data from fd error, returned read size is " +
-                    std::to_string(size_read));
+            PanicInfo(ErrorCode::UnistdError,
+                      "read data from fd error, returned read size is " +
+                          std::to_string(size_read));
         }
 
         buf = static_cast<char*>(buf) + size_read;

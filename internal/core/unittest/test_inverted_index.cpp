@@ -25,20 +25,25 @@
 
 using namespace milvus;
 
-// TODO: I would suggest that our all indexes use this test to simulate the real production environment.
-
 namespace milvus::test {
 auto
 gen_field_meta(int64_t collection_id = 1,
                int64_t partition_id = 2,
                int64_t segment_id = 3,
-               int64_t field_id = 101) -> storage::FieldDataMeta {
-    return storage::FieldDataMeta{
+               int64_t field_id = 101,
+               DataType data_type = DataType::NONE,
+               DataType element_type = DataType::NONE)
+    -> storage::FieldDataMeta {
+    auto meta = storage::FieldDataMeta{
         .collection_id = collection_id,
         .partition_id = partition_id,
         .segment_id = segment_id,
         .field_id = field_id,
     };
+    meta.schema.set_data_type(static_cast<proto::schema::DataType>(data_type));
+    meta.schema.set_element_type(
+        static_cast<proto::schema::DataType>(element_type));
+    return meta;
 }
 
 auto
@@ -86,7 +91,7 @@ struct ChunkManagerWrapper {
 };
 }  // namespace milvus::test
 
-template <typename T, DataType dtype>
+template <typename T, DataType dtype, DataType element_type = DataType::NONE>
 void
 test_run() {
     int64_t collection_id = 1;
@@ -96,8 +101,8 @@ test_run() {
     int64_t index_build_id = 1000;
     int64_t index_version = 10000;
 
-    auto field_meta =
-        test::gen_field_meta(collection_id, partition_id, segment_id, field_id);
+    auto field_meta = test::gen_field_meta(
+        collection_id, partition_id, segment_id, field_id, dtype, element_type);
     auto index_meta = test::gen_index_meta(
         segment_id, field_id, index_build_id, index_version);
 
@@ -305,8 +310,12 @@ test_string() {
     int64_t index_build_id = 1000;
     int64_t index_version = 10000;
 
-    auto field_meta =
-        test::gen_field_meta(collection_id, partition_id, segment_id, field_id);
+    auto field_meta = test::gen_field_meta(collection_id,
+                                           partition_id,
+                                           segment_id,
+                                           field_id,
+                                           dtype,
+                                           DataType::NONE);
     auto index_meta = test::gen_index_meta(
         segment_id, field_id, index_build_id, index_version);
 

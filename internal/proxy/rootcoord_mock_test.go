@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -51,6 +51,7 @@ type collectionMeta struct {
 	physicalChannelNames []string
 	createdTimestamp     uint64
 	createdUtcTimestamp  uint64
+	properties           []*commonpb.KeyValuePair
 }
 
 type partitionMeta struct {
@@ -385,6 +386,7 @@ func (coord *RootCoordMock) CreateCollection(ctx context.Context, req *milvuspb.
 		physicalChannelNames: physicalChannelNames,
 		createdTimestamp:     ts,
 		createdUtcTimestamp:  ts,
+		properties:           req.GetProperties(),
 	}
 
 	coord.partitionMtx.Lock()
@@ -528,6 +530,7 @@ func (coord *RootCoordMock) DescribeCollection(ctx context.Context, req *milvusp
 		PhysicalChannelNames: meta.physicalChannelNames,
 		CreatedTimestamp:     meta.createdUtcTimestamp,
 		CreatedUtcTimestamp:  meta.createdUtcTimestamp,
+		Properties:           meta.properties,
 	}, nil
 }
 
@@ -1116,6 +1119,14 @@ func (coord *RootCoordMock) DescribeDatabase(ctx context.Context, in *rootcoordp
 }
 
 func (coord *RootCoordMock) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *RootCoordMock) BackupRBAC(ctx context.Context, in *milvuspb.BackupRBACMetaRequest, opts ...grpc.CallOption) (*milvuspb.BackupRBACMetaResponse, error) {
+	return &milvuspb.BackupRBACMetaResponse{}, nil
+}
+
+func (coord *RootCoordMock) RestoreRBAC(ctx context.Context, in *milvuspb.RestoreRBACMetaRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, nil
 }
 

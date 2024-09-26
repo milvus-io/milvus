@@ -117,6 +117,7 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Time, flush bool) {
 	callBack := func() {
 		channelCPTs, _ := tsoutil.ParseTS(channelPos.GetTimestamp())
+		// reset flush ts to prevent frequent flush
 		ttn.writeBufferManager.NotifyCheckpointUpdated(ttn.vChannelName, channelPos.GetTimestamp())
 		log.Debug("UpdateChannelCheckpoint success",
 			zap.String("channel", ttn.vChannelName),

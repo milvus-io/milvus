@@ -59,9 +59,6 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgs
 		hits := make([]bool, len(pks))
 
 		for _, segment := range partitionSegments {
-			if segment.CompactTo() != 0 {
-				continue
-			}
 			hits = segment.GetBloomFilterSet().BatchPkExistWithHits(lc, hits)
 		}
 
@@ -90,7 +87,7 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgs
 		pksInDeleteMsgs[didx] = pks
 		pkTss := delMsg.GetTimestamps()
 		partitionSegments := wb.metaCache.GetSegmentsBy(metacache.WithPartitionID(delMsg.PartitionID),
-			metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed))
+			metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed))
 		partitionGroups := lo.Filter(groups, func(inData *inData, _ int) bool {
 			return delMsg.GetPartitionID() == common.AllPartitionsID || delMsg.GetPartitionID() == inData.partitionID
 		})
@@ -185,7 +182,6 @@ func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 		}
 	}
 
-	wb.cleanupCompactedSegments()
 	return nil
 }
 

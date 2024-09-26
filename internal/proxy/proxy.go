@@ -31,7 +31,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -67,9 +66,8 @@ type Timestamp = typeutil.Timestamp
 var _ types.Proxy = (*Proxy)(nil)
 
 var (
-	Params    = paramtable.Get()
-	Extension hook.Extension
-	rateCol   *ratelimitutil.RateCollector
+	Params  = paramtable.Get()
+	rateCol *ratelimitutil.RateCollector
 )
 
 // Proxy of milvus
@@ -128,6 +126,9 @@ type Proxy struct {
 
 	// materialized view
 	enableMaterializedView bool
+
+	// delete rate limiter
+	enableComplexDeleteLimit bool
 }
 
 // NewProxy returns a Proxy struct.
@@ -146,7 +147,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		factory:                factory,
 		searchResultCh:         make(chan *internalpb.SearchResults, n),
 		shardMgr:               mgr,
-		simpleLimiter:          NewSimpleLimiter(),
+		simpleLimiter:          NewSimpleLimiter(Params.QuotaConfig.AllocWaitInterval.GetAsDuration(time.Millisecond), Params.QuotaConfig.AllocRetryTimes.GetAsUint()),
 		lbPolicy:               lbPolicy,
 		resourceManager:        resourceManager,
 		replicateStreamManager: replicateStreamManager,
@@ -154,7 +155,6 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	expr.Register("proxy", node)
 	hookutil.InitOnceHook()
-	Extension = hookutil.Extension
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
 	return node, nil
 }
@@ -206,7 +206,6 @@ func (node *Proxy) initRateCollector() error {
 	// TODO: add bulkLoad rate
 	rateCol.Register(internalpb.RateType_DQLSearch.String())
 	rateCol.Register(internalpb.RateType_DQLQuery.String())
-	rateCol.Register(metricsinfo.ReadResultThroughput)
 	return nil
 }
 
@@ -287,6 +286,7 @@ func (node *Proxy) Init() error {
 	node.chTicker = newChannelsTimeTicker(node.ctx, Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond)/2, []string{}, node.sched.getPChanStatistics, tsoAllocator)
 	log.Debug("create channels time ticker done", zap.String("role", typeutil.ProxyRole), zap.Duration("syncTimeTickInterval", syncTimeTickInterval))
 
+	node.enableComplexDeleteLimit = Params.QuotaConfig.ComplexDeleteLimitEnable.GetAsBool()
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	log.Debug("create metrics cache manager done", zap.String("role", typeutil.ProxyRole))
 
@@ -418,7 +418,7 @@ func (node *Proxy) Start() error {
 		cb()
 	}
 
-	Extension.Report(map[string]any{
+	hookutil.GetExtension().Report(map[string]any{
 		hookutil.OpTypeKey: hookutil.OpTypeNodeID,
 		hookutil.NodeIDKey: paramtable.GetNodeID(),
 	})

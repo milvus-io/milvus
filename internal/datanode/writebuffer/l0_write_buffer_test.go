@@ -103,7 +103,7 @@ func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim
 		}
 	}
 	return tss, &msgstream.InsertMsg{
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			SegmentID:  segmentID,
 			Version:    msgpb.InsertDataVersion_ColumnBased,
 			RowIDs:     tss,
@@ -154,7 +154,7 @@ func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim
 
 func (s *L0WriteBufferSuite) composeDeleteMsg(pks []storage.PrimaryKey) *msgstream.DeleteMsg {
 	delMsg := &msgstream.DeleteMsg{
-		DeleteRequest: msgpb.DeleteRequest{
+		DeleteRequest: &msgpb.DeleteRequest{
 			PrimaryKeys: storage.ParsePrimaryKeys2IDs(pks),
 			Timestamps:  lo.RepeatBy(len(pks), func(idx int) uint64 { return tsoutil.ComposeTSByTime(time.Now(), int64(idx)+1) }),
 		},
@@ -186,7 +186,6 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false).Once()
 		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-		s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
 
 		metrics.DataNodeFlowGraphBufferDataSize.Reset()
 		err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
@@ -215,7 +214,6 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-		s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
 
 		metrics.DataNodeFlowGraphBufferDataSize.Reset()
 		err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})

@@ -369,7 +369,8 @@ class TestPartitionParams(TestcaseBase):
 
         # load with 2 replicas
         error = {ct.err_code: 65535,
-                 ct.err_msg: "failed to load partitions: failed to spawn replica for collection: nodes not enough"}
+                 ct.err_msg: "failed to spawn replica for collection: resource group node not enough"
+                             "[rg=__default_resource_group]"}
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1112,6 +1113,7 @@ class TestPartitionOperations(TestcaseBase):
         partition_w.upsert(upsert_data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="smellthemoon: behavior changed")
     def test_partition_upsert_with_auto_id(self):
         """
         target: test upsert data in partition when auto_id=True

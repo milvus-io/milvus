@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -99,4 +100,133 @@ func TestMockFieldData(t *testing.T) {
 	chunkMgr := NewMockChunkManager()
 
 	chunkMgr.mockFieldData(100000, 8, 0, 0, 1)
+}
+
+type IndexNodeServiceSuite struct {
+	suite.Suite
+	cluster      string
+	collectionID int64
+	partitionID  int64
+	taskID       int64
+	fieldID      int64
+	segmentID    int64
+}
+
+func (suite *IndexNodeServiceSuite) SetupTest() {
+	suite.cluster = "test_cluster"
+	suite.collectionID = 100
+	suite.partitionID = 102
+	suite.taskID = 11111
+	suite.fieldID = 103
+	suite.segmentID = 104
+}
+
+func (suite *IndexNodeServiceSuite) Test_AbnormalIndexNode() {
+	in, err := NewMockIndexNodeComponent(context.TODO())
+	suite.NoError(err)
+	suite.Nil(in.Stop())
+
+	ctx := context.TODO()
+	status, err := in.CreateJob(ctx, &indexpb.CreateJobRequest{})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
+
+	qresp, err := in.QueryJobs(ctx, &indexpb.QueryJobsRequest{})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(qresp.GetStatus()), merr.ErrServiceNotReady)
+
+	status, err = in.DropJobs(ctx, &indexpb.DropJobsRequest{})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
+
+	jobNumRsp, err := in.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(jobNumRsp.GetStatus()), merr.ErrServiceNotReady)
+
+	metricsResp, err := in.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
+	err = merr.CheckRPCCall(metricsResp, err)
+	suite.ErrorIs(err, merr.ErrServiceNotReady)
+
+	configurationResp, err := in.ShowConfigurations(ctx, &internalpb.ShowConfigurationsRequest{})
+	err = merr.CheckRPCCall(configurationResp, err)
+	suite.ErrorIs(err, merr.ErrServiceNotReady)
+
+	status, err = in.CreateJobV2(ctx, &indexpb.CreateJobV2Request{})
+	err = merr.CheckRPCCall(status, err)
+	suite.ErrorIs(err, merr.ErrServiceNotReady)
+
+	queryAnalyzeResultResp, err := in.QueryJobsV2(ctx, &indexpb.QueryJobsV2Request{})
+	err = merr.CheckRPCCall(queryAnalyzeResultResp, err)
+	suite.ErrorIs(err, merr.ErrServiceNotReady)
+
+	dropAnalyzeTasksResp, err := in.DropJobsV2(ctx, &indexpb.DropJobsV2Request{})
+	err = merr.CheckRPCCall(dropAnalyzeTasksResp, err)
+	suite.ErrorIs(err, merr.ErrServiceNotReady)
+}
+
+func (suite *IndexNodeServiceSuite) Test_Method() {
+	ctx := context.TODO()
+	in, err := NewMockIndexNodeComponent(context.TODO())
+	suite.NoError(err)
+	suite.NoError(in.Stop())
+
+	in.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	suite.Run("CreateJobV2", func() {
+		req := &indexpb.AnalyzeRequest{
+			ClusterID:    suite.cluster,
+			TaskID:       suite.taskID,
+			CollectionID: suite.collectionID,
+			PartitionID:  suite.partitionID,
+			FieldID:      suite.fieldID,
+			SegmentStats: map[int64]*indexpb.SegmentStats{
+				suite.segmentID: {
+					ID:      suite.segmentID,
+					NumRows: 1024,
+					LogIDs:  []int64{1, 2, 3},
+				},
+			},
+			Version:       1,
+			StorageConfig: nil,
+		}
+
+		resp, err := in.CreateJobV2(ctx, &indexpb.CreateJobV2Request{
+			ClusterID: suite.cluster,
+			TaskID:    suite.taskID,
+			JobType:   indexpb.JobType_JobTypeAnalyzeJob,
+			Request: &indexpb.CreateJobV2Request_AnalyzeRequest{
+				AnalyzeRequest: req,
+			},
+		})
+		err = merr.CheckRPCCall(resp, err)
+		suite.NoError(err)
+	})
+
+	suite.Run("QueryJobsV2", func() {
+		req := &indexpb.QueryJobsV2Request{
+			ClusterID: suite.cluster,
+			TaskIDs:   []int64{suite.taskID},
+			JobType:   indexpb.JobType_JobTypeIndexJob,
+		}
+
+		resp, err := in.QueryJobsV2(ctx, req)
+		err = merr.CheckRPCCall(resp, err)
+		suite.NoError(err)
+	})
+
+	suite.Run("DropJobsV2", func() {
+		req := &indexpb.DropJobsV2Request{
+			ClusterID: suite.cluster,
+			TaskIDs:   []int64{suite.taskID},
+			JobType:   indexpb.JobType_JobTypeIndexJob,
+		}
+
+		resp, err := in.DropJobsV2(ctx, req)
+		err = merr.CheckRPCCall(resp, err)
+		suite.NoError(err)
+	})
+}
+
+func Test_IndexNodeServiceSuite(t *testing.T) {
+	suite.Run(t, new(IndexNodeServiceSuite))
 }

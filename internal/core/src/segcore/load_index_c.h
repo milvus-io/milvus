@@ -76,6 +76,11 @@ void
 AppendStorageInfo(CLoadIndexInfo c_load_index_info,
                   const char* uri,
                   int64_t version);
+
+CStatus
+FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
+                    const uint8_t* serialized_load_index_info,
+                    const uint64_t len);
 #ifdef __cplusplus
 }
 #endif

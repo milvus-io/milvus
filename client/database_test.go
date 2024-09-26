@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"testing"
 
+	mock "github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	mock "github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
 )
 
 type DatabaseSuite struct {

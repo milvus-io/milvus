@@ -80,6 +80,13 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     VectorPtr
     ExecJsonContainsWithDiffType();
 
+    VectorPtr
+    EvalArrayContainsForIndexSegment();
+
+    template <typename ExprValueType>
+    VectorPtr
+    ExecArrayContainsForIndexSegmentImpl();
+
  private:
     std::shared_ptr<const milvus::expr::JsonContainsExpr> expr_;
 };

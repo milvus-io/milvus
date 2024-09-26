@@ -27,7 +27,7 @@
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #ifdef AZURE_BUILD_DIR
-#include "storage/AzureChunkManager.h"
+#include "storage/azure/AzureChunkManager.h"
 #endif
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -36,7 +36,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/MinioChunkManager.h"
 #ifdef USE_OPENDAL
-#include "storage/OpenDALChunkManager.h"
+#include "storage/opendal/OpenDALChunkManager.h"
 #endif
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -439,11 +439,16 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
 }
 
 std::string
+GenIndexPathIdentifier(int64_t build_id, int64_t index_version) {
+    return std::to_string(build_id) + "/" + std::to_string(index_version) + "/";
+}
+
+std::string
 GenIndexPathPrefix(ChunkManagerPtr cm,
                    int64_t build_id,
                    int64_t index_version) {
     return cm->GetRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
-           std::to_string(build_id) + "/" + std::to_string(index_version) + "/";
+           GenIndexPathIdentifier(build_id, index_version);
 }
 
 std::string
@@ -819,9 +824,9 @@ CreateFieldData(const DataType& type, int64_t dim, int64_t total_num_rows) {
             return std::make_shared<FieldData<SparseFloatVector>>(
                 type, total_num_rows);
         default:
-            throw SegcoreError(DataTypeInvalid,
-                               "CreateFieldData not support data type " +
-                                   GetDataTypeName(type));
+            PanicInfo(DataTypeInvalid,
+                      "CreateFieldData not support data type " +
+                          GetDataTypeName(type));
     }
 }
 

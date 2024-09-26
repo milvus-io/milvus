@@ -38,7 +38,13 @@ const char INDEX_BUILD_ID_KEY[] = "indexBuildID";
 
 const char INDEX_ROOT_PATH[] = "index_files";
 const char RAWDATA_ROOT_PATH[] = "raw_datas";
+const char ANALYZE_ROOT_PATH[] = "analyze_stats";
+const char CENTROIDS_NAME[] = "centroids";
+const char OFFSET_MAPPING_NAME[] = "offset_mapping";
+const char NUM_CLUSTERS[] = "num_clusters";
+const char KMEANS_CLUSTER[] = "KMEANS";
 const char VEC_OPT_FIELDS[] = "opt_fields";
+const char PAGE_RETAIN_ORDER[] = "page_retain_order";
 
 const char DEFAULT_PLANNODE_ID[] = "0";
 const char DEAFULT_QUERY_ID[] = "0";
@@ -61,3 +67,5 @@ constexpr const char* RANGE_FILTER = knowhere::meta::RANGE_FILTER;
 const int64_t DEFAULT_MAX_OUTPUT_SIZE = 67108864;  // bytes, 64MB
 
 const int64_t DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS = 10000;
+
+const int64_t DEFAULT_BITMAP_INDEX_CARDINALITY_BOUND = 500;

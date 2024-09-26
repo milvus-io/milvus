@@ -23,6 +23,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -84,6 +85,7 @@ type SegmentEntry struct {
 	PartitionID   UniqueID
 	Version       int64
 	TargetVersion int64
+	Level         datapb.SegmentLevel
 }
 
 // NewDistribution creates a new distribution instance with all field initialized.
@@ -114,9 +116,7 @@ func (d *distribution) PinReadableSegments(partitions ...int64) (sealed []Snapsh
 	sealed, growing = current.Get(partitions...)
 	version = current.version
 	targetVersion := current.GetTargetVersion()
-	filterReadable := func(entry SegmentEntry, _ int) bool {
-		return entry.TargetVersion == targetVersion || entry.TargetVersion == initialTargetVersion
-	}
+	filterReadable := d.readableFilter(targetVersion)
 	sealed, growing = d.filterSegments(sealed, growing, filterReadable)
 	return
 }
@@ -157,9 +157,7 @@ func (d *distribution) PeekSegments(readable bool, partitions ...int64) (sealed 
 
 	if readable {
 		targetVersion := current.GetTargetVersion()
-		filterReadable := func(entry SegmentEntry, _ int) bool {
-			return entry.TargetVersion == targetVersion || entry.TargetVersion == initialTargetVersion
-		}
+		filterReadable := d.readableFilter(targetVersion)
 		sealed, growing = d.filterSegments(sealed, growing, filterReadable)
 		return
 	}
@@ -380,6 +378,13 @@ func (d *distribution) genSnapshot() chan struct{} {
 	last.Expire(d.getCleanup(last.version))
 
 	return last.cleared
+}
+
+func (d *distribution) readableFilter(targetVersion int64) func(entry SegmentEntry, _ int) bool {
+	return func(entry SegmentEntry, _ int) bool {
+		// segment L0 is not readable for now
+		return entry.Level != datapb.SegmentLevel_L0 && (entry.TargetVersion == targetVersion || entry.TargetVersion == initialTargetVersion)
+	}
 }
 
 // getCleanup returns cleanup snapshots function.

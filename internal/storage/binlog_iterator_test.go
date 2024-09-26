@@ -188,7 +188,7 @@ func assertTestData(t *testing.T, i int, value *Value) {
 
 	f106 := typeutil.CreateSparseFloatRow([]uint32{0, uint32(18 * i), uint32(284 * i)}, []float32{1.1, 0.3, 2.4})
 
-	assert.EqualValues(t, &Value{
+	assert.EqualExportedValues(t, Value{
 		int64(i),
 		&Int64PrimaryKey{Value: int64(i)},
 		int64(i),
@@ -214,7 +214,7 @@ func assertTestData(t *testing.T, i int, value *Value) {
 			105: f104,
 			106: f106,
 		},
-	}, value)
+	}, *value)
 }
 
 func TestInsertlogIterator(t *testing.T) {

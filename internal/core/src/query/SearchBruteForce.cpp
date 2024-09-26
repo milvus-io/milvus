@@ -52,9 +52,9 @@ PrepareBFSearchParams(const SearchInfo& search_info) {
     if (search_info.trace_ctx_.traceID != nullptr &&
         search_info.trace_ctx_.spanID != nullptr) {
         search_cfg[knowhere::meta::TRACE_ID] =
-            tracer::GetTraceIDAsVector(&search_info.trace_ctx_);
+            tracer::GetTraceIDAsHexStr(&search_info.trace_ctx_);
         search_cfg[knowhere::meta::SPAN_ID] =
-            tracer::GetSpanIDAsVector(&search_info.trace_ctx_);
+            tracer::GetSpanIDAsHexStr(&search_info.trace_ctx_);
         search_cfg[knowhere::meta::TRACE_FLAGS] =
             search_info.trace_ctx_.traceFlags;
     }
@@ -84,6 +84,10 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
         query_dataset->SetIsSparse(true);
     }
     auto search_cfg = PrepareBFSearchParams(search_info);
+    // `range_search_k` is only used as one of the conditions for iterator early termination.
+    // not gurantee to return exactly `range_search_k` results, which may be more or less.
+    // set it to -1 will return all results in the range.
+    search_cfg[knowhere::meta::RANGE_SEARCH_K] = topk;
 
     sub_result.mutable_seg_offsets().resize(nq * topk);
     sub_result.mutable_distances().resize(nq * topk);
@@ -180,9 +184,8 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
         }
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_SearchWithBuf");
         if (stat != knowhere::Status::success) {
-            throw SegcoreError(
-                KnowhereError,
-                "Brute force search fail: " + KnowhereStatusString(stat));
+            PanicInfo(KnowhereError,
+                      "Brute force search fail: " + KnowhereStatusString(stat));
         }
     }
     sub_result.round_values();
@@ -206,8 +209,7 @@ BruteForceSearchIterators(const dataset::SearchDataset& dataset,
     }
     auto search_cfg = PrepareBFSearchParams(search_info);
 
-    knowhere::expected<
-        std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+    knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
         iterators_val;
     switch (data_type) {
         case DataType::VECTOR_FLOAT:

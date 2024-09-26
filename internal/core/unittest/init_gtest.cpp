@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include "folly/init/Init.h"
 #include "test_utils/Constants.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -19,10 +20,13 @@
 int
 main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
+    folly::Init follyInit(&argc, &argv, false);
+
     milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
         TestLocalPath);
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
         get_default_local_storage_config());
+    milvus::storage::MmapManager::GetInstance().Init(get_default_mmap_config());
 
     return RUN_ALL_TESTS();
 }

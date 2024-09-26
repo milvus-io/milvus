@@ -710,7 +710,7 @@ class TestTransferNode(TestcaseBase):
 
         # load with different replicas
         error = {ct.err_code: 999,
-                 ct.err_msg: 'failed to load collection, err=failed to spawn replica for collection[resource group num can only be 0, 1 or same as replica number]'}
+                 ct.err_msg: 'resource group num can only be 0, 1 or same as replica number'}
         collection_w.load(replica_number=replicas,
                           _resource_groups=[rgA_name, rgB_name],
                           check_task=CheckTasks.err_res, check_items=error)
@@ -877,7 +877,7 @@ class TestTransferNode(TestcaseBase):
 
         # load with different replicas
         error = {ct.err_code: 999,
-                 ct.err_msg: 'failed to load partitions, err=failed to spawn replica for collection[resource group num can only be 0, 1 or same as replica number]'}
+                 ct.err_msg: 'resource group num can only be 0, 1 or same as replica number'}
         partition_w.load(replica_number=replicas,
                          _resource_groups=[rgA_name, rgB_name],
                          check_task=CheckTasks.err_res, check_items=error)
@@ -1210,7 +1210,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         # load 3 replicas in rgA and rgB
         replica_number = 3
         error = {ct.err_code: 999,
-                 ct.err_msg: 'failed to load collection, err=failed to spawn replica for collection[resource group num can only be 0, 1 or same as replica number]'}
+                 ct.err_msg: 'resource group num can only be 0, 1 or same as replica number'}
         collection_w.load(replica_number=replica_number,
                           _resource_groups=[rgA_name, rgB_name],
                           check_task=CheckTasks.err_res,

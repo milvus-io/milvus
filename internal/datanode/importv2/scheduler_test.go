@@ -246,7 +246,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import() {
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
 	s.cm = cm
 
-	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[struct{}] {
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 		future := conc.Go(func() (struct{}, error) {
 			return struct{}{}, nil
 		})
@@ -265,7 +265,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import() {
 			},
 		},
 		Ts: 1000,
-		AutoIDRange: &datapb.AutoIDRange{
+		IDRange: &datapb.IDRange{
 			Begin: 0,
 			End:   int64(s.numRows),
 		},
@@ -307,7 +307,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import_Failed() {
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
 	s.cm = cm
 
-	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[struct{}] {
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 		future := conc.Go(func() (struct{}, error) {
 			return struct{}{}, errors.New("mock err")
 		})
@@ -326,7 +326,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import_Failed() {
 			},
 		},
 		Ts: 1000,
-		AutoIDRange: &datapb.AutoIDRange{
+		IDRange: &datapb.IDRange{
 			Begin: 0,
 			End:   int64(s.numRows),
 		},
@@ -379,12 +379,12 @@ func (s *SchedulerSuite) TestScheduler_ReadFileStat() {
 	}
 	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
 	s.manager.Add(preimportTask)
-	err = preimportTask.(*PreImportTask).readFileStat(s.reader, preimportTask, 0)
+	err = preimportTask.(*PreImportTask).readFileStat(s.reader, 0)
 	s.NoError(err)
 }
 
 func (s *SchedulerSuite) TestScheduler_ImportFile() {
-	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[struct{}] {
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 		future := conc.Go(func() (struct{}, error) {
 			return struct{}{}, nil
 		})
@@ -417,7 +417,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 			},
 		},
 		Ts: 1000,
-		AutoIDRange: &datapb.AutoIDRange{
+		IDRange: &datapb.IDRange{
 			Begin: 0,
 			End:   int64(s.numRows),
 		},
@@ -431,7 +431,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 	}
 	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(importTask)
-	err = importTask.(*ImportTask).importFile(s.reader, importTask)
+	err = importTask.(*ImportTask).importFile(s.reader)
 	s.NoError(err)
 }
 

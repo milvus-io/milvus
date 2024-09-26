@@ -19,23 +19,30 @@ package datacoord
 import (
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // SegmentsInfo wraps a map, which maintains ID to SegmentInfo relation
 type SegmentsInfo struct {
-	segments     map[UniqueID]*SegmentInfo
-	collSegments map[UniqueID]*CollectionSegments
-	compactionTo map[UniqueID]UniqueID // map the compact relation, value is the segment which `CompactFrom` contains key.
-	// A segment can be compacted to only one segment finally in meta.
+	segments         map[UniqueID]*SegmentInfo
+	secondaryIndexes segmentInfoIndexes
+	// map the compact relation, value is the segment which `CompactFrom` contains key.
+	// now segment could be compacted to multiple segments
+	compactionTo map[UniqueID][]UniqueID
+}
+
+type segmentInfoIndexes struct {
+	coll2Segments    map[UniqueID]map[UniqueID]*SegmentInfo
+	channel2Segments map[string]map[UniqueID]*SegmentInfo
 }
 
 // SegmentInfo wraps datapb.SegmentInfo and patches some extra info on it
@@ -47,6 +54,7 @@ type SegmentInfo struct {
 	isCompacting  bool
 	// a cache to avoid calculate twice
 	size            atomic.Int64
+	deltaRowcount   atomic.Int64
 	lastWrittenTime time.Time
 }
 
@@ -55,28 +63,33 @@ type SegmentInfo struct {
 // Note that the allocation information is not preserved,
 // the worst case scenario is to have a segment with twice size we expects
 func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
-	return &SegmentInfo{
-		SegmentInfo:   info,
-		currRows:      info.GetNumOfRows(),
-		allocations:   make([]*Allocation, 0, 16),
-		lastFlushTime: time.Now().Add(-1 * flushInterval),
-		// A growing segment from recovery can be also considered idle.
-		lastWrittenTime: getZeroTime(),
+	s := &SegmentInfo{
+		SegmentInfo: info,
+		currRows:    info.GetNumOfRows(),
 	}
+	// setup growing fields
+	if s.GetState() == commonpb.SegmentState_Growing {
+		s.allocations = make([]*Allocation, 0, 16)
+		s.lastFlushTime = time.Now().Add(-1 * paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second))
+		// A growing segment from recovery can be also considered idle.
+		s.lastWrittenTime = getZeroTime()
+	}
+	// mark as uninitialized
+	s.deltaRowcount.Store(-1)
+	return s
 }
 
 // NewSegmentsInfo creates a `SegmentsInfo` instance, which makes sure internal map is initialized
 // note that no mutex is wrapped so external concurrent control is needed
 func NewSegmentsInfo() *SegmentsInfo {
 	return &SegmentsInfo{
-		segments:     make(map[UniqueID]*SegmentInfo),
-		collSegments: make(map[UniqueID]*CollectionSegments),
-		compactionTo: make(map[UniqueID]UniqueID),
+		segments: make(map[UniqueID]*SegmentInfo),
+		secondaryIndexes: segmentInfoIndexes{
+			coll2Segments:    make(map[UniqueID]map[UniqueID]*SegmentInfo),
+			channel2Segments: make(map[string]map[UniqueID]*SegmentInfo),
+		},
+		compactionTo: make(map[UniqueID][]UniqueID),
 	}
-}
-
-type CollectionSegments struct {
-	segments map[int64]*SegmentInfo
 }
 
 // GetSegment returns SegmentInfo
@@ -96,26 +109,55 @@ func (s *SegmentsInfo) GetSegments() []*SegmentInfo {
 	return lo.Values(s.segments)
 }
 
+func (s *SegmentsInfo) getCandidates(criterion *segmentCriterion) map[UniqueID]*SegmentInfo {
+	if criterion.collectionID > 0 {
+		collSegments, ok := s.secondaryIndexes.coll2Segments[criterion.collectionID]
+		if !ok {
+			return nil
+		}
+
+		// both collection id and channel are filters of criterion
+		if criterion.channel != "" {
+			return lo.OmitBy(collSegments, func(k UniqueID, v *SegmentInfo) bool {
+				return v.InsertChannel != criterion.channel
+			})
+		}
+		return collSegments
+	}
+
+	if criterion.channel != "" {
+		channelSegments, ok := s.secondaryIndexes.channel2Segments[criterion.channel]
+		if !ok {
+			return nil
+		}
+		return channelSegments
+	}
+
+	return s.segments
+}
+
 func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*SegmentInfo {
 	criterion := &segmentCriterion{}
 	for _, filter := range filters {
 		filter.AddFilter(criterion)
 	}
-	var result []*SegmentInfo
-	var candidates []*SegmentInfo
+
 	// apply criterion
-	switch {
-	case criterion.collectionID > 0:
-		collSegments, ok := s.collSegments[criterion.collectionID]
-		if !ok {
-			return nil
-		}
-		candidates = lo.Values(collSegments.segments)
-	default:
-		candidates = lo.Values(s.segments)
-	}
+	candidates := s.getCandidates(criterion)
+	var result []*SegmentInfo
 	for _, segment := range candidates {
 		if criterion.Match(segment) {
+			result = append(result, segment)
+		}
+	}
+	return result
+}
+
+func (s *SegmentsInfo) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
+	channelSegments := s.secondaryIndexes.channel2Segments[channel]
+	var result []*SegmentInfo
+	for _, segment := range channelSegments {
+		if !segment.GetIsFake() {
 			result = append(result, segment)
 		}
 	}
@@ -126,15 +168,21 @@ func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*Segmen
 // Return (nil, false) if given segmentID can not found in the meta.
 // Return (nil, true) if given segmentID can be found not no compaction to.
 // Return (notnil, true) if given segmentID can be found and has compaction to.
-func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) (*SegmentInfo, bool) {
+func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) ([]*SegmentInfo, bool) {
 	if _, ok := s.segments[fromSegmentID]; !ok {
 		return nil, false
 	}
-	if toID, ok := s.compactionTo[fromSegmentID]; ok {
-		if to, ok := s.segments[toID]; ok {
-			return to, true
+	if compactTos, ok := s.compactionTo[fromSegmentID]; ok {
+		result := []*SegmentInfo{}
+		for _, compactTo := range compactTos {
+			to, ok := s.segments[compactTo]
+			if !ok {
+				log.Warn("compactionTo relation is broken", zap.Int64("from", fromSegmentID), zap.Int64("to", compactTo))
+				return nil, true
+			}
+			result = append(result, to)
 		}
-		log.Warn("unreachable code: compactionTo relation is broken", zap.Int64("from", fromSegmentID), zap.Int64("to", toID))
+		return result, true
 	}
 	return nil, true
 }
@@ -144,22 +192,22 @@ func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) (*SegmentInfo, bool)
 func (s *SegmentsInfo) DropSegment(segmentID UniqueID) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.deleteCompactTo(segment)
-		s.delCollection(segment)
+		s.removeSecondaryIndex(segment)
 		delete(s.segments, segmentID)
 	}
 }
 
 // SetSegment sets SegmentInfo with segmentID, perform overwrite if already exists
-// set the logPath of segement in meta empty, to save space
+// set the logPath of segment in meta empty, to save space
 // if segment has logPath, make it empty
 func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 	if segment, ok := s.segments[segmentID]; ok {
 		// Remove old segment compact to relation first.
 		s.deleteCompactTo(segment)
-		s.delCollection(segment)
+		s.removeSecondaryIndex(segment)
 	}
 	s.segments[segmentID] = segment
-	s.addCollection(segment)
+	s.addSecondaryIndex(segment)
 	s.addCompactTo(segment)
 }
 
@@ -260,6 +308,13 @@ func (s *SegmentInfo) IsStatsLogExists(logID int64) bool {
 	return false
 }
 
+// SetLevel sets level for segment
+func (s *SegmentsInfo) SetLevel(segmentID UniqueID, level datapb.SegmentLevel) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = segment.ShadowClone(SetLevel(level))
+	}
+}
+
 // Clone deep clone the segment info and return a new instance
 func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
@@ -289,6 +344,7 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 		lastWrittenTime: s.lastWrittenTime,
 	}
 	cloned.size.Store(s.size.Load())
+	cloned.deltaRowcount.Store(s.deltaRowcount.Load())
 
 	for _, opt := range opts {
 		opt(cloned)
@@ -296,34 +352,42 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 	return cloned
 }
 
-func (s *SegmentsInfo) addCollection(segment *SegmentInfo) {
+func (s *SegmentsInfo) addSecondaryIndex(segment *SegmentInfo) {
 	collID := segment.GetCollectionID()
-	collSegment, ok := s.collSegments[collID]
-	if !ok {
-		collSegment = &CollectionSegments{
-			segments: make(map[UniqueID]*SegmentInfo),
-		}
-		s.collSegments[collID] = collSegment
+	channel := segment.GetInsertChannel()
+	if _, ok := s.secondaryIndexes.coll2Segments[collID]; !ok {
+		s.secondaryIndexes.coll2Segments[collID] = make(map[UniqueID]*SegmentInfo)
 	}
-	collSegment.segments[segment.GetID()] = segment
+	s.secondaryIndexes.coll2Segments[collID][segment.ID] = segment
+
+	if _, ok := s.secondaryIndexes.channel2Segments[channel]; !ok {
+		s.secondaryIndexes.channel2Segments[channel] = make(map[UniqueID]*SegmentInfo)
+	}
+	s.secondaryIndexes.channel2Segments[channel][segment.ID] = segment
 }
 
-func (s *SegmentsInfo) delCollection(segment *SegmentInfo) {
+func (s *SegmentsInfo) removeSecondaryIndex(segment *SegmentInfo) {
 	collID := segment.GetCollectionID()
-	collSegment, ok := s.collSegments[collID]
-	if !ok {
-		return
+	channel := segment.GetInsertChannel()
+	if segments, ok := s.secondaryIndexes.coll2Segments[collID]; ok {
+		delete(segments, segment.ID)
+		if len(segments) == 0 {
+			delete(s.secondaryIndexes.coll2Segments, collID)
+		}
 	}
-	delete(collSegment.segments, segment.GetID())
-	if len(collSegment.segments) == 0 {
-		delete(s.collSegments, segment.GetCollectionID())
+
+	if segments, ok := s.secondaryIndexes.channel2Segments[channel]; ok {
+		delete(segments, segment.ID)
+		if len(segments) == 0 {
+			delete(s.secondaryIndexes.channel2Segments, channel)
+		}
 	}
 }
 
 // addCompactTo adds the compact relation to the segment
 func (s *SegmentsInfo) addCompactTo(segment *SegmentInfo) {
 	for _, from := range segment.GetCompactionFrom() {
-		s.compactionTo[from] = segment.GetID()
+		s.compactionTo[from] = append(s.compactionTo[from], segment.GetID())
 	}
 }
 
@@ -409,8 +473,16 @@ func SetIsCompacting(isCompacting bool) SegmentInfoOption {
 	}
 }
 
+// SetLevel is the option to set level for segment info
+func SetLevel(level datapb.SegmentLevel) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.Level = level
+	}
+}
+
+// getSegmentSize use cached value when segment is immutable
 func (s *SegmentInfo) getSegmentSize() int64 {
-	if s.size.Load() <= 0 {
+	if s.size.Load() <= 0 || s.GetState() != commonpb.SegmentState_Flushed {
 		var size int64
 		for _, binlogs := range s.GetBinlogs() {
 			for _, l := range binlogs.GetBinlogs() {
@@ -434,6 +506,21 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 		}
 	}
 	return s.size.Load()
+}
+
+// getDeltaCount use cached value when segment is immutable
+func (s *SegmentInfo) getDeltaCount() int64 {
+	if s.deltaRowcount.Load() < 0 || s.State != commonpb.SegmentState_Flushed {
+		var rc int64
+		for _, deltaLogs := range s.GetDeltalogs() {
+			for _, l := range deltaLogs.GetBinlogs() {
+				rc += l.GetEntriesNum()
+			}
+		}
+		s.deltaRowcount.Store(rc)
+	}
+	r := s.deltaRowcount.Load()
+	return r
 }
 
 // SegmentInfoSelector is the function type to select SegmentInfo from meta

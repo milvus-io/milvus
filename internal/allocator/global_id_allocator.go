@@ -17,8 +17,8 @@
 package allocator
 
 import (
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/tso"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 

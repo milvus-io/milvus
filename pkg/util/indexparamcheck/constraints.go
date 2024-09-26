@@ -64,7 +64,7 @@ var (
 )
 
 const (
-	FloatVectorDefaultMetricType       = metric.IP
+	FloatVectorDefaultMetricType       = metric.COSINE
 	SparseFloatVectorDefaultMetricType = metric.IP
-	BinaryVectorDefaultMetricType      = metric.JACCARD
+	BinaryVectorDefaultMetricType      = metric.HAMMING
 )

@@ -37,7 +37,7 @@ const (
 type channelCPUpdateTask struct {
 	pos      *msgpb.MsgPosition
 	callback func()
-	flush    bool
+	flush    bool // indicates whether the task originates from flush
 }
 
 type channelCheckpointUpdater struct {
@@ -74,6 +74,7 @@ func (ccu *channelCheckpointUpdater) start() {
 			ccu.mu.Lock()
 			for _, task := range ccu.tasks {
 				if task.flush {
+					// reset flush flag to make next flush valid
 					task.flush = false
 					tasks = append(tasks, task)
 				}
@@ -142,6 +143,7 @@ func (ccu *channelCheckpointUpdater) updateCheckpoints(tasks []*channelCPUpdateT
 	defer ccu.mu.Unlock()
 	finished.Range(func(_ string, task *channelCPUpdateTask) bool {
 		channel := task.pos.GetChannelName()
+		// delete the task if no new task has been added
 		if ccu.tasks[channel].pos.GetTimestamp() <= task.pos.GetTimestamp() {
 			delete(ccu.tasks, channel)
 		}
@@ -163,6 +165,7 @@ func (ccu *channelCheckpointUpdater) AddTask(channelPos *msgpb.MsgPosition, flus
 		return
 	}
 	if flush {
+		// trigger update to accelerate flush
 		defer ccu.trigger()
 	}
 	channel := channelPos.GetChannelName()
@@ -184,6 +187,8 @@ func (ccu *channelCheckpointUpdater) AddTask(channelPos *msgpb.MsgPosition, flus
 		}
 		return b
 	}
+	// 1. `task.pos.GetTimestamp() < channelPos.GetTimestamp()`: position updated, update task position
+	// 2. `flush && !task.flush`: position not being updated, but flush is triggered, update task flush flag
 	if task.pos.GetTimestamp() < channelPos.GetTimestamp() || (flush && !task.flush) {
 		ccu.mu.Lock()
 		defer ccu.mu.Unlock()

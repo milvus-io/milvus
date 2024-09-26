@@ -1,0 +1,55 @@
+syntax = "proto3";
+package milvus.proto.clustering;
+
+option go_package = "github.com/milvus-io/milvus/internal/proto/clusteringpb";
+import "schema.proto";
+
+// Synchronously modify StorageConfig in index_coord.proto/index_cgo_msg.proto file
+message StorageConfig {
+  string address = 1;
+  string access_keyID = 2;
+  string secret_access_key = 3;
+  bool useSSL = 4;
+  string bucket_name = 5;
+  string root_path = 6;
+  bool useIAM = 7;
+  string IAMEndpoint = 8;
+  string storage_type = 9;
+  bool use_virtual_host = 10;
+  string region = 11;
+  string cloud_provider = 12;
+  int64 request_timeout_ms = 13;
+  string sslCACert = 14;
+}
+
+message InsertFiles {
+  repeated string insert_files = 1;
+}
+
+message AnalyzeInfo {
+  string clusterID = 1;
+  int64 buildID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  int64 segmentID = 5;
+  int64 version = 6;
+  int64 dim = 7;
+  int64 num_clusters = 8;
+  int64 train_size = 9;
+  double min_cluster_ratio = 10;  // min_cluster_size / avg_cluster_size < min_cluster_ratio, is skew
+  double max_cluster_ratio = 11;  // max_cluster_size / avg_cluster_size > max_cluster_ratio, is skew
+  int64 max_cluster_size = 12;
+  map<int64, InsertFiles> insert_files = 13;
+  map<int64, int64> num_rows = 14;
+  schema.FieldSchema field_schema = 15;
+  StorageConfig storage_config = 16;
+}
+
+message ClusteringCentroidsStats {
+  repeated schema.VectorField centroids = 1;
+}
+
+message ClusteringCentroidIdMappingStats {
+  repeated uint32 centroid_id_mapping = 1;
+  repeated int64 num_in_centroid = 2;
+}

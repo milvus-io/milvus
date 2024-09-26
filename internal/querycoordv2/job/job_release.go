@@ -76,6 +76,8 @@ func (job *ReleaseCollectionJob) Execute() error {
 		return nil
 	}
 
+	job.meta.CollectionManager.SetReleasing(req.GetCollectionID())
+
 	loadedPartitions := job.meta.CollectionManager.GetPartitionsByCollection(req.GetCollectionID())
 	toRelease := lo.Map(loadedPartitions, func(partition *meta.Partition, _ int) int64 {
 		return partition.GetPartitionID()
@@ -95,7 +97,6 @@ func (job *ReleaseCollectionJob) Execute() error {
 		log.Warn(msg, zap.Error(err))
 	}
 
-	job.targetMgr.RemoveCollection(req.GetCollectionID())
 	job.targetObserver.ReleaseCollection(req.GetCollectionID())
 	waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
 	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
@@ -178,7 +179,6 @@ func (job *ReleasePartitionJob) Execute() error {
 		if err != nil {
 			log.Warn("failed to remove replicas", zap.Error(err))
 		}
-		job.targetMgr.RemoveCollection(req.GetCollectionID())
 		job.targetObserver.ReleaseCollection(req.GetCollectionID())
 		metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
@@ -189,7 +189,7 @@ func (job *ReleasePartitionJob) Execute() error {
 			log.Warn(msg, zap.Error(err))
 			return errors.Wrap(err, msg)
 		}
-		job.targetMgr.RemovePartition(req.GetCollectionID(), toRelease...)
+		job.targetObserver.ReleasePartition(req.GetCollectionID(), toRelease...)
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID(), toRelease...)
 	}
 	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))

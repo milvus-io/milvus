@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -26,23 +26,69 @@ type rankParams struct {
 	roundDecimal int64
 }
 
+func (r *rankParams) GetLimit() int64 {
+	if r != nil {
+		return r.limit
+	}
+	return 0
+}
+
+func (r *rankParams) GetOffset() int64 {
+	if r != nil {
+		return r.offset
+	}
+	return 0
+}
+
+func (r *rankParams) GetRoundDecimal() int64 {
+	if r != nil {
+		return r.roundDecimal
+	}
+	return 0
+}
+
+func (r *rankParams) String() string {
+	return fmt.Sprintf("limit: %d, offset: %d, roundDecimal: %d", r.GetLimit(), r.GetOffset(), r.GetRoundDecimal())
+}
+
 // parseSearchInfo returns QueryInfo and offset
-func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, ignoreOffset bool) (*planpb.QueryInfo, int64, error) {
-	// 1. parse offset and real topk
+func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams) (*planpb.QueryInfo, int64, error) {
+	var topK int64
+	isAdvanced := rankParams != nil
+	externalLimit := rankParams.GetLimit() + rankParams.GetOffset()
 	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, searchParamsPair)
 	if err != nil {
-		return nil, 0, errors.New(TopKKey + " not found in search_params")
+		if externalLimit <= 0 {
+			return nil, 0, fmt.Errorf("%s is required", TopKKey)
+		}
+		topK = externalLimit
+	} else {
+		topKInParam, err := strconv.ParseInt(topKStr, 0, 64)
+		if err != nil {
+			if externalLimit <= 0 {
+				return nil, 0, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
+			}
+			topK = externalLimit
+		} else {
+			topK = topKInParam
+		}
 	}
-	topK, err := strconv.ParseInt(topKStr, 0, 64)
-	if err != nil {
-		return nil, 0, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
-	}
-	if err := validateTopKLimit(topK); err != nil {
-		return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
+
+	isIterator, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
+
+	if err := validateLimit(topK); err != nil {
+		if isIterator == "True" {
+			// 1. if the request is from iterator, we set topK to QuotaLimit as the iterator can resolve too large topK problem
+			// 2. GetAsInt64 has cached inside, no need to worry about cpu cost for parsing here
+			topK = Params.QuotaConfig.TopKLimit.GetAsInt64()
+		} else {
+			return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
+		}
 	}
 
 	var offset int64
-	if !ignoreOffset {
+	// ignore offset if isAdvanced
+	if !isAdvanced {
 		offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OffsetKey, searchParamsPair)
 		if err == nil {
 			offset, err = strconv.ParseInt(offsetStr, 0, 64)
@@ -51,7 +97,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			}
 
 			if offset != 0 {
-				if err := validateTopKLimit(offset); err != nil {
+				if err := validateLimit(offset); err != nil {
 					return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
 				}
 			}
@@ -59,7 +105,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	}
 
 	queryTopK := topK + offset
-	if err := validateTopKLimit(queryTopK); err != nil {
+	if err := validateLimit(queryTopK); err != nil {
 		return nil, 0, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
 	}
 
@@ -109,8 +155,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		}
 	}
 
-	// 6. parse iterator tag, prevent trying to groupBy when doing iteration or doing range-search
-	isIterator, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
+	// 6. disable groupBy for iterator and range search
 	if isIterator == "True" && groupByFieldId > 0 {
 		return nil, 0, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do groupBy when doing iteration")

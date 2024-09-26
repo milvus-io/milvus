@@ -107,7 +107,7 @@ func HelloMilvus() {
 	if err != nil {
 		log.Fatal("failed to flush", err.Error())
 	}
-	log.Println("flush done, elasped", time.Since(start))
+	log.Println("flush done, elapsed", time.Since(start))
 
 	indexTask, err := c.CreateIndex(ctx, milvusclient.NewCreateIndexOption(collectionName, "vector", index.NewHNSWIndex(entity.L2, 16, 100)))
 	if err != nil {

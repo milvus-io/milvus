@@ -21,10 +21,9 @@ import (
 	"testing"
 
 	"github.com/samber/lo"
-	mock "github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -35,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -78,6 +78,9 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 	suite.balancer = NewRowCountBasedBalancer(suite.mockScheduler, nodeManager, distManager, testMeta, testTarget)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
+
+	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 }
 
 func (suite *RowCountBasedBalancerTestSuite) TearDownTest() {
@@ -139,61 +142,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestAssignSegment() {
 			}
 			plans := balancer.AssignSegment(0, c.assignments, c.nodes, false)
 			assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, plans)
-		})
-	}
-}
-
-func (suite *RowCountBasedBalancerTestSuite) TestSuspendNode() {
-	cases := []struct {
-		name          string
-		distributions map[int64][]*meta.Segment
-		assignments   []*meta.Segment
-		nodes         []int64
-		segmentCnts   []int
-		states        []session.State
-		expectPlans   []SegmentAssignPlan
-	}{
-		{
-			name: "test suspend node",
-			distributions: map[int64][]*meta.Segment{
-				2: {{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 20}, Node: 2}},
-				3: {{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 30}, Node: 3}},
-			},
-			assignments: []*meta.Segment{
-				{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: 5}},
-				{SegmentInfo: &datapb.SegmentInfo{ID: 4, NumOfRows: 10}},
-				{SegmentInfo: &datapb.SegmentInfo{ID: 5, NumOfRows: 15}},
-			},
-			nodes:       []int64{1, 2, 3, 4},
-			states:      []session.State{session.NodeStateSuspend, session.NodeStateSuspend, session.NodeStateSuspend, session.NodeStateSuspend},
-			segmentCnts: []int{0, 1, 1, 0},
-			expectPlans: []SegmentAssignPlan{},
-		},
-	}
-
-	for _, c := range cases {
-		suite.Run(c.name, func() {
-			// I do not find a better way to do the setup and teardown work for subtests yet.
-			// If you do, please replace with it.
-			suite.SetupSuite()
-			defer suite.TearDownTest()
-			balancer := suite.balancer
-			for node, s := range c.distributions {
-				balancer.dist.SegmentDistManager.Update(node, s...)
-			}
-			for i := range c.nodes {
-				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
-					NodeID:   c.nodes[i],
-					Address:  "localhost",
-					Hostname: "localhost",
-				})
-				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
-				nodeInfo.SetState(c.states[i])
-				suite.balancer.nodeManager.Add(nodeInfo)
-			}
-			plans := balancer.AssignSegment(0, c.assignments, c.nodes, false)
-			// all node has been suspend, so no node to assign segment
-			suite.ElementsMatch(c.expectPlans, plans)
 		})
 	}
 }
@@ -461,7 +409,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
-			suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0).Maybe()
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
@@ -675,7 +622,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 			suite.broker.ExpectedCalls = nil
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, c.segmentInNext, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
-			suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0).Maybe()
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
@@ -780,7 +726,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 		},
 	}
 
-	suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0).Maybe()
 	for _, c := range cases {
 		suite.Run(c.name, func() {
 			suite.SetupSuite()
@@ -1052,7 +997,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
-			suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0).Maybe()
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}

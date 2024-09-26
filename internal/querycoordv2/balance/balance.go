@@ -26,18 +26,22 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type SegmentAssignPlan struct {
-	Segment *meta.Segment
-	Replica *meta.Replica
-	From    int64 // -1 if empty
-	To      int64
+	Segment      *meta.Segment
+	Replica      *meta.Replica
+	From         int64 // -1 if empty
+	To           int64
+	FromScore    int64
+	ToScore      int64
+	SegmentScore int64
 }
 
 func (segPlan *SegmentAssignPlan) ToString() string {
-	return fmt.Sprintf("SegmentPlan:[collectionID: %d, replicaID: %d, segmentID: %d, from: %d, to: %d]\n",
-		segPlan.Segment.CollectionID, segPlan.Replica.GetID(), segPlan.Segment.ID, segPlan.From, segPlan.To)
+	return fmt.Sprintf("SegmentPlan:[collectionID: %d, replicaID: %d, segmentID: %d, from: %d, to: %d, fromScore: %d, toScore: %d, segmentScore: %d]\n",
+		segPlan.Segment.CollectionID, segPlan.Replica.GetID(), segPlan.Segment.ID, segPlan.From, segPlan.To, segPlan.FromScore, segPlan.ToScore, segPlan.SegmentScore)
 }
 
 type ChannelAssignPlan struct {
@@ -79,9 +83,11 @@ func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.
 	sort.Slice(nodesInfo, func(i, j int) bool {
 		cnt1, cnt2 := nodesInfo[i].SegmentCnt(), nodesInfo[j].SegmentCnt()
 		id1, id2 := nodesInfo[i].ID(), nodesInfo[j].ID()
-		delta1, delta2 := b.scheduler.GetNodeSegmentDelta(id1), b.scheduler.GetNodeSegmentDelta(id2)
+		delta1, delta2 := b.scheduler.GetSegmentTaskDelta(id1, -1), b.scheduler.GetSegmentTaskDelta(id2, -1)
 		return cnt1+delta1 < cnt2+delta2
 	})
+
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
 	ret := make([]SegmentAssignPlan, 0, len(segments))
 	for i, s := range segments {
 		plan := SegmentAssignPlan{
@@ -90,6 +96,9 @@ func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.
 			To:      nodesInfo[i%len(nodesInfo)].ID(),
 		}
 		ret = append(ret, plan)
+		if len(ret) > balanceBatchSize {
+			break
+		}
 	}
 	return ret
 }
@@ -112,7 +121,7 @@ func (b *RoundRobinBalancer) AssignChannel(channels []*meta.DmChannel, nodes []i
 	sort.Slice(nodesInfo, func(i, j int) bool {
 		cnt1, cnt2 := nodesInfo[i].ChannelCnt(), nodesInfo[j].ChannelCnt()
 		id1, id2 := nodesInfo[i].ID(), nodesInfo[j].ID()
-		delta1, delta2 := b.scheduler.GetNodeChannelDelta(id1), b.scheduler.GetNodeChannelDelta(id2)
+		delta1, delta2 := b.scheduler.GetChannelTaskDelta(id1, -1), b.scheduler.GetChannelTaskDelta(id2, -1)
 		return cnt1+delta1 < cnt2+delta2
 	})
 	ret := make([]ChannelAssignPlan, 0, len(channels))

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
-	"sort"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -42,8 +41,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -303,8 +302,9 @@ func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *con
 			retIdx += 1
 			tmpRetIdx := retIdx
 			deleteDataId := didx
+			partitionID := data.PartitionID
 			future := pool.Submit(func() (any, error) {
-				ret := sd.pkOracle.BatchGet(pks[startIdx:endIdx], pkoracle.WithPartitionID(data.PartitionID))
+				ret := sd.pkOracle.BatchGet(pks[startIdx:endIdx], pkoracle.WithPartitionID(partitionID))
 				retMap.Insert(tmpRetIdx, &BatchApplyRet{
 					DeleteDataIdx: deleteDataId,
 					StartIdx:      startIdx,
@@ -524,6 +524,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			PartitionID: info.GetPartitionID(),
 			NodeID:      req.GetDstNodeID(),
 			Version:     req.GetVersion(),
+			Level:       info.GetLevel(),
 		}
 	})
 	if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
@@ -540,7 +541,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		}
 
 		log.Debug("load delete...")
-		err = sd.loadStreamDelete(ctx, candidates, infos, req.GetDeltaPositions(), targetNodeID, worker, entries)
+		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker)
 		if err != nil {
 			log.Warn("load stream delete failed", zap.Error(err))
 			return err
@@ -554,9 +555,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	lo.ForEach(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) {
 		partStatsToReload = append(partStatsToReload, info.PartitionID)
 	})
-	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
-		sd.maybeReloadPartitionStats(ctx, partStatsToReload...)
-	}
 
 	return nil
 }
@@ -593,10 +591,6 @@ func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkorac
 		}
 	}
 
-	sort.Slice(pks, func(i, j int) bool {
-		return tss[i] < tss[j]
-	})
-
 	return pks, tss
 }
 
@@ -621,16 +615,16 @@ func (sd *shardDelegator) RefreshLevel0DeletionStats() {
 func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	candidates []*pkoracle.BloomFilterSet,
 	infos []*querypb.SegmentLoadInfo,
-	deltaPositions []*msgpb.MsgPosition,
+	req *querypb.LoadSegmentsRequest,
 	targetNodeID int64,
 	worker cluster.Worker,
-	entries []SegmentEntry,
 ) error {
 	log := sd.getLogger(ctx)
 
 	idCandidates := lo.SliceToMap(candidates, func(candidate *pkoracle.BloomFilterSet) (int64, *pkoracle.BloomFilterSet) {
 		return candidate.ID(), candidate
 	})
+	deltaPositions := req.GetDeltaPositions()
 
 	sd.deleteMut.RLock()
 	defer sd.deleteMut.RUnlock()
@@ -651,29 +645,23 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			position = deltaPositions[0]
 		}
 
-		deletedPks, deletedTss := sd.GetLevel0Deletions(candidate.Partition(), candidate)
-		deleteData := &storage.DeleteData{}
-		deleteData.AppendBatch(deletedPks, deletedTss)
-		if deleteData.RowCount > 0 {
-			log.Info("forward L0 delete to worker...",
-				zap.Int64("deleteRowNum", deleteData.RowCount),
-			)
-			err := worker.Delete(ctx, &querypb.DeleteRequest{
-				Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(targetNodeID)),
-				CollectionId: info.GetCollectionID(),
-				PartitionId:  info.GetPartitionID(),
-				SegmentId:    info.GetSegmentID(),
-				PrimaryKeys:  storage.ParsePrimaryKeys2IDs(deleteData.Pks),
-				Timestamps:   deleteData.Tss,
-				Scope:        querypb.DataScope_Historical, // only sealed segment need to loadStreamDelete
-			})
-			if err != nil {
-				log.Warn("failed to apply delete when LoadSegment", zap.Error(err))
-				return err
-			}
+		// after L0 segment feature
+		// growing segemnts should have load stream delete as well
+		deleteScope := querypb.DataScope_All
+		switch candidate.Type() {
+		case commonpb.SegmentState_Sealed:
+			deleteScope = querypb.DataScope_Historical
+		case commonpb.SegmentState_Growing:
+			deleteScope = querypb.DataScope_Streaming
 		}
 
-		deleteData = &storage.DeleteData{}
+		// forward l0 deletion
+		err := sd.forwardL0Deletion(ctx, info, req, candidate, targetNodeID, worker)
+		if err != nil {
+			return err
+		}
+
+		deleteData := &storage.DeleteData{}
 		// start position is dml position for segment
 		// if this position is before deleteBuffer's safe ts, it means some delete shall be read from msgstream
 		if position.GetTimestamp() < sd.deleteBuffer.SafeTs() {
@@ -723,6 +711,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 				SegmentId:    info.GetSegmentID(),
 				PrimaryKeys:  storage.ParsePrimaryKeys2IDs(deleteData.Pks),
 				Timestamps:   deleteData.Tss,
+				Scope:        deleteScope,
 			})
 			if err != nil {
 				log.Warn("failed to apply delete when LoadSegment", zap.Error(err))
@@ -762,7 +751,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 	// Random the subname in case we trying to load same delta at the same time
 	subName := fmt.Sprintf("querynode-delta-loader-%d-%d-%d", paramtable.GetNodeID(), sd.collectionID, rand.Int())
 	log.Info("from dml check point load delete", zap.Any("position", position), zap.String("vChannel", vchannelName), zap.String("subName", subName), zap.Time("positionTs", ts))
-	err = stream.AsConsumer(context.TODO(), []string{pChannelName}, subName, mqwrapper.SubscriptionPositionUnknown)
+	err = stream.AsConsumer(context.TODO(), []string{pChannelName}, subName, mqcommon.SubscriptionPositionUnknown)
 	if err != nil {
 		return nil, err
 	}
@@ -942,9 +931,6 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 			partitionsToReload = append(partitionsToReload, segment.Partition())
 		}
 	})
-	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
-		sd.maybeReloadPartitionStats(ctx, partitionsToReload...)
-	}
 	return nil
 }
 

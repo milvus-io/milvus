@@ -25,7 +25,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -64,6 +63,7 @@ func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*me
 		return segments[i].GetNumOfRows() > segments[j].GetNumOfRows()
 	})
 
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
 	plans := make([]SegmentAssignPlan, 0, len(segments))
 	for _, s := range segments {
 		// pick the node with the least row count and allocate to it.
@@ -74,6 +74,9 @@ func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*me
 			Segment: s,
 		}
 		plans = append(plans, plan)
+		if len(plans) > balanceBatchSize {
+			break
+		}
 		// change node's priority and push back
 		p := ni.getPriority()
 		ni.setPriority(p + int(s.GetNumOfRows()))
@@ -140,6 +143,9 @@ func (b *RowCountBasedBalancer) convertToNodeItemsBySegment(nodeIDs []int64) []*
 			rowcnt += int(view.NumOfGrowingRows)
 		}
 
+		// calculate executing task cost in scheduler
+		rowcnt += b.scheduler.GetSegmentTaskDelta(node, -1)
+
 		// more row count, less priority
 		nodeItem := newNodeItem(rowcnt, node)
 		ret = append(ret, &nodeItem)
@@ -152,8 +158,11 @@ func (b *RowCountBasedBalancer) convertToNodeItemsByChannel(nodeIDs []int64) []*
 	for _, node := range nodeIDs {
 		channels := b.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(node))
 
+		channelCount := len(channels)
+		// calculate executing task cost in scheduler
+		channelCount += b.scheduler.GetChannelTaskDelta(node, -1)
 		// more channel num, less priority
-		nodeItem := newNodeItem(len(channels), node)
+		nodeItem := newNodeItem(channelCount, node)
 		ret = append(ret, &nodeItem)
 	}
 	return ret
@@ -210,9 +219,7 @@ func (b *RowCountBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, rw
 	for _, nodeID := range roNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(nodeID))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
-				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&
-				segment.GetLevel() != datapb.SegmentLevel_L0
+			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
 		})
 		plans := b.AssignSegment(replica.GetCollectionID(), segments, rwNodes, false)
 		for i := range plans {
@@ -233,9 +240,7 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, rwNodes []
 	for _, node := range rwNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
-				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&
-				segment.GetLevel() != datapb.SegmentLevel_L0
+			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
 		})
 		rowCount := 0
 		for _, s := range segments {

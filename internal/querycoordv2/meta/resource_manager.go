@@ -21,9 +21,9 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -347,6 +347,22 @@ func (rm *ResourceManager) GetNodes(rgName string) ([]int64, error) {
 		return nil, merr.WrapErrResourceGroupNotFound(rgName)
 	}
 	return rm.groups[rgName].GetNodes(), nil
+}
+
+// GetResourceGroupByNodeID return whether resource group's node match required node count
+func (rm *ResourceManager) VerifyNodeCount(requiredNodeCount map[string]int) error {
+	rm.rwmutex.RLock()
+	defer rm.rwmutex.RUnlock()
+	for rgName, nodeCount := range requiredNodeCount {
+		if rm.groups[rgName] == nil {
+			return merr.WrapErrResourceGroupNotFound(rgName)
+		}
+		if rm.groups[rgName].NodeNum() != nodeCount {
+			return ErrNodeNotEnough
+		}
+	}
+
+	return nil
 }
 
 // GetOutgoingNodeNumByReplica return outgoing node num on each rg from this replica.
@@ -820,12 +836,11 @@ func (rm *ResourceManager) unassignNode(node int64) (string, error) {
 		mrg.UnassignNode(node)
 		rg := mrg.ToResourceGroup()
 		if err := rm.catalog.SaveResourceGroup(rg.GetMeta()); err != nil {
-			log.Warn("unassign node from resource group",
+			log.Fatal("unassign node from resource group",
 				zap.String("rgName", rg.GetName()),
 				zap.Int64("node", node),
 				zap.Error(err),
 			)
-			return "", merr.WrapErrResourceGroupServiceAvailable()
 		}
 
 		// Commit updates to memory.

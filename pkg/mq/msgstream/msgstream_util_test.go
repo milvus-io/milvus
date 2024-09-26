@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 )
 
 func TestPulsarMsgUtil(t *testing.T) {
@@ -71,7 +71,7 @@ func TestGetLatestMsgID(t *testing.T) {
 	}
 
 	{
-		mockMsgID := mqwrapper.NewMockMessageID(t)
+		mockMsgID := common.NewMockMessageID(t)
 		mockMsgID.EXPECT().Serialize().Return([]byte("mock")).Once()
 		stream.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 		stream.EXPECT().GetLatestMsgID(mock.Anything).Return(mockMsgID, nil).Once()

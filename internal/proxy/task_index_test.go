@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -179,6 +178,18 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 
 	t.Run("coll has been loaded", func(t *testing.T) {
 		qc := getMockQueryCoord()
+		qc.ExpectedCalls = nil
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: merr.Success(),
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+				},
+			},
+		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:        merr.Success(),
 			CollectionIDs: []int64{collectionID},
@@ -191,6 +202,22 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 
 	t.Run("show collection error", func(t *testing.T) {
 		qc := getMockQueryCoord()
+		qc.ExpectedCalls = nil
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: merr.Success(),
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+				},
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status:        merr.Success(),
+			CollectionIDs: []int64{collectionID},
+		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
 		dit.queryCoord = qc
 
@@ -200,6 +227,22 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 
 	t.Run("show collection fail", func(t *testing.T) {
 		qc := getMockQueryCoord()
+		qc.ExpectedCalls = nil
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: merr.Success(),
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+				},
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status:        merr.Success(),
+			CollectionIDs: []int64{collectionID},
+		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -227,6 +270,7 @@ func getMockQueryCoord() *mocks.MockQueryCoordClient {
 			},
 		},
 	}, nil)
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	return qc
 }
 
@@ -952,6 +996,38 @@ func Test_parseIndexParams(t *testing.T) {
 		err := cit.parseIndexParams()
 		assert.Error(t, err)
 	})
+
+	t.Run("create auto index and mmap enable", func(t *testing.T) {
+		paramtable.Init()
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+
+		cit := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: AutoIndexName,
+					},
+					{
+						Key:   common.MmapEnabledKey,
+						Value: "true",
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldVector",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_FloatVector,
+			},
+		}
+
+		err := cit.parseIndexParams()
+		assert.Error(t, err)
+	})
 }
 
 func Test_wrapUserIndexParams(t *testing.T) {
@@ -965,16 +1041,15 @@ func Test_wrapUserIndexParams(t *testing.T) {
 
 func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 	paramtable.Init()
-	mgr := config.NewManager()
-	mgr.SetConfig("autoIndex.enable", "true")
-	Params.AutoIndexConfig.Enable.Init(mgr)
+	Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+	Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+	Params.Save(Params.AutoIndexConfig.SparseIndexParams.Key, `{"drop_ratio_build": 0.2, "index_type": "SPARSE_INVERTED_INDEX"}`)
+	Params.Save(Params.AutoIndexConfig.BinaryIndexParams.Key, `{"nlist": 1024, "index_type": "BIN_IVF_FLAT"}`)
 
-	mgr.SetConfig("autoIndex.params.build", `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
-	mgr.SetConfig("autoIndex.params.sparse.build", `{"drop_ratio_build": 0.2, "index_type": "SPARSE_INVERTED_INDEX"}`)
-	mgr.SetConfig("autoIndex.params.binary.build", `{"nlist": 1024, "index_type": "BIN_IVF_FLAT"}`)
-	Params.AutoIndexConfig.IndexParams.Init(mgr)
-	Params.AutoIndexConfig.SparseIndexParams.Init(mgr)
-	Params.AutoIndexConfig.BinaryIndexParams.Init(mgr)
+	defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+	defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+	defer Params.Reset(Params.AutoIndexConfig.SparseIndexParams.Key)
+	defer Params.Reset(Params.AutoIndexConfig.BinaryIndexParams.Key)
 
 	floatFieldSchema := &schemapb.FieldSchema{
 		DataType: schemapb.DataType_FloatVector,
@@ -1006,6 +1081,7 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 		}
 		err := task.parseIndexParams()
 		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: "HNSW"},
 			{Key: common.MetricTypeKey, Value: "L2"},
@@ -1015,7 +1091,6 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 	})
 
 	t.Run("case 2, sparse vector parameters", func(t *testing.T) {
-		Params.AutoIndexConfig.IndexParams.Init(mgr)
 		task := &createIndexTask{
 			fieldSchema: sparseFloatFieldSchema,
 			req: &milvuspb.CreateIndexRequest{
@@ -1026,6 +1101,7 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 		}
 		err := task.parseIndexParams()
 		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: "SPARSE_INVERTED_INDEX"},
 			{Key: common.MetricTypeKey, Value: "IP"},
@@ -1044,6 +1120,7 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 		}
 		err := task.parseIndexParams()
 		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: "BIN_IVF_FLAT"},
 			{Key: common.MetricTypeKey, Value: "JACCARD"},
@@ -1054,15 +1131,16 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 
 func Test_parseIndexParams_AutoIndex(t *testing.T) {
 	paramtable.Init()
-	mgr := config.NewManager()
-	mgr.SetConfig("autoIndex.enable", "false")
-	mgr.SetConfig("autoIndex.params.build", `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`)
-	mgr.SetConfig("autoIndex.params.binary.build", `{"nlist": 1024, "index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD"}`)
-	mgr.SetConfig("autoIndex.params.sparse.build", `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`)
-	Params.AutoIndexConfig.Enable.Init(mgr)
-	Params.AutoIndexConfig.IndexParams.Init(mgr)
-	Params.AutoIndexConfig.BinaryIndexParams.Init(mgr)
-	Params.AutoIndexConfig.SparseIndexParams.Init(mgr)
+
+	Params.Save(Params.AutoIndexConfig.Enable.Key, "false")
+	Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`)
+	Params.Save(Params.AutoIndexConfig.BinaryIndexParams.Key, `{"nlist": 1024, "index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD"}`)
+	Params.Save(Params.AutoIndexConfig.SparseIndexParams.Key, `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`)
+	defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+	defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+	defer Params.Reset(Params.AutoIndexConfig.BinaryIndexParams.Key)
+	defer Params.Reset(Params.AutoIndexConfig.SparseIndexParams.Key)
+
 	autoIndexConfig := Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
 	autoIndexConfigBinary := Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()
 	autoIndexConfigSparse := Params.AutoIndexConfig.SparseIndexParams.GetAsJSONMap()
@@ -1093,6 +1171,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		}
 		err := task.parseIndexParams()
 		assert.NoError(t, err)
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: AutoIndexName},
 			{Key: common.MetricTypeKey, Value: autoIndexConfigBinary[common.MetricTypeKey]},
@@ -1108,6 +1187,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		}
 		err := task.parseIndexParams()
 		assert.NoError(t, err)
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: AutoIndexName},
 			{Key: common.MetricTypeKey, Value: autoIndexConfigSparse[common.MetricTypeKey]},
@@ -1123,6 +1203,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		}
 		err := task.parseIndexParams()
 		assert.NoError(t, err)
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: AutoIndexName},
 			{Key: common.MetricTypeKey, Value: autoIndexConfig[common.MetricTypeKey]},
@@ -1140,6 +1221,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		}
 		err := task.parseIndexParams()
 		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: AutoIndexName},
 			{Key: common.MetricTypeKey, Value: "L2"},

@@ -29,7 +29,7 @@ import (
 	"github.com/apache/arrow/go/v12/parquet/compress"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -243,7 +243,7 @@ func (w *NativePayloadWriter) AddInt16ToPayload(data []int16) error {
 	}
 
 	if len(data) == 0 {
-		return errors.New("can't add empty msgs into int64 payload")
+		return errors.New("can't add empty msgs into int16 payload")
 	}
 
 	builder, ok := w.builder.(*array.Int16Builder)
@@ -533,6 +533,10 @@ func (w *NativePayloadWriter) FinishPayloadWriter() error {
 		props,
 		pqarrow.DefaultWriterProps(),
 	)
+}
+
+func (w *NativePayloadWriter) Reserve(size int) {
+	w.builder.Reserve(size)
 }
 
 func (w *NativePayloadWriter) GetPayloadBufferFromWriter() ([]byte, error) {

@@ -17,7 +17,7 @@
 package segments
 
 /*
-#cgo pkg-config: milvus_segcore milvus_storage
+#cgo pkg-config: milvus_core
 
 #include "segcore/collection_c.h"
 #include "common/type_c.h"
@@ -28,10 +28,11 @@ import "C"
 
 import (
 	"context"
+	"math"
 	"unsafe"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/util/cgoconverter"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -55,14 +56,9 @@ func HandleCStatus(ctx context.Context, status *C.CStatus, extraInfo string, fie
 	return err
 }
 
-// HandleCProto deal with the result proto returned from CGO
-func HandleCProto(cRes *C.CProto, msg proto.Message) error {
-	// Standalone CProto is protobuf created by C side,
-	// Passed from c side
-	// memory is managed manually
-	lease, blob := cgoconverter.UnsafeGoBytes(&cRes.proto_blob, int(cRes.proto_size))
-	defer cgoconverter.Release(lease)
-
+// UnmarshalCProto unmarshal the proto from C memory
+func UnmarshalCProto(cRes *C.CProto, msg proto.Message) error {
+	blob := (*(*[math.MaxInt32]byte)(cRes.proto_blob))[:int(cRes.proto_size):int(cRes.proto_size)]
 	return proto.Unmarshal(blob, msg)
 }
 

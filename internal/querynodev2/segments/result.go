@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -399,7 +399,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	_, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeInternalRetrieveResult")
 	defer sp.End()
 
-	validRetrieveResults := []*internalpb.RetrieveResults{}
+	validRetrieveResults := []*TimestampedRetrieveResult[*internalpb.RetrieveResults]{}
 	relatedDataSize := int64(0)
 	hasMoreResult := false
 	for _, r := range retrieveResults {
@@ -409,7 +409,11 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		if r == nil || len(r.GetFieldsData()) == 0 || size == 0 {
 			continue
 		}
-		validRetrieveResults = append(validRetrieveResults, r)
+		tr, err := NewTimestampedRetrieveResult(r)
+		if err != nil {
+			return nil, err
+		}
+		validRetrieveResults = append(validRetrieveResults, tr)
 		loopEnd += size
 		hasMoreResult = hasMoreResult || r.GetHasMoreResult()
 	}
@@ -423,23 +427,23 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		loopEnd = int(param.limit)
 	}
 
-	ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].GetFieldsData()))
-	idTsMap := make(map[interface{}]uint64)
+	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(loopEnd))
+	idTsMap := make(map[interface{}]int64)
 	cursors := make([]int64, len(validRetrieveResults))
 
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; {
-		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		sel, drainOneResult := typeutil.SelectMinPKWithTimestamp(validRetrieveResults, cursors)
 		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
 			break
 		}
 
 		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
-		ts := getTS(validRetrieveResults[sel], cursors[sel])
+		ts := validRetrieveResults[sel].Timestamps[cursors[sel]]
 		if _, ok := idTsMap[pk]; !ok {
 			typeutil.AppendPKs(ret.Ids, pk)
-			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
+			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].Result.GetFieldsData(), cursors[sel])
 			idTsMap[pk] = ts
 			j++
 		} else {
@@ -448,7 +452,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 			if ts != 0 && ts > idTsMap[pk] {
 				idTsMap[pk] = ts
 				typeutil.DeleteFieldData(ret.FieldsData)
-				retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
+				retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].Result.GetFieldsData(), cursors[sel])
 			}
 		}
 
@@ -514,10 +518,8 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		loopEnd    int
 	)
 
-	validRetrieveResults := []*segcorepb.RetrieveResults{}
+	validRetrieveResults := []*TimestampedRetrieveResult[*segcorepb.RetrieveResults]{}
 	validSegments := make([]Segment, 0, len(segments))
-	selectedOffsets := make([][]int64, 0, len(retrieveResults))
-	selectedIndexes := make([][]int64, 0, len(retrieveResults))
 	hasMoreResult := false
 	for i, r := range retrieveResults {
 		size := typeutil.GetSizeOfIDs(r.GetIds())
@@ -526,12 +528,14 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			log.Debug("filter out invalid retrieve result")
 			continue
 		}
-		validRetrieveResults = append(validRetrieveResults, r)
+		tr, err := NewTimestampedRetrieveResult(r)
+		if err != nil {
+			return nil, err
+		}
+		validRetrieveResults = append(validRetrieveResults, tr)
 		if plan.ignoreNonPk {
 			validSegments = append(validSegments, segments[i])
 		}
-		selectedOffsets = append(selectedOffsets, make([]int64, 0, len(r.GetOffset())))
-		selectedIndexes = append(selectedIndexes, make([]int64, 0, len(r.GetOffset())))
 		loopEnd += size
 		hasMoreResult = r.GetHasMoreResult() || hasMoreResult
 	}
@@ -541,36 +545,65 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		return ret, nil
 	}
 
-	selected := make([]int, 0, ret.GetAllRetrieveCount())
-
 	var limit int = -1
 	if param.limit != typeutil.Unlimited && !param.mergeStopForBest {
 		limit = int(param.limit)
 	}
 
-	idSet := make(map[interface{}]struct{})
+	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(loopEnd))
 	cursors := make([]int64, len(validRetrieveResults))
+	idTsMap := make(map[any]int64, limit*len(validRetrieveResults))
 
 	var availableCount int
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
+
+	type selection struct {
+		batchIndex  int   // index of validate retrieve results
+		resultIndex int64 // index of selection in selected result item
+		offset      int64 // offset of the result
+	}
+
+	var selections []selection
+
 	for j := 0; j < loopEnd && (limit == -1 || availableCount < limit); j++ {
-		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		sel, drainOneResult := typeutil.SelectMinPKWithTimestamp(validRetrieveResults, cursors)
 		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
 			break
 		}
 
 		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
-		if _, ok := idSet[pk]; !ok {
+		ts := validRetrieveResults[sel].Timestamps[cursors[sel]]
+		if _, ok := idTsMap[pk]; !ok {
 			typeutil.AppendPKs(ret.Ids, pk)
-			selected = append(selected, sel)
-			selectedOffsets[sel] = append(selectedOffsets[sel], validRetrieveResults[sel].GetOffset()[cursors[sel]])
-			selectedIndexes[sel] = append(selectedIndexes[sel], cursors[sel])
-			idSet[pk] = struct{}{}
+			selections = append(selections, selection{
+				batchIndex:  sel,
+				resultIndex: cursors[sel],
+				offset:      validRetrieveResults[sel].Result.GetOffset()[cursors[sel]],
+			})
+			idTsMap[pk] = ts
 			availableCount++
 		} else {
 			// primary keys duplicate
 			skipDupCnt++
+			if ts != 0 && ts > idTsMap[pk] {
+				idTsMap[pk] = ts
+				idx := len(selections) - 1
+				for ; idx >= 0; idx-- {
+					selection := selections[idx]
+					pkValue := typeutil.GetPK(validRetrieveResults[selection.batchIndex].GetIds(), selection.resultIndex)
+					if pk == pkValue {
+						break
+					}
+				}
+				if idx >= 0 {
+					selections[idx] = selection{
+						batchIndex:  sel,
+						resultIndex: cursors[sel],
+						offset:      validRetrieveResults[sel].Result.GetOffset()[cursors[sel]],
+					}
+				}
+			}
 		}
 
 		cursors[sel]++
@@ -585,31 +618,28 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		// judge the `!plan.ignoreNonPk` condition.
 		_, span2 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-AppendFieldData")
 		defer span2.End()
-		ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].GetFieldsData()))
-		cursors = make([]int64, len(validRetrieveResults))
-		for _, sel := range selected {
+		ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(len(selections)))
+		// cursors = make([]int64, len(validRetrieveResults))
+		for _, selection := range selections {
 			// cannot use `cursors[sel]` directly, since some of them may be skipped.
-			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), selectedIndexes[sel][cursors[sel]])
+			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[selection.batchIndex].Result.GetFieldsData(), selection.resultIndex)
 
 			// limit retrieve result to avoid oom
 			if retSize > maxOutputSize {
 				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 			}
-
-			cursors[sel]++
 		}
 	} else {
 		// target entry not retrieved.
 		ctx, span2 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-RetrieveByOffsets-AppendFieldData")
 		defer span2.End()
 		segmentResults := make([]*segcorepb.RetrieveResults, len(validRetrieveResults))
-		futures := make([]*conc.Future[any], 0, len(validRetrieveResults))
-		for i, offsets := range selectedOffsets {
-			if len(offsets) == 0 {
-				log.Ctx(ctx).Debug("skip empty retrieve results", zap.Int64("segment", validSegments[i].ID()))
-				continue
-			}
-			idx, theOffsets := i, offsets
+		groups := lo.GroupBy(selections, func(sel selection) int {
+			return sel.batchIndex
+		})
+		futures := make([]*conc.Future[any], 0, len(groups))
+		for i, selections := range groups {
+			idx, theOffsets := i, lo.Map(selections, func(sel selection, _ int) int64 { return sel.offset })
 			future := GetSQPool().Submit(func() (any, error) {
 				var r *segcorepb.RetrieveResults
 				var err error
@@ -630,23 +660,22 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 		for _, r := range segmentResults {
 			if len(r.GetFieldsData()) != 0 {
-				ret.FieldsData = make([]*schemapb.FieldData, len(r.GetFieldsData()))
+				ret.FieldsData = typeutil.PrepareResultFieldData(r.GetFieldsData(), int64(len(selections)))
 				break
 			}
 		}
 
 		_, span3 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-AppendFieldData")
 		defer span3.End()
-		cursors = make([]int64, len(segmentResults))
-		for _, sel := range selected {
-			retSize += typeutil.AppendFieldData(ret.FieldsData, segmentResults[sel].GetFieldsData(), cursors[sel])
-
+		// retrieve result is compacted, use 0,1,2...end
+		segmentResOffset := make([]int64, len(segmentResults))
+		for _, selection := range selections {
+			retSize += typeutil.AppendFieldData(ret.FieldsData, segmentResults[selection.batchIndex].GetFieldsData(), segmentResOffset[selection.batchIndex])
+			segmentResOffset[selection.batchIndex]++
 			// limit retrieve result to avoid oom
 			if retSize > maxOutputSize {
 				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 			}
-
-			cursors[sel]++
 		}
 	}
 

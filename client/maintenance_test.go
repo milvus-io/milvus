@@ -22,13 +22,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
 )
 
 type MaintenanceSuite struct {

@@ -23,8 +23,9 @@ import (
 	"math"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/encoding/prototext"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -101,7 +102,7 @@ func (suite *ReduceSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 	for _, binlog := range binlogs {
-		err = suite.segment.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLength), binlog, false)
+		err = suite.segment.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLength), binlog)
 		suite.Require().NoError(err)
 	}
 }
@@ -167,7 +168,8 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
                  placeholder_tag: "$0"
                >`
 	var planpb planpb.PlanNode
-	proto.UnmarshalText(planStr, &planpb)
+	// proto.UnmarshalText(planStr, &planpb)
+	prototext.Unmarshal([]byte(planStr), &planpb)
 	serializedPlan, err := proto.Marshal(&planpb)
 	suite.NoError(err)
 	plan, err := createSearchPlanByExpr(context.Background(), suite.collection, serializedPlan)

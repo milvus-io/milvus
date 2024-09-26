@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -48,7 +47,9 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -85,6 +86,8 @@ type ServiceSuite struct {
 
 	distMgr        *meta.DistributionManager
 	distController *dist.MockController
+
+	proxyManager *proxyutil.MockProxyClientManager
 
 	// Test object
 	server *Server
@@ -124,6 +127,9 @@ func (suite *ServiceSuite) SetupSuite() {
 		1, 2, 3, 4, 5,
 		101, 102, 103, 104, 105,
 	}
+
+	suite.proxyManager = proxyutil.NewMockProxyClientManager(suite.T())
+	suite.proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 }
 
 func (suite *ServiceSuite) SetupTest() {
@@ -165,6 +171,8 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 	suite.jobScheduler = job.NewScheduler()
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
+	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.jobScheduler.Start()
 	suite.balancer = balance.NewRowCountBasedBalancer(
 		suite.taskScheduler,
@@ -183,6 +191,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.targetMgr,
 		suite.targetObserver,
 		&checkers.CheckerController{},
+		suite.proxyManager,
 	)
 	suite.collectionObserver.Start()
 
@@ -207,6 +216,8 @@ func (suite *ServiceSuite) SetupTest() {
 	}
 
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
 }
 
 func (suite *ServiceSuite) TestShowCollections() {
@@ -858,7 +869,7 @@ func (suite *ServiceSuite) TestLoadCollectionFailed() {
 	}
 
 	req := &querypb.LoadCollectionRequest{
-		CollectionID:   0,
+		CollectionID:   1001,
 		ReplicaNumber:  2,
 		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
 	}
@@ -1073,8 +1084,6 @@ func (suite *ServiceSuite) TestReleasePartition() {
 func (suite *ServiceSuite) TestRefreshCollection() {
 	server := suite.server
 
-	server.collectionObserver.Start()
-
 	// Test refresh all collections.
 	for _, collection := range suite.collections {
 		err := server.refreshCollection(collection)
@@ -1209,7 +1218,9 @@ func (suite *ServiceSuite) TestLoadBalance() {
 			DstNodeIDs:       []int64{dstNode},
 			SealedSegmentIDs: segments,
 		}
-		suite.taskScheduler.ExpectedCalls = make([]*mock.Call, 0)
+		suite.taskScheduler.ExpectedCalls = nil
+		suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+		suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 		suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(task task.Task) {
 			actions := task.Actions()
 			suite.Len(actions, 2)
@@ -1254,7 +1265,9 @@ func (suite *ServiceSuite) TestLoadBalanceWithNoDstNode() {
 			SourceNodeIDs:    []int64{srcNode},
 			SealedSegmentIDs: segments,
 		}
-		suite.taskScheduler.ExpectedCalls = make([]*mock.Call, 0)
+		suite.taskScheduler.ExpectedCalls = nil
+		suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+		suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 		suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(task task.Task) {
 			actions := task.Actions()
 			suite.Len(actions, 2)
@@ -1335,7 +1348,9 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 			SourceNodeIDs: []int64{srcNode},
 			DstNodeIDs:    []int64{dstNode},
 		}
-		suite.taskScheduler.ExpectedCalls = make([]*mock.Call, 0)
+		suite.taskScheduler.ExpectedCalls = nil
+		suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+		suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 		suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(t task.Task) {
 			actions := t.Actions()
 			suite.Len(actions, 2)
@@ -1600,6 +1615,7 @@ func (suite *ServiceSuite) TestGetReplicasWhenNoAvailableNodes() {
 }
 
 func (suite *ServiceSuite) TestCheckHealth() {
+	suite.loadAll()
 	ctx := context.Background()
 	server := suite.server
 
@@ -1999,9 +2015,10 @@ func (suite *ServiceSuite) updateChannelDistWithoutSegment(collection int64) {
 				ChannelName:  channels[i],
 			}))
 			suite.dist.LeaderViewManager.Update(node, &meta.LeaderView{
-				ID:           node,
-				CollectionID: collection,
-				Channel:      channels[i],
+				ID:                 node,
+				CollectionID:       collection,
+				Channel:            channels[i],
+				UnServiceableError: merr.ErrSegmentLack,
 			})
 			i++
 			if i >= len(channels) {

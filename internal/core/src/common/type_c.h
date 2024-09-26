@@ -22,6 +22,7 @@
 extern "C" {
 #endif
 
+// WARNING: do not change the enum value of Growing and Sealed
 enum SegmentType {
     Invalid = 0,
     Growing = 1,
@@ -93,11 +94,20 @@ typedef struct CStorageConfig {
     int64_t requestTimeoutMs;
 } CStorageConfig;
 
+typedef struct CMmapConfig {
+    const char* cache_read_ahead_policy;
+    const char* mmap_path;
+    uint64_t disk_limit;
+    uint64_t fix_file_size;
+    bool growing_enable_mmap;
+} CMmapConfig;
+
 typedef struct CTraceConfig {
     const char* exporter;
     float sampleFraction;
     const char* jaegerURL;
     const char* otlpEndpoint;
+    const char* otlpMethod;
     bool oltpSecure;
 
     int nodeID;

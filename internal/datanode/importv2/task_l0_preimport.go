@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -102,7 +101,7 @@ func (t *L0PreImportTask) Cancel() {
 func (t *L0PreImportTask) Clone() Task {
 	ctx, cancel := context.WithCancel(t.ctx)
 	return &L0PreImportTask{
-		PreImportTask: proto.Clone(t.PreImportTask).(*datapb.PreImportTask),
+		PreImportTask: typeutil.Clone(t.PreImportTask),
 		ctx:           ctx,
 		cancel:        cancel,
 		partitionIDs:  t.GetPartitionIDs(),
@@ -143,7 +142,7 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 			return
 		}
 		start := time.Now()
-		err = t.readL0Stat(reader, t)
+		err = t.readL0Stat(reader)
 		if err != nil {
 			return
 		}
@@ -160,7 +159,7 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 	return []*conc.Future[any]{f}
 }
 
-func (t *L0PreImportTask) readL0Stat(reader binlog.L0Reader, task Task) error {
+func (t *L0PreImportTask) readL0Stat(reader binlog.L0Reader) error {
 	totalRows := 0
 	totalSize := 0
 	hashedStats := make(map[string]*datapb.PartitionImportStats)
@@ -172,7 +171,7 @@ func (t *L0PreImportTask) readL0Stat(reader binlog.L0Reader, task Task) error {
 			}
 			return err
 		}
-		stats, err := GetDeleteStats(task, data)
+		stats, err := GetDeleteStats(t, data)
 		if err != nil {
 			return err
 		}
@@ -181,7 +180,7 @@ func (t *L0PreImportTask) readL0Stat(reader binlog.L0Reader, task Task) error {
 		size := int(data.Size())
 		totalRows += rows
 		totalSize += size
-		log.Info("reading l0 stat...", WrapLogFields(task, zap.Int("readRows", rows), zap.Int("readSize", size))...)
+		log.Info("reading l0 stat...", WrapLogFields(t, zap.Int("readRows", rows), zap.Int("readSize", size))...)
 	}
 
 	stat := &datapb.ImportFileStats{
@@ -189,6 +188,6 @@ func (t *L0PreImportTask) readL0Stat(reader binlog.L0Reader, task Task) error {
 		TotalMemorySize: int64(totalSize),
 		HashedStats:     hashedStats,
 	}
-	t.manager.Update(task.GetTaskID(), UpdateFileStat(0, stat))
+	t.manager.Update(t.GetTaskID(), UpdateFileStat(0, stat))
 	return nil
 }

@@ -5,15 +5,16 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
-	"github.com/milvus-io/milvus/internal/kv/predicates"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
@@ -38,7 +39,8 @@ func generateWatchInfo(name string, state datapb.ChannelWatchState) *datapb.Chan
 		Vchan: &datapb.VchannelInfo{
 			ChannelName: name,
 		},
-		State: state,
+		Schema: &schemapb.CollectionSchema{},
+		State:  state,
 	}
 }
 

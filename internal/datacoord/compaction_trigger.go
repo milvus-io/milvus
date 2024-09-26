@@ -28,11 +28,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -40,19 +39,19 @@ import (
 )
 
 type compactTime struct {
+	startTime     Timestamp
 	expireTime    Timestamp
 	collectionTTL time.Duration
 }
 
+// todo: migrate to compaction_trigger_v2
 type trigger interface {
 	start()
 	stop()
-	// triggerCompaction triggers a compaction if any compaction condition satisfy.
-	triggerCompaction() error
 	// triggerSingleCompaction triggers a compaction bundled with collection-partition-channel-segment
 	triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error
-	// forceTriggerCompaction force to start a compaction
-	forceTriggerCompaction(collectionID int64) (UniqueID, error)
+	// triggerManualCompaction force to start a compaction
+	triggerManualCompaction(collectionID int64) (UniqueID, error)
 }
 
 type compactionSignal struct {
@@ -75,9 +74,9 @@ type compactionTrigger struct {
 	signals           chan *compactionSignal
 	compactionHandler compactionPlanContext
 	globalTrigger     *time.Ticker
-	forceMu           sync.Mutex
-	quit              chan struct{}
-	wg                sync.WaitGroup
+	forceMu           lock.Mutex
+	closeCh           lifetime.SafeChan
+	closeWaiter       sync.WaitGroup
 
 	indexEngineVersionManager IndexEngineVersionManager
 
@@ -104,20 +103,20 @@ func newCompactionTrigger(
 		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 		handler:                      handler,
+		closeCh:                      lifetime.NewSafeChan(),
 	}
 }
 
 func (t *compactionTrigger) start() {
-	t.quit = make(chan struct{})
 	t.globalTrigger = time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
-	t.wg.Add(2)
+	t.closeWaiter.Add(2)
 	go func() {
 		defer logutil.LogPanic()
-		defer t.wg.Done()
+		defer t.closeWaiter.Done()
 
 		for {
 			select {
-			case <-t.quit:
+			case <-t.closeCh.CloseCh():
 				log.Info("compaction trigger quit")
 				return
 			case signal := <-t.signals:
@@ -144,7 +143,7 @@ func (t *compactionTrigger) start() {
 
 func (t *compactionTrigger) startGlobalCompactionLoop() {
 	defer logutil.LogPanic()
-	defer t.wg.Done()
+	defer t.closeWaiter.Done()
 
 	// If AutoCompaction disabled, global loop will not start
 	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
@@ -153,7 +152,7 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 
 	for {
 		select {
-		case <-t.quit:
+		case <-t.closeCh.CloseCh():
 			t.globalTrigger.Stop()
 			log.Info("global compaction loop exit")
 			return
@@ -167,20 +166,8 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 }
 
 func (t *compactionTrigger) stop() {
-	close(t.quit)
-	t.wg.Wait()
-}
-
-func (t *compactionTrigger) allocTs() (Timestamp, error) {
-	cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	ts, err := t.allocator.allocTimestamp(cctx)
-	if err != nil {
-		return 0, err
-	}
-
-	return ts, nil
+	t.closeCh.Close()
+	t.closeWaiter.Wait()
 }
 
 func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInfo, error) {
@@ -193,7 +180,7 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInf
 	return coll, nil
 }
 
-func (t *compactionTrigger) isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
+func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
 	enabled, err := getCollectionAutoCompactionEnabled(coll.Properties)
 	if err != nil {
 		log.Warn("collection properties auto compaction not valid, returning false", zap.Error(err))
@@ -202,21 +189,7 @@ func (t *compactionTrigger) isCollectionAutoCompactionEnabled(coll *collectionIn
 	return enabled
 }
 
-func (t *compactionTrigger) isChannelCheckpointHealthy(vchanName string) bool {
-	if paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsInt64() <= 0 {
-		return true
-	}
-	checkpoint := t.meta.GetChannelCheckpoint(vchanName)
-	if checkpoint == nil {
-		log.Warn("channel checkpoint not found", zap.String("channel", vchanName))
-		return false
-	}
-
-	cpTime := tsoutil.PhysicalTime(checkpoint.GetTimestamp())
-	return time.Since(cpTime) < paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsDuration(time.Second)
-}
-
-func (t *compactionTrigger) getCompactTime(ts Timestamp, coll *collectionInfo) (*compactTime, error) {
+func getCompactTime(ts Timestamp, coll *collectionInfo) (*compactTime, error) {
 	collectionTTL, err := getCollectionTTL(coll.Properties)
 	if err != nil {
 		return nil, err
@@ -227,11 +200,11 @@ func (t *compactionTrigger) getCompactTime(ts Timestamp, coll *collectionInfo) (
 	if collectionTTL > 0 {
 		ttexpired := pts.Add(-collectionTTL)
 		ttexpiredLogic := tsoutil.ComposeTS(ttexpired.UnixNano()/int64(time.Millisecond), 0)
-		return &compactTime{ttexpiredLogic, collectionTTL}, nil
+		return &compactTime{ts, ttexpiredLogic, collectionTTL}, nil
 	}
 
 	// no expiration time
-	return &compactTime{0, 0}, nil
+	return &compactTime{ts, 0, 0}, nil
 }
 
 // triggerCompaction trigger a compaction if any compaction condition satisfy.
@@ -249,10 +222,10 @@ func (t *compactionTrigger) triggerCompaction() error {
 	return nil
 }
 
-// triggerSingleCompaction triger a compaction bundled with collection-partition-channel-segment
+// triggerSingleCompaction trigger a compaction bundled with collection-partition-channel-segment
 func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error {
 	// If AutoCompaction disabled, flush request will not trigger compaction
-	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
+	if !paramtable.Get().DataCoordCfg.EnableAutoCompaction.GetAsBool() && !paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool() {
 		return nil
 	}
 
@@ -282,9 +255,9 @@ func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, s
 	return nil
 }
 
-// forceTriggerCompaction force to start a compaction
+// triggerManualCompaction force to start a compaction
 // invoked by user `ManualCompaction` operation
-func (t *compactionTrigger) forceTriggerCompaction(collectionID int64) (UniqueID, error) {
+func (t *compactionTrigger) triggerManualCompaction(collectionID int64) (UniqueID, error) {
 	id, err := t.allocSignalID()
 	if err != nil {
 		return -1, err
@@ -298,7 +271,7 @@ func (t *compactionTrigger) forceTriggerCompaction(collectionID int64) (UniqueID
 
 	err = t.handleGlobalSignal(signal)
 	if err != nil {
-		log.Warn("unable to handleGlobalSignal", zap.Error(err))
+		log.Warn("unable to handle compaction signal", zap.Error(err))
 		return -1, err
 	}
 
@@ -312,8 +285,6 @@ func (t *compactionTrigger) allocSignalID() (UniqueID, error) {
 }
 
 func (t *compactionTrigger) getExpectedSegmentSize(collectionID int64) int64 {
-	indexInfos := t.meta.indexMeta.GetIndexesForCollection(collectionID, "")
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	collMeta, err := t.handler.GetCollection(ctx, collectionID)
@@ -321,19 +292,7 @@ func (t *compactionTrigger) getExpectedSegmentSize(collectionID int64) int64 {
 		log.Warn("failed to get collection", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 	}
-
-	vectorFields := typeutil.GetVectorFieldSchemas(collMeta.Schema)
-	fieldIndexTypes := lo.SliceToMap(indexInfos, func(t *model.Index) (int64, indexparamcheck.IndexType) {
-		return t.FieldID, GetIndexType(t.IndexParams)
-	})
-	vectorFieldsWithDiskIndex := lo.Filter(vectorFields, func(field *schemapb.FieldSchema, _ int) bool {
-		if indexType, ok := fieldIndexTypes[field.FieldID]; ok {
-			return indexparamcheck.IsDiskIndex(indexType)
-		}
-		return false
-	})
-
-	allDiskIndex := len(vectorFields) == len(vectorFieldsWithDiskIndex)
+	allDiskIndex := t.meta.indexMeta.AreAllDiskIndex(collectionID, collMeta.Schema)
 	if allDiskIndex {
 		// Only if all vector fields index type are DiskANN, recalc segment max size here.
 		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
@@ -350,46 +309,28 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		zap.Int64("signal.collectionID", signal.collectionID),
 		zap.Int64("signal.partitionID", signal.partitionID),
 		zap.Int64("signal.segmentID", signal.segmentID))
-	m := t.meta.GetSegmentsChanPart(func(segment *SegmentInfo) bool {
+	partSegments := t.meta.GetSegmentsChanPart(func(segment *SegmentInfo) bool {
 		return (signal.collectionID == 0 || segment.CollectionID == signal.collectionID) &&
 			isSegmentHealthy(segment) &&
 			isFlush(segment) &&
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
-			segment.GetLevel() != datapb.SegmentLevel_L0 // ignore level zero segments
-	}) // m is list of chanPartSegments, which is channel-partition organized segments
+			segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
+			segment.GetLevel() != datapb.SegmentLevel_L2 // ignore l2 segment
+	}) // partSegments is list of chanPartSegments, which is channel-partition organized segments
 
-	if len(m) == 0 {
+	if len(partSegments) == 0 {
 		log.Info("the length of SegmentsChanPart is 0, skip to handle compaction")
 		return nil
 	}
 
-	ts, err := t.allocTs()
-	if err != nil {
-		log.Warn("allocate ts failed, skip to handle compaction")
-		return err
-	}
-
-	channelCheckpointOK := make(map[string]bool)
-	isChannelCPOK := func(channelName string) bool {
-		cached, ok := channelCheckpointOK[channelName]
-		if ok {
-			return cached
-		}
-		return t.isChannelCheckpointHealthy(channelName)
-	}
-
-	for _, group := range m {
+	for _, group := range partSegments {
 		log := log.With(zap.Int64("collectionID", group.collectionID),
 			zap.Int64("partitionID", group.partitionID),
 			zap.String("channel", group.channelName))
 		if !signal.isForce && t.compactionHandler.isFull() {
 			log.Warn("compaction plan skipped due to handler full")
 			break
-		}
-		if !isChannelCPOK(group.channelName) && !signal.isForce {
-			log.Warn("compaction plan skipped due to channel checkpoint lag", zap.String("channel", signal.channel))
-			continue
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
@@ -402,56 +343,60 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			return err
 		}
 
-		if !signal.isForce && !t.isCollectionAutoCompactionEnabled(coll) {
-			log.RatedInfo(20, "collection auto compaction disabled",
-				zap.Int64("collectionID", group.collectionID),
-			)
+		if !signal.isForce && !isCollectionAutoCompactionEnabled(coll) {
+			log.RatedInfo(20, "collection auto compaction disabled")
 			return nil
 		}
 
-		ct, err := t.getCompactTime(ts, coll)
+		ct, err := getCompactTime(tsoutil.ComposeTSByTime(time.Now(), 0), coll)
 		if err != nil {
-			log.Warn("get compact time failed, skip to handle compaction",
-				zap.Int64("collectionID", group.collectionID),
-				zap.Int64("partitionID", group.partitionID),
-				zap.String("channel", group.channelName))
+			log.Warn("get compact time failed, skip to handle compaction")
 			return err
 		}
 
-		plans := t.generatePlans(group.segments, signal.isForce, ct)
+		expectedSize := getExpectedSegmentSize(t.meta, coll)
+		plans := t.generatePlans(group.segments, signal, ct, expectedSize)
+		currentID, _, err := t.allocator.allocN(int64(len(plans)))
+		if err != nil {
+			return err
+		}
 		for _, plan := range plans {
-			segIDs := fetchSegIDs(plan.GetSegmentBinlogs())
-
+			totalRows := plan.A
+			segIDs := plan.B
 			if !signal.isForce && t.compactionHandler.isFull() {
-				log.Warn("compaction plan skipped due to handler full",
-					zap.Int64("collectionID", signal.collectionID),
-					zap.Int64s("segmentIDs", segIDs))
+				log.Warn("compaction plan skipped due to handler full", zap.Int64s("segmentIDs", segIDs))
 				break
 			}
 			start := time.Now()
-			if err := fillOriginPlan(t.allocator, plan); err != nil {
-				log.Warn("failed to fill plan",
-					zap.Int64("collectionID", signal.collectionID),
-					zap.Int64s("segmentIDs", segIDs),
-					zap.Error(err))
-				continue
+			planID := currentID
+			currentID++
+			pts, _ := tsoutil.ParseTS(ct.startTime)
+			task := &datapb.CompactionTask{
+				PlanID:           planID,
+				TriggerID:        signal.id,
+				State:            datapb.CompactionTaskState_pipelining,
+				StartTime:        pts.Unix(),
+				TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
+				Type:             datapb.CompactionType_MixCompaction,
+				CollectionTtl:    ct.collectionTTL.Nanoseconds(),
+				CollectionID:     group.collectionID,
+				PartitionID:      group.partitionID,
+				Channel:          group.channelName,
+				InputSegments:    segIDs,
+				TotalRows:        totalRows,
+				Schema:           coll.Schema,
+				MaxSize:          getExpandedSize(expectedSize),
 			}
-			err := t.compactionHandler.execCompactionPlan(signal, plan)
+			err := t.compactionHandler.enqueueCompaction(task)
 			if err != nil {
-				log.Warn("failed to execute compaction plan",
-					zap.Int64("collectionID", signal.collectionID),
-					zap.Int64("planID", plan.PlanID),
+				log.Warn("failed to execute compaction task",
 					zap.Int64s("segmentIDs", segIDs),
 					zap.Error(err))
 				continue
 			}
 
 			log.Info("time cost of generating global compaction",
-				zap.Int64("planID", plan.PlanID),
 				zap.Int64("time cost", time.Since(start).Milliseconds()),
-				zap.Int64("collectionID", signal.collectionID),
-				zap.String("channel", group.channelName),
-				zap.Int64("partitionID", group.partitionID),
 				zap.Int64s("segmentIDs", segIDs))
 		}
 	}
@@ -466,11 +411,6 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	// 1. check whether segment's binlogs should be compacted or not
 	if t.compactionHandler.isFull() {
 		log.Warn("compaction plan skipped due to handler full")
-		return
-	}
-
-	if !t.isChannelCheckpointHealthy(signal.channel) {
-		log.Warn("compaction plan skipped due to channel checkpoint lag", zap.String("channel", signal.channel))
 		return
 	}
 
@@ -490,13 +430,6 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	ts, err := t.allocTs()
-	if err != nil {
-		log.Warn("allocate ts failed, skip to handle compaction", zap.Int64("collectionID", signal.collectionID),
-			zap.Int64("partitionID", signal.partitionID), zap.Int64("segmentID", signal.segmentID))
-		return
-	}
-
 	coll, err := t.getCollection(collectionID)
 	if err != nil {
 		log.Warn("get collection info failed, skip handling compaction",
@@ -508,53 +441,75 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	if !signal.isForce && !t.isCollectionAutoCompactionEnabled(coll) {
+	if !signal.isForce && !isCollectionAutoCompactionEnabled(coll) {
 		log.RatedInfo(20, "collection auto compaction disabled",
 			zap.Int64("collectionID", collectionID),
 		)
 		return
 	}
-
-	ct, err := t.getCompactTime(ts, coll)
+	ts := tsoutil.ComposeTSByTime(time.Now(), 0)
+	ct, err := getCompactTime(ts, coll)
 	if err != nil {
 		log.Warn("get compact time failed, skip to handle compaction", zap.Int64("collectionID", segment.GetCollectionID()),
 			zap.Int64("partitionID", partitionID), zap.String("channel", channel))
 		return
 	}
 
-	plans := t.generatePlans(segments, signal.isForce, ct)
+	expectedSize := getExpectedSegmentSize(t.meta, coll)
+	plans := t.generatePlans(segments, signal, ct, expectedSize)
+	currentID, _, err := t.allocator.allocN(int64(len(plans)))
+	if err != nil {
+		log.Warn("fail to allocate id", zap.Error(err))
+		return
+	}
 	for _, plan := range plans {
 		if t.compactionHandler.isFull() {
-			log.Warn("compaction plan skipped due to handler full", zap.Int64("collection", signal.collectionID), zap.Int64("planID", plan.PlanID))
+			log.Warn("compaction plan skipped due to handler full", zap.Int64("collection", signal.collectionID))
 			break
 		}
+		totalRows := plan.A
+		segmentIDS := plan.B
 		start := time.Now()
-		if err := fillOriginPlan(t.allocator, plan); err != nil {
-			log.Warn("failed to fill plan", zap.Error(err))
-			continue
-		}
-		if err := t.compactionHandler.execCompactionPlan(signal, plan); err != nil {
-			log.Warn("failed to execute compaction plan",
-				zap.Int64("collection", signal.collectionID),
-				zap.Int64("planID", plan.PlanID),
-				zap.Int64s("segmentIDs", fetchSegIDs(plan.GetSegmentBinlogs())),
+		planID := currentID
+		currentID++
+		pts, _ := tsoutil.ParseTS(ct.startTime)
+		if err := t.compactionHandler.enqueueCompaction(&datapb.CompactionTask{
+			PlanID:           planID,
+			TriggerID:        signal.id,
+			State:            datapb.CompactionTaskState_pipelining,
+			StartTime:        pts.Unix(),
+			TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
+			Type:             datapb.CompactionType_MixCompaction,
+			CollectionTtl:    ct.collectionTTL.Nanoseconds(),
+			CollectionID:     collectionID,
+			PartitionID:      partitionID,
+			Channel:          channel,
+			InputSegments:    segmentIDS,
+			TotalRows:        totalRows,
+			Schema:           coll.Schema,
+			MaxSize:          getExpandedSize(expectedSize),
+		}); err != nil {
+			log.Warn("failed to execute compaction task",
+				zap.Int64("collection", collectionID),
+				zap.Int64("planID", planID),
+				zap.Int64s("segmentIDs", segmentIDS),
 				zap.Error(err))
 			continue
 		}
 		log.Info("time cost of generating compaction",
-			zap.Int64("planID", plan.PlanID),
+			zap.Int64("planID", planID),
 			zap.Int64("time cost", time.Since(start).Milliseconds()),
 			zap.Int64("collectionID", signal.collectionID),
 			zap.String("channel", channel),
 			zap.Int64("partitionID", partitionID),
-			zap.Int64s("segmentIDs", fetchSegIDs(plan.GetSegmentBinlogs())))
+			zap.Int64s("segmentIDs", segmentIDS))
 	}
 }
 
-func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, compactTime *compactTime) []*datapb.CompactionPlan {
+func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compactionSignal, compactTime *compactTime, expectedSize int64) []*typeutil.Pair[int64, []int64] {
 	if len(segments) == 0 {
 		log.Warn("the number of candidate segments is 0, skip to generate compaction plan")
-		return []*datapb.CompactionPlan{}
+		return []*typeutil.Pair[int64, []int64]{}
 	}
 
 	// find segments need internal compaction
@@ -563,13 +518,11 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, c
 	var smallCandidates []*SegmentInfo
 	var nonPlannedSegments []*SegmentInfo
 
-	expectedSize := t.getExpectedSegmentSize(segments[0].CollectionID)
-
 	// TODO, currently we lack of the measurement of data distribution, there should be another compaction help on redistributing segment based on scalar/vector field distribution
 	for _, segment := range segments {
 		segment := segment.ShadowClone()
 		// TODO should we trigger compaction periodically even if the segment has no obvious reason to be compacted?
-		if force || t.ShouldDoSingleCompaction(segment, compactTime) {
+		if signal.isForce || t.ShouldDoSingleCompaction(segment, compactTime) {
 			prioritizedCandidates = append(prioritizedCandidates, segment)
 		} else if t.isSmallSegment(segment, expectedSize) {
 			smallCandidates = append(smallCandidates, segment)
@@ -682,38 +635,19 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, c
 		}
 	}
 
-	plans := make([]*datapb.CompactionPlan, len(buckets))
+	tasks := make([]*typeutil.Pair[int64, []int64], len(buckets))
 	for i, b := range buckets {
-		plans[i] = segmentsToPlan(b, compactTime)
-	}
-	return plans
-}
-
-func segmentsToPlan(segments []*SegmentInfo, compactTime *compactTime) *datapb.CompactionPlan {
-	plan := &datapb.CompactionPlan{
-		Type:          datapb.CompactionType_MixCompaction,
-		Channel:       segments[0].GetInsertChannel(),
-		CollectionTtl: compactTime.collectionTTL.Nanoseconds(),
-	}
-
-	var size int64
-	for _, s := range segments {
-		segmentBinlogs := &datapb.CompactionSegmentBinlogs{
-			SegmentID:           s.GetID(),
-			FieldBinlogs:        s.GetBinlogs(),
-			Field2StatslogPaths: s.GetStatslogs(),
-			Deltalogs:           s.GetDeltalogs(),
-			CollectionID:        s.GetCollectionID(),
-			PartitionID:         s.GetPartitionID(),
+		segmentIDs := make([]int64, 0)
+		var totalRows int64
+		for _, s := range b {
+			totalRows += s.GetNumOfRows()
+			segmentIDs = append(segmentIDs, s.GetID())
 		}
-		plan.TotalRows += s.GetNumOfRows()
-		size += s.getSegmentSize()
-		plan.SegmentBinlogs = append(plan.SegmentBinlogs, segmentBinlogs)
+		pair := typeutil.NewPair(totalRows, segmentIDs)
+		tasks[i] = &pair
 	}
-
-	log.Info("generate a plan for priority candidates", zap.Any("plan", plan),
-		zap.Int64("target segment row", plan.TotalRows), zap.Int64("target segment size", size))
-	return plan
+	log.Info("generatePlans", zap.Int64("collectionID", signal.collectionID), zap.Int("plan_num", len(tasks)))
+	return tasks
 }
 
 func greedySelect(candidates []*SegmentInfo, free int64, maxSegment int) ([]*SegmentInfo, []*SegmentInfo, int64) {
@@ -761,7 +695,8 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 			s.GetPartitionID() != partitionID ||
 			s.isCompacting ||
 			s.GetIsImporting() ||
-			s.GetLevel() == datapb.SegmentLevel_L0 {
+			s.GetLevel() == datapb.SegmentLevel_L0 ||
+			s.GetLevel() == datapb.SegmentLevel_L2 {
 			continue
 		}
 		res = append(res, s)
@@ -790,12 +725,45 @@ func isExpandableSmallSegment(segment *SegmentInfo, expectedSize int64) bool {
 	return segment.getSegmentSize() < int64(float64(expectedSize)*(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()-1))
 }
 
+func isDeltalogTooManySegment(segment *SegmentInfo) bool {
+	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
+	res := deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()
+	log.Debug("check whether segment has too many delta log",
+		zap.Int64("collectionID", segment.CollectionID),
+		zap.Int64("segmentID", segment.ID),
+		zap.Int("deltaLogCount", deltaLogCount),
+		zap.Bool("result", res))
+	return res
+}
+
+func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
+	totalDeletedRows := 0
+	totalDeleteLogSize := int64(0)
+	for _, deltaLogs := range segment.GetDeltalogs() {
+		for _, l := range deltaLogs.GetBinlogs() {
+			totalDeletedRows += int(l.GetEntriesNum())
+			totalDeleteLogSize += l.GetMemorySize()
+		}
+	}
+
+	// currently delta log size and delete ratio policy is applied
+	res := float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
+		totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()
+	log.Debug("check whether segment has too many delete data",
+		zap.Int64("segmentID", segment.ID),
+		zap.Int64("numRows", segment.GetNumOfRows()),
+		zap.Int("deleted rows", totalDeletedRows),
+		zap.Int64("delete log size", totalDeleteLogSize),
+		zap.Bool("result", res))
+	return res
+}
+
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
 
 	binlogCount := GetBinlogCount(segment.GetBinlogs())
 	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
-	if deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
+	if isDeltalogTooManySegment(segment) {
 		log.Info("total delta number is too much, trigger compaction", zap.Int64("segmentID", segment.ID), zap.Int("Bin logs", binlogCount), zap.Int("Delta logs", deltaLogCount))
 		return true
 	}
@@ -826,22 +794,8 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 		return true
 	}
 
-	totalDeletedRows := 0
-	totalDeleteLogSize := int64(0)
-	for _, deltaLogs := range segment.GetDeltalogs() {
-		for _, l := range deltaLogs.GetBinlogs() {
-			totalDeletedRows += int(l.GetEntriesNum())
-			totalDeleteLogSize += l.GetMemorySize()
-		}
-	}
-
 	// currently delta log size and delete ratio policy is applied
-	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() || totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64() {
-		log.Info("total delete entities is too much, trigger compaction",
-			zap.Int64("segmentID", segment.ID),
-			zap.Int64("numRows", segment.GetNumOfRows()),
-			zap.Int("deleted rows", totalDeletedRows),
-			zap.Int64("delete log size", totalDeleteLogSize))
+	if isDeleteRowsTooManySegment(segment) {
 		return true
 	}
 
@@ -869,14 +823,6 @@ func isFlush(segment *SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Flushed || segment.GetState() == commonpb.SegmentState_Flushing
 }
 
-func fetchSegIDs(segBinLogs []*datapb.CompactionSegmentBinlogs) []int64 {
-	var segIDs []int64
-	for _, segBinLog := range segBinLogs {
-		segIDs = append(segIDs, segBinLog.GetSegmentID())
-	}
-	return segIDs
-}
-
 // buckets will be updated inplace
 func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, buckets [][]*SegmentInfo, expectedSize int64) (remaining []*SegmentInfo) {
 	for i := len(small) - 1; i >= 0; i-- {
@@ -898,4 +844,8 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, 
 	}
 
 	return small
+}
+
+func getExpandedSize(size int64) int64 {
+	return int64(float64(size) * Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat())
 }

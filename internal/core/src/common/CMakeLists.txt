@@ -9,35 +9,5 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
-milvus_add_pkg_config("milvus_common")
-
-set(COMMON_SRC
-        Schema.cpp
-        SystemProperty.cpp
-        Slice.cpp
-        binary_set_c.cpp
-        init_c.cpp
-        Common.cpp
-        RangeSearchHelper.cpp
-        Tracer.cpp
-        IndexMeta.cpp
-        EasyAssert.cpp
-        FieldData.cpp
-        RegexQuery.cpp
-        )
-
-add_library(milvus_common SHARED ${COMMON_SRC})
-
-target_link_libraries(milvus_common
-        milvus_bitset
-        milvus_config
-        milvus_log
-        milvus_proto
-        yaml-cpp
-        boost_bitset_ext
-        simdjson
-        ${CONAN_LIBS}
-        re2
-        )
-
-install(TARGETS milvus_common DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+add_source_at_current_directory_recursively()
+add_library(milvus_common OBJECT ${SOURCE_FILES})

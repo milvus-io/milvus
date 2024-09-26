@@ -27,8 +27,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -66,7 +66,7 @@ func getSeekPositions(factory msgstream.Factory, pchannel string, maxNum int) ([
 		return nil, err
 	}
 	defer stream.Close()
-	stream.AsConsumer(context.TODO(), []string{pchannel}, fmt.Sprintf("%d", rand.Int()), mqwrapper.SubscriptionPositionEarliest)
+	stream.AsConsumer(context.TODO(), []string{pchannel}, fmt.Sprintf("%d", rand.Int()), common.SubscriptionPositionEarliest)
 	positions := make([]*msgstream.MsgPosition, 0)
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -110,7 +110,7 @@ func genInsertMsg(numRows int, vchannel string, msgID typeutil.UniqueID) *msgstr
 	}
 	return &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{HashValues: hashValues},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base:       &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert, MsgID: msgID},
 			ShardName:  vchannel,
 			Timestamps: genTimestamps(numRows),
@@ -132,7 +132,7 @@ func genInsertMsg(numRows int, vchannel string, msgID typeutil.UniqueID) *msgstr
 func genDeleteMsg(numRows int, vchannel string, msgID typeutil.UniqueID) *msgstream.DeleteMsg {
 	return &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{HashValues: make([]uint32, numRows)},
-		DeleteRequest: msgpb.DeleteRequest{
+		DeleteRequest: &msgpb.DeleteRequest{
 			Base:      &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete, MsgID: msgID},
 			ShardName: vchannel,
 			PrimaryKeys: &schemapb.IDs{
@@ -153,28 +153,28 @@ func genDDLMsg(msgType commonpb.MsgType) msgstream.TsMsg {
 	case commonpb.MsgType_CreateCollection:
 		return &msgstream.CreateCollectionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
-			CreateCollectionRequest: msgpb.CreateCollectionRequest{
+			CreateCollectionRequest: &msgpb.CreateCollectionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 			},
 		}
 	case commonpb.MsgType_DropCollection:
 		return &msgstream.DropCollectionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
-			DropCollectionRequest: msgpb.DropCollectionRequest{
+			DropCollectionRequest: &msgpb.DropCollectionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 			},
 		}
 	case commonpb.MsgType_CreatePartition:
 		return &msgstream.CreatePartitionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
-			CreatePartitionRequest: msgpb.CreatePartitionRequest{
+			CreatePartitionRequest: &msgpb.CreatePartitionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreatePartition},
 			},
 		}
 	case commonpb.MsgType_DropPartition:
 		return &msgstream.DropPartitionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
-			DropPartitionRequest: msgpb.DropPartitionRequest{
+			DropPartitionRequest: &msgpb.DropPartitionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 			},
 		}
@@ -185,7 +185,7 @@ func genDDLMsg(msgType commonpb.MsgType) msgstream.TsMsg {
 func genTimeTickMsg(ts typeutil.Timestamp) *msgstream.TimeTickMsg {
 	return &msgstream.TimeTickMsg{
 		BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
-		TimeTickMsg: msgpb.TimeTickMsg{
+		TimeTickMsg: &msgpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				Timestamp: ts,

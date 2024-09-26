@@ -20,6 +20,7 @@ import (
 	"io"
 	"strconv"
 	"sync"
+	"time"
 
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -175,18 +176,15 @@ func initFormatter(logCfg *paramtable.AccessLogConfig) (*FormatterManger, error)
 
 // initAccessLogger initializes a zap access logger for proxy
 func initWriter(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.MinioConfig) (io.Writer, error) {
-	var lg *RotateWriter
-	var err error
-
 	if len(logCfg.Filename.GetValue()) > 0 {
-		lg, err = NewRotateWriter(logCfg, minioCfg)
+		lg, err := NewRotateWriter(logCfg, minioCfg)
 		if err != nil {
 			return nil, err
 		}
 
 		if logCfg.CacheSize.GetAsInt() > 0 {
-			blg := NewCacheWriter(lg, logCfg.CacheSize.GetAsInt())
-			return blg, nil
+			clg := NewCacheWriterWithCloser(lg, lg, logCfg.CacheSize.GetAsInt(), logCfg.CacheFlushInterval.GetAsDuration(time.Second))
+			return clg, nil
 		}
 		return lg, nil
 	}
@@ -195,6 +193,11 @@ func initWriter(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.MinioCo
 	stdout, _, err := zap.Open([]string{"stdout"}...)
 	if err != nil {
 		return nil, err
+	}
+
+	if logCfg.CacheSize.GetAsInt() > 0 {
+		lg := NewCacheWriter(stdout, logCfg.CacheSize.GetAsInt(), logCfg.CacheFlushInterval.GetAsDuration(time.Second))
+		return lg, nil
 	}
 
 	return stdout, nil

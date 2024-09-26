@@ -2,12 +2,12 @@ package datacoord
 
 import (
 	"math"
-	"sync"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type IndexEngineVersionManager interface {
@@ -21,7 +21,7 @@ type IndexEngineVersionManager interface {
 }
 
 type versionManagerImpl struct {
-	mu       sync.Mutex
+	mu       lock.Mutex
 	versions map[int64]sessionutil.IndexEngineVersion
 }
 

@@ -18,8 +18,8 @@
 #include "tantivy-binding.h"
 #include "tantivy-wrapper.h"
 #include "index/StringIndex.h"
-#include "index/TantivyConfig.h"
 #include "storage/space.h"
+#include "common/RegexQuery.h"
 
 namespace milvus::index {
 
@@ -36,13 +36,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     InvertedIndexTantivy() = default;
 
-    explicit InvertedIndexTantivy(const TantivyConfig& cfg,
-                                  const storage::FileManagerContext& ctx)
-        : InvertedIndexTantivy(cfg, ctx, nullptr) {
+    explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx)
+        : InvertedIndexTantivy(ctx, nullptr) {
     }
 
-    explicit InvertedIndexTantivy(const TantivyConfig& cfg,
-                                  const storage::FileManagerContext& ctx,
+    explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx,
                                   std::shared_ptr<milvus_storage::Space> space);
 
     ~InvertedIndexTantivy();
@@ -115,6 +113,18 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     In(size_t n, const T* values) override;
 
     const TargetBitmap
+    InApplyFilter(
+        size_t n,
+        const T* values,
+        const std::function<bool(size_t /* offset */)>& filter) override;
+
+    void
+    InApplyCallback(
+        size_t n,
+        const T* values,
+        const std::function<void(size_t /* offset */)>& callback) override;
+
+    const TargetBitmap
     NotIn(size_t n, const T* values) override;
 
     const TargetBitmap
@@ -148,23 +158,47 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     const TargetBitmap
     Query(const DatasetPtr& dataset) override;
 
+    const TargetBitmap
+    PatternMatch(const std::string& pattern) override {
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
+        return RegexQuery(regex_pattern);
+    }
+
+    bool
+    SupportPatternMatch() const override {
+        return SupportRegexQuery();
+    }
+
     bool
     SupportRegexQuery() const override {
-        return true;
+        return std::is_same_v<T, std::string>;
     }
 
     const TargetBitmap
     RegexQuery(const std::string& pattern) override;
 
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::INVERTED;
+    }
+
  private:
     void
     finish();
 
+    void
+    build_index(const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
+
+    void
+    build_index_for_array(
+        const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
+
  private:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
-    TantivyConfig cfg_;
     TantivyDataType d_type_;
     std::string path_;
+    proto::schema::FieldSchema schema_;
 
     /*
      * To avoid IO amplification, we use both mem file manager & disk file manager

@@ -67,9 +67,9 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     } else {
         auto err = get_index_obj.error();
         if (err == knowhere::Status::invalid_index_error) {
-            throw SegcoreError(ErrorCode::Unsupported, get_index_obj.what());
+            PanicInfo(ErrorCode::Unsupported, get_index_obj.what());
         }
-        throw SegcoreError(ErrorCode::KnowhereError, get_index_obj.what());
+        PanicInfo(ErrorCode::KnowhereError, get_index_obj.what());
     }
 }
 
@@ -106,9 +106,9 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     } else {
         auto err = get_index_obj.error();
         if (err == knowhere::Status::invalid_index_error) {
-            throw SegcoreError(ErrorCode::Unsupported, get_index_obj.what());
+            PanicInfo(ErrorCode::Unsupported, get_index_obj.what());
         }
-        throw SegcoreError(ErrorCode::KnowhereError, get_index_obj.what());
+        PanicInfo(ErrorCode::KnowhereError, get_index_obj.what());
     }
 }
 
@@ -217,6 +217,8 @@ VectorDiskAnnIndex<T>::BuildV2(const Config& config) {
     if (opt_fields.has_value() && index_.IsAdditionalScalarSupported()) {
         build_config[VEC_OPT_FIELDS_PATH] =
             file_manager_->CacheOptFieldToDisk(opt_fields.value());
+        // `partition_key_isolation` is already in the config, so it falls through
+        // into the index Build call directly
     }
 
     build_config.erase("insert_files");
@@ -264,6 +266,8 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     if (opt_fields.has_value() && index_.IsAdditionalScalarSupported()) {
         build_config[VEC_OPT_FIELDS_PATH] =
             file_manager_->CacheOptFieldToDisk(opt_fields.value());
+        // `partition_key_isolation` is already in the config, so it falls through
+        // into the index Build call directly
     }
 
     build_config.erase("insert_files");
@@ -367,6 +371,10 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
             GetValueFromConfig<float>(search_info.search_params_, RADIUS);
         if (radius.has_value()) {
             search_config[RADIUS] = radius.value();
+            // `range_search_k` is only used as one of the conditions for iterator early termination.
+            // not gurantee to return exactly `range_search_k` results, which may be more or less.
+            // set it to -1 will return all results in the range.
+            search_config[knowhere::meta::RANGE_SEARCH_K] = topk;
             auto range_filter = GetValueFromConfig<float>(
                 search_info.search_params_, RANGE_FILTER);
             if (range_filter.has_value()) {
@@ -375,7 +383,15 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                                       search_config[RANGE_FILTER],
                                       GetMetricType());
             }
-            auto res = index_.RangeSearch(*dataset, search_config, bitset);
+
+            auto page_retain_order = GetValueFromConfig<bool>(
+                search_info.search_params_, PAGE_RETAIN_ORDER);
+            if (page_retain_order.has_value()) {
+                search_config[knowhere::meta::RETAIN_ITERATOR_ORDER] =
+                    page_retain_order.value();
+            }
+
+            auto res = index_.RangeSearch(dataset, search_config, bitset);
 
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
@@ -386,7 +402,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
             return ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
         } else {
-            auto res = index_.Search(*dataset, search_config, bitset);
+            auto res = index_.Search(dataset, search_config, bitset);
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
                           fmt::format("failed to search: {}: {}",
@@ -419,11 +435,11 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
 }
 
 template <typename T>
-knowhere::expected<std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
                                        const knowhere::Json& conf,
                                        const BitsetView& bitset) const {
-    return this->index_.AnnIterator(*dataset, conf, bitset);
+    return this->index_.AnnIterator(dataset, conf, bitset);
 }
 
 template <typename T>
@@ -440,7 +456,7 @@ VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
         PanicInfo(ErrorCode::UnexpectedError,
                   "failed to get vector, index is sparse");
     }
-    auto res = index_.GetVectorByIds(*dataset);
+    auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
         PanicInfo(ErrorCode::UnexpectedError,
                   fmt::format("failed to get vector: {}: {}",

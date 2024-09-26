@@ -19,6 +19,7 @@ package indexnode
 import (
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
@@ -35,4 +36,15 @@ func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType)
 	default:
 		return 0, nil
 	}
+}
+
+func mapToKVPairs(m map[string]string) []*commonpb.KeyValuePair {
+	kvs := make([]*commonpb.KeyValuePair, 0, len(m))
+	for k, v := range m {
+		kvs = append(kvs, &commonpb.KeyValuePair{
+			Key:   k,
+			Value: v,
+		})
+	}
+	return kvs
 }

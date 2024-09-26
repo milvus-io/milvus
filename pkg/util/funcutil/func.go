@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -209,8 +210,16 @@ func GetAvailablePort() int {
 	return listener.Addr().(*net.TCPAddr).Port
 }
 
+// IsPhysicalChannel checks if the channel is a physical channel
+func IsPhysicalChannel(channel string) bool {
+	return strings.Count(channel, "_") == 1
+}
+
 // ToPhysicalChannel get physical channel name from virtual channel name
 func ToPhysicalChannel(vchannel string) string {
+	if IsPhysicalChannel(vchannel) {
+		return vchannel
+	}
 	index := strings.LastIndex(vchannel, "_")
 	if index < 0 {
 		return vchannel
@@ -227,6 +236,18 @@ func ConvertChannelName(chanName string, tokenFrom string, tokenTo string) (stri
 		return "", fmt.Errorf("cannot find token '%s' in '%s'", tokenFrom, chanName)
 	}
 	return strings.Replace(chanName, tokenFrom, tokenTo, 1), nil
+}
+
+func GetCollectionIDFromVChannel(vChannelName string) int64 {
+	re := regexp.MustCompile(`.*_(\d+)v\d+`)
+	matches := re.FindStringSubmatch(vChannelName)
+	if len(matches) > 1 {
+		number, err := strconv.ParseInt(matches[1], 0, 64)
+		if err == nil {
+			return number
+		}
+	}
+	return -1
 }
 
 func getNumRowsOfScalarField(datas interface{}) uint64 {

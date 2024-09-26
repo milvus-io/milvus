@@ -149,6 +149,16 @@ class SegmentSealedImpl : public SegmentSealed {
                    const int64_t* seg_offsets,
                    int64_t count) const override;
 
+    std::unique_ptr<DataArray>
+    bulk_subscript(
+        FieldId field_id,
+        const int64_t* seg_offsets,
+        int64_t count,
+        const std::vector<std::string>& dynamic_field_names) const override;
+
+    bool
+    is_mmap_field(FieldId id) const override;
+
     void
     ClearData();
 
@@ -156,6 +166,15 @@ class SegmentSealedImpl : public SegmentSealed {
     // blob and row_count
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    std::vector<std::string_view>
+    chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    BufferView
+    get_chunk_buffer(FieldId field_id,
+                     int64_t chunk_id,
+                     int64_t start_offset,
+                     int64_t length) const override;
 
     const index::IndexBase*
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const override;
@@ -279,6 +298,8 @@ class SegmentSealedImpl : public SegmentSealed {
     generate_interim_index(const FieldId field_id);
 
  private:
+    // mmap descriptor, used in chunk cache
+    storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     // segment loading state
     BitsetType field_data_ready_bitset_;
     BitsetType index_ready_bitset_;
@@ -305,6 +326,7 @@ class SegmentSealedImpl : public SegmentSealed {
     SchemaPtr schema_;
     int64_t id_;
     std::unordered_map<FieldId, std::shared_ptr<ColumnBase>> fields_;
+    std::unordered_set<FieldId> mmap_fields_;
 
     // only useful in binlog
     IndexMetaPtr col_index_meta_;

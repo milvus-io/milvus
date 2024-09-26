@@ -18,12 +18,12 @@ package config
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -71,6 +71,7 @@ func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
 		keyPrefix:      etcdInfo.KeyPrefix,
 	}
 	es.configRefresher = newRefresher(etcdInfo.RefreshInterval, es.refreshConfigurations)
+	es.configRefresher.start(es.GetSourceName())
 	return es, nil
 }
 
@@ -80,7 +81,7 @@ func (es *EtcdSource) GetConfigurationByKey(key string) (string, error) {
 	v, ok := es.currentConfigs[key]
 	es.RUnlock()
 	if !ok {
-		return "", fmt.Errorf("key not found: %s", key)
+		return "", errors.Wrap(ErrKeyNotFound, key) // fmt.Errorf("key not found: %s", key)
 	}
 	return v, nil
 }
@@ -92,7 +93,6 @@ func (es *EtcdSource) GetConfigurations() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	es.configRefresher.start(es.GetSourceName())
 	es.RLock()
 	for key, value := range es.currentConfigs {
 		configMap[key] = value

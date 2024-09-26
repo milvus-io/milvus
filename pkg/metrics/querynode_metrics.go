@@ -362,6 +362,55 @@ var (
 			nodeIDLabelName,
 		})
 
+	QueryNodeSearchHitSegmentNum = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "search_hit_segment_num",
+			Help:      "the number of segments actually involved in search task",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			queryTypeLabelName,
+		})
+
+	QueryNodeSegmentPruneRatio = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_prune_ratio",
+			Help:      "ratio of segments pruned by segment_pruner",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			segmentPruneLabelName,
+		})
+
+	QueryNodeSegmentPruneBias = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_prune_bias",
+			Help:      "bias of workload when enabling segment prune",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			segmentPruneLabelName,
+		})
+
+	QueryNodeSegmentPruneLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_prune_latency",
+			Help:      "latency of segment prune",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			segmentPruneLabelName,
+		})
+
 	QueryNodeEvictedReadReqCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -777,8 +826,14 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeDiskCacheEvictBytes)
 	registry.MustRegister(QueryNodeDiskCacheEvictDuration)
 	registry.MustRegister(QueryNodeDiskCacheEvictGlobalDuration)
+	registry.MustRegister(QueryNodeSegmentPruneLatency)
+	registry.MustRegister(QueryNodeSegmentPruneBias)
 	registry.MustRegister(QueryNodeApplyBFCost)
 	registry.MustRegister(QueryNodeForwardDeleteCost)
+	registry.MustRegister(QueryNodeSegmentPruneRatio)
+	registry.MustRegister(QueryNodeSearchHitSegmentNum)
+	// Add cgo metrics
+	RegisterCGOMetrics(registry)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

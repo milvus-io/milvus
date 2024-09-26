@@ -11,6 +11,14 @@
 
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
+include_directories(
+    ${KNOWHERE_INCLUDE_DIR}
+    ${SIMDJSON_INCLUDE_DIR}
+    ${TANTIVY_INCLUDE_DIR}
+    ${CONAN_INCLUDE_DIRS}
+    ${MILVUS_STORAGE_INCLUDE_DIRS}
+    ${MILVUS_STORAGE_SRC_DIRS}
+)
 
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/test_utils/test_segcore.yaml")
 
@@ -66,7 +74,19 @@ set(MILVUS_TEST_FILES
         test_group_by.cpp
         test_regex_query_util.cpp
         test_regex_query.cpp
+        test_array_inverted_index.cpp
+        test_chunk_vector.cpp
+        test_mmap_chunk_manager.cpp
+        test_futures.cpp
+        test_bitmap_index.cpp
+        test_monitor.cpp
         )
+
+if ( INDEX_ENGINE STREQUAL "cardinal" )
+    set(MILVUS_TEST_FILES
+        ${MILVUS_TEST_FILES}
+        test_kmeans_clustering.cpp)
+endif()
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )
     set(MILVUS_TEST_FILES
@@ -97,7 +117,7 @@ endif()
 if (LINUX)
     message( STATUS "Building Milvus Unit Test on Linux")
     option(USE_ASAN "Whether to use AddressSanitizer" OFF)
-    if ( USE_ASAN AND false )
+    if ( USE_ASAN )
         message( STATUS "Building Milvus using AddressSanitizer")
         add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
         add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
@@ -116,11 +136,8 @@ if (LINUX)
 
     target_link_libraries(index_builder_test
             gtest
-            gtest_main
-            milvus_segcore
-            milvus_storage
-            milvus_indexbuilder
-            milvus_common
+            milvus_core
+            knowhere
             )
     install(TARGETS index_builder_test DESTINATION unittest)
 endif()
@@ -131,12 +148,8 @@ add_executable(all_tests
 
 target_link_libraries(all_tests
         gtest
-        milvus_segcore
-        milvus_storage
-        milvus_indexbuilder
-        pthread
-        milvus_common
-        milvus_exec
+        milvus_core
+        knowhere
         )
 
 install(TARGETS all_tests DESTINATION unittest)

@@ -17,16 +17,24 @@
 package rootcoord
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -203,4 +211,139 @@ func getRateLimitConfig(properties map[string]string, configKey string, configVa
 	}
 
 	return configValue
+}
+
+func getQueryCoordMetrics(ctx context.Context, queryCoord types.QueryCoordClient) (*metricsinfo.QueryCoordTopology, error) {
+	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+	if err != nil {
+		return nil, err
+	}
+
+	rsp, err := queryCoord.GetMetrics(ctx, req)
+	if err = merr.CheckRPCCall(rsp, err); err != nil {
+		return nil, err
+	}
+	queryCoordTopology := &metricsinfo.QueryCoordTopology{}
+	if err := metricsinfo.UnmarshalTopology(rsp.GetResponse(), queryCoordTopology); err != nil {
+		return nil, err
+	}
+
+	return queryCoordTopology, nil
+}
+
+func getDataCoordMetrics(ctx context.Context, dataCoord types.DataCoordClient) (*metricsinfo.DataCoordTopology, error) {
+	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+	if err != nil {
+		return nil, err
+	}
+
+	rsp, err := dataCoord.GetMetrics(ctx, req)
+	if err = merr.CheckRPCCall(rsp, err); err != nil {
+		return nil, err
+	}
+	dataCoordTopology := &metricsinfo.DataCoordTopology{}
+	if err = metricsinfo.UnmarshalTopology(rsp.GetResponse(), dataCoordTopology); err != nil {
+		return nil, err
+	}
+
+	return dataCoordTopology, nil
+}
+
+func getProxyMetrics(ctx context.Context, proxies proxyutil.ProxyClientManagerInterface) ([]*metricsinfo.ProxyInfos, error) {
+	resp, err := proxies.GetProxyMetrics(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ret := make([]*metricsinfo.ProxyInfos, 0, len(resp))
+	for _, rsp := range resp {
+		proxyMetric := &metricsinfo.ProxyInfos{}
+		err = metricsinfo.UnmarshalComponentInfos(rsp.GetResponse(), proxyMetric)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, proxyMetric)
+	}
+
+	return ret, nil
+}
+
+func CheckTimeTickLagExceeded(ctx context.Context, queryCoord types.QueryCoordClient, dataCoord types.DataCoordClient, maxDelay time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, GetMetricsTimeout)
+	defer cancel()
+
+	now := time.Now()
+	group := &errgroup.Group{}
+	queryNodeTTDelay := typeutil.NewConcurrentMap[string, time.Duration]()
+	dataNodeTTDelay := typeutil.NewConcurrentMap[string, time.Duration]()
+
+	group.Go(func() error {
+		queryCoordTopology, err := getQueryCoordMetrics(ctx, queryCoord)
+		if err != nil {
+			return err
+		}
+
+		for _, queryNodeMetric := range queryCoordTopology.Cluster.ConnectedNodes {
+			qm := queryNodeMetric.QuotaMetrics
+			if qm != nil {
+				if qm.Fgm.NumFlowGraph > 0 && qm.Fgm.MinFlowGraphChannel != "" {
+					minTt, _ := tsoutil.ParseTS(qm.Fgm.MinFlowGraphTt)
+					delay := now.Sub(minTt)
+
+					if delay.Milliseconds() >= maxDelay.Milliseconds() {
+						queryNodeTTDelay.Insert(qm.Fgm.MinFlowGraphChannel, delay)
+					}
+				}
+			}
+		}
+		return nil
+	})
+
+	// get Data cluster metrics
+	group.Go(func() error {
+		dataCoordTopology, err := getDataCoordMetrics(ctx, dataCoord)
+		if err != nil {
+			return err
+		}
+
+		for _, dataNodeMetric := range dataCoordTopology.Cluster.ConnectedDataNodes {
+			dm := dataNodeMetric.QuotaMetrics
+			if dm != nil {
+				if dm.Fgm.NumFlowGraph > 0 && dm.Fgm.MinFlowGraphChannel != "" {
+					minTt, _ := tsoutil.ParseTS(dm.Fgm.MinFlowGraphTt)
+					delay := now.Sub(minTt)
+
+					if delay.Milliseconds() >= maxDelay.Milliseconds() {
+						dataNodeTTDelay.Insert(dm.Fgm.MinFlowGraphChannel, delay)
+					}
+				}
+			}
+		}
+		return nil
+	})
+
+	err := group.Wait()
+	if err != nil {
+		return err
+	}
+
+	var maxLagChannel string
+	var maxLag time.Duration
+	findMaxLagChannel := func(params ...*typeutil.ConcurrentMap[string, time.Duration]) {
+		for _, param := range params {
+			param.Range(func(k string, v time.Duration) bool {
+				if v > maxLag {
+					maxLag = v
+					maxLagChannel = k
+				}
+				return true
+			})
+		}
+	}
+	findMaxLagChannel(queryNodeTTDelay, dataNodeTTDelay)
+
+	if maxLag > 0 && len(maxLagChannel) != 0 {
+		return fmt.Errorf("max timetick lag execced threhold, max timetick lag:%s on channel:%s", maxLag, maxLagChannel)
+	}
+	return nil
 }

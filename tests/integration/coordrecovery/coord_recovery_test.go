@@ -24,9 +24,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -296,5 +296,6 @@ func (s *CoordSwitchSuite) TestCoordSwitch() {
 }
 
 func TestCoordSwitch(t *testing.T) {
+	t.Skip("https://github.com/milvus-io/milvus/issues/33823")
 	suite.Run(t, new(CoordSwitchSuite))
 }

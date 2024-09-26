@@ -37,6 +37,7 @@ constexpr const char* METRIC_TYPE = "metric_type";
 constexpr const char* ASCENDING_SORT = "STL_SORT";
 constexpr const char* MARISA_TRIE = "Trie";
 constexpr const char* INVERTED_INDEX_TYPE = "INVERTED";
+constexpr const char* BITMAP_INDEX_TYPE = "BITMAP";
 
 // index meta
 constexpr const char* COLLECTION_ID = "collection_id";
@@ -47,6 +48,12 @@ constexpr const char* INDEX_BUILD_ID = "index_build_id";
 constexpr const char* INDEX_ID = "index_id";
 constexpr const char* INDEX_VERSION = "index_version";
 constexpr const char* INDEX_ENGINE_VERSION = "index_engine_version";
+
+// below meta key of store bitmap indexes
+constexpr const char* BITMAP_INDEX_DATA = "bitmap_index_data";
+constexpr const char* BITMAP_INDEX_META = "bitmap_index_meta";
+constexpr const char* BITMAP_INDEX_LENGTH = "bitmap_index_length";
+constexpr const char* BITMAP_INDEX_NUM_ROWS = "bitmap_index_num_rows";
 
 // VecIndex file metas
 constexpr const char* DISK_ANN_PREFIX_PATH = "index_prefix";

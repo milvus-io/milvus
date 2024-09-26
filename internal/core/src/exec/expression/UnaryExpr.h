@@ -206,12 +206,8 @@ struct UnaryIndexFuncForMatch {
                       !std::is_same_v<T, std::string>) {
             PanicInfo(Unsupported, "regex query is only supported on string");
         } else {
-            PatternMatchTranslator translator;
-            auto regex_pattern = translator(val);
-            RegexMatcher matcher(regex_pattern);
-
-            if (index->SupportRegexQuery()) {
-                return index->RegexQuery(regex_pattern);
+            if (index->SupportPatternMatch()) {
+                return index->PatternMatch(val);
             }
             if (!index->HasRawData()) {
                 PanicInfo(Unsupported,
@@ -222,6 +218,9 @@ struct UnaryIndexFuncForMatch {
             // retrieve raw data to do brute force query, may be very slow.
             auto cnt = index->Count();
             TargetBitmap res(cnt);
+            PatternMatchTranslator translator;
+            auto regex_pattern = translator(val);
+            RegexMatcher matcher(regex_pattern);
             for (int64_t i = 0; i < cnt; i++) {
                 auto raw = index->Reverse_Lookup(i);
                 res[i] = matcher(raw);
@@ -310,6 +309,14 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplArray();
 
+    template <typename T>
+    VectorPtr
+    ExecRangeVisitorImplArrayForIndex();
+
+    template <typename T>
+    VectorPtr
+    ExecArrayEqualForIndex(bool reverse);
+
     // Check overflow and cache result for performace
     template <typename T>
     ColumnVectorPtr
@@ -317,7 +324,11 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     template <typename T>
     bool
-    CanUseIndex() const;
+    CanUseIndex();
+
+    template <typename T>
+    bool
+    CanUseIndexForArray();
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;

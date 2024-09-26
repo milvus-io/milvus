@@ -15,15 +15,18 @@
 
 namespace milvus::test {
 inline auto
-GenColumnInfo(int64_t field_id,
-              proto::schema::DataType field_type,
-              bool auto_id,
-              bool is_pk) {
+GenColumnInfo(
+    int64_t field_id,
+    proto::schema::DataType field_type,
+    bool auto_id,
+    bool is_pk,
+    proto::schema::DataType element_type = proto::schema::DataType::None) {
     auto column_info = new proto::plan::ColumnInfo();
     column_info->set_field_id(field_id);
     column_info->set_data_type(field_type);
     column_info->set_is_autoid(auto_id);
     column_info->set_is_primary_key(is_pk);
+    column_info->set_element_type(element_type);
     return column_info;
 }
 

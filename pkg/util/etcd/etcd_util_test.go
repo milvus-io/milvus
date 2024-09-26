@@ -104,8 +104,8 @@ func Test_SaveByBatch(t *testing.T) {
 			return nil
 		}
 
-		maxTxnNum = 2
-		err := SaveByBatch(kvs, saveFn)
+		limit := 2
+		err := SaveByBatchWithLimit(kvs, limit, saveFn)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, group)
 		assert.Equal(t, 0, count)
@@ -126,8 +126,8 @@ func Test_SaveByBatch(t *testing.T) {
 			return nil
 		}
 
-		maxTxnNum = 2
-		err := SaveByBatch(kvs, saveFn)
+		limit := 2
+		err := SaveByBatchWithLimit(kvs, limit, saveFn)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, group)
 		assert.Equal(t, 3, count)
@@ -142,8 +142,8 @@ func Test_SaveByBatch(t *testing.T) {
 			"k2": "v2",
 			"k3": "v3",
 		}
-		maxTxnNum = 2
-		err := SaveByBatch(kvs, saveFn)
+		limit := 2
+		err := SaveByBatchWithLimit(kvs, limit, saveFn)
 		assert.Error(t, err)
 	})
 }
@@ -160,8 +160,8 @@ func Test_RemoveByBatch(t *testing.T) {
 			return nil
 		}
 
-		maxTxnNum = 2
-		err := RemoveByBatch(kvs, removeFn)
+		limit := 2
+		err := RemoveByBatchWithLimit(kvs, limit, removeFn)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, group)
 		assert.Equal(t, 0, count)
@@ -178,8 +178,8 @@ func Test_RemoveByBatch(t *testing.T) {
 			return nil
 		}
 
-		maxTxnNum = 2
-		err := RemoveByBatch(kvs, removeFn)
+		limit := 2
+		err := RemoveByBatchWithLimit(kvs, limit, removeFn)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, group)
 		assert.Equal(t, 5, count)
@@ -190,8 +190,8 @@ func Test_RemoveByBatch(t *testing.T) {
 			return errors.New("mock")
 		}
 		kvs := []string{"k1", "k2", "k3", "k4", "k5"}
-		maxTxnNum = 2
-		err := RemoveByBatch(kvs, removeFn)
+		limit := 2
+		err := RemoveByBatchWithLimit(kvs, limit, removeFn)
 		assert.Error(t, err)
 	})
 }

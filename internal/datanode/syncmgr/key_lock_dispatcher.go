@@ -6,9 +6,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
+//go:generate mockery --name=Task --structname=MockTask --output=./  --filename=mock_task.go --with-expecter --inpackage
 type Task interface {
 	SegmentID() int64
-	CalcTargetSegment() (int64, error)
 	Checkpoint() *msgpb.MsgPosition
 	StartPosition() *msgpb.MsgPosition
 	ChannelName() string

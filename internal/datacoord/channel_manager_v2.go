@@ -23,14 +23,15 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -48,7 +49,6 @@ type ChannelManager interface {
 	FindWatcher(channel string) (UniqueID, error)
 
 	GetChannel(nodeID int64, channel string) (RWChannel, bool)
-	GetNodeIDByChannelName(channel string) (int64, bool)
 	GetNodeChannelsByCollectionID(collectionID int64) map[int64][]string
 	GetChannelsByCollectionID(collectionID int64) []RWChannel
 	GetChannelNamesByCollectionID(collectionID int64) []string
@@ -62,7 +62,7 @@ type SubCluster interface {
 
 type ChannelManagerImplV2 struct {
 	cancel context.CancelFunc
-	mu     sync.RWMutex
+	mu     lock.RWMutex
 	wg     sync.WaitGroup
 
 	h          Handler
@@ -351,31 +351,10 @@ func (m *ChannelManagerImplV2) GetChannel(nodeID int64, channelName string) (RWC
 	return nil, false
 }
 
-func (m *ChannelManagerImplV2) GetNodeIDByChannelName(channel string) (int64, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	nodeChannels := m.store.GetNodeChannelsBy(
-		WithoutBufferNode(),
-		WithChannelName(channel))
-
-	if len(nodeChannels) > 0 {
-		return nodeChannels[0].NodeID, true
-	}
-
-	return 0, false
-}
-
 func (m *ChannelManagerImplV2) GetNodeChannelsByCollectionID(collectionID int64) map[int64][]string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	nodeChs := make(map[UniqueID][]string)
-	nodeChannels := m.store.GetNodeChannelsBy(
-		WithoutBufferNode(),
-		WithCollectionIDV2(collectionID))
-	lo.ForEach(nodeChannels, func(info *NodeChannelInfo, _ int) {
-		nodeChs[info.NodeID] = lo.Keys(info.Channels)
-	})
-	return nodeChs
+	return m.store.GetNodeChannelsByCollectionID(collectionID)
 }
 
 func (m *ChannelManagerImplV2) GetChannelsByCollectionID(collectionID int64) []RWChannel {
@@ -405,20 +384,19 @@ func (m *ChannelManagerImplV2) FindWatcher(channel string) (UniqueID, error) {
 
 	infos := m.store.GetNodesChannels()
 	for _, info := range infos {
-		for _, channelInfo := range info.Channels {
-			if channelInfo.GetName() == channel {
-				return info.NodeID, nil
-			}
+		_, ok := info.Channels[channel]
+		if ok {
+			return info.NodeID, nil
 		}
 	}
 
 	// channel in buffer
 	bufferInfo := m.store.GetBufferChannelInfo()
-	for _, channelInfo := range bufferInfo.Channels {
-		if channelInfo.GetName() == channel {
-			return bufferID, errChannelInBuffer
-		}
+	_, ok := bufferInfo.Channels[channel]
+	if ok {
+		return bufferID, errChannelInBuffer
 	}
+
 	return 0, errChannelNotWatched
 }
 
@@ -510,6 +488,7 @@ func (m *ChannelManagerImplV2) advanceStandbys(_ context.Context, standbys []*No
 				zap.Int64("nodeID", nodeAssign.NodeID),
 				zap.Strings("channels", chNames),
 			)
+			continue
 		}
 
 		log.Info("Reassign standby channels to node",
@@ -529,6 +508,7 @@ func (m *ChannelManagerImplV2) advanceToNotifies(ctx context.Context, toNotifies
 		if channelCount == 0 {
 			continue
 		}
+		nodeID := nodeAssign.NodeID
 
 		var (
 			succeededChannels = make([]RWChannel, 0, channelCount)
@@ -548,7 +528,7 @@ func (m *ChannelManagerImplV2) advanceToNotifies(ctx context.Context, toNotifies
 			tmpWatchInfo.Vchan = m.h.GetDataVChanPositions(innerCh, allPartitionID)
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
-				err := m.Notify(ctx, nodeAssign.NodeID, tmpWatchInfo)
+				err := m.Notify(ctx, nodeID, tmpWatchInfo)
 				return innerCh, err
 			})
 			futures = append(futures, future)
@@ -591,6 +571,7 @@ func (m *ChannelManagerImplV2) advanceToChecks(ctx context.Context, toChecks []*
 			continue
 		}
 
+		nodeID := nodeAssign.NodeID
 		futures := make([]*conc.Future[any], 0, len(nodeAssign.Channels))
 
 		chNames := lo.Keys(nodeAssign.Channels)
@@ -603,7 +584,7 @@ func (m *ChannelManagerImplV2) advanceToChecks(ctx context.Context, toChecks []*
 			innerCh := ch
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
-				successful, got := m.Check(ctx, nodeAssign.NodeID, innerCh.GetWatchInfo())
+				successful, got := m.Check(ctx, nodeID, innerCh.GetWatchInfo())
 				if got {
 					return poolResult{
 						successful: successful,
@@ -717,11 +698,22 @@ func (m *ChannelManagerImplV2) fillChannelWatchInfo(op *ChannelOp) error {
 			return err
 		}
 
+		schema := ch.GetSchema()
+		if schema == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			collInfo, err := m.h.GetCollection(ctx, ch.GetCollectionID())
+			if err != nil {
+				return err
+			}
+			schema = collInfo.Schema
+		}
+
 		info := &datapb.ChannelWatchInfo{
 			Vchan:   reduceVChanSize(vcInfo),
 			StartTs: startTs,
 			State:   inferStateByOpType(op.Type),
-			Schema:  ch.GetSchema(),
+			Schema:  schema,
 			OpID:    opID,
 		}
 		ch.UpdateWatchInfo(info)

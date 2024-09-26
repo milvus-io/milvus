@@ -168,6 +168,17 @@ func newTestSchema() *schemapb.CollectionSchema {
 	}
 }
 
+func newTestScalarClusteringKeySchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name:        "test_scalar_clustering",
+		Description: "schema for test scalar clustering compaction",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "field1", IsPrimaryKey: true, IsClusteringKey: true, Description: "field no.1", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "field2", IsPrimaryKey: false, Description: "field no.2", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+}
+
 type mockDataNodeClient struct {
 	id                  int64
 	state               commonpb.StateCode
@@ -265,7 +276,7 @@ func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 	}, nil
 }
 
-func (c *mockDataNodeClient) Compaction(ctx context.Context, req *datapb.CompactionPlan, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *mockDataNodeClient) CompactionV2(ctx context.Context, req *datapb.CompactionPlan, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	if c.ch != nil {
 		c.ch <- struct{}{}
 		if c.compactionResp != nil {
@@ -317,6 +328,14 @@ func (c *mockDataNodeClient) QueryImport(ctx context.Context, req *datapb.QueryI
 
 func (c *mockDataNodeClient) DropImport(ctx context.Context, req *datapb.DropImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
+func (c *mockDataNodeClient) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest, opts ...grpc.CallOption) (*datapb.QuerySlotResponse, error) {
+	return &datapb.QuerySlotResponse{Status: merr.Success()}, nil
+}
+
+func (c *mockDataNodeClient) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
 }
 
 func (c *mockDataNodeClient) Stop() error {
@@ -601,18 +620,16 @@ func (m *mockRootCoordClient) GetMetrics(ctx context.Context, req *milvuspb.GetM
 	}, nil
 }
 
-type mockCompactionTrigger struct {
-	methods map[string]interface{}
+func (m *mockRootCoordClient) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACMetaRequest, opts ...grpc.CallOption) (*milvuspb.BackupRBACMetaResponse, error) {
+	panic("not implemented") // TODO: Implement
 }
 
-// triggerCompaction trigger a compaction if any compaction condition satisfy.
-func (t *mockCompactionTrigger) triggerCompaction() error {
-	if f, ok := t.methods["triggerCompaction"]; ok {
-		if ff, ok := f.(func() error); ok {
-			return ff()
-		}
-	}
-	panic("not implemented")
+func (m *mockRootCoordClient) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+type mockCompactionTrigger struct {
+	methods map[string]interface{}
 }
 
 // triggerSingleCompaction trigerr a compaction bundled with collection-partiiton-channel-segment
@@ -625,9 +642,9 @@ func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID, partitionI
 	panic("not implemented")
 }
 
-// forceTriggerCompaction force to start a compaction
-func (t *mockCompactionTrigger) forceTriggerCompaction(collectionID int64) (UniqueID, error) {
-	if f, ok := t.methods["forceTriggerCompaction"]; ok {
+// triggerManualCompaction force to start a compaction
+func (t *mockCompactionTrigger) triggerManualCompaction(collectionID int64) (UniqueID, error) {
+	if f, ok := t.methods["triggerManualCompaction"]; ok {
 		if ff, ok := f.(func(collectionID int64) (UniqueID, error)); ok {
 			return ff(collectionID)
 		}

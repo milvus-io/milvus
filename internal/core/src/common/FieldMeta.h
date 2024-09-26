@@ -136,6 +136,7 @@ class FieldMeta {
         if (is_vector()) {
             return GetDataTypeSize(type_, get_dim());
         } else if (is_string()) {
+            Assert(string_info_.has_value());
             return string_info_->max_length;
         } else if (IsVariableDataType(type_)) {
             return type_ == DataType::ARRAY ? ARRAY_SIZE : JSON_SIZE;

@@ -19,7 +19,6 @@ package datacoord
 
 import (
 	"context"
-	"sync"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 func TestReloadFromKV(t *testing.T) {
@@ -95,6 +95,20 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 				Key:   common.IndexTypeKey,
 				Value: "FLAT",
 			},
+			{
+				Key:   common.MetricTypeKey,
+				Value: "L2",
+			},
+		}
+		userIndexParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.IndexTypeKey,
+				Value: common.AutoIndexName,
+			},
+			{
+				Key:   common.MetricTypeKey,
+				Value: "L2",
+			},
 		}
 	)
 
@@ -114,7 +128,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		IndexParams:     indexParams,
 		Timestamp:       0,
 		IsAutoIndex:     false,
-		UserIndexParams: indexParams,
+		UserIndexParams: userIndexParams,
 	}
 
 	t.Run("can create index", func(t *testing.T) {
@@ -132,7 +146,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 			TypeParams:      typeParams,
 			IndexParams:     indexParams,
 			IsAutoIndex:     false,
-			UserIndexParams: indexParams,
+			UserIndexParams: userIndexParams,
 		}
 
 		err = m.CreateIndex(index)
@@ -162,6 +176,32 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 
 		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
 		req.UserIndexParams = req.IndexParams
+		tmpIndexID, err = m.CanCreateIndex(req)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), tmpIndexID)
+
+		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserIndexParams = req.IndexParams
+		tmpIndexID, err = m.CanCreateIndex(req)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), tmpIndexID)
+
+		// when we use autoindex, it is possible autoindex changes default metric type
+		// if user does not specify metric type, we should follow the very first autoindex config
+		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserIndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "AUTOINDEX"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserAutoindexMetricTypeSpecified = false
+		tmpIndexID, err = m.CanCreateIndex(req)
+		assert.NoError(t, err)
+		assert.Equal(t, indexID, tmpIndexID)
+		// req should follow the meta
+		assert.Equal(t, "L2", req.GetUserIndexParams()[1].Value)
+		assert.Equal(t, "L2", req.GetIndexParams()[1].Value)
+
+		// if autoindex specify metric type, so the index param change is from user, return error
+		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserIndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "AUTOINDEX"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserAutoindexMetricTypeSpecified = true
 		tmpIndexID, err = m.CanCreateIndex(req)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
@@ -264,7 +304,7 @@ func TestMeta_HasSameReq(t *testing.T) {
 
 func newSegmentIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 	return &indexMeta{
-		RWMutex:              sync.RWMutex{},
+		RWMutex:              lock.RWMutex{},
 		ctx:                  context.Background(),
 		catalog:              catalog,
 		indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
@@ -693,7 +733,8 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 }
 
 func TestMeta_GetSegmentIndexes(t *testing.T) {
-	m := createMetaTable(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
+	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
+	m := createMeta(catalog, nil, createIndexMeta(catalog))
 
 	t.Run("success", func(t *testing.T) {
 		segIndexes := m.indexMeta.getSegmentIndexes(segID)
@@ -1075,18 +1116,18 @@ func TestMeta_UpdateVersion(t *testing.T) {
 	).Return(errors.New("fail"))
 
 	t.Run("success", func(t *testing.T) {
-		err := m.UpdateVersion(buildID, nodeID)
+		err := m.UpdateVersion(buildID)
 		assert.NoError(t, err)
 	})
 
 	t.Run("fail", func(t *testing.T) {
 		m.catalog = ec
-		err := m.UpdateVersion(buildID, nodeID)
+		err := m.UpdateVersion(buildID)
 		assert.Error(t, err)
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.UpdateVersion(buildID+1, nodeID)
+		err := m.UpdateVersion(buildID + 1)
 		assert.Error(t, err)
 	})
 }
@@ -1143,18 +1184,18 @@ func TestMeta_BuildIndex(t *testing.T) {
 	).Return(errors.New("fail"))
 
 	t.Run("success", func(t *testing.T) {
-		err := m.BuildIndex(buildID)
+		err := m.BuildIndex(buildID, nodeID)
 		assert.NoError(t, err)
 	})
 
 	t.Run("fail", func(t *testing.T) {
 		m.catalog = ec
-		err := m.BuildIndex(buildID)
+		err := m.BuildIndex(buildID, nodeID)
 		assert.Error(t, err)
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.BuildIndex(buildID + 1)
+		err := m.BuildIndex(buildID+1, nodeID)
 		assert.Error(t, err)
 	})
 }
@@ -1330,7 +1371,8 @@ func TestRemoveSegmentIndex(t *testing.T) {
 }
 
 func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
-	m := createMetaTable(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
+	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
+	m := createMeta(catalog, nil, createIndexMeta(catalog))
 
 	// normal case
 	segmentIDs := make([]int64, 0, 11)

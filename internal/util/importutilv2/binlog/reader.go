@@ -18,7 +18,6 @@ package binlog
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -124,7 +123,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage
 		for _, rows := range rowsSet {
 			for _, row := range rows.([]string) {
 				dl := &storage.DeleteLog{}
-				err = json.Unmarshal([]byte(row), dl)
+				err = dl.Parse(row)
 				if err != nil {
 					return nil, err
 				}

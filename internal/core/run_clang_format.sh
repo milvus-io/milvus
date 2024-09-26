@@ -7,7 +7,7 @@ fi
 CorePath=$1
 
 formatThis() {
-    find "$1" | grep -E "(*\.cpp|*\.h|*\.cc)$" | grep -v "gen_tools/templates" | grep -v "\.pb\." | grep -v "tantivy-binding.h" | xargs clang-format-10 -i
+    find "$1" | grep -E "(*\.cpp|*\.h|*\.cc)$" | grep -v "gen_tools/templates" | grep -v "\.pb\." | grep -v "tantivy-binding.h" | xargs clang-format-12 -i
 }
 
 formatThis "${CorePath}/src"

@@ -317,7 +317,7 @@ func (node *QueryNode) queryStreamSegments(ctx context.Context, req *querypb.Que
 	}
 
 	// Send task to scheduler and wait until it finished.
-	task := tasks.NewQueryStreamTask(ctx, collection, node.manager, req, srv)
+	task := tasks.NewQueryStreamTask(ctx, collection, node.manager, req, srv, node.streamBatchSzie)
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to add query task into scheduler", zap.Error(err))
 		return err

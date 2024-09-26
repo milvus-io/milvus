@@ -19,6 +19,7 @@ package ratelimitutil
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -130,7 +131,7 @@ func TestRateLimiterNodeGetQuotaExceededError(t *testing.T) {
 		err := limitNode.GetQuotaExceededError(internalpb.RateType_DMLInsert)
 		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 		// reference: ratelimitutil.GetQuotaErrorString(errCode)
-		assert.True(t, strings.Contains(err.Error(), "deactivated"))
+		assert.True(t, strings.Contains(err.Error(), "disabled"))
 	})
 
 	t.Run("read", func(t *testing.T) {
@@ -139,7 +140,7 @@ func TestRateLimiterNodeGetQuotaExceededError(t *testing.T) {
 		err := limitNode.GetQuotaExceededError(internalpb.RateType_DQLSearch)
 		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 		// reference: ratelimitutil.GetQuotaErrorString(errCode)
-		assert.True(t, strings.Contains(err.Error(), "deactivated"))
+		assert.True(t, strings.Contains(err.Error(), "disabled"))
 	})
 
 	t.Run("unknown", func(t *testing.T) {
@@ -153,6 +154,7 @@ func TestRateLimiterNodeGetQuotaExceededError(t *testing.T) {
 func TestRateLimiterTreeClearInvalidLimiterNode(t *testing.T) {
 	root := NewRateLimiterNode(internalpb.RateScope_Cluster)
 	tree := NewRateLimiterTree(root)
+	tree.lastClearTime = time.Now().Add(-1 * clearInvalidNodeInterval * 2)
 
 	generateNodeFFunc := func(level internalpb.RateScope) func() *RateLimiterNode {
 		return func() *RateLimiterNode {

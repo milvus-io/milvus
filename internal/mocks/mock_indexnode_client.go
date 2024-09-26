@@ -142,6 +142,76 @@ func (_c *MockIndexNodeClient_CreateJob_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// CreateJobV2 provides a mock function with given fields: ctx, in, opts
+func (_m *MockIndexNodeClient) CreateJobV2(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.CreateJobV2Request, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.CreateJobV2Request, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.CreateJobV2Request, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockIndexNodeClient_CreateJobV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateJobV2'
+type MockIndexNodeClient_CreateJobV2_Call struct {
+	*mock.Call
+}
+
+// CreateJobV2 is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *indexpb.CreateJobV2Request
+//   - opts ...grpc.CallOption
+func (_e *MockIndexNodeClient_Expecter) CreateJobV2(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_CreateJobV2_Call {
+	return &MockIndexNodeClient_CreateJobV2_Call{Call: _e.mock.On("CreateJobV2",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockIndexNodeClient_CreateJobV2_Call) Run(run func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption)) *MockIndexNodeClient_CreateJobV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*indexpb.CreateJobV2Request), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockIndexNodeClient_CreateJobV2_Call) Return(_a0 *commonpb.Status, _a1 error) *MockIndexNodeClient_CreateJobV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockIndexNodeClient_CreateJobV2_Call) RunAndReturn(run func(context.Context, *indexpb.CreateJobV2Request, ...grpc.CallOption) (*commonpb.Status, error)) *MockIndexNodeClient_CreateJobV2_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropJobs provides a mock function with given fields: ctx, in, opts
 func (_m *MockIndexNodeClient) DropJobs(ctx context.Context, in *indexpb.DropJobsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
@@ -208,6 +278,76 @@ func (_c *MockIndexNodeClient_DropJobs_Call) Return(_a0 *commonpb.Status, _a1 er
 }
 
 func (_c *MockIndexNodeClient_DropJobs_Call) RunAndReturn(run func(context.Context, *indexpb.DropJobsRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockIndexNodeClient_DropJobs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropJobsV2 provides a mock function with given fields: ctx, in, opts
+func (_m *MockIndexNodeClient) DropJobsV2(ctx context.Context, in *indexpb.DropJobsV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.DropJobsV2Request, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.DropJobsV2Request, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.DropJobsV2Request, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockIndexNodeClient_DropJobsV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropJobsV2'
+type MockIndexNodeClient_DropJobsV2_Call struct {
+	*mock.Call
+}
+
+// DropJobsV2 is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *indexpb.DropJobsV2Request
+//   - opts ...grpc.CallOption
+func (_e *MockIndexNodeClient_Expecter) DropJobsV2(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_DropJobsV2_Call {
+	return &MockIndexNodeClient_DropJobsV2_Call{Call: _e.mock.On("DropJobsV2",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockIndexNodeClient_DropJobsV2_Call) Run(run func(ctx context.Context, in *indexpb.DropJobsV2Request, opts ...grpc.CallOption)) *MockIndexNodeClient_DropJobsV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*indexpb.DropJobsV2Request), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockIndexNodeClient_DropJobsV2_Call) Return(_a0 *commonpb.Status, _a1 error) *MockIndexNodeClient_DropJobsV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockIndexNodeClient_DropJobsV2_Call) RunAndReturn(run func(context.Context, *indexpb.DropJobsV2Request, ...grpc.CallOption) (*commonpb.Status, error)) *MockIndexNodeClient_DropJobsV2_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -558,6 +698,76 @@ func (_c *MockIndexNodeClient_QueryJobs_Call) Return(_a0 *indexpb.QueryJobsRespo
 }
 
 func (_c *MockIndexNodeClient_QueryJobs_Call) RunAndReturn(run func(context.Context, *indexpb.QueryJobsRequest, ...grpc.CallOption) (*indexpb.QueryJobsResponse, error)) *MockIndexNodeClient_QueryJobs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryJobsV2 provides a mock function with given fields: ctx, in, opts
+func (_m *MockIndexNodeClient) QueryJobsV2(ctx context.Context, in *indexpb.QueryJobsV2Request, opts ...grpc.CallOption) (*indexpb.QueryJobsV2Response, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *indexpb.QueryJobsV2Response
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.QueryJobsV2Request, ...grpc.CallOption) (*indexpb.QueryJobsV2Response, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.QueryJobsV2Request, ...grpc.CallOption) *indexpb.QueryJobsV2Response); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*indexpb.QueryJobsV2Response)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.QueryJobsV2Request, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockIndexNodeClient_QueryJobsV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryJobsV2'
+type MockIndexNodeClient_QueryJobsV2_Call struct {
+	*mock.Call
+}
+
+// QueryJobsV2 is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *indexpb.QueryJobsV2Request
+//   - opts ...grpc.CallOption
+func (_e *MockIndexNodeClient_Expecter) QueryJobsV2(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_QueryJobsV2_Call {
+	return &MockIndexNodeClient_QueryJobsV2_Call{Call: _e.mock.On("QueryJobsV2",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockIndexNodeClient_QueryJobsV2_Call) Run(run func(ctx context.Context, in *indexpb.QueryJobsV2Request, opts ...grpc.CallOption)) *MockIndexNodeClient_QueryJobsV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*indexpb.QueryJobsV2Request), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockIndexNodeClient_QueryJobsV2_Call) Return(_a0 *indexpb.QueryJobsV2Response, _a1 error) *MockIndexNodeClient_QueryJobsV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockIndexNodeClient_QueryJobsV2_Call) RunAndReturn(run func(context.Context, *indexpb.QueryJobsV2Request, ...grpc.CallOption) (*indexpb.QueryJobsV2Response, error)) *MockIndexNodeClient_QueryJobsV2_Call {
 	_c.Call.Return(run)
 	return _c
 }

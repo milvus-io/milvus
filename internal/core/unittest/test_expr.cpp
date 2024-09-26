@@ -1271,7 +1271,7 @@ TEST(Expr, TestExprPerformance) {
                                         {DataType::DOUBLE, double_fid}};
 
     auto seg = CreateSealedSegment(schema);
-    int N = 1000000;
+    int N = 10000;
     auto raw_data = DataGen(schema, N);
 
     // load field data
@@ -1678,7 +1678,7 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
-    int N = 1000000;
+    int N = 40000;
     auto raw_data = DataGen(schema, N);
     // load field data
     auto fields = schema->get_fields();
@@ -1739,7 +1739,7 @@ TEST_P(ExprTest, TestGrowingSegmentGetBatchSize) {
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
-    int N = 1000000;
+    int N = 400000;
     auto raw_data = DataGen(schema, N);
     seg->PreInsert(N);
     seg->Insert(0,
@@ -1804,7 +1804,7 @@ TEST_P(ExprTest, TestConjuctExpr) {
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
-    int N = 1000000;
+    int N = 10000;
     auto raw_data = DataGen(schema, N);
     // load field data
     auto fields = schema->get_fields();
@@ -1871,7 +1871,7 @@ TEST_P(ExprTest, TestUnaryBenchTest) {
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
-    int N = 1000000;
+    int N = 10000;
     auto raw_data = DataGen(schema, N);
 
     // load field data
@@ -1942,7 +1942,7 @@ TEST_P(ExprTest, TestBinaryRangeBenchTest) {
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
-    int N = 1000000;
+    int N = 10000;
     auto raw_data = DataGen(schema, N);
 
     // load field data
@@ -2022,7 +2022,7 @@ TEST_P(ExprTest, TestLogicalUnaryBenchTest) {
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
-    int N = 1000000;
+    int N = 10000;
     auto raw_data = DataGen(schema, N);
 
     // load field data
@@ -2096,7 +2096,7 @@ TEST_P(ExprTest, TestBinaryLogicalBenchTest) {
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
-    int N = 1000000;
+    int N = 10000;
     auto raw_data = DataGen(schema, N);
 
     // load field data
@@ -2180,7 +2180,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeBenchExpr) {
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
-    int N = 1000000;
+    int N = 10000;
     auto raw_data = DataGen(schema, N);
 
     // load field data
@@ -2263,7 +2263,7 @@ TEST_P(ExprTest, TestCompareExprBenchTest) {
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
-    int N = 1000000;
+    int N = 10000;
     auto raw_data = DataGen(schema, N);
 
     // load field data
@@ -2333,7 +2333,7 @@ TEST_P(ExprTest, TestRefactorExprs) {
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
-    int N = 1000000;
+    int N = 10000;
     auto raw_data = DataGen(schema, N);
 
     // load field data

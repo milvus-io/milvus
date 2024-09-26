@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 const (
@@ -147,7 +148,7 @@ func (s *importScheduler) peekSlots() map[int64]int64 {
 		return s.info.NodeID
 	})
 	nodeSlots := make(map[int64]int64)
-	mu := &sync.Mutex{}
+	mu := &lock.Mutex{}
 	wg := &sync.WaitGroup{}
 	for _, nodeID := range nodeIDs {
 		wg.Add(1)
@@ -343,10 +344,10 @@ func (s *importScheduler) processFailed(task ImportTask) {
 	if task.GetType() == ImportTaskType {
 		segments := task.(*importTask).GetSegmentIDs()
 		for _, segment := range segments {
-			err := s.meta.DropSegment(segment)
+			op := UpdateStatusOperator(segment, commonpb.SegmentState_Dropped)
+			err := s.meta.UpdateSegmentsInfo(op)
 			if err != nil {
-				log.Warn("drop import segment failed",
-					WrapTaskLog(task, zap.Int64("segment", segment), zap.Error(err))...)
+				log.Warn("drop import segment failed", WrapTaskLog(task, zap.Int64("segment", segment), zap.Error(err))...)
 				return
 			}
 		}

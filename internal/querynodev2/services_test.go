@@ -20,17 +20,19 @@ import (
 	"encoding/json"
 	"io"
 	"math/rand"
+	"path"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/gogo/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -93,7 +95,6 @@ func (suite *ServiceSuite) SetupSuite() {
 	// init param
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GCEnabled.Key, "false")
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CacheEnabled.Key, "false")
 
 	suite.rootPath = suite.T().Name()
 	suite.collectionID = 111
@@ -1707,7 +1708,7 @@ func (suite *ServiceSuite) TestShowConfigurations_Normal() {
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		Pattern: "Cache.enabled",
+		Pattern: "mmap.growingMmapEnabled",
 	}
 
 	resp, err := suite.node.ShowConfigurations(ctx, req)
@@ -1723,7 +1724,7 @@ func (suite *ServiceSuite) TestShowConfigurations_Failed() {
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		Pattern: "Cache.enabled",
+		Pattern: "mmap.growingMmapEnabled",
 	}
 
 	// node not healthy
@@ -1748,9 +1749,32 @@ func (suite *ServiceSuite) TestGetMetric_Normal() {
 		Request: string(mReq),
 	}
 
+	sd1 := delegator.NewMockShardDelegator(suite.T())
+	sd1.EXPECT().Collection().Return(100)
+	sd1.EXPECT().GetDeleteBufferSize().Return(10, 1000)
+	sd1.EXPECT().Close().Maybe()
+	suite.node.delegators.Insert("qn_unitest_dml_0_100v0", sd1)
+
+	sd2 := delegator.NewMockShardDelegator(suite.T())
+	sd2.EXPECT().Collection().Return(100)
+	sd2.EXPECT().GetDeleteBufferSize().Return(10, 1000)
+	sd2.EXPECT().Close().Maybe()
+	suite.node.delegators.Insert("qn_unitest_dml_1_100v1", sd2)
+
 	resp, err := suite.node.GetMetrics(ctx, req)
+	err = merr.CheckRPCCall(resp, err)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+	info := &metricsinfo.QueryNodeInfos{}
+	err = metricsinfo.UnmarshalComponentInfos(resp.GetResponse(), info)
+	suite.NoError(err)
+
+	entryNum, ok := info.QuotaMetrics.DeleteBufferInfo.CollectionDeleteBufferNum[100]
+	suite.True(ok)
+	suite.EqualValues(20, entryNum)
+	memorySize, ok := info.QuotaMetrics.DeleteBufferInfo.CollectionDeleteBufferSize[100]
+	suite.True(ok)
+	suite.EqualValues(2000, memorySize)
 }
 
 func (suite *ServiceSuite) TestGetMetric_Failed() {
@@ -1898,6 +1922,61 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
 	suite.True(versionMatch)
+}
+
+func (suite *ServiceSuite) TestSyncDistribution_UpdatePartitionStats() {
+	ctx := context.Background()
+	// prepare
+	// watch dmchannel and load some segments
+	suite.TestWatchDmChannelsInt64()
+
+	// write partitionStats file
+	partitionID := suite.partitionIDs[0]
+	newVersion := int64(100)
+	idPath := metautil.JoinIDPath(suite.collectionID, partitionID)
+	idPath = path.Join(idPath, suite.vchannel)
+	statsFilePath := path.Join(suite.node.chunkManager.RootPath(), common.PartitionStatsPath, idPath, strconv.FormatInt(newVersion, 10))
+	segStats := make(map[typeutil.UniqueID]storage.SegmentStats)
+	partitionStats := &storage.PartitionStatsSnapshot{
+		SegmentStats: segStats,
+	}
+	statsData, err := storage.SerializePartitionStatsSnapshot(partitionStats)
+	suite.NoError(err)
+	suite.node.chunkManager.Write(context.Background(), statsFilePath, statsData)
+	defer suite.node.chunkManager.Remove(context.Background(), statsFilePath)
+
+	// sync part stats
+	req := &querypb.SyncDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		Channel:      suite.vchannel,
+	}
+
+	partVersionsMap := make(map[int64]int64)
+	partVersionsMap[partitionID] = newVersion
+	updatePartStatsAction := &querypb.SyncAction{
+		Type:                   querypb.SyncType_UpdatePartitionStats,
+		PartitionStatsVersions: partVersionsMap,
+	}
+	req.Actions = []*querypb.SyncAction{updatePartStatsAction}
+	status, err := suite.node.SyncDistribution(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+
+	getReq := &querypb.GetDataDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID: rand.Int63(),
+		},
+	}
+	distribution, err := suite.node.GetDataDistribution(ctx, getReq)
+	suite.NoError(err)
+	suite.Equal(1, len(distribution.LeaderViews))
+	leaderView := distribution.LeaderViews[0]
+	latestPartStats := leaderView.GetPartitionStatsVersions()
+	suite.Equal(latestPartStats[partitionID], newVersion)
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {

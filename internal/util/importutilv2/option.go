@@ -35,6 +35,7 @@ const (
 	EndTs2     = "endTs"
 	BackupFlag = "backup"
 	L0Import   = "l0_import"
+	SkipDQC    = "skip_disk_quota_check"
 )
 
 type Options []*commonpb.KeyValuePair
@@ -81,6 +82,19 @@ func IsBackup(options Options) bool {
 func IsL0Import(options Options) bool {
 	isL0Import, err := funcutil.GetAttrByKeyFromRepeatedKV(L0Import, options)
 	if err != nil || strings.ToLower(isL0Import) != "true" {
+		return false
+	}
+	return true
+}
+
+// SkipDiskQuotaCheck indicates whether the import skips the disk quota check.
+// This option should only be enabled during backup restoration.
+func SkipDiskQuotaCheck(options Options) bool {
+	if !IsBackup(options) {
+		return false
+	}
+	skip, err := funcutil.GetAttrByKeyFromRepeatedKV(SkipDQC, options)
+	if err != nil || strings.ToLower(skip) != "true" {
 		return false
 	}
 	return true

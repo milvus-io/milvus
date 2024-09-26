@@ -22,12 +22,13 @@ import (
 	"reflect"
 	"sync/atomic"
 
-	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -64,7 +65,7 @@ type ddNode struct {
 	vChannelName string
 
 	dropMode           atomic.Value
-	compactionExecutor *compactionExecutor
+	compactionExecutor compaction.Executor
 
 	// for recovery
 	growingSegInfo    map[UniqueID]*datapb.SegmentInfo // segmentID
@@ -74,7 +75,7 @@ type ddNode struct {
 
 // Name returns node name, implementing flowgraph.Node
 func (ddn *ddNode) Name() string {
-	return fmt.Sprintf("ddNode-%d-%s", ddn.collectionID, ddn.vChannelName)
+	return fmt.Sprintf("ddNode-%s", ddn.vChannelName)
 }
 
 func (ddn *ddNode) IsValidInMsg(in []Msg) bool {
@@ -91,10 +92,9 @@ func (ddn *ddNode) IsValidInMsg(in []Msg) bool {
 
 // Operate handles input messages, implementing flowgrpah.Node
 func (ddn *ddNode) Operate(in []Msg) []Msg {
-	log := log.With(zap.String("channel", ddn.vChannelName))
 	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		log.Warn("type assertion failed for MsgStreamMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+		log.Warn("type assertion failed for MsgStreamMsg", zap.String("channel", ddn.vChannelName), zap.String("name", reflect.TypeOf(in[0]).Name()))
 		return []Msg{}
 	}
 
@@ -110,12 +110,12 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			endPositions:   msMsg.EndPositions(),
 			dropCollection: false,
 		}
-		log.Warn("MsgStream closed", zap.Any("ddNode node", ddn.Name()), zap.Int64("collection", ddn.collectionID))
+		log.Warn("MsgStream closed", zap.Any("ddNode node", ddn.Name()), zap.String("channel", ddn.vChannelName), zap.Int64("collection", ddn.collectionID))
 		return []Msg{&fgMsg}
 	}
 
 	if load := ddn.dropMode.Load(); load != nil && load.(bool) {
-		log.RatedInfo(1.0, "ddNode in dropMode")
+		log.RatedInfo(1.0, "ddNode in dropMode", zap.String("channel", ddn.vChannelName))
 		return []Msg{}
 	}
 
@@ -146,18 +146,18 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		switch msg.Type() {
 		case commonpb.MsgType_DropCollection:
 			if msg.(*msgstream.DropCollectionMsg).GetCollectionID() == ddn.collectionID {
-				log.Info("Receiving DropCollection msg")
+				log.Info("Receiving DropCollection msg", zap.String("channel", ddn.vChannelName))
 				ddn.dropMode.Store(true)
 
-				log.Info("Stop compaction for dropped channel")
-				ddn.compactionExecutor.discardByDroppedChannel(ddn.vChannelName)
+				log.Info("Stop compaction for dropped channel", zap.String("channel", ddn.vChannelName))
+				ddn.compactionExecutor.DiscardByDroppedChannel(ddn.vChannelName)
 				fgMsg.dropCollection = true
 			}
 
 		case commonpb.MsgType_DropPartition:
 			dpMsg := msg.(*msgstream.DropPartitionMsg)
 			if dpMsg.GetCollectionID() == ddn.collectionID {
-				log.Info("drop partition msg received", zap.Int64("partitionID", dpMsg.GetPartitionID()))
+				log.Info("drop partition msg received", zap.String("channel", ddn.vChannelName), zap.Int64("partitionID", dpMsg.GetPartitionID()))
 				fgMsg.dropPartitions = append(fgMsg.dropPartitions, dpMsg.PartitionID)
 			}
 
@@ -166,6 +166,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			if imsg.CollectionID != ddn.collectionID {
 				log.Warn("filter invalid insert message, collection mis-match",
 					zap.Int64("Get collID", imsg.CollectionID),
+					zap.String("channel", ddn.vChannelName),
 					zap.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
@@ -173,16 +174,17 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			if ddn.tryToFilterSegmentInsertMessages(imsg) {
 				log.Debug("filter insert messages",
 					zap.Int64("filter segmentID", imsg.GetSegmentID()),
+					zap.String("channel", ddn.vChannelName),
 					zap.Uint64("message timestamp", msg.EndTs()),
 				)
 				continue
 			}
 
-			rateCol.Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(&imsg.InsertRequest)))
+			rateCol.Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
-				Add(float64(proto.Size(&imsg.InsertRequest)))
+				Add(float64(proto.Size(imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeMsgCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel, fmt.Sprint(ddn.collectionID)).
@@ -194,7 +196,10 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 
 			log.Debug("DDNode receive insert messages",
 				zap.Int64("segmentID", imsg.GetSegmentID()),
-				zap.Int("numRows", len(imsg.GetRowIDs())))
+				zap.String("channel", ddn.vChannelName),
+				zap.Int("numRows", len(imsg.GetRowIDs())),
+				zap.Uint64("startPosTs", msMsg.StartPositions()[0].GetTimestamp()),
+				zap.Uint64("endPosTs", msMsg.EndPositions()[0].GetTimestamp()))
 			fgMsg.insertMessages = append(fgMsg.insertMessages, imsg)
 
 		case commonpb.MsgType_Delete:
@@ -203,16 +208,17 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			if dmsg.CollectionID != ddn.collectionID {
 				log.Warn("filter invalid DeleteMsg, collection mis-match",
 					zap.Int64("Get collID", dmsg.CollectionID),
+					zap.String("channel", ddn.vChannelName),
 					zap.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
 
-			log.Debug("DDNode receive delete messages", zap.Int64("numRows", dmsg.NumRows))
-			rateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
+			log.Debug("DDNode receive delete messages", zap.String("channel", ddn.vChannelName), zap.Int64("numRows", dmsg.NumRows))
+			rateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
-				Add(float64(proto.Size(&dmsg.DeleteRequest)))
+				Add(float64(proto.Size(dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeMsgCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel, fmt.Sprint(ddn.collectionID)).
@@ -277,7 +283,7 @@ func (ddn *ddNode) Close() {
 }
 
 func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppedSegmentIDs []UniqueID,
-	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, compactor *compactionExecutor,
+	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compaction.Executor,
 ) (*ddNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
@@ -291,7 +297,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppe
 		growingSegInfo:     make(map[UniqueID]*datapb.SegmentInfo, len(growingSegments)),
 		droppedSegmentIDs:  droppedSegmentIDs,
 		vChannelName:       vChannelName,
-		compactionExecutor: compactor,
+		compactionExecutor: executor,
 	}
 
 	dd.dropMode.Store(false)
