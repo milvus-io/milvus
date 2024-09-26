@@ -1,6 +1,7 @@
 import re
 import math  # do not remove `math`
 import pytest
+import random
 import numpy as np
 from pymilvus import DataType, AnnSearchRequest, RRFRanker, WeightedRanker
 
@@ -454,6 +455,37 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
 
         # prepare data (> 1024 triggering index building)
         self.insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=self.nb)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("range_num, counts", [
+        ([-100, 200], 10),
+        ([2000, 5000], 10),
+        ([3000, 4000], 5),
+        ([0, 0], 1)])
+    @pytest.mark.parametrize("expr_field", ['INT8', 'INT16', 'INT32', 'INT64'])
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    def test_bitmap_index_query_with_int_in(self, range_num, counts, expr_field, limit):
+        """
+        target:
+            1. check number operation
+        method:
+            1. prepare some data and  build `BITMAP index` on scalar fields
+            2. query with the different expr(in) and limit
+            3. check query result
+        expected:
+            1. query response equal to min(insert data, limit)
+        """
+        # random set expr list
+        range_numbers = [random.randint(*range_num) for _ in range(counts)]
+
+        # the total number of inserted data that matches the expression
+        expr_data = [i for i in self.insert_data.get(expr_field, []) if i in range_numbers]
+        expr_count = len(expr_data)
+
+        # query
+        res, _ = self.collection_wrap.query(expr=f"{expr_field} in {range_numbers}", limit=limit,
+                                        output_fields=[expr_field])
+        assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}, {expr_data}"
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
