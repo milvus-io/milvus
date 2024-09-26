@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <pthread.h>
 #include <sys/resource.h>
 #include <cstring>
 #include <functional>
@@ -114,7 +113,9 @@ class ThreadPool {
                 // it is designed that the thread pool shall have lower priority than normal
                 // at least equal to knowhere thread pool priority
                 if (setpriority(PRIO_PROCESS, gettid(), 19) != 0) {
-                    LOG_WARN("failed to priority of load thread pool, Error: {}", std::strerror(errno));
+                    LOG_WARN(
+                        "failed to priority of load thread pool, Error: {}",
+                        std::strerror(errno));
                 }
             }
 
