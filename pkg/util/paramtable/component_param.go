@@ -4389,7 +4389,8 @@ Setting this parameter too small causes the system to store a small amount of da
 		Key:          "dataNode.skip.BFStats.Load",
 		Version:      "2.2.5",
 		PanicIfEmpty: false,
-		DefaultValue: "false",
+		DefaultValue: "true",
+		Forbidden:    true, // The SkipBFStatsLoad is a static config that not allow dynamic refresh.
 	}
 	p.SkipBFStatsLoad.Init(base.mgr)
 
