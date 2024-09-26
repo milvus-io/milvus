@@ -881,7 +881,7 @@ class TestBitmapIndexMmap(TestCaseClassBase):
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
 
-        # enable offset cache
+        # enable mmap
         for index_name in self.bitmap_support_dtype_names:
             self.collection_wrap.alter_index(index_name=index_name, extra_params=AlterIndexParams.index_mmap())
 
@@ -1188,6 +1188,91 @@ class TestMixScenes(TestcaseBase):
         # re-query
         self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": []})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_bitmap_offset_cache_and_mmap(self, request):
+        """
+        target:
+            1. enable offset cache and mmap at the same time to verify DQL & DML operations
+        method:
+            1. create a collection with scalar fields
+            2. insert some data and build BITMAP index
+            3. alter all BITMAP fields: enabled offset cache and mmap
+            4. load collection
+            5. query the data of `not exist` primary key value
+            6. upsert the `not exist` primary key value
+            7. re-query and check data equal to the updated data
+            8. delete the upserted primary key value
+            9. re-query and check result is []
+            10. search with compound expressions and check result
+        expected:
+            1. DQL & DML operations are successful and the results are as expected
+        """
+        # init params
+        collection_name, primary_field, nb = f"{request.function.__name__}", "int64_pk", 3000
+        scalar_fields, expr = [primary_field, *self.bitmap_support_dtype_names], 'int64_pk == 33333'
+
+        # connect to server before testing
+        self._connect()
+
+        # create a collection with fields that can build `BITMAP` index
+        self.collection_wrap.init_collection(
+            name=collection_name,
+            schema=cf.set_collection_schema(
+                fields=[primary_field, DataType.FLOAT_VECTOR.name, *self.bitmap_support_dtype_names],
+                field_params={primary_field: FieldParams(is_primary=True).to_dict},
+            )
+        )
+
+        # prepare data (> 1024 triggering index building)
+        insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=nb)
+        self.collection_wrap.insert(data=list(insert_data.values()), check_task=CheckTasks.check_insert_result)
+
+        # flush collection, segment sealed
+        self.collection_wrap.flush()
+
+        # build `BITMAP` index
+        self.build_multi_index(index_params={
+            **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name),
+            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names)
+        })
+
+        # enable offset cache and mmap
+        for index_name in self.bitmap_support_dtype_names:
+            self.collection_wrap.alter_index(index_name=index_name, extra_params=AlterIndexParams.index_offset_cache())
+            self.collection_wrap.alter_index(index_name=index_name, extra_params=AlterIndexParams.index_mmap())
+
+        # load collection
+        self.collection_wrap.load()
+
+        # query before upsert
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": []})
+
+        # upsert int64_pk = 10
+        upsert_data = cf.gen_field_values(self.collection_wrap.schema, nb=1,
+                                          default_values={primary_field: [33333]}, start_id=33333)
+        self.collection_wrap.upsert(data=list(upsert_data.values()))
+        # re-query
+        expected_upsert_res = [{k: v[0] for k, v in upsert_data.items() if k != DataType.FLOAT_VECTOR.name}]
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": expected_upsert_res, "primary_field": primary_field})
+
+        # delete int64_pk = 10
+        self.collection_wrap.delete(expr=expr)
+        # re-query
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": []})
+
+        # search
+        nq, limit = 10, 10
+        self.collection_wrap.search(
+            data=cf.gen_field_values(self.collection_wrap.schema, nb=nq).get(DataType.FLOAT_VECTOR.name),
+            anns_field=DataType.FLOAT_VECTOR.name, param={"metric_type": MetricType.L2, "ef": 32}, limit=limit,
+            expr=Expr.AND(Expr.GT(Expr.SUB('INT64', 37).subset, 13), Expr.LIKE('VARCHAR', '%a')).value,
+            output_fields=scalar_fields, check_task=CheckTasks.check_search_results,
+            check_items={"nq": nq, "ids": insert_data.get(DataType.INT64.name), "limit": limit,
+                         "output_fields": scalar_fields})
 
 
 @pytest.mark.xdist_group("TestGroupSearch")

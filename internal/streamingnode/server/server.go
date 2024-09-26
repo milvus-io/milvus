@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/pulsar"
 	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // Server is the streamingnode server.
@@ -43,6 +44,9 @@ func (s *Server) Init(ctx context.Context) (err error) {
 
 // Start starts the streamingnode server.
 func (s *Server) Start() {
+	if !paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.GetAsBool() {
+		panic("In streaming service mode, disable L0 is not allowed.")
+	}
 	resource.Resource().Flusher().Start()
 	log.Info("flusher started")
 }
