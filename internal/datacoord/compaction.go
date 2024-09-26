@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -589,19 +588,9 @@ func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (Com
 	var task CompactionTask
 	switch t.GetType() {
 	case datapb.CompactionType_MixCompaction:
-		task = &mixCompactionTask{
-			CompactionTask: t,
-			allocator:      c.allocator,
-			meta:           c.meta,
-			sessions:       c.sessions,
-		}
+		task = newMixCompactionTask(t, c.allocator, c.meta, c.sessions)
 	case datapb.CompactionType_Level0DeleteCompaction:
-		task = &l0CompactionTask{
-			CompactionTask: t,
-			allocator:      c.allocator,
-			meta:           c.meta,
-			sessions:       c.sessions,
-		}
+		task = newL0CompactionTask(t, c.allocator, c.meta, c.sessions)
 	case datapb.CompactionType_ClusteringCompaction:
 		task = newClusteringCompactionTask(t, c.allocator, c.meta, c.sessions, c.handler, c.analyzeScheduler)
 	default:
@@ -688,13 +677,10 @@ func (c *compactionPlanHandler) pickAnyNode(nodeSlots map[int64]int64, task Comp
 	nodeID = NullNodeID
 	var maxSlots int64 = -1
 
-	switch task.GetType() {
-	case datapb.CompactionType_ClusteringCompaction:
-		useSlot = paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
-	case datapb.CompactionType_MixCompaction:
-		useSlot = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-	case datapb.CompactionType_Level0DeleteCompaction:
-		useSlot = paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
+	useSlot = task.GetSlotUsage()
+	if useSlot <= 0 {
+		log.Warn("task slot should not be 0", zap.Int64("planID", task.GetPlanID()), zap.String("type", task.GetType().String()))
+		return NullNodeID, useSlot
 	}
 
 	for id, slots := range nodeSlots {

@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var _ CompactionTask = (*l0CompactionTask)(nil)
@@ -46,6 +47,18 @@ type l0CompactionTask struct {
 	allocator allocator.Allocator
 	sessions  session.DataNodeManager
 	meta      CompactionMeta
+
+	slotUsage int64
+}
+
+func newL0CompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, session session.DataNodeManager) *l0CompactionTask {
+	return &l0CompactionTask{
+		CompactionTask: t,
+		allocator:      allocator,
+		meta:           meta,
+		sessions:       session,
+		slotUsage:      paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64(),
+	}
 }
 
 // Note: return True means exit this state machine.
@@ -295,7 +308,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		TotalRows:        t.GetTotalRows(),
 		Schema:           t.GetSchema(),
 		BeginLogID:       beginLogID,
-		SlotUsage:        Params.DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64(),
+		SlotUsage:        t.GetSlotUsage(),
 	}
 
 	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
@@ -423,4 +436,8 @@ func (t *l0CompactionTask) saveSegmentMeta() error {
 	)
 
 	return t.meta.UpdateSegmentsInfo(operators...)
+}
+
+func (t *l0CompactionTask) GetSlotUsage() int64 {
+	return t.slotUsage
 }
