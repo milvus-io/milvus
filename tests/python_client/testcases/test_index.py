@@ -2462,6 +2462,81 @@ class TestBitmapIndex(TestcaseBase):
         self.build_multi_index(index_params=index_params)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("index_obj, filed_name", [(DefaultScalarIndexParams.Default, 'INT64_hybrid_index'),
+                                                       (DefaultScalarIndexParams.INVERTED, 'INT64_inverted'),
+                                                       (DefaultScalarIndexParams.STL_SORT, 'INT64_stl_sort'),
+                                                       (DefaultScalarIndexParams.Trie, 'VARCHAR_trie')])
+    def test_bitmap_offset_cache_on_not_bitmap_fields(self, request, index_obj, filed_name):
+        """
+        target:
+            1. alter offset cache on not `BITMAP` index scalar field
+        method:
+            1. build scalar index on scalar field
+            2. alter offset cache on scalar index field
+        expected:
+            1. alter index raises expected error
+        """
+        # init params
+        collection_name, primary_field = f"{request.function.__name__}_{filed_name}", 'INT64_pk'
+
+        # create a collection with fields
+        self.collection_wrap.init_collection(
+            name=collection_name,
+            schema=cf.set_collection_schema(
+                fields=[primary_field, DataType.FLOAT_VECTOR.name, filed_name],
+                field_params={primary_field: FieldParams(is_primary=True).to_dict},
+            )
+        )
+
+        # build scalar index on empty collection
+        index_params = {
+            **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name),
+            **index_obj(filed_name)
+        }
+        self.build_multi_index(index_params=index_params)
+        assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
+
+        # enable offset cache and raises error
+        self.collection_wrap.alter_index(
+            index_name=filed_name, extra_params=AlterIndexParams.index_offset_cache(),
+            check_task=CheckTasks.err_res, check_items={ct.err_code: 1100, ct.err_msg: iem.InvalidOffsetCache}
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_bitmap_offset_cache_on_vector_field(self, request):
+        """
+        target:
+            1. alter offset cache on vector field
+        method:
+            1. build vector index on an empty collection
+            2. alter offset cache on vector index field
+        expected:
+            1. alter index raises expected error
+        """
+        # init params
+        collection_name, primary_field = f"{request.function.__name__}", 'INT64_pk'
+
+        # create a collection with fields
+        self.collection_wrap.init_collection(
+            name=collection_name,
+            schema=cf.set_collection_schema(
+                fields=[primary_field, DataType.FLOAT_VECTOR.name],
+                field_params={primary_field: FieldParams(is_primary=True).to_dict},
+            )
+        )
+
+        # build index on empty collection
+        index_params = DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name)
+        self.build_multi_index(index_params=index_params)
+        assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
+
+        # enable offset cache and raises error
+        self.collection_wrap.alter_index(
+            index_name=DataType.FLOAT_VECTOR.name, extra_params=AlterIndexParams.index_offset_cache(),
+            check_task=CheckTasks.err_res, check_items={ct.err_code: 1100, ct.err_msg: iem.InvalidOffsetCache}
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("primary_field", ["int64_pk", "varchar_pk"])
     def test_bitmap_insert_after_loading(self, request, primary_field, auto_id):
