@@ -50,6 +50,10 @@ func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*QueryCoord
 	}, nil
 }
 
+func (qs *QueryCoord) Prepare() error {
+	return qs.svr.Prepare()
+}
+
 // Run starts service
 func (qs *QueryCoord) Run() error {
 	if err := qs.svr.Run(); err != nil {

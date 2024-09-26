@@ -50,6 +50,10 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) (*DataNode, er
 	}, nil
 }
 
+func (d *DataNode) Prepare() error {
+	return d.svr.Prepare()
+}
+
 // Run starts service
 func (d *DataNode) Run() error {
 	if err := d.svr.Run(); err != nil {

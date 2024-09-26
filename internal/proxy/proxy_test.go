@@ -96,13 +96,16 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 
 	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		rc, err = grpcrootcoord.NewServer(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
+		if err = rc.Prepare(); err != nil {
+			panic(err)
+		}
 		err = rc.Run()
 		if err != nil {
 			panic(err)
@@ -120,13 +123,16 @@ func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
 
 	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		qs, err = grpcquerycoord.NewServer(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
+		if err = qs.Prepare(); err != nil {
+			panic(err)
+		}
 		err = qs.Run()
 		if err != nil {
 			panic(err)
@@ -144,13 +150,16 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 
 	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		factory := dependency.MockDefaultFactory(localMsg, Params)
 		var err error
 		qn, err = grpcquerynode.NewServer(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
+		if err = qn.Prepare(); err != nil {
+			panic(err)
+		}
 		err = qn.Run()
 		if err != nil {
 			panic(err)
@@ -168,10 +177,17 @@ func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Serve
 
 	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		factory := dependency.NewDefaultFactory(localMsg)
-		ds = grpcdatacoordclient.NewServer(ctx, factory)
-		wg.Done()
-		err := ds.Run()
+		var err error
+		ds, err = grpcdatacoordclient.NewServer(ctx, factory)
+		if err != nil {
+			panic(err)
+		}
+		if err = ds.Prepare(); err != nil {
+			panic(err)
+		}
+		err = ds.Run()
 		if err != nil {
 			panic(err)
 		}
@@ -188,13 +204,16 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 
 	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		factory := dependency.MockDefaultFactory(localMsg, Params)
 		var err error
 		dn, err = grpcdatanode.NewServer(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
+		if err = dn.Prepare(); err != nil {
+			panic(err)
+		}
 		err = dn.Run()
 		if err != nil {
 			panic(err)
@@ -212,13 +231,13 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 
 	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		factory := dependency.MockDefaultFactory(localMsg, Params)
 		var err error
 		in, err = grpcindexnode.NewServer(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
 		etcd, err := etcd.GetEtcdClient(
 			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
@@ -231,6 +250,9 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 			panic(err)
 		}
 		in.SetEtcdClient(etcd)
+		if err = in.Prepare(); err != nil {
+			panic(err)
+		}
 		err = in.Run()
 		if err != nil {
 			panic(err)
