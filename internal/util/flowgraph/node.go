@@ -78,7 +78,7 @@ func (nodeCtxManager *nodeCtxManager) Start() {
 	curNode := nodeCtxManager.inputNodeCtx
 	// tt checker start
 	if enableTtChecker {
-		manager := timerecord.GetCheckerManger("fgNode", nodeCtxTtInterval, func(list []string) {
+		manager := timerecord.GetCheckerManger("data-fgNode", nodeCtxTtInterval, func(list []string) {
 			log.Warn("some node(s) haven't received input", zap.Strings("list", list), zap.Duration("duration ", nodeCtxTtInterval))
 		})
 		for curNode != nil {
