@@ -2616,6 +2616,7 @@ class TestQueryOperation(TestcaseBase):
                                            ct.default_search_params, limit, multi_exprs)
         assert(check_res == True)
 
+
 class TestQueryString(TestcaseBase):
     """
     ******************************************************************
@@ -2726,14 +2727,14 @@ class TestQueryString(TestcaseBase):
         time.sleep(1)
         collection_w.load()
         expression = 'varchar like "0%"'
-        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        result, _ = collection_w.query(expression, output_fields=['varchar'])
         res_len = len(result)
         collection_w.release()
         collection_w.alter_index("bitmap_offset_cache",  {'indexoffsetcache.enabled': True})
         collection_w.create_index("varchar", index_name="bitmap_offset_cache", index_params={"index_type": "BITMAP"})
         collection_w.load()
         expression = 'varchar like "0%"'
-        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        result, _ = collection_w.query(expression, output_fields=['varchar'])
         res_len_new = len(result)
         assert res_len_new == res_len
         collection_w.release()
@@ -2741,7 +2742,7 @@ class TestQueryString(TestcaseBase):
         collection_w.create_index("varchar", index_name="bitmap_offset_cache", index_params={"index_type": "BITMAP"})
         collection_w.load()
         expression = 'varchar like "0%"'
-        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        result, _ = collection_w.query(expression, output_fields=['varchar'])
         res_len_new = len(result)
         assert res_len_new == res_len
         collection_w.release()
@@ -2824,12 +2825,13 @@ class TestQueryString(TestcaseBase):
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True,is_index=False,
                                                              primary_field=default_int_field_name)[0:2]
 
-        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="query_expr_pre_index")
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
+                                  index_name="query_expr_pre_index")
         collection_w.create_index("varchar", index_name="bitmap_auto_index",  index_params={"index_type": "BITMAP"})
         time.sleep(1)
         collection_w.load()
         expression = 'varchar like "%0%"'
-        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        result, _ = collection_w.query(expression, output_fields=['varchar'])
         res_len = len(result)
         collection_w.release()
         collection_w.drop_index(index_name="varchar_bitmap_index")
@@ -2837,7 +2839,6 @@ class TestQueryString(TestcaseBase):
         result , _ = collection_w.query(expression, output_fields=['varchar'])
         res_len_1 = len(result)
         assert res_len_1 == res_len
-
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_string_with_invalid_prefix_expr(self):
@@ -3062,6 +3063,8 @@ class TestQueryString(TestcaseBase):
         res, _ = collection_w.query(expr, output_fields=output_fields)
 
         assert len(res) == 4
+
+
 class TestQueryArray(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
