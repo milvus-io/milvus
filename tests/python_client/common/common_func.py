@@ -676,7 +676,7 @@ def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.de
                   gen_array_field(name=ct.default_float_array_field_name, element_type=DataType.FLOAT,
                                   max_capacity=max_capacity),
                   gen_array_field(name=ct.default_string_array_field_name, element_type=DataType.VARCHAR,
-                                  max_capacity=max_capacity, max_length=max_length)]
+                                  max_capacity=max_capacity, max_length=max_length, nullable=True)]
         if with_json is False:
             fields.remove(gen_json_field())
 
@@ -2934,7 +2934,7 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
     return vectors
 
 
-def gen_vectors_based_on_vector_type(num, dim, vector_data_type):
+def gen_vectors_based_on_vector_type(num, dim, vector_data_type=ct.float_type):
     """
     generate float16 vector data
     raw_vectors : the vectors

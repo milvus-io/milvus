@@ -4664,3 +4664,48 @@ class TestCollectionDefaultValueInvalid(TestcaseBase):
         self.field_schema_wrap.init_field_schema(name="int8_null", dtype=DataType.INT8, default_value=None,
                                                  check_task=CheckTasks.err_res, check_items=error)
 
+
+class TestCollectionDefaultValueValid(TestcaseBase):
+    """ Test case of collection interface """
+
+    """
+    ******************************************************************
+    #  The followings are valid cases
+    ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue 36457")
+    def test_create_collection_default_value_twice(self):
+        """
+        target: test create collection with set default value twice
+        method: create collection with default value twice
+        expected: successfully
+        """
+        self._connect()
+        int_fields = []
+        c_name = cf.gen_unique_str(prefix)
+        # add other vector fields to maximum fields num
+        int_fields.append(cf.gen_int64_field(is_primary=True))
+        int_fields.append(cf.gen_float_field(default_value=numpy.float32(10.0)))
+        int_fields.append(cf.gen_float_vec_field())
+        schema = cf.gen_collection_schema(fields=int_fields)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_collection_none_twice(self):
+        """
+        target: test create collection with nullable field twice
+        method: create collection with nullable field twice
+        expected: successfully
+        """
+        self._connect()
+        int_fields = []
+        c_name = cf.gen_unique_str(prefix)
+        int_fields.append(cf.gen_int64_field(is_primary=True))
+        int_fields.append(cf.gen_float_field(nullable=True))
+        int_fields.append(cf.gen_float_vec_field())
+        schema = cf.gen_collection_schema(fields=int_fields)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        
