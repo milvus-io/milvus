@@ -107,7 +107,8 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 
 	task := s.generateBasicTask(false)
 
-	task.processPipelining()
+	err := task.processPipelining()
+	s.NoError(err)
 
 	seg11 := s.meta.GetSegment(101)
 	s.Equal(datapb.SegmentLevel_L2, seg11.Level)
@@ -122,6 +123,7 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 			ID:                    103,
 			State:                 commonpb.SegmentState_Flushed,
 			Level:                 datapb.SegmentLevel_L2,
+			LastLevel:             datapb.SegmentLevel_L1,
 			CreatedByCompaction:   true,
 			PartitionStatsVersion: 10001,
 		},
@@ -131,12 +133,15 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 			ID:                    104,
 			State:                 commonpb.SegmentState_Flushed,
 			Level:                 datapb.SegmentLevel_L2,
+			LastLevel:             datapb.SegmentLevel_L1,
 			CreatedByCompaction:   true,
 			PartitionStatsVersion: 10001,
 		},
 	})
 
-	task.processFailedOrTimeout()
+	task.CompactionCommited = true
+	err = task.doClean()
+	s.NoError(err)
 
 	seg12 := s.meta.GetSegment(101)
 	s.Equal(datapb.SegmentLevel_L1, seg12.Level)
@@ -204,7 +209,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessRetryLogic() {
 	s.Equal(false, task.Process())
 	s.Equal(int32(3), task.RetryTimes)
 	s.Equal(datapb.CompactionTaskState_pipelining, task.GetState())
-	s.Equal(false, task.Process())
+	s.Equal(true, task.Process())
 	s.Equal(int32(0), task.RetryTimes)
 	s.Equal(datapb.CompactionTaskState_failed, task.GetState())
 }
@@ -213,7 +218,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessPipelining() {
 	s.Run("process pipelining fail, segment not found", func() {
 		task := s.generateBasicTask(false)
 		task.State = datapb.CompactionTaskState_pipelining
-		s.Equal(false, task.Process())
+		s.Equal(true, task.Process())
 		s.Equal(datapb.CompactionTaskState_failed, task.GetState())
 	})
 
@@ -439,7 +444,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 		}, nil).Once()
 		time.Sleep(time.Second * 1)
 		s.Equal(true, task.Process())
-		s.Equal(datapb.CompactionTaskState_cleaned, task.GetState())
+		s.Equal(datapb.CompactionTaskState_timeout, task.GetState())
 	})
 }
 
@@ -540,7 +545,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 	s.Run("analyze task not found", func() {
 		task := s.generateBasicTask(false)
 		task.State = datapb.CompactionTaskState_analyzing
-		s.False(task.Process())
+		s.True(task.Process())
 		s.Equal(datapb.CompactionTaskState_failed, task.GetState())
 	})
 
@@ -557,7 +562,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 			State:        indexpb.JobState_JobStateFailed,
 		}
 		s.meta.analyzeMeta.AddAnalyzeTask(t)
-		s.False(task.Process())
+		s.True(task.Process())
 		s.Equal(datapb.CompactionTaskState_failed, task.GetState())
 	})
 
@@ -575,7 +580,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 			CentroidsFile: "",
 		}
 		s.meta.analyzeMeta.AddAnalyzeTask(t)
-		s.False(task.Process())
+		s.True(task.Process())
 		s.Equal(datapb.CompactionTaskState_failed, task.GetState())
 	})
 

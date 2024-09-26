@@ -149,13 +149,38 @@ func (psm *partitionStatsMeta) DropPartitionStatsInfo(info *datapb.PartitionStat
 	if len(psm.partitionStatsInfos[info.GetVChannel()]) == 0 {
 		delete(psm.partitionStatsInfos, info.GetVChannel())
 	}
+	// if the dropping partitionStats is the current version, should update currentPartitionStats
+	currentVersion := psm.innerGetCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel())
+	if currentVersion == info.GetVersion() && currentVersion != emptyPartitionStatsVersion {
+		err := psm.catalog.DropCurrentPartitionStatsVersion(psm.ctx, info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel())
+		if err != nil {
+			return err
+		}
+		infos := psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos
+		delete(infos, currentVersion)
+		if len(infos) > 0 {
+			var maxVersion int64 = 0
+			for version := range infos {
+				if version > maxVersion {
+					maxVersion = version
+				}
+			}
+			err := psm.innerSaveCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), maxVersion)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
 func (psm *partitionStatsMeta) SaveCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string, currentPartitionStatsVersion int64) error {
 	psm.Lock()
 	defer psm.Unlock()
+	return psm.innerSaveCurrentPartitionStatsVersion(collectionID, partitionID, vChannel, currentPartitionStatsVersion)
+}
 
+func (psm *partitionStatsMeta) innerSaveCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string, currentPartitionStatsVersion int64) error {
 	log.Info("update current partition stats version", zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 		zap.String("vChannel", vChannel), zap.Int64("currentPartitionStatsVersion", currentPartitionStatsVersion))
@@ -180,7 +205,10 @@ func (psm *partitionStatsMeta) SaveCurrentPartitionStatsVersion(collectionID, pa
 func (psm *partitionStatsMeta) GetCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string) int64 {
 	psm.RLock()
 	defer psm.RUnlock()
+	return psm.innerGetCurrentPartitionStatsVersion(collectionID, partitionID, vChannel)
+}
 
+func (psm *partitionStatsMeta) innerGetCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string) int64 {
 	if _, ok := psm.partitionStatsInfos[vChannel]; !ok {
 		return emptyPartitionStatsVersion
 	}

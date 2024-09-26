@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -253,31 +254,11 @@ func (t *l0CompactionTask) CleanLogPath() {
 }
 
 func (t *l0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask {
-	taskClone := &datapb.CompactionTask{
-		PlanID:           t.GetPlanID(),
-		TriggerID:        t.GetTriggerID(),
-		State:            t.GetState(),
-		StartTime:        t.GetStartTime(),
-		EndTime:          t.GetEndTime(),
-		TimeoutInSeconds: t.GetTimeoutInSeconds(),
-		Type:             t.GetType(),
-		CollectionTtl:    t.CollectionTtl,
-		CollectionID:     t.GetCollectionID(),
-		PartitionID:      t.GetPartitionID(),
-		Channel:          t.GetChannel(),
-		InputSegments:    t.GetInputSegments(),
-		ResultSegments:   t.GetResultSegments(),
-		TotalRows:        t.TotalRows,
-		Schema:           t.Schema,
-		NodeID:           t.GetNodeID(),
-		FailReason:       t.GetFailReason(),
-		RetryTimes:       t.GetRetryTimes(),
-		Pos:              t.GetPos(),
-	}
+	pbClone := proto.Clone(t).(*datapb.CompactionTask)
 	for _, opt := range opts {
-		opt(taskClone)
+		opt(pbClone)
 	}
-	return taskClone
+	return pbClone
 }
 
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
@@ -423,4 +404,8 @@ func (t *l0CompactionTask) saveSegmentMeta() error {
 	)
 
 	return t.meta.UpdateSegmentsInfo(operators...)
+}
+
+func (t *l0CompactionTask) Clean() bool {
+	return true
 }
