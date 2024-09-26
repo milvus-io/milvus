@@ -213,19 +213,15 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 		s.Run(test.description, func() {
 			s.SetupTest()
 			s.generateInitTasksForSchedule()
-			s.Require().Equal(4, s.handler.getTaskCount())
 			// submit the testing tasks
 			for _, t := range test.tasks {
 				s.handler.submitTask(t)
 			}
-			s.Equal(4+len(test.tasks), s.handler.getTaskCount())
 
 			gotTasks := s.handler.schedule()
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
 				return t.GetPlanID()
 			}))
-
-			s.Equal(4+len(test.tasks), s.handler.getTaskCount())
 		})
 	}
 }
@@ -331,13 +327,11 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 	for _, test := range tests {
 		s.Run(test.description, func() {
 			s.SetupTest()
-			s.Require().Equal(0, s.handler.getTaskCount())
 
 			// submit the testing tasks
 			for _, t := range test.tasks {
 				s.handler.submitTask(t)
 			}
-			s.Equal(len(test.tasks), s.handler.getTaskCount())
 
 			gotTasks := s.handler.schedule()
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
@@ -507,7 +501,6 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	s.handler.submitTask(t1)
 	s.handler.restoreTask(t2)
 	s.handler.removeTasksByChannel(ch)
-	s.Equal(0, s.handler.getTaskCount())
 }
 
 func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
@@ -577,9 +570,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		s.handler.submitTask(t)
 	}
 
-	s.Equal(3, s.handler.getTaskCount())
 	s.handler.schedule()
-	s.Equal(3, s.handler.getTaskCount())
 
 	info := s.handler.getCompactionInfo(1)
 	s.Equal(1, info.completedCnt)
@@ -876,7 +867,6 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 
 	s.handler.submitTask(task)
 	s.handler.schedule()
-	s.Equal(1, s.handler.getTaskCount())
 	err := s.handler.checkCompaction()
 	s.NoError(err)
 }

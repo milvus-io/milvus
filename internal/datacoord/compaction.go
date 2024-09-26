@@ -178,11 +178,11 @@ func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64)
 	return cnt
 }
 
-func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager, cm ChannelManager, meta CompactionMeta, allocator allocator.Allocator, analyzeScheduler *taskScheduler, handler Handler,
+func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager, cm ChannelManager, meta CompactionMeta,
+	allocator allocator.Allocator, analyzeScheduler *taskScheduler, handler Handler,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
-		// queue size is not necessarily equals `dataCoord.compaction.maxParallelTaskNum`, see #isFull()
-		queueTasks:       *NewCompactionQueue(64, getPrioritizer()),
+		queueTasks:       *NewCompactionQueue(256, getPrioritizer()), // Higher capacity will have better ordering in priority, but consumes more memory.
 		chManager:        cm,
 		meta:             meta,
 		sessions:         sessions,
@@ -231,10 +231,13 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 		c.queueTasks.UpdatePrioritizer(p)
 	}
 
-	for {
+	c.executingGuard.Lock()
+	tasksToGo := Params.DataCoordCfg.CompactionMaxParallelTasks.GetAsInt() - len(c.executingTasks)
+	c.executingGuard.Unlock()
+	for len(selected) < tasksToGo && c.queueTasks.Len() > 0 {
 		t, err := c.queueTasks.Dequeue()
 		if err != nil {
-			// No task in queue, return directly
+			// Will never go here
 			return selected
 		}
 
@@ -273,6 +276,7 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Pending).Dec()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Executing).Inc()
 	}
+	return selected
 }
 
 func (c *compactionPlanHandler) start() {
@@ -698,16 +702,7 @@ func (c *compactionPlanHandler) pickShardNode(nodeSlots map[int64]int64, t Compa
 
 // isFull return true if the task pool is full
 func (c *compactionPlanHandler) isFull() bool {
-	return c.getTaskCount() >= Params.DataCoordCfg.CompactionMaxParallelTasks.GetAsInt()
-}
-
-func (c *compactionPlanHandler) getTaskCount() int {
-	count := 0
-	c.executingGuard.RLock()
-	count = len(c.executingTasks)
-	c.executingGuard.RUnlock()
-	count += c.queueTasks.Len()
-	return count
+	return c.queueTasks.Len() >= c.queueTasks.capacity
 }
 
 func (c *compactionPlanHandler) checkDelay(t CompactionTask) {

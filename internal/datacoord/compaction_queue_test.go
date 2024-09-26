@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -89,4 +90,62 @@ func TestCompactionQueue(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, datapb.CompactionType_MajorCompaction, task.GetType())
 	})
+
+	t.Run("update prioritizer", func(t *testing.T) {
+		cq := NewCompactionQueue(3, LevelPrioritizer)
+		err := cq.Enqueue(t1)
+		assert.NoError(t, err)
+		err = cq.Enqueue(t2)
+		assert.NoError(t, err)
+		err = cq.Enqueue(t3)
+		assert.NoError(t, err)
+		err = cq.Enqueue(&mixCompactionTask{})
+		assert.Error(t, err)
+
+		task, err := cq.Dequeue()
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetType())
+
+		cq.UpdatePrioritizer(DefaultPrioritizer)
+		task, err = cq.Dequeue()
+		assert.NoError(t, err)
+		assert.Equal(t, int64(2), task.GetPlanID())
+		task, err = cq.Dequeue()
+		assert.NoError(t, err)
+		assert.Equal(t, int64(3), task.GetPlanID())
+	})
+}
+
+func TestConcurrency(t *testing.T) {
+	c := 10
+
+	cq := NewCompactionQueue(c, LevelPrioritizer)
+
+	wg := sync.WaitGroup{}
+	wg.Add(c)
+	for i := 0; i < c; i++ {
+		t1 := &mixCompactionTask{
+			CompactionTask: &datapb.CompactionTask{
+				PlanID: int64(i),
+				Type:   datapb.CompactionType_MixCompaction,
+			},
+		}
+		go func() {
+			err := cq.Enqueue(t1)
+			assert.NoError(t, err)
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+
+	wg.Add(c)
+	for i := 0; i < c; i++ {
+		go func() {
+			_, err := cq.Dequeue()
+			assert.NoError(t, err)
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 }
