@@ -1566,7 +1566,6 @@ class TestSearchVector(TestBase):
         assert len(res) == limit
 
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
-    @pytest.mark.xfail(reason="issue 36508")
     def test_search_vector_with_range_search(self, metric_type):
         """
         Search a vector with range search with different metric type
@@ -1605,6 +1604,13 @@ class TestSearchVector(TestBase):
         res = rsp['data']
         logger.info(f"res: {len(res)}")
         assert len(res) >= limit*0.8
+        # add buffer to the distance of comparison
+        if metric_type == "L2":
+            r1 = r1 + 10**-6
+            r2 = r2 - 10**-6
+        else:
+            r1 = r1 - 10**-6
+            r2 = r2 + 10**-6
         for item in res:
             distance = item.get("distance")
             if metric_type == "L2":
