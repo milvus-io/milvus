@@ -76,6 +76,7 @@ func stopRocksmq() {
 
 type component interface {
 	healthz.Indicator
+	Prepare() error
 	Run() error
 	Stop() error
 }
@@ -116,6 +117,9 @@ func runComponent[T component](ctx context.Context,
 		var err error
 		role, err = creator(ctx, factory)
 		if err != nil {
+			panic(err)
+		}
+		if err := role.Prepare(); err != nil {
 			panic(err)
 		}
 		close(sign)
