@@ -578,7 +578,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 	}
 
 	s.Equal(3, s.handler.getTaskCount())
-	s.handler.doSchedule()
+	s.handler.schedule()
 	s.Equal(3, s.handler.getTaskCount())
 
 	info := s.handler.getCompactionInfo(1)
@@ -603,7 +603,6 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.NoError(err)
 	t := handler.getCompactionTask(1)
 	s.NotNil(t)
-	s.handler.taskNumber.Add(1000)
 	task.PlanID = 2
 	err = s.handler.enqueueCompaction(task)
 	s.NoError(err)
@@ -735,10 +734,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		s.handler.submitTask(t)
 	}
 
-	picked := s.handler.schedule()
-	s.NotEmpty(picked)
-
-	s.handler.doSchedule()
+	s.handler.schedule()
 	// time.Sleep(2 * time.Second)
 	s.handler.checkCompaction()
 
@@ -879,11 +875,10 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
 
 	s.handler.submitTask(task)
-	s.handler.doSchedule()
+	s.handler.schedule()
 	s.Equal(1, s.handler.getTaskCount())
 	err := s.handler.checkCompaction()
 	s.NoError(err)
-	s.Equal(0, len(s.handler.getTasksByState(datapb.CompactionTaskState_completed)))
 }
 
 func getFieldBinlogIDs(fieldID int64, logIDs ...int64) *datapb.FieldBinlog {
