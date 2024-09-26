@@ -152,7 +152,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		req := newReq()
 		if err := c.ShouldBindBodyWith(req, binding.JSON); err != nil {
 			log.Warn("high level restful api, read parameters from request body fail", zap.Error(err),
-				zap.Any("url", c.Request.URL.Path), zap.Any("request", req))
+				zap.Any("url", c.Request.URL.Path))
 			if _, ok := err.(validator.ValidationErrors); ok {
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
@@ -189,7 +189,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		ctx = log.WithTraceID(ctx, traceID)
 		c.Keys["traceID"] = traceID
 		log.Ctx(ctx).Debug("high level restful api, read parameters from request body, then start to handle.",
-			zap.Any("url", c.Request.URL.Path), zap.Any("request", req))
+			zap.Any("url", c.Request.URL.Path))
 		v2(ctx, c, req, dbName)
 	}
 }
@@ -272,7 +272,7 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 			return nil, RestRequestInterceptorErr
 		}
 	}
-	log.Ctx(ctx).Debug("high level restful api, try to do a grpc call", zap.Any("grpcRequest", req))
+	log.Ctx(ctx).Debug("high level restful api, try to do a grpc call")
 	username, ok := c.Get(ContextUsername)
 	if !ok {
 		username = ""
@@ -285,7 +285,7 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 		}
 	}
 	if err != nil {
-		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err), zap.Any("grpcRequest", req))
+		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err))
 		if !ignoreErr {
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		}
@@ -309,7 +309,7 @@ func (h *HandlersV2) wrapperCheckDatabase(v2 handlerFuncV2) handlerFuncV2 {
 				return v2(ctx, c, req, dbName)
 			}
 		}
-		log.Ctx(ctx).Warn("high level restful api, non-exist database", zap.String("database", dbName), zap.Any("request", req))
+		log.Ctx(ctx).Warn("high level restful api, non-exist database", zap.String("database", dbName))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrDatabaseNotFound),
 			HTTPReturnMessage: merr.ErrDatabaseNotFound.Error() + ", database: " + dbName,
