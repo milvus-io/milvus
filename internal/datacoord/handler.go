@@ -222,6 +222,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 					}
 				}
 				unIndexedIDs.Remove(compactTos...)
+				flushedIDs.Remove(compactTos...)
 				droppedIDs.Remove(compactionFrom...)
 			}
 		}

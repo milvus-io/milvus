@@ -64,6 +64,7 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 		{500, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L2, true},
 		{600, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L2, false},
 		{700, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0, false},
+		{800, commonpb.SegmentState_Dropped, datapb.SegmentLevel_L1, false},
 	}
 
 	compactFroms := []int64{400, 401, 402}
@@ -105,14 +106,21 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 	}
 
 	info := svr.handler.GetQueryVChanPositions(&channelMeta{Name: channel, CollectionID: 1}, -1)
+
+	totalSegs := len(info.GetLevelZeroSegmentIds()) +
+		len(info.GetUnflushedSegmentIds()) +
+		len(info.GetFlushedSegmentIds()) +
+		len(info.GetDroppedSegmentIds())
 	assert.EqualValues(t, 1, info.CollectionID)
+	assert.EqualValues(t, len(segArgs)-2, totalSegs)
 	assert.ElementsMatch(t, []int64{700}, info.GetLevelZeroSegmentIds())
 	assert.ElementsMatch(t, []int64{100}, info.GetUnflushedSegmentIds())
-	assert.ElementsMatch(t, []int64{300, 400, 401, 402, 500, 600}, info.GetFlushedSegmentIds())
+	assert.ElementsMatch(t, []int64{200, 300, 400, 401, 402, 500, 600}, info.GetFlushedSegmentIds())
+	assert.ElementsMatch(t, []int64{800}, info.GetDroppedSegmentIds())
+
 	assert.Empty(t, info.GetUnflushedSegments())
 	assert.Empty(t, info.GetFlushedSegments())
 	assert.Empty(t, info.GetDroppedSegments())
-	assert.Empty(t, info.GetDroppedSegmentIds())
 	assert.Empty(t, info.GetIndexedSegments())
 	assert.Empty(t, info.GetIndexedSegmentIds())
 }
