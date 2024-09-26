@@ -19,7 +19,6 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"sync"
 
 	"go.uber.org/zap"
@@ -179,8 +178,11 @@ func initMetaCache(initCtx context.Context, storageV2Cache *metacache.StorageV2C
 		}
 	}
 
+	// growing segments's stats should always be loaded, for generating merged pk bf.
 	loadSegmentStats("growing", unflushed)
-	loadSegmentStats("sealed", flushed)
+	if !paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
+		loadSegmentStats("sealed", flushed)
+	}
 
 	// use fetched segment info
 	info.Vchan.FlushedSegments = flushed
@@ -346,13 +348,23 @@ func newServiceWithEtcdTickler(initCtx context.Context, node *DataNode, info *da
 // NOTE: compactiable for event manager
 func newDataSyncService(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *tickler) (*dataSyncService, error) {
 	// recover segment checkpoints
-	unflushedSegmentInfos, err := node.broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
-	if err != nil {
-		return nil, err
+	var (
+		err                   error
+		metaCache             metacache.MetaCache
+		unflushedSegmentInfos []*datapb.SegmentInfo
+		flushedSegmentInfos   []*datapb.SegmentInfo
+	)
+	if len(info.GetVchan().GetUnflushedSegmentIds()) > 0 {
+		unflushedSegmentInfos, err = node.broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
+		if err != nil {
+			return nil, err
+		}
 	}
-	flushedSegmentInfos, err := node.broker.GetSegmentInfo(initCtx, info.GetVchan().GetFlushedSegmentIds())
-	if err != nil {
-		return nil, err
+	if len(info.GetVchan().GetFlushedSegmentIds()) > 0 {
+		flushedSegmentInfos, err = node.broker.GetSegmentInfo(initCtx, info.GetVchan().GetFlushedSegmentIds())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var storageCache *metacache.StorageV2Cache
@@ -362,12 +374,9 @@ func newDataSyncService(initCtx context.Context, node *DataNode, info *datapb.Ch
 			return nil, err
 		}
 	}
-	// In streaming service mode, flushed segments no longer maintain a bloom filter.
-	// So, here we skip loading the bloom filter for flushed segments.
-	info.Vchan.UnflushedSegments = unflushedSegmentInfos
-	metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) pkoracle.PkStat {
-		return pkoracle.NewBloomFilterSet()
-	})
-
+	// init metaCache meta
+	if metaCache, err = getMetaCacheWithTickler(initCtx, node, info, tickler, unflushedSegmentInfos, flushedSegmentInfos, nil); err != nil {
+		return nil, err
+	}
 	return getServiceWithChannel(initCtx, node, info, metaCache, storageCache, unflushedSegmentInfos, flushedSegmentInfos)
 }

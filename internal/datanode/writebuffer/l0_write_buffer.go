@@ -163,9 +163,9 @@ func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 		}
 	}
 
-	if streamingutil.IsStreamingServiceEnabled() {
-		// In streaming service mode, flushed segments no longer maintain a bloom filter.
-		// So, here we skip filtering delete entries by bf.
+	if paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
+		// In Skip BF mode, datanode no longer maintains bloom filters.
+		// So, here we skip filtering delete entries.
 		wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos)
 	} else {
 		// distribute delete msg
