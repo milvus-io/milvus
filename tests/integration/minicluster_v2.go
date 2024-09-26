@@ -76,18 +76,27 @@ type ClusterConfig struct {
 	IndexNodeNum int
 }
 
+var (
+	initOnce  sync.Once
+	configMap map[string]string
+)
+
 func DefaultParams() map[string]string {
-	testPath := fmt.Sprintf("integration-test-%d", time.Now().Unix())
-	return map[string]string{
-		params.EtcdCfg.RootPath.Key:  testPath,
-		params.MinioCfg.RootPath.Key: testPath,
-		//"runtime.role": typeutil.StandaloneRole,
-		//params.IntegrationTestCfg.IntegrationMode.Key: "true",
-		params.LocalStorageCfg.Path.Key:              path.Join("/tmp", testPath),
-		params.CommonCfg.StorageType.Key:             "local",
-		params.DataNodeCfg.MemoryForceSyncEnable.Key: "false", // local execution will print too many logs
-		params.CommonCfg.GracefulStopTimeout.Key:     "30",
-	}
+	initOnce.Do(func() {
+		testPath := fmt.Sprintf("integration-test-%d", time.Now().Unix())
+
+		// Notice: don't use ParamItem.Key here, the config key will be empty before param table init
+		configMap = map[string]string{
+			"etcd.rootPath":                   testPath,
+			"minio.rootPath":                  testPath,
+			"localStorage.path":               path.Join("/tmp", testPath),
+			"common.storageType":              "local",
+			"dataNode.memory.forceSyncEnable": "false", // local execution will print too many logs
+			"common.gracefulStopTimeout":      "30",
+		}
+	})
+
+	return configMap
 }
 
 func DefaultClusterConfig() ClusterConfig {
