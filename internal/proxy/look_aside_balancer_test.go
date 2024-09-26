@@ -64,9 +64,9 @@ func (suite *LookAsideBalancerSuite) TestUpdateMetrics() {
 
 	suite.balancer.UpdateCostMetrics(1, costMetrics)
 
-	lastUpdateTs, ok := suite.balancer.metricsUpdateTs.Get(1)
+	metrics, ok := suite.balancer.metricsMap.Get(1)
 	suite.True(ok)
-	suite.True(time.Now().UnixMilli()-lastUpdateTs <= 5)
+	suite.True(time.Now().UnixMilli()-metrics.ts.Load() <= 5)
 }
 
 func (suite *LookAsideBalancerSuite) TestCalculateScore() {
@@ -98,19 +98,19 @@ func (suite *LookAsideBalancerSuite) TestCalculateScore() {
 	score2 := suite.balancer.calculateScore(-1, costMetrics2, 0)
 	score3 := suite.balancer.calculateScore(-1, costMetrics3, 0)
 	score4 := suite.balancer.calculateScore(-1, costMetrics4, 0)
-	suite.Equal(float64(12), score1)
-	suite.Equal(float64(19), score2)
-	suite.Equal(float64(17), score3)
-	suite.Equal(float64(5), score4)
+	suite.Equal(int64(12), score1)
+	suite.Equal(int64(19), score2)
+	suite.Equal(int64(17), score3)
+	suite.Equal(int64(5), score4)
 
 	score5 := suite.balancer.calculateScore(-1, costMetrics1, 5)
 	score6 := suite.balancer.calculateScore(-1, costMetrics2, 5)
 	score7 := suite.balancer.calculateScore(-1, costMetrics3, 5)
 	score8 := suite.balancer.calculateScore(-1, costMetrics4, 5)
-	suite.Equal(float64(347), score5)
-	suite.Equal(float64(689), score6)
-	suite.Equal(float64(352), score7)
-	suite.Equal(float64(220), score8)
+	suite.Equal(int64(347), score5)
+	suite.Equal(int64(689), score6)
+	suite.Equal(int64(352), score7)
+	suite.Equal(int64(220), score8)
 
 	// test score overflow
 	costMetrics5 := &internalpb.CostAggregation{
@@ -120,15 +120,7 @@ func (suite *LookAsideBalancerSuite) TestCalculateScore() {
 	}
 
 	score9 := suite.balancer.calculateScore(-1, costMetrics5, math.MaxInt64)
-	suite.Equal(math.MaxFloat64, score9)
-
-	// test metrics expire
-	suite.balancer.metricsUpdateTs.Insert(1, time.Now().UnixMilli())
-	score10 := suite.balancer.calculateScore(1, costMetrics4, 0)
-	suite.Equal(float64(5), score10)
-	suite.balancer.metricsUpdateTs.Insert(1, time.Now().UnixMilli()-5000)
-	score11 := suite.balancer.calculateScore(1, costMetrics4, 0)
-	suite.Equal(float64(0), score11)
+	suite.Equal(int64(math.MaxInt64), score9)
 
 	// test unexpected negative nq value
 	costMetrics6 := &internalpb.CostAggregation{
@@ -137,14 +129,14 @@ func (suite *LookAsideBalancerSuite) TestCalculateScore() {
 		TotalNQ:      -1,
 	}
 	score12 := suite.balancer.calculateScore(-1, costMetrics6, math.MaxInt64)
-	suite.Equal(float64(4), score12)
+	suite.Equal(int64(4), score12)
 	costMetrics7 := &internalpb.CostAggregation{
 		ResponseTime: 5,
 		ServiceTime:  1,
 		TotalNQ:      1,
 	}
 	score13 := suite.balancer.calculateScore(-1, costMetrics7, -1)
-	suite.Equal(float64(4), score13)
+	suite.Equal(int64(4), score13)
 }
 
 func (suite *LookAsideBalancerSuite) TestSelectNode() {
@@ -279,7 +271,8 @@ func (suite *LookAsideBalancerSuite) TestSelectNode() {
 			}
 
 			for node, executingNQ := range c.executingNQ {
-				suite.balancer.executingTaskTotalNQ.Insert(node, atomic.NewInt64(executingNQ))
+				metrics, _ := suite.balancer.metricsMap.Get(node)
+				metrics.executingNQ.Store(executingNQ)
 			}
 			counter := make(map[int64]int64)
 			for i := 0; i < c.requestCount; i++ {
@@ -300,25 +293,31 @@ func (suite *LookAsideBalancerSuite) TestCancelWorkload() {
 	suite.NoError(err)
 	suite.balancer.CancelWorkload(node, 10)
 
-	executingNQ, ok := suite.balancer.executingTaskTotalNQ.Get(node)
+	metrics, ok := suite.balancer.metricsMap.Get(node)
 	suite.True(ok)
-	suite.Equal(int64(0), executingNQ.Load())
+	suite.Equal(int64(0), metrics.executingNQ.Load())
 }
 
 func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 	qn2 := mocks.NewMockQueryNodeClient(suite.T())
-	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(2)).Return(qn2, nil)
+	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(2)).Return(qn2, nil).Maybe()
 	qn2.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
 		},
-	}, nil)
+	}, nil).Maybe()
 
-	suite.balancer.metricsUpdateTs.Insert(1, time.Now().UnixMilli())
-	suite.balancer.metricsUpdateTs.Insert(2, time.Now().UnixMilli())
-	suite.balancer.unreachableQueryNodes.Insert(2)
+	metrics1 := &CostMetrics{}
+	metrics1.ts.Store(time.Now().UnixMilli())
+	metrics1.unavailable.Store(true)
+	suite.balancer.metricsMap.Insert(1, metrics1)
+	metrics2 := &CostMetrics{}
+	metrics2.ts.Store(time.Now().UnixMilli())
+	metrics2.unavailable.Store(true)
+	suite.balancer.metricsMap.Insert(2, metrics2)
 	suite.Eventually(func() bool {
-		return suite.balancer.unreachableQueryNodes.Contain(1)
+		metrics, ok := suite.balancer.metricsMap.Get(1)
+		return ok && metrics.unavailable.Load()
 	}, 5*time.Second, 100*time.Millisecond)
 	targetNode, err := suite.balancer.SelectNode(context.Background(), []int64{1}, 1)
 	suite.ErrorIs(err, merr.ErrServiceUnavailable)
@@ -326,16 +325,21 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 
 	suite.balancer.UpdateCostMetrics(1, &internalpb.CostAggregation{})
 	suite.Eventually(func() bool {
-		return !suite.balancer.unreachableQueryNodes.Contain(1)
+		metrics, ok := suite.balancer.metricsMap.Get(1)
+		return ok && !metrics.unavailable.Load()
 	}, 3*time.Second, 100*time.Millisecond)
 
 	suite.Eventually(func() bool {
-		return !suite.balancer.unreachableQueryNodes.Contain(2)
+		metrics, ok := suite.balancer.metricsMap.Get(2)
+		return ok && !metrics.unavailable.Load()
 	}, 5*time.Second, 100*time.Millisecond)
 }
 
 func (suite *LookAsideBalancerSuite) TestGetClientFailed() {
-	suite.balancer.metricsUpdateTs.Insert(2, time.Now().UnixMilli())
+	metrics1 := &CostMetrics{}
+	metrics1.ts.Store(time.Now().UnixMilli())
+	metrics1.unavailable.Store(true)
+	suite.balancer.metricsMap.Insert(2, metrics1)
 
 	// test get shard client from client mgr return nil
 	suite.clientMgr.ExpectedCalls = nil
@@ -364,13 +368,17 @@ func (suite *LookAsideBalancerSuite) TestNodeRecover() {
 		},
 	}, nil)
 
-	suite.balancer.metricsUpdateTs.Insert(3, time.Now().UnixMilli())
+	metrics1 := &CostMetrics{}
+	metrics1.ts.Store(time.Now().UnixMilli())
+	suite.balancer.metricsMap.Insert(3, metrics1)
 	suite.Eventually(func() bool {
-		return suite.balancer.unreachableQueryNodes.Contain(3)
+		metrics, ok := suite.balancer.metricsMap.Get(3)
+		return ok && metrics.unavailable.Load()
 	}, 5*time.Second, 100*time.Millisecond)
 
 	suite.Eventually(func() bool {
-		return !suite.balancer.unreachableQueryNodes.Contain(3)
+		metrics, ok := suite.balancer.metricsMap.Get(3)
+		return ok && !metrics.unavailable.Load()
 	}, 5*time.Second, 100*time.Millisecond)
 }
 
@@ -386,17 +394,82 @@ func (suite *LookAsideBalancerSuite) TestNodeOffline() {
 		},
 	}, nil)
 
-	suite.balancer.metricsUpdateTs.Insert(3, time.Now().UnixMilli())
+	metrics1 := &CostMetrics{}
+	metrics1.ts.Store(time.Now().UnixMilli())
+	suite.balancer.metricsMap.Insert(3, metrics1)
 	suite.Eventually(func() bool {
-		return suite.balancer.unreachableQueryNodes.Contain(3)
+		metrics, ok := suite.balancer.metricsMap.Get(3)
+		return ok && metrics.unavailable.Load()
 	}, 5*time.Second, 100*time.Millisecond)
 
 	suite.Eventually(func() bool {
-		return !suite.balancer.metricsUpdateTs.Contain(3)
+		_, ok := suite.balancer.metricsMap.Get(3)
+		return !ok
 	}, 10*time.Second, 100*time.Millisecond)
-	suite.Eventually(func() bool {
-		return !suite.balancer.unreachableQueryNodes.Contain(3)
-	}, time.Second, 100*time.Millisecond)
+}
+
+func BenchmarkSelectNode_QNWithSameWorkload(b *testing.B) {
+	balancer := NewLookAsideBalancer(nil)
+
+	ctx := context.Background()
+	nodeList := make([]int64, 0o0)
+
+	metrics := &internalpb.CostAggregation{
+		ResponseTime: 100,
+		ServiceTime:  100,
+		TotalNQ:      100,
+	}
+	for i := 0; i < 16; i++ {
+		nodeID := int64(10000 + i)
+		nodeList = append(nodeList, nodeID)
+	}
+	cost := int64(7)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			node, _ := balancer.SelectNode(ctx, nodeList, cost)
+			balancer.CancelWorkload(node, cost)
+			balancer.UpdateCostMetrics(node, metrics)
+		}
+	})
+}
+
+func BenchmarkSelectNode_QNWithDifferentWorkload(b *testing.B) {
+	balancer := NewLookAsideBalancer(nil)
+
+	ctx := context.Background()
+	nodeList := make([]int64, 0o0)
+
+	metrics := &internalpb.CostAggregation{
+		ResponseTime: 100,
+		ServiceTime:  100,
+		TotalNQ:      100,
+	}
+
+	heavyMetric := &internalpb.CostAggregation{
+		ResponseTime: 1000,
+		ServiceTime:  1000,
+		TotalNQ:      1000,
+	}
+	for i := 0; i < 16; i++ {
+		nodeID := int64(10000 + i)
+		nodeList = append(nodeList, nodeID)
+	}
+	cost := int64(7)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		var i int
+		for pb.Next() {
+			node, _ := balancer.SelectNode(ctx, nodeList, cost)
+			balancer.CancelWorkload(node, cost)
+			if i%2 == 0 {
+				balancer.UpdateCostMetrics(node, heavyMetric)
+			} else {
+				balancer.UpdateCostMetrics(node, metrics)
+			}
+			i++
+		}
+	})
 }
 
 func TestLookAsideBalancerSuite(t *testing.T) {
