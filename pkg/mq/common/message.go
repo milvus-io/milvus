@@ -16,6 +16,14 @@
 
 package common
 
+import (
+	"fmt"
+
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+)
+
 // ProducerOptions contains the options of a producer
 type ProducerOptions struct {
 	// The topic that this Producer will publish
@@ -65,3 +73,30 @@ const (
 	// SubscriptionPositionUnkown indicates we don't care about the consumer location, since we are doing another seek or only some meta api over that
 	SubscriptionPositionUnknown
 )
+
+const MsgTypeKey = "msg_type"
+
+func GetMsgType(msg Message) (commonpb.MsgType, error) {
+	msgType := commonpb.MsgType_Undefined
+	properties := msg.Properties()
+	if properties != nil {
+		if val, ok := properties[MsgTypeKey]; ok {
+			msgType = commonpb.MsgType(commonpb.MsgType_value[val])
+		}
+	}
+	if msgType == commonpb.MsgType_Undefined {
+		header := commonpb.MsgHeader{}
+		if msg.Payload() == nil {
+			return msgType, fmt.Errorf("failed to unmarshal message header, payload is empty")
+		}
+		err := proto.Unmarshal(msg.Payload(), &header)
+		if err != nil {
+			return msgType, fmt.Errorf("failed to unmarshal message header, err %s", err.Error())
+		}
+		if header.Base == nil {
+			return msgType, fmt.Errorf("failed to unmarshal message, header is uncomplete")
+		}
+		msgType = header.Base.MsgType
+	}
+	return msgType, nil
+}
