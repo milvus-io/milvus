@@ -1438,8 +1438,8 @@ TEST(Sealed, GetVectorFromChunkCache) {
     auto file_name = std::string(
         "sealed_test_get_vector_from_chunk_cache/insert_log/1/101/1000000");
 
-    milvus::storage::ChunkCacheSingleton::GetInstance().Init(mmap_dir,
-                                                             "willneed");
+    auto sc = milvus::storage::MmapConfig{};
+    milvus::storage::MmapManager::GetInstance().Init(sc);
 
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
@@ -1460,7 +1460,8 @@ TEST(Sealed, GetVectorFromChunkCache) {
                                         fakevec_id,
                                         milvus::DataType::VECTOR_FLOAT,
                                         dim,
-                                        metric_type);
+                                        metric_type,
+                                        false);
 
     auto rcm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();
@@ -1645,8 +1646,8 @@ TEST(Sealed, WarmupChunkCache) {
     auto file_name = std::string(
         "sealed_test_get_vector_from_chunk_cache/insert_log/1/101/1000000");
 
-    milvus::storage::ChunkCacheSingleton::GetInstance().Init(mmap_dir,
-                                                             "willneed");
+    auto sc = milvus::storage::MmapConfig{};
+    milvus::storage::MmapManager::GetInstance().Init(sc);
 
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
@@ -1667,7 +1668,8 @@ TEST(Sealed, WarmupChunkCache) {
                                         fakevec_id,
                                         milvus::DataType::VECTOR_FLOAT,
                                         dim,
-                                        metric_type);
+                                        metric_type,
+                                        false);
 
     auto rcm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();
