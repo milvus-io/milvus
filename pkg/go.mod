@@ -66,6 +66,7 @@ require (
 	github.com/DataDog/zstd v1.5.0 // indirect
 	github.com/ardielle/ardielle-go v1.5.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/bits-and-blooms/bitset v1.4.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
@@ -165,6 +166,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.28.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.0.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/oauth2 v0.20.0 // indirect
 	golang.org/x/term v0.22.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
@@ -180,7 +182,7 @@ require (
 )
 
 replace (
-	github.com/apache/pulsar-client-go => github.com/milvus-io/pulsar-client-go v0.6.10
+	github.com/apache/pulsar-client-go => github.com/milvus-io/pulsar-client-go v0.11.1
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/expr-lang/expr => github.com/SimFG/expr v0.0.0-20240919063422-9ca3d5925361
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
