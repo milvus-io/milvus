@@ -24,8 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/metautil"
-
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -41,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 )
 
 func TestClusteringCompactionTaskSuite(t *testing.T) {

@@ -1807,7 +1807,6 @@ func (s *segMetricMutation) addNewSeg(state commonpb.SegmentState, level datapb.
 	}
 	if _, ok := s.stateChange[level.String()][state.String()]; !ok {
 		s.stateChange[level.String()][state.String()] = make(map[string]int)
-
 	}
 	s.stateChange[level.String()][state.String()][getSortStatus(isSorted)] += 1
 
