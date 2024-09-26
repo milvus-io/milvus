@@ -1566,6 +1566,7 @@ class TestSearchVector(TestBase):
         assert len(res) == limit
 
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
+    @pytest.mark.xfail(reason="issue 36508")
     def test_search_vector_with_range_search(self, metric_type):
         """
         Search a vector with range search with different metric type
@@ -1585,6 +1586,7 @@ class TestSearchVector(TestBase):
         if metric_type == "L2":
             r1, r2 = r2, r1
         output_fields = get_common_fields_by_data(data, exclude_fields=[vector_field])
+        logger.info(f"r1: {r1}, r2: {r2}")
         payload = {
             "collectionName": name,
             "data": [vector_to_search],
