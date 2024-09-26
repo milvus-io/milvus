@@ -25,7 +25,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -344,12 +343,10 @@ func (suite *LookAsideBalancerSuite) TestGetClientFailed() {
 	// test get shard client from client mgr return nil
 	suite.clientMgr.ExpectedCalls = nil
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(2)).Return(nil, errors.New("shard client not found"))
-	failCounter := atomic.NewInt64(0)
-	suite.balancer.failedHeartBeatCounter.Insert(2, failCounter)
-
-	// slepp 10s, wait for checkNodeHealth execute for more than one round
-	time.Sleep(10 * time.Second)
-	suite.True(failCounter.Load() == 0)
+	// expected stopping the health check after failure times reaching the limit
+	suite.Eventually(func() bool {
+		return !suite.balancer.metricsMap.Contain(2)
+	}, 30*time.Second, 1*time.Second)
 }
 
 func (suite *LookAsideBalancerSuite) TestNodeRecover() {
