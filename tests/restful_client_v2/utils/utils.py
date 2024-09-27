@@ -262,6 +262,6 @@ def get_sorted_distance(train_emb, test_emb, metric_type):
         "IP": ip_distance
     }
     distance = pairwise_distances(train_emb, Y=test_emb, metric=milvus_sklearn_metric_map[metric_type], n_jobs=-1)
-    distance = np.array(distance.T, order='C', dtype=np.float16)
+    distance = np.array(distance.T, order='C', dtype=np.float32)
     distance_sorted = np.sort(distance, axis=1).tolist()
     return distance_sorted
