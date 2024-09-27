@@ -1249,6 +1249,44 @@ func AppendSystemFields(schema *schemapb.CollectionSchema) *schemapb.CollectionS
 	return newSchema
 }
 
+func GetId(src *schemapb.IDs, idx int) (int, any) {
+	switch src.IdField.(type) {
+	case *schemapb.IDs_IntId:
+		return 8, src.GetIntId().Data[idx]
+	case *schemapb.IDs_StrId:
+		return len(src.GetStrId().Data[idx]), src.GetStrId().Data[idx]
+	default:
+		panic("unknown pk type")
+	}
+}
+
+func AppendID(dst *schemapb.IDs, src any) {
+	switch value := src.(type) {
+	case int64:
+		if dst.GetIdField() == nil {
+			dst.IdField = &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{value},
+				},
+			}
+		} else {
+			dst.GetIntId().Data = append(dst.GetIntId().Data, value)
+		}
+	case string:
+		if dst.GetIdField() == nil {
+			dst.IdField = &schemapb.IDs_StrId{
+				StrId: &schemapb.StringArray{
+					Data: []string{value},
+				},
+			}
+		} else {
+			dst.GetStrId().Data = append(dst.GetStrId().Data, value)
+		}
+	default:
+		// TODO
+	}
+}
+
 func AppendIDs(dst *schemapb.IDs, src *schemapb.IDs, idx int) {
 	switch src.IdField.(type) {
 	case *schemapb.IDs_IntId:
