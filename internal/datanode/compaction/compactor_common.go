@@ -234,7 +234,7 @@ func bmSerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator.I
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "bm25 stats log serializeWrite")
 	defer span.End()
 
-	stats, err := writer.GetBm25Stats()
+	stats, err := writer.GetBm25StatsBlob()
 	if err != nil {
 		return nil, err
 	}

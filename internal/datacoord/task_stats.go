@@ -181,7 +181,6 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 	bm25LogNum := int64(len(collInfo.Schema.GetFunctions()))
 	binlogNum := (segment.getSegmentSize()/Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() + 1) * int64(len(collInfo.Schema.GetFields())) * 2
 	start, end, err := dependency.allocator.AllocN(bm25LogNum + binlogNum + 1)
-
 	if err != nil {
 		log.Warn("stats task alloc logID failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
 		st.SetState(indexpb.JobState_JobStateInit, err.Error())

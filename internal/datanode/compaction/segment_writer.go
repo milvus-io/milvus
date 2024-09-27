@@ -366,8 +366,17 @@ func (w *SegmentWriter) Write(v *storage.Value) error {
 	}
 
 	w.pkstats.Update(v.PK)
-	for fieldId, bytes := range v.BM25Row {
-		w.bm25Stats[fieldId].AppendBytes(bytes)
+	for fieldID, stats := range w.bm25Stats {
+		data, ok := v.Value.(map[storage.FieldID]interface{})[fieldID]
+		if !ok {
+			return fmt.Errorf("bm25 field value not found")
+		}
+
+		bytes, ok := data.([]byte)
+		if !ok {
+			return fmt.Errorf("bm25 field value not sparse bytes")
+		}
+		stats.AppendBytes(bytes)
 	}
 
 	w.rowCount.Inc()
@@ -380,7 +389,11 @@ func (w *SegmentWriter) Finish() (*storage.Blob, error) {
 	return codec.SerializePkStats(w.pkstats, w.GetRowNum())
 }
 
-func (w *SegmentWriter) GetBm25Stats() (map[int64]*storage.Blob, error) {
+func (w *SegmentWriter) GetBm25Stats() map[int64]*storage.BM25Stats {
+	return w.bm25Stats
+}
+
+func (w *SegmentWriter) GetBm25StatsBlob() (map[int64]*storage.Blob, error) {
 	result := make(map[int64]*storage.Blob)
 	for fieldID, stats := range w.bm25Stats {
 		bytes, err := stats.Serialize()
@@ -388,9 +401,10 @@ func (w *SegmentWriter) GetBm25Stats() (map[int64]*storage.Blob, error) {
 			return nil, err
 		}
 		result[fieldID] = &storage.Blob{
-			Key:    fmt.Sprintf("%d", fieldID),
-			Value:  bytes,
-			RowNum: stats.NumRow(), // TODO AOIASD ADD MEMORY SIZE
+			Key:        fmt.Sprintf("%d", fieldID),
+			Value:      bytes,
+			RowNum:     stats.NumRow(),
+			MemorySize: int64(len(bytes)),
 		}
 	}
 
