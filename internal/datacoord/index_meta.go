@@ -946,3 +946,17 @@ func (m *indexMeta) AreAllDiskIndex(collectionID int64, schema *schemapb.Collect
 	allDiskIndex := len(vectorFields) == len(vectorFieldsWithDiskIndex)
 	return allDiskIndex
 }
+
+func (m *indexMeta) HasIndex(collectionID int64) bool {
+	m.RLock()
+	defer m.RUnlock()
+	indexes, ok := m.indexes[collectionID]
+	if ok {
+		for _, index := range indexes {
+			if !index.IsDeleted {
+				return true
+			}
+		}
+	}
+	return false
+}

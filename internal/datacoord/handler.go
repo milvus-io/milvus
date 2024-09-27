@@ -122,7 +122,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 
 	segmentInfos := make(map[int64]*SegmentInfo)
-	indexedSegments := FilterInIndexedSegments(h, h.s.meta, segments...)
+	indexedSegments := FilterInIndexedSegments(h, h.s.meta, false, segments...)
 	indexed := make(typeutil.UniqueSet)
 	for _, segment := range indexedSegments {
 		indexed.Insert(segment.GetID())
