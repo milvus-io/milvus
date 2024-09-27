@@ -812,6 +812,25 @@ func (m *indexMeta) GetAllSegIndexes() map[int64]*model.SegmentIndex {
 	return segIndexes
 }
 
+// SetStoredIndexFileSizeMetric returns the total index files size of all segment for each collection.
+func (m *indexMeta) SetStoredIndexFileSizeMetric(collections map[UniqueID]*collectionInfo) uint64 {
+	m.RLock()
+	defer m.RUnlock()
+	
+	var total uint64
+	metrics.DataCoordStoredIndexFilesSize.Reset()
+
+	for _, segmentIdx := range m.buildID2SegmentIndex {
+		coll, ok := collections[segmentIdx.CollectionID]
+		if ok {
+			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName,
+				fmt.Sprint(segmentIdx.CollectionID), fmt.Sprint(segmentIdx.SegmentID)).Set(float64(segmentIdx.IndexSize))
+			total += segmentIdx.IndexSize
+		}
+	}
+	return total
+}
+
 func (m *indexMeta) RemoveSegmentIndex(collID, partID, segID, indexID, buildID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
