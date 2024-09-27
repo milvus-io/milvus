@@ -46,7 +46,6 @@ type Iterator interface {
 type Value struct {
 	ID        int64
 	PK        PrimaryKey
-	BM25Row   map[int64][]byte
 	Timestamp int64
 	IsDeleted bool
 	Value     interface{}

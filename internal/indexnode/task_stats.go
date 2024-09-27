@@ -405,7 +405,7 @@ func (st *statsTask) downloadData(ctx context.Context, numRows int64, PKFieldID 
 			return &storage.Blob{Key: paths[i], Value: v}
 		})
 
-		iter, err := storage.NewBinlogDeserializeReader(blobs, PKFieldID, bm25FieldIds)
+		iter, err := storage.NewBinlogDeserializeReader(blobs, PKFieldID)
 		if err != nil {
 			log.Warn("downloadData wrong, failed to new insert binlogs reader", zap.Error(err))
 			return nil, err
@@ -584,7 +584,7 @@ func statSerializeWrite(ctx context.Context, io io.BinlogIO, startID int64, writ
 func bm25SerializerWrite(ctx context.Context, io io.BinlogIO, startID int64, writer *compaction.SegmentWriter, finalRowCount int64) (int64, []*datapb.FieldBinlog, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "bm25log serializeWrite")
 	defer span.End()
-	stats, err := writer.GetBm25Stats()
+	stats, err := writer.GetBm25StatsBlob()
 	if err != nil {
 		return 0, nil, err
 	}

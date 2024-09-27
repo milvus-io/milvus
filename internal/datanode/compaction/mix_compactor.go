@@ -175,7 +175,7 @@ func (t *mixCompactionTask) mergeSplit(
 			return &storage.Blob{Key: paths[i], Value: v}
 		})
 
-		iter, err := storage.NewBinlogDeserializeReader(blobs, pkField.GetFieldID(), t.bm25FieldIDs)
+		iter, err := storage.NewBinlogDeserializeReader(blobs, pkField.GetFieldID())
 		if err != nil {
 			log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 			return nil, err
