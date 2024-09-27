@@ -1688,6 +1688,10 @@ def get_dim_by_schema(schema=None):
     return None
 
 
+def gen_varchar_data(length: int, nb: int):
+    return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
+
+
 def gen_data_by_collection_field(field, nb=None, start=None):
     # if nb is None, return one data, else return a list of data
     data_type = field.dtype
@@ -1726,8 +1730,8 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         max_length = min(20, max_length-1)
         length = random.randint(0, max_length)
         if nb is None:
-            return "".join([chr(random.randint(97, 122)) for _ in range(length)])
-        return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
+            return gen_varchar_data(length=length, nb=1)[0]
+        return gen_varchar_data(length=length, nb=nb)
     if data_type == DataType.JSON:
         if nb is None:
             return {"name": fake.name(), "address": fake.address()}
