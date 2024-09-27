@@ -3004,6 +3004,9 @@ def set_collection_schema(fields: list, field_params: dict = {}, **kwargs):
                 is_primary: bool
                 description: str
                 max_length: int = 65535
+            varchar_2:
+                max_length: int = 100
+                is_partition_key: bool
             array_int8_1:
                 max_capacity: int = 100
             array_varchar_1:
@@ -3016,6 +3019,7 @@ def set_collection_schema(fields: list, field_params: dict = {}, **kwargs):
             primary_field: str
             auto_id: bool
             enable_dynamic_field: bool
+            num_partitions: int
     """
     field_schemas = [set_field_schema(field=field, params=field_params.get(field, {})) for field in fields]
     return ApiCollectionSchemaWrapper().init_collection_schema(fields=field_schemas, **kwargs)[0]
