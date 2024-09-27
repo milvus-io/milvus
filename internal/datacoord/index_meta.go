@@ -816,7 +816,7 @@ func (m *indexMeta) GetAllSegIndexes() map[int64]*model.SegmentIndex {
 func (m *indexMeta) SetStoredIndexFileSizeMetric(collections map[UniqueID]*collectionInfo) uint64 {
 	m.RLock()
 	defer m.RUnlock()
-	
+
 	var total uint64
 	metrics.DataCoordStoredIndexFilesSize.Reset()
 
