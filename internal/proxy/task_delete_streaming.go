@@ -46,19 +46,21 @@ func (dt *deleteTaskByStreamingService) Execute(ctx context.Context) (err error)
 	}
 
 	var msgs []message.MutableMessage
-	for hashKey, deleteMsg := range result {
+	for hashKey, deleteMsgs := range result {
 		vchannel := dt.vChannels[hashKey]
-		msg, err := message.NewDeleteMessageBuilderV1().
-			WithHeader(&message.DeleteMessageHeader{
-				CollectionId: dt.collectionID,
-			}).
-			WithBody(deleteMsg.DeleteRequest).
-			WithVChannel(vchannel).
-			BuildMutable()
-		if err != nil {
-			return err
+		for _, deleteMsg := range deleteMsgs {
+			msg, err := message.NewDeleteMessageBuilderV1().
+				WithHeader(&message.DeleteMessageHeader{
+					CollectionId: dt.collectionID,
+				}).
+				WithBody(deleteMsg.DeleteRequest).
+				WithVChannel(vchannel).
+				BuildMutable()
+			if err != nil {
+				return err
+			}
+			msgs = append(msgs, msg)
 		}
-		msgs = append(msgs, msg)
 	}
 
 	log.Debug("send delete request to virtual channels",
