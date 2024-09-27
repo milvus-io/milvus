@@ -19,9 +19,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-var _ CompactionTask = (*mixCompactionTask)(nil)
+var _ CompactionTask = (*vshardSplitCompactionTask)(nil)
 
-type mixCompactionTask struct {
+type vshardSplitCompactionTask struct {
 	*datapb.CompactionTask
 	plan   *datapb.CompactionPlan
 	result *datapb.CompactionPlanResult
@@ -30,21 +30,25 @@ type mixCompactionTask struct {
 	allocator     allocator.Allocator
 	sessions      session.DataNodeManager
 	meta          CompactionMeta
+	vshardManager VshardManager
+
 	newSegmentIDs []int64
-	slotUsage     int64
+
+	slotUsage int64
 }
 
-func newMixCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, session session.DataNodeManager) *mixCompactionTask {
-	return &mixCompactionTask{
+func newVshardSplitCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, session session.DataNodeManager, vshardManager VshardManager) *vshardSplitCompactionTask {
+	return &vshardSplitCompactionTask{
 		CompactionTask: t,
 		allocator:      allocator,
 		meta:           meta,
 		sessions:       session,
+		vshardManager:  vshardManager,
 		slotUsage:      paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 	}
 }
 
-func (t *mixCompactionTask) processPipelining() bool {
+func (t *vshardSplitCompactionTask) processPipelining() bool {
 	if t.NeedReAssignNodeID() {
 		return false
 	}
@@ -53,10 +57,10 @@ func (t *mixCompactionTask) processPipelining() bool {
 	var err error
 	t.plan, err = t.BuildCompactionRequest()
 	if err != nil {
-		log.Warn("mixCompactionTask failed to build compaction request", zap.Error(err))
+		log.Warn("vshard split CompactionTask failed to build compaction request", zap.Error(err))
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 		if err != nil {
-			log.Warn("mixCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+			log.Warn("vshard split CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
 			return false
 		}
 		return t.processFailed()
@@ -64,7 +68,7 @@ func (t *mixCompactionTask) processPipelining() bool {
 
 	err = t.sessions.Compaction(context.TODO(), t.GetNodeID(), t.GetPlan())
 	if err != nil {
-		log.Warn("mixCompactionTask failed to notify compaction tasks to DataNode", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		log.Warn("vshard split CompactionTask failed to notify compaction tasks to DataNode", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
 		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		return false
 	}
@@ -73,23 +77,23 @@ func (t *mixCompactionTask) processPipelining() bool {
 	return false
 }
 
-func (t *mixCompactionTask) processMetaSaved() bool {
+func (t *vshardSplitCompactionTask) processMetaSaved() bool {
 	if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)); err != nil {
-		log.Warn("mixCompactionTask failed to proccessMetaSaved", zap.Error(err))
+		log.Warn("vshard split CompactionTask failed to proccessMetaSaved", zap.Error(err))
 		return false
 	}
 
 	return t.processCompleted()
 }
 
-func (t *mixCompactionTask) processExecuting() bool {
+func (t *vshardSplitCompactionTask) processExecuting() bool {
 	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.String("type", t.GetType().String()))
 	result, err := t.sessions.GetCompactionPlanResult(t.GetNodeID(), t.GetPlanID())
 	if err != nil || result == nil {
 		if errors.Is(err, merr.ErrNodeNotFound) {
 			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		}
-		log.Warn("mixCompactionTask failed to get compaction result", zap.Error(err))
+		log.Warn("vshard split CompactionTask failed to get compaction result", zap.Error(err))
 		return false
 	}
 	switch result.GetState() {
@@ -97,7 +101,7 @@ func (t *mixCompactionTask) processExecuting() bool {
 		if t.checkTimeout() {
 			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
 			if err != nil {
-				log.Warn("mixCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+				log.Warn("vshard split CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
 				return false
 			}
 			return t.processTimeout()
@@ -108,17 +112,17 @@ func (t *mixCompactionTask) processExecuting() bool {
 			log.Info("illegal compaction results")
 			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
 			if err != nil {
-				log.Warn("mixCompactionTask failed to setState failed", zap.Error(err))
+				log.Warn("vshard split CompactionTask failed to setState failed", zap.Error(err))
 				return false
 			}
 			return t.processFailed()
 		}
 		if err := t.saveSegmentMeta(); err != nil {
-			log.Warn("mixCompactionTask failed to save segment meta", zap.Error(err))
+			log.Warn("vshard split CompactionTask failed to save segment meta", zap.Error(err))
 			if errors.Is(err, merr.ErrIllegalCompactionPlan) {
 				err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
 				if err != nil {
-					log.Warn("mixCompactionTask failed to setState failed", zap.Error(err))
+					log.Warn("vshard split CompactionTask failed to setState failed", zap.Error(err))
 					return false
 				}
 				return t.processFailed()
@@ -127,7 +131,7 @@ func (t *mixCompactionTask) processExecuting() bool {
 		}
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(t.newSegmentIDs))
 		if err != nil {
-			log.Warn("mixCompaction failed to setState meta saved", zap.Error(err))
+			log.Warn("vshard split Compaction failed to setState meta saved", zap.Error(err))
 			return false
 		}
 		return t.processMetaSaved()
@@ -141,31 +145,46 @@ func (t *mixCompactionTask) processExecuting() bool {
 	return false
 }
 
-func (t *mixCompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
+func (t *vshardSplitCompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
 	return t.meta.SaveCompactionTask(task)
 }
 
-func (t *mixCompactionTask) SaveTaskMeta() error {
+func (t *vshardSplitCompactionTask) SaveTaskMeta() error {
 	return t.saveTaskMeta(t.CompactionTask)
 }
 
-func (t *mixCompactionTask) saveSegmentMeta() error {
-	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.String("type", t.GetType().String()))
+func (t *vshardSplitCompactionTask) saveSegmentMeta() error {
+	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.String("type", t.GetType().String()), zap.Int64("vshardTaskId", t.GetVshardTaskId()))
+
+	for _, seg := range t.result.GetSegments() {
+		log.Debug("compaction result segment", zap.Int64("segmentID", seg.SegmentID), zap.String("vshard", seg.Vshard.String()))
+	}
+
+	if t.VshardTaskId != 0 {
+		err := t.vshardManager.ReportVShardCompaction(t.PartitionID, t.VshardTaskId)
+		if err != nil {
+			log.Error("fail to report vshard compaction done", zap.Error(err))
+			return err
+		}
+	}
+
 	// Also prepare metric updates.
 	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(t.CompactionTask, t.result)
 	if err != nil {
+		log.Error("fail to CompleteCompactionMutation", zap.Error(err))
 		return err
 	}
 	// Apply metrics after successful meta update.
 	t.newSegmentIDs = lo.Map(newSegments, func(s *SegmentInfo, _ int) UniqueID { return s.GetID() })
 	metricMutation.commit()
-	log.Info("mixCompactionTask success to save segment meta")
+	log.Info("vshard split CompactionTask success to save segment meta")
+
 	return nil
 }
 
 // Note: return True means exit this state machine.
 // ONLY return True for processCompleted or processFailed
-func (t *mixCompactionTask) Process() bool {
+func (t *vshardSplitCompactionTask) Process() bool {
 	switch t.GetState() {
 	case datapb.CompactionTaskState_pipelining:
 		return t.processPipelining()
@@ -183,66 +202,66 @@ func (t *mixCompactionTask) Process() bool {
 	return true
 }
 
-func (t *mixCompactionTask) GetResult() *datapb.CompactionPlanResult {
+func (t *vshardSplitCompactionTask) GetResult() *datapb.CompactionPlanResult {
 	return t.result
 }
 
-func (t *mixCompactionTask) GetPlan() *datapb.CompactionPlan {
+func (t *vshardSplitCompactionTask) GetPlan() *datapb.CompactionPlan {
 	return t.plan
 }
 
-func (t *mixCompactionTask) GetLabel() string {
+func (t *vshardSplitCompactionTask) GetLabel() string {
 	return fmt.Sprintf("%d-%s", t.PartitionID, t.GetChannel())
 }
 
-func (t *mixCompactionTask) NeedReAssignNodeID() bool {
+func (t *vshardSplitCompactionTask) NeedReAssignNodeID() bool {
 	return t.GetState() == datapb.CompactionTaskState_pipelining && (t.GetNodeID() == 0 || t.GetNodeID() == NullNodeID)
 }
 
-func (t *mixCompactionTask) processCompleted() bool {
+func (t *vshardSplitCompactionTask) processCompleted() bool {
 	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
 		PlanID: t.GetPlanID(),
 	}); err != nil {
-		log.Warn("mixCompactionTask processCompleted unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()))
+		log.Warn("vshard split CompactionTask processCompleted unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()))
 	}
 
 	t.resetSegmentCompacting()
 	UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
-	log.Info("mixCompactionTask processCompleted done", zap.Int64("planID", t.GetPlanID()))
+	log.Info("vshard split CompactionTask processCompleted done", zap.Int64("planID", t.GetPlanID()))
 
 	return true
 }
 
-func (t *mixCompactionTask) resetSegmentCompacting() {
+func (t *vshardSplitCompactionTask) resetSegmentCompacting() {
 	t.meta.SetSegmentsCompacting(t.GetInputSegments(), false)
 }
 
-func (t *mixCompactionTask) processTimeout() bool {
+func (t *vshardSplitCompactionTask) processTimeout() bool {
 	t.resetSegmentCompacting()
 	return true
 }
 
-func (t *mixCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask {
-	taskClone := proto.Clone(t).(*datapb.CompactionTask)
+func (t *vshardSplitCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask {
+	pbClone := proto.Clone(t).(*datapb.CompactionTask)
 	for _, opt := range opts {
-		opt(taskClone)
+		opt(pbClone)
 	}
-	return taskClone
+	return pbClone
 }
 
-func (t *mixCompactionTask) processFailed() bool {
+func (t *vshardSplitCompactionTask) processFailed() bool {
 	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
 		PlanID: t.GetPlanID(),
 	}); err != nil {
-		log.Warn("mixCompactionTask processFailed unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		log.Warn("vshard split CompactionTask processFailed unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
 	}
 
-	log.Info("mixCompactionTask processFailed done", zap.Int64("planID", t.GetPlanID()))
+	log.Info("vshard split CompactionTask processFailed done", zap.Int64("planID", t.GetPlanID()))
 	t.resetSegmentCompacting()
 	return true
 }
 
-func (t *mixCompactionTask) checkTimeout() bool {
+func (t *vshardSplitCompactionTask) checkTimeout() bool {
 	if t.GetTimeoutInSeconds() > 0 {
 		diff := time.Since(time.Unix(t.GetStartTime(), 0)).Seconds()
 		if diff > float64(t.GetTimeoutInSeconds()) {
@@ -256,7 +275,7 @@ func (t *mixCompactionTask) checkTimeout() bool {
 	return false
 }
 
-func (t *mixCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
+func (t *vshardSplitCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
 	task := t.ShadowClone(opts...)
 	err := t.saveTaskMeta(task)
 	if err != nil {
@@ -266,53 +285,33 @@ func (t *mixCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) err
 	return nil
 }
 
-func (t *mixCompactionTask) SetNodeID(id UniqueID) error {
+func (t *vshardSplitCompactionTask) SetNodeID(id UniqueID) error {
 	return t.updateAndSaveTaskMeta(setNodeID(id))
 }
 
-func (t *mixCompactionTask) GetSpan() trace.Span {
+func (t *vshardSplitCompactionTask) GetSpan() trace.Span {
 	return t.span
 }
 
-func (t *mixCompactionTask) SetTask(task *datapb.CompactionTask) {
+func (t *vshardSplitCompactionTask) SetTask(task *datapb.CompactionTask) {
 	t.CompactionTask = task
 }
 
-func (t *mixCompactionTask) SetSpan(span trace.Span) {
+func (t *vshardSplitCompactionTask) SetSpan(span trace.Span) {
 	t.span = span
 }
 
-func (t *mixCompactionTask) SetResult(result *datapb.CompactionPlanResult) {
+func (t *vshardSplitCompactionTask) SetResult(result *datapb.CompactionPlanResult) {
 	t.result = result
 }
 
-func (t *mixCompactionTask) EndSpan() {
+func (t *vshardSplitCompactionTask) EndSpan() {
 	if t.span != nil {
 		t.span.End()
 	}
 }
 
-func (t *mixCompactionTask) CleanLogPath() {
-	if t.plan == nil {
-		return
-	}
-	if t.plan.GetSegmentBinlogs() != nil {
-		for _, binlogs := range t.plan.GetSegmentBinlogs() {
-			binlogs.FieldBinlogs = nil
-			binlogs.Field2StatslogPaths = nil
-			binlogs.Deltalogs = nil
-		}
-	}
-	if t.result.GetSegments() != nil {
-		for _, segment := range t.result.GetSegments() {
-			segment.InsertLogs = nil
-			segment.Deltalogs = nil
-			segment.Field2StatslogPaths = nil
-		}
-	}
-}
-
-func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
+func (t *vshardSplitCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	beginLogID, _, err := t.allocator.AllocN(1)
 	if err != nil {
 		return nil, err
@@ -331,10 +330,15 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			Begin: t.GetResultSegments()[0],
 			End:   t.GetResultSegments()[1],
 		},
-		SlotUsage: t.GetSlotUsage(),
-		MaxSize:   t.GetMaxSize(),
+		MaxSegmentRows: t.GetMaxSegmentRows(),
+		SlotUsage:      Params.DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
+		MaxSize:        t.GetMaxSize(),
+		Vshards:        t.GetToVshards(),
 	}
-	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
+	vshardsStr := lo.Map(t.GetToVshards(), func(vshard *datapb.VShardDesc, _ int) string {
+		return vshard.String()
+	})
+	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()), zap.Strings("vshard", vshardsStr))
 
 	segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
 	for _, segID := range t.GetInputSegments() {
@@ -351,14 +355,18 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			FieldBinlogs:        segInfo.GetBinlogs(),
 			Field2StatslogPaths: segInfo.GetStatslogs(),
 			Deltalogs:           segInfo.GetDeltalogs(),
-			IsSorted:            segInfo.GetIsSorted(),
 		})
 		segIDMap[segID] = segInfo.GetDeltalogs()
 	}
-	log.Info("Compaction handler refreshed mix compaction plan", zap.Int64("maxSize", plan.GetMaxSize()), zap.Any("segID2DeltaLogs", segIDMap))
+	log.Info("Compaction handler refreshed vshard compaction plan", zap.Int64("maxSize", plan.GetMaxSize()), zap.Any("segID2DeltaLogs", segIDMap))
 	return plan, nil
 }
 
-func (t *mixCompactionTask) GetSlotUsage() int64 {
+func (t *vshardSplitCompactionTask) CleanLogPath() {
+	// TODO implement me
+	panic("implement me")
+}
+
+func (t *vshardSplitCompactionTask) GetSlotUsage() int64 {
 	return t.slotUsage
 }

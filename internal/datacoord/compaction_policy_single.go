@@ -88,7 +88,7 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 		return nil, 0, err
 	}
 
-	partSegments := policy.meta.GetSegmentsChanPart(func(segment *SegmentInfo) bool {
+	partSegments := policy.meta.GetSegmentsChanPartVshard(func(segment *SegmentInfo) bool {
 		return segment.CollectionID == collectionID &&
 			isSegmentHealthy(segment) &&
 			isFlush(segment) &&
@@ -164,7 +164,7 @@ func (v *MixSegmentView) String() string {
 	strs := lo.Map(v.segments, func(segView *SegmentView, _ int) string {
 		return segView.String()
 	})
-	return fmt.Sprintf("label=<%s>,  segments=%v", v.label.String(), strs)
+	return fmt.Sprintf("label=<%s>, segmentNum=%d segments=%v", v.label.String(), len(v.segments), strs)
 }
 
 func (v *MixSegmentView) Trigger() (CompactionView, string) {

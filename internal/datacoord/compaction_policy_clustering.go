@@ -120,7 +120,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 		return nil, 0, err
 	}
 
-	partSegments := policy.meta.GetSegmentsChanPart(func(segment *SegmentInfo) bool {
+	partSegments := policy.meta.GetSegmentsChanPartVshard(func(segment *SegmentInfo) bool {
 		return segment.CollectionID == collectionID &&
 			isSegmentHealthy(segment) &&
 			isFlush(segment) &&
