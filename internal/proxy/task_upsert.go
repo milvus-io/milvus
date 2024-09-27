@@ -198,7 +198,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
 	// set field ID to insert field data
-	err = fillFieldIDBySchema(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.CollectionSchema)
+	err = fillFieldPropertiesBySchema(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.CollectionSchema)
 	if err != nil {
 		log.Warn("insert set fieldID to fieldData failed when upsert",
 			zap.Error(err))

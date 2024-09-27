@@ -1,8 +1,6 @@
 package ack
 
 import (
-	"go.uber.org/atomic"
-
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -14,9 +12,9 @@ var (
 
 // Acker records the timestamp and last confirmed message id that has not been acknowledged.
 type Acker struct {
-	acknowledged *atomic.Bool // is acknowledged.
-	detail       *AckDetail   // info is available after acknowledged.
-	manager      *AckManager  // the manager of the acker.
+	acknowledged bool        // is acknowledged.
+	detail       *AckDetail  // info is available after acknowledged.
+	manager      *AckManager // the manager of the acker.
 }
 
 // LastConfirmedMessageID returns the last confirmed message id.
@@ -34,13 +32,12 @@ func (ta *Acker) Ack(opts ...AckOption) {
 	for _, opt := range opts {
 		opt(ta.detail)
 	}
-	ta.acknowledged.Store(true)
 	ta.manager.ack(ta)
 }
 
 // ackDetail returns the ack info, only can be called after acknowledged.
 func (ta *Acker) ackDetail() *AckDetail {
-	if !ta.acknowledged.Load() {
+	if !ta.acknowledged {
 		panic("unreachable: ackDetail can only be called after acknowledged")
 	}
 	return ta.detail

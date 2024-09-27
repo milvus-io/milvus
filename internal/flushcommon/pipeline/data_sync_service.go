@@ -179,46 +179,9 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 			futures = append(futures, future)
 		}
 	}
-	lazyLoadSegmentStats := func(segType string, segments []*datapb.SegmentInfo) {
-		for _, item := range segments {
-			log.Info("lazy load pk stats for segment",
-				zap.String("vChannelName", item.GetInsertChannel()),
-				zap.Int64("segmentID", item.GetID()),
-				zap.Int64("numRows", item.GetNumOfRows()),
-				zap.String("segmentType", segType),
-			)
-			segment := item
 
-			lazy := pkoracle.NewLazyPkstats()
-
-			// ignore lazy load future
-			_ = io.GetOrCreateStatsPool().Submit(func() (any, error) {
-				var stats []*storage.PkStatistics
-				var err error
-				stats, err = compaction.LoadStats(context.Background(), chunkManager, info.GetSchema(), segment.GetID(), segment.GetStatslogs())
-				if err != nil {
-					return nil, err
-				}
-				pkStats := pkoracle.NewBloomFilterSet(stats...)
-				lazy.SetPkStats(pkStats)
-				return struct{}{}, nil
-			})
-			segmentPks.Insert(segment.GetID(), lazy)
-			if tickler != nil {
-				tickler.Inc()
-			}
-		}
-	}
-
-	// growing segment cannot use lazy mode
 	loadSegmentStats("growing", unflushed)
-	lazy := paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()
-	// check paramtable to decide whether skip load BF stage when initializing
-	if lazy {
-		lazyLoadSegmentStats("sealed", flushed)
-	} else {
-		loadSegmentStats("sealed", flushed)
-	}
+	loadSegmentStats("sealed", flushed)
 
 	// use fetched segment info
 	info.Vchan.FlushedSegments = flushed
@@ -362,19 +325,39 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 // NewDataSyncService stops and returns the initCtx.Err()
 func NewDataSyncService(initCtx context.Context, pipelineParams *util.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler) (*DataSyncService, error) {
 	// recover segment checkpoints
-	unflushedSegmentInfos, err := pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
-	if err != nil {
-		return nil, err
+	var (
+		err                   error
+		metaCache             metacache.MetaCache
+		unflushedSegmentInfos []*datapb.SegmentInfo
+		flushedSegmentInfos   []*datapb.SegmentInfo
+	)
+	if len(info.GetVchan().GetUnflushedSegmentIds()) > 0 {
+		unflushedSegmentInfos, err = pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
+		if err != nil {
+			return nil, err
+		}
 	}
-	flushedSegmentInfos, err := pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetFlushedSegmentIds())
-	if err != nil {
-		return nil, err
+	if len(info.GetVchan().GetFlushedSegmentIds()) > 0 {
+		flushedSegmentInfos, err = pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetFlushedSegmentIds())
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// init metaCache meta
-	metaCache, err := getMetaCacheWithTickler(initCtx, pipelineParams, info, tickler, unflushedSegmentInfos, flushedSegmentInfos)
-	if err != nil {
-		return nil, err
+	if paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
+		// In SkipBFStatsLoad mode, flushed segments no longer maintain a bloom filter.
+		// So, here we skip loading the bloom filter for flushed segments.
+		info.Vchan.FlushedSegments = flushedSegmentInfos
+		info.Vchan.UnflushedSegments = unflushedSegmentInfos
+		metaCache = metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
+		}, metacache.NoneBm25StatsFactory)
+	} else {
+		// init metaCache meta
+		metaCache, err = getMetaCacheWithTickler(initCtx, pipelineParams, info, tickler, unflushedSegmentInfos, flushedSegmentInfos)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, nil)

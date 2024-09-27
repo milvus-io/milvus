@@ -21,7 +21,11 @@ from common.common_params import ExprCheckParams
 from utils.util_log import test_log as log
 from customize.milvus_operator import MilvusOperator
 import pickle
+from collections import Counter
+import bm25s
+import jieba
 fake = Faker()
+
 
 from common.common_params import Expr
 """" Methods of processing data """
@@ -72,6 +76,210 @@ class ParamInfo:
 param_info = ParamInfo()
 
 
+def analyze_documents(texts, language="en"):
+    stopwords = "en"
+    if language in ["en", "english"]:
+        stopwords = "en"
+    if language in ["zh", "cn", "chinese"]:
+        stopword = " "
+        new_texts = []
+        for doc in texts:
+            seg_list = jieba.cut(doc, cut_all=True)
+            new_texts.append(" ".join(seg_list))
+        texts = new_texts
+        stopwords = [stopword]
+    # Start timing
+    t0 = time.time()
+
+    # Tokenize the corpus
+    tokenized = bm25s.tokenize(texts, lower=True, stopwords=stopwords)
+    # log.info(f"Tokenized: {tokenized}")
+    # Create a frequency counter
+    freq = Counter()
+
+    # Count the frequency of each token
+    for doc_ids in tokenized.ids:
+        freq.update(doc_ids)
+    # Create a reverse vocabulary mapping
+    id_to_word = {id: word for word, id in tokenized.vocab.items()}
+
+    # Convert token ids back to words
+    word_freq = Counter({id_to_word[token_id]: count for token_id, count in freq.items()})
+
+    # End timing
+    tt = time.time() - t0
+    log.info(f"Analyze document cost time: {tt}")
+
+    return word_freq
+
+
+def split_dataframes(df, fields, language="en"):
+    df_copy = df.copy()
+    if language in ["zh", "cn", "chinese"]:
+        for col in fields:
+            new_texts = []
+            for doc in df[col]:
+                seg_list = jieba.cut(doc, cut_all=True)
+                new_texts.append(list(seg_list))
+            df_copy[col] = new_texts
+        return df_copy
+    for col in fields:
+        texts = df[col].to_list()
+        tokenized = bm25s.tokenize(texts, lower=True, stopwords="en")
+        new_texts = []
+        id_vocab_map = {id: word for word, id in tokenized.vocab.items()}
+        for doc_ids in tokenized.ids:
+            new_texts.append([id_vocab_map[token_id] for token_id in doc_ids])
+
+        df_copy[col] = new_texts
+    return df_copy
+
+
+def generate_pandas_text_match_result(expr, df):
+    def manual_check(expr):
+        if "not" in expr:
+            key = expr["not"]["field"]
+            value = expr["not"]["value"]
+            return lambda row: value not in row[key]
+        key = expr["field"]
+        value = expr["value"]
+        return lambda row: value in row[key]
+    if "not" in expr:
+        key = expr["not"]["field"]
+    else:
+        key = expr["field"]
+    manual_result = df[df.apply(manual_check(expr), axis=1)]
+    log.info(f"pandas filter result {len(manual_result)}\n{manual_result[key]}")
+    return manual_result
+
+
+def generate_text_match_expr(query_dict):
+    """
+    Generate a TextMatch expression with multiple logical operators and field names.
+    :param query_dict: A dictionary representing the query structure
+    :return: A string representing the TextMatch expression
+    """
+
+    def process_node(node):
+        if isinstance(node, dict) and 'field' in node and 'value' in node:
+            return f"TextMatch({node['field']}, '{node['value']}')"
+        elif isinstance(node, dict) and 'not' in node:
+            return f"not {process_node(node['not'])}"
+        elif isinstance(node, list):
+            return ' '.join(process_node(item) for item in node)
+        elif isinstance(node, str):
+            return node
+        else:
+            raise ValueError(f"Invalid node type: {type(node)}")
+
+    return f"({process_node(query_dict)})"
+
+
+def generate_pandas_query_string(query):
+    def process_node(node):
+        if isinstance(node, dict):
+            if 'field' in node and 'value' in node:
+                return f"('{node['value']}' in row['{node['field']}'])"
+            elif 'not' in node:
+                return f"not {process_node(node['not'])}"
+        elif isinstance(node, str):
+            return node
+        else:
+            raise ValueError(f"Invalid node type: {type(node)}")
+
+    parts = [process_node(item) for item in query]
+    expression = ' '.join(parts).replace('and', 'and').replace('or', 'or')
+    log.info(f"Generated pandas query: {expression}")
+    return lambda row: eval(expression)
+
+
+def evaluate_expression(step_by_step_results):
+    # merge result of different steps to final result
+    def apply_operator(operators, operands):
+        operator = operators.pop()
+        right = operands.pop()
+        left = operands.pop()
+        if operator == "and":
+            operands.append(left.intersection(right))
+        elif operator == "or":
+            operands.append(left.union(right))
+
+    operators = []
+    operands = []
+
+    for item in step_by_step_results:
+        if isinstance(item, list):
+            operands.append(set(item))
+        elif item in ("and", "or"):
+            while operators and operators[-1] == "and" and item == "or":
+                apply_operator(operators, operands)
+            operators.append(item)
+    while operators:
+        apply_operator(operators, operands)
+
+    return operands[0] if operands else set()
+
+
+def generate_random_query_from_freq_dict(freq_dict, min_freq=1, max_terms=3, p_not=0.2):
+    """
+    Generate a random query expression from a dictionary of field frequencies.
+    :param freq_dict: A dictionary where keys are field names and values are word frequency dictionaries
+    :param min_freq: Minimum frequency for a word to be included in the query (default: 1)
+    :param max_terms: Maximum number of terms in the query (default: 3)
+    :param p_not: Probability of using NOT for any term (default: 0.2)
+    :return: A tuple of (query list, query expression string)
+    example:
+    freq_dict = {
+    "title": {"The": 3, "Lord": 2, "Rings": 2, "Harry": 1, "Potter": 1},
+    "author": {"Tolkien": 2, "Rowling": 1, "Orwell": 1},
+    "description": {"adventure": 4, "fantasy": 3, "magic": 1, "dystopian": 2}
+    }
+    print("Random queries from frequency dictionary:")
+    for _ in range(5):
+        query_list, expr = generate_random_query_from_freq_dict(freq_dict, min_freq=1, max_terms=4, p_not=0.2)
+        print(f"Query: {query_list}")
+        print(f"Expression: {expr}")
+        print()
+    """
+
+    def random_term(field, words):
+        term = {"field": field, "value": random.choice(words)}
+        if random.random() < p_not:
+            return {"not": term}
+        return term
+
+    # Filter words based on min_freq
+    filtered_dict = {
+        field: [word for word, freq in words.items() if freq >= min_freq]
+        for field, words in freq_dict.items()
+    }
+
+    # Remove empty fields
+    filtered_dict = {k: v for k, v in filtered_dict.items() if v}
+
+    if not filtered_dict:
+        return [], ""
+
+    # Randomly select fields and terms
+    query = []
+    for _ in range(min(max_terms, sum(len(words) for words in filtered_dict.values()))):
+        if not filtered_dict:
+            break
+        field = random.choice(list(filtered_dict.keys()))
+        if filtered_dict[field]:
+            term = random_term(field, filtered_dict[field])
+            query.append(term)
+            # Insert random AND/OR between terms
+            if query and _ < max_terms - 1:
+                query.append(random.choice(["and", "or"]))
+            # Remove the used word to avoid repetition
+            used_word = term['value'] if isinstance(term, dict) and 'value' in term else term['not']['value']
+            filtered_dict[field].remove(used_word)
+            if not filtered_dict[field]:
+                del filtered_dict[field]
+    return query, generate_text_match_expr(query), generate_pandas_query_string(query)
+
+
 def generate_array_dataset(size, array_length, hit_probabilities, target_values):
     dataset = []
     target_array_length = target_values.get('array_length_field', None)
@@ -113,6 +321,7 @@ def generate_array_dataset(size, array_length, hit_probabilities, target_values)
         dataset.append(entry)
 
     return dataset
+
 
 def prepare_array_test_data(data_size, hit_rate=0.005, dim=128):
     size = data_size  # Number of arrays in the dataset
@@ -213,7 +422,6 @@ def prepare_array_test_data(data_size, hit_rate=0.005, dim=128):
     return train_df, query_expr
 
 
-
 def gen_unique_str(str_value=None):
     prefix = "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
     return "test_" + prefix if str_value is None else str_value + "_" + prefix
@@ -223,6 +431,26 @@ def gen_str_by_length(length=8, letters_only=False):
     if letters_only:
         return "".join(random.choice(string.ascii_letters) for _ in range(length))
     return "".join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
+
+
+def generate_random_sentence(language):
+    language_map = {
+        "English": "en_US",
+        "French": "fr_FR",
+        "Spanish": "es_ES",
+        "German": "de_DE",
+        "Italian": "it_IT",
+        "Portuguese": "pt_PT",
+        "Russian": "ru_RU",
+        "Chinese": "zh_CN",
+        "Japanese": "ja_JP",
+        "Korean": "ko_KR",
+        "Arabic": "ar_SA",
+        "Hindi": "hi_IN"
+    }
+    lang_code = language_map.get(language, "en_US")
+    faker = Faker(lang_code)
+    return faker.sentence()
 
 
 def gen_digits_by_length(length=8):
@@ -749,7 +977,7 @@ def gen_binary_vectors(num, dim):
 def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
                                random_primary_key=False, multiple_dim_array=[], multiple_vector_field_name=[],
                                vector_data_type="FLOAT_VECTOR", auto_id=False,
-                               primary_field = ct.default_int64_field_name, nullable_fields={}):
+                               primary_field=ct.default_int64_field_name, nullable_fields={}, language=None):
     if not random_primary_key:
         int_values = pd.Series(data=[i for i in range(start, start + nb)])
     else:
@@ -765,6 +993,8 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, wi
         float_values = pd.Series(data=float_data, dtype=object)
 
     string_data = [str(i) for i in range(start, start + nb)]
+    if language:
+        string_data = [generate_random_sentence(language) for _ in range(nb)]
     string_values = pd.Series(data=string_data, dtype="string")
     if ct.default_string_field_name in nullable_fields:
         null_number = int(nb*nullable_fields[ct.default_string_field_name])
@@ -809,7 +1039,7 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, wi
 def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
                           random_primary_key=False, multiple_dim_array=[], multiple_vector_field_name=[],
                           vector_data_type="FLOAT_VECTOR", auto_id=False,
-                          primary_field=ct.default_int64_field_name, nullable_fields={}):
+                          primary_field=ct.default_int64_field_name, nullable_fields={}, language=None):
     insert_list = []
     if not random_primary_key:
         int_values = pd.Series(data=[i for i in range(start, start + nb)])
@@ -823,6 +1053,8 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
         float_data = float_data[:nb - null_number] + null_data
         float_values = pd.Series(data=float_data, dtype=object)
     string_data = [str(i) for i in range(start, start + nb)]
+    if language:
+        string_data = [generate_random_sentence(language) for _ in range(nb)]
     string_values = pd.Series(data=string_data, dtype="string")
     if ct.default_string_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_string_field_name])
@@ -861,7 +1093,7 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
 
 def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True, multiple_dim_array=[],
                           multiple_vector_field_name=[], vector_data_type="FLOAT_VECTOR", auto_id=False,
-                          primary_field = ct.default_int64_field_name, nullable_fields={}):
+                          primary_field = ct.default_int64_field_name, nullable_fields={}, language=None):
     array = []
     for i in range(start, start + nb):
         dict = {ct.default_int64_field_name: i,
@@ -872,6 +1104,8 @@ def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
                 }
         if with_json is False:
             dict.pop(ct.default_json_field_name, None)
+        if language:
+            dict[ct.default_string_field_name] = generate_random_sentence(language)
         if auto_id is True:
             if primary_field == ct.default_int64_field_name:
                 dict.pop(ct.default_int64_field_name)
@@ -1073,7 +1307,7 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, w
 def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
                                    auto_id=False, random_primary_key=False, multiple_dim_array=[],
                                    multiple_vector_field_name=[], primary_field=ct.default_int64_field_name,
-                                   nullable_fields={}):
+                                   nullable_fields={}, language=None):
     if not random_primary_key:
         int64_values = pd.Series(data=[i for i in range(start, start + nb)])
     else:
@@ -1127,6 +1361,8 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
         double_values = pd.Series(data=double_data, dtype=object)
 
     string_data = [str(i) for i in range(start, start + nb)]
+    if language:
+        string_data = [generate_random_sentence(language) for _ in range(nb)]
     string_values = pd.Series(data=string_data, dtype="string")
     if ct.default_string_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_string_field_name])
@@ -1167,7 +1403,7 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
 
 def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
                                         multiple_dim_array=[], multiple_vector_field_name=[], partition_id=0,
-                                        auto_id=False, primary_field=ct.default_int64_field_name):
+                                        auto_id=False, primary_field=ct.default_int64_field_name, language=None):
     array = []
     for i in range(start, start + nb):
         dict = {ct.default_int64_field_name: i,
@@ -1183,6 +1419,8 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
                 }
         if with_json is False:
             dict.pop(ct.default_json_field_name, None)
+        if language:
+            dict[ct.default_string_field_name] = generate_random_sentence(language)
         if auto_id is True:
             if primary_field == ct.default_int64_field_name:
                 dict.pop(ct.default_int64_field_name, None)
@@ -1204,7 +1442,7 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
 
 
 def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, auto_id=False,
-                                      primary_field=ct.default_int64_field_name, nullable_fields={}):
+                                      primary_field=ct.default_int64_field_name, nullable_fields={}, language=None):
     int_data = [i for i in range(start, start + nb)]
     int_values = pd.Series(data=int_data)
     if ct.default_int64_field_name in nullable_fields:
@@ -1222,6 +1460,8 @@ def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, star
         float_values = pd.Series(data=float_data, dtype=object)
 
     string_data = [str(i) for i in range(start, start + nb)]
+    if language:
+        string_data = [generate_random_sentence(language) for _ in range(nb)]
     string_values = pd.Series(data=string_data, dtype="string")
     if ct.default_string_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_string_field_name])
@@ -1448,6 +1688,10 @@ def get_dim_by_schema(schema=None):
     return None
 
 
+def gen_varchar_data(length: int, nb: int):
+    return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
+
+
 def gen_data_by_collection_field(field, nb=None, start=None):
     # if nb is None, return one data, else return a list of data
     data_type = field.dtype
@@ -1486,8 +1730,8 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         max_length = min(20, max_length-1)
         length = random.randint(0, max_length)
         if nb is None:
-            return "".join([chr(random.randint(97, 122)) for _ in range(length)])
-        return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
+            return gen_varchar_data(length=length, nb=1)[0]
+        return gen_varchar_data(length=length, nb=nb)
     if data_type == DataType.JSON:
         if nb is None:
             return {"name": fake.name(), "address": fake.address()}
@@ -2317,7 +2561,7 @@ def gen_partitions(collection_w, partition_num=1):
 def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_type=False,
                 auto_id=False, dim=ct.default_dim, insert_offset=0, enable_dynamic_field=False, with_json=True,
                 random_primary_key=False, multiple_dim_array=[], primary_field=ct.default_int64_field_name,
-                vector_data_type="FLOAT_VECTOR", nullable_fields={}):
+                vector_data_type="FLOAT_VECTOR", nullable_fields={}, language=None):
     """
     target: insert non-binary/binary data
     method: insert non-binary/binary data into partitions if any
@@ -2345,7 +2589,7 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
                                                                   multiple_vector_field_name=vector_name_list,
                                                                   vector_data_type=vector_data_type,
                                                                   auto_id=auto_id, primary_field=primary_field,
-                                                                  nullable_fields=nullable_fields)
+                                                                  nullable_fields=nullable_fields, language=language)
                     elif vector_data_type in ct.append_vector_type:
                         default_data = gen_default_list_data(nb // num, dim=dim, start=start, with_json=with_json,
                                                              random_primary_key=random_primary_key,
@@ -2353,7 +2597,7 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
                                                              multiple_vector_field_name=vector_name_list,
                                                              vector_data_type=vector_data_type,
                                                              auto_id=auto_id, primary_field=primary_field,
-                                                             nullable_fields=nullable_fields)
+                                                             nullable_fields=nullable_fields, language=language)
 
                 else:
                     default_data = gen_default_rows_data(nb // num, dim=dim, start=start, with_json=with_json,
@@ -2361,7 +2605,7 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
                                                          multiple_vector_field_name=vector_name_list,
                                                          vector_data_type=vector_data_type,
                                                          auto_id=auto_id, primary_field=primary_field,
-                                                         nullable_fields=nullable_fields)
+                                                         nullable_fields=nullable_fields, language=language)
 
             else:
                 if not enable_dynamic_field:
@@ -2371,14 +2615,14 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
                                                                       multiple_dim_array=multiple_dim_array,
                                                                       multiple_vector_field_name=vector_name_list,
                                                                       auto_id=auto_id, primary_field=primary_field,
-                                                                      nullable_fields=nullable_fields)
+                                                                      nullable_fields=nullable_fields, language=language)
                     elif vector_data_type == "FLOAT16_VECTOR" or "BFLOAT16_VECTOR":
                         default_data = gen_general_list_all_data_type(nb // num, dim=dim, start=start, with_json=with_json,
                                                                       random_primary_key=random_primary_key,
                                                                       multiple_dim_array=multiple_dim_array,
                                                                       multiple_vector_field_name=vector_name_list,
                                                                       auto_id=auto_id, primary_field=primary_field,
-                                                                      nullable_fields=nullable_fields)
+                                                                      nullable_fields=nullable_fields, language=language)
                 else:
                     if os.path.exists(ct.rows_all_data_type_file_path + f'_{i}' + f'_dim{dim}.txt'):
                         with open(ct.rows_all_data_type_file_path + f'_{i}' + f'_dim{dim}.txt', 'rb') as f:
@@ -2389,12 +2633,14 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
                                                                            multiple_dim_array=multiple_dim_array,
                                                                            multiple_vector_field_name=vector_name_list,
                                                                            partition_id=i, auto_id=auto_id,
-                                                                           primary_field=primary_field)
+                                                                           primary_field=primary_field,
+                                                                           language=language)
         else:
             default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num, dim=dim, start=start,
                                                                               auto_id=auto_id,
                                                                               primary_field=primary_field,
-                                                                              nullable_fields=nullable_fields)
+                                                                              nullable_fields=nullable_fields,
+                                                                              language=language)
             binary_raw_vectors.extend(binary_raw_data)
         insert_res = collection_w.insert(default_data, par[i].name)[0]
         log.info(f"inserted {nb // num} data into collection {collection_w.name}")
@@ -2758,6 +3004,9 @@ def set_collection_schema(fields: list, field_params: dict = {}, **kwargs):
                 is_primary: bool
                 description: str
                 max_length: int = 65535
+            varchar_2:
+                max_length: int = 100
+                is_partition_key: bool
             array_int8_1:
                 max_capacity: int = 100
             array_varchar_1:
@@ -2770,6 +3019,7 @@ def set_collection_schema(fields: list, field_params: dict = {}, **kwargs):
             primary_field: str
             auto_id: bool
             enable_dynamic_field: bool
+            num_partitions: int
     """
     field_schemas = [set_field_schema(field=field, params=field_params.get(field, {})) for field in fields]
     return ApiCollectionSchemaWrapper().init_collection_schema(fields=field_schemas, **kwargs)[0]

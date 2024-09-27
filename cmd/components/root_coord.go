@@ -49,6 +49,10 @@ func NewRootCoord(ctx context.Context, factory dependency.Factory) (*RootCoord, 
 	}, nil
 }
 
+func (rc *RootCoord) Prepare() error {
+	return rc.svr.Prepare()
+}
+
 // Run starts service
 func (rc *RootCoord) Run() error {
 	if err := rc.svr.Run(); err != nil {

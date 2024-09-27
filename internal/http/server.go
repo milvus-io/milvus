@@ -17,6 +17,7 @@
 package http
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -83,8 +84,11 @@ func registerDefaults() {
 				w.Write([]byte(fmt.Sprintf(`{"msg": "failed to execute expression, %s"}`, err.Error())))
 				return
 			}
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(fmt.Sprintf(`{"output": "%s"}`, output)))
+			resp := make(map[string]string)
+			resp["output"] = output
+			json.NewEncoder(w).Encode(resp)
 		}),
 	})
 	Register(&Handler{

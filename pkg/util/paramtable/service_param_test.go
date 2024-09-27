@@ -96,7 +96,7 @@ func TestServiceParam(t *testing.T) {
 		{
 			assert.NotEqual(t, SParams.PulsarCfg.Address.GetValue(), "")
 			t.Logf("pulsar address = %s", SParams.PulsarCfg.Address.GetValue())
-			assert.Equal(t, SParams.PulsarCfg.MaxMessageSize.GetAsInt(), SuggestPulsarMaxMessageSize)
+			assert.Equal(t, SParams.PulsarCfg.MaxMessageSize.GetAsInt(), 2097152)
 		}
 
 		address := "pulsar://localhost:6650"

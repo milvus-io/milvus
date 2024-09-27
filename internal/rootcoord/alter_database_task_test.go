@@ -147,7 +147,7 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 			},
 		}
 
-		ret := updateProperties(oldProps, updateProps1)
+		ret := MergeProperties(oldProps, updateProps1)
 
 		assert.Contains(t, ret, &commonpb.KeyValuePair{
 			Key:   common.CollectionTTLConfigKey,
@@ -165,7 +165,7 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 				Value: "2",
 			},
 		}
-		ret2 := updateProperties(ret, updateProps2)
+		ret2 := MergeProperties(ret, updateProps2)
 
 		assert.Contains(t, ret2, &commonpb.KeyValuePair{
 			Key:   common.CollectionTTLConfigKey,

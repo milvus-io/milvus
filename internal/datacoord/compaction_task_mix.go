@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var _ CompactionTask = (*mixCompactionTask)(nil)
@@ -29,6 +30,17 @@ type mixCompactionTask struct {
 	sessions      session.DataNodeManager
 	meta          CompactionMeta
 	newSegmentIDs []int64
+	slotUsage     int64
+}
+
+func newMixCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, session session.DataNodeManager) *mixCompactionTask {
+	return &mixCompactionTask{
+		CompactionTask: t,
+		allocator:      allocator,
+		meta:           meta,
+		sessions:       session,
+		slotUsage:      paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
+	}
 }
 
 func (t *mixCompactionTask) processPipelining() bool {
@@ -178,12 +190,6 @@ func (t *mixCompactionTask) GetPlan() *datapb.CompactionPlan {
 	return t.plan
 }
 
-/*
-func (t *mixCompactionTask) GetState() datapb.CompactionTaskState {
-	return t.CompactionTask.GetState()
-}
-*/
-
 func (t *mixCompactionTask) GetLabel() string {
 	return fmt.Sprintf("%d-%s", t.PartitionID, t.GetChannel())
 }
@@ -296,12 +302,6 @@ func (t *mixCompactionTask) SetSpan(span trace.Span) {
 	t.span = span
 }
 
-/*
-func (t *mixCompactionTask) SetPlan(plan *datapb.CompactionPlan) {
-	t.plan = plan
-}
-*/
-
 func (t *mixCompactionTask) SetResult(result *datapb.CompactionPlanResult) {
 	t.result = result
 }
@@ -351,7 +351,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			Begin: t.GetResultSegments()[0],
 			End:   t.GetResultSegments()[1],
 		},
-		SlotUsage: Params.DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
+		SlotUsage: t.GetSlotUsage(),
 		MaxSize:   t.GetMaxSize(),
 	}
 	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
@@ -377,4 +377,8 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	}
 	log.Info("Compaction handler refreshed mix compaction plan", zap.Int64("maxSize", plan.GetMaxSize()), zap.Any("segID2DeltaLogs", segIDMap))
 	return plan, nil
+}
+
+func (t *mixCompactionTask) GetSlotUsage() int64 {
+	return t.slotUsage
 }

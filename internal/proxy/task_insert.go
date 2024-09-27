@@ -178,7 +178,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	// set field ID to insert field data
-	err = fillFieldIDBySchema(it.insertMsg.GetFieldsData(), schema.CollectionSchema)
+	err = fillFieldPropertiesBySchema(it.insertMsg.GetFieldsData(), schema.CollectionSchema)
 	if err != nil {
 		log.Info("set fieldID to fieldData failed",
 			zap.Error(err))

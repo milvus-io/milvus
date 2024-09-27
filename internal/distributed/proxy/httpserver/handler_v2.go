@@ -152,7 +152,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		req := newReq()
 		if err := c.ShouldBindBodyWith(req, binding.JSON); err != nil {
 			log.Warn("high level restful api, read parameters from request body fail", zap.Error(err),
-				zap.Any("url", c.Request.URL.Path), zap.Any("request", req))
+				zap.Any("url", c.Request.URL.Path))
 			if _, ok := err.(validator.ValidationErrors); ok {
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
@@ -189,7 +189,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		ctx = log.WithTraceID(ctx, traceID)
 		c.Keys["traceID"] = traceID
 		log.Ctx(ctx).Debug("high level restful api, read parameters from request body, then start to handle.",
-			zap.Any("url", c.Request.URL.Path), zap.Any("request", req))
+			zap.Any("url", c.Request.URL.Path))
 		v2(ctx, c, req, dbName)
 	}
 }
@@ -272,7 +272,7 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 			return nil, RestRequestInterceptorErr
 		}
 	}
-	log.Ctx(ctx).Debug("high level restful api, try to do a grpc call", zap.Any("grpcRequest", req))
+	log.Ctx(ctx).Debug("high level restful api, try to do a grpc call")
 	username, ok := c.Get(ContextUsername)
 	if !ok {
 		username = ""
@@ -285,7 +285,7 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 		}
 	}
 	if err != nil {
-		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err), zap.Any("grpcRequest", req))
+		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err))
 		if !ignoreErr {
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		}
@@ -309,7 +309,7 @@ func (h *HandlersV2) wrapperCheckDatabase(v2 handlerFuncV2) handlerFuncV2 {
 				return v2(ctx, c, req, dbName)
 			}
 		}
-		log.Ctx(ctx).Warn("high level restful api, non-exist database", zap.String("database", dbName), zap.Any("request", req))
+		log.Ctx(ctx).Warn("high level restful api, non-exist database", zap.String("database", dbName))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrDatabaseNotFound),
 			HTTPReturnMessage: merr.ErrDatabaseNotFound.Error() + ", database: " + dbName,
@@ -905,45 +905,30 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	})
 }
 
-func generateSearchParams(ctx context.Context, c *gin.Context, reqParams map[string]float64) ([]*commonpb.KeyValuePair, error) {
-	params := map[string]interface{}{ // auto generated mapping
-		"level": int(commonpb.ConsistencyLevel_Bounded),
-	}
-	if reqParams != nil {
-		radius, radiusOk := reqParams[ParamRadius]
-		rangeFilter, rangeFilterOk := reqParams[ParamRangeFilter]
-		if rangeFilterOk {
-			if !radiusOk {
-				log.Ctx(ctx).Warn("high level restful api, search params invalid, because only " + ParamRangeFilter)
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
-					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: invalid search params",
-				})
-				return nil, merr.ErrIncorrectParameterFormat
-			}
-			params[ParamRangeFilter] = rangeFilter
-		}
-		if radiusOk {
-			params[ParamRadius] = radius
-		}
-	}
-	bs, _ := json.Marshal(params)
-	searchParams := []*commonpb.KeyValuePair{
-		{Key: Params, Value: string(bs)},
-	}
+func generateSearchParams(ctx context.Context, c *gin.Context, reqSearchParams searchParams) ([]*commonpb.KeyValuePair, error) {
+	var searchParams []*commonpb.KeyValuePair
+	bs, _ := json.Marshal(reqSearchParams.Params)
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: Params, Value: string(bs)})
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.IgnoreGrowing, Value: strconv.FormatBool(reqSearchParams.IgnoreGrowing)})
+	// need to exposure ParamRoundDecimal in req?
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
 	return searchParams, nil
 }
 
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*SearchReqV2)
 	req := &milvuspb.SearchRequest{
-		DbName:                dbName,
-		CollectionName:        httpReq.CollectionName,
-		Dsl:                   httpReq.Filter,
-		DslType:               commonpb.DslType_BoolExprV1,
-		OutputFields:          httpReq.OutputFields,
-		PartitionNames:        httpReq.PartitionNames,
-		UseDefaultConsistency: true,
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		Dsl:            httpReq.Filter,
+		DslType:        commonpb.DslType_BoolExprV1,
+		OutputFields:   httpReq.OutputFields,
+		PartitionNames: httpReq.PartitionNames,
+	}
+	var err error
+	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
+	if err != nil {
+		return nil, err
 	}
 	c.Set(ContextRequest, req)
 
@@ -951,7 +936,8 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err != nil {
 		return nil, err
 	}
-	searchParams, err := generateSearchParams(ctx, c, httpReq.Params)
+
+	searchParams, err := generateSearchParams(ctx, c, httpReq.SearchParams)
 	if err != nil {
 		return nil, err
 	}
@@ -959,7 +945,6 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: httpReq.AnnsField})
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
 	body, _ := c.Get(gin.BodyBytesKey)
 	placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField)
 	if err != nil {
@@ -1005,6 +990,11 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		Requests:       []*milvuspb.SearchRequest{},
 		OutputFields:   httpReq.OutputFields,
 	}
+	var err error
+	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
+	if err != nil {
+		return nil, err
+	}
 	c.Set(ContextRequest, req)
 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
@@ -1014,7 +1004,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	body, _ := c.Get(gin.BodyBytesKey)
 	searchArray := gjson.Get(string(body.([]byte)), "search").Array()
 	for i, subReq := range httpReq.Search {
-		searchParams, err := generateSearchParams(ctx, c, subReq.Params)
+		searchParams, err := generateSearchParams(ctx, c, subReq.SearchParams)
 		if err != nil {
 			return nil, err
 		}
@@ -1022,7 +1012,6 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(subReq.Offset), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: subReq.GroupByField})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: subReq.AnnsField})
-		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
 		placeholderGroup, err := generatePlaceholderGroup(ctx, searchArray[i].Raw, collSchema, subReq.AnnsField)
 		if err != nil {
 			log.Ctx(ctx).Warn("high level restful api, search with vector invalid", zap.Error(err))
@@ -1033,15 +1022,14 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			return nil, err
 		}
 		searchReq := &milvuspb.SearchRequest{
-			DbName:                dbName,
-			CollectionName:        httpReq.CollectionName,
-			Dsl:                   subReq.Filter,
-			PlaceholderGroup:      placeholderGroup,
-			DslType:               commonpb.DslType_BoolExprV1,
-			OutputFields:          httpReq.OutputFields,
-			PartitionNames:        httpReq.PartitionNames,
-			SearchParams:          searchParams,
-			UseDefaultConsistency: true,
+			DbName:           dbName,
+			CollectionName:   httpReq.CollectionName,
+			Dsl:              subReq.Filter,
+			PlaceholderGroup: placeholderGroup,
+			DslType:          commonpb.DslType_BoolExprV1,
+			OutputFields:     httpReq.OutputFields,
+			PartitionNames:   httpReq.PartitionNames,
+			SearchParams:     searchParams,
 		}
 		req.Requests = append(req.Requests, searchReq)
 	}

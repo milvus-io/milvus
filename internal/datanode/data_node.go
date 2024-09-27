@@ -288,6 +288,10 @@ func (node *DataNode) tryToReleaseFlowgraph(channel string) {
 
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
+	if paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() && !paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.GetAsBool() {
+		panic("In non-L0 mode, skip loading of bloom filter stats is not allowed.")
+	}
+
 	var startErr error
 	node.startOnce.Do(func() {
 		if err := node.allocator.Start(); err != nil {

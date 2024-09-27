@@ -602,22 +602,6 @@ class TestCreateCollectionNegative(TestBase):
         rsp = client.collection_create(payload)
         assert rsp['code'] == 1100
 
-    def test_create_collections_with_invalid_api_key(self):
-        """
-        target: test create collection with invalid api key(wrong username and password)
-        method: create collections with invalid api key
-        expected: create collection failed
-        """
-        name = gen_collection_name()
-        dim = 128
-        client = self.collection_client
-        client.api_key = "illegal_api_key"
-        payload = {
-            "collectionName": name,
-            "dimension": dim,
-        }
-        rsp = client.collection_create(payload)
-        assert rsp['code'] == 1800
 
     @pytest.mark.parametrize("name",
                              [" ", "test_collection_" * 100, "test collection", "test/collection", "test\collection"])
@@ -727,7 +711,7 @@ class TestGetCollectionStats(TestBase):
         rsp = client.collection_stats(collection_name=name)
         assert rsp['data']['rowCount'] == nb
 
-
+@pytest.mark.L0
 class TestLoadReleaseCollection(TestBase):
 
     def test_load_and_release_collection(self):
@@ -849,34 +833,6 @@ class TestListCollections(TestBase):
             assert name in all_collections
 
 
-@pytest.mark.L1
-class TestListCollectionsNegative(TestBase):
-    def test_list_collections_with_invalid_api_key(self):
-        """
-        target: test list collection with an invalid api key
-        method: list collection with invalid api key
-        expected: raise error with right error code and message
-        """
-        client = self.collection_client
-        name_list = []
-        for i in range(2):
-            name = gen_collection_name()
-            dim = 128
-            payload = {
-                "collectionName": name,
-                "metricType": "L2",
-                "dimension": dim,
-            }
-            time.sleep(1)
-            rsp = client.collection_create(payload)
-            assert rsp['code'] == 0
-            name_list.append(name)
-        client = self.collection_client
-        client.api_key = "illegal_api_key"
-        rsp = client.collection_list()
-        assert rsp['code'] == 1800
-
-
 @pytest.mark.L0
 class TestDescribeCollection(TestBase):
 
@@ -954,30 +910,8 @@ class TestDescribeCollection(TestBase):
         assert rsp['data']['enableDynamicField'] is True
 
 
-@pytest.mark.L1
+@pytest.mark.L0
 class TestDescribeCollectionNegative(TestBase):
-    def test_describe_collections_with_invalid_api_key(self):
-        """
-        target: test describe collection with invalid api key
-        method: describe collection with invalid api key
-        expected: raise error with right error code and message
-        """
-        name = gen_collection_name()
-        dim = 128
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "dimension": dim,
-        }
-        rsp = client.collection_create(payload)
-        assert rsp['code'] == 0
-        rsp = client.collection_list()
-        all_collections = rsp['data']
-        assert name in all_collections
-        # describe collection
-        illegal_client = CollectionClient(self.endpoint, "illegal_api_key")
-        rsp = illegal_client.collection_describe(name)
-        assert rsp['code'] == 1800
 
     def test_describe_collections_with_invalid_collection_name(self):
         """
@@ -1042,36 +976,8 @@ class TestDropCollection(TestBase):
             assert name not in all_collections
 
 
-@pytest.mark.L1
+@pytest.mark.L0
 class TestDropCollectionNegative(TestBase):
-    def test_drop_collections_with_invalid_api_key(self):
-        """
-        target: test drop collection with invalid api key
-        method: drop collection with invalid api key
-        expected: raise error with right error code and message; collection still in collection list
-        """
-        name = gen_collection_name()
-        dim = 128
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "dimension": dim,
-        }
-        rsp = client.collection_create(payload)
-        assert rsp['code'] == 0
-        rsp = client.collection_list()
-        all_collections = rsp['data']
-        assert name in all_collections
-        # drop collection
-        payload = {
-            "collectionName": name,
-        }
-        illegal_client = CollectionClient(self.endpoint, "invalid_api_key")
-        rsp = illegal_client.collection_drop(payload)
-        assert rsp['code'] == 1800
-        rsp = client.collection_list()
-        all_collections = rsp['data']
-        assert name in all_collections
 
     def test_drop_collections_with_invalid_collection_name(self):
         """
@@ -1133,3 +1039,99 @@ class TestRenameCollection(TestBase):
         all_collections = rsp['data']
         assert new_name in all_collections
         assert name not in all_collections
+
+@pytest.mark.L1
+class TestCollectionWithAuth(TestBase):
+    def test_drop_collections_with_invalid_api_key(self):
+        """
+        target: test drop collection with invalid api key
+        method: drop collection with invalid api key
+        expected: raise error with right error code and message; collection still in collection list
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = client.collection_list()
+        all_collections = rsp['data']
+        assert name in all_collections
+        # drop collection
+        payload = {
+            "collectionName": name,
+        }
+        illegal_client = CollectionClient(self.endpoint, "invalid_api_key")
+        rsp = illegal_client.collection_drop(payload)
+        assert rsp['code'] == 1800
+        rsp = client.collection_list()
+        all_collections = rsp['data']
+        assert name in all_collections
+
+    def test_describe_collections_with_invalid_api_key(self):
+        """
+        target: test describe collection with invalid api key
+        method: describe collection with invalid api key
+        expected: raise error with right error code and message
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = client.collection_list()
+        all_collections = rsp['data']
+        assert name in all_collections
+        # describe collection
+        illegal_client = CollectionClient(self.endpoint, "illegal_api_key")
+        rsp = illegal_client.collection_describe(name)
+        assert rsp['code'] == 1800
+
+    def test_list_collections_with_invalid_api_key(self):
+        """
+        target: test list collection with an invalid api key
+        method: list collection with invalid api key
+        expected: raise error with right error code and message
+        """
+        client = self.collection_client
+        name_list = []
+        for i in range(2):
+            name = gen_collection_name()
+            dim = 128
+            payload = {
+                "collectionName": name,
+                "metricType": "L2",
+                "dimension": dim,
+            }
+            time.sleep(1)
+            rsp = client.collection_create(payload)
+            assert rsp['code'] == 0
+            name_list.append(name)
+        client = self.collection_client
+        client.api_key = "illegal_api_key"
+        rsp = client.collection_list()
+        assert rsp['code'] == 1800
+
+    def test_create_collections_with_invalid_api_key(self):
+        """
+        target: test create collection with invalid api key(wrong username and password)
+        method: create collections with invalid api key
+        expected: create collection failed
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        client.api_key = "illegal_api_key"
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 1800

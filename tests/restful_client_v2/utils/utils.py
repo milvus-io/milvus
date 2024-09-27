@@ -10,7 +10,7 @@ import base64
 import requests
 from loguru import logger
 import datetime
-
+from sklearn.metrics import pairwise_distances
 fake = Faker()
 rng = np.random.default_rng()
 
@@ -240,4 +240,28 @@ def get_all_fields_by_data(data, exclude_fields=None):
     return list(fields)
 
 
+def ip_distance(x, y):
+    return np.dot(x, y)
 
+
+def cosine_distance(u, v, epsilon=1e-8):
+    dot_product = np.dot(u, v)
+    norm_u = np.linalg.norm(u)
+    norm_v = np.linalg.norm(v)
+    return dot_product / (max(norm_u * norm_v, epsilon))
+
+
+def l2_distance(u, v):
+    return np.sum((u - v) ** 2)
+
+
+def get_sorted_distance(train_emb, test_emb, metric_type):
+    milvus_sklearn_metric_map = {
+        "L2": l2_distance,
+        "COSINE": cosine_distance,
+        "IP": ip_distance
+    }
+    distance = pairwise_distances(train_emb, Y=test_emb, metric=milvus_sklearn_metric_map[metric_type], n_jobs=-1)
+    distance = np.array(distance.T, order='C', dtype=np.float32)
+    distance_sorted = np.sort(distance, axis=1).tolist()
+    return distance_sorted

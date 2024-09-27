@@ -387,11 +387,11 @@ class TestInsertParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        data = cf.gen_default_list_data(nb=100)
-        data[0][1] = 1.0
+        data = cf.gen_default_rows_data(nb=100)
+        data[0][ct.default_int64_field_name] = 1.0
         error = {ct.err_code: 999,
                  ct.err_msg: "The Input data type is inconsistent with defined schema, {%s} field should be a int64, "
-                             "but got a {<class 'int'>} instead." % ct.default_int64_field_name}
+                             "but got a {<class 'float'>} instead." % ct.default_int64_field_name}
         collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
 
