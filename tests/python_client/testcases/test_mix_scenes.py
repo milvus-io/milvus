@@ -1884,6 +1884,58 @@ class TestMixScenes(TestcaseBase):
             check_items={"nq": nq, "ids": insert_data.get(DataType.INT64.name), "limit": limit,
                          "output_fields": scalar_fields})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("scalar_field, data_type, expr_data", [('INT64', 'int', 3), ('VARCHAR', 'str', '3')])
+    def test_bitmap_partition_keys(self, request, scalar_field, data_type, expr_data):
+        """
+        target:
+            1. build BITMAP index on partition key field
+        method:
+            1. create a collection with scalar field that enable partition key
+            2. insert some data and build BITMAP index
+            4. load collection
+            5. query via partition key field expr
+        expected:
+            1. build index and query are successful
+        """
+        # init params
+        collection_name, primary_field, nb = f"{request.function.__name__}_{scalar_field}", "int64_pk", 10000
+
+        # connect to server before testing
+        self._connect()
+
+        # create a collection with fields that can build `BITMAP` index
+        self.collection_wrap.init_collection(
+            name=collection_name,
+            schema=cf.set_collection_schema(
+                fields=[primary_field, DataType.FLOAT_VECTOR.name, scalar_field],
+                field_params={primary_field: FieldParams(is_primary=True).to_dict,
+                              scalar_field: FieldParams(is_partition_key=True).to_dict},
+            )
+        )
+
+        # prepare data (> 1024 triggering index building)
+        self.collection_wrap.insert(data=cf.gen_values(self.collection_wrap.schema, nb=nb, default_values={
+            scalar_field: [eval(f"{data_type}({random.randint(1, 4)})") for _ in range(nb)]
+        }), check_task=CheckTasks.check_insert_result)
+
+        # flush collection, segment sealed
+        self.collection_wrap.flush()
+
+        # build `BITMAP` index
+        self.build_multi_index(index_params={
+            **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name),
+            **DefaultScalarIndexParams.BITMAP(scalar_field)
+        })
+
+        # load collection
+        self.collection_wrap.load()
+
+        # query before upsert
+        expr = f'{scalar_field} == {expr_data}' if scalar_field == 'INT64' else f'{scalar_field} == "{expr_data}"'
+        res, _ = self.collection_wrap.query(expr=expr, output_fields=[scalar_field], limit=100)
+        assert set([r.get(scalar_field) for r in res]) == {expr_data}
+
 
 @pytest.mark.xdist_group("TestGroupSearch")
 class TestGroupSearch(TestCaseClassBase):
