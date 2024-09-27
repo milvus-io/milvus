@@ -46,21 +46,6 @@ case "${unameOut}" in
       export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:$ROOT_DIR/internal/core/output/lib:$ROOT_DIR/internal/core/output/lib64"
       export RPATH=$LD_LIBRARY_PATH;;
     Darwin*)
-      # detect llvm version by valid list
-      for llvm_version in 17 16 15 14 NOT_FOUND ; do
-        if brew ls --versions llvm@${llvm_version} > /dev/null; then
-          break
-        fi
-      done
-      if [ "${llvm_version}" = "NOT_FOUND" ] ; then
-        echo "valid llvm(>=14) not installed"
-        exit 1
-      fi
-      llvm_prefix="$(brew --prefix llvm@${llvm_version})"
-      export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
-      export CC="ccache ${llvm_prefix}/bin/clang"
-      export CXX="ccache ${llvm_prefix}/bin/clang++"
-      export ASM="${llvm_prefix}/bin/clang"
       export CFLAGS="-Wno-deprecated-declarations -I$(brew --prefix libomp)/include"
       export CXXFLAGS=${CFLAGS}
       export LDFLAGS="-L$(brew --prefix libomp)/lib"
