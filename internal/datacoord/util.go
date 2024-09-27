@@ -72,7 +72,7 @@ func VerifyResponse(response interface{}, err error) error {
 	}
 }
 
-func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo) []*SegmentInfo {
+func FilterInIndexedSegments(handler Handler, mt *meta, skipNoIndexCollection bool, segments ...*SegmentInfo) []*SegmentInfo {
 	if len(segments) == 0 {
 		return nil
 	}
@@ -83,6 +83,12 @@ func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo
 
 	ret := make([]*SegmentInfo, 0)
 	for collection, segmentList := range collectionSegments {
+		// No segments will be filtered if there are no indices in the collection.
+		if skipNoIndexCollection && !mt.indexMeta.HasIndex(collection) {
+			ret = append(ret, segmentList...)
+			continue
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 		coll, err := handler.GetCollection(ctx, collection)
 		cancel()
