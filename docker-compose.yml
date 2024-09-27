@@ -140,7 +140,8 @@ services:
 
   gcpnative:
     image: fsouza/fake-gcs-server
-    command: -scheme http -public-host storage.gcs.127.0.0.1.nip.io:4443
+    command: -scheme http -public-host storage.gcs.127.0.0.1.nip.io:4443 -external-url "http://storage.gcs.127.0.0.1.nip.io:4443"
+    hostname: storage.gcs.127.0.0.1.nip.io
     ports:
       - "4443:4443"
 
