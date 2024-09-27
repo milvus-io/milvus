@@ -1,13 +1,16 @@
+import random
 import re
 import math  # do not remove `math`
 import pytest
 import random
 import numpy as np
+import pandas as pd
 from pymilvus import DataType, AnnSearchRequest, RRFRanker, WeightedRanker
 
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
+from common import common_params as cp
 from common.code_mapping import QueryErrorMessage as qem
 from common.common_params import (
     FieldParams, MetricType, DefaultVectorIndexParams, DefaultScalarIndexParams, Expr, AlterIndexParams
@@ -1889,7 +1892,10 @@ class TestMixScenes(TestcaseBase):
 class TestGroupSearch(TestCaseClassBase):
     """
     Testing group search scenarios
-    1. collection schema: int64_pk(auto_id), float16_vector, float_vector, bfloat16_vector, varchar
+    1. collection schema:
+        int64_pk(auto_id), varchar,
+        float16_vector, float_vector, bfloat16_vector, sparse_vector,
+        inverted_varchar
     2. varchar field is inserted with dup values for group by
     3. index for each vector field with different index types, dims and metric types
     Author: Yanliang567
@@ -1902,34 +1908,34 @@ class TestGroupSearch(TestCaseClassBase):
 
         # init params
         self.primary_field = "int64_pk"
-        self.indexed_string_field = "varchar_with_index"
+        self.inverted_string_field = "varchar_inverted"
 
         # create a collection with fields
         self.collection_wrap.init_collection(
-            name=cf.gen_unique_str("test_group_search"),
+            name=cf.gen_unique_str("TestGroupSearch"),
             schema=cf.set_collection_schema(
-                fields=[DataType.VARCHAR.name, self.primary_field, DataType.FLOAT16_VECTOR.name,
-                        DataType.FLOAT_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
+                fields=[self.primary_field, DataType.VARCHAR.name, DataType.FLOAT16_VECTOR.name,
+                        DataType.FLOAT_VECTOR.name, DataType.BFLOAT16_VECTOR.name, DataType.SPARSE_FLOAT_VECTOR.name,
                         DataType.INT8.name, DataType.INT64.name, DataType.BOOL.name,
-                        self.indexed_string_field],
+                        self.inverted_string_field],
                 field_params={
                     self.primary_field: FieldParams(is_primary=True).to_dict,
                     DataType.FLOAT16_VECTOR.name: FieldParams(dim=31).to_dict,
                     DataType.FLOAT_VECTOR.name: FieldParams(dim=64).to_dict,
-                    DataType.BFLOAT16_VECTOR.name: FieldParams(dim=24).to_dict,
+                    DataType.BFLOAT16_VECTOR.name: FieldParams(dim=24).to_dict
                 },
                 auto_id=True
             )
         )
 
-        self.vector_fields = [DataType.FLOAT16_VECTOR.name, DataType.FLOAT_VECTOR.name, DataType.BFLOAT16_VECTOR.name]
-        self.dims = [31, 64, 24]
-        self.index_types = ["IVF_SQ8", "HNSW", "IVF_FLAT"]
+        self.vector_fields = [DataType.FLOAT16_VECTOR.name, DataType.FLOAT_VECTOR.name,
+                              DataType.BFLOAT16_VECTOR.name, DataType.SPARSE_FLOAT_VECTOR.name]
+        self.dims = [31, 64, 24, 99]
+        self.index_types = [cp.IndexName.IVF_SQ8, cp.IndexName.HNSW, cp.IndexName.IVF_FLAT, cp.IndexName.SPARSE_WAND]
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
         # prepare data (> 1024 triggering index building)
-        import pandas as pd
         nb = 100
         for _ in range(100):
             string_values = pd.Series(data=[str(i) for i in range(nb)], dtype="string")
@@ -1950,8 +1956,9 @@ class TestGroupSearch(TestCaseClassBase):
             **DefaultVectorIndexParams.IVF_SQ8(DataType.FLOAT16_VECTOR.name, metric_type=MetricType.L2),
             **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name, metric_type=MetricType.IP),
             **DefaultVectorIndexParams.IVF_FLAT(DataType.BFLOAT16_VECTOR.name, metric_type=MetricType.COSINE),
+            **DefaultVectorIndexParams.SPARSE_WAND(DataType.SPARSE_FLOAT_VECTOR.name, metric_type=MetricType.IP),
             # index params for varchar field
-            **DefaultScalarIndexParams.INVERTED(self.indexed_string_field)
+            **DefaultScalarIndexParams.INVERTED(self.inverted_string_field)
         }
 
         self.build_multi_index(index_params=index_params)
@@ -1961,11 +1968,11 @@ class TestGroupSearch(TestCaseClassBase):
         self.collection_wrap.load()
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("group_by_field", [DataType.VARCHAR.name, "varchar_with_index"])
+    @pytest.mark.parametrize("group_by_field", [DataType.VARCHAR.name, "varchar_inverted"])
     def test_search_group_size(self, group_by_field):
         """
         target:
-            1. search on 3 different float vector fields with group by varchar field with group size
+            1. search on 4 different float vector fields with group by varchar field with group size
         verify results entity = limit * group_size  and group size is full if group_strict_size is True
         verify results group counts = limit if group_strict_size is False
         """
@@ -2005,7 +2012,7 @@ class TestGroupSearch(TestCaseClassBase):
     @pytest.mark.xfail()
     def test_hybrid_search_group_size(self):
         """
-        hybrid search group by on 3 different float vector fields with group by varchar field with group size
+        hybrid search group by on 4 different float vector fields with group by varchar field with group size
         verify results returns with de-dup group values and group distances are in order as rank_group_scorer
         """
         nq = 2
@@ -2024,7 +2031,8 @@ class TestGroupSearch(TestCaseClassBase):
         # 4. hybrid search group by
         rank_scorers = ["max", "avg", "sum"]
         for scorer in rank_scorers:
-            res = self.collection_wrap.hybrid_search(req_list, WeightedRanker(0.3, 0.3, 0.3), limit=limit,
+            res = self.collection_wrap.hybrid_search(req_list, WeightedRanker(0.1, 0.3, 0.9, 0.6),
+                                                     limit=limit,
                                                      group_by_field=DataType.VARCHAR.name,
                                                      group_size=group_size, rank_group_scorer=scorer,
                                                      output_fields=[DataType.VARCHAR.name])[0]
@@ -2044,16 +2052,16 @@ class TestGroupSearch(TestCaseClassBase):
                         group_distances.append(res[i][l + 1].distance)
                     else:
                         if scorer == 'sum':
-                            assert np.sum(group_distances) < np.sum(tmp_distances)
+                            assert np.sum(group_distances) <= np.sum(tmp_distances)
                         elif scorer == 'avg':
-                            assert np.mean(group_distances) < np.mean(tmp_distances)
+                            assert np.mean(group_distances) <= np.mean(tmp_distances)
                         else:  # default max
-                            assert np.max(group_distances) < np.max(tmp_distances)
+                            assert np.max(group_distances) <= np.max(tmp_distances)
 
                         tmp_distances = group_distances
                         group_distances = [res[i][l + 1].distance]
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_hybrid_search_group_by(self):
         """
         verify hybrid search group by works with different Rankers
@@ -2070,7 +2078,7 @@ class TestGroupSearch(TestCaseClassBase):
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
         # 4. hybrid search group by
-        res = self.collection_wrap.hybrid_search(req_list, WeightedRanker(0.1, 0.9, 0.2), ct.default_limit,
+        res = self.collection_wrap.hybrid_search(req_list, WeightedRanker(0.1, 0.9, 0.2, 0.3), ct.default_limit,
                                                  group_by_field=DataType.VARCHAR.name,
                                                  output_fields=[DataType.VARCHAR.name],
                                                  check_task=CheckTasks.check_search_results,
@@ -2094,7 +2102,7 @@ class TestGroupSearch(TestCaseClassBase):
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
             self.collection_wrap.hybrid_search(req_list, RRFRanker(), ct.default_limit,
-                                               group_by_field=self.indexed_string_field,
+                                               group_by_field=self.inverted_string_field,
                                                check_task=CheckTasks.check_search_results,
                                                check_items={"nq": ct.default_nq, "limit": ct.default_limit})
 
@@ -2148,7 +2156,7 @@ class TestGroupSearch(TestCaseClassBase):
         page_rounds = 3
         search_param = {}
         default_search_exp = f"{self.primary_field} >= 0"
-        grpby_field = self.indexed_string_field
+        grpby_field = self.inverted_string_field
         default_search_field = self.vector_fields[1]
         search_vectors = cf.gen_vectors(1, dim=self.dims[1], vector_data_type=self.vector_fields[1])
         all_pages_ids = []
@@ -2191,7 +2199,7 @@ class TestGroupSearch(TestCaseClassBase):
         page_rounds = 3
         search_param = {}
         default_search_exp = f"{self.primary_field} >= 0"
-        grpby_field = self.indexed_string_field
+        grpby_field = self.inverted_string_field
         default_search_field = self.vector_fields[1]
         search_vectors = cf.gen_vectors(1, dim=self.dims[1], vector_data_type=self.vector_fields[1])
         all_pages_ids = []

@@ -10558,52 +10558,6 @@ class TestSearchGroupBy(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": err_code, "err_msg": err_msg})
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
-    def test_sparse_vectors_group_by(self, index):
-        """
-        target: test search group by works on a collection with sparse vector
-        method: 1. create a collection
-                2. create index
-                3. grouping search
-        verify: search successfully
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_sparse_schema()
-        collection_w = self.init_collection_wrap(c_name, schema=schema)
-        nb = 5000
-        data = cf.gen_default_list_sparse_data(nb=nb)
-        # update float fields
-        _data = [random.randint(1, 100) for _ in range(nb)]
-        str_data = [str(i) for i in _data]
-        data[2] = str_data
-        collection_w.insert(data)
-        params = cf.get_index_params_params(index)
-        index_params = {"index_type": index, "metric_type": "IP", "params": params}
-        collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
-        collection_w.load()
-
-        nq = 2
-        limit = 20
-        search_params = ct.default_sparse_search_params
-        search_vectors = cf.gen_default_list_sparse_data(nb=nq)[-1][0:nq]
-        # verify the result if gourp by
-        res = collection_w.search(data=search_vectors, anns_field=ct.default_sparse_vec_field_name,
-                                  param=search_params, limit=limit,
-                                  group_by_field=ct.default_string_field_name,
-                                  output_fields=[ct.default_string_field_name],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq, "limit": limit})[0]
-
-        hit = res[0]
-        set_varchar = set()
-        for item in hit:
-            a = list(item.fields.values())
-            set_varchar.add(a[0])
-        # groupy by is in effect, then there are no duplicate varchar values
-        assert len(hit) == len(set_varchar)
-
 
 class TestCollectionHybridSearchValid(TestcaseBase):
     """ Test case of search interface """
