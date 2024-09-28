@@ -45,6 +45,7 @@ func TestOpenerAdaptor(t *testing.T) {
 		func(ctx context.Context, boo *walimpls.OpenOption) (walimpls.WALImpls, error) {
 			wal := mock_walimpls.NewMockWALImpls(t)
 
+			wal.EXPECT().WALName().Return("mock_wal")
 			wal.EXPECT().Channel().Return(boo.Channel)
 			wal.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
 				func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
@@ -81,6 +82,8 @@ func TestOpenerAdaptor(t *testing.T) {
 			for {
 				msg := mock_message.NewMockMutableMessage(t)
 				msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
+				msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
+				msg.EXPECT().EstimateSize().Return(1).Maybe()
 
 				msgID, err := wal.Append(context.Background(), msg)
 				time.Sleep(time.Millisecond * 10)

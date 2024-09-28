@@ -297,8 +297,8 @@ func RegisterStreamingServiceClient(registry *prometheus.Registry) {
 	})
 }
 
-// RegisterStreamingCoord registers streaming coord metrics
-func RegisterStreamingCoord(registry *prometheus.Registry) {
+// registerStreamingCoord registers streaming coord metrics
+func registerStreamingCoord(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingCoordPChannelInfo)
 	registry.MustRegister(StreamingCoordAssignmentVersion)
 	registry.MustRegister(StreamingCoordAssignmentListenerTotal)
@@ -313,11 +313,11 @@ func RegisterStreamingNode(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingNodeConsumeInflightTotal)
 	registry.MustRegister(StreamingNodeConsumeBytes)
 
-	RegisterWAL(registry)
+	registerWAL(registry)
 }
 
-// RegisterWAL registers wal metrics
-func RegisterWAL(registry *prometheus.Registry) {
+// registerWAL registers wal metrics
+func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALInfo)
 	registry.MustRegister(WALLastAllocatedTimeTick)
 	registry.MustRegister(WALAllocateTimeTickTotal)

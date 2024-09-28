@@ -363,7 +363,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordTaskExecuteLatency)
 	registry.MustRegister(TaskNum)
 
-	RegisterStreamingCoord(registry)
+	registerStreamingCoord(registry)
 }
 
 func CleanupDataCoordSegmentMetrics(dbName string, collectionID int64, segmentID int64) {

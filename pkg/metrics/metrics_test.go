@@ -41,8 +41,6 @@ func TestRegisterMetrics(t *testing.T) {
 		RegisterCGOMetrics(r)
 		RegisterStreamingServiceClient(r)
 		RegisterStreamingNode(r)
-		RegisterStreamingCoord(r)
-		RegisterWAL(r)
 	})
 }
 
