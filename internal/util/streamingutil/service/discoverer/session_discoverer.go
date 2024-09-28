@@ -95,6 +95,7 @@ func (sw *sessionDiscoverer) watch(ctx context.Context, cb func(VersionedState) 
 // handleETCDEvent handles the etcd event.
 func (sw *sessionDiscoverer) handleETCDEvent(resp clientv3.WatchResponse) error {
 	if resp.Err() != nil {
+		sw.logger.Warn("etcd watch failed with error", zap.Error(resp.Err()))
 		return resp.Err()
 	}
 
@@ -123,10 +124,6 @@ func (sw *sessionDiscoverer) handleETCDEvent(resp clientv3.WatchResponse) error 
 
 // initDiscover initializes the discoverer if needed.
 func (sw *sessionDiscoverer) initDiscover(ctx context.Context) error {
-	if sw.revision > 0 {
-		return nil
-	}
-
 	resp, err := sw.etcdCli.Get(ctx, sw.prefix, clientv3.WithPrefix(), clientv3.WithSerializable())
 	if err != nil {
 		return err
