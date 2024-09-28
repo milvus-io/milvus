@@ -118,13 +118,16 @@ func (it *indexBuildTask) GetFailReason() string {
 	return it.taskInfo.FailReason
 }
 
-func (it *indexBuildTask) UpdateVersion(ctx context.Context, meta *meta) error {
-	return meta.indexMeta.UpdateVersion(it.taskID)
+func (it *indexBuildTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error {
+	if err := meta.indexMeta.UpdateVersion(it.taskID, nodeID); err != nil {
+		return err
+	}
+	it.nodeID = nodeID
+	return nil
 }
 
-func (it *indexBuildTask) UpdateMetaBuildingState(nodeID int64, meta *meta) error {
-	it.nodeID = nodeID
-	return meta.indexMeta.BuildIndex(it.taskID, nodeID)
+func (it *indexBuildTask) UpdateMetaBuildingState(meta *meta) error {
+	return meta.indexMeta.BuildIndex(it.taskID)
 }
 
 func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskScheduler) bool {
