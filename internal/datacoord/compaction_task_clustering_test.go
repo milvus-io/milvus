@@ -19,8 +19,12 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
+	"strconv"
 	"testing"
 	"time"
+
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -675,4 +679,177 @@ func ConstructClusteringSchema(collection string, dim int, autoID bool, vectorCl
 		AutoID: autoID,
 		Fields: []*schemapb.FieldSchema{pk, fVec},
 	}
+}
+
+func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
+	s.Run("compaction to not exist", func() {
+		task := s.generateBasicTask(false)
+		task.TmpSegments = task.ResultSegments
+		task.State = datapb.CompactionTaskState_statistic
+		s.False(task.Process())
+		s.Equal(datapb.CompactionTaskState_statistic, task.GetState())
+		s.Equal(int32(0), task.RetryTimes)
+	})
+
+	s.Run("partition stats file not exist", func() {
+		task := s.generateBasicTask(false)
+		task.TmpSegments = task.ResultSegments
+		task.State = datapb.CompactionTaskState_statistic
+		task.maxRetryTimes = 3
+
+		for _, segID := range task.GetTmpSegments() {
+			err := s.meta.AddSegment(context.TODO(), &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:    segID,
+					State: commonpb.SegmentState_Flushed,
+					Level: datapb.SegmentLevel_L1,
+				},
+			})
+			s.NoError(err)
+
+			err = s.meta.AddSegment(context.TODO(), &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID * 100,
+					State:          commonpb.SegmentState_Flushed,
+					Level:          datapb.SegmentLevel_L1,
+					CompactionFrom: []int64{segID},
+					IsSorted:       true,
+				},
+			})
+			s.NoError(err)
+		}
+
+		s.False(task.Process())
+		s.Equal(datapb.CompactionTaskState_statistic, task.GetState())
+		s.Equal(int32(1), task.RetryTimes)
+	})
+
+	s.Run("partition stats deserialize failed", func() {
+		task := s.generateBasicTask(false)
+		task.TmpSegments = task.ResultSegments
+		task.State = datapb.CompactionTaskState_statistic
+		task.maxRetryTimes = 3
+
+		for _, segID := range task.GetTmpSegments() {
+			err := s.meta.AddSegment(context.TODO(), &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:    segID,
+					State: commonpb.SegmentState_Flushed,
+					Level: datapb.SegmentLevel_L1,
+				},
+			})
+			s.NoError(err)
+
+			err = s.meta.AddSegment(context.TODO(), &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID * 100,
+					State:          commonpb.SegmentState_Flushed,
+					Level:          datapb.SegmentLevel_L1,
+					CompactionFrom: []int64{segID},
+					IsSorted:       true,
+				},
+			})
+			s.NoError(err)
+		}
+
+		partitionStatsFile := path.Join(Params.MinioCfg.RootPath.GetValue(), common.PartitionStatsPath,
+			metautil.JoinIDPath(task.GetCollectionID(), task.GetPartitionID()), task.plan.GetChannel(),
+			strconv.FormatInt(task.GetPlanID(), 10))
+
+		chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
+		cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
+		s.NoError(err)
+
+		defer func() {
+			cli.Remove(context.Background(), partitionStatsFile)
+		}()
+
+		err = cli.Write(context.Background(), partitionStatsFile, []byte("hahaha"))
+		s.NoError(err)
+
+		s.False(task.Process())
+		s.Equal(datapb.CompactionTaskState_statistic, task.GetState())
+		s.Equal(int32(1), task.RetryTimes)
+	})
+
+	s.Run("normal case", func() {
+		task := s.generateBasicTask(false)
+		task.TmpSegments = task.ResultSegments
+		task.State = datapb.CompactionTaskState_statistic
+		task.maxRetryTimes = 3
+
+		for _, segID := range task.GetTmpSegments() {
+			err := s.meta.AddSegment(context.TODO(), &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:    segID,
+					State: commonpb.SegmentState_Flushed,
+					Level: datapb.SegmentLevel_L1,
+				},
+			})
+			s.NoError(err)
+
+			err = s.meta.AddSegment(context.TODO(), &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID * 100,
+					State:          commonpb.SegmentState_Flushed,
+					Level:          datapb.SegmentLevel_L1,
+					CompactionFrom: []int64{segID},
+					IsSorted:       true,
+				},
+			})
+			s.NoError(err)
+		}
+
+		partitionStatsFile := path.Join(Params.MinioCfg.RootPath.GetValue(), common.PartitionStatsPath,
+			metautil.JoinIDPath(task.GetCollectionID(), task.GetPartitionID()), task.plan.GetChannel(),
+			strconv.FormatInt(task.GetPlanID(), 10))
+
+		chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
+		cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
+		s.NoError(err)
+
+		defer func() {
+			cli.Remove(context.Background(), partitionStatsFile)
+		}()
+
+		partitionStats := &storage.PartitionStatsSnapshot{
+			SegmentStats: make(map[int64]storage.SegmentStats),
+			Version:      task.GetPlanID(),
+		}
+
+		for _, segID := range task.GetTmpSegments() {
+			partitionStats.SegmentStats[segID] = storage.SegmentStats{
+				FieldStats: []storage.FieldStats{
+					{
+						FieldID: 101,
+					},
+				},
+				NumRows: 10000,
+			}
+		}
+
+		partitionStatsBytes, err := storage.SerializePartitionStatsSnapshot(partitionStats)
+		s.NoError(err)
+
+		err = cli.Write(context.Background(), partitionStatsFile, partitionStatsBytes)
+		s.NoError(err)
+
+		s.False(task.Process())
+		s.Equal(datapb.CompactionTaskState_indexing, task.GetState())
+		s.Equal(int32(0), task.RetryTimes)
+	})
+
+	s.Run("not enable stats task", func() {
+		Params.Save(Params.DataCoordCfg.EnableStatsTask.Key, "false")
+		defer Params.Reset(Params.DataCoordCfg.EnableStatsTask.Key)
+		task := s.generateBasicTask(false)
+		task.TmpSegments = task.ResultSegments
+		task.State = datapb.CompactionTaskState_statistic
+		task.maxRetryTimes = 3
+		task.ResultSegments = nil
+
+		s.False(task.Process())
+		s.Equal(datapb.CompactionTaskState_indexing, task.GetState())
+		s.Equal(int32(0), task.RetryTimes)
+	})
 }
