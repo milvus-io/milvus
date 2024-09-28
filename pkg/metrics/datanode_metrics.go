@@ -54,8 +54,19 @@ var (
 			Help:      "byte size of data flushed to storage",
 		}, []string{
 			nodeIDLabelName,
-			msgTypeLabelName,
+			dataSourceLabelName,
 			segmentLevelLabelName,
+		})
+
+	DataNodeFlushedRows = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "flushed_data_rows",
+			Help:      "num of rows flushed to storage",
+		}, []string{
+			nodeIDLabelName,
+			dataSourceLabelName,
 		})
 
 	DataNodeNumProducers = prometheus.NewGaugeVec(
@@ -246,6 +257,7 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeFlushBufferCount)
 	registry.MustRegister(DataNodeFlushReqCounter)
 	registry.MustRegister(DataNodeFlushedSize)
+	registry.MustRegister(DataNodeFlushedRows)
 	// compaction related
 	registry.MustRegister(DataNodeCompactionLatency)
 	registry.MustRegister(DataNodeCompactionLatencyInQueue)
