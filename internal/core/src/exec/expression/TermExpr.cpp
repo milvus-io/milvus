@@ -492,14 +492,12 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
 
     std::vector<IndexInnerType> vals;
     for (auto& val : expr_->vals_) {
-        auto converted_val = GetValueFromProto<T>(val);
         // Integral overflow process
-        if constexpr (std::is_integral_v<T>) {
-            if (milvus::query::out_of_range<T>(converted_val)) {
-                continue;
-            }
+        bool overflowed = false;
+        auto converted_val = GetValueFromProtoWithOverflow<T>(val, overflowed);
+        if (!overflowed) {
+            vals.emplace_back(converted_val);
         }
-        vals.emplace_back(converted_val);
     }
     auto execute_sub_batch = [](Index* index_ptr,
                                 const std::vector<IndexInnerType>& vals) {

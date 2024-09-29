@@ -52,6 +52,8 @@ func TestIndexNodeServer(t *testing.T) {
 	err = server.setServer(inm)
 	assert.NoError(t, err)
 
+	err = server.Prepare()
+	assert.NoError(t, err)
 	err = server.Run()
 	assert.NoError(t, err)
 

@@ -33,8 +33,8 @@ type Task interface {
 	SetState(state indexpb.JobState, failReason string)
 	GetState() indexpb.JobState
 	GetFailReason() string
-	UpdateVersion(ctx context.Context, meta *meta) error
-	UpdateMetaBuildingState(nodeID int64, meta *meta) error
+	UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error
+	UpdateMetaBuildingState(meta *meta) error
 	AssignTask(ctx context.Context, client types.IndexNodeClient) bool
 	QueryResult(ctx context.Context, client types.IndexNodeClient)
 	DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool

@@ -110,7 +110,7 @@ func (m *analyzeMeta) DropAnalyzeTask(taskID int64) error {
 	return nil
 }
 
-func (m *analyzeMeta) UpdateVersion(taskID int64) error {
+func (m *analyzeMeta) UpdateVersion(taskID, nodeID int64) error {
 	m.Lock()
 	defer m.Unlock()
 
@@ -121,11 +121,13 @@ func (m *analyzeMeta) UpdateVersion(taskID int64) error {
 
 	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
 	cloneT.Version++
-	log.Info("update task version", zap.Int64("taskID", taskID), zap.Int64("newVersion", cloneT.Version))
+	cloneT.NodeID = nodeID
+	log.Info("update task version", zap.Int64("taskID", taskID),
+		zap.Int64("newVersion", cloneT.Version), zap.Int64("nodeID", nodeID))
 	return m.saveTask(cloneT)
 }
 
-func (m *analyzeMeta) BuildingTask(taskID, nodeID int64) error {
+func (m *analyzeMeta) BuildingTask(taskID int64) error {
 	m.Lock()
 	defer m.Unlock()
 
@@ -135,9 +137,8 @@ func (m *analyzeMeta) BuildingTask(taskID, nodeID int64) error {
 	}
 
 	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
-	cloneT.NodeID = nodeID
 	cloneT.State = indexpb.JobState_JobStateInProgress
-	log.Info("task will be building", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID))
+	log.Info("task will be building", zap.Int64("taskID", taskID))
 
 	return m.saveTask(cloneT)
 }

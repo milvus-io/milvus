@@ -29,7 +29,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	grpcdatacoord "github.com/milvus-io/milvus/internal/distributed/datacoord"
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -314,11 +313,8 @@ func (s *DataNodeCompatibility) checkDNRestarts(currentNumRows *int, testInsert 
 }
 
 func (s *DataNodeCompatibility) restartDC() {
-	c := s.Cluster
-	c.DataCoord.Stop()
-	c.DataCoord = grpcdatacoord.NewServer(context.TODO(), c.GetFactory())
-	err := c.DataCoord.Run()
-	s.NoError(err)
+	s.Cluster.StopDataCoord()
+	s.Cluster.StartDataCoord()
 }
 
 func (s *DataNodeCompatibility) TestCompatibility() {

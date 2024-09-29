@@ -41,7 +41,8 @@ func Test_NewServer(t *testing.T) {
 
 	ctx := context.Background()
 	mockDataCoord := mocks.NewMockDataCoord(t)
-	server := NewServer(ctx, nil)
+	server, err := NewServer(ctx, nil)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 	server.dataCoord = mockDataCoord
 
@@ -335,7 +336,8 @@ func Test_Run(t *testing.T) {
 			defer func() {
 				getTiKVClient = tikv.GetTiKVClient
 			}()
-			server := NewServer(ctx, nil)
+			server, err := NewServer(ctx, nil)
+			assert.NoError(t, err)
 			assert.NotNil(t, server)
 
 			mockDataCoord := mocks.NewMockDataCoord(t)
@@ -347,7 +349,9 @@ func Test_Run(t *testing.T) {
 			mockDataCoord.EXPECT().Init().Return(nil)
 			mockDataCoord.EXPECT().Start().Return(nil)
 			mockDataCoord.EXPECT().Register().Return(nil)
-			err := server.Run()
+			err = server.Prepare()
+			assert.NoError(t, err)
+			err = server.Run()
 			assert.NoError(t, err)
 
 			mockDataCoord.EXPECT().Stop().Return(nil)
@@ -360,15 +364,18 @@ func Test_Run(t *testing.T) {
 
 	t.Run("test init error", func(t *testing.T) {
 		ctx := context.Background()
-		server := NewServer(ctx, nil)
+		server, err := NewServer(ctx, nil)
 		assert.NotNil(t, server)
+		assert.NoError(t, err)
 		mockDataCoord := mocks.NewMockDataCoord(t)
 		mockDataCoord.EXPECT().SetEtcdClient(mock.Anything)
 		mockDataCoord.EXPECT().SetAddress(mock.Anything)
 		mockDataCoord.EXPECT().Init().Return(errors.New("error"))
 		server.dataCoord = mockDataCoord
 
-		err := server.Run()
+		err = server.Prepare()
+		assert.NoError(t, err)
+		err = server.Run()
 		assert.Error(t, err)
 
 		mockDataCoord.EXPECT().Stop().Return(nil)
@@ -377,7 +384,8 @@ func Test_Run(t *testing.T) {
 
 	t.Run("test register error", func(t *testing.T) {
 		ctx := context.Background()
-		server := NewServer(ctx, nil)
+		server, err := NewServer(ctx, nil)
+		assert.NoError(t, err)
 		assert.NotNil(t, server)
 		mockDataCoord := mocks.NewMockDataCoord(t)
 		mockDataCoord.EXPECT().SetEtcdClient(mock.Anything)
@@ -386,7 +394,9 @@ func Test_Run(t *testing.T) {
 		mockDataCoord.EXPECT().Register().Return(errors.New("error"))
 		server.dataCoord = mockDataCoord
 
-		err := server.Run()
+		err = server.Prepare()
+		assert.NoError(t, err)
+		err = server.Run()
 		assert.Error(t, err)
 
 		mockDataCoord.EXPECT().Stop().Return(nil)
@@ -395,7 +405,8 @@ func Test_Run(t *testing.T) {
 
 	t.Run("test start error", func(t *testing.T) {
 		ctx := context.Background()
-		server := NewServer(ctx, nil)
+		server, err := NewServer(ctx, nil)
+		assert.NoError(t, err)
 		assert.NotNil(t, server)
 		mockDataCoord := mocks.NewMockDataCoord(t)
 		mockDataCoord.EXPECT().SetEtcdClient(mock.Anything)
@@ -405,7 +416,9 @@ func Test_Run(t *testing.T) {
 		mockDataCoord.EXPECT().Start().Return(errors.New("error"))
 		server.dataCoord = mockDataCoord
 
-		err := server.Run()
+		err = server.Prepare()
+		assert.NoError(t, err)
+		err = server.Run()
 		assert.Error(t, err)
 
 		mockDataCoord.EXPECT().Stop().Return(nil)
@@ -414,7 +427,8 @@ func Test_Run(t *testing.T) {
 
 	t.Run("test stop error", func(t *testing.T) {
 		ctx := context.Background()
-		server := NewServer(ctx, nil)
+		server, err := NewServer(ctx, nil)
+		assert.NoError(t, err)
 		assert.NotNil(t, server)
 		mockDataCoord := mocks.NewMockDataCoord(t)
 		mockDataCoord.EXPECT().SetEtcdClient(mock.Anything)
@@ -424,7 +438,9 @@ func Test_Run(t *testing.T) {
 		mockDataCoord.EXPECT().Start().Return(nil)
 		server.dataCoord = mockDataCoord
 
-		err := server.Run()
+		err = server.Prepare()
+		assert.NoError(t, err)
+		err = server.Run()
 		assert.NoError(t, err)
 
 		mockDataCoord.EXPECT().Stop().Return(errors.New("error"))
