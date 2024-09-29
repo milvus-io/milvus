@@ -121,3 +121,12 @@ func (m *ConcurrentMap[K, V]) Values() []V {
 	})
 	return ret
 }
+
+func (m *ConcurrentMap[K, V]) Keys() []K {
+	ret := make([]K, m.Len())
+	m.inner.Range(func(key, value any) bool {
+		ret = append(ret, key.(K))
+		return true
+	})
+	return ret
+}
