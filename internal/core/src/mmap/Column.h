@@ -507,6 +507,19 @@ class SparseFloatColumn : public ColumnBase {
         size_t required_size = data_size_ + data->Size();
         if (required_size > data_cap_size_) {
             Expand(required_size * 2);
+            // after expanding, the address of each row in vec_ become invalid.
+            // the number of elements of each row is still correct, update the
+            // address of each row to the new data_.
+            size_t bytes = 0;
+            for (size_t i = 0; i < num_rows_; i++) {
+                auto count = vec_[i].size();
+                auto row_bytes = vec_[i].data_byte_size();
+                // destroy the old object and placement new a new one
+                vec_[i].~SparseRow<float>();
+                new (&vec_[i]) knowhere::sparse::SparseRow<float>(
+                    count, (uint8_t*)(data_) + bytes, false);
+                bytes += row_bytes;
+            }
         }
         dim_ = std::max(
             dim_,
