@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // NewTxnManager creates a new transaction manager.
@@ -36,6 +37,13 @@ type TxnManager struct {
 // We only support a transaction work on a streaming node, once the wal is transferred to another node,
 // the transaction is treated as expired (rollback), and user will got a expired error, then perform a retry.
 func (m *TxnManager) BeginNewTxn(ctx context.Context, timetick uint64, keepalive time.Duration) (*TxnSession, error) {
+	if keepalive == 0 {
+		// If keepalive is 0, the txn set the keepalive with default keepalive.
+		keepalive = paramtable.Get().StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse()
+	}
+	if keepalive < 1*time.Millisecond {
+		return nil, status.NewInvaildArgument("keepalive must be greater than 1ms")
+	}
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
 		return nil, err
