@@ -651,7 +651,7 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 
 func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	jsonArray := field.GetScalars().GetJsonData().GetData()
-	if jsonArray == nil {
+	if jsonArray == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("json field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need json array", "got nil", msg)
 	}
