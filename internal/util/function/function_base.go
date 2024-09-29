@@ -25,24 +25,14 @@ import (
 )
 
 
-type RunnerMode int
-
-const (
-	InsertMode RunnerMode = iota
-	SearchMode
-)
-
-
 type FunctionBase struct {
 	schema      *schemapb.FunctionSchema
 	outputFields []*schemapb.FieldSchema
-	mode RunnerMode
 }
 
-func NewBase(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema, mode RunnerMode) (*FunctionBase, error) {
+func NewBase(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (*FunctionBase, error) {
 	var base FunctionBase
 	base.schema = schema
-	base.mode = mode
 	for _, field_id := range schema.GetOutputFieldIds() {
 		for _, field := range coll.GetFields() {
 			if field.GetFieldID() == field_id {
@@ -53,7 +43,8 @@ func NewBase(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema, m
 	}
 
 	if len(base.outputFields) != len(schema.GetOutputFieldIds()) {
-		return &base, fmt.Errorf("Collection [%s]'s function [%s]'s outputs mismatch schema", coll.Name, schema.Name)
+		return &base, fmt.Errorf("The collection [%s]'s information is wrong, function [%s]'s outputs does not match the schema",
+			coll.Name, schema.Name)
 	}
 	return &base, nil
 }
