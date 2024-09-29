@@ -103,7 +103,7 @@ func SkipRemote(skip bool) Option {
 	}
 }
 
-func skipEnv(skip bool) Option {
+func SkipEnv(skip bool) Option {
 	return func(bt *baseTableConfig) {
 		bt.skipEnv = skip
 	}
@@ -112,7 +112,7 @@ func skipEnv(skip bool) Option {
 // NewBaseTableFromYamlOnly only used in migration tool.
 // Maybe we shouldn't limit the configDir internally.
 func NewBaseTableFromYamlOnly(yaml string) *BaseTable {
-	return NewBaseTable(Files([]string{yaml}), SkipRemote(true), skipEnv(true))
+	return NewBaseTable(Files([]string{yaml}), SkipRemote(true), SkipEnv(true))
 }
 
 func NewBaseTable(opts ...Option) *BaseTable {
