@@ -91,23 +91,6 @@ func (s *importScheduler) Close() {
 }
 
 func (s *importScheduler) process() {
-	getNodeID := func(nodeSlots map[int64]int64) int64 {
-		var (
-			nodeID   int64 = NullNodeID
-			maxSlots int64 = -1
-		)
-		for id, slots := range nodeSlots {
-			if slots > 0 && slots > maxSlots {
-				nodeID = id
-				maxSlots = slots
-			}
-		}
-		if nodeID != NullNodeID {
-			nodeSlots[nodeID]--
-		}
-		return nodeID
-	}
-
 	jobs := s.imeta.GetJobBy()
 	sort.Slice(jobs, func(i, j int) bool {
 		return jobs[i].GetJobID() < jobs[j].GetJobID()
@@ -118,7 +101,7 @@ func (s *importScheduler) process() {
 		for _, task := range tasks {
 			switch task.GetState() {
 			case datapb.ImportTaskStateV2_Pending:
-				nodeID := getNodeID(nodeSlots)
+				nodeID := s.getNodeID(task, nodeSlots)
 				switch task.GetType() {
 				case PreImportTaskType:
 					s.processPendingPreImport(task, nodeID)
@@ -165,6 +148,25 @@ func (s *importScheduler) peekSlots() map[int64]int64 {
 	wg.Wait()
 	log.Debug("peek slots done", zap.Any("nodeSlots", nodeSlots))
 	return nodeSlots
+}
+
+func (s *importScheduler) getNodeID(task ImportTask, nodeSlots map[int64]int64) int64 {
+	var (
+		nodeID   int64 = NullNodeID
+		maxSlots int64 = -1
+	)
+	require := task.GetSlots()
+	for id, slots := range nodeSlots {
+		// find the most idle datanode
+		if slots > 0 && slots >= require && slots > maxSlots {
+			nodeID = id
+			maxSlots = slots
+		}
+	}
+	if nodeID != NullNodeID {
+		nodeSlots[nodeID] -= require
+	}
+	return nodeID
 }
 
 func (s *importScheduler) processPendingPreImport(task ImportTask, nodeID int64) {
