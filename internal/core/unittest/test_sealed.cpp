@@ -1403,8 +1403,7 @@ TEST(Sealed, GetVectorFromChunkCache) {
                                         fakevec_id,
                                         milvus::DataType::VECTOR_FLOAT,
                                         dim,
-                                        metric_type,
-                                        false);
+                                        metric_type);
 
     auto rcm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();
@@ -1608,8 +1607,7 @@ TEST(Sealed, WarmupChunkCache) {
                                         fakevec_id,
                                         milvus::DataType::VECTOR_FLOAT,
                                         dim,
-                                        metric_type,
-                                        false);
+                                        metric_type);
 
     auto rcm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();
