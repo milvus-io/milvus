@@ -21,7 +21,6 @@ package function
 
 import (
 	"io"
-	"fmt"
 	"testing"
 	"net/http"
 	"net/http/httptest"
@@ -103,7 +102,7 @@ func createRunner(url string, schema *schemapb.CollectionSchema) (*OpenAIEmbeddi
 			{Key: OpenaiApiKeyParamKey, Value: "mock"},
 			{Key: OpenaiEmbeddingUrlParamKey, Value: url},
 		},
-	}, InsertMode)
+	})
 }
 
 func (s *OpenAIEmbeddingFunctionSuite) TestEmbedding() {
@@ -186,8 +185,6 @@ func (s *OpenAIEmbeddingFunctionSuite) TestEmbeddingDimNotMatch() {
 	data := createData([]string{"sentence", "sentence"})
 	_, err2 := runner.Run(data)
 	s.Error(err2)
-	fmt.Println(err2.Error())
-	// s.NoError(err2)
 }
 
 func (s *OpenAIEmbeddingFunctionSuite) TestEmbeddingNubmerNotMatch() {
@@ -218,8 +215,6 @@ func (s *OpenAIEmbeddingFunctionSuite) TestEmbeddingNubmerNotMatch() {
 	data := createData([]string{"sentence", "sentence2"})
 	_, err2 := runner.Run(data)
 	s.Error(err2)
-	fmt.Println(err2.Error())
-	// s.NoError(err2)
 }
 
 func (s *OpenAIEmbeddingFunctionSuite) TestRunnerParamsErr() {
@@ -248,9 +243,8 @@ func (s *OpenAIEmbeddingFunctionSuite) TestRunnerParamsErr() {
 				{Key: OpenaiApiKeyParamKey, Value: "mock"},
 				{Key: OpenaiEmbeddingUrlParamKey, Value: "mock"},
 			},
-		}, InsertMode)
+		})
 		s.Error(err)
-		fmt.Println(err.Error())
 	}
 
 	// outputfield number mismatc
@@ -281,9 +275,8 @@ func (s *OpenAIEmbeddingFunctionSuite) TestRunnerParamsErr() {
 				{Key: OpenaiApiKeyParamKey, Value: "mock"},
 				{Key: OpenaiEmbeddingUrlParamKey, Value: "mock"},
 			},
-		}, InsertMode)
+		})
 		s.Error(err)
-		fmt.Println(err.Error())
 	}
 
 	// outputfield miss
@@ -299,9 +292,8 @@ func (s *OpenAIEmbeddingFunctionSuite) TestRunnerParamsErr() {
 				{Key: OpenaiApiKeyParamKey, Value: "mock"},
 				{Key: OpenaiEmbeddingUrlParamKey, Value: "mock"},
 			}, 
-		}, InsertMode)
+		})
 		s.Error(err)
-		fmt.Println(err.Error())
 	}
 
 	// error model name
@@ -317,9 +309,8 @@ func (s *OpenAIEmbeddingFunctionSuite) TestRunnerParamsErr() {
 				{Key: OpenaiApiKeyParamKey, Value: "mock"},
 				{Key: OpenaiEmbeddingUrlParamKey, Value: "mock"},
 			},
-		}, InsertMode)
+		})
 		s.Error(err)
-		fmt.Println(err.Error())
 	}
 
 	// no openai api  key
@@ -332,8 +323,7 @@ func (s *OpenAIEmbeddingFunctionSuite) TestRunnerParamsErr() {
 			Params: []*commonpb.KeyValuePair{
 				{Key: ModelNameParamKey, Value: "text-embedding-ada-003"},
 			},
-		}, InsertMode)
+		})
 		s.Error(err)
-		fmt.Println(err.Error())
 	}
 }
