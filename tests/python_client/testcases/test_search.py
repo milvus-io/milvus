@@ -13113,6 +13113,39 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          "output_fields": [default_int64_field_name,
                                                            default_float_field_name]})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_none_data_partial_load(self, is_flush, enable_dynamic_field, null_data_percent):
+        """
+        target: test search normal case with none data inserted
+        method: create connection, collection with nullable fields, insert data including none, and search
+        expected: 1. search successfully with limit(topK)
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, is_flush=is_flush,
+                                         enable_dynamic_field=enable_dynamic_field,
+                                         nullable_fields={ct.default_float_field_name: null_data_percent})[0:5]
+        # 2. release and partial load again
+        collection_w.release()
+        loaded_fields = [default_int64_field_name, ct.default_float_vec_field_name]
+        if not enable_dynamic_field:
+            loaded_fields.append(default_float_field_name)
+        collection_w.load(load_fields=loaded_fields)
+        # 3. generate search data
+        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim)
+        # 4. search after partial load field with None data
+        output_fields = [default_int64_field_name, default_float_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "output_fields": output_fields})
+
+
 class TestSearchWithTextMatchFilter(TestcaseBase):
     """
     ******************************************************************
@@ -13259,3 +13292,4 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
                 for r in res:
                     r = r.to_dict()
                     assert any([token in r["entity"][field] for token in top_10_tokens])
+

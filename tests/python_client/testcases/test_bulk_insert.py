@@ -887,6 +887,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             expr_field = df.string_field
             expr = f"{expr_field} >= '0'"
         else:
+            res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field, df.int_field])
+            assert len(res) == 0
             expr_field = df.pk_field
             expr = f"{expr_field} >= 0"
 
@@ -925,7 +927,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         if enable_dynamic_field is False and include_meta is True:
             pytest.skip("include_meta only works with enable_dynamic_field")
         if nullable is True:
-            pytest.skip("issue #36241")
+            pytest.skip("not support bulk insert numpy files in field which set nullable == true")
         float_vec_field_dim = dim
         binary_vec_field_dim = ((dim+random.randint(-16, 32)) // 8) * 8
         bf16_vec_field_dim = dim+random.randint(-16, 32)
@@ -1201,18 +1203,26 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
         # query data
-        res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field])
-        if nullable is False:
-            assert len(res) == entities
-        query_data = [r[df.string_field] for r in res][:len(self.collection_wrap.partitions)]
-        res, _ = self.collection_wrap.query(expr=f"{df.string_field} in {query_data}", output_fields=[df.string_field])
-        if nullable is False:
-            assert len(res) == len(query_data)
+        if not nullable:
+            expr_field = df.string_field
+            expr = f"{expr_field} >= '0'"
+        else:
+            res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field])
+            assert len(res) == 0
+            expr_field = df.pk_field
+            expr = f"{expr_field} >= 0"
+
+        res, _ = self.collection_wrap.query(expr=f"{expr}", output_fields=[df.string_field])
+        assert len(res) == entities
+        query_data = [r[expr_field] for r in res][:len(self.collection_wrap.partitions)]
+        res, _ = self.collection_wrap.query(expr=f"{expr_field} in {query_data}", output_fields=[expr_field])
+        assert len(res) == len(query_data)
         res, _ = self.collection_wrap.query(expr=f"TextMatch({df.text_field}, 'milvus')", output_fields=[df.text_field])
-        if nullable is False:
+        if not nullable:
             assert len(res) == entities
         else:
             assert 0 < len(res) < entities
+
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
 
