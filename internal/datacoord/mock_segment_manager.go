@@ -5,7 +5,6 @@ package datacoord
 import (
 	context "context"
 
-	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -22,6 +21,7 @@ func (_m *MockManager) EXPECT() *MockManager_Expecter {
 	return &MockManager_Expecter{mock: &_m.Mock}
 }
 
+<<<<<<< HEAD
 // AllocImportSegment provides a mock function with given fields: ctx, taskID, collectionID, partitionID, channelName, level
 func (_m *MockManager) AllocImportSegment(ctx context.Context, taskID int64, collectionID int64, partitionID int64, channelName string, level datapb.SegmentLevel) (*SegmentInfo, error) {
 	ret := _m.Called(ctx, taskID, collectionID, partitionID, channelName, level)
@@ -33,14 +33,32 @@ func (_m *MockManager) AllocImportSegment(ctx context.Context, taskID int64, col
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, string, datapb.SegmentLevel) *SegmentInfo); ok {
 		r0 = rf(ctx, taskID, collectionID, partitionID, channelName, level)
+=======
+// AllocNewGrowingSegment provides a mock function with given fields: ctx, collectionID, partitionID, segmentID, channelName
+func (_m *MockManager) AllocNewGrowingSegment(ctx context.Context, collectionID int64, partitionID int64, segmentID int64, channelName string) (*SegmentInfo, error) {
+	ret := _m.Called(ctx, collectionID, partitionID, segmentID, channelName)
+
+	var r0 *SegmentInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, string) (*SegmentInfo, error)); ok {
+		return rf(ctx, collectionID, partitionID, segmentID, channelName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, string) *SegmentInfo); ok {
+		r0 = rf(ctx, collectionID, partitionID, segmentID, channelName)
+>>>>>>> 3d3dfefc2f (fix: Fix import segments leak in segment manager)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*SegmentInfo)
 		}
 	}
 
+<<<<<<< HEAD
 	if rf, ok := ret.Get(1).(func(context.Context, int64, int64, int64, string, datapb.SegmentLevel) error); ok {
 		r1 = rf(ctx, taskID, collectionID, partitionID, channelName, level)
+=======
+	if rf, ok := ret.Get(1).(func(context.Context, int64, int64, int64, string) error); ok {
+		r1 = rf(ctx, collectionID, partitionID, segmentID, channelName)
+>>>>>>> 3d3dfefc2f (fix: Fix import segments leak in segment manager)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -48,6 +66,7 @@ func (_m *MockManager) AllocImportSegment(ctx context.Context, taskID int64, col
 	return r0, r1
 }
 
+<<<<<<< HEAD
 // MockManager_AllocImportSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllocImportSegment'
 type MockManager_AllocImportSegment_Call struct {
 	*mock.Call
@@ -67,16 +86,44 @@ func (_e *MockManager_Expecter) AllocImportSegment(ctx interface{}, taskID inter
 func (_c *MockManager_AllocImportSegment_Call) Run(run func(ctx context.Context, taskID int64, collectionID int64, partitionID int64, channelName string, level datapb.SegmentLevel)) *MockManager_AllocImportSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(int64), args[4].(string), args[5].(datapb.SegmentLevel))
+=======
+// MockManager_AllocNewGrowingSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllocNewGrowingSegment'
+type MockManager_AllocNewGrowingSegment_Call struct {
+	*mock.Call
+}
+
+// AllocNewGrowingSegment is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - partitionID int64
+//   - segmentID int64
+//   - channelName string
+func (_e *MockManager_Expecter) AllocNewGrowingSegment(ctx interface{}, collectionID interface{}, partitionID interface{}, segmentID interface{}, channelName interface{}) *MockManager_AllocNewGrowingSegment_Call {
+	return &MockManager_AllocNewGrowingSegment_Call{Call: _e.mock.On("AllocNewGrowingSegment", ctx, collectionID, partitionID, segmentID, channelName)}
+}
+
+func (_c *MockManager_AllocNewGrowingSegment_Call) Run(run func(ctx context.Context, collectionID int64, partitionID int64, segmentID int64, channelName string)) *MockManager_AllocNewGrowingSegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(int64), args[4].(string))
+>>>>>>> 3d3dfefc2f (fix: Fix import segments leak in segment manager)
 	})
 	return _c
 }
 
+<<<<<<< HEAD
 func (_c *MockManager_AllocImportSegment_Call) Return(_a0 *SegmentInfo, _a1 error) *MockManager_AllocImportSegment_Call {
+=======
+func (_c *MockManager_AllocNewGrowingSegment_Call) Return(_a0 *SegmentInfo, _a1 error) *MockManager_AllocNewGrowingSegment_Call {
+>>>>>>> 3d3dfefc2f (fix: Fix import segments leak in segment manager)
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
+<<<<<<< HEAD
 func (_c *MockManager_AllocImportSegment_Call) RunAndReturn(run func(context.Context, int64, int64, int64, string, datapb.SegmentLevel) (*SegmentInfo, error)) *MockManager_AllocImportSegment_Call {
+=======
+func (_c *MockManager_AllocNewGrowingSegment_Call) RunAndReturn(run func(context.Context, int64, int64, int64, string) (*SegmentInfo, error)) *MockManager_AllocNewGrowingSegment_Call {
+>>>>>>> 3d3dfefc2f (fix: Fix import segments leak in segment manager)
 	_c.Call.Return(run)
 	return _c
 }
@@ -246,50 +293,6 @@ func (_c *MockManager_ExpireAllocations_Call) Return(_a0 error) *MockManager_Exp
 }
 
 func (_c *MockManager_ExpireAllocations_Call) RunAndReturn(run func(string, uint64) error) *MockManager_ExpireAllocations_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// FlushImportSegments provides a mock function with given fields: ctx, collectionID, segmentIDs
-func (_m *MockManager) FlushImportSegments(ctx context.Context, collectionID int64, segmentIDs []int64) error {
-	ret := _m.Called(ctx, collectionID, segmentIDs)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64) error); ok {
-		r0 = rf(ctx, collectionID, segmentIDs)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockManager_FlushImportSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FlushImportSegments'
-type MockManager_FlushImportSegments_Call struct {
-	*mock.Call
-}
-
-// FlushImportSegments is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-//   - segmentIDs []int64
-func (_e *MockManager_Expecter) FlushImportSegments(ctx interface{}, collectionID interface{}, segmentIDs interface{}) *MockManager_FlushImportSegments_Call {
-	return &MockManager_FlushImportSegments_Call{Call: _e.mock.On("FlushImportSegments", ctx, collectionID, segmentIDs)}
-}
-
-func (_c *MockManager_FlushImportSegments_Call) Run(run func(ctx context.Context, collectionID int64, segmentIDs []int64)) *MockManager_FlushImportSegments_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].([]int64))
-	})
-	return _c
-}
-
-func (_c *MockManager_FlushImportSegments_Call) Return(_a0 error) *MockManager_FlushImportSegments_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockManager_FlushImportSegments_Call) RunAndReturn(run func(context.Context, int64, []int64) error) *MockManager_FlushImportSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }

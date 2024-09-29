@@ -44,7 +44,6 @@ type importChecker struct {
 	broker  broker.Broker
 	cluster Cluster
 	alloc   allocator
-	sm      Manager
 	imeta   ImportMeta
 
 	closeOnce sync.Once
@@ -55,7 +54,6 @@ func NewImportChecker(meta *meta,
 	broker broker.Broker,
 	cluster Cluster,
 	alloc allocator,
-	sm Manager,
 	imeta ImportMeta,
 ) ImportChecker {
 	return &importChecker{
@@ -63,7 +61,6 @@ func NewImportChecker(meta *meta,
 		broker:    broker,
 		cluster:   cluster,
 		alloc:     alloc,
-		sm:        sm,
 		imeta:     imeta,
 		closeChan: make(chan struct{}),
 	}
@@ -220,7 +217,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 
 	allDiskIndex := c.meta.indexMeta.AreAllDiskIndex(job.GetCollectionID(), job.GetSchema())
 	groups := RegroupImportFiles(job, lacks, allDiskIndex)
-	newTasks, err := NewImportTasks(groups, job, c.sm, c.alloc)
+	newTasks, err := NewImportTasks(groups, job, c.alloc, c.meta)
 	if err != nil {
 		log.Warn("new import tasks failed", zap.Error(err))
 		return

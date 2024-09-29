@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"path"
 	"sort"
 	"time"
@@ -27,6 +28,9 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -77,9 +81,7 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 }
 
 func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
-	job ImportJob,
-	manager Manager,
-	alloc allocator,
+	job ImportJob, alloc allocator, meta *meta,
 ) ([]ImportTask, error) {
 	idBegin, _, err := alloc.allocN(int64(len(fileGroups)))
 	if err != nil {
@@ -97,7 +99,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 				FileStats:    group,
 			},
 		}
-		segments, err := AssignSegments(job, task, manager)
+		segments, err := AssignSegments(job, task, alloc, meta)
 		if err != nil {
 			return nil, err
 		}
@@ -107,7 +109,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	return tasks, nil
 }
 
-func AssignSegments(job ImportJob, task ImportTask, manager Manager) ([]int64, error) {
+func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, meta *meta) ([]int64, error) {
 	// merge hashed sizes
 	hashedDataSize := make(map[string]map[int64]int64) // vchannel->(partitionID->size)
 	for _, fileStats := range task.GetFileStats() {
@@ -138,7 +140,8 @@ func AssignSegments(job ImportJob, task ImportTask, manager Manager) ([]int64, e
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		for size > 0 {
-			segmentInfo, err := manager.AllocImportSegment(ctx, task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel, segmentLevel)
+			segmentInfo, err := AllocImportSegment(ctx, alloc, meta,
+				task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel, segmentLevel)
 			if err != nil {
 				return err
 			}
@@ -157,6 +160,59 @@ func AssignSegments(job ImportJob, task ImportTask, manager Manager) ([]int64, e
 		}
 	}
 	return segments, nil
+}
+
+func AllocImportSegment(ctx context.Context,
+	alloc allocator.Allocator,
+	meta *meta,
+	taskID int64, collectionID UniqueID,
+	partitionID UniqueID,
+	channelName string,
+	level datapb.SegmentLevel,
+) (*SegmentInfo, error) {
+	log := log.Ctx(ctx)
+	id, err := alloc.AllocID(ctx)
+	if err != nil {
+		log.Error("failed to alloc id for import segment", zap.Error(err))
+		return nil, err
+	}
+	ts, err := alloc.AllocTimestamp(ctx)
+	if err != nil {
+		return nil, err
+	}
+	position := &msgpb.MsgPosition{
+		ChannelName: channelName,
+		MsgID:       nil,
+		Timestamp:   ts,
+	}
+
+	segmentInfo := &datapb.SegmentInfo{
+		ID:             id,
+		CollectionID:   collectionID,
+		PartitionID:    partitionID,
+		InsertChannel:  channelName,
+		NumOfRows:      0,
+		State:          commonpb.SegmentState_Importing,
+		MaxRowNum:      0,
+		Level:          level,
+		LastExpireTime: math.MaxUint64,
+		StartPosition:  position,
+		DmlPosition:    position,
+	}
+	segmentInfo.IsImporting = true
+	segment := NewSegmentInfo(segmentInfo)
+	if err = meta.AddSegment(ctx, segment); err != nil {
+		log.Error("failed to add import segment", zap.Error(err))
+		return nil, err
+	}
+	log.Info("add import segment done",
+		zap.Int64("taskID", taskID),
+		zap.Int64("collectionID", segmentInfo.CollectionID),
+		zap.Int64("segmentID", segmentInfo.ID),
+		zap.String("channel", segmentInfo.InsertChannel),
+		zap.String("level", level.String()))
+
+	return segment, nil
 }
 
 func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportRequest {
