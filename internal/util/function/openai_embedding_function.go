@@ -38,8 +38,7 @@ const (
 
 const (
 	maxBatch = 128
-	timeoutSec = 60
-	maxRowNum = 60 * maxBatch
+	timeoutSec = 30
 )
 
 const (
@@ -52,7 +51,7 @@ const (
 
 
 type OpenAIEmbeddingFunction struct {
-	base *FunctionBase
+	FunctionBase
 	fieldDim int64
 	
 	client *models.OpenAIEmbeddingClient
@@ -79,12 +78,12 @@ func createOpenAIEmbeddingClient(apiKey string, url string) (*models.OpenAIEmbed
 	return &c, nil
 }
 
-func NewOpenAIEmbeddingFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema, mode RunnerMode) (*OpenAIEmbeddingFunction, error) {
+func NewOpenAIEmbeddingFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (*OpenAIEmbeddingFunction, error) {
 	if len(schema.GetOutputFieldIds()) != 1 {
-		return nil, fmt.Errorf("OpenAIEmbedding function should only have one output field, but now %d", len(schema.GetOutputFieldIds()))
+		return nil, fmt.Errorf("OpenAIEmbedding function should only have one output field, but now is %d", len(schema.GetOutputFieldIds()))
 	}
 
-	base, err := NewBase(coll, schema, mode)
+	base, err := NewBase(coll, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -107,13 +106,13 @@ func NewOpenAIEmbeddingFunction(coll *schemapb.CollectionSchema, schema *schemap
 		case ModelNameParamKey:
 			modelName = param.Value
 		case DimParamKey:
-			dim, err := strconv.ParseInt(param.Value, 10, 64)
+			dim, err = strconv.ParseInt(param.Value, 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("dim [%s] is not int", param.Value)
 			}
 
 			if dim != 0 && dim != fieldDim {
-				return nil, fmt.Errorf("Dim in field's schema is [%d], but embeding dim is [%d]", fieldDim, dim)
+				return nil, fmt.Errorf("Field %s's dim is [%d], but embeding's dim is [%d]", schema.Name, fieldDim, dim)
 			}
 		case UserParamKey:
 			user = param.Value
@@ -131,7 +130,7 @@ func NewOpenAIEmbeddingFunction(coll *schemapb.CollectionSchema, schema *schemap
 	}
 
 	runner := OpenAIEmbeddingFunction{
-		base: base,
+		FunctionBase: *base,
 		client: c,
 		fieldDim: fieldDim,
 		modelName: modelName,
@@ -146,7 +145,16 @@ func NewOpenAIEmbeddingFunction(coll *schemapb.CollectionSchema, schema *schemap
 	return &runner, nil
 }
 
-func (runner *OpenAIEmbeddingFunction) Run(inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error) {
+func (runner *OpenAIEmbeddingFunction)MaxBatch() int {
+	return 	5 * maxBatch
+}
+
+
+func (runner *OpenAIEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error) {
+	return runner.Run(inputs)
+}
+
+func (runner *OpenAIEmbeddingFunction) Run( inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error) {
 	if len(inputs) != 1 {
 		return nil, fmt.Errorf("OpenAIEmbedding function only receives one input, bug got [%d]", len(inputs))
 	}
@@ -161,15 +169,15 @@ func (runner *OpenAIEmbeddingFunction) Run(inputs []*schemapb.FieldData) ([]*sch
 	}
 
 	numRows := len(texts)
-	if numRows > maxRowNum {
-		return nil, fmt.Errorf("OpenAI embedding supports up to [%d] pieces of data at a time, got [%d]", maxRowNum, numRows)
+	if numRows > runner.MaxBatch() {
+		return nil, fmt.Errorf("OpenAI embedding supports up to [%d] pieces of data at a time, got [%d]", runner.MaxBatch(), numRows)
 	}
 	
 	var output_field schemapb.FieldData
-	output_field.FieldId = runner.base.outputFields[0].FieldID
-	output_field.FieldName = runner.base.outputFields[0].Name
-	output_field.Type = runner.base.outputFields[0].DataType
-	output_field.IsDynamic = runner.base.outputFields[0].IsDynamic
+	output_field.FieldId = runner.outputFields[0].FieldID
+	output_field.FieldName = runner.outputFields[0].Name
+	output_field.Type = runner.outputFields[0].DataType
+	output_field.IsDynamic = runner.outputFields[0].IsDynamic
 	data := make([]float32, 0, numRows * int(runner.fieldDim))
 	for i := 0; i < numRows; i += maxBatch {
 		end := i + maxBatch
@@ -185,8 +193,8 @@ func (runner *OpenAIEmbeddingFunction) Run(inputs []*schemapb.FieldData) ([]*sch
 		}
 		for _, item := range resp.Data {
 			if len(item.Embedding) != int(runner.fieldDim) {
-				return nil, fmt.Errorf("Dim in field's schema is [%d], but embeding dim is [%d]",
-					runner.fieldDim, len(resp.Data[0].Embedding))
+				return nil, fmt.Errorf("The required embedding dim for field [%s] is [%d], but the embedding obtained from the model is [%d]",
+					output_field.FieldName, runner.fieldDim, len(item.Embedding))
 			}
 			data = append(data, item.Embedding...)
 		}
