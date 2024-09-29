@@ -98,21 +98,14 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 		id := rand.Int63()
 		return id, id + n, nil
 	})
-	manager := NewMockManager(t)
-	manager.EXPECT().AllocImportSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(ctx context.Context, taskID int64, collectionID int64, partitionID int64, vchannel string, level datapb.SegmentLevel) (*SegmentInfo, error) {
-			return &SegmentInfo{
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:            rand.Int63(),
-					CollectionID:  collectionID,
-					PartitionID:   partitionID,
-					InsertChannel: vchannel,
-					IsImporting:   true,
-					Level:         level,
-				},
-			}, nil
-		})
-	tasks, err := NewImportTasks(fileGroups, job, manager, alloc)
+
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+
+	meta, err := newMeta(context.TODO(), catalog, nil)
+	assert.NoError(t, err)
+
+	tasks, err := NewImportTasks(fileGroups, job, alloc, meta)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(tasks))
 	for _, task := range tasks {
