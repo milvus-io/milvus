@@ -1,19 +1,3 @@
-// Licensed to the LF AI & Data foundation under one
-// or more contributor license agreements. See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership. The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License. You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package compaction
 
 import (
@@ -41,11 +25,11 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type ClusteringCompactionSuite struct {
+type ClusteringCompactionNullDataSuite struct {
 	integration.MiniClusterSuite
 }
 
-func (s *ClusteringCompactionSuite) SetupSuite() {
+func (s *ClusteringCompactionNullDataSuite) SetupSuite() {
 	paramtable.Init()
 
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TaskCheckInterval.Key, "1")
@@ -54,7 +38,7 @@ func (s *ClusteringCompactionSuite) SetupSuite() {
 	s.Require().NoError(s.SetupEmbedEtcd())
 }
 
-func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
+func (s *ClusteringCompactionNullDataSuite) TestClusteringCompactionNullData() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
@@ -65,7 +49,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 		rowNum = 30000
 	)
 
-	collectionName := "TestClusteringCompaction" + funcutil.GenRandomStr()
+	collectionName := "TestClusteringCompactionNullData" + funcutil.GenRandomStr()
 
 	// 2000 rows for each segment, about 1MB.
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SegmentMaxSize.Key, strconv.Itoa(1))
@@ -91,7 +75,46 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1.0")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key)
 
-	schema := ConstructScalarClusteringSchema(collectionName, dim, true)
+	pk := &schemapb.FieldSchema{
+		FieldID:         100,
+		Name:            integration.Int64Field,
+		IsPrimaryKey:    true,
+		Description:     "",
+		DataType:        schemapb.DataType_Int64,
+		TypeParams:      nil,
+		IndexParams:     nil,
+		AutoID:          true,
+		IsClusteringKey: false,
+	}
+	clusteringField := &schemapb.FieldSchema{
+		FieldID:         101,
+		Name:            "clustering",
+		IsPrimaryKey:    false,
+		Description:     "clustering key",
+		DataType:        schemapb.DataType_Int64,
+		IsClusteringKey: true,
+		Nullable:        true,
+	}
+	fVec := &schemapb.FieldSchema{
+		FieldID:      102,
+		Name:         integration.FloatVecField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: fmt.Sprintf("%d", dim),
+			},
+		},
+		IndexParams: nil,
+	}
+	schema := &schemapb.CollectionSchema{
+		Name:   collectionName,
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{pk, clusteringField, fVec},
+	}
+
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
@@ -114,7 +137,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
-	clusteringColumn := integration.NewInt64SameFieldData("clustering", rowNum, 100)
+	clusteringColumn := integration.NewInt64FieldDataNullableWithStart("clustering", rowNum, 1000)
 	hashKeys := integration.GenerateHashKeys(rowNum)
 	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
@@ -240,7 +263,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 
 	params := integration.GetSearchParams(indexType, metricType)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		fVecColumn.FieldName, vecType, nil, metricType, params, nq, dim, topk, roundDecimal)
+		fVecColumn.FieldName, vecType, []string{"clustering"}, metricType, params, nq, dim, topk, roundDecimal)
 
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 	err = merr.CheckRPCCall(searchResult, err)
@@ -284,103 +307,9 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	}()
 
 	checkWaitGroup.Wait()
-	log.Info("TestClusteringCompaction succeed")
+	log.Info("TestClusteringCompactionNullData succeed")
 }
 
-func ConstructScalarClusteringSchema(collection string, dim int, autoID bool, fields ...*schemapb.FieldSchema) *schemapb.CollectionSchema {
-	// if fields are specified, construct it
-	if len(fields) > 0 {
-		return &schemapb.CollectionSchema{
-			Name:   collection,
-			AutoID: autoID,
-			Fields: fields,
-		}
-	}
-
-	// if no field is specified, use default
-	pk := &schemapb.FieldSchema{
-		FieldID:         100,
-		Name:            integration.Int64Field,
-		IsPrimaryKey:    true,
-		Description:     "",
-		DataType:        schemapb.DataType_Int64,
-		TypeParams:      nil,
-		IndexParams:     nil,
-		AutoID:          autoID,
-		IsClusteringKey: false,
-	}
-	clusteringField := &schemapb.FieldSchema{
-		FieldID:         101,
-		Name:            "clustering",
-		IsPrimaryKey:    false,
-		Description:     "clustering key",
-		DataType:        schemapb.DataType_Int64,
-		IsClusteringKey: true,
-	}
-	fVec := &schemapb.FieldSchema{
-		FieldID:      102,
-		Name:         integration.FloatVecField,
-		IsPrimaryKey: false,
-		Description:  "",
-		DataType:     schemapb.DataType_FloatVector,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   common.DimKey,
-				Value: fmt.Sprintf("%d", dim),
-			},
-		},
-		IndexParams: nil,
-	}
-	return &schemapb.CollectionSchema{
-		Name:   collection,
-		AutoID: autoID,
-		Fields: []*schemapb.FieldSchema{pk, clusteringField, fVec},
-	}
-}
-
-func ConstructVectorClusteringSchema(collection string, dim int, autoID bool, fields ...*schemapb.FieldSchema) *schemapb.CollectionSchema {
-	// if fields are specified, construct it
-	if len(fields) > 0 {
-		return &schemapb.CollectionSchema{
-			Name:   collection,
-			AutoID: autoID,
-			Fields: fields,
-		}
-	}
-
-	// if no field is specified, use default
-	pk := &schemapb.FieldSchema{
-		FieldID:      100,
-		Name:         integration.Int64Field,
-		IsPrimaryKey: true,
-		Description:  "",
-		DataType:     schemapb.DataType_Int64,
-		TypeParams:   nil,
-		IndexParams:  nil,
-		AutoID:       autoID,
-	}
-	fVec := &schemapb.FieldSchema{
-		FieldID:      101,
-		Name:         integration.FloatVecField,
-		IsPrimaryKey: false,
-		Description:  "",
-		DataType:     schemapb.DataType_FloatVector,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   common.DimKey,
-				Value: fmt.Sprintf("%d", dim),
-			},
-		},
-		IndexParams:     nil,
-		IsClusteringKey: true,
-	}
-	return &schemapb.CollectionSchema{
-		Name:   collection,
-		AutoID: autoID,
-		Fields: []*schemapb.FieldSchema{pk, fVec},
-	}
-}
-
-func TestClusteringCompaction(t *testing.T) {
-	suite.Run(t, new(ClusteringCompactionSuite))
+func TestClusteringCompactionNullData(t *testing.T) {
+	suite.Run(t, new(ClusteringCompactionNullDataSuite))
 }

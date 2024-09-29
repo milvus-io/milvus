@@ -189,6 +189,7 @@ func (t *clusteringCompactionTask) init() error {
 
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
+	log.Info("segment ID range", zap.Int64("begin", t.plan.GetPreAllocatedSegmentIDs().GetBegin()), zap.Int64("end", t.plan.GetPreAllocatedSegmentIDs().GetEnd()))
 	t.logIDAlloc = logIDAlloc
 	t.segIDAlloc = segIDAlloc
 
@@ -197,11 +198,6 @@ func (t *clusteringCompactionTask) init() error {
 		return merr.WrapErrIllegalCompactionPlan("empty schema in compactionPlan")
 	}
 	for _, field := range t.plan.Schema.Fields {
-		// todo(wayblink): supprot null in clustring compact
-		if field.GetNullable() {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("clustering compaction can't be trigger in field(%s) which set nullable == true", field.GetName()))
-		}
-
 		if field.GetIsPrimaryKey() && field.GetFieldID() >= 100 && typeutil.IsPrimaryFieldType(field.GetDataType()) {
 			pkField = field
 		}
@@ -252,10 +248,12 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	// 2, get analyze result
 	if t.isVectorClusteringKey {
 		if err := t.getVectorAnalyzeResult(ctx); err != nil {
+			log.Error("failed in analyze vector", zap.Error(err))
 			return nil, err
 		}
 	} else {
 		if err := t.getScalarAnalyzeResult(ctx); err != nil {
+			log.Error("failed in analyze scalar", zap.Error(err))
 			return nil, err
 		}
 	}
@@ -264,6 +262,7 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	log.Info("Clustering compaction start mapping", zap.Int("bufferNum", len(t.clusterBuffers)))
 	uploadSegments, partitionStats, err := t.mapping(ctx, deltaPk2Ts)
 	if err != nil {
+		log.Error("failed in mapping", zap.Error(err))
 		return nil, err
 	}
 
@@ -297,9 +296,9 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 	if err != nil {
 		return err
 	}
-	plan := t.scalarPlan(analyzeDict)
+	buckets, containsNull := t.splitClusterByScalarValue(analyzeDict)
 	scalarToClusterBufferMap := make(map[interface{}]*ClusterBuffer, 0)
-	for id, bucket := range plan {
+	for id, bucket := range buckets {
 		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
 		if err != nil {
 			return err
@@ -323,7 +322,29 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			scalarToClusterBufferMap[key] = buffer
 		}
 	}
+	var nullBuffer *ClusterBuffer
+	if containsNull {
+		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
+		if err != nil {
+			return err
+		}
+		nullBuffer = &ClusterBuffer{
+			id:                      len(buckets),
+			flushedRowNum:           map[typeutil.UniqueID]atomic.Int64{},
+			flushedBinlogs:          make(map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog, 0),
+			uploadedSegments:        make([]*datapb.CompactionSegment, 0),
+			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
+			clusteringKeyFieldStats: fieldStats, // null stats
+		}
+		if _, err = t.refreshBufferWriterWithPack(nullBuffer); err != nil {
+			return err
+		}
+		t.clusterBuffers = append(t.clusterBuffers, nullBuffer)
+	}
 	t.keyToBufferFunc = func(key interface{}) *ClusterBuffer {
+		if key == nil {
+			return nullBuffer
+		}
 		// todo: if keys are too many, the map will be quite large, we should mark the range of each buffer and select buffer by range
 		return scalarToClusterBufferMap[key]
 	}
@@ -1011,17 +1032,7 @@ func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[inter
 	var mutex sync.Mutex
 	analyzeDict := make(map[interface{}]int64, 0)
 	for _, segment := range inputSegments {
-		segmentClone := &datapb.CompactionSegmentBinlogs{
-			SegmentID:           segment.SegmentID,
-			FieldBinlogs:        segment.FieldBinlogs,
-			Field2StatslogPaths: segment.Field2StatslogPaths,
-			Deltalogs:           segment.Deltalogs,
-			InsertChannel:       segment.InsertChannel,
-			Level:               segment.Level,
-			CollectionID:        segment.CollectionID,
-			PartitionID:         segment.PartitionID,
-			IsSorted:            segment.IsSorted,
-		}
+		segmentClone := proto.Clone(segment).(*datapb.CompactionSegmentBinlogs)
 		future := t.mappingPool.Submit(func() (any, error) {
 			analyzeResult, err := t.scalarAnalyzeSegment(ctx, segmentClone)
 			mutex.Lock()
@@ -1086,39 +1097,39 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	for idx := 0; idx < binlogNum; idx++ {
 		var ps []string
 		for _, f := range segment.GetFieldBinlogs() {
-			// todo add a new reader only read one column
-			if f.FieldID == t.primaryKeyField.GetFieldID() || f.FieldID == t.clusteringKeyField.GetFieldID() || f.FieldID == common.RowIDField || f.FieldID == common.TimeStampField {
-				ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
-			}
+			ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
 		}
 		fieldBinlogPaths = append(fieldBinlogPaths, ps)
 	}
 
-	for _, path := range fieldBinlogPaths {
-		bytesArr, err := t.binlogIO.Download(ctx, path)
-		blobs := make([]*storage.Blob, len(bytesArr))
-		for i := range bytesArr {
-			blobs[i] = &storage.Blob{Value: bytesArr[i]}
-		}
+	for _, paths := range fieldBinlogPaths {
+		allValues, err := t.binlogIO.Download(ctx, paths)
 		if err != nil {
-			log.Warn("download insertlogs wrong", zap.Strings("path", path), zap.Error(err))
+			log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
+			return nil, err
+		}
+		blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
+			return &storage.Blob{Key: paths[i], Value: v}
+		})
+
+		pkIter, err := storage.NewBinlogDeserializeReader(blobs, t.primaryKeyField.GetFieldID())
+		if err != nil {
+			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", paths), zap.Error(err))
 			return nil, err
 		}
 
-		pkIter, err := storage.NewInsertBinlogIterator(blobs, t.primaryKeyField.GetFieldID(), t.primaryKeyField.GetDataType())
-		if err != nil {
-			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", path), zap.Error(err))
-			return nil, err
-		}
-
-		// log.Info("pkIter.RowNum()", zap.Int("pkIter.RowNum()", pkIter.RowNum()), zap.Bool("hasNext", pkIter.HasNext()))
-		for pkIter.HasNext() {
-			vIter, _ := pkIter.Next()
-			v, ok := vIter.(*storage.Value)
-			if !ok {
-				log.Warn("transfer interface to Value wrong", zap.Strings("path", path))
-				return nil, errors.New("unexpected error")
+		for {
+			err := pkIter.Next()
+			if err != nil {
+				if err == sio.EOF {
+					pkIter.Close()
+					break
+				} else {
+					log.Warn("compact wrong, failed to iter through data", zap.Error(err))
+					return nil, err
+				}
 			}
+			v := pkIter.Value()
 
 			// Filtering expired entity
 			ts := typeutil.Timestamp(v.Timestamp)
@@ -1137,7 +1148,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 			// rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
 			row, ok := v.Value.(map[typeutil.UniqueID]interface{})
 			if !ok {
-				log.Warn("transfer interface to map wrong", zap.Strings("path", path))
+				log.Warn("transfer interface to map wrong", zap.Strings("path", paths))
 				return nil, errors.New("unexpected error")
 			}
 			key := row[t.clusteringKeyField.GetFieldID()]
@@ -1158,12 +1169,16 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	return analyzeResult, nil
 }
 
-func (t *clusteringCompactionTask) scalarPlan(dict map[interface{}]int64) [][]interface{} {
+func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{}]int64) ([][]interface{}, bool) {
 	keys := lo.MapToSlice(dict, func(k interface{}, _ int64) interface{} {
 		return k
 	})
-	sort.Slice(keys, func(i, j int) bool {
-		return storage.NewScalarFieldValue(t.clusteringKeyField.DataType, keys[i]).LE(storage.NewScalarFieldValue(t.clusteringKeyField.DataType, keys[j]))
+
+	notNullKeys := lo.Filter(keys, func(i interface{}, j int) bool {
+		return i != nil
+	})
+	sort.Slice(notNullKeys, func(i, j int) bool {
+		return storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[i]).LE(storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[j]))
 	})
 
 	buckets := make([][]interface{}, 0)
@@ -1171,8 +1186,8 @@ func (t *clusteringCompactionTask) scalarPlan(dict map[interface{}]int64) [][]in
 	var currentBucketSize int64 = 0
 	maxRows := t.plan.MaxSegmentRows
 	preferRows := t.plan.PreferSegmentRows
-	for _, key := range keys {
-		// todo can optimize
+	containsNull := len(keys) > len(notNullKeys)
+	for _, key := range notNullKeys {
 		if dict[key] > preferRows {
 			if len(currentBucket) != 0 {
 				buckets = append(buckets, currentBucket)
@@ -1195,7 +1210,7 @@ func (t *clusteringCompactionTask) scalarPlan(dict map[interface{}]int64) [][]in
 		}
 	}
 	buckets = append(buckets, currentBucket)
-	return buckets
+	return buckets, containsNull
 }
 
 func (t *clusteringCompactionTask) refreshBufferWriterWithPack(buffer *ClusterBuffer) (bool, error) {
