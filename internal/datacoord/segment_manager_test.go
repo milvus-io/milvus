@@ -33,7 +33,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -260,64 +259,6 @@ func TestLastExpireReset(t *testing.T) {
 	newAlloc, err := newSegmentManager.AllocSegment(context.Background(), collID, 0, channelName, 2000)
 	assert.Nil(t, err)
 	assert.Equal(t, segmentID3, newAlloc[0].SegmentID) // segment3 still can be used to allocate
-}
-
-func TestSegmentManager_AllocImportSegment(t *testing.T) {
-	ctx := context.Background()
-	mockErr := errors.New("mock error")
-
-	t.Run("normal case", func(t *testing.T) {
-		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocID(mock.Anything).Return(0, nil)
-		alloc.EXPECT().AllocTimestamp(mock.Anything).Return(0, nil)
-		meta, err := newMemoryMeta()
-		assert.NoError(t, err)
-		sm, err := newSegmentManager(meta, alloc)
-		assert.NoError(t, err)
-
-		segment, err := sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", datapb.SegmentLevel_L1)
-		assert.NoError(t, err)
-		segment2 := meta.GetSegment(segment.GetID())
-		assert.NotNil(t, segment2)
-		assert.Equal(t, true, segment2.GetIsImporting())
-	})
-
-	t.Run("alloc id failed", func(t *testing.T) {
-		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocID(mock.Anything).Return(0, mockErr)
-		meta, err := newMemoryMeta()
-		assert.NoError(t, err)
-		sm, err := newSegmentManager(meta, alloc)
-		assert.NoError(t, err)
-		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", datapb.SegmentLevel_L1)
-		assert.Error(t, err)
-	})
-
-	t.Run("alloc ts failed", func(t *testing.T) {
-		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocID(mock.Anything).Return(0, nil)
-		alloc.EXPECT().AllocTimestamp(mock.Anything).Return(0, mockErr)
-		meta, err := newMemoryMeta()
-		assert.NoError(t, err)
-		sm, err := newSegmentManager(meta, alloc)
-		assert.NoError(t, err)
-		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", datapb.SegmentLevel_L1)
-		assert.Error(t, err)
-	})
-
-	t.Run("add segment failed", func(t *testing.T) {
-		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocID(mock.Anything).Return(0, nil)
-		alloc.EXPECT().AllocTimestamp(mock.Anything).Return(0, nil)
-		meta, err := newMemoryMeta()
-		assert.NoError(t, err)
-		sm, _ := newSegmentManager(meta, alloc)
-		catalog := mocks.NewDataCoordCatalog(t)
-		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(mockErr)
-		meta.catalog = catalog
-		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", datapb.SegmentLevel_L1)
-		assert.Error(t, err)
-	})
 }
 
 func TestLoadSegmentsFromMeta(t *testing.T) {
