@@ -17,7 +17,6 @@
 package datacoord
 
 import (
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -92,31 +92,23 @@ type ImportJob interface {
 	GetCompleteTime() string
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
+	GetTR() *timerecord.TimeRecorder
 	Clone() ImportJob
 }
 
 type importJob struct {
 	*datapb.ImportJob
 
-	startTime              time.Time
-	startTimeOnce          sync.Once
-	startExecTime          time.Time
-	startExecTimeOnce      sync.Once
-	preImportDoneTime      time.Time
-	preImportDoneTimeOnce  sync.Once
-	importDoneTime         time.Time
-	importDoneTimeOnce     sync.Once
-	buildIndexDoneTime     time.Time
-	buildIndexDoneTimeOnce sync.Once
+	tr *timerecord.TimeRecorder
+}
+
+func (j *importJob) GetTR() *timerecord.TimeRecorder {
+	return j.tr
 }
 
 func (j *importJob) Clone() ImportJob {
 	return &importJob{
-		ImportJob:          proto.Clone(j.ImportJob).(*datapb.ImportJob),
-		startTime:          j.startTime,
-		startExecTime:      j.startExecTime,
-		preImportDoneTime:  j.preImportDoneTime,
-		importDoneTime:     j.importDoneTime,
-		buildIndexDoneTime: j.buildIndexDoneTime,
+		ImportJob: proto.Clone(j.ImportJob).(*datapb.ImportJob),
+		tr:        j.tr,
 	}
 }

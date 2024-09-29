@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type TaskType int
@@ -139,33 +140,46 @@ type ImportTask interface {
 	GetState() datapb.ImportTaskStateV2
 	GetReason() string
 	GetFileStats() []*datapb.ImportFileStats
+	GetTR() *timerecord.TimeRecorder
 	Clone() ImportTask
 }
 
 type preImportTask struct {
 	*datapb.PreImportTask
+	tr *timerecord.TimeRecorder
 }
 
 func (p *preImportTask) GetType() TaskType {
 	return PreImportTaskType
 }
 
+func (p *preImportTask) GetTR() *timerecord.TimeRecorder {
+	return p.tr
+}
+
 func (p *preImportTask) Clone() ImportTask {
 	return &preImportTask{
 		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
+		tr:            p.tr,
 	}
 }
 
 type importTask struct {
 	*datapb.ImportTaskV2
+	tr *timerecord.TimeRecorder
 }
 
 func (t *importTask) GetType() TaskType {
 	return ImportTaskType
 }
 
+func (t *importTask) GetTR() *timerecord.TimeRecorder {
+	return t.tr
+}
+
 func (t *importTask) Clone() ImportTask {
 	return &importTask{
 		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
+		tr:           t.tr,
 	}
 }

@@ -80,6 +80,7 @@ const (
 	ImportStagePending    = "pending"
 	ImportStagePreImport  = "preimport"
 	ImportStageImport     = "import"
+	ImportStageStats      = "stats"
 	ImportStageBuildIndex = "build_index"
 
 	compactionTypeLabelName  = "compaction_type"

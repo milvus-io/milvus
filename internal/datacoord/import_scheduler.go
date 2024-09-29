@@ -186,7 +186,9 @@ func (s *importScheduler) processPendingPreImport(task ImportTask, nodeID int64)
 		log.Warn("update import task failed", WrapTaskLog(task, zap.Error(err))...)
 		return
 	}
-	log.Info("process pending preimport task done", WrapTaskLog(task)...)
+	pendingDuration := task.GetTR().RecordSpan()
+	metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
+	log.Info("preimport task start to execute", WrapTaskLog(task, zap.Int64("scheduledNodeID", nodeID), zap.Duration("taskTimeCost/pending", pendingDuration))...)
 }
 
 func (s *importScheduler) processPendingImport(task ImportTask, nodeID int64) {
@@ -212,7 +214,9 @@ func (s *importScheduler) processPendingImport(task ImportTask, nodeID int64) {
 		log.Warn("update import task failed", WrapTaskLog(task, zap.Error(err))...)
 		return
 	}
-	log.Info("processing pending import task done", WrapTaskLog(task)...)
+	pendingDuration := task.GetTR().RecordSpan()
+	metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
+	log.Info("import task start to execute", WrapTaskLog(task, zap.Int64("scheduledNodeID", nodeID), zap.Duration("taskTimeCost/pending", pendingDuration))...)
 }
 
 func (s *importScheduler) processInProgressPreImport(task ImportTask) {
@@ -249,6 +253,11 @@ func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 	}
 	log.Info("query preimport", WrapTaskLog(task, zap.String("state", resp.GetState().String()),
 		zap.Any("fileStats", resp.GetFileStats()))...)
+	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
+		preimportDuration := task.GetTR().RecordSpan()
+		metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePreImport).Observe(float64(preimportDuration.Milliseconds()))
+		log.Info("preimport done", WrapTaskLog(task, zap.Duration("timeCost/preimport", preimportDuration))...)
+	}
 }
 
 func (s *importScheduler) processInProgressImport(task ImportTask) {
@@ -322,6 +331,9 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 			log.Warn("update import task failed", WrapTaskLog(task, zap.Error(err))...)
 			return
 		}
+		importDuration := task.GetTR().RecordSpan()
+		metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStageImport).Observe(float64(importDuration.Milliseconds()))
+		log.Info("import done", WrapTaskLog(task, zap.Duration("timeCost/import", importDuration))...)
 	}
 	log.Info("query import", WrapTaskLog(task, zap.String("state", resp.GetState().String()),
 		zap.String("reason", resp.GetReason()))...)

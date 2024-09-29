@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -1738,7 +1739,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			Options:        in.GetOptions(),
 			StartTime:      startTime.Format("2006-01-02T15:04:05Z07:00"),
 		},
-		startTime: startTime,
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.importMeta.AddJob(job)
 	if err != nil {

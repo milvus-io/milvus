@@ -186,7 +186,7 @@ func (c *importChecker) getLackFilesForImports(job ImportJob) []*datapb.ImportFi
 }
 
 func (c *importChecker) checkPendingJob(job ImportJob) {
-	logger := log.With(zap.Int64("jobID", job.GetJobID()))
+	log := log.With(zap.Int64("jobID", job.GetJobID()))
 	lacks := c.getLackFilesForPreImports(job)
 	if len(lacks) == 0 {
 		return
@@ -195,7 +195,7 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 
 	newTasks, err := NewPreImportTasks(fileGroups, job, c.alloc)
 	if err != nil {
-		logger.Warn("new preimport tasks failed", zap.Error(err))
+		log.Warn("new preimport tasks failed", zap.Error(err))
 		return
 	}
 	for _, t := range newTasks {
@@ -207,22 +207,18 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 		log.Info("add new preimport task", WrapTaskLog(t)...)
 	}
 
-	job.(*importJob).startExecTimeOnce.Do(func() {
-		job.(*importJob).startExecTime = time.Now()
-		pendingDuration := job.(*importJob).startExecTime.Sub(job.(*importJob).startTime)
-		metrics.DataCoordImportLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
-		log.Info("import job start to execute", zap.Int64("jobID", job.GetJobID()),
-			zap.Duration("timeCost/pending", pendingDuration), zap.Time("startTime", job.(*importJob).startTime), zap.Time("startExecTime", job.(*importJob).startExecTime))
-	})
-
 	err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
 	if err != nil {
-		logger.Warn("failed to update job state to PreImporting", zap.Error(err))
+		log.Warn("failed to update job state to PreImporting", zap.Error(err))
+		return
 	}
+	pendingDuration := job.GetTR().RecordSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
+	log.Info("import job start to execute", zap.Duration("jobTimeCost/pending", pendingDuration))
 }
 
 func (c *importChecker) checkPreImportingJob(job ImportJob) {
-	logger := log.With(zap.Int64("jobID", job.GetJobID()))
+	log := log.With(zap.Int64("jobID", job.GetJobID()))
 	lacks := c.getLackFilesForImports(job)
 	if len(lacks) == 0 {
 		return
@@ -230,10 +226,10 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 
 	requestSize, err := CheckDiskQuota(job, c.meta, c.imeta)
 	if err != nil {
-		logger.Warn("import failed, disk quota exceeded", zap.Error(err))
+		log.Warn("import failed, disk quota exceeded", zap.Error(err))
 		err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
 		if err != nil {
-			logger.Warn("failed to update job state to Failed", zap.Error(err))
+			log.Warn("failed to update job state to Failed", zap.Error(err))
 		}
 		return
 	}
@@ -242,7 +238,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 	groups := RegroupImportFiles(job, lacks, allDiskIndex)
 	newTasks, err := NewImportTasks(groups, job, c.sm, c.alloc)
 	if err != nil {
-		logger.Warn("new import tasks failed", zap.Error(err))
+		log.Warn("new import tasks failed", zap.Error(err))
 		return
 	}
 	for _, t := range newTasks {
@@ -254,21 +250,18 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 		log.Info("add new import task", WrapTaskLog(t)...)
 	}
 
-	job.(*importJob).preImportDoneTimeOnce.Do(func() {
-		job.(*importJob).preImportDoneTime = time.Now()
-		preImportDuration := job.(*importJob).preImportDoneTime.Sub(job.(*importJob).startExecTime)
-		metrics.DataCoordImportLatency.WithLabelValues(metrics.ImportStagePreImport).Observe(float64(preImportDuration.Milliseconds()))
-		log.Info("import job preimport done", zap.Int64("jobID", job.GetJobID()),
-			zap.Duration("timeCost/preimport", preImportDuration), zap.Time("startExecTime", job.(*importJob).startExecTime), zap.Time("preImportDoneTime", job.(*importJob).preImportDoneTime))
-	})
-
 	err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing), UpdateRequestedDiskSize(requestSize))
 	if err != nil {
-		logger.Warn("failed to update job state to Importing", zap.Error(err))
+		log.Warn("failed to update job state to Importing", zap.Error(err))
+		return
 	}
+	preImportDuration := job.GetTR().RecordSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStagePreImport).Observe(float64(preImportDuration.Milliseconds()))
+	log.Info("import job preimport done", zap.Duration("jobTimeCost/preimport", preImportDuration))
 }
 
 func (c *importChecker) checkImportingJob(job ImportJob) {
+	log := log.With(zap.Int64("jobID", job.GetJobID()))
 	tasks := c.imeta.GetTaskBy(WithType(ImportTaskType), WithJob(job.GetJobID()))
 	for _, t := range tasks {
 		if t.GetState() != datapb.ImportTaskStateV2_Completed {
@@ -280,18 +273,22 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 		log.Warn("failed to update job state to Stats", zap.Error(err))
 		return
 	}
-	log.Info("update import job state to Stats", zap.Int64("jobID", job.GetJobID()))
+	importDuration := job.GetTR().RecordSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageImport).Observe(float64(importDuration.Milliseconds()))
+	log.Info("import job import done", zap.Duration("jobTimeCost/import", importDuration))
 }
 
 func (c *importChecker) checkStatsJob(job ImportJob) {
-	logger := log.With(zap.Int64("jobID", job.GetJobID()))
+	log := log.With(zap.Int64("jobID", job.GetJobID()))
 	updateJobState := func(state internalpb.ImportJobState) {
 		err := c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(state))
 		if err != nil {
-			logger.Warn("failed to update job state", zap.Error(err))
+			log.Warn("failed to update job state", zap.Error(err))
 			return
 		}
-		logger.Info("update import job state", zap.String("state", state.String()))
+		statsDuration := job.GetTR().RecordSpan()
+		metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageStats).Observe(float64(statsDuration.Milliseconds()))
+		log.Info("import job stats done", zap.Duration("jobTimeCost/stats", statsDuration))
 	}
 
 	// Skip stats stage if not enable stats or is l0 import.
@@ -311,18 +308,20 @@ func (c *importChecker) checkStatsJob(job ImportJob) {
 		statsSegmentIDs := task.(*importTask).GetStatsSegmentIDs()
 		taskCnt += len(originSegmentIDs)
 		for i, originSegmentID := range originSegmentIDs {
+			taskLogFields := WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("stats", statsSegmentIDs[i]))
 			state := c.sjm.GetStatsTaskState(originSegmentID, indexpb.StatsSubJob_Sort)
 			switch state {
 			case indexpb.JobState_JobStateNone:
 				err := c.sjm.SubmitStatsTask(originSegmentID, statsSegmentIDs[i], indexpb.StatsSubJob_Sort, false)
 				if err != nil {
-					logger.Warn("submit stats task failed", zap.Error(err))
+					log.Warn("submit stats task failed", zap.Error(err))
 					continue
 				}
-				log.Info("submit stats task done", WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("stats", statsSegmentIDs[i]))...)
+				log.Info("submit stats task done", taskLogFields...)
 			case indexpb.JobState_JobStateInit, indexpb.JobState_JobStateRetry, indexpb.JobState_JobStateInProgress:
-				logger.Debug("waiting for stats task...", WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("stats", statsSegmentIDs[i]))...)
+				log.Debug("waiting for stats task...", taskLogFields...)
 			case indexpb.JobState_JobStateFailed:
+				log.Warn("import job stats failed", taskLogFields...)
 				updateJobState(internalpb.ImportJobState_Failed)
 				return
 			case indexpb.JobState_JobStateFinished:
@@ -338,7 +337,7 @@ func (c *importChecker) checkStatsJob(job ImportJob) {
 }
 
 func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
-	logger := log.With(zap.Int64("jobID", job.GetJobID()))
+	log := log.With(zap.Int64("jobID", job.GetJobID()))
 	tasks := c.imeta.GetTaskBy(WithType(ImportTaskType), WithJob(job.GetJobID()))
 	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
@@ -360,28 +359,32 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 			default:
 			}
 		}
-		logger.Debug("waiting for import segments building index...", zap.Int64s("unindexed", unindexed))
+		log.Debug("waiting for import segments building index...", zap.Int64s("unindexed", unindexed))
 		return
 	}
+
+	buildIndexDuration := job.GetTR().RecordSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageBuildIndex).Observe(float64(buildIndexDuration.Milliseconds()))
+	log.Info("import job build index done", zap.Duration("jobTimeCost/buildIndex", buildIndexDuration))
 
 	// Here, all segment indexes have been successfully built, try unset isImporting flag for all segments.
 	isImportingSegments := lo.Filter(append(originSegmentIDs, statsSegmentIDs...), func(segmentID int64, _ int) bool {
 		segment := c.meta.GetSegment(segmentID)
 		if segment == nil {
-			logger.Warn("cannot find segment", zap.Int64("segmentID", segmentID))
+			log.Warn("cannot find segment", zap.Int64("segmentID", segmentID))
 			return false
 		}
 		return segment.GetIsImporting()
 	})
 	channels, err := c.meta.GetSegmentsChannels(isImportingSegments)
 	if err != nil {
-		logger.Warn("get segments channels failed", zap.Error(err))
+		log.Warn("get segments channels failed", zap.Error(err))
 		return
 	}
 	for _, segmentID := range isImportingSegments {
 		channelCP := c.meta.GetChannelCheckpoint(channels[segmentID])
 		if channelCP == nil {
-			logger.Warn("nil channel checkpoint")
+			log.Warn("nil channel checkpoint")
 			return
 		}
 		op1 := UpdateStartPosition([]*datapb.SegmentStartPosition{{StartPosition: channelCP, SegmentID: segmentID}})
@@ -389,7 +392,7 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		op3 := UpdateIsImporting(segmentID, false)
 		err = c.meta.UpdateSegmentsInfo(op1, op2, op3)
 		if err != nil {
-			logger.Warn("update import segment failed", zap.Error(err))
+			log.Warn("update import segment failed", zap.Error(err))
 			return
 		}
 	}
@@ -398,10 +401,12 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 	err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed), UpdateJobCompleteTime(completeTime))
 	if err != nil {
-		logger.Warn("failed to update job state to Completed", zap.Error(err))
+		log.Warn("failed to update job state to Completed", zap.Error(err))
 		return
 	}
-	logger.Info("import job completed")
+	totalDuration := job.GetTR().ElapseSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
+	log.Info("import job all completed", zap.Duration("jobTimeCost/total", totalDuration))
 }
 
 func (c *importChecker) checkFailedJob(job ImportJob) {
@@ -483,9 +488,9 @@ func (c *importChecker) checkGC(job ImportJob) {
 	}
 	cleanupTime := tsoutil.PhysicalTime(job.GetCleanupTs())
 	if time.Now().After(cleanupTime) {
-		logger := log.With(zap.Int64("jobID", job.GetJobID()))
+		log := log.With(zap.Int64("jobID", job.GetJobID()))
 		GCRetention := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
-		logger.Info("job has reached the GC retention",
+		log.Info("job has reached the GC retention",
 			zap.Time("cleanupTime", cleanupTime), zap.Duration("GCRetention", GCRetention))
 		tasks := c.imeta.GetTaskBy(WithJob(job.GetJobID()))
 		shouldRemoveJob := true
@@ -513,9 +518,9 @@ func (c *importChecker) checkGC(job ImportJob) {
 		}
 		err := c.imeta.RemoveJob(job.GetJobID())
 		if err != nil {
-			logger.Warn("remove import job failed", zap.Error(err))
+			log.Warn("remove import job failed", zap.Error(err))
 			return
 		}
-		logger.Info("import job removed")
+		log.Info("import job removed")
 	}
 }
