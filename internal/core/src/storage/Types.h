@@ -101,6 +101,8 @@ struct StorageConfig {
     bool useIAM = false;
     bool useVirtualHost = false;
     int64_t requestTimeoutMs = 3000;
+    bool gcp_native_without_auth = false;
+    std::string gcp_credential_json = "";
 
     std::string
     ToString() const {
@@ -113,7 +115,9 @@ struct StorageConfig {
            << ", sslCACert=" << sslCACert.size()  // only print cert length
            << ", useIAM=" << std::boolalpha << useIAM
            << ", useVirtualHost=" << std::boolalpha << useVirtualHost
-           << ", requestTimeoutMs=" << requestTimeoutMs << "]";
+           << ", requestTimeoutMs=" << requestTimeoutMs
+           << ", gcp_native_without_auth=" << std::boolalpha
+           << gcp_native_without_auth << "]";
 
         return ss.str();
     }

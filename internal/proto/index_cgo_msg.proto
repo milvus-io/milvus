@@ -48,6 +48,7 @@ message StorageConfig {
   string cloud_provider = 12;
   int64 request_timeout_ms = 13;
   string sslCACert = 14;
+  string GcpCredentialJSON = 15;
 }
 
 // Synchronously modify OptionalFieldInfo in index_coord.proto file

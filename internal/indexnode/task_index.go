@@ -248,20 +248,21 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	storageConfig := &indexcgopb.StorageConfig{
-		Address:          it.req.GetStorageConfig().GetAddress(),
-		AccessKeyID:      it.req.GetStorageConfig().GetAccessKeyID(),
-		SecretAccessKey:  it.req.GetStorageConfig().GetSecretAccessKey(),
-		UseSSL:           it.req.GetStorageConfig().GetUseSSL(),
-		BucketName:       it.req.GetStorageConfig().GetBucketName(),
-		RootPath:         it.req.GetStorageConfig().GetRootPath(),
-		UseIAM:           it.req.GetStorageConfig().GetUseIAM(),
-		IAMEndpoint:      it.req.GetStorageConfig().GetIAMEndpoint(),
-		StorageType:      it.req.GetStorageConfig().GetStorageType(),
-		UseVirtualHost:   it.req.GetStorageConfig().GetUseVirtualHost(),
-		Region:           it.req.GetStorageConfig().GetRegion(),
-		CloudProvider:    it.req.GetStorageConfig().GetCloudProvider(),
-		RequestTimeoutMs: it.req.GetStorageConfig().GetRequestTimeoutMs(),
-		SslCACert:        it.req.GetStorageConfig().GetSslCACert(),
+		Address:           it.req.GetStorageConfig().GetAddress(),
+		AccessKeyID:       it.req.GetStorageConfig().GetAccessKeyID(),
+		SecretAccessKey:   it.req.GetStorageConfig().GetSecretAccessKey(),
+		UseSSL:            it.req.GetStorageConfig().GetUseSSL(),
+		BucketName:        it.req.GetStorageConfig().GetBucketName(),
+		RootPath:          it.req.GetStorageConfig().GetRootPath(),
+		UseIAM:            it.req.GetStorageConfig().GetUseIAM(),
+		IAMEndpoint:       it.req.GetStorageConfig().GetIAMEndpoint(),
+		StorageType:       it.req.GetStorageConfig().GetStorageType(),
+		UseVirtualHost:    it.req.GetStorageConfig().GetUseVirtualHost(),
+		Region:            it.req.GetStorageConfig().GetRegion(),
+		CloudProvider:     it.req.GetStorageConfig().GetCloudProvider(),
+		RequestTimeoutMs:  it.req.GetStorageConfig().GetRequestTimeoutMs(),
+		SslCACert:         it.req.GetStorageConfig().GetSslCACert(),
+		GcpCredentialJSON: it.req.GetStorageConfig().GetGcpCredentialJSON(),
 	}
 
 	optFields := make([]*indexcgopb.OptionalFieldInfo, 0, len(it.req.GetOptionalScalarFields()))
