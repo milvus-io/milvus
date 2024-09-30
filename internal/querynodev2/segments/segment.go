@@ -161,6 +161,10 @@ func (s *baseSegment) Level() datapb.SegmentLevel {
 	return s.loadInfo.Load().GetLevel()
 }
 
+func (s *baseSegment) IsSorted() bool {
+	return s.loadInfo.Load().GetIsSorted()
+}
+
 func (s *baseSegment) StartPosition() *msgpb.MsgPosition {
 	return s.loadInfo.Load().GetStartPosition()
 }

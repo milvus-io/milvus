@@ -53,6 +53,7 @@ type Segment interface {
 	StartPosition() *msgpb.MsgPosition
 	Type() SegmentType
 	Level() datapb.SegmentLevel
+	IsSorted() bool
 	LoadInfo() *querypb.SegmentLoadInfo
 	// PinIfNotReleased the segment to prevent it from being released
 	PinIfNotReleased() error
