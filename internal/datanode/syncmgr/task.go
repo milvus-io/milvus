@@ -55,6 +55,7 @@ type SyncTask struct {
 	pkField       *schemapb.FieldSchema
 	startPosition *msgpb.MsgPosition
 	checkpoint    *msgpb.MsgPosition
+	dataSource    string
 	// batchSize is the row number of this sync task,
 	// not the total num of rows of segemnt
 	batchSize int64
@@ -159,7 +160,8 @@ func (t *SyncTask) Run() (err error) {
 		totalSize += float64(len(t.deltaBlob.Value))
 	}
 
-	metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.AllLabel, t.level.String()).Add(totalSize)
+	metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, t.level.String()).Add(totalSize)
+	metrics.DataNodeFlushedRows.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource).Add(float64(t.batchSize))
 
 	metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 
