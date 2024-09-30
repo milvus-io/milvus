@@ -315,7 +315,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		return
 	}
 
-	resultSegmentNum := totalRows / preferSegmentRows * 2
+	resultSegmentNum := (totalRows/preferSegmentRows + 1) * 2
 	start, end, err := m.allocator.AllocN(resultSegmentNum)
 	if err != nil {
 		log.Warn("pre-allocate result segments failed", zap.String("view", view.String()), zap.Error(err))

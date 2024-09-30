@@ -167,22 +167,6 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 	s.Equal(8, s.task.getWorkerPoolSize())
 	s.Equal(8, s.task.mappingPool.Cap())
 	s.Equal(8, s.task.flushPool.Cap())
-
-	s.task.plan.Schema = genCollectionSchema()
-	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
-		FieldID:  104,
-		Name:     "nullableFid",
-		DataType: schemapb.DataType_Int64,
-		Nullable: true,
-	})
-	s.task.plan.ClusteringKeyField = 100
-	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
-		{
-			SegmentID: 100,
-		},
-	}
-	err = s.task.init()
-	s.Require().Error(err)
 }
 
 func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {

@@ -6112,6 +6112,50 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 		}}, nil))
 	})
 
+	t.Run("no int data but set nullable==true or set default_value", func(t *testing.T) {
+		v := newValidateUtil(withOverflowCheck())
+
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int8,
+			Nullable: true,
+		}
+
+		data := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+
+		err := v.checkIntegerFieldData(data, f)
+		assert.NoError(t, err)
+
+		f = &schemapb.FieldSchema{
+			DataType:     schemapb.DataType_Int8,
+			DefaultValue: &schemapb.ValueField{},
+		}
+
+		data = &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+
+		err = v.checkIntegerFieldData(data, f)
+		assert.NoError(t, err)
+	})
+
 	t.Run("tiny int, type mismatch", func(t *testing.T) {
 		v := newValidateUtil(withOverflowCheck())
 
@@ -6242,6 +6286,48 @@ func Test_validateUtil_checkJSONData(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("no json data but set nullable==true or set default_value", func(t *testing.T) {
+		v := newValidateUtil(withOverflowCheck())
+
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_JSON,
+			Nullable: true,
+		}
+		data := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+
+		err := v.checkJSONFieldData(data, f)
+		assert.NoError(t, err)
+
+		f = &schemapb.FieldSchema{
+			DataType:     schemapb.DataType_JSON,
+			DefaultValue: &schemapb.ValueField{},
+		}
+		data = &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+
+		err = v.checkJSONFieldData(data, f)
+		assert.NoError(t, err)
+	})
+
 	t.Run("json string exceed max length", func(t *testing.T) {
 		v := newValidateUtil(withOverflowCheck(), withMaxLenCheck())
 		jsonString := ""
@@ -6338,6 +6424,49 @@ func Test_validateUtil_checkLongFieldData(t *testing.T) {
 			},
 		},
 	}, nil))
+
+	t.Run("no long data but set nullable==true or set default_value", func(t *testing.T) {
+		v := newValidateUtil(withOverflowCheck())
+
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int64,
+			Nullable: true,
+		}
+
+		data := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+
+		err := v.checkLongFieldData(data, f)
+		assert.NoError(t, err)
+
+		f = &schemapb.FieldSchema{
+			DataType:     schemapb.DataType_Int64,
+			DefaultValue: &schemapb.ValueField{},
+		}
+
+		data = &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+		err = v.checkLongFieldData(data, f)
+		assert.NoError(t, err)
+	})
 }
 
 func Test_validateUtil_checkFloatFieldData(t *testing.T) {
@@ -6367,6 +6496,47 @@ func Test_validateUtil_checkFloatFieldData(t *testing.T) {
 			},
 		},
 	}, nil))
+
+	t.Run("no float data but set nullable==true or set default_value", func(t *testing.T) {
+		v := newValidateUtil(withOverflowCheck())
+
+		f := &schemapb.FieldSchema{
+			Nullable: true,
+		}
+
+		data := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+
+		err := v.checkFloatFieldData(data, f)
+		assert.NoError(t, err)
+
+		f = &schemapb.FieldSchema{
+			DefaultValue: &schemapb.ValueField{},
+		}
+
+		data = &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+		err = v.checkFloatFieldData(data, f)
+		assert.NoError(t, err)
+	})
 }
 
 func Test_validateUtil_checkDoubleFieldData(t *testing.T) {
@@ -6396,6 +6566,47 @@ func Test_validateUtil_checkDoubleFieldData(t *testing.T) {
 			},
 		},
 	}, nil))
+
+	t.Run("no float data but set nullable==true or set default_value", func(t *testing.T) {
+		v := newValidateUtil(withOverflowCheck())
+
+		f := &schemapb.FieldSchema{
+			Nullable: true,
+		}
+
+		data := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_DoubleData{
+						DoubleData: &schemapb.DoubleArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+
+		err := v.checkDoubleFieldData(data, f)
+		assert.NoError(t, err)
+
+		f = &schemapb.FieldSchema{
+			DefaultValue: &schemapb.ValueField{},
+		}
+
+		data = &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_DoubleData{
+						DoubleData: &schemapb.DoubleArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+		err = v.checkDoubleFieldData(data, f)
+		assert.NoError(t, err)
+	})
 }
 
 func TestCheckArrayElementNilData(t *testing.T) {

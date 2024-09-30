@@ -159,6 +159,13 @@ func (n *NodeInfo) ChannelCnt() int {
 	return n.stats.getChannelCnt()
 }
 
+// return node's memory capacity in mb
+func (n *NodeInfo) MemCapacity() float64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.stats.getMemCapacity()
+}
+
 func (n *NodeInfo) SetLastHeartbeat(time time.Time) {
 	n.lastHeartbeat.Store(time.UnixNano())
 }
@@ -216,5 +223,11 @@ func WithSegmentCnt(cnt int) StatsOption {
 func WithChannelCnt(cnt int) StatsOption {
 	return func(n *NodeInfo) {
 		n.setChannelCnt(cnt)
+	}
+}
+
+func WithMemCapacity(capacity float64) StatsOption {
+	return func(n *NodeInfo) {
+		n.setMemCapacity(capacity)
 	}
 }
