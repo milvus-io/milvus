@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -29,7 +28,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lock"
@@ -359,59 +357,6 @@ func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
 	expirePhysicalTs := physicalTs.Add(time.Duration(Params.DataCoordCfg.SegAssignmentExpiration.GetAsFloat()) * time.Millisecond)
 	expireTs := tsoutil.ComposeTS(expirePhysicalTs.UnixNano()/int64(time.Millisecond), int64(logicalTs))
 	return expireTs, nil
-}
-
-func (s *SegmentManager) AllocImportSegment(ctx context.Context, taskID int64, collectionID UniqueID,
-	partitionID UniqueID, channelName string, level datapb.SegmentLevel,
-) (*SegmentInfo, error) {
-	log := log.Ctx(ctx)
-	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
-	defer sp.End()
-	id, err := s.allocator.allocID(ctx)
-	if err != nil {
-		log.Error("failed to open new segment while allocID", zap.Error(err))
-		return nil, err
-	}
-	ts, err := s.allocator.allocTimestamp(ctx)
-	if err != nil {
-		return nil, err
-	}
-	position := &msgpb.MsgPosition{
-		ChannelName: channelName,
-		MsgID:       nil,
-		Timestamp:   ts,
-	}
-
-	segmentInfo := &datapb.SegmentInfo{
-		ID:             id,
-		CollectionID:   collectionID,
-		PartitionID:    partitionID,
-		InsertChannel:  channelName,
-		NumOfRows:      0,
-		State:          commonpb.SegmentState_Importing,
-		MaxRowNum:      0,
-		Level:          level,
-		LastExpireTime: math.MaxUint64,
-		StartPosition:  position,
-		DmlPosition:    position,
-	}
-	segmentInfo.IsImporting = true
-	segment := NewSegmentInfo(segmentInfo)
-	if err := s.meta.AddSegment(ctx, segment); err != nil {
-		log.Error("failed to add import segment", zap.Error(err))
-		return nil, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.segments = append(s.segments, id)
-	log.Info("add import segment done",
-		zap.Int64("taskID", taskID),
-		zap.Int64("collectionID", segmentInfo.CollectionID),
-		zap.Int64("segmentID", segmentInfo.ID),
-		zap.String("channel", segmentInfo.InsertChannel),
-		zap.String("level", level.String()))
-
-	return segment, nil
 }
 
 func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID,
