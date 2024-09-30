@@ -123,8 +123,8 @@ func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse,
 		node.UpdateStats(
 			session.WithSegmentCnt(len(resp.GetSegments())),
 			session.WithChannelCnt(len(resp.GetChannels())),
+			session.WithMemCapacity(resp.GetMemCapacityInMB()),
 		)
-
 		dh.updateSegmentsDistribution(resp)
 		dh.updateChannelsDistribution(resp)
 		dh.updateLeaderView(resp)

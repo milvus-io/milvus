@@ -63,6 +63,7 @@ func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
+	log.Info("node workload status", zap.Int64("collectionID", collectionID), zap.Stringers("nodes", lo.Values(nodeItemsMap)))
 
 	queue := newPriorityQueue()
 	for _, item := range nodeItemsMap {
@@ -89,13 +90,13 @@ func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.
 			targetNode := queue.pop().(*nodeItem)
 			// make sure candidate is always push back
 			defer queue.push(targetNode)
-			priorityChange := b.calculateSegmentScore(s)
+			scoreChanges := b.calculateSegmentScore(s)
 
 			sourceNode := nodeItemsMap[s.Node]
 			// if segment's node exist, which means this segment comes from balancer. we should consider the benefit
 			// if the segment reassignment doesn't got enough benefit, we should skip this reassignment
 			// notice: we should skip benefit check for manual balance
-			if !manualBalance && sourceNode != nil && !b.hasEnoughBenefit(sourceNode, targetNode, priorityChange) {
+			if !manualBalance && sourceNode != nil && !b.hasEnoughBenefit(sourceNode, targetNode, scoreChanges) {
 				return
 			}
 
@@ -112,15 +113,15 @@ func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.
 				Segment:      s,
 				FromScore:    fromScore,
 				ToScore:      int64(targetNode.getPriority()),
-				SegmentScore: int64(priorityChange),
+				SegmentScore: int64(scoreChanges),
 			}
 			plans = append(plans, plan)
 
 			// update the sourceNode and targetNode's score
 			if sourceNode != nil {
-				sourceNode.setPriority(sourceNode.getPriority() - priorityChange)
+				sourceNode.AddCurrentScoreDelta(-scoreChanges)
 			}
-			targetNode.setPriority(targetNode.getPriority() + priorityChange)
+			targetNode.AddCurrentScoreDelta(scoreChanges)
 		}(s)
 
 		if len(plans) > balanceBatchSize {
@@ -130,21 +131,21 @@ func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.
 	return plans
 }
 
-func (b *ScoreBasedBalancer) hasEnoughBenefit(sourceNode *nodeItem, targetNode *nodeItem, priorityChange int) bool {
+func (b *ScoreBasedBalancer) hasEnoughBenefit(sourceNode *nodeItem, targetNode *nodeItem, scoreChanges float64) bool {
 	// if the score diff between sourceNode and targetNode is lower than the unbalance toleration factor, there is no need to assign it targetNode
-	oldScoreDiff := math.Abs(float64(sourceNode.getPriority()) - float64(targetNode.getPriority()))
-	if oldScoreDiff < float64(targetNode.getPriority())*params.Params.QueryCoordCfg.ScoreUnbalanceTolerationFactor.GetAsFloat() {
+	oldPriorityDiff := math.Abs(float64(sourceNode.getPriority()) - float64(targetNode.getPriority()))
+	if oldPriorityDiff < float64(targetNode.getPriority())*params.Params.QueryCoordCfg.ScoreUnbalanceTolerationFactor.GetAsFloat() {
 		return false
 	}
 
-	newSourceScore := sourceNode.getPriority() - priorityChange
-	newTargetScore := targetNode.getPriority() + priorityChange
-	if newTargetScore > newSourceScore {
+	newSourcePriority := sourceNode.getPriorityWithCurrentScoreDelta(-scoreChanges)
+	newTargetPriority := targetNode.getPriorityWithCurrentScoreDelta(scoreChanges)
+	if newTargetPriority > newSourcePriority {
 		// if score diff reverted after segment reassignment, we will consider the benefit
 		// only trigger following segment reassignment when the generated reverted score diff
 		// is far smaller than the original score diff
-		newScoreDiff := math.Abs(float64(newSourceScore) - float64(newTargetScore))
-		if newScoreDiff*params.Params.QueryCoordCfg.ReverseUnbalanceTolerationFactor.GetAsFloat() >= oldScoreDiff {
+		newScoreDiff := math.Abs(float64(newSourcePriority) - float64(newTargetPriority))
+		if newScoreDiff*params.Params.QueryCoordCfg.ReverseUnbalanceTolerationFactor.GetAsFloat() >= oldPriorityDiff {
 			return false
 		}
 	}
@@ -155,25 +156,48 @@ func (b *ScoreBasedBalancer) hasEnoughBenefit(sourceNode *nodeItem, targetNode *
 func (b *ScoreBasedBalancer) convertToNodeItems(collectionID int64, nodeIDs []int64) map[int64]*nodeItem {
 	totalScore := 0
 	nodeScoreMap := make(map[int64]*nodeItem)
+	nodeMemMap := make(map[int64]float64)
+	totalMemCapacity := float64(0)
+	allNodeHasMemInfo := true
 	for _, node := range nodeIDs {
 		score := b.calculateScore(collectionID, node)
 		nodeItem := newNodeItem(score, node)
 		nodeScoreMap[node] = &nodeItem
 		totalScore += score
+
+		// set memory default to 1.0, will multiply average value to compute assigned score
+		nodeInfo := b.nodeManager.Get(node)
+		if nodeInfo != nil {
+			totalMemCapacity += nodeInfo.MemCapacity()
+			nodeMemMap[node] = nodeInfo.MemCapacity()
+		}
+		allNodeHasMemInfo = allNodeHasMemInfo && nodeInfo != nil && nodeInfo.MemCapacity() > 0
 	}
 
 	if totalScore == 0 {
 		return nodeScoreMap
 	}
 
-	average := totalScore / len(nodeIDs)
+	// if all node has memory info, we will use totalScore / totalMemCapacity to calculate the score, then average means average score on memory unit
+	// otherwise, we will use totalScore / len(nodeItemsMap) to calculate the score, then average means average score on node unit
+	average := float64(0)
+	if allNodeHasMemInfo {
+		average = float64(totalScore) / totalMemCapacity
+	} else {
+		average = float64(totalScore) / float64(len(nodeIDs))
+	}
+
 	delegatorOverloadFactor := params.Params.QueryCoordCfg.DelegatorMemoryOverloadFactor.GetAsFloat()
-	// use average * delegatorOverloadFactor * delegator_num, to preserve fixed memory size for delegator
 	for _, node := range nodeIDs {
+		if allNodeHasMemInfo {
+			nodeScoreMap[node].setAssignedScore(nodeMemMap[node] * average)
+		} else {
+			nodeScoreMap[node].setAssignedScore(average)
+		}
+		// use assignedScore * delegatorOverloadFactor * delegator_num, to preserve fixed memory size for delegator
 		collectionViews := b.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(collectionID), meta.WithNodeID2LeaderView(node))
 		if len(collectionViews) > 0 {
-			newScore := nodeScoreMap[node].getPriority() + int(float64(average)*delegatorOverloadFactor)*len(collectionViews)
-			nodeScoreMap[node].setPriority(newScore)
+			nodeScoreMap[node].AddCurrentScoreDelta(nodeScoreMap[node].getAssignedScore() * delegatorOverloadFactor * float64(len(collectionViews)))
 		}
 	}
 	return nodeScoreMap
@@ -217,8 +241,8 @@ func (b *ScoreBasedBalancer) calculateScore(collectionID, nodeID int64) int {
 }
 
 // calculateSegmentScore calculate the score which the segment represented
-func (b *ScoreBasedBalancer) calculateSegmentScore(s *meta.Segment) int {
-	return int(float64(s.GetNumOfRows()) * (1 + params.Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat()))
+func (b *ScoreBasedBalancer) calculateSegmentScore(s *meta.Segment) float64 {
+	return float64(s.GetNumOfRows()) * (1 + params.Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat())
 }
 
 func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
@@ -288,8 +312,10 @@ func (b *ScoreBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, onlin
 
 func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes []int64) []SegmentAssignPlan {
 	segmentDist := make(map[int64][]*meta.Segment)
-	nodeScore := b.convertToNodeItems(replica.GetCollectionID(), onlineNodes)
-	totalScore := 0
+	nodeItemsMap := b.convertToNodeItems(replica.GetCollectionID(), onlineNodes)
+	if len(nodeItemsMap) == 0 {
+		return nil
+	}
 
 	// list all segment which could be balanced, and calculate node's score
 	for _, node := range onlineNodes {
@@ -298,21 +324,16 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
 		})
 		segmentDist[node] = segments
-		totalScore += nodeScore[node].getPriority()
-	}
-
-	if totalScore == 0 {
-		return nil
 	}
 
 	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
 
 	// find the segment from the node which has more score than the average
 	segmentsToMove := make([]*meta.Segment, 0)
-	average := totalScore / len(onlineNodes)
 	for node, segments := range segmentDist {
-		leftScore := nodeScore[node].getPriority()
-		if leftScore <= average {
+		currentScore := nodeItemsMap[node].getCurrentScore()
+		assignedScore := nodeItemsMap[node].getAssignedScore()
+		if currentScore <= assignedScore {
 			continue
 		}
 
@@ -324,8 +345,9 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 			if len(segmentsToMove) >= balanceBatchSize {
 				break
 			}
-			leftScore -= b.calculateSegmentScore(s)
-			if leftScore <= average {
+
+			currentScore -= b.calculateSegmentScore(s)
+			if currentScore <= assignedScore {
 				break
 			}
 		}

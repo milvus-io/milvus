@@ -18,6 +18,7 @@ package balance
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 
@@ -77,9 +78,8 @@ func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*me
 		if len(plans) > balanceBatchSize {
 			break
 		}
-		// change node's priority and push back
-		p := ni.getPriority()
-		ni.setPriority(p + int(s.GetNumOfRows()))
+		// change node's score and push back
+		ni.AddCurrentScoreDelta(float64(s.GetNumOfRows()))
 		queue.push(ni)
 	}
 	return plans
@@ -119,9 +119,8 @@ func (b *RowCountBasedBalancer) AssignChannel(channels []*meta.DmChannel, nodes 
 			Channel: c,
 		}
 		plans = append(plans, plan)
-		// change node's priority and push back
-		p := ni.getPriority()
-		ni.setPriority(p + 1)
+		// change node's score and push back
+		ni.AddCurrentScoreDelta(1)
 		queue.push(ni)
 	}
 	return plans
@@ -366,14 +365,51 @@ func NewRowCountBasedBalancer(
 
 type nodeItem struct {
 	baseItem
-	nodeID int64
+	fmt.Stringer
+	nodeID        int64
+	assignedScore float64
+	currentScore  float64
 }
 
-func newNodeItem(priority int, nodeID int64) nodeItem {
+func newNodeItem(currentScore int, nodeID int64) nodeItem {
 	return nodeItem{
-		baseItem: baseItem{
-			priority: priority,
-		},
-		nodeID: nodeID,
+		baseItem:     baseItem{},
+		nodeID:       nodeID,
+		currentScore: float64(currentScore),
 	}
+}
+
+func (b *nodeItem) getPriority() int {
+	// if node lacks more score between assignedScore and currentScore, then higher priority
+	return int(b.currentScore - b.assignedScore)
+}
+
+func (b *nodeItem) setPriority(priority int) {
+	panic("not supported, use updatePriority instead")
+}
+
+func (b *nodeItem) getPriorityWithCurrentScoreDelta(delta float64) int {
+	return int((b.currentScore + delta) - b.assignedScore)
+}
+
+func (b *nodeItem) getCurrentScore() float64 {
+	return b.currentScore
+}
+
+func (b *nodeItem) AddCurrentScoreDelta(delta float64) {
+	b.currentScore += delta
+	b.priority = b.getPriority()
+}
+
+func (b *nodeItem) getAssignedScore() float64 {
+	return b.assignedScore
+}
+
+func (b *nodeItem) setAssignedScore(delta float64) {
+	b.assignedScore += delta
+	b.priority = b.getPriority()
+}
+
+func (b *nodeItem) String() string {
+	return fmt.Sprintf("{NodeID: %d, AssignedScore: %f, CurrentScore: %f, Priority: %d}", b.nodeID, b.assignedScore, b.currentScore, b.priority)
 }
