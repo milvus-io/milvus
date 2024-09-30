@@ -2462,11 +2462,11 @@ class TestBitmapIndex(TestcaseBase):
         self.build_multi_index(index_params=index_params)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("index_obj, filed_name", [(DefaultScalarIndexParams.Default, 'INT64_hybrid_index'),
+    @pytest.mark.parametrize("index_obj, field_name", [(DefaultScalarIndexParams.Default, 'INT64_hybrid_index'),
                                                        (DefaultScalarIndexParams.INVERTED, 'INT64_inverted'),
                                                        (DefaultScalarIndexParams.STL_SORT, 'INT64_stl_sort'),
                                                        (DefaultScalarIndexParams.Trie, 'VARCHAR_trie')])
-    def test_bitmap_offset_cache_on_not_bitmap_fields(self, request, index_obj, filed_name):
+    def test_bitmap_offset_cache_on_not_bitmap_fields(self, request, index_obj, field_name):
         """
         target:
             1. alter offset cache on not `BITMAP` index scalar field
@@ -2477,13 +2477,13 @@ class TestBitmapIndex(TestcaseBase):
             1. alter index raises expected error
         """
         # init params
-        collection_name, primary_field = f"{request.function.__name__}_{filed_name}", 'INT64_pk'
+        collection_name, primary_field = f"{request.function.__name__}_{field_name}", 'INT64_pk'
 
         # create a collection with fields
         self.collection_wrap.init_collection(
             name=collection_name,
             schema=cf.set_collection_schema(
-                fields=[primary_field, DataType.FLOAT_VECTOR.name, filed_name],
+                fields=[primary_field, DataType.FLOAT_VECTOR.name, field_name],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
             )
         )
@@ -2491,14 +2491,14 @@ class TestBitmapIndex(TestcaseBase):
         # build scalar index on empty collection
         index_params = {
             **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name),
-            **index_obj(filed_name)
+            **index_obj(field_name)
         }
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
 
         # enable offset cache and raises error
         self.collection_wrap.alter_index(
-            index_name=filed_name, extra_params=AlterIndexParams.index_offset_cache(),
+            index_name=field_name, extra_params=AlterIndexParams.index_offset_cache(),
             check_task=CheckTasks.err_res, check_items={ct.err_code: 1100, ct.err_msg: iem.InvalidOffsetCache}
         )
 
@@ -2535,6 +2535,52 @@ class TestBitmapIndex(TestcaseBase):
             index_name=DataType.FLOAT_VECTOR.name, extra_params=AlterIndexParams.index_offset_cache(),
             check_task=CheckTasks.err_res, check_items={ct.err_code: 1100, ct.err_msg: iem.InvalidOffsetCache}
         )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_bitmap_offset_cache_alter_after_loading(self, request):
+        """
+        target:
+            1. alter offset cache on `BITMAP` index scalar
+            2. alter offset cache on loaded collection failed
+        method:
+            1. build scalar index on scalar field
+            2. alter offset cache on scalar field
+            3. load collection
+            4. alter offset cache again
+        expected:
+            1. alter index raises expected error after loading collection
+        """
+        # init params
+        collection_name, primary_field = f"{request.function.__name__}", 'INT64_pk'
+
+        # create a collection with fields
+        self.collection_wrap.init_collection(
+            name=collection_name,
+            schema=cf.set_collection_schema(
+                fields=[primary_field, DataType.FLOAT_VECTOR.name, *self.bitmap_support_dtype_names],
+                field_params={primary_field: FieldParams(is_primary=True).to_dict},
+            )
+        )
+
+        # build scalar index on empty collection
+        index_params = {
+            **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name),
+            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names)
+        }
+        self.build_multi_index(index_params=index_params)
+        assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
+
+        # enable offset cache
+        for n in self.bitmap_support_dtype_names:
+            self.collection_wrap.alter_index(index_name=n, extra_params=AlterIndexParams.index_offset_cache())
+
+        self.collection_wrap.load()
+
+        # enable offset cache on loaded collection
+        for n in self.bitmap_support_dtype_names:
+            self.collection_wrap.alter_index(
+                index_name=n, extra_params=AlterIndexParams.index_offset_cache(),
+                check_task=CheckTasks.err_res, check_items={ct.err_code: 104, ct.err_msg: iem.AlterOnLoadedCollection})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -2929,6 +2975,52 @@ class TestBitmapIndex(TestcaseBase):
             field_name=DataType.INT64.name, index_name=DataType.INT64.name,
             index_params={"index_type": IndexName.AUTOINDEX, "bitmap_cardinality_limit": bitmap_cardinality_limit},
             check_task=CheckTasks.err_res, check_items={ct.err_code: 1100, ct.err_msg: iem.CheckBitmapCardinality})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index_params, name", [({"index_type": IndexName.AUTOINDEX}, "AUTOINDEX"), ({}, "None")])
+    def test_bitmap_cardinality_limit_check(self, request, index_params, name):
+        """
+        target:
+            1. check that only one `bitmap_cardinality_limit` value can be set on a field
+        method:
+            1. create a collection with scalar fields
+            2. build scalar index with `bitmap_cardinality_limit`
+            3. re-build scalar index with different `bitmap_cardinality_limit`
+            4. drop all scalar index
+            5. build scalar index with different `bitmap_cardinality_limit`
+        expected:
+            1. re-build scalar index failed
+            2. after dropping scalar index, rebuild scalar index with different `bitmap_cardinality_limit` succeeds
+        """
+        # init params
+        collection_name, primary_field = f"{request.function.__name__}_{name}", "int64_pk"
+
+        # create a collection with fields that can build `BITMAP` index
+        self.collection_wrap.init_collection(
+            name=collection_name,
+            schema=cf.set_collection_schema(
+                fields=[primary_field, DataType.FLOAT_VECTOR.name, *self.bitmap_support_dtype_names],
+                field_params={primary_field: FieldParams(is_primary=True).to_dict},
+            )
+        )
+
+        for scalar_field in self.bitmap_support_dtype_names:
+            # build scalar index
+            self.collection_wrap.create_index(field_name=scalar_field, index_name=scalar_field,
+                                              index_params={**index_params, "bitmap_cardinality_limit": 200})
+
+            # build scalar index with different `bitmap_cardinality_limit`
+            self.collection_wrap.create_index(field_name=scalar_field, index_name=scalar_field,
+                                              index_params={**index_params, "bitmap_cardinality_limit": 300},
+                                              check_task=CheckTasks.err_res,
+                                              check_items={ct.err_code: 65535, ct.err_msg: iem.OneIndexPerField})
+
+        self.drop_multi_index(self.bitmap_support_dtype_names)
+
+        # re-build scalar index
+        for scalar_field in self.bitmap_support_dtype_names:
+            self.collection_wrap.create_index(field_name=scalar_field, index_name=scalar_field,
+                                              index_params={**index_params, "bitmap_cardinality_limit": 300})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("bitmap_cardinality_limit", [1, 100, 1000])
