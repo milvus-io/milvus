@@ -291,8 +291,8 @@ class TestMilvusClientCollectionValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="pymilvus issue 1864")
-    def test_milvus_client_collection_self_creation_default(self):
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_milvus_client_collection_self_creation_default(self, nullable):
         """
         target: test fast create collection normal case
         method: create collection
@@ -300,27 +300,35 @@ class TestMilvusClientCollectionValid(TestcaseBase):
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
+        dim = 128
         # 1. create collection
         schema = client_w.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("id_string", DataType.VARCHAR, max_length=64, is_primary=True, auto_id = False)
-        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=128)
+        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim)
         schema.add_field("title", DataType.VARCHAR, max_length=64, is_partition_key=True)
-        schema.add_field("array_field", DataType.Array, max_capacity=12,
-                         element_type_params={"type": DataType.VARCHAR, "max_length": 64})
-        index_params = client_w.prepare_index_params()
-        index_params.add_index("embeddings", metric_type="cosine")
-        index_params.add_index("title")
-        client_w.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        schema.add_field("nullable_field", DataType.INT64, nullable=nullable, default_value=10)
+        schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=12,
+                         max_length=64, nullable=nullable)
+        index_params = client_w.prepare_index_params(client)[0]
+        index_params.add_index("embeddings", metric_type="COSINE")
+        # index_params.add_index("title")
+        client_w.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         collections = client_w.list_collections(client)[0]
         assert collection_name in collections
+        check_items = {"collection_name": collection_name,
+                       "dim": dim,
+                       "consistency_level": 0,
+                       "enable_dynamic_field": False,
+                       "num_partitions": 16,
+                       "id_name": "id_string",
+                       "vector_name": "embeddings"}
+        if nullable:
+            check_items["nullable_fields"] = ["nullable_field", "array_field"]
         client_w.describe_collection(client, collection_name,
                                      check_task=CheckTasks.check_describe_collection_property,
-                                     check_items={"collection_name": collection_name,
-                                                  "dim": 128,
-                                                  "consistency_level": 0})
+                                     check_items=check_items)
         index = client_w.list_indexes(client, collection_name)[0]
-        assert index == ['vector']
-        # load_state = client_w.get_load_state(collection_name)[0]
+        assert index == ['embeddings']
         if client_w.has_collection(client, collection_name)[0]:
             client_w.drop_collection(client, collection_name)
 
