@@ -347,28 +347,30 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegments {
 	m.RLock()
 	defer m.RUnlock()
-	mDimEntry := make(map[string]*chanPartSegments)
+	type dim struct {
+		partitionID int64
+		channelName string
+	}
 
-	log.Debug("GetSegmentsChanPart segment number", zap.Int("length", len(m.segments.GetSegments())))
-	for _, segmentInfo := range m.segments.segments {
-		if !selector(segmentInfo) {
+	mDimEntry := make(map[dim]*chanPartSegments)
+
+	for _, si := range m.segments.segments {
+		if !selector(si) {
 			continue
 		}
-
-		cloned := segmentInfo.Clone()
-
-		dim := fmt.Sprintf("%d-%s", cloned.PartitionID, cloned.InsertChannel)
-		entry, ok := mDimEntry[dim]
+		d := dim{si.PartitionID, si.InsertChannel}
+		entry, ok := mDimEntry[d]
 		if !ok {
 			entry = &chanPartSegments{
-				collectionID: cloned.CollectionID,
-				partitionID:  cloned.PartitionID,
-				channelName:  cloned.InsertChannel,
+				collectionID: si.CollectionID,
+				partitionID:  si.PartitionID,
+				channelName:  si.InsertChannel,
 			}
-			mDimEntry[dim] = entry
+			mDimEntry[d] = entry
 		}
-		entry.segments = append(entry.segments, cloned)
+		entry.segments = append(entry.segments, si)
 	}
+	log.Debug("GetSegmentsChanPart segment number", zap.Int("length", len(m.segments.GetSegments())))
 
 	result := make([]*chanPartSegments, 0, len(mDimEntry))
 	for _, entry := range mDimEntry {
