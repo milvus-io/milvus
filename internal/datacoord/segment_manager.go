@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -29,7 +30,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lock"
@@ -361,7 +361,6 @@ func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
 	return expireTs, nil
 }
 
-<<<<<<< HEAD
 func (s *SegmentManager) AllocImportSegment(ctx context.Context, taskID int64, collectionID UniqueID,
 	partitionID UniqueID, channelName string, level datapb.SegmentLevel,
 ) (*SegmentInfo, error) {
@@ -418,14 +417,6 @@ func (s *SegmentManager) AllocImportSegment(ctx context.Context, taskID int64, c
 func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID,
 	channelName string, segmentState commonpb.SegmentState, level datapb.SegmentLevel,
 ) (*SegmentInfo, error) {
-=======
-// AllocNewGrowingSegment allocates segment for streaming node.
-func (s *SegmentManager) AllocNewGrowingSegment(ctx context.Context, collectionID, partitionID, segmentID UniqueID, channelName string) (*SegmentInfo, error) {
-	return s.openNewSegmentWithGivenSegmentID(ctx, collectionID, partitionID, segmentID, channelName)
-}
-
-func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string) (*SegmentInfo, error) {
->>>>>>> 3d3dfefc2f (fix: Fix import segments leak in segment manager)
 	log := log.Ctx(ctx)
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
 	defer sp.End()

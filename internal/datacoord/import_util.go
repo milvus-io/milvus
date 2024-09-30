@@ -30,7 +30,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -109,7 +108,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	return tasks, nil
 }
 
-func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, meta *meta) ([]int64, error) {
+func AssignSegments(job ImportJob, task ImportTask, alloc allocator, meta *meta) ([]int64, error) {
 	// merge hashed sizes
 	hashedDataSize := make(map[string]map[int64]int64) // vchannel->(partitionID->size)
 	for _, fileStats := range task.GetFileStats() {
@@ -163,7 +162,7 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 }
 
 func AllocImportSegment(ctx context.Context,
-	alloc allocator.Allocator,
+	alloc allocator,
 	meta *meta,
 	taskID int64, collectionID UniqueID,
 	partitionID UniqueID,
@@ -171,12 +170,12 @@ func AllocImportSegment(ctx context.Context,
 	level datapb.SegmentLevel,
 ) (*SegmentInfo, error) {
 	log := log.Ctx(ctx)
-	id, err := alloc.AllocID(ctx)
+	id, err := alloc.allocID(ctx)
 	if err != nil {
 		log.Error("failed to alloc id for import segment", zap.Error(err))
 		return nil, err
 	}
-	ts, err := alloc.AllocTimestamp(ctx)
+	ts, err := alloc.allocTimestamp(ctx)
 	if err != nil {
 		return nil, err
 	}
