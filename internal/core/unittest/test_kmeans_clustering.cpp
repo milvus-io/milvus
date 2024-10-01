@@ -22,7 +22,7 @@
 #include "storage/Util.h"
 #include "storage/InsertData.h"
 #include "clustering/KmeansClustering.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/local/LocalChunkManagerSingleton.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "index/Meta.h"

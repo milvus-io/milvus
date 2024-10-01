@@ -22,7 +22,7 @@
 #include "config/ConfigKnowhere.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/local/LocalChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "common/Consts.h"
 #include "common/RangeSearchHelper.h"

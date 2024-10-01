@@ -13,7 +13,7 @@
 
 #include "folly/init/Init.h"
 #include "test_utils/Constants.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/local/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "test_utils/storage_test_utils.h"
 

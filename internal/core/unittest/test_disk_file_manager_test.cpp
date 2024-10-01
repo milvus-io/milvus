@@ -38,7 +38,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/DiskFileManagerImpl.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/local/LocalChunkManagerSingleton.h"
 
 #include "test_utils/storage_test_utils.h"
 

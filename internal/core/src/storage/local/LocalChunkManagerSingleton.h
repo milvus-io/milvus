@@ -21,7 +21,7 @@
 #include <shared_mutex>
 
 #include "storage/ChunkManager.h"
-#include "storage/LocalChunkManager.h"
+#include "storage/local/LocalChunkManager.h"
 
 namespace milvus::storage {
 

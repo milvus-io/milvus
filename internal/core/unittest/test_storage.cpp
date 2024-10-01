@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 #include "common/EasyAssert.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/local/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/storage_c.h"
 

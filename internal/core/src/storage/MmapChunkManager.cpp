@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include "storage/MmapChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/local/LocalChunkManagerSingleton.h"
 #include <fstream>
 #include <sys/mman.h>
 #include <unistd.h>

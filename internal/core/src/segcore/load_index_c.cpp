@@ -24,7 +24,7 @@
 #include "segcore/Types.h"
 #include "storage/Util.h"
 #include "storage/RemoteChunkManagerSingleton.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/local/LocalChunkManagerSingleton.h"
 #include "pb/cgo_msg.pb.h"
 
 bool

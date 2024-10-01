@@ -17,7 +17,7 @@
 #include "storage/storage_c.h"
 #include "monitor/prometheus_client.h"
 #include "storage/RemoteChunkManagerSingleton.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/local/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 
 CStatus
