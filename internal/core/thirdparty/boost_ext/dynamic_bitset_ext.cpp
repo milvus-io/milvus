@@ -26,7 +26,7 @@ void
 from_block_range<PtrWrapper, Block, Allocator>(PtrWrapper result,
                                               PtrWrapper resultB,
                                               dynamic_bitset<>& bitset) {
-    (void)resultB;
+    static_cast<void>(resultB);
     result.ptr_ = reinterpret_cast<char*>(bitset.m_bits.data());
 }
 

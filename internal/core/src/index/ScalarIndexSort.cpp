@@ -166,7 +166,9 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
                                         const Config& config) {
     size_t index_size;
     auto index_length = index_binary.GetByName("index_length");
-    memcpy(&index_size, index_length->data.get(), (size_t)index_length->size);
+    memcpy(&index_size,
+           index_length->data.get(),
+           static_cast<size_t>(index_length->size));
 
     auto index_data = index_binary.GetByName("index_data");
     data_.resize(index_size);
@@ -176,7 +178,9 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
            (size_t)index_num_rows->size);
     idx_to_offsets_.resize(total_num_rows_);
     valid_bitset = TargetBitmap(total_num_rows_, false);
-    memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
+    memcpy(data_.data(),
+           index_data->data.get(),
+           static_cast<size_t>(index_data->size));
     for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
         valid_bitset.set(data_[i].idx_);
@@ -207,7 +211,7 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
         auto size = data->DataSize();
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         auto buf = std::shared_ptr<uint8_t[]>(
-            (uint8_t*)const_cast<void*>(data->Data()), deleter);
+            static_cast<uint8_t*>(const_cast<void*>(data->Data())), deleter);
         binary_set.Append(key, buf, size);
     }
 
