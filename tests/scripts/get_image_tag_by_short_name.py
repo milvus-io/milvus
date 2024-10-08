@@ -14,8 +14,8 @@ def get_image_tag_by_short_name(tag, arch):
     tag_list = []
     for r in rsp:
         tags = r["tags"]
-        for tag in tags:
-            tag_list.append(tag["name"])
+        for item in tags:
+            tag_list.append(item["name"])
     tag_candidates = []
     for t in tag_list:
         r = t.split("-")
@@ -33,6 +33,4 @@ if __name__ == "__main__":
     argparse.add_argument("--arch", type=str, default="amd64")
     args = argparse.parse_args()
     res = get_image_tag_by_short_name(args.tag, args.arch)
-    if not 4 <= len(res.split("-")) <= 5:
-        raise Exception(f"Failed to get image tag {res} by short name: {args.tag}")
     print(res)
