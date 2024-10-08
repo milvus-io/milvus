@@ -266,8 +266,8 @@ message VchannelInfo {
   repeated int64 unflushedSegmentIds = 7;
   repeated int64 flushedSegmentIds = 8;
   repeated int64 dropped_segmentIds = 9;
-  repeated int64 indexed_segmentIds = 10;
-  repeated SegmentInfo indexed_segments = 11;
+  repeated int64 indexed_segmentIds = 10; // deprecated, keep it for compatibility
+  repeated SegmentInfo indexed_segments = 11; // deprecated, keep it for compatibility
   repeated int64 level_zero_segment_ids = 12;
   map<int64, int64> partition_stats_versions = 13;
 }
