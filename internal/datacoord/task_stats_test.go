@@ -67,6 +67,7 @@ func (s *statsTaskSuite) SetupSuite() {
 						NumOfRows:     65535,
 						State:         commonpb.SegmentState_Flushed,
 						MaxRowNum:     65535,
+						Level:         datapb.SegmentLevel_L2,
 					},
 				},
 			},
@@ -82,6 +83,7 @@ func (s *statsTaskSuite) SetupSuite() {
 								NumOfRows:     65535,
 								State:         commonpb.SegmentState_Flushed,
 								MaxRowNum:     65535,
+								Level:         datapb.SegmentLevel_L2,
 							},
 						},
 					},
@@ -97,6 +99,7 @@ func (s *statsTaskSuite) SetupSuite() {
 								NumOfRows:     65535,
 								State:         commonpb.SegmentState_Flushed,
 								MaxRowNum:     65535,
+								Level:         datapb.SegmentLevel_L2,
 							},
 						},
 					},
@@ -549,8 +552,9 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 
 			s.NoError(st.SetJobInfo(s.mt))
-			s.NotNil(s.mt.GetHealthySegment(s.segID + 1))
+			s.NotNil(s.mt.GetHealthySegment(s.targetID))
 			s.Equal(indexpb.JobState_JobStateFinished, s.mt.statsTaskMeta.tasks[s.taskID].GetState())
+			s.Equal(datapb.SegmentLevel_L2, s.mt.GetHealthySegment(s.targetID).GetLevel())
 		})
 	})
 }
