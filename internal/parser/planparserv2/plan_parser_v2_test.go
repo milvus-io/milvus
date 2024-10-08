@@ -1391,3 +1391,30 @@ func Test_convertHanToASCII(t *testing.T) {
 		assert.Equal(t, c.target, convertHanToASCII(c.source))
 	}
 }
+
+func BenchmarkTemplateWithString(b *testing.B) {
+	schema := newTestSchema()
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(b, err)
+
+	elements := make([]interface{}, 0, 100)
+	for i := 0; i < 100; i++ {
+		elements = append(elements, fmt.Sprintf(`"%s",`, randomChineseString(rand.Intn(100))))
+	}
+	expr := "StringField in {list}"
+
+	mv := generateExpressionFieldData("list", schemapb.DataType_Array, []interface{}{
+		generateExpressionFieldData("", schemapb.DataType_VarChar, elements),
+	})
+
+	for i := 0; i < b.N; i++ {
+		plan, err := CreateSearchPlan(schemaHelper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, mv)
+		assert.NoError(b, err)
+		assert.NotNil(b, plan)
+	}
+}
