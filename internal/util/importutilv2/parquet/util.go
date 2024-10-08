@@ -115,7 +115,7 @@ func isArrowArithmeticType(dataType arrow.Type) bool {
 	return isArrowIntegerType(dataType) || isArrowFloatingType(dataType)
 }
 
-func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, nullable bool) bool {
+func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, field *schemapb.FieldSchema) bool {
 	srcType := src.ID()
 	dstType := dst.ID()
 	switch srcType {
@@ -142,9 +142,10 @@ func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, nullable
 	case arrow.BINARY:
 		return dstType == arrow.LIST && dst.(*arrow.ListType).Elem().ID() == arrow.UINT8
 	case arrow.LIST:
-		return dstType == arrow.LIST && isArrowDataTypeConvertible(src.(*arrow.ListType).Elem(), dst.(*arrow.ListType).Elem(), nullable)
+		return dstType == arrow.LIST && isArrowDataTypeConvertible(src.(*arrow.ListType).Elem(), dst.(*arrow.ListType).Elem(), field)
 	case arrow.NULL:
-		return nullable
+		// if nullable==true or has set default_value, can use null type
+		return field.GetNullable() || field.GetDefaultValue() != nil
 	default:
 		return false
 	}
@@ -218,13 +219,18 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useNullType bool) (
 		if err != nil {
 			return nil, err
 		}
+		nullable := field.GetNullable()
 		if field.GetNullable() && useNullType {
 			arrDataType = arrow.Null
+		}
+		if field.GetDefaultValue() != nil && useNullType {
+			arrDataType = arrow.Null
+			nullable = true
 		}
 		arrFields = append(arrFields, arrow.Field{
 			Name:     field.GetName(),
 			Type:     arrDataType,
-			Nullable: field.GetNullable(),
+			Nullable: nullable,
 			Metadata: arrow.Metadata{},
 		})
 	}
@@ -250,7 +256,7 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 		if err != nil {
 			return err
 		}
-		if !isArrowDataTypeConvertible(arrField.Type, toArrDataType, field.GetNullable()) {
+		if !isArrowDataTypeConvertible(arrField.Type, toArrDataType, field) {
 			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' type mis-match, milvus data type '%s', arrow data type get '%s'",
 				field.Name, field.DataType.String(), arrField.Type.String()))
 		}
