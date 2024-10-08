@@ -1372,9 +1372,6 @@ TEST(Sealed, GetVector) {
 }
 
 TEST(Sealed, GetVectorFromChunkCache) {
-    // skip test due to mem leak from AWS::InitSDK
-    return;
-
     auto dim = 16;
     auto topK = 5;
     auto N = ROW_COUNT;
@@ -1384,10 +1381,8 @@ TEST(Sealed, GetVectorFromChunkCache) {
     auto file_name = std::string(
         "sealed_test_get_vector_from_chunk_cache/insert_log/1/101/1000000");
 
-    auto sc = milvus::storage::StorageConfig{};
-    milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(sc);
-    auto mcm = std::make_unique<milvus::storage::MinioChunkManager>(sc);
-    // mcm->CreateBucket(sc.bucket_name);
+    auto sc = milvus::storage::MmapConfig{};
+    milvus::storage::MmapManager::GetInstance().Init(sc);
 
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
@@ -1580,9 +1575,6 @@ TEST(Sealed, GetSparseVectorFromChunkCache) {
 }
 
 TEST(Sealed, WarmupChunkCache) {
-    // skip test due to mem leak from AWS::InitSDK
-    return;
-
     auto dim = 16;
     auto topK = 5;
     auto N = ROW_COUNT;
@@ -1593,9 +1585,8 @@ TEST(Sealed, WarmupChunkCache) {
     auto file_name = std::string(
         "sealed_test_get_vector_from_chunk_cache/insert_log/1/101/1000000");
 
-    auto sc = milvus::storage::StorageConfig{};
-    milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(sc);
-    auto mcm = std::make_unique<milvus::storage::MinioChunkManager>(sc);
+    auto sc = milvus::storage::MmapConfig{};
+    milvus::storage::MmapManager::GetInstance().Init(sc);
 
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(

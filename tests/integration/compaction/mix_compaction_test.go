@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -70,6 +71,17 @@ func (s *CompactionSuite) TestMixCompaction() {
 	err = merr.CheckRPCCall(createCollectionStatus, err)
 	s.NoError(err)
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+
+	// create index
+	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: collectionName,
+		FieldName:      integration.FloatVecField,
+		IndexName:      "_default",
+		ExtraParams:    integration.ConstructIndexParam(dim, indexType, metricType),
+	})
+	err = merr.CheckRPCCall(createIndexStatus, err)
+	s.NoError(err)
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// show collection
 	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
@@ -110,21 +122,14 @@ func (s *CompactionSuite) TestMixCompaction() {
 		log.Info("insert done", zap.Int("i", i))
 	}
 
-	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
-		CollectionName: collectionName,
-		FieldName:      integration.FloatVecField,
-		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, indexType, metricType),
-	})
-	err = merr.CheckRPCCall(createIndexStatus, err)
-	s.NoError(err)
-	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
-
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
-	s.Equal(rowNum/batch, len(segments))
+
+	// The stats task of segments will create a new segment, potentially triggering compaction simultaneously,
+	// which may lead to an increase or decrease in the number of segments.
+	s.True(len(segments) > 0)
+
 	for _, segment := range segments {
 		log.Info("show segment result", zap.String("segment", segment.String()))
 	}
@@ -134,16 +139,21 @@ func (s *CompactionSuite) TestMixCompaction() {
 		segments, err = c.MetaWatcher.ShowSegments()
 		s.NoError(err)
 		s.NotEmpty(segments)
+
 		compactFromSegments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 			return segment.GetState() == commonpb.SegmentState_Dropped
 		})
 		compactToSegments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 			return segment.GetState() == commonpb.SegmentState_Flushed
 		})
+
 		log.Info("ShowSegments result", zap.Int("len(compactFromSegments)", len(compactFromSegments)),
 			zap.Int("len(compactToSegments)", len(compactToSegments)))
-		return len(compactToSegments) == 1
+
+		// The small segments can be merged based on dataCoord.compaction.min.segment
+		return len(compactToSegments) <= paramtable.Get().DataCoordCfg.MinSegmentToMerge.GetAsInt()
 	}
+
 	for !showSegments() {
 		select {
 		case <-ctx.Done():
