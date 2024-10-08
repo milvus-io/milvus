@@ -59,6 +59,8 @@ type compactionPlanContext interface {
 	getCompactionTasksNumBySignalID(signalID int64) int
 	getCompactionInfo(signalID int64) *compactionInfo
 	removeTasksByChannel(channel string)
+
+	isEmpty() bool
 }
 
 var (
@@ -717,6 +719,10 @@ func (c *compactionPlanHandler) pickShardNode(nodeSlots map[int64]int64, t Compa
 // isFull return true if the task pool is full
 func (c *compactionPlanHandler) isFull() bool {
 	return c.getTaskCount() >= Params.DataCoordCfg.CompactionMaxParallelTasks.GetAsInt()
+}
+
+func (c *compactionPlanHandler) isEmpty() bool {
+	return c.getTaskCount() == 0
 }
 
 func (c *compactionPlanHandler) getTaskCount() int {

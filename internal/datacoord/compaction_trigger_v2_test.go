@@ -5,17 +5,15 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/samber/lo"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -27,17 +25,17 @@ type CompactionTriggerManagerSuite struct {
 	suite.Suite
 
 	mockAlloc       *NMockAllocator
-	handler         Handler
+	mockHandler     *NMockHandler
 	mockPlanContext *MockCompactionPlanContext
 	testLabel       *CompactionGroupLabel
 	meta            *meta
 
-	triggerManager *CompactionTriggerManager
+	trigger *CompactionTriggerManager
 }
 
 func (s *CompactionTriggerManagerSuite) SetupTest() {
 	s.mockAlloc = NewNMockAllocator(s.T())
-	s.handler = NewNMockHandler(s.T())
+	s.mockHandler = NewNMockHandler(s.T())
 	s.mockPlanContext = NewMockCompactionPlanContext(s.T())
 
 	s.testLabel = &CompactionGroupLabel{
@@ -45,111 +43,154 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 		PartitionID:  10,
 		Channel:      "ch-1",
 	}
+	s.meta = &meta{
+		segments: NewSegmentsInfo(),
+		indexMeta: &indexMeta{
+			indexes: make(map[UniqueID]map[UniqueID]*model.Index),
+		},
+		collections: make(map[UniqueID]*collectionInfo),
+	}
+	s.meta.AddCollection(&collectionInfo{ID: s.testLabel.CollectionID})
+
 	segments := genSegmentsForMeta(s.testLabel)
-	s.meta = &meta{segments: NewSegmentsInfo()}
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment)
 	}
 
-	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.mockPlanContext, s.meta)
+	s.trigger = NewCompactionTriggerManager(s.mockAlloc, s.mockHandler, s.mockPlanContext, s.meta)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "false")
 }
 
-func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
-	handler := NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
-	s.triggerManager.handler = handler
-
-	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
-
-	segments, found := collSegs[1]
-	s.Require().True(found)
-
-	seg1, found := lo.Find(segments, func(info *SegmentInfo) bool {
-		return info.ID == int64(100) && info.GetLevel() == datapb.SegmentLevel_L0
-	})
-	s.Require().True(found)
-
-	// Prepare only 1 l0 segment that doesn't meet the Trigger minimum condition
-	// but ViewIDLE Trigger will still forceTrigger the plan
-	latestL0Segments := GetViewsByInfo(seg1)
-	expectedSegID := seg1.ID
-
-	s.Require().Equal(1, len(latestL0Segments))
-	needRefresh, levelZeroView := s.triggerManager.l0Policy.getChangedLevelZeroViews(1, latestL0Segments)
-	s.True(needRefresh)
-	s.Require().Equal(1, len(levelZeroView))
-	cView, ok := levelZeroView[0].(*LevelZeroSegmentsView)
-	s.True(ok)
-	s.NotNil(cView)
-	log.Info("view", zap.Any("cView", cView))
-
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil)
-	s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).
-		RunAndReturn(func(task *datapb.CompactionTask) error {
-			s.EqualValues(19530, task.GetTriggerID())
-			// s.True(signal.isGlobal)
-			// s.False(signal.isForce)
-			s.EqualValues(30000, task.GetPos().GetTimestamp())
-			s.Equal(s.testLabel.CollectionID, task.GetCollectionID())
-			s.Equal(s.testLabel.PartitionID, task.GetPartitionID())
-
-			s.Equal(s.testLabel.Channel, task.GetChannel())
-			s.Equal(datapb.CompactionType_Level0DeleteCompaction, task.GetType())
-
-			expectedSegs := []int64{expectedSegID}
-			s.ElementsMatch(expectedSegs, task.GetInputSegments())
-			return nil
-		}).Return(nil).Once()
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Maybe()
-	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewIDLE, levelZeroView)
+func (s *CompactionTriggerManagerSuite) TearDownTest() {
+	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key)
 }
 
-func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
-	handler := NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
-	s.triggerManager.handler = handler
-	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
+func (s *CompactionTriggerManagerSuite) TestStartClose() {
+	s.trigger.Start()
+	s.trigger.Close()
+}
 
-	segments, found := collSegs[1]
-	s.Require().True(found)
+func (s *CompactionTriggerManagerSuite) TestGetSeperateViews() {
+	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Once()
+	collInfo := &collectionInfo{ID: s.testLabel.CollectionID}
+	got := s.trigger.getSeperateViews(context.Background(), collInfo, NotForce)
+	s.NotEmpty(got)
+	s.Equal(2, len(got))
 
-	levelZeroSegments := lo.Filter(segments, func(info *SegmentInfo, _ int) bool {
-		return info.GetLevel() == datapb.SegmentLevel_L0
+	l0Views, ok := got[TriggerTypeLevelZeroViewChange]
+	s.True(ok)
+	s.Equal(1, len(l0Views))
+
+	l0View, ok := l0Views[0].(*LevelZeroSegmentsView)
+	s.True(ok)
+	s.NotEmpty(l0View.segments)
+	for _, seg := range l0View.segments {
+		s.Equal(datapb.SegmentLevel_L0, seg.Level)
+	}
+
+	l2Views, ok := got[TriggerTypeDeltaTooMuch]
+	s.True(ok)
+	s.Equal(1, len(l2Views))
+
+	l2View, ok := l2Views[0].(*MixSegmentView)
+	s.True(ok)
+	s.NotEmpty(l2View.segments)
+	for _, seg := range l2View.segments {
+		s.Equal(datapb.SegmentLevel_L2, seg.Level)
+	}
+}
+
+func (s *CompactionTriggerManagerSuite) TestManualTrigger() {
+	s.Run("skipped", func() {
+		s.SetupTest()
+		s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).
+			Return(&collectionInfo{ID: s.testLabel.CollectionID}, nil).Once()
+		triggerID, err := s.trigger.ManualTrigger(context.Background(), s.testLabel.CollectionID, TriggerTypeClustering)
+		s.NoError(err)
+		s.EqualValues(0, triggerID)
 	})
 
-	latestL0Segments := GetViewsByInfo(levelZeroSegments...)
-	s.Require().NotEmpty(latestL0Segments)
-	needRefresh, levelZeroView := s.triggerManager.l0Policy.getChangedLevelZeroViews(1, latestL0Segments)
-	s.Require().True(needRefresh)
-	s.Require().Equal(1, len(levelZeroView))
-	cView, ok := levelZeroView[0].(*LevelZeroSegmentsView)
-	s.True(ok)
-	s.NotNil(cView)
-	log.Info("view", zap.Any("cView", cView))
+	s.Run("get collection error", func() {
+		s.SetupTest()
+		s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).
+			Return(nil, errors.New("mock get collection wrong")).Once()
+		triggerID, err := s.trigger.ManualTrigger(context.Background(), s.testLabel.CollectionID, TriggerTypeClustering)
+		s.Error(err)
+		s.EqualValues(0, triggerID)
+	})
 
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil)
-	s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).
-		RunAndReturn(func(task *datapb.CompactionTask) error {
-			s.EqualValues(19530, task.GetTriggerID())
-			// s.True(signal.isGlobal)
-			// s.False(signal.isForce)
-			s.EqualValues(30000, task.GetPos().GetTimestamp())
-			s.Equal(s.testLabel.CollectionID, task.GetCollectionID())
-			s.Equal(s.testLabel.PartitionID, task.GetPartitionID())
-			s.Equal(s.testLabel.Channel, task.GetChannel())
-			s.Equal(datapb.CompactionType_Level0DeleteCompaction, task.GetType())
+	s.Run("triggered", func() {
+		s.SetupTest()
+		s.meta.compactionTaskMeta = &compactionTaskMeta{compactionTasks: make(map[int64]map[int64]*datapb.CompactionTask)}
 
-			expectedSegs := []int64{100, 101, 102}
-			s.ElementsMatch(expectedSegs, task.GetInputSegments())
-			return nil
-		}).Return(nil).Once()
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Maybe()
-	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroView)
+		s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).Return(nil).Once()
+		s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).
+			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: newTestScalarClusteringKeySchema()}, nil).Twice()
+		s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Once()
+		s.mockAlloc.EXPECT().allocN(mock.Anything).RunAndReturn(
+			func(count int64) (int64, int64, error) {
+				return 99999, 99999 + count, nil
+			}).Once()
+		triggerID, err := s.trigger.ManualTrigger(context.Background(), s.testLabel.CollectionID, TriggerTypeClustering)
+		s.NoError(err)
+		s.EqualValues(19530, triggerID)
+	})
+}
+
+func (s *CompactionTriggerManagerSuite) TestTrigger() {
+	s.Run("handler failed to get collection", func() {
+		s.SetupTest()
+		s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Twice()
+		s.trigger.TimelyTrigger()
+		s.trigger.IDLETrigger(AllCollection)
+	})
+
+	s.Run("collection auto compaction not enabled", func() {
+		s.SetupTest()
+		s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).
+			Return(&collectionInfo{
+				ID:         s.testLabel.CollectionID,
+				Properties: map[string]string{common.CollectionAutoCompactionKey: "false"},
+			}, nil).Twice()
+		s.trigger.TimelyTrigger()
+		s.trigger.IDLETrigger(AllCollection)
+	})
+
+	s.Run("collection auto compaction invalid value", func() {
+		s.SetupTest()
+		s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).
+			Return(&collectionInfo{
+				ID:         s.testLabel.CollectionID,
+				Properties: map[string]string{common.CollectionAutoCompactionKey: "okokok"},
+			}, nil).Twice()
+		s.trigger.TimelyTrigger()
+		s.trigger.IDLETrigger(1)
+	})
+
+	s.Run("triggered", func() {
+		s.SetupTest()
+		s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).
+			Return(&collectionInfo{ID: s.testLabel.CollectionID}, nil)
+		s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Times(5)
+		s.mockPlanContext.EXPECT().isFull().Return(false).Times(3)
+		s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).RunAndReturn(
+			func(task *datapb.CompactionTask) error {
+				s.EqualValues(datapb.CompactionTaskState_pipelining, task.GetState())
+				s.NotNil(task.GetInputSegments())
+				s.EqualValues(19530, task.GetTriggerID())
+				s.EqualValues(19530, task.GetPlanID())
+				return nil
+			},
+		).Times(3)
+
+		s.trigger.TimelyTrigger()
+		s.trigger.IDLETrigger(AllCollection)
+	})
 }
 
 func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 	var (
-		collectionID = int64(1000)
+		collectionID = int64(1)
 		fieldID      = int64(2000)
 		indexID      = int64(3000)
 	)
@@ -159,7 +200,10 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.DiskSegmentMaxSize.Key, strconv.Itoa(200))
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.DiskSegmentMaxSize.Key)
 
-	s.triggerManager.meta = &meta{
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key)
+
+	s.trigger.meta = &meta{
 		indexMeta: &indexMeta{
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collectionID: {
@@ -212,11 +256,11 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 			},
 		}
 
-		s.Equal(int64(200*1024*1024), getExpectedSegmentSize(s.triggerManager.meta, collection))
+		s.Equal(int64(200*1024*1024), getExpectedSegmentSize(s.trigger.meta, collection))
 	})
 
 	s.Run("HNSW & DISKANN", func() {
-		s.triggerManager.meta = &meta{
+		s.trigger.meta = &meta{
 			indexMeta: &indexMeta{
 				indexes: map[UniqueID]map[UniqueID]*model.Index{
 					collectionID: {
@@ -267,11 +311,11 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 			},
 		}
 
-		s.Equal(int64(100*1024*1024), getExpectedSegmentSize(s.triggerManager.meta, collection))
+		s.Equal(int64(100*1024*1024), getExpectedSegmentSize(s.trigger.meta, collection))
 	})
 
 	s.Run("some vector has no index", func() {
-		s.triggerManager.meta = &meta{
+		s.trigger.meta = &meta{
 			indexMeta: &indexMeta{
 				indexes: map[UniqueID]map[UniqueID]*model.Index{
 					collectionID: {
@@ -308,6 +352,6 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 			},
 		}
 
-		s.Equal(int64(100*1024*1024), getExpectedSegmentSize(s.triggerManager.meta, collection))
+		s.Equal(int64(100*1024*1024), getExpectedSegmentSize(s.trigger.meta, collection))
 	})
 }
