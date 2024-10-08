@@ -858,7 +858,6 @@ message ImportTaskV2 {
   string reason = 7;
   string complete_time = 8;
   repeated ImportFileStats file_stats = 9;
-  repeated int64 stats_segmentIDs = 10;
 }
 
 enum GcCommand {

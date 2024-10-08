@@ -487,13 +487,7 @@ generate-mockery-datacoord: getdeps
 	$(INSTALL_PATH)/mockery --name=ChannelManager --dir=internal/datacoord --filename=mock_channelmanager.go --output=internal/datacoord  --structname=MockChannelManager --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=SubCluster --dir=internal/datacoord --filename=mock_subcluster.go --output=internal/datacoord  --structname=MockSubCluster --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=Broker --dir=internal/datacoord/broker --filename=mock_coordinator_broker.go --output=internal/datacoord/broker  --structname=MockBroker --with-expecter --inpackage
-<<<<<<< HEAD
 	$(INSTALL_PATH)/mockery --name=WorkerManager --dir=internal/datacoord --filename=mock_worker_manager.go --output=internal/datacoord  --structname=MockWorkerManager --with-expecter --inpackage
-=======
-	$(INSTALL_PATH)/mockery --name=WorkerManager --dir=internal/datacoord/session --filename=mock_worker_manager.go --output=internal/datacoord/session  --structname=MockWorkerManager --with-expecter --inpackage
-	$(INSTALL_PATH)/mockery --name=Manager --dir=internal/datacoord --filename=mock_segment_manager.go --output=internal/datacoord  --structname=MockManager --with-expecter --inpackage
-	$(INSTALL_PATH)/mockery --name=StatsJobManager --dir=internal/datacoord --filename=mock_job_manager.go --output=internal/datacoord  --structname=MockStatsJobManager --with-expecter --inpackage
->>>>>>> a61668c77e (feat: Introduce stats task for import (#35868))
 
 generate-mockery-datanode: getdeps
 	$(INSTALL_PATH)/mockery --name=Allocator --dir=$(PWD)/internal/datanode/allocator --output=$(PWD)/internal/datanode/allocator --filename=mock_allocator.go --with-expecter --structname=MockAllocator --outpkg=allocator --inpackage

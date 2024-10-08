@@ -831,7 +831,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	scheduler.collectMetricsDuration = time.Millisecond * 200
 	scheduler.Start()
 
-	s.Run("Submit", func() {
+	s.Run("enqueue", func() {
 		taskID := int64(6)
 		newTask := &indexpb.AnalyzeTask{
 			CollectionID: s.collectionID,
@@ -1661,7 +1661,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		resetMetaFunc()
 	})
 
-	s.Run("Submit valid", func() {
+	s.Run("enqueue valid", func() {
 		for _, dataType := range []schemapb.DataType{
 			schemapb.DataType_Int8,
 			schemapb.DataType_Int16,
@@ -1692,7 +1692,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	})
 
 	// should still be able to build vec index when opt field is not set
-	s.Run("Submit returns empty optional field when cfg disable", func() {
+	s.Run("enqueue returns empty optional field when cfg disable", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -1713,7 +1713,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		resetMetaFunc()
 	})
 
-	s.Run("Submit returns empty when vector type is not dense vector", func() {
+	s.Run("enqueue returns empty when vector type is not dense vector", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		for _, dataType := range []schemapb.DataType{
 			schemapb.DataType_SparseFloatVector,
@@ -1739,7 +1739,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		}
 	})
 
-	s.Run("Submit returns empty optional field when the data type is not STRING or VARCHAR or Integer", func() {
+	s.Run("enqueue returns empty optional field when the data type is not STRING or VARCHAR or Integer", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		for _, dataType := range []schemapb.DataType{
 			schemapb.DataType_Bool,
@@ -1769,7 +1769,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		}
 	})
 
-	s.Run("Submit returns empty optional field when no partition key", func() {
+	s.Run("enqueue returns empty optional field when no partition key", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		mt.collections[collID].Schema.Fields[1].IsPartitionKey = false
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
@@ -1791,7 +1791,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		resetMetaFunc()
 	})
 
-	s.Run("Submit partitionKeyIsolation is false when schema is not set", func() {
+	s.Run("enqueue partitionKeyIsolation is false when schema is not set", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -1830,7 +1830,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	scheduler_isolation := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler_isolation)
 	scheduler_isolation.Start()
 
-	s.Run("Submit partitionKeyIsolation is false when MV not enabled", func() {
+	s.Run("enqueue partitionKeyIsolation is false when MV not enabled", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -1851,7 +1851,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		resetMetaFunc()
 	})
 
-	s.Run("Submit partitionKeyIsolation is true when MV enabled", func() {
+	s.Run("enqueue partitionKeyIsolation is true when MV enabled", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 		isoCollInfo.Properties[common.PartitionKeyIsolationKey] = "true"
@@ -1874,7 +1874,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		resetMetaFunc()
 	})
 
-	s.Run("Submit partitionKeyIsolation is invalid when MV is enabled", func() {
+	s.Run("enqueue partitionKeyIsolation is invalid when MV is enabled", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 		isoCollInfo.Properties[common.PartitionKeyIsolationKey] = "invalid"
