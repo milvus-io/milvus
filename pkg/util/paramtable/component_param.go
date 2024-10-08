@@ -265,11 +265,13 @@ type commonConfig struct {
 	UseVectorAsClusteringKey       ParamItem `refreshable:"true"`
 	EnableVectorClusteringKey      ParamItem `refreshable:"true"`
 
-	GCEnabled                           ParamItem `refreshable:"false"`
-	GCHelperEnabled                     ParamItem `refreshable:"false"`
+	//GC
+	GCEnabled         ParamItem `refreshable:"false"`
+	GCHelperEnabled   ParamItem `refreshable:"false"`
+	MaximumGOGCConfig ParamItem `refreshable:"false"`
+	MinimumGOGCConfig ParamItem `refreshable:"false"`
+
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
-	MaximumGOGCConfig                   ParamItem `refreshable:"false"`
-	MinimumGOGCConfig                   ParamItem `refreshable:"false"`
 	ReadOnlyPrivileges                  ParamItem `refreshable:"false"`
 	ReadWritePrivileges                 ParamItem `refreshable:"false"`
 	AdminPrivileges                     ParamItem `refreshable:"false"`
@@ -853,6 +855,7 @@ This helps Milvus-CDC synchronize incremental data`,
 
 	p.GCEnabled = ParamItem{
 		Key:          "common.gcenabled",
+		FallbackKeys: []string{"queryNode.gcenabled"},
 		Version:      "2.4.7",
 		DefaultValue: "true",
 	}
@@ -860,6 +863,7 @@ This helps Milvus-CDC synchronize incremental data`,
 
 	p.GCHelperEnabled = ParamItem{
 		Key:          "common.gchelper.enabled",
+		FallbackKeys: []string{"queryNode.gchelper.enabled"},
 		Version:      "2.4.7",
 		DefaultValue: "true",
 	}
@@ -878,6 +882,7 @@ This helps Milvus-CDC synchronize incremental data`,
 
 	p.MaximumGOGCConfig = ParamItem{
 		Key:          "common.gchelper.maximumGoGC",
+		FallbackKeys: []string{"queryNode.gchelper.maximumGoGC"},
 		Version:      "2.4.7",
 		DefaultValue: "200",
 	}
@@ -885,6 +890,7 @@ This helps Milvus-CDC synchronize incremental data`,
 
 	p.MinimumGOGCConfig = ParamItem{
 		Key:          "common.gchelper.minimumGoGC",
+		FallbackKeys: []string{"queryNode.gchelper.minimumGoGC"},
 		Version:      "2.4.7",
 		DefaultValue: "30",
 	}
@@ -2379,12 +2385,7 @@ type queryNodeConfig struct {
 	TopKMergeRatio        ParamItem `refreshable:"true"`
 	CPURatio              ParamItem `refreshable:"true"`
 	MaxTimestampLag       ParamItem `refreshable:"true"`
-	GCEnabled             ParamItem `refreshable:"true"`
-
-	GCHelperEnabled     ParamItem `refreshable:"false"`
-	MinimumGOGCConfig   ParamItem `refreshable:"false"`
-	MaximumGOGCConfig   ParamItem `refreshable:"false"`
-	GracefulStopTimeout ParamItem `refreshable:"false"`
+	GracefulStopTimeout   ParamItem `refreshable:"false"`
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
@@ -2951,34 +2952,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.MaxTimestampLag.Init(base.mgr)
-
-	p.GCEnabled = ParamItem{
-		Key:          "queryNode.gcenabled",
-		Version:      "2.3.0",
-		DefaultValue: "true",
-	}
-	p.GCEnabled.Init(base.mgr)
-
-	p.GCHelperEnabled = ParamItem{
-		Key:          "queryNode.gchelper.enabled",
-		Version:      "2.0.0",
-		DefaultValue: "true",
-	}
-	p.GCHelperEnabled.Init(base.mgr)
-
-	p.MaximumGOGCConfig = ParamItem{
-		Key:          "queryNode.gchelper.maximumGoGC",
-		Version:      "2.0.0",
-		DefaultValue: "200",
-	}
-	p.MaximumGOGCConfig.Init(base.mgr)
-
-	p.MinimumGOGCConfig = ParamItem{
-		Key:          "queryNode.gchelper.minimumGoGC",
-		Version:      "2.0.0",
-		DefaultValue: "30",
-	}
-	p.MinimumGOGCConfig.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "queryNode.gracefulStopTimeout",
