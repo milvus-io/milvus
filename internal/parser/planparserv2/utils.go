@@ -543,3 +543,21 @@ func isIntegerColumn(col *planpb.ColumnInfo) bool {
 func isEscapeCh(ch uint8) bool {
 	return ch == '\\' || ch == 'n' || ch == 't' || ch == 'r' || ch == 'f' || ch == '"' || ch == '\''
 }
+
+func formatUnicode(r uint32) string {
+	return string([]byte{
+		'\\', 'u',
+		hexDigit(r >> 12),
+		hexDigit(r >> 8),
+		hexDigit(r >> 4),
+		hexDigit(r),
+	})
+}
+
+func hexDigit(n uint32) byte {
+	n &= 0xf
+	if n < 10 {
+		return byte(n) + '0'
+	}
+	return byte(n-10) + 'a'
+}
