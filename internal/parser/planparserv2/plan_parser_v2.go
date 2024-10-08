@@ -133,7 +133,6 @@ func convertHanToASCII(s string) string {
 			builder.WriteString(formatUnicode(uint32(r)))
 		} else {
 			builder.WriteRune(r)
-
 		}
 	}
 
