@@ -33,4 +33,6 @@ if __name__ == "__main__":
     argparse.add_argument("--arch", type=str, default="amd64")
     args = argparse.parse_args()
     res = get_image_tag_by_short_name(args.tag, args.arch)
+    if not 4 <= len(res.split("-")) <= 5:
+        raise Exception(f"Failed to get image tag {res} by short name: {args.tag}")
     print(res)
