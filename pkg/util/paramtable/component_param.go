@@ -254,7 +254,7 @@ type commonConfig struct {
 	UseVectorAsClusteringKey       ParamItem `refreshable:"true"`
 	EnableVectorClusteringKey      ParamItem `refreshable:"true"`
 
-	//GC
+	// GC
 	GCEnabled         ParamItem `refreshable:"false"`
 	GCHelperEnabled   ParamItem `refreshable:"false"`
 	MaximumGOGCConfig ParamItem `refreshable:"false"`
