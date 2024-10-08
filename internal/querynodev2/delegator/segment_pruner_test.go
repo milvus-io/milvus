@@ -232,7 +232,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "age==156"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -249,7 +249,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "age!=156"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -266,7 +266,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "age in [100,200,300]"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -284,7 +284,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "age not in [100,200,300]"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -301,7 +301,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "age>=700"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -317,7 +317,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "age>=500 and age<=550"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -333,7 +333,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "500<=age<=550"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -350,7 +350,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "(age>=500 and age<=550) or (age>800 and age<950) or (age>300 and age<330)"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -368,7 +368,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "(age>=500 and age<=550) or (age>800 and age<950) or (age>300 and age<330) or age < 150"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -386,7 +386,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "age > 600 or age < 300"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -404,7 +404,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "age > 600 or age < 30"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -429,7 +429,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
 		exprStr := "age>=500 and age<=550 and info != 'xxx'"
 		// as info is not cluster key field, so 'and' one more info condition will not influence the pruned result
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -447,7 +447,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
 		exprStr := "age>=500 and info != 'xxx' and age<=550"
 		// as info is not cluster key field, so 'and' one more info condition will not influence the pruned result
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -465,7 +465,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
 		exprStr := "age>=500 and age<=550 or info != 'xxx'"
 		// as info is not cluster key field, so 'or' one more will make it impossible to prune any segments
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -484,7 +484,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "(age>=500 and age<=550) or info != 'xxx' or (age>800 and age<950) or (age>300 and age<330) or age < 50"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -503,7 +503,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "(age>=500 and age<=550) and info != 'xxx' or (age>800 and age<950) or (age>300 and age<330) or age < 50"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -520,7 +520,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "info in ['aa','bb','cc']"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -544,7 +544,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarStrField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := `info=="rag"`
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -562,7 +562,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarStrField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := `info=="kpl"`
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -580,7 +580,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarStrField() {
 		copy(testSegments, sps.sealedSegments)
 		exprStr := `info<="less"`
 		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -765,7 +765,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			copy(testSegments, sealedSegments)
 			exprStr := "int8 > 128"
 			schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
@@ -781,7 +781,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			copy(testSegments, sealedSegments)
 			exprStr := "int8 < -129"
 			schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
@@ -797,7 +797,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			copy(testSegments, sealedSegments)
 			exprStr := "int8 > 50"
 			schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
@@ -914,7 +914,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			copy(testSegments, sealedSegments)
 			exprStr := "int16 > 32768"
 			schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
@@ -930,7 +930,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			copy(testSegments, sealedSegments)
 			exprStr := "int16 < -32769"
 			schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
@@ -945,7 +945,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			copy(testSegments, sealedSegments)
 			exprStr := "int16 > 2550"
 			schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
@@ -1063,7 +1063,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			copy(testSegments, sealedSegments)
 			exprStr := "int32 > 2147483648"
 			schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
@@ -1079,7 +1079,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			copy(testSegments, sealedSegments)
 			exprStr := "int32 < -2147483649"
 			schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
@@ -1095,7 +1095,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			copy(testSegments, sealedSegments)
 			exprStr := "int32 > 12550"
 			schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
@@ -1230,7 +1230,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsFloatTypes() {
 			copy(testSegments, sealedSegments)
 			exprStr := "float > 3.5"
 			schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
@@ -1347,7 +1347,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsFloatTypes() {
 			copy(testSegments, sealedSegments)
 			exprStr := "double < -1.5"
 			schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+			planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
@@ -1421,7 +1421,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithoutPartitionStats() {
 		copy(testSegments, sealedSegments)
 		exprStr := "double < -1.5"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -1441,7 +1441,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithoutPartitionStats() {
 		copy(testSegments, sealedSegments)
 		exprStr := "double < -1.5"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -1459,7 +1459,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithoutPartitionStats() {
 		copy(testSegments, sealedSegments)
 		exprStr := "double < -1.5"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
@@ -1537,7 +1537,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithoutPartitionStats() {
 		copy(testSegments, sealedSegments)
 		exprStr := "double < -1.5"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
