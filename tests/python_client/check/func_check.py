@@ -117,7 +117,7 @@ class ResponseChecker:
         return True
 
     def assert_exception(self, res, actual=True, error_dict=None):
-        assert actual is False
+        assert actual is False, f"Response of API {self.func_name} expect get error, but success"
         assert len(error_dict) > 0
         if isinstance(res, Error):
             error_code = error_dict[ct.err_code]
