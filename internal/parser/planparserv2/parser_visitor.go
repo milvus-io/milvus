@@ -129,8 +129,9 @@ func (v *ParserVisitor) VisitFloating(ctx *parser.FloatingContext) interface{} {
 	}
 }
 
-func parseString(text string) interface{} {
-	pattern, err := convertEscapeSingle(text)
+// VisitString translates expr to GenericValue.
+func (v *ParserVisitor) VisitString(ctx *parser.StringContext) interface{} {
+	pattern, err := convertEscapeSingle(ctx.GetText())
 	if err != nil {
 		return err
 	}
@@ -145,11 +146,6 @@ func parseString(text string) interface{} {
 		},
 		nodeDependent: true,
 	}
-}
-
-// VisitString translates expr to GenericValue.
-func (v *ParserVisitor) VisitString(ctx *parser.StringContext) interface{} {
-	return parseString(ctx.StringLiteral().GetText())
 }
 
 func checkDirectComparisonBinaryField(columnInfo *planpb.ColumnInfo) error {
@@ -583,67 +579,6 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 		dataType: schemapb.DataType_Bool,
 	}
 }
-
-//// VisitTerm translates expr to term plan.
-//func (v *ParserVisitor) VisitStringLiteralTerm(ctx *parser.StringLiteralTermContext) interface{} {
-//	fmt.Println(time.Now().UnixMicro())
-//	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
-//	if err != nil {
-//		return err
-//	}
-//	if columnInfo == nil {
-//		return fmt.Errorf("'term' can only be used on single field, but got: %s", ctx.Identifier().GetText())
-//	}
-//
-//	dataType := columnInfo.GetDataType()
-//	if typeutil.IsArrayType(dataType) && len(columnInfo.GetNestedPath()) != 0 {
-//		dataType = columnInfo.GetElementType()
-//	}
-//	allExpr := ctx.AllStringLiteral()
-//	lenOfAllExpr := len(allExpr)
-//	values := make([]*planpb.GenericValue, 0, lenOfAllExpr)
-//	for i := 0; i < lenOfAllExpr; i++ {
-//		term := parseString(ctx.StringLiteral(i).GetText())
-//		//term := allExpr[i].Accept(v)
-//		if getError(term) != nil {
-//			return term
-//		}
-//		n := getGenericValue(term)
-//		if n == nil {
-//			return fmt.Errorf("value '%s' in list cannot be a non-const expression", ctx.StringLiteral(i).GetText())
-//		}
-//		castedValue, err := castValue(dataType, n)
-//		if err != nil {
-//			return fmt.Errorf("value '%s' in list cannot be casted to %s", ctx.StringLiteral(i).GetText(), dataType.String())
-//		}
-//		values = append(values, castedValue)
-//	}
-//	if len(values) <= 0 {
-//		return fmt.Errorf("'term' has empty value list")
-//	}
-//	expr := &planpb.Expr{
-//		Expr: &planpb.Expr_TermExpr{
-//			TermExpr: &planpb.TermExpr{
-//				ColumnInfo: columnInfo,
-//				Values:     values,
-//			},
-//		},
-//	}
-//	if ctx.GetOp().GetTokenType() == parser.PlanParserNIN {
-//		expr = &planpb.Expr{
-//			Expr: &planpb.Expr_UnaryExpr{
-//				UnaryExpr: &planpb.UnaryExpr{
-//					Op:    planpb.UnaryExpr_Not,
-//					Child: expr,
-//				},
-//			},
-//		}
-//	}
-//	return &ExprWithType{
-//		expr:     expr,
-//		dataType: schemapb.DataType_Bool,
-//	}
-//}
 
 // VisitEmptyTerm translates expr to term plan.
 func (v *ParserVisitor) VisitEmptyTerm(ctx *parser.EmptyTermContext) interface{} {
