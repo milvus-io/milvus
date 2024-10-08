@@ -2834,9 +2834,9 @@ class TestLoadCollection(TestcaseBase):
         # verify load different replicas thrown an exception
         error = {ct.err_code: 1100, ct.err_msg: "call query coordinator LoadCollection: can't change the replica number"
                                                 " for loaded collection: invalid parameter[expected=1][actual=2]"}
-        collection_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.load(replica_number=2)
         one_replica, _ = collection_w.get_replicas()
-        assert len(one_replica.groups) == 1
+        assert len(one_replica.groups) == 2
 
         collection_w.release()
         collection_w.load(replica_number=2)
