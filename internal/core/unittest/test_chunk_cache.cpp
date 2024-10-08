@@ -82,7 +82,55 @@ TEST_F(ChunkCacheTest, Read) {
                  field_meta);
 
     auto cc = milvus::storage::MmapManager::GetInstance().GetChunkCache();
-    const auto& column = cc->Read(file_name, descriptor);
+    const auto& column = cc->Read(file_name, descriptor, field_meta, true);
+    Assert(column->ByteSize() == dim * N * 4);
+
+    auto actual = (float*)column->Data();
+    for (auto i = 0; i < N; i++) {
+        AssertInfo(data[i] == actual[i],
+                   fmt::format("expect {}, actual {}", data[i], actual[i]));
+    }
+
+    cc->Remove(file_name);
+    lcm->Remove(file_name);
+}
+
+TEST_F(ChunkCacheTest, ReadByMemoryMode) {
+    auto N = 10000;
+    auto dim = 128;
+    auto metric_type = knowhere::metric::L2;
+
+    auto schema = std::make_shared<milvus::Schema>();
+    auto fake_id = schema->AddDebugField(
+        "fakevec", milvus::DataType::VECTOR_FLOAT, dim, metric_type);
+    auto i64_fid = schema->AddDebugField("counter", milvus::DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    auto dataset = milvus::segcore::DataGen(schema, N);
+
+    auto field_data_meta =
+        milvus::storage::FieldDataMeta{1, 2, 3, fake_id.get()};
+    auto field_meta = milvus::FieldMeta(milvus::FieldName("facevec"),
+                                        fake_id,
+                                        milvus::DataType::VECTOR_FLOAT,
+                                        dim,
+                                        metric_type);
+
+    auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
+                   .GetChunkManager();
+    auto data = dataset.get_col<float>(fake_id);
+    auto data_slices = std::vector<void*>{data.data()};
+    auto slice_sizes = std::vector<int64_t>{static_cast<int64_t>(N)};
+    auto slice_names = std::vector<std::string>{file_name};
+    PutFieldData(lcm.get(),
+                 data_slices,
+                 slice_sizes,
+                 slice_names,
+                 field_data_meta,
+                 field_meta);
+
+    auto cc = milvus::storage::MmapManager::GetInstance().GetChunkCache();
+    const auto& column = cc->Read(file_name, descriptor, field_meta, false);
     Assert(column->ByteSize() == dim * N * 4);
 
     auto actual = (float*)column->Data();
@@ -134,7 +182,7 @@ TEST_F(ChunkCacheTest, TestMultithreads) {
     constexpr int threads = 16;
     std::vector<int64_t> total_counts(threads);
     auto executor = [&](int thread_id) {
-        const auto& column = cc->Read(file_name, descriptor);
+        const auto& column = cc->Read(file_name, descriptor, field_meta, true);
         Assert(column->ByteSize() == dim * N * 4);
 
         auto actual = (float*)column->Data();

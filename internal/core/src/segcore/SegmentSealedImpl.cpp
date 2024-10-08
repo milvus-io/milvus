@@ -129,7 +129,7 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
 }
 
 void
-SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
+SegmentSealedImpl::WarmupChunkCache(const FieldId field_id, bool mmap_enabled) {
     auto& field_meta = schema_->operator[](field_id);
     AssertInfo(field_meta.is_vector(), "vector field is not vector type");
 
@@ -155,7 +155,11 @@ SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     const bool mmap_rss_not_need = true;
     for (const auto& data_path : field_info.insert_files) {
-        auto column = cc->Read(data_path, mmap_descriptor_, mmap_rss_not_need);
+        auto column = cc->Read(data_path,
+                               mmap_descriptor_,
+                               field_meta,
+                               mmap_enabled,
+                               mmap_rss_not_need);
     }
 }
 
@@ -894,7 +898,10 @@ std::tuple<std::string, std::shared_ptr<ColumnBase>> static ReadFromChunkCache(
     const storage::ChunkCachePtr& cc,
     const std::string& data_path,
     const storage::MmapChunkDescriptorPtr& descriptor) {
-    auto column = cc->Read(data_path, descriptor);
+    // For mmap mode, field_meta is unused, so just construct a fake field meta.
+    auto fm = FieldMeta(FieldName(""), FieldId(0), milvus::DataType::NONE);
+    // TODO: add Load() interface for chunk cache when support retrieve_enable, make Read() raise error if cache miss
+    auto column = cc->Read(data_path, descriptor, fm, true);
     cc->Prefetch(data_path);
     return {data_path, column};
 }

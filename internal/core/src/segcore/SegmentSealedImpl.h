@@ -292,7 +292,7 @@ class SegmentSealedImpl : public SegmentSealed {
     LoadScalarIndex(const LoadIndexInfo& info);
 
     void
-    WarmupChunkCache(const FieldId field_id) override;
+    WarmupChunkCache(const FieldId field_id, bool mmap_enabled) override;
 
     bool
     generate_interim_index(const FieldId field_id);

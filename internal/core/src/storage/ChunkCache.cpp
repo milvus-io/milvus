@@ -23,6 +23,8 @@ namespace milvus::storage {
 std::shared_ptr<ColumnBase>
 ChunkCache::Read(const std::string& filepath,
                  const MmapChunkDescriptorPtr& descriptor,
+                 const FieldMeta& field_meta,
+                 bool mmap_enabled,
                  const bool mmap_rss_not_need) {
     // use rlock to get future
     {
@@ -61,8 +63,9 @@ ChunkCache::Read(const std::string& filepath,
     std::string err_msg = "";
     try {
         field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
-        column = Mmap(field_data->GetFieldData(), descriptor);
-        if (mmap_rss_not_need) {
+        column = Mmap(
+            field_data->GetFieldData(), descriptor, field_meta, mmap_enabled);
+        if (mmap_enabled && mmap_rss_not_need) {
             auto ok = madvise(reinterpret_cast<void*>(
                                   const_cast<char*>(column->MmappedData())),
                               column->ByteSize(),
@@ -135,7 +138,9 @@ ChunkCache::Prefetch(const std::string& filepath) {
 
 std::shared_ptr<ColumnBase>
 ChunkCache::Mmap(const FieldDataPtr& field_data,
-                 const MmapChunkDescriptorPtr& descriptor) {
+                 const MmapChunkDescriptorPtr& descriptor,
+                 const FieldMeta& field_meta,
+                 bool mmap_enabled) {
     auto dim = field_data->get_dim();
     auto data_type = field_data->get_data_type();
 
@@ -150,8 +155,13 @@ ChunkCache::Mmap(const FieldDataPtr& field_data,
             indices.push_back(offset);
             offset += field_data->Size(i);
         }
-        auto sparse_column = std::make_shared<SparseFloatColumn>(
-            data_size, dim, data_type, mcm_, descriptor);
+        std::shared_ptr<SparseFloatColumn> sparse_column;
+        if (mmap_enabled) {
+            sparse_column = std::make_shared<SparseFloatColumn>(
+                data_size, dim, data_type, mcm_, descriptor);
+        } else {
+            sparse_column = std::make_shared<SparseFloatColumn>(field_meta);
+        }
         sparse_column->AppendBatchMmap(field_data);
         sparse_column->Seal(std::move(indices));
         column = std::move(sparse_column);
@@ -159,8 +169,13 @@ ChunkCache::Mmap(const FieldDataPtr& field_data,
         AssertInfo(
             false, "TODO: unimplemented for variable data type: {}", data_type);
     } else {
-        column = std::make_shared<Column>(
-            data_size, dim, data_type, mcm_, descriptor);
+        if (mmap_enabled) {
+            column = std::make_shared<Column>(
+                data_size, dim, data_type, mcm_, descriptor);
+        } else {
+            column = std::make_shared<Column>(field_data->get_num_rows(),
+                                              field_meta);
+        }
         column->AppendBatch(field_data);
     }
     return column;
