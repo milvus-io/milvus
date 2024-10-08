@@ -155,6 +155,11 @@ INSTANTIATE_TEST_SUITE_P(
             {{"index_type", "INVERTED"},
              {"mmap", "false"},
              {"field_type", "string"}},
+            {2.0f, 0.0f, 1.0f, 0.0f, false}),
+        std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
+            {{"index_type", "INVERTED"},
+             {"mmap", "true"},
+             {"field_type", "string"}},
             {1.0f, 1.0f, 0.0f, 1.0f, false}),
         std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
             {{"index_type", "BITMAP"},

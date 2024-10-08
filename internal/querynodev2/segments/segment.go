@@ -1164,7 +1164,16 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		return err
 	}
 
-	err = GetCLoadInfoWithFunc(ctx, fieldSchema,
+	return s.innerLoadIndex(ctx, fieldSchema, indexInfo, tr, fieldType)
+}
+
+func (s *LocalSegment) innerLoadIndex(ctx context.Context,
+	fieldSchema *schemapb.FieldSchema,
+	indexInfo *querypb.FieldIndexInfo,
+	tr *timerecord.TimeRecorder,
+	fieldType schemapb.DataType,
+) error {
+	err := GetCLoadInfoWithFunc(ctx, fieldSchema,
 		s.LoadInfo(), indexInfo, func(loadIndexInfo *LoadIndexInfo) error {
 			newLoadIndexInfoSpan := tr.RecordSpan()
 
@@ -1204,7 +1213,6 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 			)
 			return nil
 		})
-
 	if err != nil {
 		log.Warn("load index failed", zap.Error(err))
 	}

@@ -90,7 +90,6 @@ type Loader interface {
 }
 
 type ResourceEstimate struct {
-	Success         bool
 	MaxMemoryCost   uint64
 	MaxDiskCost     uint64
 	FinalMemoryCost uint64
@@ -99,13 +98,7 @@ type ResourceEstimate struct {
 }
 
 func GetResourceEstimate(estimate *C.LoadResourceRequest) ResourceEstimate {
-	if int(estimate.max_memory_cost) < 0 {
-		return ResourceEstimate{
-			Success: false,
-		}
-	}
 	return ResourceEstimate{
-		Success:         true,
 		MaxMemoryCost:   uint64(float64(estimate.max_memory_cost) * util.GB),
 		MaxDiskCost:     uint64(float64(estimate.max_disk_cost) * util.GB),
 		FinalMemoryCost: uint64(float64(estimate.final_memory_cost) * util.GB),
@@ -1329,9 +1322,6 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			err := GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
 				loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
 				estimateResult = GetResourceEstimate(&loadResourceRequest)
-				if !estimateResult.Success {
-					return errors.New("failed to estimate resource usage of index")
-				}
 				return nil
 			})
 			if err != nil {
