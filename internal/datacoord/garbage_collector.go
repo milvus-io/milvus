@@ -439,7 +439,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 			droppedCompactTo[to] = struct{}{}
 		}
 	}
-	indexedSegments := FilterInIndexedSegments(gc.handler, gc.meta, lo.Keys(droppedCompactTo)...)
+	indexedSegments := FilterInIndexedSegments(gc.handler, gc.meta, false, lo.Keys(droppedCompactTo)...)
 	indexedSet := make(typeutil.UniqueSet)
 	for _, segment := range indexedSegments {
 		indexedSet.Insert(segment.GetID())
