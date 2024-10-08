@@ -129,7 +129,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 
 	validSegmentInfos := make(map[int64]*SegmentInfo)
-	indexedSegments := FilterInIndexedSegments(h, h.s.meta, segments...)
+	indexedSegments := FilterInIndexedSegments(h, h.s.meta, false, segments...)
 	indexed := typeutil.NewUniqueSet(lo.Map(indexedSegments, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })...)
 
 	unIndexedIDs := make(typeutil.UniqueSet)
