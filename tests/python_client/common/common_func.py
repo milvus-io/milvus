@@ -77,6 +77,11 @@ param_info = ParamInfo()
 
 
 def analyze_documents(texts, language="en"):
+    valid_texts = []
+    for text in texts:
+        if isinstance(text, str):
+            valid_texts.append(text)
+    texts = valid_texts
     stopwords = "en"
     if language in ["en", "english"]:
         stopwords = "en"
