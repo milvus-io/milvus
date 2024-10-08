@@ -118,8 +118,6 @@ def get_bm25_ground_truth(corpus, queries, top_k=100, language="en"):
     return results, scores
 
 
-
-
 def custom_tokenizer(language="en"):
     def remove_punctuation(text):
         text = text.strip()
@@ -176,6 +174,7 @@ def analyze_documents(texts, language="en"):
     log.debug(f"Analyze document cost time: {tt}")
 
     return word_freq
+
 
 def check_token_overlap(text_a, text_b, language="en"):
     word_freq_a = analyze_documents([text_a], language)
