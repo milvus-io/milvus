@@ -105,6 +105,7 @@ const (
 	segmentStateLabelName    = "segment_state"
 	segmentIDLabelName       = "segment_id"
 	segmentLevelLabelName    = "segment_level"
+	segmentIsSortedLabelName = "segment_is_sorted"
 	usernameLabelName        = "username"
 	roleNameLabelName        = "role_name"
 	cacheNameLabelName       = "cache_name"

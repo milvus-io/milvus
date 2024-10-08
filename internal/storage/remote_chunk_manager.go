@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -29,6 +30,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/api/googleapi"
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -38,11 +40,12 @@ import (
 )
 
 const (
-	CloudProviderGCP     = "gcp"
-	CloudProviderAWS     = "aws"
-	CloudProviderAliyun  = "aliyun"
-	CloudProviderAzure   = "azure"
-	CloudProviderTencent = "tencent"
+	CloudProviderGCP       = "gcp"
+	CloudProviderGCPNative = "gcpnative"
+	CloudProviderAWS       = "aws"
+	CloudProviderAliyun    = "aliyun"
+	CloudProviderAzure     = "azure"
+	CloudProviderTencent   = "tencent"
 )
 
 // ChunkObjectWalkFunc is the callback function for walking objects.
@@ -78,6 +81,8 @@ func NewRemoteChunkManager(ctx context.Context, c *config) (*RemoteChunkManager,
 	var err error
 	if c.cloudProvider == CloudProviderAzure {
 		client, err = newAzureObjectStorageWithConfig(ctx, c)
+	} else if c.cloudProvider == CloudProviderGCPNative {
+		client, err = newGcpNativeObjectStorageWithConfig(ctx, c)
 	} else {
 		client, err = newMinioObjectStorageWithConfig(ctx, c)
 	}
@@ -400,6 +405,11 @@ func checkObjectStorageError(fileName string, err error) error {
 		return merr.WrapErrIoFailed(fileName, err)
 	case minio.ErrorResponse:
 		if err.Code == "NoSuchKey" {
+			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
+		}
+		return merr.WrapErrIoFailed(fileName, err)
+	case *googleapi.Error:
+		if err.Code == http.StatusNotFound {
 			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
 		}
 		return merr.WrapErrIoFailed(fileName, err)

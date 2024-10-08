@@ -51,6 +51,7 @@ var (
 		}, []string{
 			segmentStateLabelName,
 			segmentLevelLabelName,
+			segmentIsSortedLabelName,
 		})
 
 	// DataCoordCollectionNum records the num of collections managed by DataCoord.

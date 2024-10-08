@@ -464,7 +464,7 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 		if !ok {
 			msgid, err := it.idAllocator.AllocOne()
 			if err != nil {
-				errors.Wrap(err, "failed to allocate MsgID for delete of upsert")
+				return errors.Wrap(err, "failed to allocate MsgID for delete of upsert")
 			}
 			sliceRequest := &msgpb.DeleteRequest{
 				Base: commonpbutil.NewMsgBase(

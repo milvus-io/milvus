@@ -913,6 +913,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			InsertChannel: segment.InsertChannel,
 			NumOfRows:     rowCount,
 			Level:         segment.GetLevel(),
+			IsSorted:      segment.GetIsSorted(),
 		})
 	}
 
