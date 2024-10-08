@@ -121,11 +121,14 @@ class FileManagerImpl : public knowhere::FileManager {
 
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
-        return rcm_->GetRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
-               std::to_string(index_meta_.build_id) + "/" +
-               std::to_string(index_meta_.index_version) + "/" +
-               std::to_string(field_meta_.partition_id) + "/" +
-               std::to_string(field_meta_.segment_id);
+        std::string prefix = rcm_->GetRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/";
+        prefix.append(rcm_->UseCollectionIdBasedIndexPath() ? std::to_string(field_meta_.collection_id) + "/" : "");
+        prefix.append(std::to_string(index_meta_.build_id) + "/" +
+        std::to_string(index_meta_.index_version) + "/" +
+        std::to_string(field_meta_.partition_id) + "/" +
+        std::to_string(field_meta_.segment_id));
+
+        return prefix;
     }
 
  protected:

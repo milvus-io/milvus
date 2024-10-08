@@ -63,20 +63,21 @@ func NewBuildIndexInfo(config *indexpb.StorageConfig) (*BuildIndexInfo, error) {
 	defer C.free(unsafe.Pointer(cRegion))
 	defer C.free(unsafe.Pointer(cSslCACert))
 	storageConfig := C.CStorageConfig{
-		address:          cAddress,
-		bucket_name:      cBucketName,
-		access_key_id:    cAccessKey,
-		access_key_value: cAccessValue,
-		root_path:        cRootPath,
-		storage_type:     cStorageType,
-		cloud_provider:   cCloudProvider,
-		iam_endpoint:     cIamEndPoint,
-		useSSL:           C.bool(config.UseSSL),
-		sslCACert:        cSslCACert,
-		useIAM:           C.bool(config.UseIAM),
-		region:           cRegion,
-		useVirtualHost:   C.bool(config.UseVirtualHost),
-		requestTimeoutMs: C.int64_t(config.RequestTimeoutMs),
+		address:                  cAddress,
+		bucket_name:              cBucketName,
+		access_key_id:            cAccessKey,
+		access_key_value:         cAccessValue,
+		root_path:                cRootPath,
+		storage_type:             cStorageType,
+		cloud_provider:           cCloudProvider,
+		iam_endpoint:             cIamEndPoint,
+		useSSL:                   C.bool(config.UseSSL),
+		sslCACert:                cSslCACert,
+		useIAM:                   C.bool(config.UseIAM),
+		region:                   cRegion,
+		useVirtualHost:           C.bool(config.UseVirtualHost),
+		requestTimeoutMs:         C.int64_t(config.RequestTimeoutMs),
+		useCollectionIdIndexPath: C.bool(config.UseCollectionIdIndexPath),
 	}
 
 	status := C.NewBuildIndexInfo(&cBuildIndexInfo, storageConfig)
