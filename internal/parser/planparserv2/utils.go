@@ -539,3 +539,7 @@ func isIntegerColumn(col *planpb.ColumnInfo) bool {
 		(typeutil.IsArrayType(col.GetDataType()) && typeutil.IsIntegerType(col.GetElementType())) ||
 		typeutil.IsJSONType(col.GetDataType())
 }
+
+func isEscapeCh(ch uint8) bool {
+	return ch == '\\' || ch == 'n' || ch == 't' || ch == 'r' || ch == 'f' || ch == '"' || ch == '\''
+}
