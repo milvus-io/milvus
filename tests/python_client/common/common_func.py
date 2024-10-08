@@ -676,7 +676,7 @@ def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.de
                   gen_array_field(name=ct.default_float_array_field_name, element_type=DataType.FLOAT,
                                   max_capacity=max_capacity),
                   gen_array_field(name=ct.default_string_array_field_name, element_type=DataType.VARCHAR,
-                                  max_capacity=max_capacity, max_length=max_length)]
+                                  max_capacity=max_capacity, max_length=max_length, nullable=True)]
         if with_json is False:
             fields.remove(gen_json_field())
 
@@ -1688,6 +1688,10 @@ def get_dim_by_schema(schema=None):
     return None
 
 
+def gen_varchar_data(length: int, nb: int):
+    return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
+
+
 def gen_data_by_collection_field(field, nb=None, start=None):
     # if nb is None, return one data, else return a list of data
     data_type = field.dtype
@@ -1726,8 +1730,8 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         max_length = min(20, max_length-1)
         length = random.randint(0, max_length)
         if nb is None:
-            return "".join([chr(random.randint(97, 122)) for _ in range(length)])
-        return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
+            return gen_varchar_data(length=length, nb=1)[0]
+        return gen_varchar_data(length=length, nb=nb)
     if data_type == DataType.JSON:
         if nb is None:
             return {"name": fake.name(), "address": fake.address()}
@@ -2930,7 +2934,7 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
     return vectors
 
 
-def gen_vectors_based_on_vector_type(num, dim, vector_data_type):
+def gen_vectors_based_on_vector_type(num, dim, vector_data_type=ct.float_type):
     """
     generate float16 vector data
     raw_vectors : the vectors
@@ -3000,6 +3004,9 @@ def set_collection_schema(fields: list, field_params: dict = {}, **kwargs):
                 is_primary: bool
                 description: str
                 max_length: int = 65535
+            varchar_2:
+                max_length: int = 100
+                is_partition_key: bool
             array_int8_1:
                 max_capacity: int = 100
             array_varchar_1:
@@ -3012,6 +3019,7 @@ def set_collection_schema(fields: list, field_params: dict = {}, **kwargs):
             primary_field: str
             auto_id: bool
             enable_dynamic_field: bool
+            num_partitions: int
     """
     field_schemas = [set_field_schema(field=field, params=field_params.get(field, {})) for field in fields]
     return ApiCollectionSchemaWrapper().init_collection_schema(fields=field_schemas, **kwargs)[0]

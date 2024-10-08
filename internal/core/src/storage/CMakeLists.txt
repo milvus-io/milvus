@@ -15,6 +15,12 @@
 # limitations under the License.
 
 add_source_at_current_directory()
+
+if (ENABLE_GCP_NATIVE)
+    add_definitions(-DENABLE_GCP_NATIVE)
+    add_subdirectory(gcp-native-storage)
+endif()
+
 if (DEFINED AZURE_BUILD_DIR)
     add_definitions(-DAZURE_BUILD_DIR)
     include_directories(azure-blob-storage)

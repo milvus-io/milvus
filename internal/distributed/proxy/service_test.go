@@ -177,6 +177,9 @@ func waitForServerReady() {
 }
 
 func runAndWaitForServerReady(server *Server) error {
+	if err := server.Prepare(); err != nil {
+		return err
+	}
 	err := server.Run()
 	if err != nil {
 		return err
@@ -1036,7 +1039,8 @@ func Test_NewHTTPServer_TLS_TwoWay(t *testing.T) {
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "19529")
 	err = runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
-	server.Stop()
+	err = server.Stop()
+	assert.Nil(t, err)
 }
 
 func Test_NewHTTPServer_TLS_OneWay(t *testing.T) {
@@ -1064,12 +1068,14 @@ func Test_NewHTTPServer_TLS_OneWay(t *testing.T) {
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "8080")
 
 	err := runAndWaitForServerReady(server)
+	fmt.Printf("err: %v\n", err)
 	assert.Nil(t, err)
 	assert.NotNil(t, server.grpcExternalServer)
 	err = server.Stop()
 	assert.Nil(t, err)
 
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "19529")
+	fmt.Printf("err: %v\n", err)
 	err = runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
 	server.Stop()
@@ -1080,8 +1086,8 @@ func Test_NewHTTPServer_TLS_FileNotExisted(t *testing.T) {
 
 	mockProxy := server.proxy.(*mocks.MockProxy)
 	mockProxy.EXPECT().Stop().Return(nil)
-	mockProxy.EXPECT().SetEtcdClient(mock.Anything).Return()
-	mockProxy.EXPECT().SetAddress(mock.Anything).Return()
+	mockProxy.EXPECT().SetEtcdClient(mock.Anything).Return().Maybe()
+	mockProxy.EXPECT().SetAddress(mock.Anything).Return().Maybe()
 	Params := &paramtable.Get().ProxyGrpcServerCfg
 
 	paramtable.Get().Save(Params.TLSMode.Key, "1")
@@ -1220,7 +1226,9 @@ func Test_Service_GracefulStop(t *testing.T) {
 		enableRegisterProxyServer = false
 	}()
 
-	err := server.Run()
+	err := server.Prepare()
+	assert.Nil(t, err)
+	err = server.Run()
 	assert.Nil(t, err)
 
 	proxyClient, err := grpcproxyclient.NewClient(ctx, fmt.Sprintf("localhost:%s", Params.Port.GetValue()), 0)

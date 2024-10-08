@@ -40,6 +40,9 @@ class IndexErrorMessage(ExceptionsMessage):
     CheckBitmapOnPK = "create bitmap index on primary key not supported"
     CheckBitmapCardinality = "failed to check bitmap cardinality limit, should be larger than 0 and smaller than 1000"
     NotConfigable = "{0} is not configable index param"
+    InvalidOffsetCache = "invalid offset cache index params"
+    OneIndexPerField = "at most one distinct index is allowed per field"
+    AlterOnLoadedCollection = "can't alter index on loaded collection, please release the collection first"
 
 
 class QueryErrorMessage(ExceptionsMessage):

@@ -3,7 +3,6 @@ package streaming
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -97,8 +96,7 @@ func (u *walAccesserImpl) appendToVChannel(ctx context.Context, vchannel string,
 	// Otherwise, we start a transaction to append the messages.
 	// The transaction will be committed when all messages are appended.
 	txn, err := u.Txn(ctx, TxnOption{
-		VChannel:  vchannel,
-		Keepalive: 5 * time.Second,
+		VChannel: vchannel,
 	})
 	if err != nil {
 		resp.fillAllError(err)

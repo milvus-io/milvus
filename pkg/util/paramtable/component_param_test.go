@@ -583,16 +583,19 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 	})
 
-	t.Run("test streamingCoordConfig", func(t *testing.T) {
-		assert.Equal(t, 1*time.Minute, params.StreamingCoordCfg.AutoBalanceTriggerInterval.GetAsDurationByParse())
-		assert.Equal(t, 50*time.Millisecond, params.StreamingCoordCfg.AutoBalanceBackoffInitialInterval.GetAsDurationByParse())
-		assert.Equal(t, 2.0, params.StreamingCoordCfg.AutoBalanceBackoffMultiplier.GetAsFloat())
-		params.Save(params.StreamingCoordCfg.AutoBalanceTriggerInterval.Key, "50s")
-		params.Save(params.StreamingCoordCfg.AutoBalanceBackoffInitialInterval.Key, "50s")
-		params.Save(params.StreamingCoordCfg.AutoBalanceBackoffMultiplier.Key, "3.5")
-		assert.Equal(t, 50*time.Second, params.StreamingCoordCfg.AutoBalanceTriggerInterval.GetAsDurationByParse())
-		assert.Equal(t, 50*time.Second, params.StreamingCoordCfg.AutoBalanceBackoffInitialInterval.GetAsDurationByParse())
-		assert.Equal(t, 3.5, params.StreamingCoordCfg.AutoBalanceBackoffMultiplier.GetAsFloat())
+	t.Run("test streamingConfig", func(t *testing.T) {
+		assert.Equal(t, 1*time.Minute, params.StreamingCfg.WALBalancerTriggerInterval.GetAsDurationByParse())
+		assert.Equal(t, 50*time.Millisecond, params.StreamingCfg.WALBalancerBackoffInitialInterval.GetAsDurationByParse())
+		assert.Equal(t, 2.0, params.StreamingCfg.WALBalancerBackoffMultiplier.GetAsFloat())
+		assert.Equal(t, 10*time.Second, params.StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse())
+		params.Save(params.StreamingCfg.WALBalancerTriggerInterval.Key, "50s")
+		params.Save(params.StreamingCfg.WALBalancerBackoffInitialInterval.Key, "50s")
+		params.Save(params.StreamingCfg.WALBalancerBackoffMultiplier.Key, "3.5")
+		params.Save(params.StreamingCfg.TxnDefaultKeepaliveTimeout.Key, "3500ms")
+		assert.Equal(t, 50*time.Second, params.StreamingCfg.WALBalancerTriggerInterval.GetAsDurationByParse())
+		assert.Equal(t, 50*time.Second, params.StreamingCfg.WALBalancerBackoffInitialInterval.GetAsDurationByParse())
+		assert.Equal(t, 3.5, params.StreamingCfg.WALBalancerBackoffMultiplier.GetAsFloat())
+		assert.Equal(t, 3500*time.Millisecond, params.StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse())
 	})
 
 	t.Run("channel config priority", func(t *testing.T) {

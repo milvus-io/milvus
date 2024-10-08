@@ -116,7 +116,8 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage
 		if err != nil {
 			return nil, err
 		}
-		rowsSet, err := readData(reader, storage.DeleteEventType)
+		// no need to read nulls in DeleteEventType
+		rowsSet, _, err := readData(reader, storage.DeleteEventType)
 		if err != nil {
 			return nil, err
 		}

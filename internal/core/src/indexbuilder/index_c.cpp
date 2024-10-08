@@ -103,6 +103,8 @@ get_storage_config(const milvus::proto::indexcgo::StorageConfig& config) {
     storage_config.region = config.region();
     storage_config.useVirtualHost = config.use_virtual_host();
     storage_config.requestTimeoutMs = config.request_timeout_ms();
+    storage_config.gcp_credential_json =
+        std::string(config.gcpcredentialjson());
     return storage_config;
 }
 
@@ -563,6 +565,8 @@ NewBuildIndexInfo(CBuildIndexInfo* c_build_index_info,
         storage_config.region = c_storage_config.region;
         storage_config.useVirtualHost = c_storage_config.useVirtualHost;
         storage_config.requestTimeoutMs = c_storage_config.requestTimeoutMs;
+        storage_config.gcp_credential_json =
+            std::string(c_storage_config.gcp_credential_json);
 
         *c_build_index_info = build_index_info.release();
         auto status = CStatus();

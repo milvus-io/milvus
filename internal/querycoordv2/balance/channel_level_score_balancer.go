@@ -161,8 +161,15 @@ func (b *ChannelLevelScoreBalancer) genStoppingSegmentPlan(replica *meta.Replica
 
 func (b *ChannelLevelScoreBalancer) genSegmentPlan(replica *meta.Replica, channelName string, onlineNodes []int64) []SegmentAssignPlan {
 	segmentDist := make(map[int64][]*meta.Segment)
-	nodeScore := b.convertToNodeItems(replica.GetCollectionID(), onlineNodes)
-	totalScore := 0
+	nodeItemsMap := b.convertToNodeItems(replica.GetCollectionID(), onlineNodes)
+	if len(nodeItemsMap) == 0 {
+		return nil
+	}
+	log.Info("node workload status",
+		zap.Int64("collectionID", replica.GetCollectionID()),
+		zap.Int64("replicaID", replica.GetID()),
+		zap.String("channelName", channelName),
+		zap.Stringers("nodes", lo.Values(nodeItemsMap)))
 
 	// list all segment which could be balanced, and calculate node's score
 	for _, node := range onlineNodes {
@@ -171,19 +178,14 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(replica *meta.Replica, channe
 			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
 		})
 		segmentDist[node] = segments
-		totalScore += nodeScore[node].getPriority()
-	}
-
-	if totalScore == 0 {
-		return nil
 	}
 
 	// find the segment from the node which has more score than the average
 	segmentsToMove := make([]*meta.Segment, 0)
-	average := totalScore / len(onlineNodes)
 	for node, segments := range segmentDist {
-		leftScore := nodeScore[node].getPriority()
-		if leftScore <= average {
+		currentScore := nodeItemsMap[node].getCurrentScore()
+		assignedScore := nodeItemsMap[node].getAssignedScore()
+		if currentScore <= assignedScore {
 			continue
 		}
 
@@ -192,8 +194,8 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(replica *meta.Replica, channe
 		})
 		for _, s := range segments {
 			segmentsToMove = append(segmentsToMove, s)
-			leftScore -= b.calculateSegmentScore(s)
-			if leftScore <= average {
+			currentScore -= b.calculateSegmentScore(s)
+			if currentScore <= assignedScore {
 				break
 			}
 		}

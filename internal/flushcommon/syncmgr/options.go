@@ -117,3 +117,8 @@ func (t *SyncTask) WithLevel(level datapb.SegmentLevel) *SyncTask {
 	t.level = level
 	return t
 }
+
+func (t *SyncTask) WithDataSource(source string) *SyncTask {
+	t.dataSource = source
+	return t
+}

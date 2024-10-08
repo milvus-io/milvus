@@ -44,13 +44,12 @@ func (r *fieldReader) Next() (storage.FieldData, error) {
 	if err != nil {
 		return nil, err
 	}
-	rowsSet, err := readData(r.reader, storage.InsertEventType)
+	rowsSet, validDataRows, err := readData(r.reader, storage.InsertEventType)
 	if err != nil {
 		return nil, err
 	}
-	// need append nulls
-	for _, rows := range rowsSet {
-		err = fieldData.AppendRows(rows, nil)
+	for i, rows := range rowsSet {
+		err = fieldData.AppendRows(rows, validDataRows[i])
 		if err != nil {
 			return nil, err
 		}

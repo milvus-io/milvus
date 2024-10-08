@@ -840,10 +840,6 @@ func (s *spySegmentManager) allocSegmentForImport(ctx context.Context, collectio
 	return nil, nil
 }
 
-func (s *spySegmentManager) AllocImportSegment(ctx context.Context, taskID int64, collectionID UniqueID, partitionID UniqueID, channelName string, level datapb.SegmentLevel) (*SegmentInfo, error) {
-	return nil, nil
-}
-
 // DropSegment drops the segment from manager.
 func (s *spySegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 }

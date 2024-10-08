@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	grpcdatacoord "github.com/milvus-io/milvus/internal/distributed/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -152,10 +151,8 @@ func (s *CompactionSuite) compactAndReboot(collection string) {
 
 	// Reboot
 	if planResp.GetMergeInfos()[0].GetTarget() == int64(-1) {
-		s.Cluster.DataCoord.Stop()
-		s.Cluster.DataCoord = grpcdatacoord.NewServer(ctx, s.Cluster.GetFactory())
-		err = s.Cluster.DataCoord.Run()
-		s.Require().NoError(err)
+		s.Cluster.StopDataCoord()
+		s.Cluster.StartDataCoord()
 
 		stateResp, err = s.Cluster.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
 			CompactionID: compactID,

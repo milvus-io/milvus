@@ -1256,6 +1256,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 	s.Run("HNSW", func() {
 		ctx := context.Background()
+		indexNodeTasks := make(map[int64]int)
 
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		in := mocks.NewMockIndexNodeClient(s.T())
@@ -1353,10 +1354,19 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		// assign failed --> retry
 		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
-		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *workerpb.CreateJobV2Request, option ...grpc.CallOption) (*commonpb.Status, error) {
+			indexNodeTasks[request.GetTaskID()]++
+			return nil, errors.New("mock error")
+		}).Once()
 
 		// retry --> init
-		workerManager.EXPECT().GetClientByID(mock.Anything).Return(nil, false).Once()
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
+		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *workerpb.DropJobsV2Request, option ...grpc.CallOption) (*commonpb.Status, error) {
+			for _, taskID := range request.GetTaskIDs() {
+				indexNodeTasks[taskID]--
+			}
+			return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+		}).Once()
 
 		// init --> inProgress
 		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
@@ -1370,7 +1380,10 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 				},
 			},
 		}, nil).Once()
-		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Once()
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *workerpb.CreateJobV2Request, option ...grpc.CallOption) (*commonpb.Status, error) {
+			indexNodeTasks[request.GetTaskID()]++
+			return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+		}).Once()
 
 		// inProgress --> Finished
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
@@ -1393,7 +1406,13 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 
 		// finished --> done
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
-		workerManager.EXPECT().GetClientByID(mock.Anything).Return(nil, false).Once()
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
+		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *workerpb.DropJobsV2Request, option ...grpc.CallOption) (*commonpb.Status, error) {
+			for _, taskID := range request.GetTaskIDs() {
+				indexNodeTasks[taskID]--
+			}
+			return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+		}).Once()
 
 		for {
 			scheduler.RLock()
@@ -1411,6 +1430,10 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		indexJob, exist := mt.indexMeta.GetIndexJob(buildID)
 		s.True(exist)
 		s.Equal(commonpb.IndexState_Finished, indexJob.IndexState)
+
+		for _, v := range indexNodeTasks {
+			s.Zero(v)
+		}
 	})
 }
 

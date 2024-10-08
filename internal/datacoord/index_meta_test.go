@@ -1247,18 +1247,18 @@ func TestMeta_UpdateVersion(t *testing.T) {
 	).Return(errors.New("fail"))
 
 	t.Run("success", func(t *testing.T) {
-		err := m.UpdateVersion(buildID)
+		err := m.UpdateVersion(buildID, nodeID)
 		assert.NoError(t, err)
 	})
 
 	t.Run("fail", func(t *testing.T) {
 		m.catalog = ec
-		err := m.UpdateVersion(buildID)
+		err := m.UpdateVersion(buildID, nodeID)
 		assert.Error(t, err)
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.UpdateVersion(buildID + 1)
+		err := m.UpdateVersion(buildID+1, nodeID)
 		assert.Error(t, err)
 	})
 }
@@ -1315,18 +1315,18 @@ func TestMeta_BuildIndex(t *testing.T) {
 	).Return(errors.New("fail"))
 
 	t.Run("success", func(t *testing.T) {
-		err := m.BuildIndex(buildID, nodeID)
+		err := m.BuildIndex(buildID)
 		assert.NoError(t, err)
 	})
 
 	t.Run("fail", func(t *testing.T) {
 		m.catalog = ec
-		err := m.BuildIndex(buildID, nodeID)
+		err := m.BuildIndex(buildID)
 		assert.Error(t, err)
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.BuildIndex(buildID+1, nodeID)
+		err := m.BuildIndex(buildID + 1)
 		assert.Error(t, err)
 	})
 }

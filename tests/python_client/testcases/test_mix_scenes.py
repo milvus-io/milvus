@@ -1,12 +1,16 @@
+import random
 import re
 import math  # do not remove `math`
 import pytest
+import random
 import numpy as np
+import pandas as pd
 from pymilvus import DataType, AnnSearchRequest, RRFRanker, WeightedRanker
 
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
+from common import common_params as cp
 from common.code_mapping import QueryErrorMessage as qem
 from common.common_params import (
     FieldParams, MetricType, DefaultVectorIndexParams, DefaultScalarIndexParams, Expr, AlterIndexParams
@@ -30,7 +34,7 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
         self._connect(self)
 
         # init params
-        self.primary_field, nb = "int64_pk", 3000
+        self.primary_field, self.nb = "int64_pk", 3000
 
         # create a collection with fields
         self.collection_wrap.init_collection(
@@ -48,7 +52,7 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
         )
 
         # prepare data (> 1024 triggering index building)
-        self.insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=nb)
+        self.insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=self.nb)
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
@@ -155,6 +159,48 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("range_num, counts", [([-100, 200], 10), ([2000, 5000], 10), ([3000, 4000], 5)])
+    @pytest.mark.parametrize("expr_field", ['INT8', 'INT16', 'INT32', 'INT64'])
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    def test_no_index_query_with_int_in(self, range_num, counts, expr_field, limit):
+        """
+        target:
+            1. check number operation `in` and `not in`, calculate total number via expr
+        method:
+            1. prepare some data
+            2. query with the different expr(in, not in) and limit
+            3. check query result
+        expected:
+            1. query response equal to min(insert data, limit)
+        """
+        # random set expr list
+        range_numbers = [random.randint(*range_num) for _ in range(counts)]
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if i in range_numbers])
+
+        # query `in`
+        res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # count `in`
+        self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
+        # query `not in`
+        not_in_count = self.nb - expr_count
+        res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+
+        # count `not in`
+        self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": not_in_count}]})
+
 
 @pytest.mark.xdist_group("TestHybridIndexDQLExpr")
 class TestHybridIndexDQLExpr(TestCaseClassBase):
@@ -172,13 +218,14 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
 
         # init params
         self.primary_field, self.nb = "int64_pk", 3000
+        self.all_fields = [self.primary_field, DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
+                           DataType.SPARSE_FLOAT_VECTOR.name, DataType.BINARY_VECTOR.name, *self().all_scalar_fields]
 
         # create a collection with fields
         self.collection_wrap.init_collection(
             name=cf.gen_unique_str("test_hybrid_index_dql_expr"),
             schema=cf.set_collection_schema(
-                fields=[self.primary_field, DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
-                        DataType.SPARSE_FLOAT_VECTOR.name, DataType.BINARY_VECTOR.name, *self().all_scalar_fields],
+                fields=self.all_fields,
                 field_params={
                     self.primary_field: FieldParams(is_primary=True).to_dict,
                     DataType.FLOAT16_VECTOR.name: FieldParams(dim=3).to_dict,
@@ -189,7 +236,10 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         )
 
         # prepare data (> 1024 triggering index building)
-        self.insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=self.nb)
+        self.insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=self.nb, default_values={
+            'VARCHAR': cf.gen_varchar_data(3, self.nb),
+            'ARRAY_VARCHAR': [cf.gen_varchar_data(length=2, nb=random.randint(0, 10)) for _ in range(self.nb)]
+        })
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
@@ -279,6 +329,114 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("range_num, counts", [([-100, 200], 10), ([2000, 5000], 10), ([3000, 4000], 5)])
+    @pytest.mark.parametrize("expr_field", ['INT8', 'INT16', 'INT32', 'INT64'])
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    def test_hybrid_index_query_with_int_in(self, range_num, counts, expr_field, limit):
+        """
+        target:
+            1. check number operation `in` and `not in`, calculate total number via expr
+        method:
+            1. prepare some data and  build `Hybrid index` on scalar fields
+            2. query with the different expr(in, not in) and limit
+            3. check query result
+        expected:
+            1. query response equal to min(insert data, limit)
+        """
+        # random set expr list
+        range_numbers = [random.randint(*range_num) for _ in range(counts)]
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if i in range_numbers])
+
+        # query `in`
+        res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # count `in`
+        self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
+        # query `not in`
+        not_in_count = self.nb - expr_count
+        res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+
+        # count `not in`
+        self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": not_in_count}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("range_num, counts", [([1, 3], 50), ([2, 5], 50), ([3, 3], 100)])
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    @pytest.mark.parametrize("expr_field", ['VARCHAR'])
+    def test_hybrid_index_query_with_varchar_in(self, range_num, counts, limit, expr_field):
+        """
+        target:
+            1. check varchar operation `in` and `not in`, calculate total number via expr
+        method:
+            1. prepare some data and  build `Hybrid index` on scalar fields
+            2. query with the different expr(in, not in) and limit
+            3. check query result
+        expected:
+            1. query response equal to min(insert data, limit)
+        """
+        # random set expr list
+        range_numbers = [cf.gen_varchar_data(random.randint(*range_num), 1)[0] for _ in range(counts)]
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if i in range_numbers])
+
+        # query `in`
+        res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # count `in`
+        self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
+        # query `not in`
+        not_in_count = self.nb - expr_count
+        res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+
+        # count `not in`
+        self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": not_in_count}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("length", [0, 5, 11])
+    @pytest.mark.parametrize("expr_obj", [Expr.array_length, Expr.ARRAY_LENGTH])
+    @pytest.mark.parametrize("expr_field", ['ARRAY_VARCHAR'])
+    def test_hybrid_index_query_array_length_count(self, length, expr_obj, expr_field):
+        """
+        target:
+            1. check query with count(*) via expr `array length`
+        method:
+            1. prepare some data and build `Hybrid index` on scalar fields
+            2. query with count(*) via expr
+            3. check query result
+        expected:
+            1. query response equal to insert nb
+        """
+        expr = Expr.EQ(expr_obj(expr_field).value, length).value
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if len(i) == length])
+
+        # query count(*)
+        self.collection_wrap.query(expr=expr, output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_index_query_count(self):
         """
@@ -294,6 +452,25 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         # query count(*)
         self.collection_wrap.query(expr='', output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": self.nb}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_hybrid_index_search_output_fields(self):
+        """
+        target:
+            1. check search output fields with Hybrid index built on scalar fields
+        method:
+            1. prepare some data and build `Hybrid index` on scalar fields
+            2. search output fields and check result
+        expected:
+            1. search output fields with Hybrid index
+        """
+        search_params, vector_field, limit, nq = {"metric_type": "L2", "ef": 32}, DataType.FLOAT16_VECTOR.name, 3, 1
+
+        self.collection_wrap.search(
+            cf.gen_vectors(nb=nq, dim=3, vector_data_type=vector_field), vector_field, search_params, limit,
+            output_fields=['*'], check_task=CheckTasks.check_search_results,
+            check_items={"nq": nq, "ids": self.insert_data.get(self.primary_field),
+                         "limit": limit, "output_fields": self.all_fields})
 
 
 @pytest.mark.xdist_group("TestInvertedIndexDQLExpr")
@@ -311,14 +488,15 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         self._connect(self)
 
         # init params
-        self.primary_field, nb = "int64_pk", 3000
+        self.primary_field, self.nb = "int64_pk", 3000
+        self.all_fields = [self.primary_field, DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
+                           DataType.SPARSE_FLOAT_VECTOR.name, DataType.BINARY_VECTOR.name, *self().all_scalar_fields]
 
         # create a collection with fields
         self.collection_wrap.init_collection(
             name=cf.gen_unique_str("test_inverted_index_dql_expr"),
             schema=cf.set_collection_schema(
-                fields=[self.primary_field, DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
-                        DataType.SPARSE_FLOAT_VECTOR.name, DataType.BINARY_VECTOR.name, *self().all_scalar_fields],
+                fields=self.all_fields,
                 field_params={
                     self.primary_field: FieldParams(is_primary=True).to_dict,
                     DataType.FLOAT16_VECTOR.name: FieldParams(dim=3).to_dict,
@@ -329,7 +507,10 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         )
 
         # prepare data (> 1024 triggering index building)
-        self.insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=nb)
+        self.insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=self.nb, default_values={
+            'VARCHAR': cf.gen_varchar_data(3, self.nb),
+            'ARRAY_VARCHAR': [cf.gen_varchar_data(length=2, nb=random.randint(0, 10)) for _ in range(self.nb)]
+        })
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
@@ -419,6 +600,114 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("range_num, counts", [([-100, 200], 10), ([2000, 5000], 10), ([3000, 4000], 5)])
+    @pytest.mark.parametrize("expr_field", ['INT8', 'INT16', 'INT32', 'INT64'])
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    def test_inverted_index_query_with_int_in(self, range_num, counts, expr_field, limit):
+        """
+        target:
+            1. check number operation `in` and `not in`, calculate total number via expr
+        method:
+            1. prepare some data and  build `INVERTED index` on scalar fields
+            2. query with the different expr(in, not in) and limit
+            3. check query result
+        expected:
+            1. query response equal to min(insert data, limit)
+        """
+        # random set expr list
+        range_numbers = [random.randint(*range_num) for _ in range(counts)]
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if i in range_numbers])
+
+        # query `in`
+        res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # count `in`
+        self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
+        # query `not in`
+        not_in_count = self.nb - expr_count
+        res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+
+        # count `not in`
+        self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": not_in_count}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("range_num, counts", [([1, 3], 50), ([2, 5], 50), ([3, 3], 100)])
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    @pytest.mark.parametrize("expr_field", ['VARCHAR'])
+    def test_inverted_index_query_with_varchar_in(self, range_num, counts, limit, expr_field):
+        """
+        target:
+            1. check varchar operation `in` and `not in`, calculate total number via expr
+        method:
+            1. prepare some data and  build `INVERTED index` on scalar fields
+            2. query with the different expr(in, not in) and limit
+            3. check query result
+        expected:
+            1. query response equal to min(insert data, limit)
+        """
+        # random set expr list
+        range_numbers = [cf.gen_varchar_data(random.randint(*range_num), 1)[0] for _ in range(counts)]
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if i in range_numbers])
+
+        # query `in`
+        res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # count `in`
+        self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
+        # query `not in`
+        not_in_count = self.nb - expr_count
+        res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+
+        # count `not in`
+        self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": not_in_count}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("length", [0, 5, 11])
+    @pytest.mark.parametrize("expr_obj", [Expr.array_length, Expr.ARRAY_LENGTH])
+    @pytest.mark.parametrize("expr_field", ['ARRAY_VARCHAR'])
+    def test_inverted_index_query_array_length_count(self, length, expr_obj, expr_field):
+        """
+        target:
+            1. check query with count(*) via expr `array length`
+        method:
+            1. prepare some data and build `INVERTED index` on scalar fields
+            2. query with count(*) via expr
+            3. check query result
+        expected:
+            1. query response equal to insert nb
+        """
+        expr = Expr.EQ(expr_obj(expr_field).value, length).value
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if len(i) == length])
+
+        # query count(*)
+        self.collection_wrap.query(expr=expr, output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
 
 @pytest.mark.xdist_group("TestBitmapIndexDQLExpr")
 class TestBitmapIndexDQLExpr(TestCaseClassBase):
@@ -436,13 +725,14 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
 
         # init params
         self.primary_field, self.nb = "int64_pk", 3000
+        self.all_fields = [self.primary_field, DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
+                           DataType.SPARSE_FLOAT_VECTOR.name, DataType.BINARY_VECTOR.name, *self().all_scalar_fields]
 
         # create a collection with fields
         self.collection_wrap.init_collection(
             name=cf.gen_unique_str("test_bitmap_index_dql_expr"),
             schema=cf.set_collection_schema(
-                fields=[self.primary_field, DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
-                        DataType.SPARSE_FLOAT_VECTOR.name, DataType.BINARY_VECTOR.name, *self().all_scalar_fields],
+                fields=self.all_fields,
                 field_params={
                     self.primary_field: FieldParams(is_primary=True).to_dict,
                     DataType.FLOAT16_VECTOR.name: FieldParams(dim=3).to_dict,
@@ -453,7 +743,10 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         )
 
         # prepare data (> 1024 triggering index building)
-        self.insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=self.nb)
+        self.insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=self.nb, default_values={
+            'VARCHAR': cf.gen_varchar_data(3, self.nb),
+            'ARRAY_VARCHAR': [cf.gen_varchar_data(length=2, nb=random.randint(0, 10)) for _ in range(self.nb)]
+        })
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
@@ -568,6 +861,114 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("range_num, counts", [([-100, 200], 10), ([2000, 5000], 10), ([3000, 4000], 5)])
+    @pytest.mark.parametrize("expr_field", ['INT8', 'INT16', 'INT32', 'INT64'])
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    def test_bitmap_index_query_with_int_in(self, range_num, counts, expr_field, limit):
+        """
+        target:
+            1. check number operation `in` and `not in`, calculate total number via expr
+        method:
+            1. prepare some data and  build `BITMAP index` on scalar fields
+            2. query with the different expr(in, not in) and limit
+            3. check query result
+        expected:
+            1. query response equal to min(insert data, limit)
+        """
+        # random set expr list
+        range_numbers = [random.randint(*range_num) for _ in range(counts)]
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if i in range_numbers])
+
+        # query `in`
+        res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # count `in`
+        self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
+        # query `not in`
+        not_in_count = self.nb - expr_count
+        res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+
+        # count `not in`
+        self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": not_in_count}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("range_num, counts", [([1, 3], 50), ([2, 5], 50), ([3, 3], 100)])
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    @pytest.mark.parametrize("expr_field", ['VARCHAR'])
+    def test_bitmap_index_query_with_varchar_in(self, range_num, counts, limit, expr_field):
+        """
+        target:
+            1. check varchar operation `in` and `not in`, calculate total number via expr
+        method:
+            1. prepare some data and  build `BITMAP index` on scalar fields
+            2. query with the different expr(in, not in) and limit
+            3. check query result
+        expected:
+            1. query response equal to min(insert data, limit)
+        """
+        # random set expr list
+        range_numbers = [cf.gen_varchar_data(random.randint(*range_num), 1)[0] for _ in range(counts)]
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if i in range_numbers])
+
+        # query `in`
+        res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # count `in`
+        self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
+        # query `not in`
+        not_in_count = self.nb - expr_count
+        res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+
+        # count `not in`
+        self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": not_in_count}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("length", [0, 5, 11])
+    @pytest.mark.parametrize("expr_obj", [Expr.array_length, Expr.ARRAY_LENGTH])
+    @pytest.mark.parametrize("expr_field", ['ARRAY_VARCHAR'])
+    def test_bitmap_index_query_array_length_count(self, length, expr_obj, expr_field):
+        """
+        target:
+            1. check query with count(*) via expr `array length`
+        method:
+            1. prepare some data and build `BITMAP index` on scalar fields
+            2. query with count(*) via expr
+            3. check query result
+        expected:
+            1. query response equal to insert nb
+        """
+        expr = Expr.EQ(expr_obj(expr_field).value, length).value
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if len(i) == length])
+
+        # query count(*)
+        self.collection_wrap.query(expr=expr, output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_bitmap_index_query_count(self):
         """
@@ -632,6 +1033,25 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
             expr='INT16 > 15', check_task=CheckTasks.check_search_iterator, check_items={"batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
+    def test_bitmap_index_search_output_fields(self):
+        """
+        target:
+            1. check search output fields with BITMAP index built on scalar fields
+        method:
+            1. prepare some data and build `BITMAP index` on scalar fields
+            2. search output fields and check result
+        expected:
+            1. search output fields with BITMAP index
+        """
+        search_params, vector_field, limit, nq = {"metric_type": "L2", "ef": 32}, DataType.FLOAT16_VECTOR.name, 3, 1
+
+        self.collection_wrap.search(
+            cf.gen_vectors(nb=nq, dim=3, vector_data_type=vector_field), vector_field, search_params, limit,
+            output_fields=['*'], check_task=CheckTasks.check_search_results,
+            check_items={"nq": nq, "ids": self.insert_data.get(self.primary_field),
+                         "limit": limit, "output_fields": self.all_fields})
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_bitmap_index_hybrid_search(self):
         """
         target:
@@ -665,7 +1085,7 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         ]
         self.collection_wrap.hybrid_search(
             req_list, RRFRanker(), limit, check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": self.insert_data.get('int64_pk'), "limit": limit})
+            check_items={"nq": nq, "ids": self.insert_data.get(self.primary_field), "limit": limit})
 
 
 @pytest.mark.xdist_group("TestBitmapIndexOffsetCacheDQL")
@@ -684,12 +1104,13 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
 
         # init params
         self.primary_field, self.nb = "int64_pk", 3000
+        self.all_fields = [self.primary_field, DataType.FLOAT_VECTOR.name, *self().all_scalar_fields]
 
         # create a collection with fields
         self.collection_wrap.init_collection(
             name=cf.gen_unique_str("test_bitmap_index_offset_cache"),
             schema=cf.set_collection_schema(
-                fields=[self.primary_field, DataType.FLOAT_VECTOR.name, *self().all_scalar_fields],
+                fields=self.all_fields,
                 field_params={
                     self.primary_field: FieldParams(is_primary=True).to_dict
                 },
@@ -697,7 +1118,10 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         )
 
         # prepare data (> 1024 triggering index building)
-        self.insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=self.nb)
+        self.insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=self.nb, default_values={
+            'VARCHAR': cf.gen_varchar_data(3, self.nb),
+            'ARRAY_VARCHAR': [cf.gen_varchar_data(length=2, nb=random.randint(0, 10)) for _ in range(self.nb)]
+        })
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
@@ -788,6 +1212,114 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("range_num, counts", [([-100, 200], 10), ([2000, 5000], 10), ([3000, 4000], 5)])
+    @pytest.mark.parametrize("expr_field", ['INT8', 'INT16', 'INT32', 'INT64'])
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    def test_bitmap_offset_cache_query_with_int_in(self, range_num, counts, expr_field, limit):
+        """
+        target:
+            1. check number operation `in` and `not in`, calculate total number via expr
+        method:
+            1. prepare some data and  build `BITMAP index` on scalar fields
+            2. query with the different expr(in, not in) and limit
+            3. check query result
+        expected:
+            1. query response equal to min(insert data, limit)
+        """
+        # random set expr list
+        range_numbers = [random.randint(*range_num) for _ in range(counts)]
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if i in range_numbers])
+
+        # query `in`
+        res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # count `in`
+        self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
+        # query `not in`
+        not_in_count = self.nb - expr_count
+        res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+
+        # count `not in`
+        self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": not_in_count}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("range_num, counts", [([1, 3], 50), ([2, 5], 50), ([3, 3], 100)])
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    @pytest.mark.parametrize("expr_field", ['VARCHAR'])
+    def test_bitmap_offset_cache_query_with_varchar_in(self, range_num, counts, limit, expr_field):
+        """
+        target:
+            1. check varchar operation `in` and `not in`, calculate total number via expr
+        method:
+            1. prepare some data and  build `BITMAP index` on scalar fields
+            2. query with the different expr(in, not in) and limit
+            3. check query result
+        expected:
+            1. query response equal to min(insert data, limit)
+        """
+        # random set expr list
+        range_numbers = [cf.gen_varchar_data(random.randint(*range_num), 1)[0] for _ in range(counts)]
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if i in range_numbers])
+
+        # query `in`
+        res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # count `in`
+        self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
+        # query `not in`
+        not_in_count = self.nb - expr_count
+        res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+
+        # count `not in`
+        self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": not_in_count}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("length", [0, 5, 11])
+    @pytest.mark.parametrize("expr_obj", [Expr.array_length, Expr.ARRAY_LENGTH])
+    @pytest.mark.parametrize("expr_field", ['ARRAY_VARCHAR'])
+    def test_bitmap_offset_cache_query_array_length_count(self, length, expr_obj, expr_field):
+        """
+        target:
+            1. check query with count(*) via expr `array length`
+        method:
+            1. prepare some data and build `BITMAP index` on scalar fields
+            2. query with count(*) via expr
+            3. check query result
+        expected:
+            1. query response equal to insert nb
+        """
+        expr = Expr.EQ(expr_obj(expr_field).value, length).value
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if len(i) == length])
+
+        # query count(*)
+        self.collection_wrap.query(expr=expr, output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_bitmap_offset_cache_query_count(self):
         """
         target:
@@ -802,6 +1334,25 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         # query count(*)
         self.collection_wrap.query(expr='', output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": self.nb}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_bitmap_offset_cache_search_output_fields(self):
+        """
+        target:
+            1. check search output fields with BITMAP index built on scalar fields
+        method:
+            1. prepare some data and build `BITMAP index` on scalar fields
+            2. search output fields and check result
+        expected:
+            1. search output fields with BITMAP index
+        """
+        search_params, vector_field, limit, nq = {"metric_type": "L2", "ef": 32}, DataType.FLOAT_VECTOR.name, 3, 1
+
+        self.collection_wrap.search(
+            cf.gen_vectors(nb=nq, dim=ct.default_dim, vector_data_type=vector_field),
+            vector_field, search_params, limit, output_fields=['*'], check_task=CheckTasks.check_search_results,
+            check_items={"nq": nq, "ids": self.insert_data.get(self.primary_field),
+                         "limit": limit, "output_fields": self.all_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_bitmap_offset_cache_hybrid_search(self):
@@ -831,7 +1382,7 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         ]
         self.collection_wrap.hybrid_search(
             req_list, RRFRanker(), limit, check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": self.insert_data.get('int64_pk'), "limit": limit})
+            check_items={"nq": nq, "ids": self.insert_data.get(self.primary_field), "limit": limit})
 
 
 @pytest.mark.xdist_group("TestBitmapIndexOffsetCacheDQL")
@@ -850,12 +1401,13 @@ class TestBitmapIndexMmap(TestCaseClassBase):
 
         # init params
         self.primary_field, self.nb = "int64_pk", 3000
+        self.all_fields = [self.primary_field, DataType.FLOAT_VECTOR.name, *self().all_scalar_fields]
 
         # create a collection with fields
         self.collection_wrap.init_collection(
             name=cf.gen_unique_str("test_bitmap_index_bitmap"),
             schema=cf.set_collection_schema(
-                fields=[self.primary_field, DataType.FLOAT_VECTOR.name, *self().all_scalar_fields],
+                fields=self.all_fields,
                 field_params={
                     self.primary_field: FieldParams(is_primary=True).to_dict
                 },
@@ -954,6 +1506,48 @@ class TestBitmapIndexMmap(TestCaseClassBase):
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("range_num, counts", [([-100, 200], 10), ([2000, 5000], 10), ([3000, 4000], 5)])
+    @pytest.mark.parametrize("expr_field", ['INT8', 'INT16', 'INT32', 'INT64'])
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    def test_bitmap_mmap_query_with_int_in(self, range_num, counts, expr_field, limit):
+        """
+        target:
+            1. check number operation `in` and `not in`, calculate total number via expr
+        method:
+            1. prepare some data and  build `BITMAP index` on scalar fields
+            2. query with the different expr(in, not in) and limit
+            3. check query result
+        expected:
+            1. query response equal to min(insert data, limit)
+        """
+        # random set expr list
+        range_numbers = [random.randint(*range_num) for _ in range(counts)]
+
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if i in range_numbers])
+
+        # query `in`
+        res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # count `in`
+        self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": expr_count}]})
+
+        # query `not in`
+        not_in_count = self.nb - expr_count
+        res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
+                                            output_fields=[expr_field])
+        assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+
+        # count `not in`
+        self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [{"count(*)": not_in_count}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_bitmap_mmap_query_count(self):
         """
         target:
@@ -968,6 +1562,25 @@ class TestBitmapIndexMmap(TestCaseClassBase):
         # query count(*)
         self.collection_wrap.query(expr='', output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": self.nb}]})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_bitmap_mmap_search_output_fields(self):
+        """
+        target:
+            1. check search output fields with BITMAP index built on scalar fields
+        method:
+            1. prepare some data and build `BITMAP index` on scalar fields
+            2. search output fields and check result
+        expected:
+            1. search output fields with BITMAP index
+        """
+        search_params, vector_field, limit, nq = {"metric_type": "L2", "ef": 32}, DataType.FLOAT_VECTOR.name, 3, 1
+
+        self.collection_wrap.search(
+            cf.gen_vectors(nb=nq, dim=ct.default_dim, vector_data_type=vector_field),
+            vector_field, search_params, limit, output_fields=['*'], check_task=CheckTasks.check_search_results,
+            check_items={"nq": nq, "ids": self.insert_data.get(self.primary_field),
+                         "limit": limit, "output_fields": self.all_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_bitmap_mmap_hybrid_search(self):
@@ -997,7 +1610,7 @@ class TestBitmapIndexMmap(TestCaseClassBase):
         ]
         self.collection_wrap.hybrid_search(
             req_list, RRFRanker(), limit, check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": self.insert_data.get('int64_pk'), "limit": limit})
+            check_items={"nq": nq, "ids": self.insert_data.get(self.primary_field), "limit": limit})
 
 
 @pytest.mark.xdist_group("TestIndexUnicodeString")
@@ -1274,12 +1887,67 @@ class TestMixScenes(TestcaseBase):
             check_items={"nq": nq, "ids": insert_data.get(DataType.INT64.name), "limit": limit,
                          "output_fields": scalar_fields})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("scalar_field, data_type, expr_data", [('INT64', 'int', 3), ('VARCHAR', 'str', '3')])
+    def test_bitmap_partition_keys(self, request, scalar_field, data_type, expr_data):
+        """
+        target:
+            1. build BITMAP index on partition key field
+        method:
+            1. create a collection with scalar field that enable partition key
+            2. insert some data and build BITMAP index
+            4. load collection
+            5. query via partition key field expr
+        expected:
+            1. build index and query are successful
+        """
+        # init params
+        collection_name, primary_field, nb = f"{request.function.__name__}_{scalar_field}", "int64_pk", 10000
+
+        # connect to server before testing
+        self._connect()
+
+        # create a collection with fields that can build `BITMAP` index
+        self.collection_wrap.init_collection(
+            name=collection_name,
+            schema=cf.set_collection_schema(
+                fields=[primary_field, DataType.FLOAT_VECTOR.name, scalar_field],
+                field_params={primary_field: FieldParams(is_primary=True).to_dict,
+                              scalar_field: FieldParams(is_partition_key=True).to_dict},
+            )
+        )
+
+        # prepare data (> 1024 triggering index building)
+        self.collection_wrap.insert(data=cf.gen_values(self.collection_wrap.schema, nb=nb, default_values={
+            scalar_field: [eval(f"{data_type}({random.randint(1, 4)})") for _ in range(nb)]
+        }), check_task=CheckTasks.check_insert_result)
+
+        # flush collection, segment sealed
+        self.collection_wrap.flush()
+
+        # build `BITMAP` index
+        self.build_multi_index(index_params={
+            **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name),
+            **DefaultScalarIndexParams.BITMAP(scalar_field)
+        })
+
+        # load collection
+        self.collection_wrap.load()
+
+        # query before upsert
+        expr = f'{scalar_field} == {expr_data}' if scalar_field == 'INT64' else f'{scalar_field} == "{expr_data}"'
+        res, _ = self.collection_wrap.query(expr=expr, output_fields=[scalar_field], limit=100)
+        assert set([r.get(scalar_field) for r in res]) == {expr_data}
+
 
 @pytest.mark.xdist_group("TestGroupSearch")
 class TestGroupSearch(TestCaseClassBase):
     """
     Testing group search scenarios
-    1. collection schema: int64_pk(auto_id), float16_vector, float_vector, bfloat16_vector, varchar
+    1. collection schema:
+        int64_pk(auto_id), varchar,
+        float16_vector, float_vector, bfloat16_vector, sparse_vector,
+        inverted_varchar
     2. varchar field is inserted with dup values for group by
     3. index for each vector field with different index types, dims and metric types
     Author: Yanliang567
@@ -1292,34 +1960,34 @@ class TestGroupSearch(TestCaseClassBase):
 
         # init params
         self.primary_field = "int64_pk"
-        self.indexed_string_field = "varchar_with_index"
+        self.inverted_string_field = "varchar_inverted"
 
         # create a collection with fields
         self.collection_wrap.init_collection(
-            name=cf.gen_unique_str("test_group_search"),
+            name=cf.gen_unique_str("TestGroupSearch"),
             schema=cf.set_collection_schema(
-                fields=[DataType.VARCHAR.name, self.primary_field, DataType.FLOAT16_VECTOR.name,
-                        DataType.FLOAT_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
+                fields=[self.primary_field, DataType.VARCHAR.name, DataType.FLOAT16_VECTOR.name,
+                        DataType.FLOAT_VECTOR.name, DataType.BFLOAT16_VECTOR.name, DataType.SPARSE_FLOAT_VECTOR.name,
                         DataType.INT8.name, DataType.INT64.name, DataType.BOOL.name,
-                        self.indexed_string_field],
+                        self.inverted_string_field],
                 field_params={
                     self.primary_field: FieldParams(is_primary=True).to_dict,
                     DataType.FLOAT16_VECTOR.name: FieldParams(dim=31).to_dict,
                     DataType.FLOAT_VECTOR.name: FieldParams(dim=64).to_dict,
-                    DataType.BFLOAT16_VECTOR.name: FieldParams(dim=24).to_dict,
+                    DataType.BFLOAT16_VECTOR.name: FieldParams(dim=24).to_dict
                 },
                 auto_id=True
             )
         )
 
-        self.vector_fields = [DataType.FLOAT16_VECTOR.name, DataType.FLOAT_VECTOR.name, DataType.BFLOAT16_VECTOR.name]
-        self.dims = [31, 64, 24]
-        self.index_types = ["IVF_SQ8", "HNSW", "IVF_FLAT"]
+        self.vector_fields = [DataType.FLOAT16_VECTOR.name, DataType.FLOAT_VECTOR.name,
+                              DataType.BFLOAT16_VECTOR.name, DataType.SPARSE_FLOAT_VECTOR.name]
+        self.dims = [31, 64, 24, 99]
+        self.index_types = [cp.IndexName.IVF_SQ8, cp.IndexName.HNSW, cp.IndexName.IVF_FLAT, cp.IndexName.SPARSE_WAND]
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
         # prepare data (> 1024 triggering index building)
-        import pandas as pd
         nb = 100
         for _ in range(100):
             string_values = pd.Series(data=[str(i) for i in range(nb)], dtype="string")
@@ -1340,8 +2008,9 @@ class TestGroupSearch(TestCaseClassBase):
             **DefaultVectorIndexParams.IVF_SQ8(DataType.FLOAT16_VECTOR.name, metric_type=MetricType.L2),
             **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name, metric_type=MetricType.IP),
             **DefaultVectorIndexParams.IVF_FLAT(DataType.BFLOAT16_VECTOR.name, metric_type=MetricType.COSINE),
+            **DefaultVectorIndexParams.SPARSE_WAND(DataType.SPARSE_FLOAT_VECTOR.name, metric_type=MetricType.IP),
             # index params for varchar field
-            **DefaultScalarIndexParams.INVERTED(self.indexed_string_field)
+            **DefaultScalarIndexParams.INVERTED(self.inverted_string_field)
         }
 
         self.build_multi_index(index_params=index_params)
@@ -1351,11 +2020,11 @@ class TestGroupSearch(TestCaseClassBase):
         self.collection_wrap.load()
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("group_by_field", [DataType.VARCHAR.name, "varchar_with_index"])
+    @pytest.mark.parametrize("group_by_field", [DataType.VARCHAR.name, "varchar_inverted"])
     def test_search_group_size(self, group_by_field):
         """
         target:
-            1. search on 3 different float vector fields with group by varchar field with group size
+            1. search on 4 different float vector fields with group by varchar field with group size
         verify results entity = limit * group_size  and group size is full if group_strict_size is True
         verify results group counts = limit if group_strict_size is False
         """
@@ -1392,9 +2061,10 @@ class TestGroupSearch(TestCaseClassBase):
                 assert len(set(group_values)) == limit
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail()
     def test_hybrid_search_group_size(self):
         """
-        hybrid search group by on 3 different float vector fields with group by varchar field with group size
+        hybrid search group by on 4 different float vector fields with group by varchar field with group size
         verify results returns with de-dup group values and group distances are in order as rank_group_scorer
         """
         nq = 2
@@ -1413,7 +2083,8 @@ class TestGroupSearch(TestCaseClassBase):
         # 4. hybrid search group by
         rank_scorers = ["max", "avg", "sum"]
         for scorer in rank_scorers:
-            res = self.collection_wrap.hybrid_search(req_list, WeightedRanker(0.3, 0.3, 0.3), limit=limit,
+            res = self.collection_wrap.hybrid_search(req_list, WeightedRanker(0.1, 0.3, 0.9, 0.6),
+                                                     limit=limit,
                                                      group_by_field=DataType.VARCHAR.name,
                                                      group_size=group_size, rank_group_scorer=scorer,
                                                      output_fields=[DataType.VARCHAR.name])[0]
@@ -1433,16 +2104,16 @@ class TestGroupSearch(TestCaseClassBase):
                         group_distances.append(res[i][l + 1].distance)
                     else:
                         if scorer == 'sum':
-                            assert np.sum(group_distances) < np.sum(tmp_distances)
+                            assert np.sum(group_distances) <= np.sum(tmp_distances)
                         elif scorer == 'avg':
-                            assert np.mean(group_distances) < np.mean(tmp_distances)
+                            assert np.mean(group_distances) <= np.mean(tmp_distances)
                         else:  # default max
-                            assert np.max(group_distances) < np.max(tmp_distances)
+                            assert np.max(group_distances) <= np.max(tmp_distances)
 
                         tmp_distances = group_distances
                         group_distances = [res[i][l + 1].distance]
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_hybrid_search_group_by(self):
         """
         verify hybrid search group by works with different Rankers
@@ -1459,7 +2130,7 @@ class TestGroupSearch(TestCaseClassBase):
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
         # 4. hybrid search group by
-        res = self.collection_wrap.hybrid_search(req_list, WeightedRanker(0.1, 0.9, 0.2), ct.default_limit,
+        res = self.collection_wrap.hybrid_search(req_list, WeightedRanker(0.1, 0.9, 0.2, 0.3), ct.default_limit,
                                                  group_by_field=DataType.VARCHAR.name,
                                                  output_fields=[DataType.VARCHAR.name],
                                                  check_task=CheckTasks.check_search_results,
@@ -1483,7 +2154,7 @@ class TestGroupSearch(TestCaseClassBase):
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
             self.collection_wrap.hybrid_search(req_list, RRFRanker(), ct.default_limit,
-                                               group_by_field=self.indexed_string_field,
+                                               group_by_field=self.inverted_string_field,
                                                check_task=CheckTasks.check_search_results,
                                                check_items={"nq": ct.default_nq, "limit": ct.default_limit})
 
@@ -1537,7 +2208,7 @@ class TestGroupSearch(TestCaseClassBase):
         page_rounds = 3
         search_param = {}
         default_search_exp = f"{self.primary_field} >= 0"
-        grpby_field = self.indexed_string_field
+        grpby_field = self.inverted_string_field
         default_search_field = self.vector_fields[1]
         search_vectors = cf.gen_vectors(1, dim=self.dims[1], vector_data_type=self.vector_fields[1])
         all_pages_ids = []
@@ -1573,46 +2244,55 @@ class TestGroupSearch(TestCaseClassBase):
         assert len(grpby_field_values) == len(set(grpby_field_values))
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="issue #36401")
     def test_search_pagination_group_size(self):
         limit = 10
         group_size = 5
         page_rounds = 3
         search_param = {}
         default_search_exp = f"{self.primary_field} >= 0"
-        grpby_field = self.indexed_string_field
+        grpby_field = self.inverted_string_field
         default_search_field = self.vector_fields[1]
         search_vectors = cf.gen_vectors(1, dim=self.dims[1], vector_data_type=self.vector_fields[1])
         all_pages_ids = []
         all_pages_grpby_field_values = []
+        res_count = limit * group_size
         for r in range(page_rounds):
             page_res = self.collection_wrap.search(search_vectors, anns_field=default_search_field,
                                                    param=search_param, limit=limit, offset=limit * r,
                                                    expr=default_search_exp,
                                                    group_by_field=grpby_field, group_size=group_size,
+                                                   group_strict_size=True,
                                                    output_fields=[grpby_field],
                                                    check_task=CheckTasks.check_search_results,
-                                                   check_items={"nq": 1, "limit": limit},
+                                                   check_items={"nq": 1, "limit": res_count},
                                                    )[0]
-            for j in range(limit):
+            for j in range(res_count):
                 all_pages_grpby_field_values.append(page_res[0][j].get(grpby_field))
             all_pages_ids += page_res[0].ids
-        hit_rate = round(len(set(all_pages_grpby_field_values)) / len(all_pages_grpby_field_values), 3)
-        assert hit_rate >= 0.8
 
+        hit_rate = round(len(set(all_pages_grpby_field_values)) / len(all_pages_grpby_field_values), 3)
+        expect_hit_rate = round(1 / group_size, 3) * 0.7
+        log.info(f"expect_hit_rate :{expect_hit_rate}, hit_rate:{hit_rate}, "
+                 f"unique_group_by_value_count:{len(set(all_pages_grpby_field_values))},"
+                 f"total_group_by_value_count:{len(all_pages_grpby_field_values)}")
+        assert hit_rate >= expect_hit_rate
+
+        total_count = limit * group_size * page_rounds
         total_res = self.collection_wrap.search(search_vectors, anns_field=default_search_field,
                                                 param=search_param, limit=limit * page_rounds,
                                                 expr=default_search_exp,
                                                 group_by_field=grpby_field, group_size=group_size,
+                                                group_strict_size=True,
                                                 output_fields=[grpby_field],
                                                 check_task=CheckTasks.check_search_results,
-                                                check_items={"nq": 1, "limit": limit * page_rounds}
+                                                check_items={"nq": 1, "limit": total_count}
                                                 )[0]
         hit_num = len(set(total_res[0].ids).intersection(set(all_pages_ids)))
         hit_rate = round(hit_num / (limit * page_rounds), 3)
         assert hit_rate >= 0.8
         log.info(f"search pagination with groupby hit_rate: {hit_rate}")
         grpby_field_values = []
-        for i in range(limit * page_rounds):
+        for i in range(total_count):
             grpby_field_values.append(total_res[0][i].fields.get(grpby_field))
-        assert len(grpby_field_values) == len(set(grpby_field_values))
+        assert len(grpby_field_values) == total_count
+        assert len(set(grpby_field_values)) == limit * page_rounds

@@ -155,7 +155,7 @@ func (stm *statsTaskMeta) DropStatsTask(taskID int64) error {
 	return nil
 }
 
-func (stm *statsTaskMeta) UpdateVersion(taskID int64) error {
+func (stm *statsTaskMeta) UpdateVersion(taskID, nodeID int64) error {
 	stm.Lock()
 	defer stm.Unlock()
 
@@ -166,23 +166,25 @@ func (stm *statsTaskMeta) UpdateVersion(taskID int64) error {
 
 	cloneT := proto.Clone(t).(*indexpb.StatsTask)
 	cloneT.Version++
+	cloneT.NodeID = nodeID
 
 	if err := stm.catalog.SaveStatsTask(stm.ctx, cloneT); err != nil {
 		log.Warn("update stats task version failed",
 			zap.Int64("taskID", t.GetTaskID()),
 			zap.Int64("segmentID", t.GetSegmentID()),
+			zap.Int64("nodeID", nodeID),
 			zap.Error(err))
 		return err
 	}
 
 	stm.tasks[t.TaskID] = cloneT
 	stm.updateMetrics()
-	log.Info("update stats task version success", zap.Int64("taskID", taskID),
+	log.Info("update stats task version success", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID),
 		zap.Int64("newVersion", cloneT.GetVersion()))
 	return nil
 }
 
-func (stm *statsTaskMeta) UpdateBuildingTask(taskID, nodeID int64) error {
+func (stm *statsTaskMeta) UpdateBuildingTask(taskID int64) error {
 	stm.Lock()
 	defer stm.Unlock()
 
@@ -192,7 +194,6 @@ func (stm *statsTaskMeta) UpdateBuildingTask(taskID, nodeID int64) error {
 	}
 
 	cloneT := proto.Clone(t).(*indexpb.StatsTask)
-	cloneT.NodeID = nodeID
 	cloneT.State = indexpb.JobState_JobStateInProgress
 
 	if err := stm.catalog.SaveStatsTask(stm.ctx, cloneT); err != nil {
@@ -206,7 +207,7 @@ func (stm *statsTaskMeta) UpdateBuildingTask(taskID, nodeID int64) error {
 	stm.tasks[t.TaskID] = cloneT
 	stm.updateMetrics()
 
-	log.Info("update building stats task success", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID))
+	log.Info("update building stats task success", zap.Int64("taskID", taskID))
 	return nil
 }
 

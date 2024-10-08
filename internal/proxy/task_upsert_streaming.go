@@ -122,19 +122,21 @@ func (it *upsertTaskByStreamingService) packDeleteMessage(ctx context.Context) (
 	}
 
 	var msgs []message.MutableMessage
-	for hashKey, deleteMsg := range result {
+	for hashKey, deleteMsgs := range result {
 		vchannel := vChannels[hashKey]
-		msg, err := message.NewDeleteMessageBuilderV1().
-			WithHeader(&message.DeleteMessageHeader{
-				CollectionId: it.upsertMsg.DeleteMsg.CollectionID,
-			}).
-			WithBody(deleteMsg.DeleteRequest).
-			WithVChannel(vchannel).
-			BuildMutable()
-		if err != nil {
-			return nil, err
+		for _, deleteMsg := range deleteMsgs {
+			msg, err := message.NewDeleteMessageBuilderV1().
+				WithHeader(&message.DeleteMessageHeader{
+					CollectionId: it.upsertMsg.DeleteMsg.CollectionID,
+				}).
+				WithBody(deleteMsg.DeleteRequest).
+				WithVChannel(vchannel).
+				BuildMutable()
+			if err != nil {
+				return nil, err
+			}
+			msgs = append(msgs, msg)
 		}
-		msgs = append(msgs, msg)
 	}
 
 	log.Debug("Proxy Upsert deleteExecute done",

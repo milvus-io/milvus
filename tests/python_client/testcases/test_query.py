@@ -3965,6 +3965,49 @@ class TestQueryCount(TestcaseBase):
                                     check_items={"count": ct.default_nb,
                                                  "batch_size": batch_size})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.repeat(3)
+    @pytest.mark.skip(reason="issue #36538")
+    def test_count_query_search_after_release_partition_load(self):
+        """
+        target: test query count(*) after release collection and load partition
+        method: 1. create a collection and 2 partitions with nullable and default value fields
+                2. insert data
+                3. load one partition
+                4. delete half data in each partition
+                5. release the collection and load one partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=True)[0]
+        collection_w.query(expr='', output_fields=[ct.default_count_output],
+                          check_task=CheckTasks.check_query_results,
+                          check_items={"exp_res": [{ct.default_count_output: 200}]})
+        collection_w.release()
+        partition_w1, partition_w2 = collection_w.partitions
+        # load
+        partition_w1.load()
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # release
+        collection_w.release()
+        # partition_w1.load()
+        collection_w.load(partition_names=[partition_w1.name])
+        # search on collection, partition1, partition2
+        collection_w.query(expr='', output_fields=[ct.default_count_output],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={"exp_res": [{ct.default_count_output: 50}]})
+        partition_w1.query(expr='', output_fields=[ct.default_count_output],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={"exp_res": [{ct.default_count_output: 50}]})
+        vectors = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
+        collection_w.search(vectors[:1], ct.default_float_vec_field_name, ct.default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+
 
 class TestQueryIterator(TestcaseBase):
     """
@@ -4502,6 +4545,51 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         term_expr = f'{ct.default_int64_field_name} in {int_values[:pos]}'
         collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #36538")
+    def test_query_none_count(self, null_data_percent):
+        """
+        target: test query count(*) with None and default data
+        method: 1. create a collection and 2 partitions with nullable and default value fields
+                2. insert data
+                3. load one partition
+                4. delete half data in each partition
+                5. release the collection and load one partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=True,
+                                                    nullable_fields={ct.default_float_field_name: null_data_percent},
+                                                    default_value_fields={ct.default_string_field_name: "data"})[0]
+        collection_w.query(expr='', output_fields=[ct.default_count_output],
+                          check_task=CheckTasks.check_query_results,
+                          check_items={"exp_res": [{ct.default_count_output: 200}]})
+        collection_w.release()
+        partition_w1, partition_w2 = collection_w.partitions
+        # load
+        partition_w1.load()
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # release
+        collection_w.release()
+        # partition_w1.load()
+        collection_w.load(partition_names=[partition_w1.name])
+        # search on collection, partition1, partition2
+        collection_w.query(expr='', output_fields=[ct.default_count_output],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={"exp_res": [{ct.default_count_output: 50}]})
+        partition_w1.query(expr='', output_fields=[ct.default_count_output],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={"exp_res": [{ct.default_count_output: 50}]})
+        vectors = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
+        collection_w.search(vectors[:1], ct.default_float_vec_field_name, ct.default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+
 
 class TestQueryTextMatch(TestcaseBase):
     """

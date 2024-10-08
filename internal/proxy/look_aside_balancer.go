@@ -247,6 +247,7 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 						qn, err := b.clientMgr.GetClient(ctx, node)
 						if err != nil {
 							// get client from clientMgr failed, which means this qn isn't a shard leader anymore, skip it's health check
+							b.trySetQueryNodeUnReachable(node, err)
 							log.RatedInfo(10, "get client failed", zap.Int64("node", node), zap.Error(err))
 							return struct{}{}, nil
 						}

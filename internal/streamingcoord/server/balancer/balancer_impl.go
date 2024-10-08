@@ -291,12 +291,12 @@ type backoffConfigFetcher struct{}
 
 func (f *backoffConfigFetcher) BackoffConfig() typeutil.BackoffConfig {
 	return typeutil.BackoffConfig{
-		InitialInterval: paramtable.Get().StreamingCoordCfg.AutoBalanceBackoffInitialInterval.GetAsDurationByParse(),
-		Multiplier:      paramtable.Get().StreamingCoordCfg.AutoBalanceBackoffMultiplier.GetAsFloat(),
-		MaxInterval:     paramtable.Get().StreamingCoordCfg.AutoBalanceTriggerInterval.GetAsDurationByParse(),
+		InitialInterval: paramtable.Get().StreamingCfg.WALBalancerBackoffInitialInterval.GetAsDurationByParse(),
+		Multiplier:      paramtable.Get().StreamingCfg.WALBalancerBackoffMultiplier.GetAsFloat(),
+		MaxInterval:     paramtable.Get().StreamingCfg.WALBalancerTriggerInterval.GetAsDurationByParse(),
 	}
 }
 
 func (f *backoffConfigFetcher) DefaultInterval() time.Duration {
-	return paramtable.Get().StreamingCoordCfg.AutoBalanceTriggerInterval.GetAsDurationByParse()
+	return paramtable.Get().StreamingCfg.WALBalancerTriggerInterval.GetAsDurationByParse()
 }

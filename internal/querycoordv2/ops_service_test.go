@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -683,6 +684,33 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 	suite.True(merr.Ok(resp))
 	suite.Equal(counter.Load(), int64(4))
 	suite.Len(nodeSet.Collect(), 3)
+
+	// test transfer segment idempotent
+	suite.taskScheduler.ExpectedCalls = nil
+	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	counter = atomic.NewInt64(0)
+	taskIDSet := typeutil.NewUniqueSet()
+	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		if taskIDSet.Contain(t.ID()) {
+			return errors.New("duplicate task")
+		}
+		return nil
+	})
+	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
+		SourceNodeID: nodes[0],
+		TransferAll:  true,
+		ToAllNodes:   true,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
+	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
+		SourceNodeID: nodes[0],
+		TransferAll:  true,
+		ToAllNodes:   true,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
 }
 
 func (suite *OpsServiceSuite) TestTransferChannel() {
@@ -907,6 +935,34 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 	suite.True(merr.Ok(resp))
 	suite.Equal(counter.Load(), int64(4))
 	suite.Len(nodeSet.Collect(), 3)
+
+	// test transfer channel idempotent
+	suite.taskScheduler.ExpectedCalls = nil
+	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	counter = atomic.NewInt64(0)
+	taskIDSet := typeutil.NewUniqueSet()
+	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		if taskIDSet.Contain(t.ID()) {
+			return errors.New("duplicate task")
+		}
+		return nil
+	})
+
+	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
+		SourceNodeID: nodes[0],
+		TransferAll:  true,
+		ToAllNodes:   true,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
+	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
+		SourceNodeID: nodes[0],
+		TransferAll:  true,
+		ToAllNodes:   true,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
 }
 
 func TestOpsService(t *testing.T) {

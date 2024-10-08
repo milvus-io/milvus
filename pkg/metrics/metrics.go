@@ -57,6 +57,9 @@ const (
 	FlushingSegmentLabel = "Flushing"
 	DroppedSegmentLabel  = "Dropped"
 
+	StreamingDataSourceLabel  = "streaming"
+	BulkinsertDataSourceLabel = "bulkinsert"
+
 	Leader     = "OnLeader"
 	FromLeader = "FromLeader"
 
@@ -96,11 +99,13 @@ const (
 	segmentStateLabelName    = "segment_state"
 	segmentIDLabelName       = "segment_id"
 	segmentLevelLabelName    = "segment_level"
+	segmentIsSortedLabelName = "segment_is_sorted"
 	usernameLabelName        = "username"
 	roleNameLabelName        = "role_name"
 	cacheNameLabelName       = "cache_name"
 	cacheStateLabelName      = "cache_state"
 	indexCountLabelName      = "indexed_field_count"
+	dataSourceLabelName      = "data_source"
 	requestScope             = "scope"
 	fullMethodLabelName      = "full_method"
 	reduceLevelName          = "reduce_level"

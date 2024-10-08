@@ -118,24 +118,27 @@ func TestRun(t *testing.T) {
 	parameters := []string{"tikv", "etcd"}
 	for _, v := range parameters {
 		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx := context.Background()
 		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
 			return tikv.SetupLocalTxn(), nil
 		}
 		defer func() {
 			getTiKVClient = tikv.GetTiKVClient
 		}()
-		svr := Server{
-			rootCoord:   &mockCore{},
-			ctx:         ctx,
-			cancel:      cancel,
-			grpcErrChan: make(chan error),
-		}
 		rcServerConfig := &paramtable.Get().RootCoordGrpcServerCfg
+		oldPort := rcServerConfig.Port.GetValue()
 		paramtable.Get().Save(rcServerConfig.Port.Key, "1000000")
-		err := svr.Run()
+		svr, err := NewServer(ctx, nil)
+		assert.NoError(t, err)
+		err = svr.Prepare()
 		assert.Error(t, err)
 		assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
+		paramtable.Get().Save(rcServerConfig.Port.Key, oldPort)
+
+		svr, err = NewServer(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, svr)
+		svr.rootCoord = &mockCore{}
 
 		mockDataCoord := mocks.NewMockDataCoordClient(t)
 		mockDataCoord.EXPECT().Close().Return(nil)
@@ -171,6 +174,8 @@ func TestRun(t *testing.T) {
 		assert.NoError(t, err)
 		sessKey := path.Join(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
 		_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
+		assert.NoError(t, err)
+		err = svr.Prepare()
 		assert.NoError(t, err)
 		err = svr.Run()
 		assert.NoError(t, err)
@@ -236,6 +241,8 @@ func TestServerRun_DataCoordClientInitErr(t *testing.T) {
 		server.newDataCoordClient = func() types.DataCoordClient {
 			return mockDataCoord
 		}
+		err = server.Prepare()
+		assert.NoError(t, err)
 		assert.Panics(t, func() { server.Run() })
 
 		err = server.Stop()
@@ -264,6 +271,8 @@ func TestServerRun_DataCoordClientStartErr(t *testing.T) {
 		server.newDataCoordClient = func() types.DataCoordClient {
 			return mockDataCoord
 		}
+		err = server.Prepare()
+		assert.NoError(t, err)
 		assert.Panics(t, func() { server.Run() })
 
 		err = server.Stop()
@@ -292,7 +301,8 @@ func TestServerRun_QueryCoordClientInitErr(t *testing.T) {
 		server.newQueryCoordClient = func() types.QueryCoordClient {
 			return mockQueryCoord
 		}
-
+		err = server.Prepare()
+		assert.NoError(t, err)
 		assert.Panics(t, func() { server.Run() })
 
 		err = server.Stop()
@@ -321,6 +331,8 @@ func TestServer_QueryCoordClientStartErr(t *testing.T) {
 		server.newQueryCoordClient = func() types.QueryCoordClient {
 			return mockQueryCoord
 		}
+		err = server.Prepare()
+		assert.NoError(t, err)
 		assert.Panics(t, func() { server.Run() })
 
 		err = server.Stop()

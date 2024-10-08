@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -357,6 +358,7 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 		CompactionTask: &datapb.CompactionTask{
 			Type: datapb.CompactionType_MixCompaction,
 		},
+		slotUsage: paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 	})
 	s.Equal(int64(101), node)
 	nodeSlots[node] = nodeSlots[node] - useSlot
@@ -365,6 +367,7 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 		CompactionTask: &datapb.CompactionTask{
 			Type: datapb.CompactionType_MixCompaction,
 		},
+		slotUsage: paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 	})
 	s.Equal(int64(100), node)
 	nodeSlots[node] = nodeSlots[node] - useSlot
@@ -373,12 +376,29 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 		CompactionTask: &datapb.CompactionTask{
 			Type: datapb.CompactionType_MixCompaction,
 		},
+		slotUsage: paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 	})
 	s.Equal(int64(101), node)
 	nodeSlots[node] = nodeSlots[node] - useSlot
 
 	node, useSlot = s.handler.pickAnyNode(map[int64]int64{}, &mixCompactionTask{})
 	s.Equal(int64(NullNodeID), node)
+}
+
+func (s *CompactionPlanHandlerSuite) TestPickAnyNodeSlotUsageShouldNotBeZero() {
+	s.SetupTest()
+	nodeSlots := map[int64]int64{
+		100: 16,
+		101: 23,
+	}
+	nodeID, useSlot := s.handler.pickAnyNode(nodeSlots, &mixCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_MixCompaction,
+		},
+		slotUsage: 0,
+	})
+	s.Equal(int64(NullNodeID), nodeID)
+	s.Equal(int64(0), useSlot)
 }
 
 func (s *CompactionPlanHandlerSuite) TestPickAnyNodeForClusteringTask() {
@@ -393,17 +413,20 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNodeForClusteringTask() {
 		CompactionTask: &datapb.CompactionTask{
 			Type: datapb.CompactionType_ClusteringCompaction,
 		},
+		slotUsage: paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64(),
 	}
 	executingTasks[2] = &clusteringCompactionTask{
 		CompactionTask: &datapb.CompactionTask{
 			Type: datapb.CompactionType_ClusteringCompaction,
 		},
+		slotUsage: paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64(),
 	}
 	s.handler.executingTasks = executingTasks
 	node, useSlot := s.handler.pickAnyNode(nodeSlots, &clusteringCompactionTask{
 		CompactionTask: &datapb.CompactionTask{
 			Type: datapb.CompactionType_ClusteringCompaction,
 		},
+		slotUsage: paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64(),
 	})
 	s.Equal(int64(101), node)
 	nodeSlots[node] = nodeSlots[node] - useSlot
@@ -412,6 +435,7 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNodeForClusteringTask() {
 		CompactionTask: &datapb.CompactionTask{
 			Type: datapb.CompactionType_ClusteringCompaction,
 		},
+		slotUsage: paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64(),
 	})
 	s.Equal(int64(NullNodeID), node)
 }
