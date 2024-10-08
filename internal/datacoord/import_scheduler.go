@@ -260,7 +260,7 @@ func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		preimportDuration := task.GetTR().RecordSpan()
 		metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePreImport).Observe(float64(preimportDuration.Milliseconds()))
-		log.Info("preimport done", WrapTaskLog(task, zap.Duration("timeCost/preimport", preimportDuration))...)
+		log.Info("preimport done", WrapTaskLog(task, zap.Duration("taskTimeCost/preimport", preimportDuration))...)
 	}
 }
 
@@ -341,7 +341,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		}
 		importDuration := task.GetTR().RecordSpan()
 		metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStageImport).Observe(float64(importDuration.Milliseconds()))
-		log.Info("import done", WrapTaskLog(task, zap.Duration("timeCost/import", importDuration))...)
+		log.Info("import done", WrapTaskLog(task, zap.Duration("taskTimeCost/import", importDuration))...)
 	}
 	log.Info("query import", WrapTaskLog(task, zap.String("state", resp.GetState().String()),
 		zap.String("reason", resp.GetReason()))...)
