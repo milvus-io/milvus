@@ -41,12 +41,13 @@ namespace milvus {
 
 /*
 * If string field's value all empty, need a string padding to avoid
-* mmap failing because size_ is zero which causing invalid arguement
+* mmap failing because size_ is zero which causing invalid argument
 * array has the same problem
 * TODO: remove it when support NULL value
 */
 constexpr size_t FILE_STRING_PADDING = 1;
 constexpr size_t FILE_ARRAY_PADDING = 1;
+constexpr size_t SPARSE_FLOAT_PADDING = 4;
 
 inline size_t
 PaddingSize(const DataType& type) {
@@ -60,6 +61,8 @@ PaddingSize(const DataType& type) {
             break;
         case DataType::ARRAY:
             return FILE_ARRAY_PADDING;
+        case DataType::VECTOR_SPARSE_FLOAT:
+            return SPARSE_FLOAT_PADDING;
         default:
             break;
     }
