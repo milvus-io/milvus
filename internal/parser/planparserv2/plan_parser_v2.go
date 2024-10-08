@@ -149,7 +149,7 @@ func convertHanToASCII(s string) string {
 		}
 
 		if unicode.Is(unicode.Han, r) {
-			builder.WriteString(fmt.Sprintf("\\u%04x", r))
+			builder.WriteString(formatUnicode(uint32(r)))
 		} else {
 			builder.WriteRune(r)
 
