@@ -5,10 +5,12 @@ expr:
 	| FloatingConstant										                     # Floating
 	| BooleanConstant										                     # Boolean
 	| StringLiteral											                     # String
-	| Identifier											                     # Identifier
+	| (Identifier|Meta)           			      							     # Identifier
 	| JSONIdentifier                                                             # JSONIdentifier
+	| LBRACE Identifier RBRACE                                                   # TemplateVariable
 	| '(' expr ')'											                     # Parens
 	| '[' expr (',' expr)* ','? ']'                                              # Array
+	| EmptyArray                                                                 # EmptyArray
 	| expr LIKE StringLiteral                                                    # Like
 	| expr POW expr											                     # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                     # Unary
@@ -16,8 +18,7 @@ expr:
 	| expr op = (MUL | DIV | MOD) expr						                     # MulDivMod
 	| expr op = (ADD | SUB) expr							                     # AddSub
 	| expr op = (SHL | SHR) expr							                     # Shift
-	| expr op = (IN | NIN) ('[' expr (',' expr)* ','? ']')                       # Term
-	| expr op = (IN | NIN) EmptyTerm                                             # EmptyTerm
+	| expr op = NOT? IN expr                                                     # Term
 	| (JSONContains | ArrayContains)'('expr',' expr')'                           # JSONContains
 	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                     # JSONContainsAll
 	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                     # JSONContainsAny
@@ -42,6 +43,8 @@ expr:
 // INT64: 'int64';
 // FLOAT: 'float';
 // DOUBLE: 'double';
+LBRACE: '{';
+RBRACE: '}';
 
 LT: '<';
 LE: '<=';
@@ -71,9 +74,8 @@ OR: '||' | 'or';
 BNOT: '~';
 NOT: '!' | 'not';
 
-IN: 'in';
-NIN: 'not in';
-EmptyTerm: '[' (Whitespace | Newline)* ']';
+IN: 'in' | 'IN';
+EmptyArray: '[' (Whitespace | Newline)* ']';
 
 JSONContains: 'json_contains' | 'JSON_CONTAINS';
 JSONContainsAll: 'json_contains_all' | 'JSON_CONTAINS_ALL';
@@ -96,10 +98,11 @@ FloatingConstant:
 	DecimalFloatingConstant
 	| HexadecimalFloatingConstant;
 
-Identifier: Nondigit (Nondigit | Digit)* | '$meta';
+Identifier: Nondigit (Nondigit | Digit)*;
+Meta: '$meta';
 
 StringLiteral: EncodingPrefix? ('"' DoubleSCharSequence? '"' | '\'' SingleSCharSequence? '\'');
-JSONIdentifier: Identifier('[' (StringLiteral | DecimalConstant) ']')+;
+JSONIdentifier: (Identifier | Meta)('[' (StringLiteral | DecimalConstant) ']')+;
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 
