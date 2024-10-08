@@ -92,6 +92,7 @@ func TestConsumeServerRecvArm(t *testing.T) {
 		},
 		logger:  log.With(),
 		closeCh: make(chan struct{}),
+		metrics: newConsumerMetrics("test"),
 	}
 	recvCh := make(chan *streamingpb.ConsumeRequest)
 	grpcConsumerServer.EXPECT().Recv().RunAndReturn(func() (*streamingpb.ConsumeRequest, error) {
@@ -137,13 +138,13 @@ func TestConsumerServeSendArm(t *testing.T) {
 		logger:  log.With(),
 		scanner: scanner,
 		closeCh: make(chan struct{}),
+		metrics: newConsumerMetrics("test"),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	grpcConsumerServer.EXPECT().Context().Return(ctx)
 	grpcConsumerServer.EXPECT().Send(mock.Anything).RunAndReturn(func(cr *streamingpb.ConsumeResponse) error { return nil }).Times(7)
 
 	scanCh := make(chan message.ImmutableMessage, 5)
-	scanner.EXPECT().Channel().Return(types.PChannelInfo{})
 	scanner.EXPECT().Chan().Return(scanCh)
 	scanner.EXPECT().Close().Return(nil).Times(3)
 

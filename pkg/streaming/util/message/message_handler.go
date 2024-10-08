@@ -23,12 +23,3 @@ func (cmh ChanMessageHandler) Handle(msg ImmutableMessage) {
 func (cmh ChanMessageHandler) Close() {
 	close(cmh)
 }
-
-// NopCloseHandler is a handler that do nothing when close.
-type NopCloseHandler struct {
-	Handler
-}
-
-// Close is called after all messages are handled or handling is interrupted.
-func (nch NopCloseHandler) Close() {
-}

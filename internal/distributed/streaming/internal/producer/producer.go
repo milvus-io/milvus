@@ -14,10 +14,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
@@ -44,6 +42,7 @@ func NewResumableProducer(f factory, opts *ProducerOptions) *ResumableProducer {
 		producer: newProducerWithResumingError(), // lazy initialized.
 		cond:     syncutil.NewContextCond(&sync.Mutex{}),
 		factory:  f,
+		metrics:  newProducerMetrics(opts.PChannel),
 	}
 	go p.resumeLoop()
 	return p
@@ -73,14 +72,20 @@ type ResumableProducer struct {
 
 	// factory is used to create a new producer.
 	factory factory
+
+	metrics *producerMetrics
 }
 
 // Produce produce a new message to log service.
-func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMessage) (*producer.ProduceResult, error) {
+func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMessage) (result *producer.ProduceResult, err error) {
 	if p.lifetime.Add(lifetime.IsWorking) != nil {
 		return nil, errors.Wrapf(errs.ErrClosed, "produce on closed producer")
 	}
-	defer p.lifetime.Done()
+	metricGuard := p.metrics.StartProduce(msg.EstimateSize())
+	defer func() {
+		metricGuard.Finish(err)
+		p.lifetime.Done()
+	}()
 
 	for {
 		// get producer.
@@ -112,15 +117,18 @@ func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMess
 func (p *ResumableProducer) resumeLoop() {
 	defer func() {
 		p.logger.Info("stop resuming")
+		p.metrics.IntoUnavailable()
 		close(p.resumingExitCh)
 	}()
 
 	for {
+		p.metrics.IntoUnavailable()
 		producer, err := p.createNewProducer()
 		p.producer.SwapProducer(producer, err)
 		if err != nil {
 			return
 		}
+		p.metrics.IntoAvailable()
 
 		// Wait until the new producer is unavailable, trigger a new swap operation.
 		if err := p.waitUntilUnavailable(producer); err != nil {
@@ -132,10 +140,6 @@ func (p *ResumableProducer) resumeLoop() {
 
 // waitUntilUnavailable is used to wait until the producer is unavailable or context canceled.
 func (p *ResumableProducer) waitUntilUnavailable(producer handler.Producer) error {
-	// Mark as available.
-	metrics.StreamingServiceClientProducerTotal.WithLabelValues(paramtable.GetStringNodeID(), metrics.StreamingServiceClientProducerAvailable).Inc()
-	defer metrics.StreamingServiceClientProducerTotal.WithLabelValues(paramtable.GetStringNodeID(), metrics.StreamingServiceClientProducerAvailable).Dec()
-
 	select {
 	case <-p.stopResumingCh:
 		return errGracefulShutdown
@@ -204,4 +208,5 @@ func (p *ResumableProducer) Close() {
 	// force close is applied by cancel context if graceful close is failed.
 	p.cancel()
 	<-p.resumingExitCh
+	p.metrics.Close()
 }

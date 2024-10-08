@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -44,8 +45,10 @@ func adaptImplsToWAL(
 			channel:     basicWAL.Channel(),
 			idAllocator: typeutil.NewIDAllocator(),
 		},
-		scanners: typeutil.NewConcurrentMap[int64, wal.Scanner](),
-		cleanup:  cleanup,
+		scanners:     typeutil.NewConcurrentMap[int64, wal.Scanner](),
+		cleanup:      cleanup,
+		writeMetrics: metricsutil.NewWriteMetrics(basicWAL.Channel(), basicWAL.WALName()),
+		scanMetrics:  metricsutil.NewScanMetrics(basicWAL.Channel()),
 	}
 	param.WAL.Set(wal)
 	return wal
@@ -61,6 +64,8 @@ type walAdaptorImpl struct {
 	scannerRegistry        scannerRegistry
 	scanners               *typeutil.ConcurrentMap[int64, wal.Scanner]
 	cleanup                func()
+	writeMetrics           *metricsutil.WriteMetrics
+	scanMetrics            *metricsutil.ScanMetrics
 }
 
 func (w *walAdaptorImpl) WALName() string {
@@ -88,6 +93,9 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	// Setup the term of wal.
 	msg = msg.WithWALTerm(w.Channel().Term)
 
+	// Metrics for append message.
+	metricsGuard := w.writeMetrics.StartAppend(msg.MessageType(), msg.EstimateSize())
+
 	// Execute the interceptor and wal append.
 	var extraAppendResult utility.ExtraAppendResult
 	ctx = utility.WithExtraAppendResult(ctx, &extraAppendResult)
@@ -98,9 +106,13 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 				// only used by time tick sync operator.
 				return notPersistHint.MessageID, nil
 			}
-			return w.inner.Append(ctx, msg)
+			metricsGuard.StartWALImplAppend()
+			msgID, err := w.inner.Append(ctx, msg)
+			metricsGuard.FinishWALImplAppend()
+			return msgID, err
 		})
 	if err != nil {
+		metricsGuard.Finish(err)
 		return nil, err
 	}
 
@@ -111,6 +123,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		TxnCtx:    extraAppendResult.TxnCtx,
 		Extra:     extraAppendResult.Extra,
 	}
+	metricsGuard.Finish(nil)
 	return r, nil
 }
 
@@ -148,9 +161,8 @@ func (w *walAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.Sca
 		name,
 		w.inner,
 		opts,
-		func() {
-			w.scanners.Remove(id)
-		})
+		w.scanMetrics.NewScannerMetrics(),
+		func() { w.scanners.Remove(id) })
 	w.scanners.Insert(id, s)
 	return s, nil
 }
@@ -198,6 +210,10 @@ func (w *walAdaptorImpl) Close() {
 	logger.Info("call wal cleanup function...")
 	w.cleanup()
 	logger.Info("wal closed")
+
+	// close all metrics.
+	w.scanMetrics.Close()
+	w.writeMetrics.Close()
 }
 
 type interceptorBuildResult struct {

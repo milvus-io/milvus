@@ -2,7 +2,6 @@ package consumer
 
 import (
 	"io"
-	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -12,12 +11,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // CreateConsumeServer create a new consumer.
@@ -55,11 +52,13 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 		}
 		return nil, errors.Wrap(err, "at send created")
 	}
+	metrics := newConsumerMetrics(l.Channel().Name)
 	return &ConsumeServer{
 		scanner:       scanner,
 		consumeServer: consumeServer,
 		logger:        log.With(zap.String("channel", l.Channel().Name), zap.Int64("term", l.Channel().Term)), // Add trace info for all log.
 		closeCh:       make(chan struct{}),
+		metrics:       metrics,
 	}, nil
 }
 
@@ -69,6 +68,7 @@ type ConsumeServer struct {
 	consumeServer *consumeGrpcServerHelper
 	logger        *log.MLogger
 	closeCh       chan struct{}
+	metrics       *consumerMetrics
 }
 
 // Execute executes the consumer.
@@ -83,7 +83,9 @@ func (c *ConsumeServer) Execute() error {
 	// 1. the stream is broken.
 	// 2. recv arm recv close signal.
 	// 3. scanner is quit with expected error.
-	return c.sendLoop()
+	err := c.sendLoop()
+	c.metrics.Close()
+	return err
 }
 
 // sendLoop sends the message to client.
@@ -141,9 +143,13 @@ func (c *ConsumeServer) sendLoop() (err error) {
 	}
 }
 
-func (c *ConsumeServer) sendImmutableMessage(msg message.ImmutableMessage) error {
+func (c *ConsumeServer) sendImmutableMessage(msg message.ImmutableMessage) (err error) {
+	metricsGuard := c.metrics.StartConsume(msg.EstimateSize())
+	defer func() {
+		metricsGuard.Finish(err)
+	}()
+
 	// Send Consumed message to client and do metrics.
-	messageSize := msg.EstimateSize()
 	if err := c.consumeServer.SendConsumeMessage(&streamingpb.ConsumeMessageReponse{
 		Message: &messagespb.ImmutableMessage{
 			Id: &messagespb.MessageID{
@@ -155,11 +161,6 @@ func (c *ConsumeServer) sendImmutableMessage(msg message.ImmutableMessage) error
 	}); err != nil {
 		return status.NewInner("send consume message failed: %s", err.Error())
 	}
-	metrics.StreamingNodeConsumeBytes.WithLabelValues(
-		paramtable.GetStringNodeID(),
-		c.scanner.Channel().Name,
-		strconv.FormatInt(c.scanner.Channel().Term, 10),
-	).Observe(float64(messageSize))
 	return nil
 }
 

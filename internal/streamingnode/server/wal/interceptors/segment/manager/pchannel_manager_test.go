@@ -95,7 +95,7 @@ func TestSegmentAllocManager(t *testing.T) {
 	assert.True(t, m.IsNoWaitSeal()) // result2 is acked, so new seal segment will be sealed right away.
 
 	// interactive with txn
-	txnManager := txn.NewTxnManager()
+	txnManager := txn.NewTxnManager(types.PChannelInfo{Name: "test"})
 	txn, err := txnManager.BeginNewTxn(context.Background(), tsoutil.GetCurrentTime(), time.Second)
 	assert.NoError(t, err)
 	txn.BeginDone()
