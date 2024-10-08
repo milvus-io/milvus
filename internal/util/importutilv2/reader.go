@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 //go:generate mockery --name=Reader --structname=MockReader --output=./  --filename=mock_reader.go --with-expecter --inpackage
@@ -51,6 +52,9 @@ func NewReader(ctx context.Context,
 	options Options,
 	bufferSize int,
 ) (Reader, error) {
+	if IsFromLocal(options) {
+		cm = storage.NewLocalChunkManager(storage.RootPath(paramtable.Get().LocalStorageCfg.Path.GetValue()))
+	}
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
 		if err != nil {
