@@ -4494,7 +4494,7 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",
 		Version:      "2.4.0",
 		Doc:          "The minimal memory ratio of free memory for level zero compaction executing in batch mode",
-		DefaultValue: "0.05",
+		DefaultValue: "0.5",
 		Export:       true,
 	}
 	p.L0BatchMemoryRatio.Init(base.mgr)
