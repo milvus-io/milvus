@@ -60,6 +60,7 @@ func (m *SegmentAssignMetrics) UpdateCollectionCount(cnt int) {
 func (m *SegmentAssignMetrics) Close() {
 	metrics.WALSegmentAllocTotal.DeletePartialMatch(m.constLabel)
 	metrics.WALSegmentFlushedTotal.DeletePartialMatch(m.constLabel)
+	metrics.WALSegmentBytes.Delete(m.constLabel)
 	metrics.WALPartitionTotal.Delete(m.constLabel)
 	metrics.WALCollectionTotal.Delete(m.constLabel)
 }
