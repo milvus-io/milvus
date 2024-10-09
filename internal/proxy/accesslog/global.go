@@ -164,8 +164,9 @@ func initFormatter(logCfg *paramtable.AccessLogConfig) (*FormatterManger, error)
 		}
 	}
 
+	quote := logCfg.Quote.GetAsBool()
 	for name, format := range formatMap {
-		formatterManger.Add(name, format)
+		formatterManger.Add(name, format, quote)
 		if methods, ok := methodMap[name]; ok {
 			formatterManger.SetMethod(name, methods...)
 		}

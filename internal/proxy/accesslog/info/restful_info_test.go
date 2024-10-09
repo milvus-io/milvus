@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -55,123 +56,130 @@ func (s *RestfulAccessInfoSuite) SetupTest() {
 
 func (s *RestfulAccessInfoSuite) TestTimeCost() {
 	s.info.params.Latency = time.Second
-	result := Get(s.info, "$time_cost")
+	result := Get(s.info, false, "$time_cost")
 	s.Equal(fmt.Sprint(time.Second), result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestTimeNow() {
-	result := Get(s.info, "$time_now")
+	result := Get(s.info, false, "$time_now")
 	s.NotEqual(Unknown, result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestTimeStart() {
-	result := Get(s.info, "$time_start")
+	result := Get(s.info, false, "$time_start")
 	s.Equal(Unknown, result[0])
 
 	s.info.start = time.Now()
-	result = Get(s.info, "$time_start")
+	result = Get(s.info, false, "$time_start")
 	s.Equal(s.info.start.Format(timeFormat), result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestTimeEnd() {
 	s.info.params.TimeStamp = time.Now()
-	result := Get(s.info, "$time_end")
+	result := Get(s.info, false, "$time_end")
 	s.Equal(s.info.params.TimeStamp.Format(timeFormat), result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestMethodName() {
 	s.info.params.Path = "/restful/test"
-	result := Get(s.info, "$method_name")
+	result := Get(s.info, false, "$method_name")
 	s.Equal(s.info.params.Path, result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestAddress() {
 	s.info.params.ClientIP = "127.0.0.1"
-	result := Get(s.info, "$user_addr")
+	result := Get(s.info, false, "$user_addr")
 	s.Equal(s.info.params.ClientIP, result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestTraceID() {
-	result := Get(s.info, "$trace_id")
+	result := Get(s.info, false, "$trace_id")
 	s.Equal(Unknown, result[0])
 
 	s.info.params.Keys["traceID"] = "testtrace"
-	result = Get(s.info, "$trace_id")
+	result = Get(s.info, false, "$trace_id")
 	s.Equal(s.info.params.Keys["traceID"], result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestStatus() {
 	s.info.params.StatusCode = http.StatusBadRequest
-	result := Get(s.info, "$method_status")
+	result := Get(s.info, false, "$method_status")
 	s.Equal("HttpError400", result[0])
 
 	s.info.params.StatusCode = http.StatusOK
 	s.info.params.Keys[ContextReturnCode] = merr.Code(merr.ErrChannelLack)
-	result = Get(s.info, "$method_status")
+	result = Get(s.info, false, "$method_status")
 	s.Equal("Failed", result[0])
 
 	s.info.params.StatusCode = http.StatusOK
 	s.info.params.Keys[ContextReturnCode] = merr.Code(nil)
-	result = Get(s.info, "$method_status")
+	result = Get(s.info, false, "$method_status")
 	s.Equal("Successful", result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestErrorCode() {
-	result := Get(s.info, "$error_code")
+	result := Get(s.info, false, "$error_code")
 	s.Equal(Unknown, result[0])
 
 	s.info.params.Keys[ContextReturnCode] = 200
-	result = Get(s.info, "$error_code")
+	result = Get(s.info, false, "$error_code")
 	s.Equal(fmt.Sprint(200), result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestErrorMsg() {
 	s.info.params.Keys[ContextReturnMessage] = merr.ErrChannelLack.Error()
-	result := Get(s.info, "$error_msg")
+	result := Get(s.info, false, "$error_msg")
 	s.Equal(merr.ErrChannelLack.Error(), result[0])
 
 	s.info.params.Keys[ContextReturnMessage] = "test error. stack: 1:\n 2:\n 3:\n"
-	result = Get(s.info, "$error_msg")
-	s.Equal("test error. stack: 1:\\n 2:\\n 3:\\n", result[0])
+	result = Get(s.info, true, "$error_msg")
+	s.Equal("\"test error. stack: 1:\\n 2:\\n 3:\\n\"", result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestDbName() {
-	result := Get(s.info, "$database_name")
+	result := Get(s.info, false, "$database_name")
 	s.Equal(Unknown, result[0])
 
 	req := &milvuspb.QueryRequest{
 		DbName: "test",
 	}
 	s.info.req = req
-	result = Get(s.info, "$database_name")
+	result = Get(s.info, false, "$database_name")
 	s.Equal("test", result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestSdkInfo() {
-	result := Get(s.info, "$sdk_version")
+	result := Get(s.info, false, "$sdk_version")
 	s.Equal("Restful", result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestExpression() {
-	result := Get(s.info, "$method_expr")
+	result := Get(s.info, false, "$method_expr")
 	s.Equal(Unknown, result[0])
 
 	testExpr := "test"
 	s.info.req = &milvuspb.QueryRequest{
 		Expr: testExpr,
 	}
-	result = Get(s.info, "$method_expr")
+	result = Get(s.info, false, "$method_expr")
 	s.Equal(testExpr, result[0])
 
 	s.info.req = &milvuspb.SearchRequest{
 		Dsl: testExpr,
 	}
-	result = Get(s.info, "$method_expr")
+	result = Get(s.info, false, "$method_expr")
 	s.Equal(testExpr, result[0])
+
+	s.info.req = &milvuspb.SearchRequest{
+		Dsl: "expr = \" test \"",
+	}
+	result = Get(s.info, true, "$method_expr")
+	log.Info(result[0].(string))
+	s.Equal("\"expr = \\\" test \\\"\"", result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestOutputFields() {
-	result := Get(s.info, "$output_fields")
+	result := Get(s.info, false, "$output_fields")
 	s.Equal(Unknown, result[0])
 
 	fields := []string{"pk"}
@@ -179,19 +187,19 @@ func (s *RestfulAccessInfoSuite) TestOutputFields() {
 		OutputFields: fields,
 	}
 	s.info.InitReq()
-	result = Get(s.info, "$output_fields")
+	result = Get(s.info, false, "$output_fields")
 	s.Equal(fmt.Sprint(fields), result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestConsistencyLevel() {
-	result := Get(s.info, "$consistency_level")
+	result := Get(s.info, false, "$consistency_level")
 	s.Equal(Unknown, result[0])
 
 	s.info.params.Keys[ContextRequest] = &milvuspb.QueryRequest{
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 	}
 	s.info.InitReq()
-	result = Get(s.info, "$consistency_level")
+	result = Get(s.info, false, "$consistency_level")
 	s.Equal(commonpb.ConsistencyLevel_Bounded.String(), result[0])
 }
 
@@ -200,7 +208,7 @@ func (s *RestfulAccessInfoSuite) TestClusterPrefix() {
 	paramtable.Init()
 	ClusterPrefix.Store(cluster)
 
-	result := Get(s.info, "$cluster_prefix")
+	result := Get(s.info, false, "$cluster_prefix")
 	s.Equal(cluster, result[0])
 }
 

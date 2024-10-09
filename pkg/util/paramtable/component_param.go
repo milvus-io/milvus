@@ -1193,6 +1193,7 @@ type AccessLogConfig struct {
 	LocalPath     ParamItem  `refreshable:"false"`
 	Filename      ParamItem  `refreshable:"false"`
 	MaxSize       ParamItem  `refreshable:"false"`
+	Quote         ParamItem  `refreshable:"false"`
 	RotatedTime   ParamItem  `refreshable:"false"`
 	MaxBackups    ParamItem  `refreshable:"false"`
 	RemotePath    ParamItem  `refreshable:"false"`
@@ -1464,6 +1465,15 @@ please adjust in embedded Milvus: false`,
 		Export:       true,
 	}
 	p.AccessLog.CacheSize.Init(base.mgr)
+
+	p.AccessLog.Quote = ParamItem{
+		Key:          "proxy.accessLog.quote",
+		Version:      "2.5.0",
+		DefaultValue: "false",
+		Doc:          "Whether to return some variable with go double-quote format, to make access log program-readable",
+		Export:       true,
+	}
+	p.AccessLog.Quote.Init(base.mgr)
 
 	p.AccessLog.CacheFlushInterval = ParamItem{
 		Key:          "proxy.accessLog.cacheFlushInterval",

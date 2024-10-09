@@ -40,7 +40,7 @@ func genTestData(clientInfo *commonpb.ClientInfo, identifier int64) []*TestData 
 	ret = append(ret, &TestData{
 		req: &milvuspb.SearchRequest{
 			CollectionName: "test2",
-			Dsl:            "pk <= 100",
+			Dsl:            "varchar == \"test\"",
 		},
 		resp: &milvuspb.SearchResults{
 			CollectionName: "test2",
@@ -68,6 +68,7 @@ func BenchmarkAccesslog(b *testing.B) {
 	Params := paramtable.Get()
 	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true")
 	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "")
+	Params.Save(Params.ProxyCfg.AccessLog.Quote.Key, "true")
 	Params.Save(Params.CommonCfg.ClusterPrefix.Key, "in-test")
 	InitAccessLogger(Params)
 	paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
@@ -80,7 +81,7 @@ func BenchmarkAccesslog(b *testing.B) {
 	md := metadata.MD{util.IdentifierKey: []string{fmt.Sprint(identifier)}}
 	ctx := metadata.NewIncomingContext(context.TODO(), md)
 	connection.GetManager().Register(ctx, identifier, clientInfo)
-	rpcInfo := &grpc.UnaryServerInfo{Server: nil, FullMethod: "testMethod"}
+	rpcInfo := &grpc.UnaryServerInfo{Server: nil, FullMethod: "Query"}
 	datas := genTestData(clientInfo, identifier)
 
 	b.ResetTimer()

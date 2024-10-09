@@ -45,8 +45,8 @@ func NewFormatterManger() *FormatterManger {
 	}
 }
 
-func (m *FormatterManger) Add(name, fmt string) {
-	m.formatters[name] = NewFormatter(fmt)
+func (m *FormatterManger) Add(name, fmt string, quote bool) {
+	m.formatters[name] = NewFormatter(fmt, quote)
 }
 
 func (m *FormatterManger) SetMethod(name string, methods ...string) {
@@ -72,11 +72,13 @@ type Formatter struct {
 	base   string
 	fmt    string
 	fields []string
+	quote  bool
 }
 
-func NewFormatter(base string) *Formatter {
+func NewFormatter(base string, quote bool) *Formatter {
 	formatter := &Formatter{
-		base: base,
+		base:  base,
+		quote: quote,
 	}
 	formatter.build()
 	return formatter
@@ -120,7 +122,7 @@ func (f *Formatter) build() {
 }
 
 func (f *Formatter) Format(i info.AccessInfo) string {
-	fieldValues := info.Get(i, f.fields...)
+	fieldValues := info.Get(i, f.quote, f.fields...)
 	return fmt.Sprintf(f.fmt, fieldValues...)
 }
 

@@ -79,11 +79,11 @@ func (s *GrpcAccessInfoSuite) TestErrorCode() {
 	s.info.resp = &milvuspb.QueryResults{
 		Status: merr.Status(nil),
 	}
-	result := Get(s.info, "$error_code")
+	result := Get(s.info, false, "$error_code")
 	s.Equal(fmt.Sprint(0), result[0])
 
 	s.info.resp = merr.Status(nil)
-	result = Get(s.info, "$error_code")
+	result = Get(s.info, false, "$error_code")
 	s.Equal(fmt.Sprint(0), result[0])
 }
 
@@ -91,20 +91,21 @@ func (s *GrpcAccessInfoSuite) TestErrorMsg() {
 	s.info.resp = &milvuspb.QueryResults{
 		Status: merr.Status(merr.ErrChannelLack),
 	}
-	result := Get(s.info, "$error_msg")
+	result := Get(s.info, false, "$error_msg")
 	s.Equal(merr.ErrChannelLack.Error(), result[0])
 
 	s.info.resp = merr.Status(merr.ErrChannelLack)
-	result = Get(s.info, "$error_msg")
+	result = Get(s.info, false, "$error_msg")
 	s.Equal(merr.ErrChannelLack.Error(), result[0])
 
 	// replace line breaks
 	s.info.resp = merr.Status(fmt.Errorf("test error. stack: 1:\n 2:\n 3:\n"))
-	result = Get(s.info, "$error_msg")
-	s.Equal("test error. stack: 1:\\n 2:\\n 3:\\n", result[0])
+	result = Get(s.info, true, "$error_msg")
+	s.Equal("\"test error. stack: 1:\\n 2:\\n 3:\\n\"", result[0])
 
+	panic("")
 	s.info.err = status.Errorf(codes.Unavailable, "mock")
-	result = Get(s.info, "$error_msg")
+	result = Get(s.info, false, "$error_msg")
 	s.Equal("rpc error: code = Unavailable desc = mock", result[0])
 }
 
@@ -112,27 +113,27 @@ func (s *GrpcAccessInfoSuite) TestErrorType() {
 	s.info.resp = &milvuspb.QueryResults{
 		Status: merr.Status(nil),
 	}
-	result := Get(s.info, "$error_type")
+	result := Get(s.info, false, "$error_type")
 	s.Equal("", result[0])
 
 	s.info.resp = merr.Status(merr.WrapErrAsInputError(merr.ErrParameterInvalid))
-	result = Get(s.info, "$error_type")
+	result = Get(s.info, false, "$error_type")
 	s.Equal(merr.InputError.String(), result[0])
 
 	s.info.err = merr.ErrParameterInvalid
-	result = Get(s.info, "$error_type")
+	result = Get(s.info, false, "$error_type")
 	s.Equal(merr.SystemError.String(), result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestDbName() {
 	s.info.req = nil
-	result := Get(s.info, "$database_name")
+	result := Get(s.info, false, "$database_name")
 	s.Equal(Unknown, result[0])
 
 	s.info.req = &milvuspb.QueryRequest{
 		DbName: "test",
 	}
-	result = Get(s.info, "$database_name")
+	result = Get(s.info, false, "$database_name")
 	s.Equal("test", result[0])
 }
 
@@ -144,31 +145,31 @@ func (s *GrpcAccessInfoSuite) TestSdkInfo() {
 	}
 
 	s.info.ctx = ctx
-	result := Get(s.info, "$sdk_version")
+	result := Get(s.info, false, "$sdk_version")
 	s.Equal(Unknown, result[0])
 
 	md := metadata.MD{}
 	ctx = metadata.NewIncomingContext(ctx, md)
 	s.info.ctx = ctx
-	result = Get(s.info, "$sdk_version")
+	result = Get(s.info, false, "$sdk_version")
 	s.Equal(Unknown, result[0])
 
 	md = metadata.MD{util.HeaderUserAgent: []string{"invalid"}}
 	ctx = metadata.NewIncomingContext(ctx, md)
 	s.info.ctx = ctx
-	result = Get(s.info, "$sdk_version")
+	result = Get(s.info, false, "$sdk_version")
 	s.Equal(Unknown, result[0])
 
 	md = metadata.MD{util.HeaderUserAgent: []string{"grpc-go.test"}}
 	ctx = metadata.NewIncomingContext(ctx, md)
 	s.info.ctx = ctx
-	result = Get(s.info, "$sdk_version")
+	result = Get(s.info, false, "$sdk_version")
 	s.Equal("Golang"+"-"+Unknown, result[0])
 
 	s.info.req = &milvuspb.ConnectRequest{
 		ClientInfo: clientInfo,
 	}
-	result = Get(s.info, "$sdk_version")
+	result = Get(s.info, false, "$sdk_version")
 	s.Equal(clientInfo.SdkType+"-"+clientInfo.SdkVersion, result[0])
 
 	identifier := 11111
@@ -177,48 +178,48 @@ func (s *GrpcAccessInfoSuite) TestSdkInfo() {
 	connection.GetManager().Register(ctx, int64(identifier), clientInfo)
 
 	s.info.ctx = ctx
-	result = Get(s.info, "$sdk_version")
+	result = Get(s.info, false, "$sdk_version")
 	s.Equal(clientInfo.SdkType+"-"+clientInfo.SdkVersion, result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestExpression() {
-	result := Get(s.info, "$method_expr")
+	result := Get(s.info, false, "$method_expr")
 	s.Equal(Unknown, result[0])
 
 	testExpr := "test"
 	s.info.req = &milvuspb.QueryRequest{
 		Expr: testExpr,
 	}
-	result = Get(s.info, "$method_expr")
+	result = Get(s.info, false, "$method_expr")
 	s.Equal(testExpr, result[0])
 
 	s.info.req = &milvuspb.SearchRequest{
 		Dsl: testExpr,
 	}
-	result = Get(s.info, "$method_expr")
+	result = Get(s.info, false, "$method_expr")
 	s.Equal(testExpr, result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestOutputFields() {
-	result := Get(s.info, "$output_fields")
+	result := Get(s.info, false, "$output_fields")
 	s.Equal(Unknown, result[0])
 
 	fields := []string{"pk"}
 	s.info.req = &milvuspb.QueryRequest{
 		OutputFields: fields,
 	}
-	result = Get(s.info, "$output_fields")
+	result = Get(s.info, false, "$output_fields")
 	s.Equal(fmt.Sprint(fields), result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestConsistencyLevel() {
-	result := Get(s.info, "$consistency_level")
+	result := Get(s.info, false, "$consistency_level")
 	s.Equal(Unknown, result[0])
 
 	s.info.req = &milvuspb.QueryRequest{
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 	}
-	result = Get(s.info, "$consistency_level")
+	result = Get(s.info, false, "$consistency_level")
 	s.Equal(commonpb.ConsistencyLevel_Bounded.String(), result[0])
 }
 
@@ -227,7 +228,7 @@ func (s *GrpcAccessInfoSuite) TestClusterPrefix() {
 	paramtable.Init()
 	ClusterPrefix.Store(cluster)
 
-	result := Get(s.info, "$cluster_prefix")
+	result := Get(s.info, false, "$cluster_prefix")
 	s.Equal(cluster, result[0])
 }
 
