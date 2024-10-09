@@ -114,6 +114,7 @@ def analyze_documents(texts, language="en"):
     # End timing
     tt = time.time() - t0
     log.info(f"Analyze document cost time: {tt}")
+    log.info(f"Word frequency: {word_freq.most_common(10)}")
 
     return word_freq
 
