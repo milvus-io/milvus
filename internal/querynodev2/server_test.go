@@ -65,7 +65,7 @@ func (suite *QueryNodeSuite) SetupTest() {
 	var err error
 	paramtable.Init()
 	suite.params = paramtable.Get()
-	suite.params.Save(suite.params.QueryNodeCfg.GCEnabled.Key, "false")
+	suite.params.Save(suite.params.CommonCfg.GCEnabled.Key, "false")
 
 	// mock factory
 	suite.factory = dependency.NewMockFactory(suite.T())
