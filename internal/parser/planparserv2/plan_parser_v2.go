@@ -2,6 +2,8 @@ package planparserv2
 
 import (
 	"fmt"
+	"strings"
+	"unicode"
 
 	"github.com/antlr/antlr4/runtime/Go/antlr"
 	"github.com/samber/lo"
@@ -107,7 +109,39 @@ func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string) (*planpb.
 	return planNode, nil
 }
 
+func convertHanToASCII(s string) string {
+	var builder strings.Builder
+	builder.Grow(len(s) * 6)
+	skipCur := false
+	n := len(s)
+	for i, r := range s {
+		if skipCur {
+			builder.WriteRune(r)
+			skipCur = false
+			continue
+		}
+		if r == '\\' {
+			if i+1 < n && !isEscapeCh(s[i+1]) {
+				return s
+			}
+			skipCur = true
+			builder.WriteRune(r)
+			continue
+		}
+
+		if unicode.Is(unicode.Han, r) {
+			builder.WriteString(formatUnicode(uint32(r)))
+		} else {
+			builder.WriteRune(r)
+		}
+	}
+
+	return builder.String()
+}
+
 func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) (*planpb.PlanNode, error) {
+	exprStr = convertHanToASCII(exprStr)
+
 	parse := func() (*planpb.Expr, error) {
 		if len(exprStr) <= 0 {
 			return nil, nil
