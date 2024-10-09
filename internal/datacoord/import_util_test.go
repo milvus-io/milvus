@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -556,13 +555,13 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(mockErr))
 	assert.NoError(t, err)
 
-	progress, state, _, _, reason := GetJobProgress(job.GetJobID(), imeta, meta, nil)
+	progress, state, _, _, reason := GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(0), progress)
 	assert.Equal(t, internalpb.ImportJobState_Failed, state)
 	assert.Equal(t, mockErr, reason)
 
 	// job does not exist
-	progress, state, _, _, reason = GetJobProgress(-1, imeta, meta, nil)
+	progress, state, _, _, reason = GetJobProgress(-1, imeta, meta)
 	assert.Equal(t, int64(0), progress)
 	assert.Equal(t, internalpb.ImportJobState_Failed, state)
 	assert.NotEqual(t, "", reason)
@@ -570,7 +569,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	// pending state
 	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Pending))
 	assert.NoError(t, err)
-	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, nil)
+	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(10), progress)
 	assert.Equal(t, internalpb.ImportJobState_Pending, state)
 	assert.Equal(t, "", reason)
@@ -578,7 +577,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	// preImporting state
 	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
 	assert.NoError(t, err)
-	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, nil)
+	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(10+30), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
@@ -586,7 +585,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	// importing state, segmentImportedRows/totalRows = 0.5
 	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing))
 	assert.NoError(t, err)
-	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, nil)
+	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(10+30+30*0.5), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
@@ -604,38 +603,15 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.NoError(t, err)
 	err = meta.UpdateSegmentsInfo(UpdateImportedRows(22, 100))
 	assert.NoError(t, err)
-	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, nil)
+	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(float32(10+30+30)), progress)
-	assert.Equal(t, internalpb.ImportJobState_Importing, state)
-	assert.Equal(t, "", reason)
-
-	// stats state, len(statsSegmentIDs) / (len(originalSegmentIDs) = 0.5
-	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Stats))
-	assert.NoError(t, err)
-	sjm := NewMockStatsJobManager(t)
-	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).RunAndReturn(func(segmentID int64, _ indexpb.StatsSubJob) indexpb.JobState {
-		if lo.Contains([]int64{10, 11, 12}, segmentID) {
-			return indexpb.JobState_JobStateFinished
-		}
-		return indexpb.JobState_JobStateInProgress
-	})
-	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, sjm)
-	assert.Equal(t, int64(10+30+30+10*0.5), progress)
-	assert.Equal(t, internalpb.ImportJobState_Importing, state)
-	assert.Equal(t, "", reason)
-
-	// stats state, len(statsSegmentIDs) / (len(originalSegmentIDs) = 1
-	sjm = NewMockStatsJobManager(t)
-	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).Return(indexpb.JobState_JobStateFinished)
-	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, sjm)
-	assert.Equal(t, int64(10+30+30+10), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
 	// completed state
 	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed))
 	assert.NoError(t, err)
-	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, sjm)
+	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(100), progress)
 	assert.Equal(t, internalpb.ImportJobState_Completed, state)
 	assert.Equal(t, "", reason)

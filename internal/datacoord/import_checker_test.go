@@ -31,7 +31,6 @@ import (
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -195,30 +194,12 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		err := s.checker.meta.AddSegment(context.Background(), segment)
 		s.NoError(err)
 		err = s.imeta.UpdateTask(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed),
-			UpdateSegmentIDs([]int64{segment.GetID()}), UpdateStatsSegmentIDs([]int64{rand.Int63()}))
+			UpdateSegmentIDs([]int64{segment.GetID()}))
 		s.NoError(err)
 		err = s.checker.meta.UpdateChannelCheckpoint(segment.GetInsertChannel(), &msgpb.MsgPosition{MsgID: []byte{0}})
 		s.NoError(err)
 	}
 	s.checker.checkImportingJob(job)
-	s.Equal(internalpb.ImportJobState_Stats, s.imeta.GetJob(job.GetJobID()).GetState())
-
-	// test check stats job
-	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil).Maybe()
-	sjm := s.checker.sjm.(*MockStatsJobManager)
-	sjm.EXPECT().SubmitStatsTask(mock.Anything, mock.Anything, mock.Anything, false).Return(nil)
-	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).Return(indexpb.JobState_JobStateNone)
-	s.checker.checkStatsJob(job)
-	s.Equal(internalpb.ImportJobState_Stats, s.imeta.GetJob(job.GetJobID()).GetState())
-	sjm = NewMockStatsJobManager(s.T())
-	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).Return(indexpb.JobState_JobStateInProgress)
-	s.checker.sjm = sjm
-	s.checker.checkStatsJob(job)
-	s.Equal(internalpb.ImportJobState_Stats, s.imeta.GetJob(job.GetJobID()).GetState())
-	sjm = NewMockStatsJobManager(s.T())
-	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).Return(indexpb.JobState_JobStateFinished)
-	s.checker.sjm = sjm
-	s.checker.checkStatsJob(job)
 	s.Equal(internalpb.ImportJobState_IndexBuilding, s.imeta.GetJob(job.GetJobID()).GetState())
 
 	// test check IndexBuilding job
@@ -321,24 +302,18 @@ func (s *ImportCheckerSuite) TestCheckFailure() {
 
 	it := &importTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:           s.jobID,
-			TaskID:          1,
-			State:           datapb.ImportTaskStateV2_Pending,
-			SegmentIDs:      []int64{2},
-			StatsSegmentIDs: []int64{3},
+			JobID:      s.jobID,
+			TaskID:     1,
+			State:      datapb.ImportTaskStateV2_Pending,
+			SegmentIDs: []int64{2},
 		},
 	}
 	err := s.imeta.AddTask(it)
 	s.NoError(err)
 
-	sjm := NewMockStatsJobManager(s.T())
-	sjm.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock err"))
-	s.checker.sjm = sjm
 	s.checker.checkFailedJob(s.imeta.GetJob(s.jobID))
 	tasks := s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(0, len(tasks))
-	sjm.ExpectedCalls = nil
-	sjm.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
 
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(errors.New("mock error"))
@@ -360,11 +335,10 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	var task ImportTask = &importTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:           s.jobID,
-			TaskID:          1,
-			State:           datapb.ImportTaskStateV2_Failed,
-			SegmentIDs:      []int64{2},
-			StatsSegmentIDs: []int64{3},
+			JobID:      s.jobID,
+			TaskID:     1,
+			State:      datapb.ImportTaskStateV2_Failed,
+			SegmentIDs: []int64{2},
 		},
 	}
 	err := s.imeta.AddTask(task)
@@ -393,13 +367,6 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 	s.Equal(1, len(s.imeta.GetTaskBy(WithJob(s.jobID))))
 	s.Equal(1, len(s.imeta.GetJobBy()))
 	err = s.imeta.UpdateTask(task.GetTaskID(), UpdateSegmentIDs([]int64{}))
-	s.NoError(err)
-
-	// stats segment not dropped
-	s.checker.checkGC(s.imeta.GetJob(s.jobID))
-	s.Equal(1, len(s.imeta.GetTaskBy(WithJob(s.jobID))))
-	s.Equal(1, len(s.imeta.GetJobBy()))
-	err = s.imeta.UpdateTask(task.GetTaskID(), UpdateStatsSegmentIDs([]int64{}))
 	s.NoError(err)
 
 	// task is not dropped

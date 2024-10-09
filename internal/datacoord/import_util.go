@@ -24,8 +24,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -105,14 +103,6 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 			return nil, err
 		}
 		task.SegmentIDs = segments
-		if paramtable.Get().DataCoordCfg.EnableStatsTask.GetAsBool() {
-			statsSegIDBegin, _, err := alloc.AllocN(int64(len(segments)))
-			if err != nil {
-				return nil, err
-			}
-			task.StatsSegmentIDs = lo.RangeFrom(statsSegIDBegin, len(segments))
-			log.Info("preallocate stats segment ids", WrapTaskLog(task, zap.Int64s("segmentIDs", task.StatsSegmentIDs))...)
-		}
 		tasks = append(tasks, task)
 	}
 	return tasks, nil
@@ -434,47 +424,20 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) (float32, i
 	return float32(importedRows) / float32(totalRows), importedRows, totalRows
 }
 
-func getStatsProgress(jobID int64, imeta ImportMeta, sjm StatsJobManager) float32 {
-	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
-		return 1
-	}
-	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
-	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetSegmentIDs()
-	})
-	if len(originSegmentIDs) == 0 {
-		return 1
-	}
-	doneCnt := 0
-	for _, originSegmentID := range originSegmentIDs {
-		state := sjm.GetStatsTaskState(originSegmentID, indexpb.StatsSubJob_Sort)
-		if state == indexpb.JobState_JobStateFinished {
-			doneCnt++
-		}
-	}
-	return float32(doneCnt) / float32(len(originSegmentIDs))
-}
-
 func getIndexBuildingProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
 	job := imeta.GetJob(jobID)
 	if !Params.DataCoordCfg.WaitForIndex.GetAsBool() {
 		return 1
 	}
 	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
-	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
+	segmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
 	})
-	targetSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetStatsSegmentIDs()
-	})
-	if len(originSegmentIDs) == 0 {
+	if len(segmentIDs) == 0 {
 		return 1
 	}
-	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
-		targetSegmentIDs = originSegmentIDs
-	}
-	unindexed := meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
-	return float32(len(targetSegmentIDs)-len(unindexed)) / float32(len(targetSegmentIDs))
+	unindexed := meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), segmentIDs)
+	return float32(len(segmentIDs)-len(unindexed)) / float32(len(segmentIDs))
 }
 
 // GetJobProgress calculates the importing job progress.
@@ -482,12 +445,11 @@ func getIndexBuildingProgress(jobID int64, imeta ImportMeta, meta *meta) float32
 // 10%: Pending
 // 30%: PreImporting
 // 30%: Importing
-// 10%: Stats
-// 10%: IndexBuilding
+// 20%: IndexBuilding
 // 10%: Completed
 // TODO: Wrap a function to map status to user status.
 // TODO: Save these progress to job instead of recalculating.
-func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta, sjm StatsJobManager) (int64, internalpb.ImportJobState, int64, int64, string) {
+func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, int64, int64, string) {
 	job := imeta.GetJob(jobID)
 	if job == nil {
 		return 0, internalpb.ImportJobState_Failed, 0, 0, fmt.Sprintf("import job does not exist, jobID=%d", jobID)
@@ -505,15 +467,10 @@ func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta, sjm StatsJobManag
 		progress, importedRows, totalRows := getImportingProgress(jobID, imeta, meta)
 		return 10 + 30 + int64(progress*30), internalpb.ImportJobState_Importing, importedRows, totalRows, ""
 
-	case internalpb.ImportJobState_Stats:
-		progress := getStatsProgress(jobID, imeta, sjm)
-		_, totalRows := getImportRowsInfo(jobID, imeta, meta)
-		return 10 + 30 + 30 + int64(progress*10), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
-
 	case internalpb.ImportJobState_IndexBuilding:
 		progress := getIndexBuildingProgress(jobID, imeta, meta)
 		_, totalRows := getImportRowsInfo(jobID, imeta, meta)
-		return 10 + 30 + 30 + 10 + int64(progress*10), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
+		return 10 + 30 + 30 + int64(progress*20), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
 
 	case internalpb.ImportJobState_Completed:
 		_, totalRows := getImportRowsInfo(jobID, imeta, meta)

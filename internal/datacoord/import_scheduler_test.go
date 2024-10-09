@@ -215,13 +215,12 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 	s.catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	var task ImportTask = &importTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:           0,
-			TaskID:          1,
-			CollectionID:    s.collectionID,
-			NodeID:          6,
-			SegmentIDs:      []int64{2, 3},
-			StatsSegmentIDs: []int64{4, 5},
-			State:           datapb.ImportTaskStateV2_Failed,
+			JobID:        0,
+			TaskID:       1,
+			CollectionID: s.collectionID,
+			NodeID:       6,
+			SegmentIDs:   []int64{2, 3},
+			State:        datapb.ImportTaskStateV2_Failed,
 		},
 	}
 	err := s.imeta.AddTask(task)

@@ -342,9 +342,7 @@ func (s *importScheduler) processCompleted(task ImportTask) {
 
 func (s *importScheduler) processFailed(task ImportTask) {
 	if task.GetType() == ImportTaskType {
-		originSegmentIDs := task.(*importTask).GetSegmentIDs()
-		statsSegmentIDs := task.(*importTask).GetStatsSegmentIDs()
-		segments := append(originSegmentIDs, statsSegmentIDs...)
+		segments := task.(*importTask).GetSegmentIDs()
 		for _, segment := range segments {
 			op := UpdateStatusOperator(segment, commonpb.SegmentState_Dropped)
 			err := s.meta.UpdateSegmentsInfo(op)
@@ -354,7 +352,7 @@ func (s *importScheduler) processFailed(task ImportTask) {
 			}
 		}
 		if len(segments) > 0 {
-			err := s.imeta.UpdateTask(task.GetTaskID(), UpdateSegmentIDs(nil), UpdateStatsSegmentIDs(nil))
+			err := s.imeta.UpdateTask(task.GetTaskID(), UpdateSegmentIDs(nil))
 			if err != nil {
 				log.Warn("update import task segments failed", WrapTaskLog(task, zap.Error(err))...)
 			}
