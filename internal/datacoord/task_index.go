@@ -216,24 +216,20 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 			it.SetState(indexpb.JobState_JobStateInit, err.Error())
 			return true
 		}
-		partitionKeyField, err := typeutil.GetPartitionKeyFieldSchema(schema)
-		if partitionKeyField == nil || err != nil {
-			log.Ctx(ctx).Warn("index builder get partition key field failed", zap.Int64("taskID", it.taskID), zap.Error(err))
-		} else {
-			if typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyField) {
-				optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
-					FieldID:   partitionKeyField.FieldID,
-					FieldName: partitionKeyField.Name,
-					FieldType: int32(partitionKeyField.DataType),
-					DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
-				})
-				iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collectionInfo.Properties)
-				if isoErr != nil {
-					log.Ctx(ctx).Warn("failed to parse partition key isolation", zap.Error(isoErr))
-				}
-				if iso {
-					partitionKeyIsolation = true
-				}
+		partitionKeyField, _ := typeutil.GetPartitionKeyFieldSchema(schema)
+		if partitionKeyField != nil && typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyField) {
+			optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
+				FieldID:   partitionKeyField.FieldID,
+				FieldName: partitionKeyField.Name,
+				FieldType: int32(partitionKeyField.DataType),
+				DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
+			})
+			iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collectionInfo.Properties)
+			if isoErr != nil {
+				log.Ctx(ctx).Warn("failed to parse partition key isolation", zap.Error(isoErr))
+			}
+			if iso {
+				partitionKeyIsolation = true
 			}
 		}
 	}
