@@ -162,7 +162,7 @@ func (s *FunctionExecutorSuite) TestExecutor() {
 
 	defer ts.Close()
 	schema := s.creataSchema(ts.URL)
-	exec, err := newFunctionExecutor(schema)
+	exec, err := NewFunctionExecutor(schema)
 	s.NoError(err)
 	msg := s.createMsg([]string{"sentence", "sentence"})
 	exec.ProcessInsert(msg)
@@ -198,7 +198,7 @@ func (s *FunctionExecutorSuite) TestErrorEmbedding() {
 	}))
 	defer ts.Close()
 	schema := s.creataSchema(ts.URL)
-	exec, err := newFunctionExecutor(schema)
+	exec, err := NewFunctionExecutor(schema)
 	s.NoError(err)
 	msg := s.createMsg([]string{"sentence", "sentence"})
 	err = exec.ProcessInsert(msg)
@@ -208,6 +208,6 @@ func (s *FunctionExecutorSuite) TestErrorEmbedding() {
 func (s *FunctionExecutorSuite) TestErrorSchema() {
 	schema := s.creataSchema("http://localhost")
 	schema.Functions[0].Type = schemapb.FunctionType_Unknown
-	_, err := newFunctionExecutor(schema)
+	_, err := NewFunctionExecutor(schema)
 	s.Error(err)
 }
