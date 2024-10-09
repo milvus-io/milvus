@@ -3142,9 +3142,10 @@ type dataCoordConfig struct {
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 
 	// compaction
-	EnableCompaction     ParamItem `refreshable:"false"`
-	EnableAutoCompaction ParamItem `refreshable:"true"`
-	IndexBasedCompaction ParamItem `refreshable:"true"`
+	EnableCompaction          ParamItem `refreshable:"false"`
+	EnableAutoCompaction      ParamItem `refreshable:"true"`
+	IndexBasedCompaction      ParamItem `refreshable:"true"`
+	CompactionTaskPrioritizer ParamItem `refreshable:"true"`
 
 	CompactionRPCTimeout              ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks        ParamItem `refreshable:"true"`
@@ -3414,6 +3415,15 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 		Export:       true,
 	}
 	p.IndexBasedCompaction.Init(base.mgr)
+
+	p.CompactionTaskPrioritizer = ParamItem{
+		Key:          "dataCoord.compaction.taskPrioritizer",
+		Version:      "2.5.0",
+		DefaultValue: "default",
+		Doc:          "compaction task prioritizer, options: [default, level]. Default is FIFO, level is prioritized by level: L0 compactions first, then mix compactions, then major compactions.",
+		Export:       true,
+	}
+	p.CompactionTaskPrioritizer.Init(base.mgr)
 
 	p.CompactionRPCTimeout = ParamItem{
 		Key:          "dataCoord.compaction.rpcTimeout",
