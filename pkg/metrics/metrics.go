@@ -77,6 +77,12 @@ const (
 	Executing = "executing"
 	Done      = "done"
 
+	ImportStagePending    = "pending"
+	ImportStagePreImport  = "preimport"
+	ImportStageImport     = "import"
+	ImportStageStats      = "stats"
+	ImportStageBuildIndex = "build_index"
+
 	compactionTypeLabelName  = "compaction_type"
 	isVectorFieldLabelName   = "is_vector_field"
 	segmentPruneLabelName    = "segment_prune_label"
@@ -105,6 +111,7 @@ const (
 	cacheStateLabelName      = "cache_state"
 	indexCountLabelName      = "indexed_field_count"
 	dataSourceLabelName      = "data_source"
+	importStageLabelName     = "import_stage"
 	requestScope             = "scope"
 	fullMethodLabelName      = "full_method"
 	reduceLevelName          = "reduce_level"

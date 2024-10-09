@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
@@ -47,6 +48,7 @@ func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
 		zap.Int64("jobID", task.GetJobID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
 		zap.String("type", task.GetType().String()),
+		zap.Int64("nodeID", task.GetNodeID()),
 	}
 	res = append(res, fields...)
 	return res
@@ -75,6 +77,7 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 				State:        datapb.ImportTaskStateV2_Pending,
 				FileStats:    fileStats,
 			},
+			tr: timerecord.NewTimeRecorder("preimport task"),
 		}
 		tasks = append(tasks, task)
 	}
@@ -99,6 +102,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 				State:        datapb.ImportTaskStateV2_Pending,
 				FileStats:    group,
 			},
+			tr: timerecord.NewTimeRecorder("import task"),
 		}
 		segments, err := AssignSegments(job, task, alloc, meta)
 		if err != nil {
