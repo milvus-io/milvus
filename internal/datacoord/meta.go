@@ -370,12 +370,11 @@ func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegm
 		}
 		entry.segments = append(entry.segments, si)
 	}
-	log.Debug("GetSegmentsChanPart segment number", zap.Int("length", len(m.segments.GetSegments())))
-
 	result := make([]*chanPartSegments, 0, len(mDimEntry))
 	for _, entry := range mDimEntry {
 		result = append(result, entry)
 	}
+	log.Debug("GetSegmentsChanPart", zap.Int("length", len(result)))
 	return result
 }
 
