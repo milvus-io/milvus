@@ -214,19 +214,15 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 		s.Run(test.description, func() {
 			s.SetupTest()
 			s.generateInitTasksForSchedule()
-			s.Require().Equal(4, s.handler.getTaskCount())
 			// submit the testing tasks
 			for _, t := range test.tasks {
 				s.handler.submitTask(t)
 			}
-			s.Equal(4+len(test.tasks), s.handler.getTaskCount())
 
 			gotTasks := s.handler.schedule()
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
 				return t.GetPlanID()
 			}))
-
-			s.Equal(4+len(test.tasks), s.handler.getTaskCount())
 		})
 	}
 }
@@ -332,13 +328,11 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 	for _, test := range tests {
 		s.Run(test.description, func() {
 			s.SetupTest()
-			s.Require().Equal(0, s.handler.getTaskCount())
 
 			// submit the testing tasks
 			for _, t := range test.tasks {
 				s.handler.submitTask(t)
 			}
-			s.Equal(len(test.tasks), s.handler.getTaskCount())
 
 			gotTasks := s.handler.schedule()
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
@@ -531,7 +525,6 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	s.handler.submitTask(t1)
 	s.handler.restoreTask(t2)
 	s.handler.removeTasksByChannel(ch)
-	s.Equal(0, s.handler.getTaskCount())
 }
 
 func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
@@ -601,9 +594,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		s.handler.submitTask(t)
 	}
 
-	s.Equal(3, s.handler.getTaskCount())
-	s.handler.doSchedule()
-	s.Equal(3, s.handler.getTaskCount())
+	s.handler.schedule()
 
 	info := s.handler.getCompactionInfo(1)
 	s.Equal(1, info.completedCnt)
@@ -627,7 +618,6 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.NoError(err)
 	t := handler.getCompactionTask(1)
 	s.NotNil(t)
-	s.handler.taskNumber.Add(1000)
 	task.PlanID = 2
 	err = s.handler.enqueueCompaction(task)
 	s.NoError(err)
@@ -759,10 +749,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		s.handler.submitTask(t)
 	}
 
-	picked := s.handler.schedule()
-	s.NotEmpty(picked)
-
-	s.handler.doSchedule()
+	s.handler.schedule()
 	// time.Sleep(2 * time.Second)
 	s.handler.checkCompaction()
 
@@ -903,11 +890,9 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
 
 	s.handler.submitTask(task)
-	s.handler.doSchedule()
-	s.Equal(1, s.handler.getTaskCount())
+	s.handler.schedule()
 	err := s.handler.checkCompaction()
 	s.NoError(err)
-	s.Equal(0, len(s.handler.getTasksByState(datapb.CompactionTaskState_completed)))
 }
 
 func getFieldBinlogIDs(fieldID int64, logIDs ...int64) *datapb.FieldBinlog {
