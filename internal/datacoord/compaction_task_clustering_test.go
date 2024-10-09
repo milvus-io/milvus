@@ -118,12 +118,13 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 	s.Equal(datapb.SegmentLevel_L2, seg21.Level)
 	s.Equal(int64(10000), seg21.PartitionStatsVersion)
 
-	task.ResultSegments = []int64{103, 104}
+	task.TmpSegments = []int64{103, 104}
+	task.ResultSegments = []int64{105, 106}
 	// fake some compaction result segment
 	s.meta.AddSegment(context.TODO(), &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:                    103,
-			State:                 commonpb.SegmentState_Flushed,
+			State:                 commonpb.SegmentState_Dropped,
 			Level:                 datapb.SegmentLevel_L2,
 			CreatedByCompaction:   true,
 			PartitionStatsVersion: 10001,
@@ -132,6 +133,26 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 	s.meta.AddSegment(context.TODO(), &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:                    104,
+			State:                 commonpb.SegmentState_Dropped,
+			Level:                 datapb.SegmentLevel_L2,
+			CreatedByCompaction:   true,
+			PartitionStatsVersion: 10001,
+		},
+	})
+
+	// fake some compaction result segment
+	s.meta.AddSegment(context.TODO(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:                    105,
+			State:                 commonpb.SegmentState_Flushed,
+			Level:                 datapb.SegmentLevel_L2,
+			CreatedByCompaction:   true,
+			PartitionStatsVersion: 10001,
+		},
+	})
+	s.meta.AddSegment(context.TODO(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:                    106,
 			State:                 commonpb.SegmentState_Flushed,
 			Level:                 datapb.SegmentLevel_L2,
 			CreatedByCompaction:   true,
@@ -148,11 +169,18 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 	s.Equal(int64(10000), seg22.PartitionStatsVersion)
 
 	seg32 := s.meta.GetSegment(103)
-	s.Equal(datapb.SegmentLevel_L1, seg32.Level)
-	s.Equal(int64(0), seg32.PartitionStatsVersion)
+	s.Equal(datapb.SegmentLevel_L2, seg32.Level)
+	s.Equal(commonpb.SegmentState_Dropped, seg32.State)
 	seg42 := s.meta.GetSegment(104)
-	s.Equal(datapb.SegmentLevel_L1, seg42.Level)
-	s.Equal(int64(0), seg42.PartitionStatsVersion)
+	s.Equal(datapb.SegmentLevel_L2, seg42.Level)
+	s.Equal(commonpb.SegmentState_Dropped, seg32.State)
+
+	seg52 := s.meta.GetSegment(105)
+	s.Equal(datapb.SegmentLevel_L1, seg52.Level)
+	s.Equal(int64(0), seg52.PartitionStatsVersion)
+	seg62 := s.meta.GetSegment(106)
+	s.Equal(datapb.SegmentLevel_L1, seg62.Level)
+	s.Equal(int64(0), seg62.PartitionStatsVersion)
 }
 
 func (s *ClusteringCompactionTaskSuite) generateBasicTask(vectorClusteringKey bool) *clusteringCompactionTask {

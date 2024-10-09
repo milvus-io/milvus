@@ -490,6 +490,10 @@ func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 		operators = append(operators, UpdateSegmentLevelOperator(segID, datapb.SegmentLevel_L1))
 		operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(segID, 0))
 	}
+	for _, segID := range t.GetTmpSegments() {
+		operators = append(operators, UpdateSegmentLevelOperator(segID, datapb.SegmentLevel_L1))
+		operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(segID, 0))
+	}
 	err := t.meta.UpdateSegmentsInfo(operators...)
 	if err != nil {
 		log.Warn("UpdateSegmentsInfo fail", zap.Error(err))
