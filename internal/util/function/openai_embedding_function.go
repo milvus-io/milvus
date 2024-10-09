@@ -151,10 +151,6 @@ func (runner *OpenAIEmbeddingFunction)MaxBatch() int {
 
 
 func (runner *OpenAIEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error) {
-	return runner.Run(inputs)
-}
-
-func (runner *OpenAIEmbeddingFunction) Run( inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error) {
 	if len(inputs) != 1 {
 		return nil, fmt.Errorf("OpenAIEmbedding function only receives one input, bug got [%d]", len(inputs))
 	}
@@ -210,4 +206,19 @@ func (runner *OpenAIEmbeddingFunction) Run( inputs []*schemapb.FieldData) ([]*sc
 		},
 	}
 	return []*schemapb.FieldData{&output_field}, nil
+}
+
+func (runner *OpenAIEmbeddingFunction)ProcessSearch(placeholderGroups [][]byte) ([][]byte, error){
+	if len(placeholderGroups) != 1 {
+		return nil, fmt.Errorf("OpenAIEmbedding function only receives one input, bug got [%d]", len(placeholderGroups))
+	}
+
+	// get tests from placeholderGroups
+
+	// texts := []string{}
+
+	// calc embedding
+
+	//to placeholderGroups
+	return nil, nil
 }

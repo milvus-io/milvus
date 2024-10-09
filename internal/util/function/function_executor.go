@@ -23,9 +23,8 @@ package function
 import (
 	"fmt"
 	"sync"
-
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
@@ -35,15 +34,15 @@ type Runner interface {
 	GetOutputFields() []*schemapb.FieldSchema
 
 	MaxBatch() int
-	ProcessInsert(inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error)	
+	ProcessInsert(inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error)
+	ProcessSearch(placeholderGroups [][]byte) ([][]byte, error)
 }
-
 
 type FunctionExecutor struct {
 	runners []Runner
 }
 
-func newFunctionExecutor(schema *schemapb.CollectionSchema) (*FunctionExecutor, error) {
+func NewFunctionExecutor(schema *schemapb.CollectionSchema) (*FunctionExecutor, error) {
 	executor := new(FunctionExecutor)
 	for _, f_schema := range schema.Functions {
 		switch f_schema.GetType() {
@@ -59,6 +58,10 @@ func newFunctionExecutor(schema *schemapb.CollectionSchema) (*FunctionExecutor, 
 		}
 	}
 	return executor, nil
+}
+
+func (executor *FunctionExecutor)Empty() bool {
+	return len(executor.runners) == 0
 }
 
 func (executor *FunctionExecutor)processSingleFunction(idx int, msg *msgstream.InsertMsg) ([]*schemapb.FieldData, error) {
@@ -119,7 +122,6 @@ func (executor *FunctionExecutor)ProcessInsert(msg *msgstream.InsertMsg) error {
 	return nil
 }
 
-
-func  (executor *FunctionExecutor)ProcessSearch(msg *milvuspb.SearchRequest) error {
-	return nil
+func  (executor *FunctionExecutor)ProcessSearch(req *internalpb.SearchRequest) (interface{}, error) {
+	return nil, nil
 }
