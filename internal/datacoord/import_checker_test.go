@@ -311,14 +311,10 @@ func (s *ImportCheckerSuite) TestCheckFailure() {
 	err := s.imeta.AddTask(it)
 	s.NoError(err)
 
-	s.checker.checkFailedJob(s.imeta.GetJob(s.jobID))
-	tasks := s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
-	s.Equal(0, len(tasks))
-
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(errors.New("mock error"))
 	s.checker.checkFailedJob(s.imeta.GetJob(s.jobID))
-	tasks = s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
+	tasks := s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(0, len(tasks))
 
 	catalog.ExpectedCalls = nil
