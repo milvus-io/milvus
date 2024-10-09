@@ -15,8 +15,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -97,7 +97,7 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 				IndexID:   1,
 			})
 			assert.NoError(t, err)
-			err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+			err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
 				BuildID: arg.segID,
 				State:   commonpb.IndexState_Finished,
 			})
@@ -180,7 +180,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		IndexID:   1,
 	})
 	assert.NoError(t, err)
-	err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+	err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
 		BuildID: 1,
 		State:   commonpb.IndexState_Finished,
 	})
@@ -377,10 +377,10 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(e))
 		assert.NoError(t, err)
-		// vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
-		// assert.EqualValues(t, 2, len(vchan.FlushedSegmentIds))
-		// assert.EqualValues(t, 0, len(vchan.UnflushedSegmentIds))
-		// assert.ElementsMatch(t, []int64{c.GetID(), d.GetID()}, vchan.FlushedSegmentIds) // expected c, d
+		vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
+		assert.EqualValues(t, 2, len(vchan.FlushedSegmentIds))
+		assert.EqualValues(t, 0, len(vchan.UnflushedSegmentIds))
+		assert.ElementsMatch(t, []int64{c.GetID(), d.GetID()}, vchan.FlushedSegmentIds) // expected c, d
 	})
 
 	t.Run("a GC-ed, bcde unIndexed", func(t *testing.T) {
@@ -463,10 +463,10 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(e))
 		assert.NoError(t, err)
-		// vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
-		// assert.EqualValues(t, 2, len(vchan.FlushedSegmentIds))
-		// assert.EqualValues(t, 0, len(vchan.UnflushedSegmentIds))
-		// assert.ElementsMatch(t, []int64{c.GetID(), d.GetID()}, vchan.FlushedSegmentIds) // expected c, d
+		vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
+		assert.EqualValues(t, 2, len(vchan.FlushedSegmentIds))
+		assert.EqualValues(t, 0, len(vchan.UnflushedSegmentIds))
+		assert.ElementsMatch(t, []int64{c.GetID(), d.GetID()}, vchan.FlushedSegmentIds) // expected c, d
 	})
 
 	t.Run("ab GC-ed, c unIndexed, de indexed", func(t *testing.T) {
@@ -521,7 +521,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IndexID:   1,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
 			BuildID: 1,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -549,16 +549,16 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IndexID:   1,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
 			BuildID: 2,
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
 
-		// vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
-		// assert.EqualValues(t, 1, len(vchan.FlushedSegmentIds))
-		// assert.EqualValues(t, 0, len(vchan.UnflushedSegmentIds))
-		// assert.ElementsMatch(t, []int64{e.GetID()}, vchan.FlushedSegmentIds) // expected e
+		vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
+		assert.EqualValues(t, 1, len(vchan.FlushedSegmentIds))
+		assert.EqualValues(t, 0, len(vchan.UnflushedSegmentIds))
+		assert.ElementsMatch(t, []int64{e.GetID()}, vchan.FlushedSegmentIds) // expected e
 	})
 }
 
