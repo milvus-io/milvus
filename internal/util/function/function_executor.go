@@ -43,7 +43,7 @@ type FunctionExecutor struct {
 	runners []Runner
 }
 
-func newFunctionExecutor(schema *schemapb.CollectionSchema) (*FunctionExecutor, error) {
+func NewFunctionExecutor(schema *schemapb.CollectionSchema) (*FunctionExecutor, error) {
 	executor := new(FunctionExecutor)
 	for _, f_schema := range schema.Functions {
 		switch f_schema.GetType() {
@@ -59,6 +59,10 @@ func newFunctionExecutor(schema *schemapb.CollectionSchema) (*FunctionExecutor, 
 		}
 	}
 	return executor, nil
+}
+
+func (executor *FunctionExecutor)Empty() bool {
+	return len(executor.runners) != 0
 }
 
 func (executor *FunctionExecutor)processSingleFunction(idx int, msg *msgstream.InsertMsg) ([]*schemapb.FieldData, error) {
@@ -118,7 +122,6 @@ func (executor *FunctionExecutor)ProcessInsert(msg *msgstream.InsertMsg) error {
 	}
 	return nil
 }
-
 
 func  (executor *FunctionExecutor)ProcessSearch(msg *milvuspb.SearchRequest) error {
 	return nil
