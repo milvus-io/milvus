@@ -468,7 +468,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(MaxInsertRate)
 	registry.MustRegister(ProxyRetrySearchCount)
 	registry.MustRegister(ProxyRetrySearchResultInsufficientCount)
-	
+
 	RegisterStreamingServiceClient(registry)
 }
 
