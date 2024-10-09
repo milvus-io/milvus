@@ -67,16 +67,21 @@ class PhyColumnExpr : public Expr {
 
     void
     MoveCursor() override {
-        if (segment_chunk_reader_.segment_->is_chunked()) {
-            segment_chunk_reader_.MoveCursorForMultipleChunk(
-                current_chunk_id_,
-                current_chunk_pos_,
-                expr_->GetColumn().field_id_,
-                num_chunk_,
-                batch_size_);
-        } else {
-            segment_chunk_reader_.MoveCursorForSingleChunk(
-                current_chunk_id_, current_chunk_pos_, num_chunk_, batch_size_);
+        if (!has_offset_input_) {
+            if (segment_chunk_reader_.segment_->is_chunked()) {
+                segment_chunk_reader_.MoveCursorForMultipleChunk(
+                    current_chunk_id_,
+                    current_chunk_pos_,
+                    expr_->GetColumn().field_id_,
+                    num_chunk_,
+                    batch_size_);
+            } else {
+                segment_chunk_reader_.MoveCursorForSingleChunk(
+                    current_chunk_id_,
+                    current_chunk_pos_,
+                    num_chunk_,
+                    batch_size_);
+            }
         }
     }
 
@@ -107,7 +112,7 @@ class PhyColumnExpr : public Expr {
 
     template <typename T>
     VectorPtr
-    DoEval();
+    DoEval(OffsetVector* input = nullptr);
 
  private:
     bool is_indexed_;

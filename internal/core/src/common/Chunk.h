@@ -170,6 +170,9 @@ class StringChunk : public Chunk {
         return result;
     }
 
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    ViewsByOffsets(const FixedVector<int32_t>& offsets);
+
     const char*
     ValueAt(int64_t idx) const override {
         return (*this)[idx].data();

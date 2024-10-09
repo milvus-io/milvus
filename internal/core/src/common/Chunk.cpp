@@ -27,6 +27,25 @@ StringChunk::StringViews() {
     return {ret, valid_};
 }
 
+std::pair<std::vector<std::string_view>, FixedVector<bool>>
+StringChunk::ViewsByOffsets(const FixedVector<int32_t>& offsets) {
+    std::vector<std::string_view> ret;
+    FixedVector<bool> valid_res;
+    size_t size = offsets.size();
+    ret.reserve(size);
+    valid_res.reserve(size);
+    for (auto i = 0; i < size; ++i) {
+        uint32_t string_size;
+        char* pos = data_;
+        pos += offsets_[offsets[i]];
+        string_size = *reinterpret_cast<uint32_t*>(pos);
+        pos += sizeof(uint32_t);
+        ret.emplace_back(std::string_view(pos, string_size));
+        valid_res.emplace_back(isValid(offsets[i]));
+    }
+    return {ret, valid_res};
+}
+
 void
 ArrayChunk::ConstructViews() {
     views_.reserve(row_nums_);

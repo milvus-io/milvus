@@ -290,12 +290,32 @@ TEST(StringExpr, Term) {
             MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
+        // specify some offsets and do scalar filtering on these offsets
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(N * num_iters / 2);
+        for (auto i = 0; i < N * num_iters; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get(),
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP,
+            &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(view.size(), N * num_iters / 2);
+
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
 
             auto val = str_col[i];
             auto ref = std::find(term.begin(), term.end(), val) != term.end();
             ASSERT_EQ(ans, ref) << "@" << i << "!!" << val;
+            if (i % 2 == 0) {
+                ASSERT_EQ(view[int(i / 2)], ref) << "@" << i << "!!" << val;
+            }
         }
     }
 }
@@ -363,6 +383,23 @@ TEST(StringExpr, TermNullable) {
             MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
+        // specify some offsets and do scalar filtering on these offsets
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(N * num_iters / 2);
+        for (auto i = 0; i < N * num_iters; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get(),
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP,
+            &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(view.size(), N * num_iters / 2);
+
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
             if (!valid_data[i]) {
@@ -372,6 +409,9 @@ TEST(StringExpr, TermNullable) {
             auto val = str_col[i];
             auto ref = std::find(term.begin(), term.end(), val) != term.end();
             ASSERT_EQ(ans, ref) << "@" << i << "!!" << val;
+            if (i % 2 == 0) {
+                ASSERT_EQ(view[int(i / 2)], ref) << "@" << i << "!!" << val;
+            }
         }
     }
 }
@@ -481,6 +521,23 @@ TEST(StringExpr, Compare) {
             MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
+        // specify some offsets and do scalar filtering on these offsets
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(N * num_iters / 2);
+        for (auto i = 0; i < N * num_iters; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get(),
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP,
+            &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(view.size(), N * num_iters / 2);
+
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
 
@@ -488,6 +545,10 @@ TEST(StringExpr, Compare) {
             auto another_val = another_str_col[i];
             auto ref = ref_func(val, another_val);
             ASSERT_EQ(ans, ref) << "@" << op << "@" << i << "!!" << val;
+            if (i % 2 == 0) {
+                ASSERT_EQ(view[int(i / 2)], ref)
+                    << "@" << op << "@" << i << "!!" << val;
+            }
         }
     }
 }
@@ -609,6 +670,23 @@ TEST(StringExpr, CompareNullable) {
             MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
+        // specify some offsets and do scalar filtering on these offsets
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(N * num_iters / 2);
+        for (auto i = 0; i < N * num_iters; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get(),
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP,
+            &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(view.size(), N * num_iters / 2);
+
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
             if (!valid_data[i]) {
@@ -619,6 +697,10 @@ TEST(StringExpr, CompareNullable) {
             auto another_val = another_str_col[i];
             auto ref = ref_func(val, another_val);
             ASSERT_EQ(ans, ref) << "@" << op << "@" << i << "!!" << val;
+            if (i % 2 == 0) {
+                ASSERT_EQ(view[int(i / 2)], ref)
+                    << "@" << op << "@" << i << "!!" << val;
+            }
         }
     }
 }
@@ -741,16 +823,40 @@ TEST(StringExpr, CompareNullable2) {
             MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
+        // specify some offsets and do scalar filtering on these offsets
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(N * num_iters / 2);
+        for (auto i = 0; i < N * num_iters; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get(),
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP,
+            &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(view.size(), N * num_iters / 2);
+
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
             if (!valid_data[i]) {
                 ASSERT_EQ(ans, false);
+                if (i % 2 == 0) {
+                    ASSERT_EQ(view[int(i / 2)], false);
+                }
                 continue;
             }
             auto val = str_col[i];
             auto another_val = another_str_col[i];
             auto ref = ref_func(val, another_val);
             ASSERT_EQ(ans, ref) << "@" << op << "@" << i << "!!" << val;
+            if (i % 2 == 0) {
+                ASSERT_EQ(view[int(i / 2)], ref)
+                    << "@" << op << "@" << i << "!!" << val;
+            }
         }
     }
 }
@@ -840,6 +946,23 @@ TEST(StringExpr, UnaryRange) {
             MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
+        // specify some offsets and do scalar filtering on these offsets
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(N * num_iters / 2);
+        for (auto i = 0; i < N * num_iters; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get(),
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP,
+            &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(view.size(), N * num_iters / 2);
+
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
 
@@ -847,6 +970,10 @@ TEST(StringExpr, UnaryRange) {
             auto ref = ref_func(val);
             ASSERT_EQ(ans, ref)
                 << "@" << op << "@" << value << "@" << i << "!!" << val;
+            if (i % 2 == 0) {
+                ASSERT_EQ(view[int(i / 2)], ref)
+                    << "@" << op << "@" << value << "@" << i << "!!" << val;
+            }
         }
     }
 }
@@ -947,6 +1074,23 @@ TEST(StringExpr, UnaryRangeNullable) {
             MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
+        // specify some offsets and do scalar filtering on these offsets
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(N * num_iters / 2);
+        for (auto i = 0; i < N * num_iters; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get(),
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP,
+            &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(view.size(), N * num_iters / 2);
+
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
             if (!valid_data[i]) {
@@ -957,6 +1101,10 @@ TEST(StringExpr, UnaryRangeNullable) {
             auto ref = ref_func(val);
             ASSERT_EQ(ans, ref)
                 << "@" << op << "@" << value << "@" << i << "!!" << val;
+            if (i % 2 == 0) {
+                ASSERT_EQ(view[int(i / 2)], ref)
+                    << "@" << op << "@" << value << "@" << i << "!!" << val;
+            }
         }
     }
 }
@@ -1064,6 +1212,23 @@ TEST(StringExpr, BinaryRange) {
             MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
+        // specify some offsets and do scalar filtering on these offsets
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(N * num_iters / 2);
+        for (auto i = 0; i < N * num_iters; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get(),
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP,
+            &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(view.size(), N * num_iters / 2);
+
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
 
@@ -1072,6 +1237,11 @@ TEST(StringExpr, BinaryRange) {
             ASSERT_EQ(ans, ref)
                 << "@" << lb_inclusive << "@" << ub_inclusive << "@" << lb
                 << "@" << ub << "@" << i << "!!" << val;
+            if (i % 2 == 0) {
+                ASSERT_EQ(view[int(i / 2)], ref)
+                    << "@" << lb_inclusive << "@" << ub_inclusive << "@" << lb
+                    << "@" << ub << "@" << i << "!!" << val;
+            }
         }
     }
 }
@@ -1191,10 +1361,30 @@ TEST(StringExpr, BinaryRangeNullable) {
             MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
+        // specify some offsets and do scalar filtering on these offsets
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(N * num_iters / 2);
+        for (auto i = 0; i < N * num_iters; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get(),
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP,
+            &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(view.size(), N * num_iters / 2);
+
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
             if (!valid_data[i]) {
                 ASSERT_EQ(ans, false);
+                if (i % 2 == 0) {
+                    ASSERT_EQ(view[int(i / 2)], false);
+                }
                 continue;
             }
             auto val = str_col[i];
@@ -1202,6 +1392,11 @@ TEST(StringExpr, BinaryRangeNullable) {
             ASSERT_EQ(ans, ref)
                 << "@" << lb_inclusive << "@" << ub_inclusive << "@" << lb
                 << "@" << ub << "@" << i << "!!" << val;
+            if (i % 2 == 0) {
+                ASSERT_EQ(view[int(i / 2)], ref)
+                    << "@" << lb_inclusive << "@" << ub_inclusive << "@" << lb
+                    << "@" << ub << "@" << i << "!!" << val;
+            }
         }
     }
 }

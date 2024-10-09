@@ -51,6 +51,7 @@ set(MILVUS_TEST_FILES
         test_function.cpp
         test_futures.cpp
         test_group_by.cpp
+        test_iterative_filter.cpp
         test_growing.cpp
         test_growing_index.cpp
         test_hybrid_index.cpp

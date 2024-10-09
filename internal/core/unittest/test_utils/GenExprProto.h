@@ -16,6 +16,7 @@
 
 #include "common/Consts.h"
 #include "expr/ITypeExpr.h"
+#include "exec/expression/Expr.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
 
@@ -102,6 +103,32 @@ CreateSearchPlanByExpr(std::shared_ptr<milvus::expr::ITypeExpr> expr) {
         std::to_string(init_plannode_id++), sources);
 
     return plannode;
+}
+
+inline ColumnVectorPtr
+gen_filter_res(milvus::plan::PlanNode* plan_node,
+               const milvus::segcore::SegmentInternalInterface* segment,
+               uint64_t active_count,
+               uint64_t timestamp,
+               FixedVector<int32_t>* offsets = nullptr) {
+    auto filter_node = dynamic_cast<milvus::plan::FilterBitsNode*>(plan_node);
+    assert(filter_node != nullptr);
+    std::vector<milvus::expr::TypedExprPtr> filters;
+    filters.emplace_back(filter_node->filter());
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID, segment, active_count, timestamp);
+
+    std::unique_ptr<milvus::exec::ExecContext> exec_context =
+        std::make_unique<milvus::exec::ExecContext>(query_context.get());
+    auto exprs_ =
+        std::make_unique<milvus::exec::ExprSet>(filters, exec_context.get());
+    std::vector<VectorPtr> results_;
+    milvus::exec::EvalCtx eval_ctx(exec_context.get(), exprs_.get());
+    eval_ctx.set_offset_input(offsets);
+    exprs_->Eval(0, 1, true, eval_ctx, results_);
+
+    auto col_vec = std::dynamic_pointer_cast<milvus::ColumnVector>(results_[0]);
+    return col_vec;
 }
 
 }  // namespace milvus::test

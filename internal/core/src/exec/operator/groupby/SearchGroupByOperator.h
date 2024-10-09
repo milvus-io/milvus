@@ -125,49 +125,6 @@ GetDataGetter(const segcore::SegmentInternalInterface& segment,
     }
 }
 
-static bool
-PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
-                                int nq,
-                                const DatasetPtr dataset,
-                                SearchResult& search_result,
-                                const BitsetView& bitset,
-                                const index::VectorIndex& index) {
-    if (search_info.group_by_field_id_.has_value()) {
-        try {
-            auto search_conf = index.PrepareSearchParams(search_info);
-            knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
-                iterators_val =
-                    index.VectorIterators(dataset, search_conf, bitset);
-            if (iterators_val.has_value()) {
-                search_result.AssembleChunkVectorIterators(
-                    nq, 1, {0}, iterators_val.value());
-            } else {
-                LOG_ERROR(
-                    "Returned knowhere iterator has non-ready iterators "
-                    "inside, terminate group_by operation:{}",
-                    knowhere::Status2String(iterators_val.error()));
-                PanicInfo(ErrorCode::Unsupported,
-                          "Returned knowhere iterator has non-ready iterators "
-                          "inside, terminate group_by operation");
-            }
-            search_result.total_nq_ = dataset->GetRows();
-            search_result.unity_topK_ = search_info.topk_;
-        } catch (const std::runtime_error& e) {
-            LOG_ERROR(
-                "Caught error:{} when trying to initialize ann iterators for "
-                "group_by: "
-                "group_by operation will be terminated",
-                e.what());
-            PanicInfo(
-                ErrorCode::Unsupported,
-                "Failed to groupBy, current index:" + index.GetIndexType() +
-                    " doesn't support search_group_by");
-        }
-        return true;
-    }
-    return false;
-}
-
 void
 SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
               const SearchInfo& searchInfo,
