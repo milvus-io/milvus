@@ -139,7 +139,7 @@ func (s *OpenAIEmbeddingFunctionSuite) TestEmbedding() {
 	s.NoError(err)
 	{
 		data := createData([]string{"sentence"})
-		ret, err2 := runner.Run(data)
+		ret, err2 := runner.ProcessInsert(data)
 		s.NoError(err2)
 		s.Equal(1, len(ret))
 		s.Equal(int64(4), ret[0].GetVectors().Dim)
@@ -147,7 +147,7 @@ func (s *OpenAIEmbeddingFunctionSuite) TestEmbedding() {
 	}
 	{
 		data := createData([]string{"sentence 1", "sentence 2", "sentence 3"})
-		ret, _ := runner.Run(data)
+		ret, _ := runner.ProcessInsert(data)
 		s.Equal([]float32{0.0, 0.1, 0.2, 0.3, 1.0, 1.1, 1.2, 1.3, 2.0, 2.1, 2.2, 2.3}, ret[0].GetVectors().GetFloatVector().Data)
 	}
 }
@@ -183,7 +183,7 @@ func (s *OpenAIEmbeddingFunctionSuite) TestEmbeddingDimNotMatch() {
 
 	// embedding dim not match
 	data := createData([]string{"sentence", "sentence"})
-	_, err2 := runner.Run(data)
+	_, err2 := runner.ProcessInsert(data)
 	s.Error(err2)
 }
 
@@ -213,7 +213,7 @@ func (s *OpenAIEmbeddingFunctionSuite) TestEmbeddingNubmerNotMatch() {
 
 	// embedding dim not match
 	data := createData([]string{"sentence", "sentence2"})
-	_, err2 := runner.Run(data)
+	_, err2 := runner.ProcessInsert(data)
 	s.Error(err2)
 }
 
