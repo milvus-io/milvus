@@ -138,18 +138,7 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter := NewMultiSegmentWriter(t.binlogIO, compAlloc, t.plan, t.maxRows, t.partitionID, t.collectionID)
-
-	isValueDeleted := func(v *storage.Value) bool {
-		ts, ok := delta[v.PK.GetValue()]
-		// insert task and delete task has the same ts when upsert
-		// here should be < instead of <=
-		// to avoid the upsert data to be deleted after compact
-		if ok && uint64(v.Timestamp) < ts {
-			return true
-		}
-		return false
-	}
+	mWriter := NewMultiSegmentWriter(t.binlogIO, compAlloc, t.plan.GetSchema(), t.plan.GetChannel(), t.plan.GetMaxSize(), t.maxRows, t.partitionID, t.collectionID, false)
 
 	deletedRowCount := int64(0)
 	expiredRowCount := int64(0)
@@ -188,7 +177,7 @@ func (t *mixCompactionTask) mergeSplit(
 				}
 			}
 			v := iter.Value()
-			if isValueDeleted(v) {
+			if isDeletedEntity(v, delta) {
 				deletedRowCount++
 				continue
 			}
@@ -207,6 +196,7 @@ func (t *mixCompactionTask) mergeSplit(
 		}
 	}
 	res, err := mWriter.Finish()
+	mWriter.GetRowNum()
 	if err != nil {
 		log.Warn("compact wrong, failed to finish writer", zap.Error(err))
 		return nil, err

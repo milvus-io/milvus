@@ -263,6 +263,49 @@ func (_c *MockCompactionMeta_GetAnalyzeMeta_Call) RunAndReturn(run func() *analy
 	return _c
 }
 
+// GetCollections provides a mock function with given fields:
+func (_m *MockCompactionMeta) GetCollections() []*collectionInfo {
+	ret := _m.Called()
+
+	var r0 []*collectionInfo
+	if rf, ok := ret.Get(0).(func() []*collectionInfo); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*collectionInfo)
+		}
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_GetCollections_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollections'
+type MockCompactionMeta_GetCollections_Call struct {
+	*mock.Call
+}
+
+// GetCollections is a helper method to define mock.On call
+func (_e *MockCompactionMeta_Expecter) GetCollections() *MockCompactionMeta_GetCollections_Call {
+	return &MockCompactionMeta_GetCollections_Call{Call: _e.mock.On("GetCollections")}
+}
+
+func (_c *MockCompactionMeta_GetCollections_Call) Run(run func()) *MockCompactionMeta_GetCollections_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetCollections_Call) Return(_a0 []*collectionInfo) *MockCompactionMeta_GetCollections_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetCollections_Call) RunAndReturn(run func() []*collectionInfo) *MockCompactionMeta_GetCollections_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCompactionTaskMeta provides a mock function with given fields:
 func (_m *MockCompactionMeta) GetCompactionTaskMeta() *compactionTaskMeta {
 	ret := _m.Called()
@@ -563,6 +606,93 @@ func (_c *MockCompactionMeta_GetSegment_Call) Return(_a0 *SegmentInfo) *MockComp
 }
 
 func (_c *MockCompactionMeta_GetSegment_Call) RunAndReturn(run func(int64) *SegmentInfo) *MockCompactionMeta_GetSegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetSegmentsChanPart provides a mock function with given fields: selector
+func (_m *MockCompactionMeta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegments {
+	ret := _m.Called(selector)
+
+	var r0 []*chanPartSegments
+	if rf, ok := ret.Get(0).(func(SegmentInfoSelector) []*chanPartSegments); ok {
+		r0 = rf(selector)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*chanPartSegments)
+		}
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_GetSegmentsChanPart_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSegmentsChanPart'
+type MockCompactionMeta_GetSegmentsChanPart_Call struct {
+	*mock.Call
+}
+
+// GetSegmentsChanPart is a helper method to define mock.On call
+//   - selector SegmentInfoSelector
+func (_e *MockCompactionMeta_Expecter) GetSegmentsChanPart(selector interface{}) *MockCompactionMeta_GetSegmentsChanPart_Call {
+	return &MockCompactionMeta_GetSegmentsChanPart_Call{Call: _e.mock.On("GetSegmentsChanPart", selector)}
+}
+
+func (_c *MockCompactionMeta_GetSegmentsChanPart_Call) Run(run func(selector SegmentInfoSelector)) *MockCompactionMeta_GetSegmentsChanPart_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(SegmentInfoSelector))
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetSegmentsChanPart_Call) Return(_a0 []*chanPartSegments) *MockCompactionMeta_GetSegmentsChanPart_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetSegmentsChanPart_Call) RunAndReturn(run func(SegmentInfoSelector) []*chanPartSegments) *MockCompactionMeta_GetSegmentsChanPart_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetVshardMeta provides a mock function with given fields:
+func (_m *MockCompactionMeta) GetVshardMeta() VshardMeta {
+	ret := _m.Called()
+
+	var r0 VshardMeta
+	if rf, ok := ret.Get(0).(func() VshardMeta); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(VshardMeta)
+		}
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_GetVshardMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVshardMeta'
+type MockCompactionMeta_GetVshardMeta_Call struct {
+	*mock.Call
+}
+
+// GetVshardMeta is a helper method to define mock.On call
+func (_e *MockCompactionMeta_Expecter) GetVshardMeta() *MockCompactionMeta_GetVshardMeta_Call {
+	return &MockCompactionMeta_GetVshardMeta_Call{Call: _e.mock.On("GetVshardMeta")}
+}
+
+func (_c *MockCompactionMeta_GetVshardMeta_Call) Run(run func()) *MockCompactionMeta_GetVshardMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetVshardMeta_Call) Return(_a0 VshardMeta) *MockCompactionMeta_GetVshardMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetVshardMeta_Call) RunAndReturn(run func() VshardMeta) *MockCompactionMeta_GetVshardMeta_Call {
 	_c.Call.Return(run)
 	return _c
 }
