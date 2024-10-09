@@ -145,7 +145,7 @@ type searchParams struct {
 	// not use metricType any more, just for compatibility
 	MetricType    string                 `json:"metricType"`
 	Params        map[string]interface{} `json:"params"`
-	IgnoreGrowing bool                   `json:"ignore_growing"`
+	IgnoreGrowing bool                   `json:"ignoreGrowing"`
 }
 
 type SearchReqV2 struct {
