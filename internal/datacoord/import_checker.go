@@ -92,7 +92,7 @@ func (c *importChecker) Start() {
 				case internalpb.ImportJobState_IndexBuilding:
 					c.checkIndexBuildingJob(job)
 				case internalpb.ImportJobState_Failed:
-					c.checkFailedJob(job)
+					c.tryFailingTasks(job)
 				}
 			}
 		case <-ticker2.C:
@@ -241,6 +241,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 }
 
 func (c *importChecker) checkImportingJob(job ImportJob) {
+	log := log.With(zap.Int64("jobID", job.GetJobID()))
 	tasks := c.imeta.GetTaskBy(WithType(ImportTaskType), WithJob(job.GetJobID()))
 	for _, t := range tasks {
 		if t.GetState() != datapb.ImportTaskStateV2_Completed {
@@ -252,7 +253,7 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 		log.Warn("failed to update job state to IndexBuilding", zap.Error(err))
 		return
 	}
-	log.Info("update import job state to IndexBuilding", zap.Int64("jobID", job.GetJobID()))
+	log.Info("update import job state to IndexBuilding")
 }
 
 func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
@@ -306,10 +307,6 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		return
 	}
 	log.Info("import job completed")
-}
-
-func (c *importChecker) checkFailedJob(job ImportJob) {
-	c.tryFailingTasks(job)
 }
 
 func (c *importChecker) tryFailingTasks(job ImportJob) {

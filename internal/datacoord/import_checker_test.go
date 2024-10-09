@@ -313,13 +313,13 @@ func (s *ImportCheckerSuite) TestCheckFailure() {
 
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(errors.New("mock error"))
-	s.checker.checkFailedJob(s.imeta.GetJob(s.jobID))
+	s.checker.tryFailingTasks(s.imeta.GetJob(s.jobID))
 	tasks := s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(0, len(tasks))
 
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
-	s.checker.checkFailedJob(s.imeta.GetJob(s.jobID))
+	s.checker.tryFailingTasks(s.imeta.GetJob(s.jobID))
 	tasks = s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(1, len(tasks))
 }
@@ -358,7 +358,7 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 	err = s.imeta.AddJob(job)
 	s.NoError(err)
 
-	// origin segment not dropped
+	// segment not dropped
 	s.checker.checkGC(s.imeta.GetJob(s.jobID))
 	s.Equal(1, len(s.imeta.GetTaskBy(WithJob(s.jobID))))
 	s.Equal(1, len(s.imeta.GetJobBy()))
