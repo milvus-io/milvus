@@ -1697,8 +1697,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			Options:        in.GetOptions(),
 			StartTime:      startTime.Format("2006-01-02T15:04:05Z07:00"),
 		},
-		hasRecorded: make(map[string]bool),
-		tr:          timerecord.NewTimeRecorder("import job"),
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.importMeta.AddJob(job)
 	if err != nil {

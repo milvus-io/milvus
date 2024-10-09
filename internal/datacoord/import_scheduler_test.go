@@ -97,8 +97,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 			TimeoutTs:    math.MaxUint64,
 			Schema:       &schemapb.CollectionSchema{},
 		},
-		hasRecorded: make(map[string]bool),
-		tr:          timerecord.NewTimeRecorder("import job"),
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.imeta.AddJob(job)
 	s.NoError(err)
@@ -173,8 +172,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 			Schema:       &schemapb.CollectionSchema{},
 			TimeoutTs:    math.MaxUint64,
 		},
-		hasRecorded: make(map[string]bool),
-		tr:          timerecord.NewTimeRecorder("import job"),
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.imeta.AddJob(job)
 	s.NoError(err)
@@ -242,8 +240,7 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 			Schema:       &schemapb.CollectionSchema{},
 			TimeoutTs:    math.MaxUint64,
 		},
-		hasRecorded: make(map[string]bool),
-		tr:          timerecord.NewTimeRecorder("import job"),
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.imeta.AddJob(job)
 	s.NoError(err)

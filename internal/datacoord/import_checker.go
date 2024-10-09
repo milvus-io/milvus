@@ -202,7 +202,9 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 		log.Warn("failed to update job state to PreImporting", zap.Error(err))
 		return
 	}
-	job.Record(metrics.ImportStagePending, "import job start to execute", false)
+	pendingDuration := job.GetTR().RecordSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
+	log.Info("import job start to execute", zap.Duration("jobTimeCost/pending", pendingDuration))
 }
 
 func (c *importChecker) checkPreImportingJob(job ImportJob) {
@@ -243,7 +245,9 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 		log.Warn("failed to update job state to Importing", zap.Error(err))
 		return
 	}
-	job.Record(metrics.ImportStagePreImport, "import job preimport done", false)
+	preImportDuration := job.GetTR().RecordSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStagePreImport).Observe(float64(preImportDuration.Milliseconds()))
+	log.Info("import job preimport done", zap.Duration("jobTimeCost/preimport", preImportDuration))
 }
 
 func (c *importChecker) checkImportingJob(job ImportJob) {
@@ -259,7 +263,9 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 		log.Warn("failed to update job state to IndexBuilding", zap.Error(err))
 		return
 	}
-	job.Record(metrics.ImportStageImport, "import job import done", false)
+	importDuration := job.GetTR().RecordSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageImport).Observe(float64(importDuration.Milliseconds()))
+	log.Info("import job import done", zap.Duration("jobTimeCost/import", importDuration))
 }
 
 func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
@@ -274,7 +280,10 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		log.Debug("waiting for import segments building index...", zap.Int64s("unindexed", unindexed))
 		return
 	}
-	job.Record(metrics.ImportStageBuildIndex, "import job build index done", false)
+
+	buildIndexDuration := job.GetTR().RecordSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageBuildIndex).Observe(float64(buildIndexDuration.Milliseconds()))
+	log.Info("import job build index done", zap.Duration("jobTimeCost/buildIndex", buildIndexDuration))
 
 	// Here, all segment indexes have been successfully built, try unset isImporting flag for all segments.
 	isImportingSegments := lo.Filter(segmentIDs, func(segmentID int64, _ int) bool {
@@ -313,7 +322,9 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		log.Warn("failed to update job state to Completed", zap.Error(err))
 		return
 	}
-	job.Record(metrics.TotalLabel, "import job all completed", true)
+	totalDuration := job.GetTR().ElapseSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
+	log.Info("import job all completed", zap.Duration("jobTimeCost/total", totalDuration))
 }
 
 func (c *importChecker) tryFailingTasks(job ImportJob) {

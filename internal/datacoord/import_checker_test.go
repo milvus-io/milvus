@@ -96,8 +96,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 				},
 			},
 		},
-		hasRecorded: make(map[string]bool),
-		tr:          timerecord.NewTimeRecorder("import job"),
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 
 	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)

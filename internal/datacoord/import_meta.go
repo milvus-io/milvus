@@ -75,9 +75,8 @@ func NewImportMeta(catalog metastore.DataCoordCatalog) (ImportMeta, error) {
 	jobs := make(map[int64]ImportJob)
 	for _, job := range restoredJobs {
 		jobs[job.GetJobID()] = &importJob{
-			ImportJob:   job,
-			hasRecorded: make(map[string]bool),
-			tr:          timerecord.NewTimeRecorder("import job"),
+			ImportJob: job,
+			tr:        timerecord.NewTimeRecorder("import job"),
 		}
 	}
 
