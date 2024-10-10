@@ -212,7 +212,7 @@ func TestIndexAutoSparseVector(t *testing.T) {
 	for _, unsupportedMt := range hp.UnsupportedSparseVecMetricsType {
 		idx := index.NewAutoIndex(unsupportedMt)
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultSparseVecFieldName, idx))
-		common.CheckErr(t, err, false, "only IP is the supported metric type for sparse index")
+		common.CheckErr(t, err, false, "only IP&BM25 is the supported metric type for sparse index")
 	}
 
 	// auto index with different metric type on sparse vec
@@ -829,11 +829,11 @@ func TestCreateSparseIndexInvalidParams(t *testing.T) {
 	for _, mt := range hp.UnsupportedSparseVecMetricsType {
 		idxInverted := index.NewSparseInvertedIndex(mt, 0.2)
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultSparseVecFieldName, idxInverted))
-		common.CheckErr(t, err, false, "only IP is the supported metric type for sparse index")
+		common.CheckErr(t, err, false, "only IP&BM25 is the supported metric type for sparse index")
 
 		idxWand := index.NewSparseWANDIndex(mt, 0.2)
 		_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultSparseVecFieldName, idxWand))
-		common.CheckErr(t, err, false, "only IP is the supported metric type for sparse index")
+		common.CheckErr(t, err, false, "only IP&BM25 is the supported metric type for sparse index")
 	}
 
 	// create index with invalid drop_ratio_build

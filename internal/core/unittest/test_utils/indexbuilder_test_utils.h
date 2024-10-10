@@ -25,6 +25,7 @@
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
+#include "knowhere/comp/index_param.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "storage/Types.h"
 
@@ -100,6 +101,14 @@ generate_build_conf(const milvus::IndexType& index_type,
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
                index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
+        if (metric_type == knowhere::metric::BM25) {
+            return knowhere::Json{
+                {knowhere::meta::METRIC_TYPE, metric_type},
+                {knowhere::indexparam::DROP_RATIO_BUILD, "0.1"},
+                {knowhere::meta::BM25_K1, "1.2"},
+                {knowhere::meta::BM25_B, "0.75"},
+                {knowhere::meta::BM25_AVGDL, "100"}};
+        }
         return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::indexparam::DROP_RATIO_BUILD, "0.1"},

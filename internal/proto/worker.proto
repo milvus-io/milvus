@@ -198,6 +198,7 @@ message StatsResult {
   repeated data.FieldBinlog stats_logs = 9;
   map<int64, data.TextIndexStats> text_stats_logs = 10;
   int64 num_rows = 11;
+  repeated data.FieldBinlog bm25_logs = 12;
 }
 
 message StatsResults {

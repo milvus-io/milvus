@@ -514,6 +514,7 @@ func (i *IndexNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2Re
 					InsertLogs:    info.insertLogs,
 					StatsLogs:     info.statsLogs,
 					TextStatsLogs: info.textStatsLogs,
+					Bm25Logs:      info.bm25Logs,
 					NumRows:       info.numRows,
 				})
 			}

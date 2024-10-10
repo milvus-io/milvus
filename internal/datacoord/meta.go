@@ -1532,6 +1532,7 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 				Binlogs:       compactToSegment.GetInsertLogs(),
 				Statslogs:     compactToSegment.GetField2StatslogPaths(),
 				Deltalogs:     compactToSegment.GetDeltalogs(),
+				Bm25Statslogs: compactToSegment.GetBm25Logs(),
 
 				CreatedByCompaction: true,
 				CompactionFrom:      compactFromSegIDs,
@@ -1985,6 +1986,7 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 		MaxRowNum:           cloned.GetMaxRowNum(),
 		Binlogs:             result.GetInsertLogs(),
 		Statslogs:           result.GetStatsLogs(),
+		Bm25Statslogs:       result.GetBm25Logs(),
 		TextStatsLogs:       result.GetTextStatsLogs(),
 		CreatedByCompaction: true,
 		CompactionFrom:      []int64{oldSegmentID},
