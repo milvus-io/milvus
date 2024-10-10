@@ -402,7 +402,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+	tSafe, err := sd.waitTSafe(ctx, req.Req.GetGuaranteeTimestamp())
 	if err != nil {
 		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
 		return err
@@ -473,7 +473,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+	tSafe, err := sd.waitTSafe(ctx, req.Req.GetGuaranteeTimestamp())
 	if err != nil {
 		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
 		return nil, err
