@@ -37,6 +37,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -252,7 +253,10 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
 	appV2 := ginHandler.Group("/v2/vectordb")
 	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
+	var h2Config http2.Server
+	h2Config.MaxConcurrentStreams = paramtable.Get().ProxyGrpcServerCfg.MaxConcurrentStreams.GetAsUint32()
 	s.httpServer = &http.Server{Handler: ginHandler, ReadHeaderTimeout: time.Second}
+	http2.ConfigureServer(s.httpServer, &h2Config) // Configure the http2 server of the max concurrent streams
 	errChan <- nil
 	if err := s.httpServer.Serve(s.listenerManager.HTTPListener()); err != nil && err != cmux.ErrServerClosed {
 		log.Error("start Proxy http server to listen failed", zap.Error(err))
@@ -316,6 +320,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
+		grpc.MaxConcurrentStreams(Params.MaxConcurrentStreams.GetAsUint32()),
 		unaryServerOption,
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 		grpc.StatsHandler(metrics.NewGRPCSizeStatsHandler().
@@ -409,6 +414,7 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
+		grpc.MaxConcurrentStreams(Params.MaxConcurrentStreams.GetAsUint32()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,
