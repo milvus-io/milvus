@@ -18,8 +18,6 @@ package grpcindexnode
 
 import (
 	"context"
-	"fmt"
-	"net"
 	"strconv"
 	"sync"
 	"time"
@@ -46,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/netutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -54,6 +53,7 @@ type Server struct {
 	indexnode types.IndexNodeComponent
 
 	grpcServer  *grpc.Server
+	listener    *netutil.NetListener
 	grpcErrChan chan error
 
 	serverID atomic.Int64
@@ -63,6 +63,23 @@ type Server struct {
 	grpcWG     sync.WaitGroup
 
 	etcdCli *clientv3.Client
+}
+
+func (s *Server) Prepare() error {
+	listener, err := netutil.NewListener(
+		netutil.OptIP(paramtable.Get().IndexNodeGrpcServerCfg.IP),
+		netutil.OptHighPriorityToUsePort(paramtable.Get().IndexNodeGrpcServerCfg.Port.GetAsInt()),
+	)
+	if err != nil {
+		log.Warn("IndexNode fail to create net listener", zap.Error(err))
+		return err
+	}
+	s.listener = listener
+	log.Info("IndexNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	paramtable.Get().Save(
+		paramtable.Get().IndexNodeGrpcServerCfg.Port.Key,
+		strconv.FormatInt(int64(listener.Port()), 10))
+	return nil
 }
 
 // Run initializes and starts IndexNode's grpc service.
@@ -79,17 +96,10 @@ func (s *Server) Run() error {
 }
 
 // startGrpcLoop starts the grep loop of IndexNode component.
-func (s *Server) startGrpcLoop(grpcPort int) {
+func (s *Server) startGrpcLoop() {
 	defer s.grpcWG.Done()
 
 	Params := &paramtable.Get().IndexNodeGrpcServerCfg
-	log.Debug("IndexNode", zap.String("network address", Params.GetAddress()), zap.Int("network port: ", grpcPort))
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
-	if err != nil {
-		log.Warn("IndexNode", zap.Error(err))
-		s.grpcErrChan <- err
-		return
-	}
 
 	ctx, cancel := context.WithCancel(s.loopCtx)
 	defer cancel()
@@ -133,7 +143,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	indexpb.RegisterIndexNodeServer(s.grpcServer, s)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
-	if err := s.grpcServer.Serve(lis); err != nil {
+	if err := s.grpcServer.Serve(s.listener); err != nil {
 		s.grpcErrChan <- err
 	}
 }
@@ -141,12 +151,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 // init initializes IndexNode's grpc service.
 func (s *Server) init() error {
 	etcdConfig := &paramtable.Get().EtcdCfg
-	Params := &paramtable.Get().IndexNodeGrpcServerCfg
 	var err error
-	if !funcutil.CheckPortAvailable(Params.Port.GetAsInt()) {
-		paramtable.Get().Save(Params.Port.Key, fmt.Sprintf("%d", funcutil.GetAvailablePort()))
-		log.Warn("IndexNode get available port when init", zap.Int("Port", Params.Port.GetAsInt()))
-	}
 
 	defer func() {
 		if err != nil {
@@ -158,7 +163,7 @@ func (s *Server) init() error {
 	}()
 
 	s.grpcWG.Add(1)
-	go s.startGrpcLoop(Params.Port.GetAsInt())
+	go s.startGrpcLoop()
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
 	if err != nil {
@@ -183,7 +188,7 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.indexnode.SetEtcdClient(etcdCli)
-	s.indexnode.SetAddress(Params.GetAddress())
+	s.indexnode.SetAddress(s.listener.Address())
 	err = s.indexnode.Init()
 	if err != nil {
 		log.Error("IndexNode Init failed", zap.Error(err))
@@ -210,8 +215,10 @@ func (s *Server) start() error {
 
 // Stop stops IndexNode's grpc service.
 func (s *Server) Stop() (err error) {
-	Params := &paramtable.Get().IndexNodeGrpcServerCfg
-	logger := log.With(zap.String("address", Params.GetAddress()))
+	logger := log.With()
+	if s.listener != nil {
+		logger = log.With(zap.String("address", s.listener.Address()))
+	}
 	logger.Info("IndexNode stopping")
 	defer func() {
 		logger.Info("IndexNode stopped", zap.Error(err))
@@ -233,6 +240,9 @@ func (s *Server) Stop() (err error) {
 	s.grpcWG.Wait()
 
 	s.loopCancel()
+	if s.listener != nil {
+		s.listener.Close()
+	}
 	return nil
 }
 

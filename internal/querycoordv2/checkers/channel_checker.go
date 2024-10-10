@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
@@ -101,12 +102,15 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 	// clean node which has been move out from replica
 	for _, nodeInfo := range c.nodeMgr.GetAll() {
 		nodeID := nodeInfo.ID()
-		replicas := c.meta.ReplicaManager.GetByNode(nodeID)
-		channels := c.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(nodeID))
-		if len(replicas) == 0 && len(channels) != 0 {
-			reduceTasks := c.createChannelReduceTasks(ctx, channels, meta.NilReplica)
-			task.SetReason("dirty channel exists", reduceTasks...)
-			tasks = append(tasks, reduceTasks...)
+		channelOnQN := c.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(nodeID))
+		collectionChannels := lo.GroupBy(channelOnQN, func(ch *meta.DmChannel) int64 { return ch.CollectionID })
+		for collectionID, channels := range collectionChannels {
+			replica := c.meta.ReplicaManager.GetByCollectionAndNode(collectionID, nodeID)
+			if replica == nil {
+				reduceTasks := c.createChannelReduceTasks(ctx, channels, meta.NilReplica)
+				task.SetReason("dirty channel exists", reduceTasks...)
+				tasks = append(tasks, reduceTasks...)
+			}
 		}
 	}
 	return tasks

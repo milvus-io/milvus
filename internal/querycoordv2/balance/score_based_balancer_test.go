@@ -1006,6 +1006,107 @@ func (suite *ScoreBasedBalancerTestSuite) TestMultiReplicaBalance() {
 	}
 }
 
+func (suite *ScoreBasedBalancerTestSuite) TestQNMemoryCapacity() {
+	cases := []struct {
+		name                 string
+		nodes                []int64
+		collectionID         int64
+		replicaID            int64
+		collectionsSegments  []*datapb.SegmentInfo
+		states               []session.State
+		shouldMock           bool
+		distributions        map[int64][]*meta.Segment
+		distributionChannels map[int64][]*meta.DmChannel
+		expectPlans          []SegmentAssignPlan
+		expectChannelPlans   []ChannelAssignPlan
+	}{
+		{
+			name:         "test qn memory capacity",
+			nodes:        []int64{1, 2},
+			collectionID: 1,
+			replicaID:    1,
+			collectionsSegments: []*datapb.SegmentInfo{
+				{ID: 1, PartitionID: 1}, {ID: 2, PartitionID: 1}, {ID: 3, PartitionID: 1}, {ID: 4, PartitionID: 1},
+			},
+			states: []session.State{session.NodeStateNormal, session.NodeStateNormal},
+			distributions: map[int64][]*meta.Segment{
+				1: {{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 10}, Node: 1}},
+				2: {
+					{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 10}, Node: 2},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 20}, Node: 2},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 20}, Node: 2},
+				},
+			},
+			expectPlans:        []SegmentAssignPlan{},
+			expectChannelPlans: []ChannelAssignPlan{},
+		},
+	}
+
+	for _, c := range cases {
+		suite.Run(c.name, func() {
+			suite.SetupSuite()
+			defer suite.TearDownTest()
+			balancer := suite.balancer
+
+			// 1. set up target for multi collections
+			collection := utils.CreateTestCollection(c.collectionID, int32(c.replicaID))
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
+				nil, c.collectionsSegments, nil)
+			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
+			collection.LoadPercentage = 100
+			collection.Status = querypb.LoadStatus_Loaded
+			balancer.meta.CollectionManager.PutCollection(collection)
+			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(c.collectionID, c.collectionID))
+			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
+			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
+			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+
+			// 2. set up target for distribution for multi collections
+			for node, s := range c.distributions {
+				balancer.dist.SegmentDistManager.Update(node, s...)
+			}
+			for node, v := range c.distributionChannels {
+				balancer.dist.ChannelDistManager.Update(node, v...)
+			}
+
+			// 3. set up nodes info and resourceManager for balancer
+			nodeInfoMap := make(map[int64]*session.NodeInfo)
+			for i := range c.nodes {
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   c.nodes[i],
+					Address:  "127.0.0.1:0",
+					Hostname: "localhost",
+				})
+				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
+				nodeInfo.SetState(c.states[i])
+				nodeInfoMap[c.nodes[i]] = nodeInfo
+				suite.balancer.nodeManager.Add(nodeInfo)
+				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
+			}
+			utils.RecoverAllCollection(balancer.meta)
+
+			// test qn has same memory capacity
+			nodeInfoMap[1].UpdateStats(session.WithMemCapacity(1024))
+			nodeInfoMap[2].UpdateStats(session.WithMemCapacity(1024))
+			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, c.collectionID)
+			suite.Len(channelPlans, 0)
+			suite.Len(segmentPlans, 1)
+			suite.Equal(segmentPlans[0].To, int64(1))
+			suite.Equal(segmentPlans[0].Segment.NumOfRows, int64(20))
+
+			// test qn has different memory capacity
+			nodeInfoMap[1].UpdateStats(session.WithMemCapacity(1024))
+			nodeInfoMap[2].UpdateStats(session.WithMemCapacity(2048))
+			segmentPlans, channelPlans = suite.getCollectionBalancePlans(balancer, c.collectionID)
+			suite.Len(channelPlans, 0)
+			suite.Len(segmentPlans, 1)
+			suite.Equal(segmentPlans[0].To, int64(1))
+			suite.Equal(segmentPlans[0].Segment.NumOfRows, int64(10))
+		})
+	}
+}
+
 func TestScoreBasedBalancerSuite(t *testing.T) {
 	suite.Run(t, new(ScoreBasedBalancerTestSuite))
 }

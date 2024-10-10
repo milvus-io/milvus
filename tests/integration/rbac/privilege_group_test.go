@@ -34,12 +34,11 @@ type PrivilegeGroupTestSuite struct {
 }
 
 func (s *PrivilegeGroupTestSuite) SetupSuite() {
+	s.MiniClusterSuite.SetupSuite()
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "true")
-
-	s.Require().NoError(s.SetupEmbedEtcd())
 }
 
 func (s *PrivilegeGroupTestSuite) TestPrivilegeGroup() {

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -78,6 +79,11 @@ func NewSyncTask(ctx context.Context,
 		return nil, err
 	}
 
+	segmentLevel := datapb.SegmentLevel_L1
+	if insertData == nil && deleteData != nil {
+		segmentLevel = datapb.SegmentLevel_L0
+	}
+
 	syncPack := &syncmgr.SyncPack{}
 	syncPack.WithInsertData([]*storage.InsertData{insertData}).
 		WithDeleteData(deleteData).
@@ -86,6 +92,8 @@ func NewSyncTask(ctx context.Context,
 		WithChannelName(vchannel).
 		WithSegmentID(segmentID).
 		WithTimeRange(ts, ts).
+		WithLevel(segmentLevel).
+		WithDataSource(metrics.BulkinsertDataSourceLabel).
 		WithBatchSize(int64(insertData.GetRowNum()))
 
 	return serializer.EncodeBuffer(ctx, syncPack)

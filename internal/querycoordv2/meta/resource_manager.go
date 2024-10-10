@@ -349,6 +349,22 @@ func (rm *ResourceManager) GetNodes(rgName string) ([]int64, error) {
 	return rm.groups[rgName].GetNodes(), nil
 }
 
+// GetResourceGroupByNodeID return whether resource group's node match required node count
+func (rm *ResourceManager) VerifyNodeCount(requiredNodeCount map[string]int) error {
+	rm.rwmutex.RLock()
+	defer rm.rwmutex.RUnlock()
+	for rgName, nodeCount := range requiredNodeCount {
+		if rm.groups[rgName] == nil {
+			return merr.WrapErrResourceGroupNotFound(rgName)
+		}
+		if rm.groups[rgName].NodeNum() != nodeCount {
+			return ErrNodeNotEnough
+		}
+	}
+
+	return nil
+}
+
 // GetOutgoingNodeNumByReplica return outgoing node num on each rg from this replica.
 func (rm *ResourceManager) GetOutgoingNodeNumByReplica(replica *Replica) map[string]int32 {
 	rm.rwmutex.RLock()

@@ -29,6 +29,7 @@ import (
 	"github.com/samber/lo"
 	uatomic "go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -304,35 +305,43 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 	if err != nil {
 		return err
 	}
+	eg, _ := errgroup.WithContext(context.Background())
 	for k, v := range result {
-		channel := ms.producerChannels[k]
-		for i := 0; i < len(v.Msgs); i++ {
-			spanCtx, sp := MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
-			defer sp.End()
+		k := k
+		v := v
+		eg.Go(func() error {
+			channel := ms.producerChannels[k]
+			for i := 0; i < len(v.Msgs); i++ {
+				spanCtx, sp := MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
+				defer sp.End()
 
-			mb, err := v.Msgs[i].Marshal(v.Msgs[i])
-			if err != nil {
-				return err
-			}
+				mb, err := v.Msgs[i].Marshal(v.Msgs[i])
+				if err != nil {
+					return err
+				}
 
-			m, err := convertToByteArray(mb)
-			if err != nil {
-				return err
-			}
+				m, err := convertToByteArray(mb)
+				if err != nil {
+					return err
+				}
 
-			msg := &common.ProducerMessage{Payload: m, Properties: map[string]string{}}
-			InjectCtx(spanCtx, msg.Properties)
+				msg := &common.ProducerMessage{Payload: m, Properties: map[string]string{
+					common.MsgTypeKey: v.Msgs[i].Type().String(),
+				}}
+				InjectCtx(spanCtx, msg.Properties)
 
-			ms.producerLock.RLock()
-			if _, err := ms.producers[channel].Send(spanCtx, msg); err != nil {
+				ms.producerLock.RLock()
+				if _, err := ms.producers[channel].Send(spanCtx, msg); err != nil {
+					ms.producerLock.RUnlock()
+					sp.RecordError(err)
+					return err
+				}
 				ms.producerLock.RUnlock()
-				sp.RecordError(err)
-				return err
 			}
-			ms.producerLock.RUnlock()
-		}
+			return nil
+		})
 	}
-	return nil
+	return eg.Wait()
 }
 
 // BroadcastMark broadcast msg pack to all producers and returns corresponding msg id
@@ -384,18 +393,11 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) (map[string][]MessageID, erro
 }
 
 func (ms *mqMsgStream) getTsMsgFromConsumerMsg(msg common.Message) (TsMsg, error) {
-	header := commonpb.MsgHeader{}
-	if msg.Payload() == nil {
-		return nil, fmt.Errorf("failed to unmarshal message header, payload is empty")
-	}
-	err := proto.Unmarshal(msg.Payload(), &header)
+	msgType, err := common.GetMsgType(msg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal message header, err %s", err.Error())
+		return nil, err
 	}
-	if header.Base == nil {
-		return nil, fmt.Errorf("failed to unmarshal message, header is uncomplete")
-	}
-	tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), header.Base.MsgType)
+	tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), msgType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal tsMsg, err %s", err.Error())
 	}
