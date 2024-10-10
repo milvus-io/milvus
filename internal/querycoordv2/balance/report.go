@@ -38,9 +38,9 @@ func (br *balanceReport) AddSegmentPlan() {
 }
 
 func (br *balanceReport) AddNodeItem(item *nodeItem) {
-	nodeItem, ok := br.nodeItems[item.nodeID]
+	_, ok := br.nodeItems[item.nodeID]
 	if !ok {
-		nodeItem = &nodeItemInfo{
+		nodeItem := &nodeItemInfo{
 			nodeItem:     item,
 			memoryFactor: 1,
 		}
