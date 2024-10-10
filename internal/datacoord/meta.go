@@ -1010,10 +1010,12 @@ func (m *meta) UpdateSegmentsInfo(operators ...UpdateOperator) error {
 	}
 
 	for _, operator := range operators {
-		ok := operator(updatePack)
-		if !ok {
-			return nil
-		}
+		operator(updatePack)
+	}
+
+	// skip if all segment not exist
+	if len(updatePack.segments) == 0 {
+		return nil
 	}
 
 	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
