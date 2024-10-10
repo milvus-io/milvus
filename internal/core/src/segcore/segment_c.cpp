@@ -98,8 +98,8 @@ AsyncSearch(CTraceContext c_trace,
             CSearchPlan c_plan,
             CPlaceholderGroup c_placeholder_group,
             uint64_t timestamp) {
-    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
-    auto plan = (milvus::query::Plan*)c_plan;
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    auto plan = static_cast<milvus::query::Plan*>(c_plan);
     auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
         c_placeholder_group);
 

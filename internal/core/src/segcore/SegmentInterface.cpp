@@ -86,7 +86,8 @@ SegmentInternalInterface::Search(
     query::ExecPlanNodeVisitor visitor(*this, timestamp, placeholder_group);
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
-    results->segment_ = (void*)this;
+    results->segment_ = static_cast<void*>(
+        const_cast<milvus::segcore::SegmentInternalInterface*>(this));
     return results;
 }
 
@@ -101,7 +102,8 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(*this, timestamp);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
-    retrieve_results.segment_ = (void*)this;
+    retrieve_results.segment_ = static_cast<void*>(
+        const_cast<milvus::segcore::SegmentInternalInterface*>(this));
     results->set_has_more_result(retrieve_results.has_more_result);
 
     auto result_rows = retrieve_results.result_offsets_.size();

@@ -246,7 +246,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
         auto size = data->Size();
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         auto buf = std::shared_ptr<uint8_t[]>(
-            (uint8_t*)const_cast<void*>(data->Data()), deleter);
+            static_cast<uint8_t*>(const_cast<void*>(data->Data())), deleter);
         binary_set.Append(key, buf, size);
     }
 

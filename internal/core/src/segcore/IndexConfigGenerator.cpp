@@ -47,8 +47,8 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
     build_params_[knowhere::meta::METRIC_TYPE] = metric_type_;
     build_params_[knowhere::indexparam::NLIST] =
         std::to_string(config_.get_nlist());
-    build_params_[knowhere::indexparam::SSIZE] = std::to_string(
-        std::max((int)(config_.get_chunk_rows() / config_.get_nlist()), 48));
+    build_params_[knowhere::indexparam::SSIZE] = std::to_string(std::max(
+        static_cast<int>(config_.get_chunk_rows() / config_.get_nlist()), 48));
     search_params_[knowhere::indexparam::NPROBE] =
         std::to_string(config_.get_nprobe());
     // note for sparse vector index: drop_ratio_build is not allowed for growing
@@ -71,7 +71,7 @@ VecIndexConfig::GetBuildThreshold() const noexcept {
     assert(VecIndexConfig::index_build_ratio.count(index_type_));
     auto ratio = VecIndexConfig::index_build_ratio.at(index_type_);
     assert(ratio >= 0.0 && ratio < 1.0);
-    return std::max(int64_t(max_index_row_count_ * ratio),
+    return std::max(static_cast<int64_t>(max_index_row_count_ * ratio),
                     config_.get_nlist() * 39);
 }
 
