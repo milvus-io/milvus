@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/antlr4-go/antlr/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -646,7 +646,7 @@ func (l *errorListenerTest) SyntaxError(recognizer antlr.Recognizer, offendingSy
 	listenerCnt += 1
 }
 
-func (l *errorListenerTest) ReportAmbiguity(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex int, exact bool, ambigAlts *antlr.BitSet, configs antlr.ATNConfigSet) {
+func (l *errorListenerTest) ReportAmbiguity(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex int, exact bool, ambigAlts *antlr.BitSet, configs *antlr.ATNConfigSet) {
 	listenerCnt += 1
 }
 
@@ -1192,6 +1192,7 @@ func Test_ArrayExpr(t *testing.T) {
 		`100 > ArrayField[0] > 0`,
 		`ArrayField[0] > 1`,
 		`ArrayField[0] == 1`,
+		`ArrayField in []`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -1218,7 +1219,6 @@ func Test_ArrayExpr(t *testing.T) {
 		`ArrayField + 3 == 1`,
 		`ArrayField in [1,2,3]`,
 		`ArrayField[0] in [1, "abc",3.3]`,
-		`ArrayField in []`,
 		`0 < ArrayField < 100`,
 		`100 > ArrayField > 0`,
 		`ArrayField > 1`,

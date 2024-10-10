@@ -3,7 +3,7 @@ package planparserv2
 import (
 	"context"
 
-	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/antlr4-go/antlr/v4"
 	pool "github.com/jolestar/go-commons-pool/v2"
 
 	antlrparser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"

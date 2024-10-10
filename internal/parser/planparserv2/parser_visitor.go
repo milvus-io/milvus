@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
@@ -535,27 +535,29 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	if typeutil.IsArrayType(dataType) && len(columnInfo.GetNestedPath()) != 0 {
 		dataType = columnInfo.GetElementType()
 	}
-	allExpr := ctx.AllExpr()
-	lenOfAllExpr := len(allExpr)
-	values := make([]*planpb.GenericValue, 0, lenOfAllExpr)
-	for i := 1; i < lenOfAllExpr; i++ {
-		term := allExpr[i].Accept(v)
-		if getError(term) != nil {
-			return term
-		}
-		n := getGenericValue(term)
-		if n == nil {
-			return fmt.Errorf("value '%s' in list cannot be a non-const expression", ctx.Expr(i).GetText())
-		}
-		castedValue, err := castValue(dataType, n)
+
+	term := ctx.Expr(1).Accept(v)
+	if getError(term) != nil {
+		return term
+	}
+	value := getGenericValue(term)
+	if value == nil {
+		return fmt.Errorf("value '%s' in list cannot be a non-const expression", ctx.Expr(1).GetText())
+	}
+
+	if !IsArray(value) {
+		return fmt.Errorf("the right-hand side of 'in' must be a list, but got: %s", ctx.Expr(1).GetText())
+	}
+
+	values := value.GetArrayVal().GetArray()
+	for i, e := range values {
+		castedValue, err := castValue(dataType, e)
 		if err != nil {
-			return fmt.Errorf("value '%s' in list cannot be casted to %s", ctx.Expr(i).GetText(), dataType.String())
+			return fmt.Errorf("value '%s' in list cannot be casted to %s", e.String(), dataType.String())
 		}
-		values = append(values, castedValue)
+		values[i] = castedValue
 	}
-	if len(values) <= 0 {
-		return fmt.Errorf("'term' has empty value list")
-	}
+
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_TermExpr{
 			TermExpr: &planpb.TermExpr{
@@ -564,51 +566,7 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 			},
 		},
 	}
-	if ctx.GetOp().GetTokenType() == parser.PlanParserNIN {
-		expr = &planpb.Expr{
-			Expr: &planpb.Expr_UnaryExpr{
-				UnaryExpr: &planpb.UnaryExpr{
-					Op:    planpb.UnaryExpr_Not,
-					Child: expr,
-				},
-			},
-		}
-	}
-	return &ExprWithType{
-		expr:     expr,
-		dataType: schemapb.DataType_Bool,
-	}
-}
-
-// VisitEmptyTerm translates expr to term plan.
-func (v *ParserVisitor) VisitEmptyTerm(ctx *parser.EmptyTermContext) interface{} {
-	child := ctx.Expr().Accept(v)
-	if err := getError(child); err != nil {
-		return err
-	}
-
-	if childValue := getGenericValue(child); childValue != nil {
-		return fmt.Errorf("'term' can only be used on non-const expression, but got: %s", ctx.Expr().GetText())
-	}
-
-	childExpr := getExpr(child)
-	columnInfo := toColumnInfo(childExpr)
-	if columnInfo == nil {
-		return fmt.Errorf("'term' can only be used on single field, but got: %s", ctx.Expr().GetText())
-	}
-	if err := checkDirectComparisonBinaryField(columnInfo); err != nil {
-		return err
-	}
-
-	expr := &planpb.Expr{
-		Expr: &planpb.Expr_TermExpr{
-			TermExpr: &planpb.TermExpr{
-				ColumnInfo: columnInfo,
-				Values:     nil,
-			},
-		},
-	}
-	if ctx.GetOp().GetTokenType() == parser.PlanParserNIN {
+	if ctx.GetOp() != nil {
 		expr = &planpb.Expr{
 			Expr: &planpb.Expr_UnaryExpr{
 				UnaryExpr: &planpb.UnaryExpr{
@@ -1133,7 +1091,7 @@ func (v *ParserVisitor) VisitExists(ctx *parser.ExistsContext) interface{} {
 
 func (v *ParserVisitor) VisitArray(ctx *parser.ArrayContext) interface{} {
 	allExpr := ctx.AllExpr()
-	array := make([]*planpb.GenericValue, 0, len(allExpr))
+	array := make([]*planpb.GenericValue, len(allExpr))
 	dType := schemapb.DataType_None
 	sameType := true
 	for i := 0; i < len(allExpr); i++ {
@@ -1145,7 +1103,7 @@ func (v *ParserVisitor) VisitArray(ctx *parser.ArrayContext) interface{} {
 		if elementValue == nil {
 			return fmt.Errorf("array element type must be generic value, but got: %s", allExpr[i].GetText())
 		}
-		array = append(array, elementValue)
+		array[i] = elementValue
 
 		if dType == schemapb.DataType_None {
 			dType = element.(*ExprWithType).dataType
@@ -1168,6 +1126,28 @@ func (v *ParserVisitor) VisitArray(ctx *parser.ArrayContext) interface{} {
 								Array:       array,
 								SameType:    sameType,
 								ElementType: dType,
+							},
+						},
+					},
+				},
+			},
+		},
+		nodeDependent: true,
+	}
+}
+
+func (v *ParserVisitor) VisitEmptyArray(ctx *parser.EmptyArrayContext) interface{} {
+	return &ExprWithType{
+		dataType: schemapb.DataType_Array,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: &planpb.GenericValue{
+						Val: &planpb.GenericValue_ArrayVal{
+							ArrayVal: &planpb.Array{
+								Array:       nil,
+								SameType:    true,
+								ElementType: schemapb.DataType_None,
 							},
 						},
 					},

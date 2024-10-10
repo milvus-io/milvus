@@ -1,7 +1,7 @@
-// Code generated from Plan.g4 by ANTLR 4.9. DO NOT EDIT.
+// Code generated from Plan.g4 by ANTLR 4.13.2. DO NOT EDIT.
 
 package planparserv2 // Plan
-import "github.com/antlr/antlr4/runtime/Go/antlr"
+import "github.com/antlr4-go/antlr/v4"
 
 type BasePlanVisitor struct {
 	*antlr.BaseParseTreeVisitor
@@ -67,6 +67,10 @@ func (v *BasePlanVisitor) VisitBitOr(ctx *BitOrContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitEmptyArray(ctx *EmptyArrayContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitAddSub(ctx *AddSubContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -120,10 +124,6 @@ func (v *BasePlanVisitor) VisitExists(ctx *ExistsContext) interface{} {
 }
 
 func (v *BasePlanVisitor) VisitBitAnd(ctx *BitAndContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitEmptyTerm(ctx *EmptyTermContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

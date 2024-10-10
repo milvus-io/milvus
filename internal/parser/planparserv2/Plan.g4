@@ -9,6 +9,7 @@ expr:
 	| JSONIdentifier                                                             # JSONIdentifier
 	| '(' expr ')'											                     # Parens
 	| '[' expr (',' expr)* ','? ']'                                              # Array
+	| EmptyArray                                                                 # EmptyArray
 	| expr LIKE StringLiteral                                                    # Like
 	| TEXTMATCH'('Identifier',' StringLiteral')'                                 # TextMatch
 	| expr POW expr											                     # Power
@@ -17,8 +18,8 @@ expr:
 	| expr op = (MUL | DIV | MOD) expr						                     # MulDivMod
 	| expr op = (ADD | SUB) expr							                     # AddSub
 	| expr op = (SHL | SHR) expr							                     # Shift
-	| expr op = (IN | NIN) ('[' expr (',' expr)* ','? ']')                       # Term
-	| expr op = (IN | NIN) EmptyTerm                                             # EmptyTerm
+	| expr op = NOT? IN expr                                                     # Term
+//	| EmptyTerm                                                                  # EmptyTerm
 	| (JSONContains | ArrayContains)'('expr',' expr')'                           # JSONContains
 	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                     # JSONContainsAll
 	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                     # JSONContainsAny
@@ -53,7 +54,7 @@ NE: '!=';
 
 LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
-TEXTMATCH: 'TextMatch';
+TEXTMATCH: 'TextMatch'|'textmatch'|'TEXTMATCH';
 
 ADD: '+';
 SUB: '-';
@@ -73,9 +74,8 @@ OR: '||' | 'or';
 BNOT: '~';
 NOT: '!' | 'not';
 
-IN: 'in';
-NIN: 'not in';
-EmptyTerm: '[' (Whitespace | Newline)* ']';
+IN: 'in' | 'IN';
+EmptyArray: '[' (Whitespace | Newline)* ']';
 
 JSONContains: 'json_contains' | 'JSON_CONTAINS';
 JSONContainsAll: 'json_contains_all' | 'JSON_CONTAINS_ALL';
