@@ -173,7 +173,7 @@ func (li *LoadIndexInfo) appendIndexEngineVersion(ctx context.Context, indexEngi
 	return HandleCStatus(ctx, &status, "AppendIndexEngineVersion failed")
 }
 
-func (li *LoadIndexInfo) finish(ctx context.Context, info *cgopb.LoadIndexInfo) error {
+func (li *LoadIndexInfo) appendLoadIndexInfo(ctx context.Context, info *cgopb.LoadIndexInfo) error {
 	marshaled, err := proto.Marshal(info)
 	if err != nil {
 		return err
@@ -185,10 +185,11 @@ func (li *LoadIndexInfo) finish(ctx context.Context, info *cgopb.LoadIndexInfo) 
 		return nil, nil
 	}).Await()
 
-	if err := HandleCStatus(ctx, &status, "FinishLoadIndexInfo failed"); err != nil {
-		return err
-	}
+	return HandleCStatus(ctx, &status, "FinishLoadIndexInfo failed")
+}
 
+func (li *LoadIndexInfo) loadIndex(ctx context.Context) error {
+	var status C.CStatus
 	_, _ = GetLoadPool().Submit(func() (any, error) {
 		traceCtx := ParseCTraceContext(ctx)
 		status = C.AppendIndexV2(traceCtx.ctx, li.cLoadIndexInfo)

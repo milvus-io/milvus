@@ -470,18 +470,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 func (m *meta) SetStoredIndexFileSizeMetric() uint64 {
 	m.RLock()
 	defer m.RUnlock()
-	var total uint64
-
-	metrics.DataCoordStoredIndexFilesSize.Reset()
-	for _, segmentIdx := range m.indexMeta.GetAllSegIndexes() {
-		coll, ok := m.collections[segmentIdx.CollectionID]
-		if ok {
-			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName,
-				fmt.Sprint(segmentIdx.CollectionID), fmt.Sprint(segmentIdx.SegmentID)).Set(float64(segmentIdx.IndexSize))
-			total += segmentIdx.IndexSize
-		}
-	}
-	return total
+	return m.indexMeta.SetStoredIndexFileSizeMetric(m.collections)
 }
 
 func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
@@ -1818,7 +1807,6 @@ func (s *segMetricMutation) addNewSeg(state commonpb.SegmentState, level datapb.
 	}
 	if _, ok := s.stateChange[level.String()][state.String()]; !ok {
 		s.stateChange[level.String()][state.String()] = make(map[string]int)
-
 	}
 	s.stateChange[level.String()][state.String()][getSortStatus(isSorted)] += 1
 

@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.53.0') _
+@Library('jenkins-shared-library@v0.57.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 def milvus_helm_chart_version = '4.2.8'
@@ -72,7 +72,7 @@ pipeline {
                 axes {
                     axis {
                         name 'milvus_deployment_option'
-                        values 'standalone', 'distributed', 'standalone-kafka', 'distributed-streaming-service'
+                        values 'standalone', 'distributed', 'standalone-kafka-mmap', 'distributed-streaming-service'
                     }
                 }
                 stages {

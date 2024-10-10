@@ -100,7 +100,7 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 	views := make([]CompactionView, 0)
 	for _, group := range partSegments {
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.segments = FilterInIndexedSegments(policy.handler, policy.meta, group.segments...)
+			group.segments = FilterInIndexedSegments(policy.handler, policy.meta, false, group.segments...)
 		}
 
 		collectionTTL, err := getCollectionTTL(collection.Properties)

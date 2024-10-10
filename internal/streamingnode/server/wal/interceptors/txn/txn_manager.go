@@ -8,19 +8,22 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // NewTxnManager creates a new transaction manager.
-func NewTxnManager() *TxnManager {
+func NewTxnManager(pchannel types.PChannelInfo) *TxnManager {
 	return &TxnManager{
 		mu:       sync.Mutex{},
 		sessions: make(map[message.TxnID]*TxnSession),
 		closed:   nil,
+		metrics:  metricsutil.NewTxnMetrics(pchannel.Name),
 	}
 }
 
@@ -31,6 +34,7 @@ type TxnManager struct {
 	mu       sync.Mutex
 	sessions map[message.TxnID]*TxnSession
 	closed   lifetime.SafeChan
+	metrics  *metricsutil.TxnMetrics
 }
 
 // BeginNewTxn starts a new transaction with a session.
@@ -70,6 +74,7 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, timetick uint64, keepalive
 	}
 
 	m.sessions[session.TxnContext().TxnID] = session
+	m.metrics.BeginTxn()
 	return session, nil
 }
 
@@ -81,6 +86,7 @@ func (m *TxnManager) CleanupTxnUntil(ts uint64) {
 	for id, session := range m.sessions {
 		if session.IsExpiredOrDone(ts) {
 			session.Cleanup()
+			m.metrics.Finish(session.State())
 			delete(m.sessions, id)
 		}
 	}
@@ -105,6 +111,8 @@ func (m *TxnManager) GetSessionOfTxn(id message.TxnID) (*TxnSession, error) {
 
 // GracefulClose waits for all transactions to be cleaned up.
 func (m *TxnManager) GracefulClose(ctx context.Context) error {
+	defer m.metrics.Close()
+
 	m.mu.Lock()
 	if m.closed == nil {
 		m.closed = lifetime.NewSafeChan()

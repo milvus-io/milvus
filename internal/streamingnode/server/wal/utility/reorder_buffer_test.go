@@ -14,6 +14,7 @@ func TestReOrderByTimeTickBuffer(t *testing.T) {
 	timeticks := rand.Perm(25)
 	for i, timetick := range timeticks {
 		msg := mock_message.NewMockImmutableMessage(t)
+		msg.EXPECT().EstimateSize().Return(1)
 		msg.EXPECT().TimeTick().Return(uint64(timetick + 1))
 		buf.Push(msg)
 		assert.Equal(t, i+1, buf.Len())

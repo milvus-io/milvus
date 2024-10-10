@@ -28,6 +28,7 @@ import (
 func TestWalAdaptorReadFail(t *testing.T) {
 	l := mock_walimpls.NewMockWALImpls(t)
 	expectedErr := errors.New("test")
+	l.EXPECT().WALName().Return("test")
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
 	l.EXPECT().Read(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, ro walimpls.ReadOption) (walimpls.ScannerImpls, error) {
@@ -52,6 +53,7 @@ func TestWALAdaptor(t *testing.T) {
 
 	// Create a mock WAL implementation
 	l := mock_walimpls.NewMockWALImpls(t)
+	l.EXPECT().WALName().Return("test")
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
@@ -74,6 +76,8 @@ func TestWALAdaptor(t *testing.T) {
 
 	msg := mock_message.NewMockMutableMessage(t)
 	msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
+	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
+	msg.EXPECT().EstimateSize().Return(1).Maybe()
 	_, err := lAdapted.Append(context.Background(), msg)
 	assert.NoError(t, err)
 	lAdapted.AppendAsync(context.Background(), msg, func(mi *wal.AppendResult, err error) {
@@ -128,6 +132,7 @@ func assertShutdownError(t *testing.T, err error) {
 
 func TestNoInterceptor(t *testing.T) {
 	l := mock_walimpls.NewMockWALImpls(t)
+	l.EXPECT().WALName().Return("test")
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
 		return nil, nil
@@ -138,6 +143,8 @@ func TestNoInterceptor(t *testing.T) {
 
 	msg := mock_message.NewMockMutableMessage(t)
 	msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
+	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
+	msg.EXPECT().EstimateSize().Return(1).Maybe()
 	_, err := lWithInterceptors.Append(context.Background(), msg)
 	assert.NoError(t, err)
 	lWithInterceptors.Close()
@@ -149,6 +156,7 @@ func TestWALWithInterceptor(t *testing.T) {
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
 		return nil, nil
 	})
+	l.EXPECT().WALName().Return("test")
 	l.EXPECT().Close().Run(func() {})
 
 	b := mock_interceptors.NewMockInterceptorBuilder(t)
@@ -170,6 +178,8 @@ func TestWALWithInterceptor(t *testing.T) {
 	// Interceptor is not ready, so the append/read will be blocked until timeout.
 	msg := mock_message.NewMockMutableMessage(t)
 	msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
+	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
+	msg.EXPECT().EstimateSize().Return(1).Maybe()
 	_, err := lWithInterceptors.Append(ctx, msg)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 

@@ -834,6 +834,8 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSearchHitSegmentNum)
 	// Add cgo metrics
 	RegisterCGOMetrics(registry)
+
+	RegisterStreamingServiceClient(registry)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
