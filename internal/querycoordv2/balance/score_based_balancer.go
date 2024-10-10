@@ -395,7 +395,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(br *balanceReport, replica *meta.Rep
 		times := len(b.dist.SegmentDistManager.GetByFilter(meta.WithReplica(replica), meta.WithSegmentID(s.GetID())))
 		segmentUnique := times == 1
 		if !segmentUnique {
-			br.AddRecord(StrRecordf("abort balancing segment %d since it appear mulitple times(%d) in distribution", s.ID, times))
+			br.AddRecord(StrRecordf("abort balancing segment %d since it appear multiple times(%d) in distribution", s.ID, times))
 		}
 		return segmentUnique
 	})
