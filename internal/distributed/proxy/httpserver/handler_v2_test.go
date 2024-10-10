@@ -1140,6 +1140,9 @@ func TestMethodPost(t *testing.T) {
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(ImportJobCategory, GetProgressAction),
 	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(ImportJobCategory, DescribeAction),
+	})
 
 	for _, testcase := range queryTestCases {
 		t.Run(testcase.path, func(t *testing.T) {
