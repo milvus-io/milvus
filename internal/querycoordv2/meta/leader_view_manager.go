@@ -199,19 +199,20 @@ func composeNodeViews(views ...*LeaderView) nodeViews {
 type NotifyDelegatorChanges = func(collectionID ...int64)
 
 type LeaderViewManager struct {
-	rwmutex    sync.RWMutex
-	views      map[int64]nodeViews // LeaderID -> Views (one per shard)
-	notifyFunc NotifyDelegatorChanges
+	rwmutex     sync.RWMutex
+	views       map[int64]nodeViews // LeaderID -> Views (one per shard)
+	notifyFuncs []NotifyDelegatorChanges
 }
 
 func NewLeaderViewManager() *LeaderViewManager {
 	return &LeaderViewManager{
-		views: make(map[int64]nodeViews),
+		views:       make(map[int64]nodeViews),
+		notifyFuncs: make([]NotifyDelegatorChanges, 0),
 	}
 }
 
-func (mgr *LeaderViewManager) SetNotifyFunc(notifyFunc NotifyDelegatorChanges) {
-	mgr.notifyFunc = notifyFunc
+func (mgr *LeaderViewManager) SetNotifyFunc(notifyFunc ...NotifyDelegatorChanges) {
+	mgr.notifyFuncs = append(mgr.notifyFuncs, notifyFunc...)
 }
 
 // Update updates the leader's views, all views have to be with the same leader ID
@@ -235,30 +236,31 @@ func (mgr *LeaderViewManager) Update(leaderID int64, views ...*LeaderView) {
 	// 1. leader has been released from node
 	// 2. leader has been loaded to node
 	// 3. leader serviceable status changed
-	if mgr.notifyFunc != nil {
-		viewChanges := typeutil.NewUniqueSet()
-		for channel, oldView := range oldViews {
-			// if channel released from current node
-			if _, ok := newViews[channel]; !ok {
-				viewChanges.Insert(oldView.CollectionID)
-			}
+	viewChanges := typeutil.NewUniqueSet()
+	for channel, oldView := range oldViews {
+		// if channel released from current node
+		if _, ok := newViews[channel]; !ok {
+			viewChanges.Insert(oldView.CollectionID)
+		}
+	}
+
+	serviceableChange := func(old, new *LeaderView) bool {
+		if old == nil || new == nil {
+			return true
 		}
 
-		serviceableChange := func(old, new *LeaderView) bool {
-			if old == nil || new == nil {
-				return true
-			}
+		return (old.UnServiceableError == nil) != (new.UnServiceableError == nil)
+	}
 
-			return (old.UnServiceableError == nil) != (new.UnServiceableError == nil)
+	for channel, newView := range newViews {
+		// if channel loaded to current node
+		if oldView, ok := oldViews[channel]; !ok || serviceableChange(oldView, newView) {
+			viewChanges.Insert(newView.CollectionID)
 		}
-
-		for channel, newView := range newViews {
-			// if channel loaded to current node
-			if oldView, ok := oldViews[channel]; !ok || serviceableChange(oldView, newView) {
-				viewChanges.Insert(newView.CollectionID)
-			}
-		}
-		mgr.notifyFunc(viewChanges.Collect()...)
+	}
+	collectionIDs := viewChanges.Collect()
+	for _, f := range mgr.notifyFuncs {
+		f(collectionIDs...)
 	}
 }
 
