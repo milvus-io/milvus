@@ -19,6 +19,7 @@ package datacoord
 import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type ImportMeta interface {
@@ -61,11 +62,13 @@ func NewImportMeta(catalog metastore.DataCoordCatalog) (ImportMeta, error) {
 	for _, task := range restoredPreImportTasks {
 		tasks[task.GetTaskID()] = &preImportTask{
 			PreImportTask: task,
+			tr:            timerecord.NewTimeRecorder("preimport task"),
 		}
 	}
 	for _, task := range restoredImportTasks {
 		tasks[task.GetTaskID()] = &importTask{
 			ImportTaskV2: task,
+			tr:           timerecord.NewTimeRecorder("import task"),
 		}
 	}
 
@@ -73,6 +76,7 @@ func NewImportMeta(catalog metastore.DataCoordCatalog) (ImportMeta, error) {
 	for _, job := range restoredJobs {
 		jobs[job.GetJobID()] = &importJob{
 			ImportJob: job,
+			tr:        timerecord.NewTimeRecorder("import job"),
 		}
 	}
 

@@ -212,6 +212,28 @@ var (
 			stageLabelName,
 		})
 
+	ImportJobLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "import_job_latency",
+			Help:      "latency of import job",
+			Buckets:   longTaskBuckets,
+		}, []string{
+			importStageLabelName,
+		})
+
+	ImportTaskLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "import_task_latency",
+			Help:      "latency of import task",
+			Buckets:   longTaskBuckets,
+		}, []string{
+			importStageLabelName,
+		})
+
 	FlushedSegmentFileNum = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -342,6 +364,8 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordCompactedSegmentSize)
 	registry.MustRegister(DataCoordCompactionTaskNum)
 	registry.MustRegister(DataCoordCompactionLatency)
+	registry.MustRegister(ImportJobLatency)
+	registry.MustRegister(ImportTaskLatency)
 	registry.MustRegister(DataCoordSizeStoredL0Segment)
 	registry.MustRegister(DataCoordL0DeleteEntriesNum)
 	registry.MustRegister(FlushedSegmentFileNum)
