@@ -177,3 +177,15 @@ func TestParsePrimaryKeysAndIDs(t *testing.T) {
 		assert.ElementsMatch(t, c.pks, testPks)
 	}
 }
+
+func TestPrimaryKeyHash(t *testing.T) {
+	pk := NewInt64PrimaryKey(1)
+	hash, err := pk.Hash()
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(1392991556), hash)
+
+	vcharPK := NewVarCharPrimaryKey("1")
+	vcharHash, err2 := vcharPK.Hash()
+	assert.NoError(t, err2)
+	assert.Equal(t, uint32(2212294583), vcharHash)
+}
