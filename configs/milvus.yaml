@@ -290,6 +290,7 @@ proxy:
     localPath: /tmp/milvus_access # The local folder path where the access log file is stored. This parameter can be specified when proxy.accessLog.filename is not empty.
     filename:  # The name of the access log file. If you leave this parameter empty, access logs will be printed to stdout.
     maxSize: 64 # The maximum size allowed for a single access log file. If the log file size reaches this limit, a rotation process will be triggered. This process seals the current access log file, creates a new log file, and clears the contents of the original log file. Unit: MB.
+    quote: false # Whether to return some variable(error_msg and method_expr) with go double-quote format, to make access log program-readable
     rotatedTime: 0 # The maximum time interval allowed for rotating a single access log file. Upon reaching the specified time interval, a rotation process is triggered, resulting in the creation of a new access log file and sealing of the previous one. Unit: seconds
     remotePath: access_log/ # The path of the object storage for uploading access log files.
     remoteMaxTime: 0 # The time interval allowed for uploading access log files. If the upload time of a log file exceeds this interval, the file will be deleted. Setting the value to 0 disables this feature.
