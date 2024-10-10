@@ -167,12 +167,21 @@ func (b *RowCountBasedBalancer) convertToNodeItemsByChannel(nodeIDs []int64) []*
 	return ret
 }
 
-func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) (segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan) {
 	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.RowCountBasedBalancer", 1, 60).With(
 		zap.Int64("collectionID", replica.GetCollectionID()),
 		zap.Int64("replicaID", replica.GetCollectionID()),
 		zap.String("resourceGroup", replica.GetResourceGroup()),
 	)
+	br := NewBalanceReport()
+	defer func() {
+		if len(segmentPlans) == 0 && len(channelPlans) == 0 {
+			log.WithRateGroup(fmt.Sprintf("scorebasedbalance-noplan-%d", replica.GetID()), 1, 60).
+				RatedDebug(60, "no plan generated, balance report", zap.Stringers("records", br.detailRecords))
+		} else {
+			log.Info("balance plan generated", zap.Stringers("report details", br.records))
+		}
+	}()
 	if replica.NodesCount() == 0 {
 		return nil, nil
 	}
@@ -184,7 +193,7 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 		return nil, nil
 	}
 
-	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
+	segmentPlans, channelPlans = make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
 	if len(roNodes) != 0 {
 		if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
 			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
@@ -202,7 +211,7 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 		}
 	} else {
 		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
-			channelPlans = append(channelPlans, b.genChannelPlan(replica, rwNodes)...)
+			channelPlans = append(channelPlans, b.genChannelPlan(br, replica, rwNodes)...)
 		}
 
 		if len(channelPlans) == 0 {
@@ -309,7 +318,7 @@ func (b *RowCountBasedBalancer) genStoppingChannelPlan(replica *meta.Replica, rw
 	return channelPlans
 }
 
-func (b *RowCountBasedBalancer) genChannelPlan(replica *meta.Replica, rwNodes []int64) []ChannelAssignPlan {
+func (b *RowCountBasedBalancer) genChannelPlan(br *balanceReport, replica *meta.Replica, rwNodes []int64) []ChannelAssignPlan {
 	channelPlans := make([]ChannelAssignPlan, 0)
 	if len(rwNodes) > 1 {
 		// start to balance channels on all available nodes
@@ -341,6 +350,7 @@ func (b *RowCountBasedBalancer) genChannelPlan(replica *meta.Replica, rwNodes []
 		for i := range channelPlans {
 			channelPlans[i].From = channelPlans[i].Channel.Node
 			channelPlans[i].Replica = replica
+			br.AddRecord(StrRecordf("add channel plan %s", channelPlans[i]))
 		}
 
 		return channelPlans
