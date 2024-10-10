@@ -1243,9 +1243,31 @@ func TestCatalog_CreateCollection(t *testing.T) {
 			Partitions: []*model.Partition{
 				{PartitionName: "test"},
 			},
-			Fields:    []*model.Field{{Name: "text", DataType: schemapb.DataType_VarChar}, {Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}},
-			Functions: []*model.Function{{Name: "test", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse"}}},
-			State:     pb.CollectionState_CollectionCreating,
+			Fields: []*model.Field{
+				{
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "enable_tokenizer",
+							Value: "true",
+						},
+					},
+				},
+				{
+					Name:     "sparse",
+					DataType: schemapb.DataType_SparseFloatVector,
+				},
+			},
+			Functions: []*model.Function{
+				{
+					Name:             "test",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"text"},
+					OutputFieldNames: []string{"sparse"},
+				},
+			},
+			State: pb.CollectionState_CollectionCreating,
 		}
 		err := kc.CreateCollection(ctx, coll, 100)
 		assert.NoError(t, err)
@@ -1325,9 +1347,31 @@ func TestCatalog_DropCollection(t *testing.T) {
 			Partitions: []*model.Partition{
 				{PartitionName: "test"},
 			},
-			Fields:    []*model.Field{{Name: "text", DataType: schemapb.DataType_VarChar}, {Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}},
-			Functions: []*model.Function{{Name: "test", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse"}}},
-			State:     pb.CollectionState_CollectionDropping,
+			Fields: []*model.Field{
+				{
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "enable_tokenizer",
+							Value: "true",
+						},
+					},
+				},
+				{
+					Name:     "sparse",
+					DataType: schemapb.DataType_SparseFloatVector,
+				},
+			},
+			Functions: []*model.Function{
+				{
+					Name:             "test",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"text"},
+					OutputFieldNames: []string{"sparse"},
+				},
+			},
+			State: pb.CollectionState_CollectionDropping,
 		}
 		err := kc.DropCollection(ctx, coll, 100)
 		assert.NoError(t, err)

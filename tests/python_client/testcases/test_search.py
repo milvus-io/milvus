@@ -13167,7 +13167,7 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
                 3. verify the result
         expected: text match successfully and result is correct
         """
-        analyzer_params = {
+        tokenizer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -13177,30 +13177,34 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
+                enable_tokenizer=True,
+				enable_match=True,
                 is_partition_key=enable_partition_key,
-                analyzer_params=analyzer_params,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
