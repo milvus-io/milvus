@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -67,6 +68,9 @@ func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex
 }
 
 func (c *FieldReader) Next(count int64) (any, any, error) {
+	if c.field.GetDefaultValue() != nil {
+		return fillWithDefaultValue(c, count)
+	}
 	switch c.field.GetDataType() {
 	case schemapb.DataType_Bool:
 		if c.field.GetNullable() {
@@ -212,6 +216,173 @@ func ReadBoolData(pcr *FieldReader, count int64) (any, error) {
 	return data, nil
 }
 
+func fillWithDefaultValue(c *FieldReader, count int64) (any, []bool, error) {
+	switch c.field.GetDataType() {
+	case schemapb.DataType_Bool:
+		v, validData, err := ReadNullableBoolData(c, count)
+		if err != nil {
+			return nil, nil, err
+		}
+		if v == nil {
+			return nil, nil, nil
+		}
+		data, ok := v.([]bool)
+		if !ok {
+			return nil, nil, merr.WrapErrParameterInvalid("[]bool", v, "Wrong row type")
+		}
+
+		defaultValue := c.field.GetDefaultValue().GetBoolData()
+		return fillWithDefaultValueImpl(data, defaultValue, validData, c.field)
+
+	case schemapb.DataType_Int8:
+		v, validData, err := ReadNullableIntegerOrFloatData[int8](c, count)
+		if err != nil {
+			return nil, nil, err
+		}
+		if v == nil {
+			return nil, nil, nil
+		}
+		data, ok := v.([]int8)
+		if !ok {
+			return nil, nil, merr.WrapErrParameterInvalid("[]int8", v, "Wrong row type")
+		}
+
+		defaultValue := c.field.GetDefaultValue().GetIntData()
+		return fillWithDefaultValueImpl(data, int8(defaultValue), validData, c.field)
+
+	case schemapb.DataType_Int16:
+		v, validData, err := ReadNullableIntegerOrFloatData[int16](c, count)
+		if err != nil {
+			return nil, nil, err
+		}
+		if v == nil {
+			return nil, nil, nil
+		}
+		data, ok := v.([]int16)
+		if !ok {
+			return nil, nil, merr.WrapErrParameterInvalid("[]int16", v, "Wrong row type")
+		}
+
+		defaultValue := c.field.GetDefaultValue().GetIntData()
+		return fillWithDefaultValueImpl(data, int16(defaultValue), validData, c.field)
+
+	case schemapb.DataType_Int32:
+		v, validData, err := ReadNullableIntegerOrFloatData[int32](c, count)
+		if err != nil {
+			return nil, nil, err
+		}
+		if v == nil {
+			return nil, nil, nil
+		}
+		data, ok := v.([]int32)
+		if !ok {
+			return nil, nil, merr.WrapErrParameterInvalid("[]int32", v, "Wrong row type")
+		}
+
+		defaultValue := c.field.GetDefaultValue().GetIntData()
+		return fillWithDefaultValueImpl(data, defaultValue, validData, c.field)
+
+	case schemapb.DataType_Int64:
+		v, validData, err := ReadNullableIntegerOrFloatData[int64](c, count)
+		if err != nil {
+			return nil, nil, err
+		}
+		if v == nil {
+			return nil, nil, nil
+		}
+		data, ok := v.([]int64)
+		if !ok {
+			return nil, nil, merr.WrapErrParameterInvalid("[]int64", v, "Wrong row type")
+		}
+
+		defaultValue := c.field.GetDefaultValue().GetLongData()
+		return fillWithDefaultValueImpl(data, defaultValue, validData, c.field)
+
+	case schemapb.DataType_Float:
+		v, validData, err := ReadNullableIntegerOrFloatData[float32](c, count)
+		if err != nil {
+			return nil, nil, err
+		}
+		if v == nil {
+			return nil, nil, nil
+		}
+		data, ok := v.([]float32)
+		if !ok {
+			return nil, nil, merr.WrapErrParameterInvalid("[]float32", v, "Wrong row type")
+		}
+
+		defaultValue := c.field.GetDefaultValue().GetFloatData()
+
+		if err = typeutil.VerifyFloats32(data); err != nil {
+			return nil, nil, err
+		}
+		return fillWithDefaultValueImpl(data, defaultValue, validData, c.field)
+
+	case schemapb.DataType_Double:
+		v, validData, err := ReadNullableIntegerOrFloatData[float64](c, count)
+		if err != nil {
+			return nil, nil, err
+		}
+		if v == nil {
+			return nil, nil, nil
+		}
+		data, ok := v.([]float64)
+		if !ok {
+			return nil, nil, merr.WrapErrParameterInvalid("[]float64", v, "Wrong row type")
+		}
+
+		defaultValue := c.field.GetDefaultValue().GetDoubleData()
+		if err = typeutil.VerifyFloats64(data); err != nil {
+			return nil, nil, err
+		}
+		return fillWithDefaultValueImpl(data, defaultValue, validData, c.field)
+
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		v, validData, err := ReadNullableVarcharData(c, count)
+		if err != nil {
+			return nil, nil, err
+		}
+		if v == nil {
+			return nil, nil, nil
+		}
+		data, ok := v.([]string)
+		if !ok {
+			return nil, nil, merr.WrapErrParameterInvalid("[]string", v, "Wrong row type")
+		}
+
+		defaultValue := c.field.GetDefaultValue().GetStringData()
+		return fillWithDefaultValueImpl(data, defaultValue, validData, c.field)
+
+	default:
+		msg := fmt.Sprintf("type (%s) not support default_value", c.field.GetDataType().String())
+		return nil, nil, merr.WrapErrParameterInvalidMsg(msg)
+	}
+}
+
+func fillWithDefaultValueImpl[T any](array []T, value T, validData []bool, field *schemapb.FieldSchema) (any, []bool, error) {
+	rowNum := len(validData)
+	for i, v := range validData {
+		if !v {
+			array[i] = value
+		}
+	}
+	if !typeutil.IsVectorType(field.GetDataType()) {
+		if field.GetNullable() {
+			for i := range validData {
+				validData[i] = true
+			}
+		} else {
+			validData = []bool{}
+		}
+	}
+
+	err := nullutil.CheckValidData(validData, field, rowNum)
+	if err != nil {
+		return nil, nil, err
+	}
+	return array, validData, nil
+}
+
 func ReadNullableBoolData(pcr *FieldReader, count int64) (any, []bool, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
@@ -237,11 +408,11 @@ func ReadNullableBoolData(pcr *FieldReader, count int64) (any, []bool, error) {
 			}
 		}
 	}
-	if len(data) == 0 {
-		return nil, nil, nil
-	}
 	if len(data) != len(validData) {
 		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
+	}
+	if len(data) == 0 {
+		return nil, nil, nil
 	}
 	return data, validData, nil
 }
@@ -367,11 +538,11 @@ func ReadNullableIntegerOrFloatData[T constraints.Integer | constraints.Float](p
 			return nil, nil, WrapTypeErr("integer|float|null", chunk.DataType().Name(), pcr.field)
 		}
 	}
-	if len(data) == 0 {
-		return nil, nil, nil
-	}
 	if len(data) != len(validData) {
 		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
+	}
+	if len(data) == 0 {
+		return nil, nil, nil
 	}
 	return data, validData, nil
 }
@@ -430,11 +601,11 @@ func ReadNullableStringData(pcr *FieldReader, count int64) (any, []bool, error) 
 			}
 		}
 	}
-	if len(data) == 0 {
-		return nil, nil, nil
-	}
 	if len(data) != len(validData) {
 		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
+	}
+	if len(data) == 0 {
+		return nil, nil, nil
 	}
 	return data, validData, nil
 }
@@ -507,11 +678,11 @@ func ReadNullableVarcharData(pcr *FieldReader, count int64) (any, []bool, error)
 			}
 		}
 	}
-	if len(data) == 0 {
-		return nil, nil, nil
-	}
 	if len(data) != len(validData) {
 		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
+	}
+	if len(data) == 0 {
+		return nil, nil, nil
 	}
 	return data, validData, nil
 }
@@ -739,11 +910,11 @@ func ReadNullableBoolArrayData(pcr *FieldReader, count int64) (any, []bool, erro
 			}
 		}
 	}
-	if len(data) == 0 {
-		return nil, nil, nil
-	}
 	if len(data) != len(validData) {
 		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
+	}
+	if len(data) == 0 {
+		return nil, nil, nil
 	}
 	return data, validData, nil
 }
@@ -898,11 +1069,11 @@ func ReadNullableIntegerOrFloatArrayData[T constraints.Integer | constraints.Flo
 			}
 		}
 	}
-	if len(data) == 0 {
-		return nil, nil, nil
-	}
 	if len(data) != len(validData) {
 		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
+	}
+	if len(data) == 0 {
+		return nil, nil, nil
 	}
 	return data, validData, nil
 }
@@ -977,11 +1148,11 @@ func ReadNullableStringArrayData(pcr *FieldReader, count int64) (any, []bool, er
 			}
 		}
 	}
-	if len(data) == 0 {
-		return nil, nil, nil
-	}
 	if len(data) != len(validData) {
 		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
+	}
+	if len(data) == 0 {
+		return nil, nil, nil
 	}
 	return data, validData, nil
 }

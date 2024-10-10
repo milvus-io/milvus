@@ -201,12 +201,80 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 				insertData.Data[f.FieldID].AppendValidDataRows(testutils.GenerateBoolArray(rows))
 			} else if len(nullPercent) == 1 && nullPercent[0] == 100 {
 				insertData.Data[f.FieldID].AppendValidDataRows(make([]bool, rows))
+			} else if len(nullPercent) == 1 && nullPercent[0] == 0 {
+				validData := make([]bool, rows)
+				for i := range validData {
+					validData[i] = true
+				}
+				insertData.Data[f.FieldID].AppendValidDataRows(validData)
 			} else {
-				return nil, merr.WrapErrParameterInvalidMsg("not support the number of nullPercent")
+				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support the number of nullPercent(%d)", nullPercent))
 			}
 		}
 	}
 	return insertData, nil
+}
+
+func CreateFieldWithDefaultValue(dataType schemapb.DataType, id int64, nullable bool) (*schemapb.FieldSchema, error) {
+	field := &schemapb.FieldSchema{
+		FieldID:  102,
+		Name:     dataType.String(),
+		DataType: dataType,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MaxLengthKey,
+				Value: "128",
+			},
+			{
+				Key:   common.MaxCapacityKey,
+				Value: "128",
+			},
+		},
+		Nullable: nullable,
+	}
+
+	switch field.GetDataType() {
+	case schemapb.DataType_Bool:
+		field.DefaultValue = &schemapb.ValueField{
+			Data: &schemapb.ValueField_BoolData{
+				BoolData: ([]bool{true, false})[rand.Intn(2)],
+			},
+		}
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		field.DefaultValue = &schemapb.ValueField{
+			Data: &schemapb.ValueField_IntData{
+				IntData: ([]int32{1, 10, 100, 1000})[rand.Intn(4)],
+			},
+		}
+	case schemapb.DataType_Int64:
+		field.DefaultValue = &schemapb.ValueField{
+			Data: &schemapb.ValueField_LongData{
+				LongData: rand.Int63(),
+			},
+		}
+	case schemapb.DataType_Float:
+		field.DefaultValue = &schemapb.ValueField{
+			Data: &schemapb.ValueField_FloatData{
+				FloatData: rand.Float32(),
+			},
+		}
+	case schemapb.DataType_Double:
+		field.DefaultValue = &schemapb.ValueField{
+			Data: &schemapb.ValueField_DoubleData{
+				DoubleData: rand.Float64(),
+			},
+		}
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		field.DefaultValue = &schemapb.ValueField{
+			Data: &schemapb.ValueField_StringData{
+				StringData: randomString(10),
+			},
+		}
+	default:
+		msg := fmt.Sprintf("type (%s) not support default_value", field.GetDataType().String())
+		return nil, merr.WrapErrParameterInvalidMsg(msg)
+	}
+	return field, nil
 }
 
 func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.InsertData, useNullType bool) ([]arrow.Array, error) {
