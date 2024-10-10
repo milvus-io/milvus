@@ -77,6 +77,11 @@ param_info = ParamInfo()
 
 
 def analyze_documents(texts, language="en"):
+    valid_texts = []
+    for text in texts:
+        if isinstance(text, str):
+            valid_texts.append(text)
+    texts = valid_texts
     stopwords = "en"
     if language in ["en", "english"]:
         stopwords = "en"
@@ -109,6 +114,7 @@ def analyze_documents(texts, language="en"):
     # End timing
     tt = time.time() - t0
     log.info(f"Analyze document cost time: {tt}")
+    log.info(f"Word frequency: {word_freq.most_common(10)}")
 
     return word_freq
 
