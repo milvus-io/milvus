@@ -1642,7 +1642,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			if mmapEnabled {
 				segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
 			} else {
-				if multiplyFactor.enableTempSegmentIndex {
+				if multiplyFactor.enableTempSegmentIndex && !isGrowingMmapEnable() {
 					segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
 				}
 			}
