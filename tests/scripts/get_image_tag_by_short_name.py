@@ -14,8 +14,8 @@ def get_image_tag_by_short_name(tag, arch):
     tag_list = []
     for r in rsp:
         tags = r["tags"]
-        for tag in tags:
-            tag_list.append(tag["name"])
+        for item in tags:
+            tag_list.append(item["name"])
     tag_candidates = []
     for t in tag_list:
         r = t.split("-")
