@@ -322,10 +322,20 @@ type FieldSchema struct {
 	ElementTypeParams map[string]interface{} `json:"elementTypeParams" binding:"required"`
 }
 
+type FunctionSchema struct {
+	FunctionName     string                 `json:"name" binding:"required"`
+	Description      string                 `json:"description"`
+	FunctionType     string                 `json:"type" binding:"required"`
+	InputFieldNames  []string               `json:"inputFieldNames" binding:"required"`
+	OutputFieldNames []string               `json:"outputFieldNames" binding:"required"`
+	Params           map[string]interface{} `json:"params"`
+}
+
 type CollectionSchema struct {
-	Fields             []FieldSchema `json:"fields"`
-	AutoId             bool          `json:"autoID"`
-	EnableDynamicField bool          `json:"enableDynamicField"`
+	Fields             []FieldSchema    `json:"fields"`
+	Functions          []FunctionSchema `json:"functions"`
+	AutoId             bool             `json:"autoID"`
+	EnableDynamicField bool             `json:"enableDynamicField"`
 }
 
 type CollectionReq struct {

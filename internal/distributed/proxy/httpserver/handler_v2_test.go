@@ -468,6 +468,143 @@ func TestDatabaseWrapper(t *testing.T) {
 	}
 }
 
+func TestDocInDocOutCreateCollection(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	postTestCases := []requestBodyTestCase{}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(1)
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(CollectionCategory, CreateAction)
+
+	const baseRequestBody = `{
+		"collectionName": "doc_in_doc_out_demo",
+		"schema": {
+			"autoId": false,
+			"enableDynamicField": false,
+			"fields": [
+				{
+					"fieldName": "my_id",
+					"dataType": "Int64",
+					"isPrimary": true
+				},
+				{
+					"fieldName": "document_content",
+					"dataType": "VarChar",
+					"elementTypeParams": {
+						"max_length": "9000"
+					}
+				},
+				{
+					"fieldName": "sparse_vector_1",
+					"dataType": "SparseFloatVector"
+				}
+			],
+			"functions": %s
+		}
+	}`
+
+	runCase := func(t *testing.T, testcase requestBodyTestCase) {
+		t.Run("post"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+			if testcase.errCode != 0 {
+				assert.Contains(t, returnBody.Message, testcase.errMsg)
+			}
+		})
+	}
+
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(fmt.Sprintf(baseRequestBody, `[
+			{
+				"name": "bm25_fn_1",
+				"type": "BM25",
+				"inputFieldNames": ["document_content"],
+				"outputFieldNames": ["sparse_vector_1"]
+			}
+		]`)),
+	})
+
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(fmt.Sprintf(baseRequestBody, `[
+			{
+				"name": "bm25_fn_1",
+				"type": "BM25_",
+				"inputFieldNames": ["document_content"],
+				"outputFieldNames": ["sparse_vector_1"]
+			}
+		]`)),
+		errMsg:  "BM25_ is invalid",
+		errCode: 1100,
+	})
+
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(fmt.Sprintf(baseRequestBody, `[
+			{
+				"name": "bm25_fn_1",
+				"inputFieldNames": ["document_content"],
+				"outputFieldNames": ["sparse_vector_1"]
+			}
+		]`)),
+		errMsg:  "function data type  is invalid", // unprovided function type is empty string
+		errCode: 1100,
+	})
+
+	for _, testcase := range postTestCases {
+		runCase(t, testcase)
+	}
+}
+
+func TestDocInDocOutDescribeCollection(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateDocInDocOutCollectionSchema(schemapb.DataType_Int64),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&DefaultLoadStateResp, nil).Once()
+	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&DefaultDescIndexesReqp, nil).Once()
+	mp.EXPECT().ListAliases(mock.Anything, mock.Anything).Return(&milvuspb.ListAliasesResponse{
+		Status:  &StatusSuccess,
+		Aliases: []string{DefaultAliasName},
+	}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	testcase := rawTestCase{
+		path: versionalV2(CollectionCategory, DescribeAction),
+	}
+	t.Run(testcase.path, func(t *testing.T) {
+		bodyReader := bytes.NewReader([]byte(`{` +
+			`"collectionName": "` + DefaultCollectionName + `"` +
+			`}`))
+		req := httptest.NewRequest(http.MethodPost, testcase.path, bodyReader)
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.Nil(t, err)
+		assert.Equal(t, testcase.errCode, returnBody.Code)
+		if testcase.errCode != 0 {
+			assert.Equal(t, testcase.errMsg, returnBody.Message)
+		}
+	})
+}
+
 func TestCreateCollection(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
@@ -961,7 +1098,6 @@ func TestMethodGet(t *testing.T) {
 			if testcase.errCode != 0 {
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
 			}
-			fmt.Println(w.Body.String())
 		})
 	}
 }

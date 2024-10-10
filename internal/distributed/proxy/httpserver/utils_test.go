@@ -74,17 +74,21 @@ func generateVectorFieldSchema(dataType schemapb.DataType) *schemapb.FieldSchema
 	if dataType == schemapb.DataType_BinaryVector {
 		dim = "8"
 	}
+	typeParams := []*commonpb.KeyValuePair{
+		{
+			Key:   common.DimKey,
+			Value: dim,
+		},
+	}
+	if dataType == schemapb.DataType_SparseFloatVector {
+		typeParams = nil
+	}
 	return &schemapb.FieldSchema{
 		FieldID:      common.StartOfUserFieldID + int64(dataType),
 		IsPrimaryKey: false,
 		DataType:     dataType,
 		AutoID:       false,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   common.DimKey,
-				Value: dim,
-			},
-		},
+		TypeParams:   typeParams,
 	}
 }
 
@@ -105,6 +109,43 @@ func generateCollectionSchema(primaryDataType schemapb.DataType) *schemapb.Colle
 				DataType:     5,
 				AutoID:       false,
 			}, vectorField,
+		},
+		EnableDynamicField: true,
+	}
+}
+
+func generateDocInDocOutCollectionSchema(primaryDataType schemapb.DataType) *schemapb.CollectionSchema {
+	primaryField := generatePrimaryField(primaryDataType)
+	vectorField := generateVectorFieldSchema(schemapb.DataType_SparseFloatVector)
+	vectorField.Name = FieldBookIntro
+	return &schemapb.CollectionSchema{
+		Name:        DefaultCollectionName,
+		Description: "",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			primaryField, {
+				FieldID:      common.StartOfUserFieldID + 1,
+				Name:         FieldWordCount,
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     5,
+				AutoID:       false,
+			}, vectorField, {
+				FieldID:      common.StartOfUserFieldID + 2,
+				Name:         "varchar_field",
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_VarChar,
+				AutoID:       false,
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "sum",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"varchar_field"},
+				OutputFieldNames: []string{FieldBookIntro},
+			},
 		},
 		EnableDynamicField: true,
 	}

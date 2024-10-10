@@ -86,7 +86,7 @@ func (t *searchTask) CanSkipAllocTimestamp() bool {
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
 	if !useDefaultConsistency {
-		// legacy SDK & resultful behavior
+		// legacy SDK & restful behavior
 		if t.request.GetConsistencyLevel() == commonpb.ConsistencyLevel_Strong && t.request.GetGuaranteeTimestamp() > 0 {
 			return true
 		}
@@ -372,7 +372,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 		// set PartitionIDs for sub search
 		if t.partitionKeyMode {
-			// isolatioin has tighter constraint, check first
+			// isolation has tighter constraint, check first
 			mvErr := setQueryInfoIfMvEnable(queryInfo, t, plan)
 			if mvErr != nil {
 				return mvErr
@@ -451,7 +451,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.SearchRequest.Offset = offset
 
 	if t.partitionKeyMode {
-		// isolatioin has tighter constraint, check first
+		// isolation has tighter constraint, check first
 		mvErr := setQueryInfoIfMvEnable(queryInfo, t, plan)
 		if mvErr != nil {
 			return mvErr
