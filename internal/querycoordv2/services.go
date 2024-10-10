@@ -19,7 +19,9 @@ package querycoordv2
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -36,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
+	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -931,16 +934,23 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 		return &milvuspb.CheckHealthResponse{Status: merr.Status(err), IsHealthy: false, Reasons: []string{err.Error()}}, nil
 	}
 
-	errReasons, err := s.checkNodeHealth(ctx)
-	if err != nil || len(errReasons) != 0 {
-		return componentutil.CheckHealthRespWithErrMsg(errReasons...), nil
+	latestCheckResult := s.healthChecker.GetLatestCheckResult()
+	if !latestCheckResult.IsHealthy() {
+		return healthcheck.GetCheckHealthResponseFrom(&latestCheckResult), nil
 	}
-
-	if err := utils.CheckCollectionsQueryable(s.meta, s.targetMgr, s.dist, s.nodeMgr); err != nil {
-		return componentutil.CheckHealthRespWithErr(err), nil
-	}
-
 	return componentutil.CheckHealthRespWithErr(nil), nil
+}
+
+func (s *Server) healthCheckFn() healthcheck.Result {
+	timeout := Params.CommonCfg.HealthCheckRPCTimeout.GetAsDuration(time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, timeout)
+	defer cancel()
+
+	checkResults := s.broadcastCheckHealth(ctx)
+	for collectionID, failReason := range utils.CheckCollectionsQueryable(s.meta, s.targetMgr, s.dist, s.nodeMgr) {
+		checkResults.AppendUnhealthyCollectionMsgs(healthcheck.UnhealthyCollectionMsg{CollectionID: collectionID, UnhealthyMsg: failReason})
+	}
+	return checkResults
 }
 
 func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {
@@ -969,6 +979,47 @@ func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {
 	err := group.Wait()
 
 	return errReasons, err
+}
+
+func (s *Server) broadcastCheckHealth(ctx context.Context) healthcheck.Result {
+	result := healthcheck.NewResult()
+	wg := sync.WaitGroup{}
+	wlock := sync.Mutex{}
+
+	for _, node := range s.nodeMgr.GetAll() {
+		node := node
+		wg.Add(1)
+		go func() {
+			var checkHealthResp *milvuspb.CheckHealthResponse
+			var err error
+
+			defer func() {
+				if err != nil {
+					wlock.Lock()
+					result.AppendUnhealthyNodeMsg(healthcheck.UnhealthyNodeMsg{
+						Role:         "QueryNode",
+						NodeID:       node.ID(),
+						UnhealthyMsg: err.Error(),
+					})
+					wlock.Unlock()
+				}
+				wg.Done()
+			}()
+
+			checkHealthResp, err = s.cluster.CheckHealth(ctx, node.ID())
+			if err = merr.CheckRPCCall(checkHealthResp, err); err != nil && !errors.Is(err, merr.ErrServiceUnimplemented) {
+				err = fmt.Errorf("CheckHealth fails for node:%d, %w", node.ID(), err)
+				return
+			}
+
+			if !checkHealthResp.IsHealthy && len(checkHealthResp.Reasons) > 0 {
+				err = errors.New(strings.Join(checkHealthResp.Reasons, ","))
+			}
+		}()
+	}
+
+	wg.Wait()
+	return result
 }
 
 func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
