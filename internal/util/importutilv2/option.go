@@ -104,7 +104,7 @@ func SkipDiskQuotaCheck(options Options) bool {
 
 func GetCSVSep(options Options) (rune, error) {
 	sep, err := funcutil.GetAttrByKeyFromRepeatedKV("sep", options)
-	unsupportedSep := []rune{0, '\n', '\r', '"'}
+	unsupportedSep := []rune{0, '\n', '\r', '"', 0xFFFD}
 	defaultSep := ','
 	if err != nil || len(sep) == 0 {
 		return defaultSep, nil
