@@ -1701,6 +1701,7 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
             return false;
         }
         // check data type
+        // TODO: QianYa when add other data type, please check the SupportInterimIndexDataType method in the go code
         if (field_meta.get_data_type() != DataType::VECTOR_FLOAT &&
             !is_sparse) {
             return false;

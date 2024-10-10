@@ -73,6 +73,7 @@ const (
 	RoleConfigPrivilege  = "privilege"
 
 	MaxEtcdTxnNum = 128
+	GB            = 1024 * 1024 * 1024
 )
 
 const (

@@ -908,10 +908,10 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	)
 
 	loadFieldDataInfo, err := newLoadFieldDataInfo(ctx)
-	defer deleteFieldDataInfo(loadFieldDataInfo)
 	if err != nil {
 		return err
 	}
+	defer deleteFieldDataInfo(loadFieldDataInfo)
 
 	for _, field := range fields {
 		fieldID := field.FieldID
@@ -1256,6 +1256,66 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	return nil
 }
 
+func GetCLoadInfoWithFunc(ctx context.Context,
+	fieldSchema *schemapb.FieldSchema,
+	s *querypb.SegmentLoadInfo,
+	indexInfo *querypb.FieldIndexInfo,
+	f func(c *LoadIndexInfo) error,
+) error {
+	// 1.
+	loadIndexInfo, err := newLoadIndexInfo(ctx)
+	if err != nil {
+		return err
+	}
+	defer deleteLoadIndexInfo(loadIndexInfo)
+
+	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+	// as Knowhere reports error if encounter an unknown param, we need to delete it
+	delete(indexParams, common.MmapEnabledKey)
+
+	// some build params also exist in indexParams, which are useless during loading process
+	if indexParams["index_type"] == indexparamcheck.IndexDISKANN {
+		if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
+			return err
+		}
+	}
+
+	// // set whether enable offset cache for bitmap index
+	// if indexParams["index_type"] == indexparamcheck.IndexBitmap {
+	// 	indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
+	// }
+
+	if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+		return err
+	}
+
+	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
+
+	indexInfoProto := &cgopb.LoadIndexInfo{
+		CollectionID:       s.GetCollectionID(),
+		PartitionID:        s.GetPartitionID(),
+		SegmentID:          s.GetSegmentID(),
+		Field:              fieldSchema,
+		EnableMmap:         enableMmap,
+		MmapDirPath:        paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
+		IndexID:            indexInfo.GetIndexID(),
+		IndexBuildID:       indexInfo.GetBuildID(),
+		IndexVersion:       indexInfo.GetIndexVersion(),
+		IndexParams:        indexParams,
+		IndexFiles:         indexInfo.GetIndexFilePaths(),
+		IndexEngineVersion: indexInfo.GetCurrentIndexVersion(),
+		IndexStoreVersion:  indexInfo.GetIndexStoreVersion(),
+		IndexFileSize:      indexInfo.GetIndexSize(),
+	}
+
+	// 2.
+	if err := loadIndexInfo.appendLoadIndexInfo(ctx, indexInfoProto); err != nil {
+		log.Warn("fail to append load index info", zap.Error(err))
+		return err
+	}
+	return f(loadIndexInfo)
+}
+
 func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
@@ -1276,99 +1336,68 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 	defer sp.End()
 
 	tr := timerecord.NewTimeRecorder("loadIndex")
-	// 1.
-	loadIndexInfo, err := newLoadIndexInfo(ctx)
-	if err != nil {
-		return err
-	}
-	defer deleteLoadIndexInfo(loadIndexInfo)
 
-	schema, err := typeutil.CreateSchemaHelper(s.GetCollection().Schema())
+	schemaHelper, err := typeutil.CreateSchemaHelper(s.GetCollection().Schema())
 	if err != nil {
 		return err
 	}
-	fieldSchema, err := schema.GetFieldFromID(indexInfo.GetFieldID())
+	fieldSchema, err := schemaHelper.GetFieldFromID(indexInfo.GetFieldID())
 	if err != nil {
 		return err
 	}
 
-	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-	// as Knowhere reports error if encounter an unknown param, we need to delete it
-	delete(indexParams, common.MmapEnabledKey)
+	return s.innerLoadIndex(ctx, fieldSchema, indexInfo, tr, fieldType)
+}
 
-	// some build params also exist in indexParams, which are useless during loading process
-	if indexParams["index_type"] == indexparamcheck.IndexDISKANN {
-		if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
-			return err
-		}
-	}
+func (s *LocalSegment) innerLoadIndex(ctx context.Context,
+	fieldSchema *schemapb.FieldSchema,
+	indexInfo *querypb.FieldIndexInfo,
+	tr *timerecord.TimeRecorder,
+	fieldType schemapb.DataType,
+) error {
+	err := GetCLoadInfoWithFunc(ctx, fieldSchema,
+		s.LoadInfo(), indexInfo, func(loadIndexInfo *LoadIndexInfo) error {
+			newLoadIndexInfoSpan := tr.RecordSpan()
 
-	if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
-		return err
-	}
+			if err := loadIndexInfo.loadIndex(ctx); err != nil {
+				if loadIndexInfo.cleanLocalData(ctx) != nil {
+					log.Warn("failed to clean cached data on disk after append index failed",
+						zap.Int64("buildID", indexInfo.BuildID),
+						zap.Int64("index version", indexInfo.IndexVersion))
+				}
+				return err
+			}
+			if s.Type() != SegmentTypeSealed {
+				errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
+				return errors.New(errMsg)
+			}
+			appendLoadIndexInfoSpan := tr.RecordSpan()
 
-	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
+			// 3.
+			err := s.UpdateIndexInfo(ctx, indexInfo, loadIndexInfo)
+			if err != nil {
+				return err
+			}
+			updateIndexInfoSpan := tr.RecordSpan()
+			if !typeutil.IsVectorType(fieldType) || s.HasRawData(indexInfo.GetFieldID()) {
+				return nil
+			}
 
-	indexInfoProto := &cgopb.LoadIndexInfo{
-		CollectionID:       s.Collection(),
-		PartitionID:        s.Partition(),
-		SegmentID:          s.ID(),
-		Field:              fieldSchema,
-		EnableMmap:         enableMmap,
-		MmapDirPath:        paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
-		IndexID:            indexInfo.GetIndexID(),
-		IndexBuildID:       indexInfo.GetBuildID(),
-		IndexVersion:       indexInfo.GetIndexVersion(),
-		IndexParams:        indexParams,
-		IndexFiles:         indexInfo.GetIndexFilePaths(),
-		IndexEngineVersion: indexInfo.GetCurrentIndexVersion(),
-		IndexStoreVersion:  indexInfo.GetIndexStoreVersion(),
-	}
-
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		uri, err := typeutil_internal.GetStorageURI(paramtable.Get().CommonCfg.StorageScheme.GetValue(), paramtable.Get().CommonCfg.StoragePathPrefix.GetValue(), s.ID())
-		if err != nil {
-			return err
-		}
-		indexInfoProto.Uri = uri
-	}
-	newLoadIndexInfoSpan := tr.RecordSpan()
-
-	// 2.
-	if err := loadIndexInfo.finish(ctx, indexInfoProto); err != nil {
-		if loadIndexInfo.cleanLocalData(ctx) != nil {
-			log.Warn("failed to clean cached data on disk after append index failed",
-				zap.Int64("buildID", indexInfo.BuildID),
-				zap.Int64("index version", indexInfo.IndexVersion))
-		}
-		return err
-	}
-	if s.Type() != SegmentTypeSealed {
-		errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
-		return errors.New(errMsg)
-	}
-	appendLoadIndexInfoSpan := tr.RecordSpan()
-
-	// 3.
-	err = s.UpdateIndexInfo(ctx, indexInfo, loadIndexInfo)
+			// 4.
+			s.WarmupChunkCache(ctx, indexInfo.GetFieldID())
+			warmupChunkCacheSpan := tr.RecordSpan()
+			log.Info("Finish loading index",
+				zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
+				zap.Duration("appendLoadIndexInfoSpan", appendLoadIndexInfoSpan),
+				zap.Duration("updateIndexInfoSpan", updateIndexInfoSpan),
+				zap.Duration("warmupChunkCacheSpan", warmupChunkCacheSpan),
+			)
+			return nil
+		})
 	if err != nil {
-		return err
+		log.Warn("load index failed", zap.Error(err))
 	}
-	updateIndexInfoSpan := tr.RecordSpan()
-	if !typeutil.IsVectorType(fieldType) || s.HasRawData(indexInfo.GetFieldID()) {
-		return nil
-	}
-
-	// 4.
-	s.WarmupChunkCache(ctx, indexInfo.GetFieldID())
-	warmupChunkCacheSpan := tr.RecordSpan()
-	log.Info("Finish loading index",
-		zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
-		zap.Duration("appendLoadIndexInfoSpan", appendLoadIndexInfoSpan),
-		zap.Duration("updateIndexInfoSpan", updateIndexInfoSpan),
-		zap.Duration("warmupChunkCacheSpan", warmupChunkCacheSpan),
-	)
-	return nil
+	return err
 }
 
 func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {

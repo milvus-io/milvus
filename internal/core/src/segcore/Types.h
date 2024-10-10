@@ -47,6 +47,7 @@ struct LoadIndexInfo {
     int64_t index_store_version;
     IndexVersion index_engine_version;
     proto::schema::FieldSchema schema;
+    int64_t index_size;
 };
 
 }  // namespace milvus::segcore

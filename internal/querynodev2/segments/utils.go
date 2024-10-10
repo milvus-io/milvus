@@ -284,8 +284,3 @@ func isDataMmapEnable(fieldSchema *schemapb.FieldSchema) bool {
 	}
 	return params.Params.QueryNodeCfg.MmapScalarField.GetAsBool()
 }
-
-func hasRawData(indexInfo *querypb.FieldIndexInfo) bool {
-	log.Warn("hasRawData is not implemented, please check it", zap.Int64("field_id", indexInfo.FieldID))
-	return true
-}
