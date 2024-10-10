@@ -609,7 +609,7 @@ message CompactionPlan {
   repeated int64 analyze_segment_ids = 15;
   int32 state = 16;
   int64 begin_logID = 17;
-  IDRange pre_allocated_segmentIDs = 18; // only for clustering compaction
+  IDRange pre_allocated_segmentIDs = 18;
   int64 slot_usage = 19;
   int64 max_size = 20;
 }
@@ -972,6 +972,7 @@ message CompactionTask{
   int64 lastStateStartTime = 25;
   int64 max_size = 26;
   repeated int64 tmpSegments = 27;
+  IDRange pre_allocated_segmentIDs = 28;
 }
 
 message PartitionStatsInfo {

@@ -385,10 +385,14 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 				PartitionID:      group.partitionID,
 				Channel:          group.channelName,
 				InputSegments:    inputSegmentIDs,
-				ResultSegments:   []int64{startID + 1, endID}, // pre-allocated target segment
+				ResultSegments:   []int64{},
 				TotalRows:        totalRows,
 				Schema:           coll.Schema,
 				MaxSize:          getExpandedSize(expectedSize),
+				PreAllocatedSegmentIDs: &datapb.IDRange{
+					Begin: startID + 1,
+					End:   endID,
+				},
 			}
 			err = t.compactionHandler.enqueueCompaction(task)
 			if err != nil {
@@ -491,10 +495,14 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 			PartitionID:      partitionID,
 			Channel:          channel,
 			InputSegments:    inputSegmentIDs,
-			ResultSegments:   []int64{startID + 1, endID}, // pre-allocated target segment
+			ResultSegments:   []int64{},
 			TotalRows:        totalRows,
 			Schema:           coll.Schema,
 			MaxSize:          getExpandedSize(expectedSize),
+			PreAllocatedSegmentIDs: &datapb.IDRange{
+				Begin: startID + 1,
+				End:   endID,
+			},
 		}
 		if err := t.compactionHandler.enqueueCompaction(task); err != nil {
 			log.Warn("failed to execute compaction task",

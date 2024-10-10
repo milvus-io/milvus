@@ -167,25 +167,22 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		return nil, err
 	}
 	plan := &datapb.CompactionPlan{
-		PlanID:             t.GetPlanID(),
-		StartTime:          t.GetStartTime(),
-		TimeoutInSeconds:   t.GetTimeoutInSeconds(),
-		Type:               t.GetType(),
-		Channel:            t.GetChannel(),
-		CollectionTtl:      t.GetCollectionTtl(),
-		TotalRows:          t.GetTotalRows(),
-		Schema:             t.GetSchema(),
-		ClusteringKeyField: t.GetClusteringKeyField().GetFieldID(),
-		MaxSegmentRows:     t.GetMaxSegmentRows(),
-		PreferSegmentRows:  t.GetPreferSegmentRows(),
-		AnalyzeResultPath:  path.Join(t.meta.(*meta).chunkManager.RootPath(), common.AnalyzeStatsPath, metautil.JoinIDPath(t.AnalyzeTaskID, t.AnalyzeVersion)),
-		AnalyzeSegmentIds:  t.GetInputSegments(),
-		BeginLogID:         beginLogID,
-		PreAllocatedSegmentIDs: &datapb.IDRange{
-			Begin: t.GetResultSegments()[0],
-			End:   t.GetResultSegments()[1],
-		},
-		SlotUsage: t.GetSlotUsage(),
+		PlanID:                 t.GetPlanID(),
+		StartTime:              t.GetStartTime(),
+		TimeoutInSeconds:       t.GetTimeoutInSeconds(),
+		Type:                   t.GetType(),
+		Channel:                t.GetChannel(),
+		CollectionTtl:          t.GetCollectionTtl(),
+		TotalRows:              t.GetTotalRows(),
+		Schema:                 t.GetSchema(),
+		ClusteringKeyField:     t.GetClusteringKeyField().GetFieldID(),
+		MaxSegmentRows:         t.GetMaxSegmentRows(),
+		PreferSegmentRows:      t.GetPreferSegmentRows(),
+		AnalyzeResultPath:      path.Join(t.meta.(*meta).chunkManager.RootPath(), common.AnalyzeStatsPath, metautil.JoinIDPath(t.AnalyzeTaskID, t.AnalyzeVersion)),
+		AnalyzeSegmentIds:      t.GetInputSegments(),
+		BeginLogID:             beginLogID,
+		PreAllocatedSegmentIDs: t.GetPreAllocatedSegmentIDs(),
+		SlotUsage:              t.GetSlotUsage(),
 	}
 	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 

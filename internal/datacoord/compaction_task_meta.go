@@ -57,6 +57,13 @@ func (csm *compactionTaskMeta) reloadFromKV() error {
 		return err
 	}
 	for _, task := range compactionTasks {
+		// To maintain compatibility with versions ≤v2.4.12, which use `ResultSegments` as preallocate segment IDs.
+		if task.PreAllocatedSegmentIDs == nil && len(task.GetResultSegments()) == 2 {
+			task.PreAllocatedSegmentIDs = &datapb.IDRange{
+				Begin: task.GetResultSegments()[0],
+				End:   task.GetResultSegments()[1],
+			}
+		}
 		csm.saveCompactionTaskMemory(task)
 	}
 	log.Info("DataCoord compactionTaskMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
