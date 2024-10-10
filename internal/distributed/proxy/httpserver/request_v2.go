@@ -320,6 +320,8 @@ type FieldSchema struct {
 	IsPrimary         bool                   `json:"isPrimary"`
 	IsPartitionKey    bool                   `json:"isPartitionKey"`
 	ElementTypeParams map[string]interface{} `json:"elementTypeParams" binding:"required"`
+	Nullable          bool                   `json:"nullable" binding:"required"`
+	DefaultValue      interface{}            `json:"defaultValue" binding:"required"`
 }
 
 type CollectionSchema struct {
