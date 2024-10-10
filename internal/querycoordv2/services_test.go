@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/kv"
@@ -169,6 +170,11 @@ func (suite *ServiceSuite) SetupTest() {
 	}
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+	suite.cluster.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{
+		Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		IsHealthy: true,
+		Reasons:   []string{},
+	}, nil).Maybe()
 	suite.jobScheduler = job.NewScheduler()
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
 	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
@@ -216,7 +222,6 @@ func (suite *ServiceSuite) SetupTest() {
 	}
 
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
-
 	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
 }
 
@@ -1618,6 +1623,8 @@ func (suite *ServiceSuite) TestCheckHealth() {
 	suite.loadAll()
 	ctx := context.Background()
 	server := suite.server
+	server.healthChecker = healthcheck.NewChecker(40*time.Millisecond, suite.server.healthCheckFn)
+	defer server.healthChecker.Close()
 
 	assertCheckHealthResult := func(isHealthy bool) {
 		resp, err := server.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -1630,28 +1637,38 @@ func (suite *ServiceSuite) TestCheckHealth() {
 		}
 	}
 
-	setNodeSate := func(state commonpb.StateCode) {
-		// Test for components state fail
-		suite.cluster.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Unset()
-		suite.cluster.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
-			&milvuspb.ComponentStates{
-				State:  &milvuspb.ComponentInfo{StateCode: state},
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	setNodeSate := func(isHealthy bool, isRPCFail bool) {
+		status := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+		if isRPCFail {
+			status = &commonpb.Status{ErrorCode: commonpb.ErrorCode_ForceDeny}
+		}
+		suite.cluster.EXPECT().CheckHealth(mock.Anything, mock.Anything).Unset()
+		suite.cluster.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(
+			&milvuspb.CheckHealthResponse{
+				Status:    status,
+				IsHealthy: isHealthy,
+				Reasons:   []string{"check fails"},
 			},
 			nil).Maybe()
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	// Test for server is not healthy
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	assertCheckHealthResult(false)
 
-	// Test for components state fail
-	setNodeSate(commonpb.StateCode_Abnormal)
+	// Test for check health has some error reasons
+	setNodeSate(false, false)
+	server.UpdateStateCode(commonpb.StateCode_Healthy)
+	assertCheckHealthResult(false)
+
+	// Test for check health rpc fail
+	setNodeSate(true, true)
 	server.UpdateStateCode(commonpb.StateCode_Healthy)
 	assertCheckHealthResult(false)
 
 	// Test for check load percentage fail
-	setNodeSate(commonpb.StateCode_Healthy)
+	setNodeSate(true, false)
 	assertCheckHealthResult(true)
 
 	// Test for check channel ok
@@ -1673,7 +1690,11 @@ func (suite *ServiceSuite) TestCheckHealth() {
 	for _, node := range suite.nodes {
 		suite.nodeMgr.Stopping(node)
 	}
-	assertCheckHealthResult(true)
+
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.UpdateCollectionLoadStatusInterval.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.UpdateCollectionLoadStatusInterval.Key)
+	time.Sleep(1500 * time.Millisecond)
+	assertCheckHealthResult(false)
 }
 
 func (suite *ServiceSuite) TestGetShardLeaders() {

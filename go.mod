@@ -32,6 +32,7 @@ require (
 	github.com/samber/lo v1.27.0
 	github.com/sbinet/npyio v0.6.0
 	github.com/soheilhy/cmux v0.1.5
+	github.com/sourcegraph/conc v0.3.0
 	github.com/spf13/cast v1.3.1
 	github.com/spf13/viper v1.8.1
 	github.com/stretchr/testify v1.9.0

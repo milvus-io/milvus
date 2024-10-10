@@ -137,6 +137,8 @@ service DataNode {
   rpc QuerySlot(QuerySlotRequest) returns(QuerySlotResponse) {}
 
   rpc DropCompactionPlan(DropCompactionPlanRequest) returns(common.Status) {}
+
+  rpc CheckHealth(milvus.CheckHealthRequest)returns (milvus.CheckHealthResponse) {}
 }
 
 message FlushRequest {

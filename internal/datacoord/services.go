@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
+	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -1591,20 +1592,26 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 		}, nil
 	}
 
-	err := s.sessionManager.CheckHealth(ctx)
-	if err != nil {
-		return componentutil.CheckHealthRespWithErr(err), nil
+	latestCheckResult := s.healthChecker.GetLatestCheckResult()
+	if !latestCheckResult.IsHealthy() {
+		return healthcheck.GetCheckHealthResponseFrom(&latestCheckResult), nil
 	}
-
-	if err = CheckAllChannelsWatched(s.meta, s.channelManager); err != nil {
-		return componentutil.CheckHealthRespWithErr(err), nil
-	}
-
-	if err = CheckCheckPointsHealth(s.meta); err != nil {
-		return componentutil.CheckHealthRespWithErr(err), nil
-	}
-
 	return componentutil.CheckHealthRespWithErr(nil), nil
+}
+
+func (s *Server) healthCheckFn() healthcheck.Result {
+	timeout := Params.CommonCfg.HealthCheckRPCTimeout.GetAsDuration(time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, timeout)
+	defer cancel()
+
+	checkResults := s.sessionManager.CheckDNHealth(ctx)
+	for collectionID, failReason := range CheckAllChannelsWatched(s.meta, s.channelManager) {
+		checkResults.AppendUnhealthyCollectionMsgs(healthcheck.UnhealthyCollectionMsg{CollectionID: collectionID, UnhealthyMsg: failReason})
+	}
+	for collectionID, failReason := range CheckCheckPointsHealth(s.meta) {
+		checkResults.AppendUnhealthyCollectionMsgs(healthcheck.UnhealthyCollectionMsg{CollectionID: collectionID, UnhealthyMsg: failReason})
+	}
+	return checkResults
 }
 
 func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {
