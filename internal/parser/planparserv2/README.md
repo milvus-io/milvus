@@ -4,7 +4,7 @@
 
 Please follow [install antlr4](https://github.com/antlr/antlr4/blob/master/doc/go-target.md) to install the antlr tool.
 
-The version of antlr tool: `4.9`.
+The version of antlr tool: `4.13.2`.
 
 ## Code Generate
 

@@ -1,7 +1,7 @@
-// Code generated from Plan.g4 by ANTLR 4.9. DO NOT EDIT.
+// Code generated from Plan.g4 by ANTLR 4.13.2. DO NOT EDIT.
 
 package planparserv2 // Plan
-import "github.com/antlr/antlr4/runtime/Go/antlr"
+import "github.com/antlr4-go/antlr/v4"
 
 // A complete Visitor for a parse tree produced by PlanParser.
 type PlanVisitor interface {
@@ -52,6 +52,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#BitOr.
 	VisitBitOr(ctx *BitOrContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#EmptyArray.
+	VisitEmptyArray(ctx *EmptyArrayContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#AddSub.
 	VisitAddSub(ctx *AddSubContext) interface{}
 
@@ -93,9 +96,6 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#BitAnd.
 	VisitBitAnd(ctx *BitAndContext) interface{}
-
-	// Visit a parse tree produced by PlanParser#EmptyTerm.
-	VisitEmptyTerm(ctx *EmptyTermContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#Power.
 	VisitPower(ctx *PowerContext) interface{}
