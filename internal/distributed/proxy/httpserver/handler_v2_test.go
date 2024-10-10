@@ -57,6 +57,22 @@ func init() {
 	paramtable.Init()
 }
 
+func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method string, testcase requestBodyTestCase) {
+	t.Run(testName, func(t *testing.T) {
+		req := httptest.NewRequest(method, testcase.path, bytes.NewReader(testcase.requestBody))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.Nil(t, err)
+		assert.Equal(t, testcase.errCode, returnBody.Code)
+		if testcase.errCode != 0 {
+			assert.Contains(t, returnBody.Message, testcase.errMsg)
+		}
+	})
+}
+
 func TestHTTPWrapper(t *testing.T) {
 	postTestCases := []requestBodyTestCase{}
 	postTestCasesTrace := []requestBodyTestCase{}
@@ -507,23 +523,6 @@ func TestDocInDocOutCreateCollection(t *testing.T) {
 		}
 	}`
 
-	runCase := func(t *testing.T, testcase requestBodyTestCase) {
-		t.Run("post"+testcase.path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
-			w := httptest.NewRecorder()
-			testEngine.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code)
-			fmt.Println(w.Body.String())
-			returnBody := &ReturnErrMsg{}
-			err := json.Unmarshal(w.Body.Bytes(), returnBody)
-			assert.Nil(t, err)
-			assert.Equal(t, testcase.errCode, returnBody.Code)
-			if testcase.errCode != 0 {
-				assert.Contains(t, returnBody.Message, testcase.errMsg)
-			}
-		})
-	}
-
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path: path,
 		requestBody: []byte(fmt.Sprintf(baseRequestBody, `[
@@ -564,7 +563,7 @@ func TestDocInDocOutCreateCollection(t *testing.T) {
 	})
 
 	for _, testcase := range postTestCases {
-		runCase(t, testcase)
+		sendReqAndVerify(t, testEngine, "post"+testcase.path, http.MethodPost, testcase)
 	}
 }
 
@@ -584,25 +583,91 @@ func TestDocInDocOutDescribeCollection(t *testing.T) {
 		Aliases: []string{DefaultAliasName},
 	}, nil).Once()
 	testEngine := initHTTPServerV2(mp, false)
-	testcase := rawTestCase{
-		path: versionalV2(CollectionCategory, DescribeAction),
+	testcase := requestBodyTestCase{
+		path:        versionalV2(CollectionCategory, DescribeAction),
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `"}`),
 	}
-	t.Run(testcase.path, func(t *testing.T) {
-		bodyReader := bytes.NewReader([]byte(`{` +
-			`"collectionName": "` + DefaultCollectionName + `"` +
-			`}`))
-		req := httptest.NewRequest(http.MethodPost, testcase.path, bodyReader)
-		w := httptest.NewRecorder()
-		testEngine.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-		returnBody := &ReturnErrMsg{}
-		err := json.Unmarshal(w.Body.Bytes(), returnBody)
-		assert.Nil(t, err)
-		assert.Equal(t, testcase.errCode, returnBody.Code)
-		if testcase.errCode != 0 {
-			assert.Equal(t, testcase.errMsg, returnBody.Message)
-		}
-	})
+	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
+func TestDocInDocOutInsert(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateDocInDocOutCollectionSchema(schemapb.DataType_Int64),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
+
+	testcase := requestBodyTestCase{
+		path:        versionalV2(EntityCategory, InsertAction),
+		requestBody: []byte(`{"collectionName": "book", "data": [{"book_id": 0, "word_count": 0, "varchar_field": "some text"}]}`),
+	}
+
+	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
+func TestDocInDocOutInsertInvalid(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateDocInDocOutCollectionSchema(schemapb.DataType_Int64),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	// invlaid insert request, will not be sent to proxy
+
+	testcase := requestBodyTestCase{
+		path:        versionalV2(EntityCategory, InsertAction),
+		requestBody: []byte(`{"collectionName": "book", "data": [{"book_id": 0, "word_count": 0, "book_intro": {"1": 0.1}, "varchar_field": "some text"}]}`),
+		errCode:     1804,
+		errMsg:      "not allowed to provide input data for function output field",
+	}
+
+	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
+func TestDocInDocOutSearch(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateDocInDocOutCollectionSchema(schemapb.DataType_Int64),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+		TopK:         int64(3),
+		OutputFields: []string{FieldWordCount},
+		FieldsData:   generateFieldData(),
+		Ids:          generateIDs(schemapb.DataType_Int64, 3),
+		Scores:       DefaultScores,
+	}}, nil).Once()
+
+	testcase := requestBodyTestCase{
+		path:        versionalV2(EntityCategory, SearchAction),
+		requestBody: []byte(`{"collectionName": "book", "data": ["query data"], "limit": 4, "outputFields": ["word_count"]}`),
+	}
+
+	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
 }
 
 func TestCreateCollection(t *testing.T) {

@@ -23,6 +23,7 @@ const (
 	FieldWordCount = "word_count"
 	FieldBookID    = "book_id"
 	FieldBookIntro = "book_intro"
+	FieldVarchar   = "varchar_field"
 )
 
 var DefaultScores = []float32{0.01, 0.04, 0.09}
@@ -118,6 +119,7 @@ func generateDocInDocOutCollectionSchema(primaryDataType schemapb.DataType) *sch
 	primaryField := generatePrimaryField(primaryDataType)
 	vectorField := generateVectorFieldSchema(schemapb.DataType_SparseFloatVector)
 	vectorField.Name = FieldBookIntro
+	vectorField.IsFunctionOutput = true
 	return &schemapb.CollectionSchema{
 		Name:        DefaultCollectionName,
 		Description: "",
@@ -132,7 +134,7 @@ func generateDocInDocOutCollectionSchema(primaryDataType schemapb.DataType) *sch
 				AutoID:       false,
 			}, vectorField, {
 				FieldID:      common.StartOfUserFieldID + 2,
-				Name:         "varchar_field",
+				Name:         FieldVarchar,
 				IsPrimaryKey: false,
 				Description:  "",
 				DataType:     schemapb.DataType_VarChar,
@@ -143,7 +145,7 @@ func generateDocInDocOutCollectionSchema(primaryDataType schemapb.DataType) *sch
 			{
 				Name:             "sum",
 				Type:             schemapb.FunctionType_BM25,
-				InputFieldNames:  []string{"varchar_field"},
+				InputFieldNames:  []string{FieldVarchar},
 				OutputFieldNames: []string{FieldBookIntro},
 			},
 		},
