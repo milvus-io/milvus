@@ -102,6 +102,49 @@ func (_c *MockImmutableMessage_EstimateSize_Call) RunAndReturn(run func() int) *
 	return _c
 }
 
+// EvictPayload provides a mock function with given fields:
+func (_m *MockImmutableMessage) EvictPayload() message.ImmutableMessage {
+	ret := _m.Called()
+
+	var r0 message.ImmutableMessage
+	if rf, ok := ret.Get(0).(func() message.ImmutableMessage); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.ImmutableMessage)
+		}
+	}
+
+	return r0
+}
+
+// MockImmutableMessage_EvictPayload_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EvictPayload'
+type MockImmutableMessage_EvictPayload_Call struct {
+	*mock.Call
+}
+
+// EvictPayload is a helper method to define mock.On call
+func (_e *MockImmutableMessage_Expecter) EvictPayload() *MockImmutableMessage_EvictPayload_Call {
+	return &MockImmutableMessage_EvictPayload_Call{Call: _e.mock.On("EvictPayload")}
+}
+
+func (_c *MockImmutableMessage_EvictPayload_Call) Run(run func()) *MockImmutableMessage_EvictPayload_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockImmutableMessage_EvictPayload_Call) Return(_a0 message.ImmutableMessage) *MockImmutableMessage_EvictPayload_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImmutableMessage_EvictPayload_Call) RunAndReturn(run func() message.ImmutableMessage) *MockImmutableMessage_EvictPayload_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LastConfirmedMessageID provides a mock function with given fields:
 func (_m *MockImmutableMessage) LastConfirmedMessageID() message.MessageID {
 	ret := _m.Called()

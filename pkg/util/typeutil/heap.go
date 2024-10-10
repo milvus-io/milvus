@@ -15,7 +15,7 @@ type HeapInterface interface {
 }
 
 // Heap is a heap of E.
-// Use `golang.org/x/exp/constraints` directly if you want to change any element.
+// Use `golang.org/x/exp/constraints` directly if you want to change any element or Use PriorityQueue
 type Heap[E any] interface {
 	// Len returns the size of the heap.
 	Len() int
@@ -60,6 +60,7 @@ func (h *heapArray[E]) Pop() interface{} {
 	old := *h
 	n := len(old)
 	x := old[n-1]
+	// TODO: The GC may not happen immediately.
 	*h = old[0 : n-1]
 	return x
 }

@@ -207,6 +207,16 @@ func (m *immutableMessageImpl) overwriteLastConfirmedMessageID(id MessageID) {
 	m.WithLastConfirmed(id)
 }
 
+// EvictPayload evicts the payload of current message.
+func (m *immutableMessageImpl) EvictPayload() ImmutableMessage {
+	return &immutableMessageImpl{
+		messageImpl: messageImpl{
+			properties: m.properties,
+		},
+		id: m.id,
+	}
+}
+
 // immutableTxnMessageImpl is a immutable transaction message.
 type immutableTxnMessageImpl struct {
 	immutableMessageImpl
