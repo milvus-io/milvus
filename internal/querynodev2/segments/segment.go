@@ -30,6 +30,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"unsafe"
 
@@ -732,6 +733,7 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 			(*C.uint8_t)(unsafe.Pointer(&insertRecordBlob[0])),
 			(C.uint64_t)(len(insertRecordBlob)),
 		)
+		debug.FreeOSMemory()
 		return nil, nil
 	}).Await()
 	if err := HandleCStatus(ctx, &status, "Insert failed"); err != nil {
