@@ -52,6 +52,11 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         search_info.materialized_view_involved =
             query_info_proto.materialized_view_involved();
 
+        if (query_info_proto.bm25_avgdl() > 0) {
+            search_info.search_params_[knowhere::meta::BM25_AVGDL] =
+                query_info_proto.bm25_avgdl();
+        }
+
         if (query_info_proto.group_by_field_id() > 0) {
             auto group_by_field_id =
                 FieldId(query_info_proto.group_by_field_id());

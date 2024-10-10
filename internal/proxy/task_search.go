@@ -370,6 +370,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			GroupSize:          t.rankParams.GetGroupSize(),
 		}
 
+		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
 		// set PartitionIDs for sub search
 		if t.partitionKeyMode {
 			// isolatioin has tighter constraint, check first
@@ -449,6 +450,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	}
 
 	t.SearchRequest.Offset = offset
+	t.SearchRequest.FieldId = queryInfo.GetQueryFieldId()
 
 	if t.partitionKeyMode {
 		// isolatioin has tighter constraint, check first
@@ -511,6 +513,8 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	if queryInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
 		return nil, nil, 0, errors.New("not support search_group_by operation based on binary vector column")
 	}
+
+	queryInfo.QueryFieldId = annField.GetFieldID()
 	plan, planErr := planparserv2.CreateSearchPlan(t.schema.schemaHelper, dsl, annsFieldName, queryInfo)
 	if planErr != nil {
 		log.Warn("failed to create query plan", zap.Error(planErr),

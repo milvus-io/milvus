@@ -70,19 +70,37 @@ func (suite *SegmentLoaderSuite) SetupSuite() {
 }
 
 func (suite *SegmentLoaderSuite) SetupTest() {
-	// Dependencies
-	suite.manager = NewManager()
 	ctx := context.Background()
+
 	// TODO:: cpp chunk manager not support local chunk manager
 	// suite.chunkManager = storage.NewLocalChunkManager(storage.RootPath(
 	//	fmt.Sprintf("/tmp/milvus-ut/%d", rand.Int63())))
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
+
+	// Dependencies
+	suite.manager = NewManager()
 	suite.loader = NewLoader(suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	// Data
 	suite.schema = GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
+	indexMeta := GenTestIndexMeta(suite.collectionID, suite.schema)
+	loadMeta := &querypb.LoadMetaInfo{
+		LoadType:     querypb.LoadType_LoadCollection,
+		CollectionID: suite.collectionID,
+		PartitionIDs: []int64{suite.partitionID},
+	}
+	suite.manager.Collection.PutOrRef(suite.collectionID, suite.schema, indexMeta, loadMeta)
+}
+
+func (suite *SegmentLoaderSuite) SetupBM25() {
+	// Dependencies
+	suite.manager = NewManager()
+	suite.loader = NewLoader(suite.manager, suite.chunkManager)
+	initcore.InitRemoteChunkManager(paramtable.Get())
+
+	suite.schema = GenTestBM25CollectionSchema("test")
 	indexMeta := GenTestIndexMeta(suite.collectionID, suite.schema)
 	loadMeta := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
@@ -404,6 +422,41 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 			exist := segment.MayPkExist(lc)
 			suite.Require().True(exist)
 		}
+	}
+}
+
+func (suite *SegmentLoaderSuite) TestLoadBm25Stats() {
+	suite.SetupBM25()
+	msgLength := 1
+	sparseFieldID := simpleSparseFloatVectorField.id
+	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
+
+	for i := 0; i < suite.segmentNum; i++ {
+		segmentID := suite.segmentID + int64(i)
+
+		bm25logs, err := SaveBM25Log(suite.collectionID, suite.partitionID, segmentID, sparseFieldID, msgLength, suite.chunkManager)
+		suite.NoError(err)
+
+		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
+			SegmentID:     segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			Bm25Logs:      []*datapb.FieldBinlog{bm25logs},
+			NumOfRows:     int64(msgLength),
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		})
+	}
+
+	statsMap, err := suite.loader.LoadBM25Stats(context.Background(), suite.collectionID, loadInfos...)
+	suite.NoError(err)
+
+	for i := 0; i < suite.segmentNum; i++ {
+		segmentID := suite.segmentID + int64(i)
+		stats, ok := statsMap.Get(segmentID)
+		suite.True(ok)
+		fieldStats, ok := stats[sparseFieldID]
+		suite.True(ok)
+		suite.Equal(int64(msgLength), fieldStats.NumRow())
 	}
 }
 

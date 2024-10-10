@@ -21,10 +21,10 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 
 	"go.uber.org/zap"
-	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
@@ -347,7 +347,7 @@ func (m *BM25Stats) AppendFieldData(datas ...*SparseFloatVectorFieldData) {
 // Update BM25Stats by sparse vector bytes
 func (m *BM25Stats) AppendBytes(datas ...[]byte) {
 	for _, data := range datas {
-		dim := len(data) / 8
+		dim := typeutil.SparseFloatRowElementCount(data)
 		for i := 0; i < dim; i++ {
 			index := typeutil.SparseFloatRowIndexAt(data, i)
 			value := typeutil.SparseFloatRowValueAt(data, i)
@@ -454,17 +454,19 @@ func (m *BM25Stats) Deserialize(bs []byte) error {
 		m.rowsWithToken[keys[i]] += values[i]
 	}
 
-	log.Info("test-- deserialize", zap.Int64("numrow", m.numRow), zap.Int64("tokenNum", m.numToken))
 	return nil
 }
 
-func (m *BM25Stats) BuildIDF(tf map[uint32]float32) map[uint32]float32 {
-	vector := make(map[uint32]float32)
-	for key, value := range tf {
+func (m *BM25Stats) BuildIDF(tf []byte) (idf []byte) {
+	dim := typeutil.SparseFloatRowElementCount(tf)
+	idf = make([]byte, len(tf))
+	for idx := 0; idx < dim; idx++ {
+		key := typeutil.SparseFloatRowIndexAt(tf, idx)
+		value := typeutil.SparseFloatRowValueAt(tf, idx)
 		nq := m.rowsWithToken[key]
-		vector[key] = value * float32(math.Log(1+(float64(m.numRow)-float64(nq)+0.5)/(float64(nq)+0.5)))
+		typeutil.SparseFloatRowSetAt(idf, idx, key, value*float32(math.Log(1+(float64(m.numRow)-float64(nq)+0.5)/(float64(nq)+0.5))))
 	}
-	return vector
+	return
 }
 
 func (m *BM25Stats) GetAvgdl() float64 {

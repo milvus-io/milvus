@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "IndexConfigGenerator.h"
+#include "knowhere/comp/index_param.h"
 #include "log/Log.h"
 
 namespace milvus::segcore {
@@ -49,15 +50,28 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
         std::to_string(config_.get_nlist());
     build_params_[knowhere::indexparam::SSIZE] = std::to_string(
         std::max((int)(config_.get_chunk_rows() / config_.get_nlist()), 48));
+
+    if (is_sparse && metric_type_ == knowhere::metric::BM25) {
+        build_params_[knowhere::meta::BM25_K1] =
+            index_meta_.GetIndexParams().at(knowhere::meta::BM25_K1);
+        build_params_[knowhere::meta::BM25_B] =
+            index_meta_.GetIndexParams().at(knowhere::meta::BM25_B);
+        build_params_[knowhere::meta::BM25_AVGDL] =
+            index_meta_.GetIndexParams().at(knowhere::meta::BM25_AVGDL);
+    }
+
     search_params_[knowhere::indexparam::NPROBE] =
         std::to_string(config_.get_nprobe());
+
     // note for sparse vector index: drop_ratio_build is not allowed for growing
     // segment index.
     LOG_INFO(
-        "VecIndexConfig: origin_index_type={}, index_type={}, metric_type={}",
+        "VecIndexConfig: origin_index_type={}, index_type={}, metric_type={}, "
+        "config={}",
         origin_index_type_,
         index_type_,
-        metric_type_);
+        metric_type_,
+        build_params_.dump());
 }
 
 int64_t
@@ -99,6 +113,11 @@ VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) {
         if (searchInfo.search_params_.contains(key)) {
             searchParam.search_params_[key] = searchInfo.search_params_[key];
         }
+    }
+
+    if (metric_type_ == knowhere::metric::BM25) {
+        searchParam.search_params_[knowhere::meta::BM25_AVGDL] =
+            searchInfo.search_params_[knowhere::meta::BM25_AVGDL];
     }
     return searchParam;
 }
