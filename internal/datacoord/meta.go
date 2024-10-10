@@ -1989,7 +1989,7 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 		CreatedByCompaction: true,
 		CompactionFrom:      []int64{oldSegmentID},
 		LastExpireTime:      cloned.GetLastExpireTime(),
-		Level:               datapb.SegmentLevel_L1,
+		Level:               cloned.GetLevel(),
 		StartPosition:       cloned.GetStartPosition(),
 		DmlPosition:         cloned.GetDmlPosition(),
 		IsSorted:            true,
