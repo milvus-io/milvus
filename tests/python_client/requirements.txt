@@ -46,6 +46,7 @@ h5py==3.8.0
 loguru==0.7.0
 
 # util
+numpy==1.26.4
 psutil==5.9.4
 pandas==1.5.3
 tenacity==8.1.0

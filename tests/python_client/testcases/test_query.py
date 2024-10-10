@@ -5580,3 +5580,20 @@ class TestQueryTextMatchNegative(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+
+
+class TestQueryFunction(TestcaseBase):
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_function_empty(self):
+        """
+        target: test query data
+        method: create collection and insert data
+                query with mix expr in string field and int field
+        expected: query successfully
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
+                                                             primary_field=ct.default_string_field_name)[0:2]
+        res = vectors[0].iloc[:, 1:3].to_dict('records')
+        output_fields = [default_float_field_name, default_string_field_name]
+        collection_w.query("not empty(varchar) && int64 >= 0", output_fields=output_fields,
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})

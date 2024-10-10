@@ -223,7 +223,7 @@ class PhyCompareFilterExpr : public Expr {
     const FieldId right_field_;
     bool is_left_indexed_;
     bool is_right_indexed_;
-    int64_t active_count_{0};
+    const int64_t active_count_;
     int64_t num_chunk_{0};
     int64_t current_chunk_id_{0};
     int64_t current_chunk_pos_{0};

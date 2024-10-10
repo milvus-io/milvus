@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
@@ -252,6 +253,18 @@ ProtoParser::ParseBinaryRangeExprs(
 }
 
 expr::TypedExprPtr
+ProtoParser::ParseCallExprs(const proto::plan::CallExpr& expr_pb) {
+    std::vector<expr::TypedExprPtr> parameters;
+    for (auto& param_expr : expr_pb.function_parameters()) {
+        // function parameter can be any type
+        auto e = this->ParseExprs(param_expr, TypeIsAny);
+        parameters.push_back(e);
+    }
+    return std::make_shared<expr::CallTypeExpr>(expr_pb.function_name(),
+                                                parameters);
+}
+
+expr::TypedExprPtr
 ProtoParser::ParseCompareExprs(const proto::plan::CompareExpr& expr_pb) {
     auto& left_column_info = expr_pb.left_column_info();
     auto left_field_id = FieldId(left_column_info.field_id());
@@ -345,44 +358,79 @@ ProtoParser::ParseJsonContainsExprs(
 }
 
 expr::TypedExprPtr
+ProtoParser::ParseColumnExprs(const proto::plan::ColumnExpr& expr_pb) {
+    return std::make_shared<expr::ColumnExpr>(expr_pb.info());
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseValueExprs(const proto::plan::ValueExpr& expr_pb) {
+    return std::make_shared<expr::ValueExpr>(expr_pb.value());
+}
+
+expr::TypedExprPtr
 ProtoParser::CreateAlwaysTrueExprs() {
     return std::make_shared<expr::AlwaysTrueExpr>();
 }
 
 expr::TypedExprPtr
-ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb) {
+ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
+                        TypeCheckFunction type_check) {
     using ppe = proto::plan::Expr;
+    expr::TypedExprPtr result;
     switch (expr_pb.expr_case()) {
         case ppe::kUnaryRangeExpr: {
-            return ParseUnaryRangeExprs(expr_pb.unary_range_expr());
+            result = ParseUnaryRangeExprs(expr_pb.unary_range_expr());
+            break;
         }
         case ppe::kBinaryExpr: {
-            return ParseBinaryExprs(expr_pb.binary_expr());
+            result = ParseBinaryExprs(expr_pb.binary_expr());
+            break;
         }
         case ppe::kUnaryExpr: {
-            return ParseUnaryExprs(expr_pb.unary_expr());
+            result = ParseUnaryExprs(expr_pb.unary_expr());
+            break;
         }
         case ppe::kTermExpr: {
-            return ParseTermExprs(expr_pb.term_expr());
+            result = ParseTermExprs(expr_pb.term_expr());
+            break;
         }
         case ppe::kBinaryRangeExpr: {
-            return ParseBinaryRangeExprs(expr_pb.binary_range_expr());
+            result = ParseBinaryRangeExprs(expr_pb.binary_range_expr());
+            break;
         }
         case ppe::kCompareExpr: {
-            return ParseCompareExprs(expr_pb.compare_expr());
+            result = ParseCompareExprs(expr_pb.compare_expr());
+            break;
         }
         case ppe::kBinaryArithOpEvalRangeExpr: {
-            return ParseBinaryArithOpEvalRangeExprs(
+            result = ParseBinaryArithOpEvalRangeExprs(
                 expr_pb.binary_arith_op_eval_range_expr());
+            break;
         }
         case ppe::kExistsExpr: {
-            return ParseExistExprs(expr_pb.exists_expr());
+            result = ParseExistExprs(expr_pb.exists_expr());
+            break;
         }
         case ppe::kAlwaysTrueExpr: {
-            return CreateAlwaysTrueExprs();
+            result = CreateAlwaysTrueExprs();
+            break;
         }
         case ppe::kJsonContainsExpr: {
-            return ParseJsonContainsExprs(expr_pb.json_contains_expr());
+            result = ParseJsonContainsExprs(expr_pb.json_contains_expr());
+            break;
+        }
+        case ppe::kCallExpr: {
+            result = ParseCallExprs(expr_pb.call_expr());
+            break;
+        }
+            // may emit various types
+        case ppe::kColumnExpr: {
+            result = ParseColumnExprs(expr_pb.column_expr());
+            break;
+        }
+        case ppe::kValueExpr: {
+            result = ParseValueExprs(expr_pb.value_expr());
+            break;
         }
         default: {
             std::string s;
@@ -391,6 +439,11 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb) {
                       std::string("unsupported expr proto node: ") + s);
         }
     }
+    if (type_check(result->type())) {
+        return result;
+    }
+    PanicInfo(
+        ExprInvalid, "expr type check failed, actual type: {}", result->type());
 }
 
 }  // namespace milvus::query

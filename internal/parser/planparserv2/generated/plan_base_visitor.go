@@ -59,6 +59,10 @@ func (v *BasePlanVisitor) VisitShift(ctx *ShiftContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitCall(ctx *CallContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitReverseRange(ctx *ReverseRangeContext) interface{} {
 	return v.VisitChildren(ctx)
 }
