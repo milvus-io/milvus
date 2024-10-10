@@ -54,6 +54,7 @@ message IndexInfo {
     bool is_auto_index = 11;
     repeated common.KeyValuePair user_index_params = 12;
     int64 pending_index_rows = 13;
+    bool is_json = 14;
 }
 
 message FieldIndex {
@@ -80,6 +81,7 @@ message SegmentIndex {
     bool write_handoff = 15;
     int32 current_index_version = 16;
     int64 index_store_version = 17;
+    bool is_json = 18;
 }
 
 message RegisterNodeRequest {
@@ -158,6 +160,7 @@ message IndexFilePathInfo {
     int64 index_version = 9;
     int64 num_rows = 10;
     int32 current_index_version = 11;
+    bool is_json = 12;
 }
 
 message SegmentInfo {

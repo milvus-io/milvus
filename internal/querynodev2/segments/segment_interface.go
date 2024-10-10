@@ -73,6 +73,7 @@ type Segment interface {
 	GetIndex(fieldID int64) *IndexedFieldInfo
 	ExistIndex(fieldID int64) bool
 	Indexes() []*IndexedFieldInfo
+	JsonIndexes() []*IndexedFieldInfo
 	HasRawData(fieldID int64) bool
 
 	// Modification related

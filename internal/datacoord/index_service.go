@@ -19,12 +19,15 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -52,12 +55,12 @@ func (s *Server) startIndexService(ctx context.Context) {
 	go s.createIndexForSegmentLoop(ctx)
 }
 
-func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) error {
+func (s *Server) createIndexForSegment(segment *SegmentInfo, index *model.Index) error {
 	if !segment.GetIsSorted() && Params.DataCoordCfg.EnableStatsTask.GetAsBool() && !segment.GetIsImporting() && segment.Level != datapb.SegmentLevel_L0 {
 		log.Info("segment not sorted, skip create index", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
-	log.Info("create index for segment", zap.Int64("segmentID", segment.ID), zap.Int64("indexID", indexID))
+	log.Info("create index for segment", zap.Int64("segmentID", segment.ID), zap.Int64("indexID", index.IndexID))
 	buildID, err := s.allocator.AllocID(context.Background())
 	if err != nil {
 		return err
@@ -67,10 +70,11 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 		CollectionID: segment.CollectionID,
 		PartitionID:  segment.PartitionID,
 		NumRows:      segment.NumOfRows,
-		IndexID:      indexID,
+		IndexID:      index.IndexID,
 		BuildID:      buildID,
 		CreateTime:   uint64(segment.ID),
 		WriteHandoff: false,
+		IsJson:       index.IsJson,
 	}
 	if err = s.meta.indexMeta.AddSegmentIndex(segIndex); err != nil {
 		return err
@@ -93,7 +97,7 @@ func (s *Server) createIndexesForSegment(segment *SegmentInfo) error {
 	indexIDToSegIndexes := s.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 	for _, index := range indexes {
 		if _, ok := indexIDToSegIndexes[index.IndexID]; !ok {
-			if err := s.createIndexForSegment(segment, index.IndexID); err != nil {
+			if err := s.createIndexForSegment(segment, index); err != nil {
 				log.Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
 					zap.Int64("indexID", index.IndexID))
 				return err
@@ -162,18 +166,157 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 	}
 }
 
-func (s *Server) getFieldNameByID(ctx context.Context, collID, fieldID int64) (string, error) {
-	resp, err := s.broker.DescribeCollectionInternal(ctx, collID)
-	if err != nil {
-		return "", err
-	}
-
-	for _, field := range resp.GetSchema().GetFields() {
+func (s *Server) getFieldNameByID(schema *schemapb.CollectionSchema, collID, fieldID int64) (string, error) {
+	for _, field := range schema.GetFields() {
 		if field.FieldID == fieldID {
 			return field.Name, nil
 		}
 	}
 	return "", nil
+}
+
+func (s *Server) getSchema(ctx context.Context, collID int64) (*schemapb.CollectionSchema, error) {
+	resp, err := s.broker.DescribeCollectionInternal(ctx, collID)
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetSchema(), nil
+}
+
+func (s *Server) isJsonField(schema *schemapb.CollectionSchema, collID, fieldID int64) (bool, error) {
+	for _, f := range schema.Fields {
+		if f.FieldID == fieldID {
+			return typeutil.IsJSONType(f.DataType), nil
+		}
+	}
+	return false, nil
+}
+
+const JSON_PATH_KEY = "json_path"
+const JSON_CAST_KEY = "json_cast_type"
+
+func getIndexParam(indexParams []*commonpb.KeyValuePair, key string) (string, error) {
+	for _, p := range indexParams {
+		if p.Key == JSON_PATH_KEY {
+			return p.Value, nil
+		}
+	}
+	return "", merr.WrapErrParameterInvalidMsg("%s not found", key)
+}
+
+func setIndexParam(indexParams []*commonpb.KeyValuePair, key, value string) {
+	for _, p := range indexParams {
+		if p.Key == key {
+			p.Value = value
+		}
+	}
+}
+
+func (s *Server) checkJsonParams(req *indexpb.CreateIndexRequest) error {
+	var jsonPath = ""
+	var jsonCastType = schemapb.DataType_None
+	for _, p := range req.IndexParams {
+		if p.Key == JSON_PATH_KEY {
+			jsonPath = p.Value
+		} else if p.Key == JSON_CAST_KEY {
+			v, err := strconv.ParseInt(p.Value, 10, 64)
+			if err != nil {
+				return err
+			}
+			jsonCastType = schemapb.DataType(v)
+		}
+	}
+
+	if jsonPath == "" {
+		return merr.WrapErrParameterInvalidMsg("%s is empty", JSON_PATH_KEY)
+	}
+	if jsonCastType == schemapb.DataType_None {
+		return merr.WrapErrParameterInvalidMsg("%s is empty", JSON_CAST_KEY)
+	}
+
+	// TODO: sunby, check json path
+	// check json cast type
+	switch jsonCastType {
+	case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_Float, schemapb.DataType_Double,
+		schemapb.DataType_String, schemapb.DataType_VarChar:
+	default:
+		return merr.WrapErrParameterInvalidMsg("invalid json cast type %s", jsonCastType.String())
+	}
+
+	// check duplicate json path
+	exists := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
+	if len(exists) > 0 {
+		if len(exists) > 1 {
+			log.Warn("there're more than one index with the same name", zap.String("indexName", req.GetIndexName()))
+		}
+		existsJsonPath, err := getIndexParam(exists[0].IndexParams, JSON_PATH_KEY)
+		if err != nil {
+			return err
+		}
+		if existsJsonPath != jsonPath {
+			return merr.WrapErrParameterInvalidMsg("can not create duplicated indexes with different json path, prev: %v", existsJsonPath)
+		}
+		existsJsonCastType, err := getIndexParam(exists[0].IndexParams, JSON_CAST_KEY)
+		if err != nil {
+			return err
+		}
+		existsType, err := strconv.ParseInt(existsJsonCastType, 10, 64)
+		if err != nil {
+			return err
+		}
+		if schemapb.DataType(existsType) != jsonCastType {
+			return merr.WrapErrParameterInvalidMsg("can not create duplicated indexes with different json cast type, prev: %v", schemapb.DataType(existsType).String())
+		}
+	}
+	return nil
+}
+
+func (s *Server) parseNestedPath(identifier string, schema *schemapb.CollectionSchema) (string, error) {
+	fieldName := strings.Split(identifier, "[")[0]
+	nestedPath := make([]string, 0)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return "", err
+	}
+	field, err := helper.GetFieldFromNameDefaultJSON(fieldName)
+	if err != nil {
+		return "", err
+	}
+	if field.GetDataType() != schemapb.DataType_JSON &&
+		field.GetDataType() != schemapb.DataType_Array {
+		errMsg := fmt.Sprintf("%s data type not supported accessed with []", field.GetDataType())
+		return "", fmt.Errorf(errMsg)
+	}
+	if fieldName != field.Name {
+		r := strings.ReplaceAll(fieldName, "~", "~0")
+		r = strings.ReplaceAll(r, "/", "~1")
+		nestedPath = append(nestedPath, r)
+	}
+	jsonKeyStr := identifier[len(fieldName):]
+	ss := strings.Split(jsonKeyStr, "][")
+	for i := 0; i < len(ss); i++ {
+		path := strings.Trim(ss[i], "[]")
+		if path == "" {
+			return "", fmt.Errorf("invalid identifier: %s", identifier)
+		}
+		if (strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"")) ||
+			(strings.HasPrefix(path, "'") && strings.HasSuffix(path, "'")) {
+			path = path[1 : len(path)-1]
+			if path == "" {
+				return "", fmt.Errorf("invalid identifier: %s", identifier)
+			}
+			if typeutil.IsArrayType(field.DataType) {
+				return "", fmt.Errorf("can only access array field with integer index")
+			}
+		} else if _, err := strconv.ParseInt(path, 10, 64); err != nil {
+			return "", fmt.Errorf("json key must be enclosed in double quotes or single quotes: \"%s\"", path)
+		}
+		r := strings.ReplaceAll(path, "~", "~0")
+		r = strings.ReplaceAll(r, "/", "~1")
+		nestedPath = append(nestedPath, r)
+	}
+
+	return "/" + strings.Join(nestedPath, "/"), nil
 }
 
 // CreateIndex create an index on collection.
@@ -197,17 +340,45 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 	metrics.IndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
 
+	schema, err := s.getSchema(ctx, req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	isJson, err := s.isJsonField(schema, req.GetCollectionID(), req.GetFieldID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
 	if req.GetIndexName() == "" {
-		indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
-		if len(indexes) == 0 {
-			fieldName, err := s.getFieldNameByID(ctx, req.GetCollectionID(), req.GetFieldID())
+		if isJson {
+			jsonPath, err := getIndexParam(req.GetIndexParams(), JSON_PATH_KEY)
 			if err != nil {
-				log.Warn("get field name from schema failed", zap.Int64("fieldID", req.GetFieldID()))
 				return merr.Status(err), nil
 			}
-			req.IndexName = fieldName
-		} else if len(indexes) == 1 {
-			req.IndexName = indexes[0].IndexName
+			nestedPath, err := s.parseNestedPath(jsonPath, schema)
+			if err != nil {
+				return merr.Status(err), nil
+			}
+			setIndexParam(req.GetIndexParams(), JSON_PATH_KEY, nestedPath)
+			req.IndexName = jsonPath
+		} else {
+			indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
+			if len(indexes) == 0 {
+				fieldName, err := s.getFieldNameByID(schema, req.GetCollectionID(), req.GetFieldID())
+				if err != nil {
+					log.Warn("get field name from schema failed", zap.Int64("fieldID", req.GetFieldID()))
+					return merr.Status(err), nil
+				}
+				req.IndexName = fieldName
+			} else if len(indexes) == 1 {
+				req.IndexName = indexes[0].IndexName
+			}
+		}
+	}
+
+	if isJson {
+		if err := s.checkJsonParams(req); err != nil {
+			return merr.Status(err), nil
 		}
 	}
 
@@ -250,6 +421,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		CreateTime:      req.GetTimestamp(),
 		IsAutoIndex:     req.GetIsAutoIndex(),
 		UserIndexParams: req.GetUserIndexParams(),
+		IsJson:          isJson,
 	}
 
 	if err := ValidateIndexParams(index); err != nil {
@@ -890,6 +1062,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							IndexVersion:        segIdx.IndexVersion,
 							NumRows:             segIdx.NumRows,
 							CurrentIndexVersion: segIdx.CurrentIndexVersion,
+							IsJson:              segIdx.IsJson,
 						})
 				}
 			}

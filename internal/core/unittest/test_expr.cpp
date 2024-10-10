@@ -19,9 +19,15 @@
 #include <chrono>
 #include <roaring/roaring.hh>
 
+#include "common/FieldDataInterface.h"
 #include "common/Json.h"
+#include "common/LoadInfo.h"
 #include "common/Types.h"
+#include "indexbuilder/JsonInvertedIndexCreator.h"
+#include "knowhere/comp/index_param.h"
+#include "mmap/Types.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
 #include "query/PlanProto.h"
@@ -29,6 +35,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "simdjson/padded_string.h"
 #include "segcore/segment_c.h"
+#include "storage/FileManager.h"
 #include "test_utils/DataGen.h"
 #include "index/IndexFactory.h"
 #include "exec/expression/Expr.h"
@@ -6620,4 +6627,57 @@ TEST_P(ExprTest, TestJsonContainsDiffType) {
             ASSERT_EQ(ans, testcase.res);
         }
     }
+}
+
+TEST(JsonInvertedIndex, UnaryExpr) {
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i32_fid = schema->AddDebugField("age32", DataType::INT32);
+    auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    int N = 1000;
+    auto raw_data = DataGen(schema, N);
+    segcore::LoadIndexInfo load_index_info;
+
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        proto::schema::Int64);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    auto json_index = std::make_unique<
+        milvus::indexbuilder::JsonInvertedIndexCreator<int64_t>>(
+        proto::schema::Int64, "/json/int", file_manager_ctx);
+    auto json_col = raw_data.get_col<std::string>(json_fid);
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    std::vector<milvus::Json> jsons;
+
+    for (auto& json : json_col) {
+        jsons.push_back(milvus::Json(simdjson::padded_string(json)));
+    }
+    json_field->add_json_data(jsons);
+
+    json_index->BuildWithFieldData({json_field});
+    json_index->finish();
+    json_index->create_reader();
+
+    load_index_info.field_id = json_fid.get();
+    load_index_info.field_type = DataType::JSON;
+    load_index_info.index = std::move(json_index);
+    load_index_info.index_params = {{"json_path", "/json/int"}};
+    seg->LoadIndex(load_index_info);
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(1);
+    auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"json", "int"}),
+        proto::plan::OpType::LessThan,
+        value);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
+    auto final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.size(), N);
 }

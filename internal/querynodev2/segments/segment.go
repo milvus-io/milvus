@@ -259,6 +259,7 @@ type LocalSegment struct {
 	lastDeltaTimestamp *atomic.Uint64
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo]
+	jsonIndexes        *typeutil.ConcurrentMap[int64, *IndexedFieldInfo]
 }
 
 func NewSegment(ctx context.Context,
@@ -323,6 +324,7 @@ func NewSegment(ctx context.Context,
 		lastDeltaTimestamp: atomic.NewUint64(0),
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		jsonIndexes:        typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 
 		memSize:     atomic.NewInt64(-1),
 		rowNum:      atomic.NewInt64(-1),
@@ -441,6 +443,11 @@ func (s *LocalSegment) GetIndex(fieldID int64) *IndexedFieldInfo {
 	return info
 }
 
+func (s *LocalSegment) GetJsonIndex(indexID int64) *IndexedFieldInfo {
+	info, _ := s.jsonIndexes.Get(indexID)
+	return info
+}
+
 func (s *LocalSegment) ExistIndex(fieldID int64) bool {
 	fieldInfo, ok := s.fieldIndexes.Get(fieldID)
 	if !ok {
@@ -462,6 +469,15 @@ func (s *LocalSegment) HasRawData(fieldID int64) bool {
 func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
 	var result []*IndexedFieldInfo
 	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
+		result = append(result, value)
+		return true
+	})
+	return result
+}
+
+func (s *LocalSegment) JsonIndexes() []*IndexedFieldInfo {
+	var result []*IndexedFieldInfo
+	s.jsonIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
 		result = append(result, value)
 		return true
 	})
@@ -1143,7 +1159,12 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		zap.Int64("indexID", indexInfo.GetIndexID()),
 	)
 
-	old := s.GetIndex(indexInfo.GetFieldID())
+	var old *IndexedFieldInfo
+	if indexInfo.IsJson {
+		old = s.GetJsonIndex(indexInfo.GetIndexID())
+	} else {
+		old = s.GetIndex(indexInfo.GetFieldID())
+	}
 	// the index loaded
 	if old != nil && old.IndexInfo.GetIndexID() == indexInfo.GetIndexID() && old.IsLoaded {
 		log.Warn("index already loaded")
@@ -1277,13 +1298,23 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 		return err
 	}
 
-	s.fieldIndexes.Insert(indexInfo.GetFieldID(), &IndexedFieldInfo{
-		FieldBinlog: &datapb.FieldBinlog{
-			FieldID: indexInfo.GetFieldID(),
-		},
-		IndexInfo: indexInfo,
-		IsLoaded:  true,
-	})
+	if indexInfo.IsJson {
+		s.jsonIndexes.Insert(indexInfo.IndexID, &IndexedFieldInfo{
+			FieldBinlog: &datapb.FieldBinlog{
+				FieldID: indexInfo.FieldID,
+			},
+			IndexInfo: indexInfo,
+			IsLoaded:  true,
+		})
+	} else {
+		s.fieldIndexes.Insert(indexInfo.GetFieldID(), &IndexedFieldInfo{
+			FieldBinlog: &datapb.FieldBinlog{
+				FieldID: indexInfo.GetFieldID(),
+			},
+			IndexInfo: indexInfo,
+			IsLoaded:  true,
+		})
+	}
 	log.Info("updateSegmentIndex done")
 	return nil
 }

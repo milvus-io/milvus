@@ -383,6 +383,7 @@ message FieldIndexInfo {
     int64 num_rows = 10;
     int32 current_index_version = 11;
     int64 index_store_version = 12;
+    bool is_json = 13;
 }
 
 enum LoadScope {
@@ -638,6 +639,7 @@ message SegmentVersionInfo {
     map<int64, FieldIndexInfo> index_info = 7;
     data.SegmentLevel level = 8;
     bool is_sorted = 9;
+    map<int64, FieldIndexInfo> json_index = 10;
 }
 
 message ChannelVersionInfo {

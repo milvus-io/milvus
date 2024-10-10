@@ -62,6 +62,9 @@ class SegmentSealedImpl : public SegmentSealed {
     DropFieldData(const FieldId field_id) override;
     bool
     HasIndex(FieldId field_id) const override;
+
+    bool
+    HasIndex(const std::string& nested_index) const override;
     bool
     HasFieldData(FieldId field_id) const override;
 
@@ -201,6 +204,9 @@ class SegmentSealedImpl : public SegmentSealed {
 
     const index::IndexBase*
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    const index::IndexBase*
+    chunk_index_impl(std::string path, int64_t chunk_id) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]],
     // where Vec is determined from field_offset
@@ -365,6 +371,8 @@ class SegmentSealedImpl : public SegmentSealed {
 
     // whether the segment is sorted by the pk
     bool is_sorted_by_pk_ = false;
+
+    std::unordered_map<std::string, index::IndexBasePtr> json_indexings_;
 };
 
 inline SegmentSealedUPtr

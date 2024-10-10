@@ -635,12 +635,18 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 	[]*datapb.FieldBinlog, // fields info
 	map[int64]*datapb.TextIndexStats, // text indexed info
 	map[int64]struct{}, // unindexed text fields
+	[]*querypb.FieldIndexInfo, // json indexes
 ) {
 	fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
+	jsonIndexes := make([]*querypb.FieldIndexInfo, 0)
 	for _, indexInfo := range loadInfo.IndexInfos {
 		if len(indexInfo.GetIndexFilePaths()) > 0 {
-			fieldID := indexInfo.FieldID
-			fieldID2IndexInfo[fieldID] = indexInfo
+			if indexInfo.IsJson {
+				jsonIndexes = append(jsonIndexes, indexInfo)
+			} else {
+				fieldID := indexInfo.FieldID
+				fieldID2IndexInfo[fieldID] = indexInfo
+			}
 		}
 	}
 
@@ -680,7 +686,7 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 		}
 	}
 
-	return indexedFieldInfos, fieldBinlogs, textIndexedInfo, unindexedTextFields
+	return indexedFieldInfos, fieldBinlogs, textIndexedInfo, unindexedTextFields, jsonIndexes
 }
 
 func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *querypb.SegmentLoadInfo, segment *LocalSegment) (err error) {
@@ -704,7 +710,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 
 	collection := segment.GetCollection()
 	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
-	indexedFieldInfos, fieldBinlogs, textIndexes, unindexedTextFields := separateLoadInfoV2(loadInfo, collection.Schema())
+	indexedFieldInfos, fieldBinlogs, textIndexes, unindexedTextFields, jsonIndexes := separateLoadInfoV2(loadInfo, collection.Schema())
 	if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
 		return err
 	}
@@ -717,6 +723,9 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		zap.Int64s("unindexed text fields", lo.Keys(unindexedTextFields)),
 	)
 	if err := loader.loadFieldsIndex(ctx, schemaHelper, segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
+		return err
+	}
+	if err := loader.loadJsonIndexes(ctx, segment, jsonIndexes); err != nil {
 		return err
 	}
 	loadFieldsIndexSpan := tr.RecordSpan()
@@ -961,6 +970,34 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 				return err
 			}
 		}
+	}
+
+	return nil
+}
+
+func (loader *segmentLoader) loadJsonIndexes(ctx context.Context,
+	segment *LocalSegment,
+	jsonIndexes []*querypb.FieldIndexInfo,
+) error {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", segment.Collection()),
+		zap.Int64("partitionID", segment.Partition()),
+		zap.Int64("segmentID", segment.ID()),
+	)
+
+	for _, fieldInfo := range jsonIndexes {
+		tr := timerecord.NewTimeRecorder("loadFieldIndex")
+		err := loader.loadFieldIndex(ctx, segment, fieldInfo)
+		loadFieldIndexSpan := tr.RecordSpan()
+		if err != nil {
+			return err
+		}
+
+		log.Info("load json field binlogs done for sealed segment with index",
+			zap.Int64("fieldID", fieldInfo.FieldID),
+			zap.Int32("current_index_version", fieldInfo.GetCurrentIndexVersion()),
+			zap.Duration("load_duration", loadFieldIndexSpan),
+		)
 	}
 
 	return nil
@@ -1475,14 +1512,18 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 				return merr.WrapErrIndexNotFound("index file list empty")
 			}
 
-			fieldInfo, ok := fieldInfos[info.GetFieldID()]
-			if !ok {
-				return merr.WrapErrParameterInvalid("index info with corresponding field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))
-			}
-			err := loader.loadFieldIndex(ctx, segment, info)
-			if err != nil {
-				log.Warn("failed to load index for segment", zap.Error(err))
-				return err
+			if info.IsJson {
+				loader.loadJsonIndexes(ctx, segment, []*querypb.FieldIndexInfo{info})
+			} else {
+				fieldInfo, ok := fieldInfos[info.GetFieldID()]
+				if !ok {
+					return merr.WrapErrParameterInvalid("index info with corresponding field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))
+				}
+				err := loader.loadFieldIndex(ctx, segment, info)
+				if err != nil {
+					log.Warn("failed to load index for segment", zap.Error(err))
+					return err
+				}
 			}
 		}
 		loader.notifyLoadFinish(loadInfo)

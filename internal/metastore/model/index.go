@@ -19,6 +19,7 @@ type Index struct {
 	IndexParams     []*commonpb.KeyValuePair
 	IsAutoIndex     bool
 	UserIndexParams []*commonpb.KeyValuePair
+	IsJson          bool
 }
 
 func UnmarshalIndexModel(indexInfo *indexpb.FieldIndex) *Index {
@@ -37,6 +38,7 @@ func UnmarshalIndexModel(indexInfo *indexpb.FieldIndex) *Index {
 		IndexParams:     indexInfo.IndexInfo.GetIndexParams(),
 		IsAutoIndex:     indexInfo.IndexInfo.GetIsAutoIndex(),
 		UserIndexParams: indexInfo.IndexInfo.GetUserIndexParams(),
+		IsJson:          indexInfo.IndexInfo.IsJson,
 	}
 }
 
@@ -55,6 +57,7 @@ func MarshalIndexModel(index *Index) *indexpb.FieldIndex {
 			IndexParams:     index.IndexParams,
 			IsAutoIndex:     index.IsAutoIndex,
 			UserIndexParams: index.UserIndexParams,
+			IsJson:          index.IsJson,
 		},
 		Deleted:    index.IsDeleted,
 		CreateTime: index.CreateTime,
@@ -124,6 +127,7 @@ func CloneIndex(index *Index) *Index {
 		IndexParams:     make([]*commonpb.KeyValuePair, len(index.IndexParams)),
 		IsAutoIndex:     index.IsAutoIndex,
 		UserIndexParams: make([]*commonpb.KeyValuePair, len(index.UserIndexParams)),
+		IsJson:          index.IsJson,
 	}
 	for i, param := range index.TypeParams {
 		clonedIndex.TypeParams[i] = proto.Clone(param).(*commonpb.KeyValuePair)

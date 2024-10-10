@@ -158,8 +158,15 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb.IndexInfo) (fieldIDs []int64) {
 	var result []int64
 	for _, indexInfo := range indexInfos {
-		fieldID, indexID := indexInfo.FieldID, indexInfo.IndexID
-		info, ok := segment.IndexInfo[fieldID]
+		fieldID, indexID, isJson := indexInfo.FieldID, indexInfo.IndexID, indexInfo.IsJson
+		// check json index first
+		var info *querypb.FieldIndexInfo
+		var ok bool
+		if isJson {
+			info, ok = segment.JsonIndexInfo[indexID]
+		} else {
+			info, ok = segment.IndexInfo[fieldID]
+		}
 		if !ok {
 			result = append(result, fieldID)
 			continue

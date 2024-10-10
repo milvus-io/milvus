@@ -155,6 +155,7 @@ func (dh *distHandler) updateSegmentsDistribution(resp *querypb.GetDataDistribut
 			Version:            s.GetVersion(),
 			LastDeltaTimestamp: s.GetLastDeltaTimestamp(),
 			IndexInfo:          s.GetIndexInfo(),
+			JsonIndexInfo:      s.GetJsonIndex(),
 		})
 	}
 
