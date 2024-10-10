@@ -118,9 +118,10 @@ func (t *mixCompactionTask) preCompact() error {
 	outputSegmentCount := int64(math.Ceil(float64(currSize) / float64(t.targetSize)))
 	log.Info("preCompaction analyze",
 		zap.Int64("planID", t.GetPlanID()),
-		zap.Int64("currSize", currSize),
+		zap.Int64("inputSize", currSize),
 		zap.Int64("targetSize", t.targetSize),
-		zap.Int64("estimatedSegmentCount", outputSegmentCount),
+		zap.Int("inputSegmentCount", len(t.plan.GetSegmentBinlogs())),
+		zap.Int64("estimatedOutputSegmentCount", outputSegmentCount),
 	)
 
 	return nil
