@@ -43,7 +43,7 @@ const (
 	GrantPrivilegeAction  = "grant_privilege"
 	RevokePrivilegeAction = "revoke_privilege"
 	AlterAction           = "alter"
-	GetProgressAction     = "get_progress"
+	GetProgressAction     = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
 )
 
 const (
