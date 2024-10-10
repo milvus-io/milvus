@@ -1,6 +1,7 @@
 package balance
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"sort"
@@ -467,12 +468,22 @@ type MultiTargetBalancer struct {
 	targetMgr meta.TargetManagerInterface
 }
 
-func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) (segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan) {
 	log := log.With(
 		zap.Int64("collection", replica.GetCollectionID()),
 		zap.Int64("replica id", replica.GetID()),
 		zap.String("replica group", replica.GetResourceGroup()),
 	)
+	br := NewBalanceReport()
+	defer func() {
+		if len(segmentPlans) == 0 && len(channelPlans) == 0 {
+			log.WithRateGroup(fmt.Sprintf("scorebasedbalance-noplan-%d", replica.GetID()), 1, 60).
+				RatedDebug(60, "no plan generated, balance report", zap.Stringers("records", br.detailRecords))
+		} else {
+			log.Info("balance plan generated", zap.Stringers("report details", br.records))
+		}
+	}()
+
 	if replica.NodesCount() == 0 {
 		return nil, nil
 	}
@@ -486,7 +497,7 @@ func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAs
 	}
 
 	// print current distribution before generating plans
-	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
+	segmentPlans, channelPlans = make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
 	if len(roNodes) != 0 {
 		if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
 			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
@@ -504,7 +515,7 @@ func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAs
 		}
 	} else {
 		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
-			channelPlans = append(channelPlans, b.genChannelPlan(replica, rwNodes)...)
+			channelPlans = append(channelPlans, b.genChannelPlan(br, replica, rwNodes)...)
 		}
 
 		if len(channelPlans) == 0 {
