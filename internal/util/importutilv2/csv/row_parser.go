@@ -160,79 +160,55 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]string, row Row) 
 
 func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, error) {
 	nullable := field.GetNullable()
+	if nullable && obj == r.nullkey {
+		return r.parseNullableEntity(field)
+	}
 	switch field.GetDataType() {
 	case schemapb.DataType_Bool:
-		if nullable && obj == r.nullkey {
-			return nil, nil
-		}
 		b, err := strconv.ParseBool(obj)
 		if err != nil {
 			return false, r.wrapTypeError(obj, field)
 		}
 		return b, nil
 	case schemapb.DataType_Int8:
-		if nullable && obj == r.nullkey {
-			return nil, nil
-		}
 		num, err := strconv.ParseInt(obj, 10, 8)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return int8(num), nil
 	case schemapb.DataType_Int16:
-		if nullable && obj == r.nullkey {
-			return nil, nil
-		}
 		num, err := strconv.ParseInt(obj, 10, 16)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return int16(num), nil
 	case schemapb.DataType_Int32:
-		if nullable && obj == r.nullkey {
-			return nil, nil
-		}
 		num, err := strconv.ParseInt(obj, 10, 32)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return int32(num), nil
 	case schemapb.DataType_Int64:
-		if nullable && obj == r.nullkey {
-			return nil, nil
-		}
 		num, err := strconv.ParseInt(obj, 10, 64)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return num, nil
 	case schemapb.DataType_Float:
-		if nullable && obj == r.nullkey {
-			return nil, nil
-		}
 		num, err := strconv.ParseFloat(obj, 32)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return float32(num), typeutil.VerifyFloats32([]float32{float32(num)})
 	case schemapb.DataType_Double:
-		if nullable && obj == r.nullkey {
-			return nil, nil
-		}
 		num, err := strconv.ParseFloat(obj, 64)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return num, typeutil.VerifyFloats64([]float64{num})
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		if nullable && obj == r.nullkey {
-			return nil, nil
-		}
 		return obj, nil
 	case schemapb.DataType_BinaryVector:
-		if nullable && obj == r.nullkey {
-			return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
-		}
 		var vec []byte
 		err := json.Unmarshal([]byte(obj), &vec)
 		if err != nil {
@@ -243,9 +219,6 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		}
 		return vec, nil
 	case schemapb.DataType_JSON:
-		if nullable && obj == r.nullkey {
-			return nil, nil
-		}
 		var data interface{}
 		err := json.Unmarshal([]byte(obj), &data)
 		if err != nil {
@@ -253,77 +226,80 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		}
 		return []byte(obj), nil
 	case schemapb.DataType_FloatVector:
-		if nullable && obj == r.nullkey {
-			return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
-		}
-		var vec []float32
-		err := json.Unmarshal([]byte(obj), &vec)
+		arr, err := r.parseJSONArray(obj)
 		if err != nil {
 			return nil, r.wrapTypeError(obj, field)
 		}
-		if len(vec) != r.name2Dim[field.GetName()] {
-			return nil, r.wrapDimError(len(vec), field)
+		if len(arr) != r.name2Dim[field.GetName()] {
+			return nil, r.wrapDimError(len(arr), field)
+		}
+		vec := make([]float32, len(arr))
+		for i := 0; i < len(arr); i++ {
+			value, ok := arr[i].(json.Number)
+			if !ok {
+				return nil, r.wrapTypeError(arr[i], field)
+			}
+			num, err := strconv.ParseFloat(value.String(), 32)
+			if err != nil {
+				return nil, err
+			}
+			vec[i] = float32(num)
 		}
 		return vec, typeutil.VerifyFloats32(vec)
 	case schemapb.DataType_Float16Vector:
-		if nullable && obj == r.nullkey {
-			return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
-		}
-		var vec []float32
-		err := json.Unmarshal([]byte(obj), &vec)
+		arr, err := r.parseJSONArray(obj)
 		if err != nil {
 			return nil, r.wrapTypeError(obj, field)
 		}
-		if len(vec) != r.name2Dim[field.GetName()] {
-			return nil, r.wrapDimError(len(vec), field)
+		if len(arr) != r.name2Dim[field.GetName()] {
+			return nil, r.wrapDimError(len(arr), field)
 		}
-		vec2 := make([]byte, len(vec)*2)
-		for i := 0; i < len(vec); i++ {
-			copy(vec2[i*2:], typeutil.Float32ToFloat16Bytes(vec[i]))
+		vec := make([]byte, len(arr)*2)
+		for i := 0; i < len(arr); i++ {
+			value, ok := arr[i].(json.Number)
+			if !ok {
+				return nil, r.wrapTypeError(arr[i], field)
+			}
+			num, err := strconv.ParseFloat(value.String(), 32)
+			if err != nil {
+				return nil, err
+			}
+			copy(vec[i*2:], typeutil.Float32ToFloat16Bytes(float32(num)))
 		}
-		return vec2, typeutil.VerifyFloats16(vec2)
+		return vec, typeutil.VerifyFloats16(vec)
 	case schemapb.DataType_BFloat16Vector:
-		if nullable && obj == r.nullkey {
-			return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
-		}
-		var vec []float32
-		err := json.Unmarshal([]byte(obj), &vec)
+		arr, err := r.parseJSONArray(obj)
 		if err != nil {
 			return nil, r.wrapTypeError(obj, field)
 		}
-		if len(vec) != r.name2Dim[field.GetName()] {
-			return nil, r.wrapDimError(len(vec), field)
+		if len(arr) != r.name2Dim[field.GetName()] {
+			return nil, r.wrapDimError(len(arr), field)
 		}
-		vec2 := make([]byte, len(vec)*2)
-		for i := 0; i < len(vec); i++ {
-			copy(vec2[i*2:], typeutil.Float32ToBFloat16Bytes(vec[i]))
+		vec := make([]byte, len(arr)*2)
+		for i := 0; i < len(arr); i++ {
+			value, ok := arr[i].(json.Number)
+			if !ok {
+				return nil, r.wrapTypeError(arr[i], field)
+			}
+			num, err := strconv.ParseFloat(value.String(), 32)
+			if err != nil {
+				return nil, err
+			}
+			copy(vec[i*2:], typeutil.Float32ToBFloat16Bytes(float32(num)))
 		}
-		return vec2, typeutil.VerifyBFloats16(vec2)
+		return vec, typeutil.VerifyFloats16(vec)
 	case schemapb.DataType_SparseFloatVector:
-		if nullable && obj == r.nullkey {
-			return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
-		}
-		// use dec.UseNumber() to avoid float64 precision loss
-		var vec map[string]interface{}
-		dec := json.NewDecoder(strings.NewReader(obj))
-		dec.UseNumber()
-		err := dec.Decode(&vec)
+		arr, err := r.parseJSONMap(obj)
 		if err != nil {
 			return nil, r.wrapTypeError(obj, field)
 		}
-		vec2, err := typeutil.CreateSparseFloatRowFromMap(vec)
+		vec, err := typeutil.CreateSparseFloatRowFromMap(arr)
 		if err != nil {
 			return nil, err
 		}
-		return vec2, nil
+		return vec, nil
 	case schemapb.DataType_Array:
-		if nullable && obj == r.nullkey {
-			return nil, nil
-		}
-		var vec []interface{}
-		desc := json.NewDecoder(strings.NewReader(obj))
-		desc.UseNumber()
-		err := desc.Decode(&vec)
+		vec, err := r.parseJSONArray(obj)
 		if err != nil {
 			return nil, r.wrapTypeError(obj, field)
 		}
@@ -463,6 +439,40 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, eleType schemapb.DataTyp
 	default:
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("parse csv failed, unsupported data type: %s", eleType.String()))
 	}
+}
+
+func (r *rowParser) parseNullableEntity(field *schemapb.FieldSchema) (any, error) {
+	switch field.GetDataType() {
+	case schemapb.DataType_BinaryVector:
+	case schemapb.DataType_FloatVector:
+	case schemapb.DataType_Float16Vector:
+	case schemapb.DataType_BFloat16Vector:
+	case schemapb.DataType_SparseFloatVector:
+		return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+	}
+	return nil, nil
+}
+
+func (r *rowParser) parseJSONArray(obj string) ([]interface{}, error) {
+	var data []interface{}
+	desc := json.NewDecoder(strings.NewReader(obj))
+	desc.UseNumber()
+	err := desc.Decode(&data)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (r *rowParser) parseJSONMap(obj string) (map[string]interface{}, error) {
+	var data map[string]interface{}
+	desc := json.NewDecoder(strings.NewReader(obj))
+	desc.UseNumber()
+	err := desc.Decode(&data)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func (r *rowParser) wrapTypeError(v any, field *schemapb.FieldSchema) error {
