@@ -32,8 +32,6 @@ class ChunkVectorBase {
     get_chunk_data(int64_t index) = 0;
     virtual int64_t
     get_chunk_size(int64_t index) = 0;
-    virtual Type
-    get_element(int64_t chunk_id, int64_t chunk_offset) = 0;
     virtual int64_t
     get_element_size() = 0;
     virtual int64_t
@@ -103,23 +101,6 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
             std::copy_n(data, length, ptr + offset);
         } else {
             vec_[chunk_id].set(data, offset, length);
-        }
-    }
-
-    Type
-    get_element(int64_t chunk_id, int64_t chunk_offset) override {
-        std::shared_lock<std::shared_mutex> lck(mutex_);
-        auto chunk = vec_[chunk_id];
-        AssertInfo(
-            chunk_id < this->counter_ && chunk_offset < chunk.size(),
-            fmt::format("index out of range, index={}, chunk_offset={}, cap={}",
-                        chunk_id,
-                        chunk_offset,
-                        chunk.size()));
-        if constexpr (IsMmap) {
-            return chunk.get(chunk_offset);
-        } else {
-            return chunk[chunk_offset];
         }
     }
 
@@ -229,7 +210,6 @@ SelectChunkVectorPtr(storage::MmapChunkDescriptorPtr& mmap_descriptor) {
             return std::make_unique<ThreadSafeChunkVector<Type>>();
         }
     } else {
-        // todo: sparse float vector support mmap
         return std::make_unique<ThreadSafeChunkVector<Type>>();
     }
 }
