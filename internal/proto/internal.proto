@@ -124,6 +124,7 @@ message SearchRequest {
   common.ConsistencyLevel consistency_level = 22;
   int64 group_by_field_id = 23;
   int64 group_size = 24;
+  bool is_topk_reduce = 25;
 }
 
 message SubSearchResults {
@@ -159,6 +160,7 @@ message SearchResults {
   repeated SubSearchResults sub_results = 15;
   bool is_advanced = 16;
   int64 all_search_count = 17;
+  bool is_topk_reduce = 18;
 }
 
 message CostAggregation {

@@ -62,6 +62,8 @@ type searchTask struct {
 	partitionKeyMode       bool
 	enableMaterializedView bool
 	mustUsePartitionKey    bool
+	resultSizeInsufficient bool
+	isTopkReduce           bool
 
 	userOutputFields  []string
 	userDynamicFields []string
@@ -633,7 +635,11 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 
 	t.queryChannelsTs = make(map[string]uint64)
 	t.relatedDataSize = 0
+	isTopkReduce := false
 	for _, r := range toReduceResults {
+		if r.GetIsTopkReduce() {
+			isTopkReduce = true
+		}
 		t.relatedDataSize += r.GetCostAggregation().GetTotalRelatedDataSize()
 		for ch, ts := range r.GetChannelsMvcc() {
 			t.queryChannelsTs[ch] = ts
@@ -646,6 +652,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
+	// reduce
 	if t.SearchRequest.GetIsAdvanced() {
 		multipleInternalResults := make([][]*internalpb.SearchResults, len(t.SearchRequest.GetSubReqs()))
 		for _, searchResult := range toReduceResults {
@@ -702,6 +709,17 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		}
 	}
 
+	// reduce done, get final result
+	limit := t.SearchRequest.GetTopk() - t.SearchRequest.GetOffset()
+	resultSizeInsufficient := false
+	for _, topk := range t.result.Results.Topks {
+		if topk < limit {
+			resultSizeInsufficient = true
+			break
+		}
+	}
+	t.resultSizeInsufficient = resultSizeInsufficient
+	t.isTopkReduce = isTopkReduce
 	t.result.CollectionName = t.collectionName
 	t.fillInFieldInfo()
 
