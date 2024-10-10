@@ -41,7 +41,7 @@ func Hash32Bytes(b []byte) (uint32, error) {
 	return h.Sum32() & 0x7fffffff, nil
 }
 
-// Hash32Uint64 hashing an uint64 nubmer to uint32
+// Hash32Uint64 hashing an uint64 number to uint32
 func Hash32Uint64(v uint64) (uint32, error) {
 	// need unsafe package to get element byte size
 	/* #nosec G103 */
@@ -97,6 +97,35 @@ func HashPK2Channels(primaryKeys *schemapb.IDs, shardNames []string) []uint32 {
 	}
 
 	return hashValues
+}
+
+// HashPK2ShardID hash primary keys to ShardID
+func HashPK2ShardID(keys *schemapb.FieldData, numShard uint32) ([]uint32, error) {
+	var hashValues []uint32
+	switch keys.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		scalarField := keys.GetScalars()
+		switch scalarField.Data.(type) {
+		case *schemapb.ScalarField_LongData:
+			longKeys := scalarField.GetLongData().Data
+			for _, key := range longKeys {
+				value, _ := Hash32Int64(key)
+				hashValues = append(hashValues, value%numShard)
+			}
+		case *schemapb.ScalarField_StringData:
+			stringKeys := scalarField.GetStringData().Data
+			for _, key := range stringKeys {
+				value := HashString2Uint32(key)
+				hashValues = append(hashValues, value%numShard)
+			}
+		default:
+			return nil, errors.New("currently only support DataType Int64 or VarChar field")
+		}
+	default:
+		return nil, errors.New("currently not support vector field")
+	}
+
+	return hashValues, nil
 }
 
 // HashKey2Partitions hash partition keys to partitions
