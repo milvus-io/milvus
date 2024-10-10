@@ -75,7 +75,7 @@ func newEmbeddingNode(collectionID int64, channelName string, manager *DataManag
 }
 
 func (eNode *embeddingNode) Name() string {
-	return fmt.Sprintf("embeddingNode-%s-%s", "BM25test", eNode.channel)
+	return fmt.Sprintf("embeddingNode-%s", eNode.channel)
 }
 
 func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, collection *Collection) error {
@@ -101,7 +101,7 @@ func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.In
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.Schema(), msg)
 	if err != nil {
 		err = fmt.Errorf("failed to get primary keys, err = %d", err)
-		log.Error(err.Error(), zap.Int64("collectionID", eNode.collectionID), zap.String("channel", eNode.channel))
+		log.Error(err.Error(), zap.String("channel", eNode.channel))
 		return err
 	}
 
@@ -110,7 +110,7 @@ func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.In
 	} else {
 		err := typeutil.MergeFieldData(iData.InsertRecord.FieldsData, insertRecord.FieldsData)
 		if err != nil {
-			log.Error("failed to merge field data", zap.Error(err))
+			log.Warn("failed to merge field data", zap.String("channel", eNode.channel), zap.Error(err))
 			return err
 		}
 		iData.InsertRecord.NumRows += insertRecord.NumRows
@@ -118,7 +118,7 @@ func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.In
 
 	pks, err := segments.GetPrimaryKeys(msg, collection.Schema())
 	if err != nil {
-		log.Error("failed to get primary keys from insert message", zap.Error(err))
+		log.Warn("failed to get primary keys from insert message", zap.String("channel", eNode.channel), zap.Error(err))
 		return err
 	}
 

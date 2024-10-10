@@ -62,7 +62,7 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 	} else {
 		err := typeutil.MergeFieldData(iData.InsertRecord.FieldsData, insertRecord.FieldsData)
 		if err != nil {
-			log.Error("failed to merge field data", zap.Error(err))
+			log.Error("failed to merge field data", zap.String("channel", iNode.channel), zap.Error(err))
 			panic(err)
 		}
 		iData.InsertRecord.NumRows += insertRecord.NumRows

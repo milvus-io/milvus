@@ -73,7 +73,7 @@ func newEmbeddingNode(channelName string, schema *schemapb.CollectionSchema) (*e
 }
 
 func (eNode *embeddingNode) Name() string {
-	return fmt.Sprintf("embeddingNode-%s-%s", "BM25test", eNode.channelName)
+	return fmt.Sprintf("embeddingNode-%s", eNode.channelName)
 }
 
 func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, inputFieldId, outputFieldId int64, data *storage.InsertData, meta map[int64]*storage.BM25Stats) error {

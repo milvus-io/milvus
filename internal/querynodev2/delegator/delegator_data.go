@@ -997,6 +997,11 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, error) {
 	pb := &commonpb.PlaceholderGroup{}
 	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
+
+	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) != 1 {
+		return 0, merr.WrapErrParameterInvalidMsg("please provide varchar for bm25")
+	}
+
 	holder := pb.Placeholders[0]
 	if holder.Type != commonpb.PlaceholderType_VarChar {
 		return 0, fmt.Errorf("can't build BM25 IDF for data not varchar")

@@ -301,7 +301,7 @@ func NewCollectionWithoutSchema(collectionID int64, loadType querypb.LoadType) *
 
 // new collection without segcore prepare
 // ONLY FOR TEST
-func NewCollectionWithoutSegcore(collectionID int64, schema *schemapb.CollectionSchema) *Collection {
+func NewCollectionWithoutSegcoreForTest(collectionID int64, schema *schemapb.CollectionSchema) *Collection {
 	coll := &Collection{
 		id:         collectionID,
 		partitions: typeutil.NewConcurrentSet[int64](),
