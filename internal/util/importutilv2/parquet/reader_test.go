@@ -146,6 +146,24 @@ func (s *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType
 			},
 		},
 	}
+	if dataType == schemapb.DataType_VarChar {
+		// Add a BM25 function if data type is VarChar
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:          103,
+			Name:             "sparse",
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+		schema.Functions = append(schema.Functions, &schemapb.FunctionSchema{
+			Id:               1000,
+			Name:             "bm25",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldIds:    []int64{102},
+			InputFieldNames:  []string{dataType.String()},
+			OutputFieldIds:   []int64{103},
+			OutputFieldNames: []string{"sparse"},
+		})
+	}
 
 	filePath := fmt.Sprintf("/tmp/test_%d_reader.parquet", rand.Int())
 	defer os.Remove(filePath)

@@ -62,20 +62,17 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 	if err != nil {
 		return nil, err
 	}
+	dynamicField := typeutil.GetDynamicField(schema)
 
-	name2FieldID := lo.SliceToMap(schema.GetFields(),
+	name2FieldID := lo.SliceToMap(
+		lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+			return !field.GetIsFunctionOutput() && !typeutil.IsAutoPKField(field) && field.GetName() != dynamicField.GetName()
+		}),
 		func(field *schemapb.FieldSchema) (string, int64) {
 			return field.GetName(), field.GetFieldID()
-		})
+		},
+	)
 
-	if pkField.GetAutoID() {
-		delete(name2FieldID, pkField.GetName())
-	}
-
-	dynamicField := typeutil.GetDynamicField(schema)
-	if dynamicField != nil {
-		delete(name2FieldID, dynamicField.GetName())
-	}
 	return &rowParser{
 		id2Dim:       id2Dim,
 		id2Field:     id2Field,
