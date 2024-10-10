@@ -24,7 +24,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 #include "storage/ChunkCache.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/local/LocalChunkManagerSingleton.h"
 
 #define DEFAULT_READ_AHEAD_POLICY "willneed"
 class ChunkCacheTest : public testing::TestWithParam</*mmap enabled*/ bool> {

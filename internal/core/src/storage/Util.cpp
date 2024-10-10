@@ -27,7 +27,7 @@
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #ifdef AZURE_BUILD_DIR
-#include "storage/azure/AzureChunkManager.h"
+#include "storage/azure-blob-storage/AzureChunkManager.h"
 #endif
 #ifdef ENABLE_GCP_NATIVE
 #include "storage/gcp-native-storage/GcpNativeChunkManager.h"
@@ -35,9 +35,9 @@
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/InsertData.h"
-#include "storage/LocalChunkManager.h"
+#include "storage/local/LocalChunkManager.h"
 #include "storage/MemFileManagerImpl.h"
-#include "storage/MinioChunkManager.h"
+#include "storage/minio/MinioChunkManager.h"
 #ifdef USE_OPENDAL
 #include "storage/opendal/OpenDALChunkManager.h"
 #endif
