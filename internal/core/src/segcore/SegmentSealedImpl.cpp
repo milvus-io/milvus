@@ -198,8 +198,10 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                 if (!is_sorted_by_pk_ && insert_record_.empty_pks() &&
                     int64_index->HasRawData()) {
                     for (int i = 0; i < row_count; ++i) {
-                        insert_record_.insert_pk(int64_index->Reverse_Lookup(i),
-                                                 i);
+                        AssertInfo(int64_index->Reverse_Lookup(i).has_value(),
+                                   "Primary key not found");
+                        insert_record_.insert_pk(
+                            int64_index->Reverse_Lookup(i).value(), i);
                     }
                     insert_record_.seal_pks();
                 }
@@ -212,8 +214,10 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                 if (!is_sorted_by_pk_ && insert_record_.empty_pks() &&
                     string_index->HasRawData()) {
                     for (int i = 0; i < row_count; ++i) {
+                        AssertInfo(string_index->Reverse_Lookup(i).has_value(),
+                                   "Primary key not found");
                         insert_record_.insert_pk(
-                            string_index->Reverse_Lookup(i), i);
+                            string_index->Reverse_Lookup(i).value(), i);
                     }
                     insert_record_.seal_pks();
                 }
@@ -2075,7 +2079,11 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
                        "converted to string index");
             auto n = impl->Size();
             for (size_t i = 0; i < n; i++) {
-                index->AddText(impl->Reverse_Lookup(i), i);
+                auto value = impl->Reverse_Lookup(i);
+                if (!value.has_value()) {
+                    continue;
+                }
+                index->AddText(impl->Reverse_Lookup(i).value(), i);
             }
         }
     }

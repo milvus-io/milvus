@@ -45,6 +45,10 @@ PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
                   "unsupported logical operator: {}",
                   expr_->GetOpTypeString());
     }
+    TargetBitmapView lvalid_view(lflat->GetValidRawData(), size);
+    TargetBitmapView rvalid_view(rflat->GetValidRawData(), size);
+    LogicalElementFunc<LogicalOpType::Or> func;
+    func(lvalid_view, rvalid_view, size);
     result = std::move(left);
 }
 

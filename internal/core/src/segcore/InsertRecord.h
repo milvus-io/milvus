@@ -315,7 +315,9 @@ class ThreadSafeValidData {
                 data_.resize(length_ + num_rows);
             }
             auto src = data->valid_data().data();
-            std::copy_n(src, num_rows, data_.data() + length_);
+            for (size_t i = 0; i < num_rows; i++) {
+                data_[length_ + i] = src[i];
+            }
             length_ += num_rows;
         }
     }

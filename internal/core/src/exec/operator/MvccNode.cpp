@@ -52,12 +52,13 @@ PhyMvccNode::GetOutput() {
         return nullptr;
     }
 
-    auto col_input =
-        is_source_node_
-            ? std::make_shared<ColumnVector>(TargetBitmap(active_count_))
-            : GetColumnVector(input_);
+    auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
+                                           TargetBitmap(active_count_),
+                                           TargetBitmap(active_count_))
+                                     : GetColumnVector(input_);
 
     TargetBitmapView data(col_input->GetRawData(), col_input->size());
+    // need to expose null?
     segment_->mask_with_timestamps(data, query_timestamp_);
     segment_->mask_with_delete(data, active_count_, query_timestamp_);
     is_finished_ = true;

@@ -19,6 +19,7 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -118,7 +119,9 @@ StringIndexMarisa::BuildWithFieldData(
 }
 
 void
-StringIndexMarisa::Build(size_t n, const std::string* values) {
+StringIndexMarisa::Build(size_t n,
+                         const std::string* values,
+                         const bool* valid_data) {
     if (built_) {
         PanicInfo(IndexAlreadyBuild, "index has been built");
     }
@@ -127,12 +130,14 @@ StringIndexMarisa::Build(size_t n, const std::string* values) {
     {
         // fill key set.
         for (size_t i = 0; i < n; i++) {
-            keyset.push_back(values[i].c_str());
+            if (!valid_data || valid_data[i]) {
+                keyset.push_back(values[i].c_str());
+            }
         }
     }
 
     trie_.build(keyset, MARISA_LABEL_ORDER);
-    fill_str_ids(n, values);
+    fill_str_ids(n, values, valid_data);
     fill_offsets();
 
     built_ = true;
@@ -213,7 +218,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
 
     auto str_ids = set.GetByName(MARISA_STR_IDS);
     auto str_ids_len = str_ids->size;
-    str_ids_.resize(str_ids_len / sizeof(size_t));
+    str_ids_.resize(str_ids_len / sizeof(size_t), MARISA_NULL_KEY_ID);
     memcpy(str_ids_.data(), str_ids->data.get(), str_ids_len);
 
     fill_offsets();
@@ -491,9 +496,14 @@ StringIndexMarisa::PrefixMatch(std::string_view prefix) {
 }
 
 void
-StringIndexMarisa::fill_str_ids(size_t n, const std::string* values) {
-    str_ids_.resize(n);
+StringIndexMarisa::fill_str_ids(size_t n,
+                                const std::string* values,
+                                const bool* valid_data) {
+    str_ids_.resize(n, MARISA_NULL_KEY_ID);
     for (size_t i = 0; i < n; i++) {
+        if (valid_data && !valid_data[i]) {
+            continue;
+        }
         auto str = values[i];
         auto str_id = lookup(str);
         AssertInfo(valid_str_id(str_id), "invalid marisa key");
@@ -534,11 +544,13 @@ StringIndexMarisa::prefix_match(const std::string_view prefix) {
     }
     return ret;
 }
-
-std::string
+std::optional<std::string>
 StringIndexMarisa::Reverse_Lookup(size_t offset) const {
     AssertInfo(offset < str_ids_.size(), "out of range of total count");
     marisa::Agent agent;
+    if (str_ids_[offset] < 0) {
+        return std::nullopt;
+    }
     agent.set_query(str_ids_[offset]);
     trie_.reverse_lookup(agent);
     return std::string(agent.key().ptr(), agent.key().length());

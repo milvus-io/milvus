@@ -97,10 +97,12 @@ struct ArithOpElementFunc {
         HighPrecisonType;
     void
     operator()(const T* src,
+               const bool* valid_data,
                size_t size,
                HighPrecisonType val,
                HighPrecisonType right_operand,
-               TargetBitmapView res) {
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
         /*
         // This is the original code, kept here for the documentation purposes
         for (int i = 0; i < size; ++i) {
@@ -239,28 +241,59 @@ struct ArithOpElementFunc {
             }
         }
         */
-
-        if constexpr (!std::is_same_v<decltype(CmpOpHelper<cmp_op>::op),
-                                      void>) {
-            constexpr auto cmp_op_cvt = CmpOpHelper<cmp_op>::op;
-            if constexpr (!std::is_same_v<decltype(ArithOpHelper<arith_op>::op),
-                                          void>) {
-                constexpr auto arith_op_cvt = ArithOpHelper<arith_op>::op;
-
-                res.inplace_arith_compare<T, arith_op_cvt, cmp_op_cvt>(
-                    src, right_operand, val, size);
-            } else {
-                PanicInfo(
-                    OpTypeInvalid,
-                    fmt::format(
-                        "unsupported arith type:{} for ArithOpElementFunc",
-                        arith_op));
+        auto execute_sub_batch = [](const T* src,
+                                    size_t size,
+                                    HighPrecisonType val,
+                                    HighPrecisonType right_operand,
+                                    TargetBitmapView res) {
+            if (size == 0) {
+                return;
             }
-        } else {
-            PanicInfo(
-                OpTypeInvalid,
-                fmt::format("unsupported cmp type:{} for ArithOpElementFunc",
-                            cmp_op));
+            if constexpr (!std::is_same_v<decltype(CmpOpHelper<cmp_op>::op),
+                                          void>) {
+                constexpr auto cmp_op_cvt = CmpOpHelper<cmp_op>::op;
+                if constexpr (!std::is_same_v<
+                                  decltype(ArithOpHelper<arith_op>::op),
+                                  void>) {
+                    constexpr auto arith_op_cvt = ArithOpHelper<arith_op>::op;
+
+                    res.inplace_arith_compare<T, arith_op_cvt, cmp_op_cvt>(
+                        src, right_operand, val, size);
+                } else {
+                    PanicInfo(
+                        OpTypeInvalid,
+                        fmt::format(
+                            "unsupported arith type:{} for ArithOpElementFunc",
+                            arith_op));
+                }
+            } else {
+                PanicInfo(OpTypeInvalid,
+                          fmt::format(
+                              "unsupported cmp type:{} for ArithOpElementFunc",
+                              cmp_op));
+            }
+        };
+        if (valid_data == nullptr) {
+            return execute_sub_batch(src, size, val, right_operand, res);
+        }
+        for (int left = 0; left < size; left++) {
+            for (int right = left; right < size; right++) {
+                if (valid_data[right]) {
+                    if (right == size - 1) {
+                        execute_sub_batch(src + left,
+                                          right - left,
+                                          val,
+                                          right_operand,
+                                          res + left);
+                    }
+                    continue;
+                }
+                valid_res[right] = false;
+                execute_sub_batch(
+                    src + left, right - left, val, right_operand, res + left);
+                left = right;
+                break;
+            }
         }
     }
 };
@@ -282,22 +315,30 @@ struct ArithOpIndexFunc {
                HighPrecisonType right_operand) {
         TargetBitmap res(size);
         for (size_t i = 0; i < size; ++i) {
+            if (!index->Reverse_Lookup(i).has_value()) {
+                res[i] = false;
+                continue;
+            }
             if constexpr (cmp_op == proto::plan::OpType::Equal) {
                 if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                    res[i] = (index->Reverse_Lookup(i) + right_operand) == val;
+                    res[i] = (index->Reverse_Lookup(i).value() +
+                              right_operand) == val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Sub) {
-                    res[i] = (index->Reverse_Lookup(i) - right_operand) == val;
+                    res[i] = (index->Reverse_Lookup(i).value() -
+                              right_operand) == val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Mul) {
-                    res[i] = (index->Reverse_Lookup(i) * right_operand) == val;
+                    res[i] = (index->Reverse_Lookup(i).value() *
+                              right_operand) == val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Div) {
-                    res[i] = (index->Reverse_Lookup(i) / right_operand) == val;
+                    res[i] = (index->Reverse_Lookup(i).value() /
+                              right_operand) == val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Mod) {
-                    res[i] =
-                        (fmod(index->Reverse_Lookup(i), right_operand)) == val;
+                    res[i] = (fmod(index->Reverse_Lookup(i).value(),
+                                   right_operand)) == val;
                 } else {
                     PanicInfo(
                         OpTypeInvalid,
@@ -307,20 +348,24 @@ struct ArithOpIndexFunc {
                 }
             } else if constexpr (cmp_op == proto::plan::OpType::NotEqual) {
                 if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                    res[i] = (index->Reverse_Lookup(i) + right_operand) != val;
+                    res[i] = (index->Reverse_Lookup(i).value() +
+                              right_operand) != val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Sub) {
-                    res[i] = (index->Reverse_Lookup(i) - right_operand) != val;
+                    res[i] = (index->Reverse_Lookup(i).value() -
+                              right_operand) != val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Mul) {
-                    res[i] = (index->Reverse_Lookup(i) * right_operand) != val;
+                    res[i] = (index->Reverse_Lookup(i).value() *
+                              right_operand) != val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Div) {
-                    res[i] = (index->Reverse_Lookup(i) / right_operand) != val;
+                    res[i] = (index->Reverse_Lookup(i).value() /
+                              right_operand) != val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Mod) {
-                    res[i] =
-                        (fmod(index->Reverse_Lookup(i), right_operand)) != val;
+                    res[i] = (fmod(index->Reverse_Lookup(i).value(),
+                                   right_operand)) != val;
                 } else {
                     PanicInfo(
                         OpTypeInvalid,
@@ -330,20 +375,24 @@ struct ArithOpIndexFunc {
                 }
             } else if constexpr (cmp_op == proto::plan::OpType::GreaterThan) {
                 if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                    res[i] = (index->Reverse_Lookup(i) + right_operand) > val;
+                    res[i] = (index->Reverse_Lookup(i).value() +
+                              right_operand) > val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Sub) {
-                    res[i] = (index->Reverse_Lookup(i) - right_operand) > val;
+                    res[i] = (index->Reverse_Lookup(i).value() -
+                              right_operand) > val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Mul) {
-                    res[i] = (index->Reverse_Lookup(i) * right_operand) > val;
+                    res[i] = (index->Reverse_Lookup(i).value() *
+                              right_operand) > val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Div) {
-                    res[i] = (index->Reverse_Lookup(i) / right_operand) > val;
+                    res[i] = (index->Reverse_Lookup(i).value() /
+                              right_operand) > val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Mod) {
-                    res[i] =
-                        (fmod(index->Reverse_Lookup(i), right_operand)) > val;
+                    res[i] = (fmod(index->Reverse_Lookup(i).value(),
+                                   right_operand)) > val;
                 } else {
                     PanicInfo(
                         OpTypeInvalid,
@@ -353,20 +402,24 @@ struct ArithOpIndexFunc {
                 }
             } else if constexpr (cmp_op == proto::plan::OpType::GreaterEqual) {
                 if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                    res[i] = (index->Reverse_Lookup(i) + right_operand) >= val;
+                    res[i] = (index->Reverse_Lookup(i).value() +
+                              right_operand) >= val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Sub) {
-                    res[i] = (index->Reverse_Lookup(i) - right_operand) >= val;
+                    res[i] = (index->Reverse_Lookup(i).value() -
+                              right_operand) >= val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Mul) {
-                    res[i] = (index->Reverse_Lookup(i) * right_operand) >= val;
+                    res[i] = (index->Reverse_Lookup(i).value() *
+                              right_operand) >= val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Div) {
-                    res[i] = (index->Reverse_Lookup(i) / right_operand) >= val;
+                    res[i] = (index->Reverse_Lookup(i).value() /
+                              right_operand) >= val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Mod) {
-                    res[i] =
-                        (fmod(index->Reverse_Lookup(i), right_operand)) >= val;
+                    res[i] = (fmod(index->Reverse_Lookup(i).value(),
+                                   right_operand)) >= val;
                 } else {
                     PanicInfo(
                         OpTypeInvalid,
@@ -376,20 +429,24 @@ struct ArithOpIndexFunc {
                 }
             } else if constexpr (cmp_op == proto::plan::OpType::LessThan) {
                 if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                    res[i] = (index->Reverse_Lookup(i) + right_operand) < val;
+                    res[i] = (index->Reverse_Lookup(i).value() +
+                              right_operand) < val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Sub) {
-                    res[i] = (index->Reverse_Lookup(i) - right_operand) < val;
+                    res[i] = (index->Reverse_Lookup(i).value() -
+                              right_operand) < val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Mul) {
-                    res[i] = (index->Reverse_Lookup(i) * right_operand) < val;
+                    res[i] = (index->Reverse_Lookup(i).value() *
+                              right_operand) < val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Div) {
-                    res[i] = (index->Reverse_Lookup(i) / right_operand) < val;
+                    res[i] = (index->Reverse_Lookup(i).value() /
+                              right_operand) < val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Mod) {
-                    res[i] =
-                        (fmod(index->Reverse_Lookup(i), right_operand)) < val;
+                    res[i] = (fmod(index->Reverse_Lookup(i).value(),
+                                   right_operand)) < val;
                 } else {
                     PanicInfo(
                         OpTypeInvalid,
@@ -399,20 +456,24 @@ struct ArithOpIndexFunc {
                 }
             } else if constexpr (cmp_op == proto::plan::OpType::LessEqual) {
                 if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                    res[i] = (index->Reverse_Lookup(i) + right_operand) <= val;
+                    res[i] = (index->Reverse_Lookup(i).value() +
+                              right_operand) <= val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Sub) {
-                    res[i] = (index->Reverse_Lookup(i) - right_operand) <= val;
+                    res[i] = (index->Reverse_Lookup(i).value() -
+                              right_operand) <= val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Mul) {
-                    res[i] = (index->Reverse_Lookup(i) * right_operand) <= val;
+                    res[i] = (index->Reverse_Lookup(i).value() *
+                              right_operand) <= val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Div) {
-                    res[i] = (index->Reverse_Lookup(i) / right_operand) <= val;
+                    res[i] = (index->Reverse_Lookup(i).value() /
+                              right_operand) <= val;
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::Mod) {
-                    res[i] =
-                        (fmod(index->Reverse_Lookup(i), right_operand)) <= val;
+                    res[i] = (fmod(index->Reverse_Lookup(i).value(),
+                                   right_operand)) <= val;
                 } else {
                     PanicInfo(
                         OpTypeInvalid,

@@ -299,6 +299,7 @@ ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg,
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
         auto chunk_data = source->get_chunk_data(chunk_id);
         // build index for chunk
+        // seem no lint, not pass valid_data here
         // TODO
         if constexpr (std::is_same_v<T, std::string>) {
             auto indexing = index::CreateStringIndexSort();

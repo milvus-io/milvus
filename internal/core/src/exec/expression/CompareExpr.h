@@ -18,6 +18,7 @@
 
 #include <fmt/core.h>
 #include <boost/variant.hpp>
+#include <optional>
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
@@ -28,14 +29,17 @@
 namespace milvus {
 namespace exec {
 
-using number = boost::variant<bool,
-                              int8_t,
-                              int16_t,
-                              int32_t,
-                              int64_t,
-                              float,
-                              double,
-                              std::string>;
+using number_type = boost::variant<bool,
+                                   int8_t,
+                                   int16_t,
+                                   int32_t,
+                                   int64_t,
+                                   float,
+                                   double,
+                                   std::string>;
+
+using number = std::optional<number_type>;
+
 using ChunkDataAccessor = std::function<const number(int)>;
 
 template <typename T, typename U, proto::plan::OpType op>
@@ -159,7 +163,10 @@ class PhyCompareFilterExpr : public Expr {
 
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
-    ProcessBothDataChunks(FUNC func, TargetBitmapView res, ValTypes... values) {
+    ProcessBothDataChunks(FUNC func,
+                          TargetBitmapView res,
+                          TargetBitmapView valid_res,
+                          ValTypes... values) {
         int64_t processed_size = 0;
 
         for (size_t i = current_chunk_id_; i < num_chunk_; i++) {
@@ -182,6 +189,20 @@ class PhyCompareFilterExpr : public Expr {
             const T* left_data = left_chunk.data() + data_pos;
             const U* right_data = right_chunk.data() + data_pos;
             func(left_data, right_data, size, res + processed_size, values...);
+            const bool* left_valid_data = left_chunk.valid_data();
+            const bool* right_valid_data = right_chunk.valid_data();
+            // mask with valid_data
+            for (int i = 0; i < size; ++i) {
+                if (left_valid_data && !left_valid_data[i + data_pos]) {
+                    res[processed_size + i] = false;
+                    valid_res[processed_size + i] = false;
+                    continue;
+                }
+                if (right_valid_data && !right_valid_data[i + data_pos]) {
+                    res[processed_size + i] = false;
+                    valid_res[processed_size + i] = false;
+                }
+            }
             processed_size += size;
 
             if (processed_size >= batch_size_) {

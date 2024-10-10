@@ -44,22 +44,30 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto execute_sub_batch = [](const milvus::Json* data,
+                                const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
+                                TargetBitmapView valid_res,
                                 const std::string& pointer) {
         for (int i = 0; i < size; ++i) {
+            if (valid_data && !valid_data[i]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
             res[i] = data[i].exist(pointer);
         }
     };
 
     int64_t processed_size = ProcessDataChunks<Json>(
-        execute_sub_batch, std::nullptr_t{}, res, pointer);
+        execute_sub_batch, std::nullptr_t{}, res, valid_res, pointer);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
