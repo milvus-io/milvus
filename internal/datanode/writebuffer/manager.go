@@ -176,7 +176,7 @@ func (m *bufferManager) FlushChannel(ctx context.Context, channel string, flushT
 	m.mut.RUnlock()
 
 	if !ok {
-		log.Ctx(ctx).Warn("write buffer not found when flush segments",
+		log.Ctx(ctx).Warn("write buffer not found when flush channel",
 			zap.String("channel", channel),
 			zap.Uint64("flushTs", flushTs))
 		return merr.WrapErrChannelNotFound(channel)
