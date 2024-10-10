@@ -17,8 +17,9 @@
 #pragma once
 #include <future>
 #include <unordered_map>
+#include "common/FieldMeta.h"
 #include "storage/MmapChunkManager.h"
-#include "mmap/Column.h"
+#include "mmap/ChunkedColumn.h"
 
 namespace milvus::storage {
 
@@ -47,6 +48,11 @@ class ChunkCache {
     std::shared_ptr<ColumnBase>
     Read(const std::string& filepath,
          const MmapChunkDescriptorPtr& descriptor,
+         const FieldMeta& field_meta);
+
+    std::shared_ptr<ColumnBase>
+    Read(const std::string& filepath,
+         const MmapChunkDescriptorPtr& descriptor,
          const FieldMeta& field_meta,
          bool mmap_enabled,
          bool mmap_rss_not_need = false);
@@ -58,6 +64,9 @@ class ChunkCache {
     Prefetch(const std::string& filepath);
 
  private:
+    std::string
+    CachePath(const std::string& filepath);
+
     std::shared_ptr<ColumnBase>
     ConvertToColumn(const FieldDataPtr& field_data,
                     const MmapChunkDescriptorPtr& descriptor,

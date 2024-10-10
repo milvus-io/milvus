@@ -46,7 +46,7 @@ TEST(Span, Naive) {
     auto float_ptr = dataset.get_col<float>(float_vec_fid);
     auto nullable_data_ptr = dataset.get_col<int64_t>(nullable_fid);
     auto nullable_valid_data_ptr = dataset.get_col_valid(nullable_fid);
-    auto num_chunk = segment->num_chunk();
+    auto num_chunk = segment->num_chunk(FieldId(0));
     ASSERT_EQ(num_chunk, upper_div(N, size_per_chunk));
     auto row_count = segment->get_row_count();
     ASSERT_EQ(N, row_count);

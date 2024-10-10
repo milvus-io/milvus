@@ -29,25 +29,23 @@
 #include "TimestampIndex.h"
 #include "common/EasyAssert.h"
 #include "google/protobuf/message_lite.h"
-#include "mmap/Column.h"
+#include "mmap/ChunkedColumn.h"
 #include "index/ScalarIndex.h"
-#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "sys/mman.h"
 #include "common/Types.h"
 #include "common/IndexMeta.h"
-#include "index/TextMatchIndex.h"
 
 namespace milvus::segcore {
 
-class SegmentSealedImpl : public SegmentSealed {
+class ChunkedSegmentSealedImpl : public SegmentSealed {
  public:
-    explicit SegmentSealedImpl(SchemaPtr schema,
-                               IndexMetaPtr index_meta,
-                               const SegcoreConfig& segcore_config,
-                               int64_t segment_id,
-                               bool TEST_skip_index_for_retrieve = false,
-                               bool is_sorted_by_pk = false);
-    ~SegmentSealedImpl() override;
+    explicit ChunkedSegmentSealedImpl(SchemaPtr schema,
+                                      IndexMetaPtr index_meta,
+                                      const SegcoreConfig& segcore_config,
+                                      int64_t segment_id,
+                                      bool TEST_skip_index_for_retrieve = false,
+                                      bool is_sorted_by_pk = false);
+    ~ChunkedSegmentSealedImpl() override;
     void
     LoadIndex(const LoadIndexInfo& info) override;
     void
@@ -91,7 +89,7 @@ class SegmentSealedImpl : public SegmentSealed {
     GetFieldDataType(FieldId fieldId) const override;
 
     void
-    RemoveFieldFile(const FieldId field_id);
+    RemoveFieldFile(const FieldId field_id) override;
 
     void
     CreateTextIndex(FieldId field_id) override;
@@ -141,6 +139,11 @@ class SegmentSealedImpl : public SegmentSealed {
         return it->second->IsNullable();
     };
 
+    bool
+    is_chunked() const override {
+        return true;
+    }
+
  public:
     int64_t
     num_chunk_index(FieldId field_id) const override;
@@ -157,23 +160,14 @@ class SegmentSealedImpl : public SegmentSealed {
     size_per_chunk() const override;
 
     int64_t
-    chunk_size(FieldId field_id, int64_t chunk_id) const override {
-        PanicInfo(ErrorCode::Unsupported, "Not implemented");
-    }
-    bool
-    is_chunked() const override {
-        return false;
-    }
+    chunk_size(FieldId field_id, int64_t chunk_id) const override;
 
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field_id, int64_t offset) const override {
-        PanicInfo(ErrorCode::Unsupported, "Not implemented");
-    }
+    get_chunk_by_offset(FieldId field_id, int64_t offset) const override;
 
     int64_t
-    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override {
-        PanicInfo(ErrorCode::Unsupported, "Not implemented");
-    }
+    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override;
+
     std::string
     debug() const override;
 
@@ -252,28 +246,35 @@ class SegmentSealedImpl : public SegmentSealed {
 
     template <typename S, typename T = S>
     static void
-    bulk_subscript_impl(const SingleChunkColumnBase* field,
+    bulk_subscript_impl(const ChunkedColumnBase* field,
+                        const int64_t* seg_offsets,
+                        int64_t count,
+                        T* dst_raw);
+
+    template <typename S, typename T = S>
+    static void
+    bulk_subscript_impl(const ChunkedColumnBase* field,
                         const int64_t* seg_offsets,
                         int64_t count,
                         void* dst_raw);
 
     template <typename S, typename T = S>
     static void
-    bulk_subscript_ptr_impl(const SingleChunkColumnBase* field,
+    bulk_subscript_ptr_impl(const ChunkedColumnBase* field,
                             const int64_t* seg_offsets,
                             int64_t count,
                             google::protobuf::RepeatedPtrField<T>* dst_raw);
 
     template <typename T>
     static void
-    bulk_subscript_array_impl(const SingleChunkColumnBase* column,
+    bulk_subscript_array_impl(const ChunkedColumnBase* column,
                               const int64_t* seg_offsets,
                               int64_t count,
                               google::protobuf::RepeatedPtrField<T>* dst);
 
     static void
     bulk_subscript_impl(int64_t element_sizeof,
-                        const void* src_raw,
+                        const ChunkedColumnBase* field,
                         const int64_t* seg_offsets,
                         int64_t count,
                         void* dst_raw);
@@ -335,7 +336,7 @@ class SegmentSealedImpl : public SegmentSealed {
     void
     LoadScalarIndex(const LoadIndexInfo& info);
 
-    void
+    virtual void
     WarmupChunkCache(const FieldId field_id, bool mmap_enabled) override;
 
     bool
@@ -369,7 +370,7 @@ class SegmentSealedImpl : public SegmentSealed {
 
     SchemaPtr schema_;
     int64_t id_;
-    std::unordered_map<FieldId, std::shared_ptr<SingleChunkColumnBase>> fields_;
+    std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnBase>> fields_;
     std::unordered_set<FieldId> mmap_fields_;
 
     // only useful in binlog
@@ -387,32 +388,5 @@ class SegmentSealedImpl : public SegmentSealed {
     // whether the segment is sorted by the pk
     bool is_sorted_by_pk_ = false;
 };
-
-inline SegmentSealedUPtr
-CreateSealedSegment(
-    SchemaPtr schema,
-    IndexMetaPtr index_meta = nullptr,
-    int64_t segment_id = -1,
-    const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
-    bool TEST_skip_index_for_retrieve = false,
-    bool is_sorted_by_pk = false,
-    bool is_multi_chunk = false) {
-    if (!is_multi_chunk) {
-        return std::make_unique<SegmentSealedImpl>(schema,
-                                                   index_meta,
-                                                   segcore_config,
-                                                   segment_id,
-                                                   TEST_skip_index_for_retrieve,
-                                                   is_sorted_by_pk);
-    } else {
-        return std::make_unique<ChunkedSegmentSealedImpl>(
-            schema,
-            index_meta,
-            segcore_config,
-            segment_id,
-            TEST_skip_index_for_retrieve,
-            is_sorted_by_pk);
-    }
-}
 
 }  // namespace milvus::segcore

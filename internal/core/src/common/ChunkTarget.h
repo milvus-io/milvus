@@ -64,12 +64,17 @@ class MmapChunkTarget : public ChunkTarget {
 class MemChunkTarget : public ChunkTarget {
  public:
     MemChunkTarget(size_t cap) : cap_(cap) {
-        data_ = reinterpret_cast<char*>(mmap(nullptr,
-                                             cap,
-                                             PROT_READ | PROT_WRITE,
-                                             MAP_PRIVATE | MAP_ANON,
-                                             -1,
-                                             0));
+        auto m = mmap(nullptr,
+                      cap,
+                      PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANON,
+                      -1,
+                      0);
+        AssertInfo(m != MAP_FAILED,
+                   "failed to map: {}, map_size={}",
+                   strerror(errno),
+                   size_);
+        data_ = reinterpret_cast<char*>(m);
     }
 
     void

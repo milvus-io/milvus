@@ -539,12 +539,15 @@ GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id) {
 
 std::unique_ptr<DataCodec>
 DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
-                            const std::string& file) {
+                            const std::string& file,
+                            bool is_field_data) {
     auto fileSize = chunk_manager->Size(file);
     auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
     chunk_manager->Read(file, buf.get(), fileSize);
 
-    return DeserializeFileData(buf, fileSize);
+    auto res = DeserializeFileData(buf, fileSize, is_field_data);
+    res->SetData(buf);
+    return res;
 }
 
 std::pair<std::string, size_t>
@@ -599,7 +602,7 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     futures.reserve(remote_files.size());
     for (auto& file : remote_files) {
         futures.emplace_back(pool.Submit(
-            DownloadAndDecodeRemoteFile, remote_chunk_manager, file));
+            DownloadAndDecodeRemoteFile, remote_chunk_manager, file, true));
     }
     return futures;
 }

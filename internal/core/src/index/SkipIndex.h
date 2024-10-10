@@ -16,6 +16,7 @@
 #include "common/Types.h"
 #include "log/Log.h"
 #include "mmap/Column.h"
+#include "mmap/ChunkedColumn.h"
 
 namespace milvus {
 
@@ -103,7 +104,12 @@ class SkipIndex {
     void
     LoadString(milvus::FieldId field_id,
                int64_t chunk_id,
-               const milvus::VariableColumn<std::string>& var_column);
+               const milvus::ChunkedVariableColumn<std::string>& var_column);
+    void
+    LoadString(
+        milvus::FieldId field_id,
+        int64_t chunk_id,
+        const milvus::SingleChunkVariableColumn<std::string>& var_column);
 
  private:
     const FieldChunkMetrics&
@@ -269,9 +275,9 @@ class SkipIndex {
         return {minValue, maxValue, null_count};
     }
 
+    template <typename T>
     metricInfo<std::string>
-    ProcessStringFieldMetrics(
-        const milvus::VariableColumn<std::string>& var_column) {
+    ProcessStringFieldMetrics(const T& var_column) {
         int num_rows = var_column.NumRows();
         // find first not null value
         int64_t start = 0;

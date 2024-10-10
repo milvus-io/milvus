@@ -25,6 +25,7 @@
 #include "ctz.h"
 #include "popcount.h"
 
+#include "bitset/common.h"
 namespace milvus {
 namespace bitset {
 namespace detail {

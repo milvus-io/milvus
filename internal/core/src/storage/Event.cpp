@@ -210,7 +210,8 @@ DescriptorEventData::Serialize() {
 BaseEventData::BaseEventData(BinlogReaderPtr reader,
                              int event_length,
                              DataType data_type,
-                             bool nullable) {
+                             bool nullable,
+                             bool is_field_data) {
     auto ast = reader->Read(sizeof(start_timestamp), &start_timestamp);
     AssertInfo(ast.ok(), "read start timestamp failed");
     ast = reader->Read(sizeof(end_timestamp), &end_timestamp);
@@ -220,9 +221,11 @@ BaseEventData::BaseEventData(BinlogReaderPtr reader,
         event_length - sizeof(start_timestamp) - sizeof(end_timestamp);
     auto res = reader->Read(payload_length);
     AssertInfo(res.first.ok(), "read payload failed");
-    auto payload_reader = std::make_shared<PayloadReader>(
-        res.second.get(), payload_length, data_type, nullable);
-    field_data = payload_reader->get_field_data();
+    payload_reader = std::make_shared<PayloadReader>(
+        res.second.get(), payload_length, data_type, nullable, is_field_data);
+    if (is_field_data) {
+        field_data = payload_reader->get_field_data();
+    }
 }
 
 std::vector<uint8_t>

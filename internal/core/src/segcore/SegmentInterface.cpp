@@ -396,7 +396,7 @@ void
 SegmentInternalInterface::LoadStringSkipIndex(
     milvus::FieldId field_id,
     int64_t chunk_id,
-    const milvus::VariableColumn<std::string>& var_column) {
+    const milvus::ChunkedVariableColumn<std::string>& var_column) {
     skip_index_.LoadString(field_id, chunk_id, var_column);
 }
 
@@ -409,4 +409,11 @@ SegmentInternalInterface::GetTextIndex(FieldId field_id) const {
     return iter->second.get();
 }
 
+void
+SegmentInternalInterface::LoadStringSkipIndex(
+    milvus::FieldId field_id,
+    int64_t chunk_id,
+    const milvus::SingleChunkVariableColumn<std::string>& var_column) {
+    skip_index_.LoadString(field_id, chunk_id, var_column);
+}
 }  // namespace milvus::segcore
