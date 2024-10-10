@@ -919,6 +919,11 @@ message CompactionTask{
   int64 analyzeVersion = 24;
   int64 lastStateStartTime = 25;
   int64 max_size = 26;
+  repeated int64 tmpSegments = 27;
+  // Error Handling for Compaction Data Commit:
+  //   If the task fails before or during the commit, revert all changes to ensure consistency.
+  //   If the task fails after the commit, only revert the subsequent steps while preserving the committed data.
+  bool compaction_commited = 28;
 }
 
 message PartitionStatsInfo {
