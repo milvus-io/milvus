@@ -69,17 +69,18 @@ type ComponentParam struct {
 	GpuConfig       gpuConfig
 	TraceCfg        traceConfig
 
-	RootCoordCfg  rootCoordConfig
-	ProxyCfg      proxyConfig
-	QueryCoordCfg queryCoordConfig
-	QueryNodeCfg  queryNodeConfig
-	DataCoordCfg  dataCoordConfig
-	DataNodeCfg   dataNodeConfig
-	IndexNodeCfg  indexNodeConfig
-	HTTPCfg       httpConfig
-	LogCfg        logConfig
-	RoleCfg       roleConfig
-	StreamingCfg  streamingConfig
+	RootCoordCfg      rootCoordConfig
+	ProxyCfg          proxyConfig
+	QueryCoordCfg     queryCoordConfig
+	QueryNodeCfg      queryNodeConfig
+	DataCoordCfg      dataCoordConfig
+	DataNodeCfg       dataNodeConfig
+	IndexNodeCfg      indexNodeConfig
+	IndexEngineConfig indexEngineConfig
+	HTTPCfg           httpConfig
+	LogCfg            logConfig
+	RoleCfg           roleConfig
+	StreamingCfg      streamingConfig
 
 	RootCoordGrpcServerCfg     GrpcServerConfig
 	ProxyGrpcServerCfg         GrpcServerConfig
@@ -134,6 +135,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
 	p.GpuConfig.init(bt)
+	p.IndexEngineConfig.init(bt)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
 	p.ProxyGrpcServerCfg.Init("proxy", bt)

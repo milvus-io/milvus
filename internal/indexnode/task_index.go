@@ -33,10 +33,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -210,7 +210,8 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		zap.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()))
 
 	indexType := it.newIndexParams[common.IndexTypeKey]
-	if indexType == indexparamcheck.IndexDISKANN {
+	var fieldDataSize uint64
+	if indexparamcheck.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 		// check index node support disk index
 		if !Params.IndexNodeCfg.EnableDisk.GetAsBool() {
 			log.Warn("IndexNode don't support build disk index",
@@ -225,7 +226,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 			log.Warn("IndexNode get local used size failed")
 			return err
 		}
-		fieldDataSize, err := estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
+		fieldDataSize, err = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
 		if err != nil {
 			log.Warn("IndexNode get local used size failed")
 			return err
@@ -245,6 +246,10 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 			log.Warn("failed to fill disk index params", zap.Error(err))
 			return err
 		}
+	}
+
+	if Params.IndexEngineConfig.Enable.GetAsBool() {
+		it.newIndexParams, _ = Params.IndexEngineConfig.MergeWithResource(fieldDataSize, it.newIndexParams)
 	}
 
 	storageConfig := &indexcgopb.StorageConfig{

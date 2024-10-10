@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -1470,7 +1469,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 				},
 				{
 					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.IndexHNSW,
+					Value: "HNSW",
 				},
 			},
 		},
@@ -1523,7 +1522,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 							},
 							{
 								Key:   common.IndexTypeKey,
-								Value: indexparamcheck.IndexHNSW,
+								Value: "HNSW",
 							},
 						},
 					},
@@ -1624,7 +1623,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	resetMetaFunc := func() {
 		mt.indexMeta.buildID2SegmentIndex[buildID].IndexState = commonpb.IndexState_Unissued
 		mt.indexMeta.segmentIndexes[segID][indexID].IndexState = commonpb.IndexState_Unissued
-		mt.indexMeta.indexes[collID][indexID].IndexParams[1].Value = indexparamcheck.IndexHNSW
+		mt.indexMeta.indexes[collID][indexID].IndexParams[1].Value = "HNSW"
 		mt.collections[collID].Schema.Fields[0].DataType = schemapb.DataType_FloatVector
 		mt.collections[collID].Schema.Fields[1].IsPartitionKey = true
 		mt.collections[collID].Schema.Fields[1].DataType = schemapb.DataType_VarChar

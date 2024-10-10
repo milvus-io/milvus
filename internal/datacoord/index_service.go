@@ -28,10 +28,10 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -231,10 +231,10 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
-		if GetIndexType(req.GetIndexParams()) == indexparamcheck.IndexDISKANN && !s.indexNodeManager.ClientSupportDisk() {
+		if indexparamcheck.GetVecIndexMgrInstance().IsDiskANN(GetIndexType(req.IndexParams)) && !s.indexNodeManager.ClientSupportDisk() {
 			errMsg := "all IndexNodes do not support disk indexes, please verify"
 			log.Warn(errMsg)
-			err = merr.WrapErrIndexNotSupported(indexparamcheck.IndexDISKANN)
+			err = merr.WrapErrIndexNotSupported(GetIndexType(req.IndexParams))
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}

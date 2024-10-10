@@ -28,12 +28,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
@@ -346,7 +346,14 @@ func (cit *createIndexTask) parseIndexParams() error {
 		if !exist {
 			return fmt.Errorf("IndexType not specified")
 		}
-		if indexType == indexparamcheck.IndexDISKANN {
+		if Params.IndexEngineConfig.Enable.GetAsBool() {
+			var err error
+			indexParamsMap, err = Params.IndexEngineConfig.MergeRequestMapParam(indexType, paramtable.BuildStage, indexParamsMap)
+			if err != nil {
+				return err
+			}
+		}
+		if indexparamcheck.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 			err := indexparams.FillDiskIndexParams(Params, indexParamsMap)
 			if err != nil {
 				return err
@@ -476,23 +483,16 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 		if err := fillDimension(field, indexParams); err != nil {
 			return err
 		}
-	} else {
-		// used only for checker, should be deleted after checking
-		indexParams[IsSparseKey] = "true"
 	}
 
-	if err := checker.CheckValidDataType(field); err != nil {
+	if err := checker.CheckValidDataType(indexType, field); err != nil {
 		log.Info("create index with invalid data type", zap.Error(err), zap.String("data_type", field.GetDataType().String()))
 		return err
 	}
 
-	if err := checker.CheckTrain(indexParams); err != nil {
+	if err := checker.CheckTrain(field.DataType, indexParams); err != nil {
 		log.Info("create index with invalid parameters", zap.Error(err))
 		return err
-	}
-
-	if isSparse {
-		delete(indexParams, IsSparseKey)
 	}
 
 	return nil
