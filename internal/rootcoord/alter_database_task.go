@@ -59,6 +59,11 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	if ContainsKeyPairArray(a.Req.GetProperties(), oldDB.Properties) {
+		log.Info("skip to alter database due to no changes were detected in the properties", zap.String("databaseName", a.Req.GetDbName()))
+		return nil
+	}
+
 	newDB := oldDB.Clone()
 	ret := MergeProperties(oldDB.Properties, a.Req.GetProperties())
 	newDB.Properties = ret
