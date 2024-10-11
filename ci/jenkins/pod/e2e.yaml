@@ -9,7 +9,7 @@ spec:
   enableServiceLinks: false
   containers: 
   - name: pytest
-    image: harbor.milvus.io/dockerhub/milvusdb/pytest:20240925-58baeee
+    image: harbor.milvus.io/dockerhub/milvusdb/pytest:20241010-f7b8114
     resources:
       limits:
         cpu: "6"
