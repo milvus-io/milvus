@@ -33,6 +33,7 @@
 #include "index/StringIndexMarisa.h"
 #include "index/BoolIndex.h"
 #include "storage/space.h"
+#include "segcore/load_index_c.h"
 
 namespace milvus::index {
 
@@ -51,6 +52,27 @@ class IndexFactory {
 
         return instance;
     }
+
+    LoadResourceRequest
+    IndexLoadResource(DataType field_type,
+                      IndexVersion index_version,
+                      float index_size,
+                      std::map<std::string, std::string>& index_params,
+                      bool mmap_enable);
+
+    LoadResourceRequest
+    VecIndexLoadResource(DataType field_type,
+                         IndexVersion index_version,
+                         float index_size,
+                         std::map<std::string, std::string>& index_params,
+                         bool mmap_enable);
+
+    LoadResourceRequest
+    ScalarIndexLoadResource(DataType field_type,
+                            IndexVersion index_version,
+                            float index_size,
+                            std::map<std::string, std::string>& index_params,
+                            bool mmap_enable);
 
     IndexBasePtr
     CreateIndex(const CreateIndexInfo& create_index_info,
