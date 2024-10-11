@@ -112,9 +112,9 @@ func (m *StatsManager) GetStatsOfSegment(segmentID int64) *SegmentStats {
 	return m.segmentStats[segmentID].Copy()
 }
 
-// UpdateOnFlush updates the stats of segment on flush.
+// UpdateOnSync updates the stats of segment on sync.
 // It's an async update operation, so it's not necessary to do success.
-func (m *StatsManager) UpdateOnFlush(segmentID int64, flush FlushOperationMetrics) {
+func (m *StatsManager) UpdateOnSync(segmentID int64, syncMetric SyncOperationMetrics) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -122,7 +122,7 @@ func (m *StatsManager) UpdateOnFlush(segmentID int64, flush FlushOperationMetric
 	if _, ok := m.segmentIndex[segmentID]; !ok {
 		return
 	}
-	m.segmentStats[segmentID].UpdateOnFlush(flush)
+	m.segmentStats[segmentID].UpdateOnSync(syncMetric)
 
 	// binlog counter is updated, notify seal manager to do seal scanning.
 	m.sealNotifier.AddAndNotify(m.segmentIndex[segmentID])

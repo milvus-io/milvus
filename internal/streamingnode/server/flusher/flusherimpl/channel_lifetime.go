@@ -26,10 +26,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	adaptor2 "github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
@@ -116,7 +118,17 @@ func (c *channelLifetime) Run() error {
 
 	// Build and add pipeline.
 	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx, c.f.pipelineParams,
-		&datapb.ChannelWatchInfo{Vchan: resp.GetInfo(), Schema: resp.GetSchema()}, handler.Chan())
+		&datapb.ChannelWatchInfo{Vchan: resp.GetInfo(), Schema: resp.GetSchema()}, handler.Chan(), func(t syncmgr.Task, err error) {
+			if err != nil || t == nil {
+				return
+			}
+			if tt, ok := t.(*syncmgr.SyncTask); ok {
+				insertLogs, _, _ := tt.Binlogs()
+				resource.Resource().SegmentAssignStatsManager().UpdateOnSync(tt.SegmentID(),
+					stats.SyncOperationMetrics{BinLogCounterIncr: uint64(len(insertLogs))},
+				)
+			}
+		})
 	if err != nil {
 		return err
 	}

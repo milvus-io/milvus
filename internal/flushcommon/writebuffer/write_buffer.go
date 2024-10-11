@@ -151,7 +151,8 @@ type writeBufferBase struct {
 	checkpoint     *msgpb.MsgPosition
 	flushTimestamp *atomic.Uint64
 
-	errHandler func(err error)
+	errHandler           func(err error)
+	taskObserverCallback func(t syncmgr.Task, err error) // execute when a sync task finished, should be concurrent safe.
 
 	// pre build logger
 	logger        *log.MLogger
@@ -181,19 +182,20 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 	}
 
 	wb := &writeBufferBase{
-		channelName:      channel,
-		collectionID:     metacache.Collection(),
-		collSchema:       schema,
-		estSizePerRecord: estSize,
-		syncMgr:          syncMgr,
-		metaWriter:       option.metaWriter,
-		buffers:          make(map[int64]*segmentBuffer),
-		metaCache:        metacache,
-		serializer:       serializer,
-		syncCheckpoint:   newCheckpointCandiates(),
-		syncPolicies:     option.syncPolicies,
-		flushTimestamp:   flushTs,
-		errHandler:       option.errorHandler,
+		channelName:          channel,
+		collectionID:         metacache.Collection(),
+		collSchema:           schema,
+		estSizePerRecord:     estSize,
+		syncMgr:              syncMgr,
+		metaWriter:           option.metaWriter,
+		buffers:              make(map[int64]*segmentBuffer),
+		metaCache:            metacache,
+		serializer:           serializer,
+		syncCheckpoint:       newCheckpointCandiates(),
+		syncPolicies:         option.syncPolicies,
+		flushTimestamp:       flushTs,
+		errHandler:           option.errorHandler,
+		taskObserverCallback: option.taskObserverCallback,
 	}
 
 	wb.logger = log.With(zap.Int64("collectionID", wb.collectionID),
@@ -342,6 +344,10 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 		}
 
 		result = append(result, wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
+			if wb.taskObserverCallback != nil {
+				wb.taskObserverCallback(syncTask, err)
+			}
+
 			if err != nil {
 				return err
 			}
@@ -654,6 +660,10 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 		}
 
 		f := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
+			if wb.taskObserverCallback != nil {
+				wb.taskObserverCallback(syncTask, err)
+			}
+
 			if err != nil {
 				return err
 			}

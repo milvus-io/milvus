@@ -19,14 +19,17 @@ const (
 
 type WriteBufferOption func(opt *writeBufferOption)
 
+type TaskObserverCallback func(t syncmgr.Task, err error)
+
 type writeBufferOption struct {
 	deletePolicy string
 	idAllocator  allocator.Interface
 	syncPolicies []SyncPolicy
 
-	pkStatsFactory metacache.PkStatsFactory
-	metaWriter     syncmgr.MetaWriter
-	errorHandler   func(error)
+	pkStatsFactory       metacache.PkStatsFactory
+	metaWriter           syncmgr.MetaWriter
+	errorHandler         func(error)
+	taskObserverCallback TaskObserverCallback
 }
 
 func defaultWBOption(metacache metacache.MetaCache) *writeBufferOption {
@@ -83,5 +86,13 @@ func WithSyncPolicy(policy SyncPolicy) WriteBufferOption {
 func WithErrorHandler(handler func(err error)) WriteBufferOption {
 	return func(opt *writeBufferOption) {
 		opt.errorHandler = handler
+	}
+}
+
+// WithTaskObserverCallback sets the callback function for observing task status.
+// The callback will be called when every task is executed, should be concurrent safe to be called.
+func WithTaskObserverCallback(callback TaskObserverCallback) WriteBufferOption {
+	return func(opt *writeBufferOption) {
+		opt.taskObserverCallback = callback
 	}
 }
