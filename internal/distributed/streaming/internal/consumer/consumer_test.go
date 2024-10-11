@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
@@ -68,4 +69,19 @@ func TestResumableConsumer(t *testing.T) {
 
 	rc.Close()
 	<-rc.Done()
+}
+
+func TestHandler(t *testing.T) {
+	ch := make(chan message.ImmutableMessage, 100)
+	hNop := nopCloseHandler{
+		Handler: message.ChanMessageHandler(ch),
+	}
+	hNop.Handle(nil)
+	assert.Nil(t, <-ch)
+	hNop.Close()
+	select {
+	case <-ch:
+		panic("should not be closed")
+	default:
+	}
 }

@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -76,6 +77,9 @@ type Loader interface {
 	// LoadBloomFilterSet loads needed statslog for RemoteSegment.
 	LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
 
+	// LoadBM25Stats loads BM25 statslog for RemoteSegment
+	LoadBM25Stats(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) (*typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats], error)
+
 	// LoadIndex append index for segment and remove vector binlogs.
 	LoadIndex(ctx context.Context,
 		segment Segment,
@@ -86,6 +90,24 @@ type Loader interface {
 		segment Segment,
 		loadInfo *querypb.SegmentLoadInfo,
 	) error
+}
+
+type ResourceEstimate struct {
+	MaxMemoryCost   uint64
+	MaxDiskCost     uint64
+	FinalMemoryCost uint64
+	FinalDiskCost   uint64
+	HasRawData      bool
+}
+
+func GetResourceEstimate(estimate *C.LoadResourceRequest) ResourceEstimate {
+	return ResourceEstimate{
+		MaxMemoryCost:   uint64(float64(estimate.max_memory_cost) * util.GB),
+		MaxDiskCost:     uint64(float64(estimate.max_disk_cost) * util.GB),
+		FinalMemoryCost: uint64(float64(estimate.final_memory_cost) * util.GB),
+		FinalDiskCost:   uint64(float64(estimate.final_disk_cost) * util.GB),
+		HasRawData:      bool(estimate.has_raw_data),
+	}
 }
 
 type requestResourceResult struct {
@@ -524,6 +546,47 @@ func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentTyp
 	return nil
 }
 
+func (loader *segmentLoader) LoadBM25Stats(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) (*typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats], error) {
+	segmentNum := len(infos)
+	if segmentNum == 0 {
+		return nil, nil
+	}
+
+	segments := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
+		return info.GetSegmentID()
+	})
+	log.Info("start loading bm25 stats for remote...", zap.Int64("collectionID", collectionID), zap.Int64s("segmentIDs", segments), zap.Int("segmentNum", segmentNum))
+
+	loadedStats := typeutil.NewConcurrentMap[int64, map[int64]*storage.BM25Stats]()
+	loadRemoteBM25Func := func(idx int) error {
+		loadInfo := infos[idx]
+		segmentID := loadInfo.SegmentID
+		stats := make(map[int64]*storage.BM25Stats)
+
+		log.Info("loading bm25 stats for remote...", zap.Int64("collectionID", collectionID), zap.Int64("segment", segmentID))
+		logpaths := loader.filterBM25Stats(loadInfo.Bm25Logs)
+		err := loader.loadBm25Stats(ctx, segmentID, stats, logpaths)
+		if err != nil {
+			log.Warn("load remote segment bm25 stats failed",
+				zap.Int64("segmentID", segmentID),
+				zap.Error(err),
+			)
+			return err
+		}
+		loadedStats.Insert(segmentID, stats)
+		return nil
+	}
+
+	err := funcutil.ProcessFuncParallel(segmentNum, segmentNum, loadRemoteBM25Func, "loadRemoteBM25Func")
+	if err != nil {
+		// no partial success here
+		log.Warn("failed to load bm25 stats for remote segment", zap.Int64("collectionID", collectionID), zap.Int64s("segmentIDs", segments), zap.Error(err))
+		return nil, err
+	}
+
+	return loadedStats, nil
+}
+
 func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collectionID),
@@ -807,6 +870,16 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		if err != nil {
 			return err
 		}
+
+		if len(loadInfo.Bm25Logs) > 0 {
+			log.Info("loading bm25 stats...")
+			bm25StatsLogs := loader.filterBM25Stats(loadInfo.Bm25Logs)
+
+			err = loader.loadBm25Stats(ctx, segment.ID(), segment.bm25Stats, bm25StatsLogs)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -877,6 +950,26 @@ func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBi
 		}
 	}
 	return result, storage.DefaultStatsType
+}
+
+func (loader *segmentLoader) filterBM25Stats(fieldBinlogs []*datapb.FieldBinlog) map[int64][]string {
+	result := make(map[int64][]string, 0)
+	for _, fieldBinlog := range fieldBinlogs {
+		logpaths := []string{}
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			_, logidx := path.Split(binlog.GetLogPath())
+			// if special status log exist
+			// only load one file
+			if logidx == storage.CompoundStatsType.LogIdx() {
+				logpaths = []string{binlog.GetLogPath()}
+				break
+			} else {
+				logpaths = append(logpaths, binlog.GetLogPath())
+			}
+		}
+		result[fieldBinlog.FieldID] = logpaths
+	}
+	return result
 }
 
 func loadSealedSegmentFields(ctx context.Context, collection *Collection, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64) error {
@@ -968,6 +1061,51 @@ func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalS
 	}
 
 	return segment.LoadIndex(ctx, indexInfo, fieldType)
+}
+
+func (loader *segmentLoader) loadBm25Stats(ctx context.Context, segmentID int64, stats map[int64]*storage.BM25Stats, binlogPaths map[int64][]string) error {
+	log := log.Ctx(ctx).With(
+		zap.Int64("segmentID", segmentID),
+	)
+	if len(binlogPaths) == 0 {
+		log.Info("there are no bm25 stats logs saved with segment")
+		return nil
+	}
+
+	pathList := []string{}
+	fieldList := []int64{}
+	fieldOffset := []int{}
+	for fieldId, logpaths := range binlogPaths {
+		pathList = append(pathList, logpaths...)
+		fieldList = append(fieldList, fieldId)
+		fieldOffset = append(fieldOffset, len(logpaths))
+	}
+
+	startTs := time.Now()
+	values, err := loader.cm.MultiRead(ctx, pathList)
+	if err != nil {
+		return err
+	}
+
+	cnt := 0
+	for i, fieldID := range fieldList {
+		newStats, ok := stats[fieldID]
+		if !ok {
+			newStats = storage.NewBM25Stats()
+			stats[fieldID] = newStats
+		}
+
+		for j := 0; j < fieldOffset[i]; j++ {
+			err := newStats.Deserialize(values[cnt+j])
+			if err != nil {
+				return err
+			}
+		}
+		cnt += fieldOffset[i]
+		log.Info("Successfully load bm25 stats", zap.Duration("time", time.Since(startTs)), zap.Int64("numRow", newStats.NumRow()), zap.Int64("fieldID", fieldID))
+	}
+
+	return nil
 }
 
 func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int64, bfs *pkoracle.BloomFilterSet,
@@ -1283,6 +1421,9 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 		log.Warn("failed to create schema helper", zap.String("name", schema.GetName()), zap.Error(err))
 		return nil, err
 	}
+	calculateDataSizeCount := 0
+	ctx := context.Background()
+
 	for _, fieldBinlog := range loadInfo.BinlogPaths {
 		fieldID := fieldBinlog.FieldID
 		var mmapEnabled bool
@@ -1293,43 +1434,48 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			return nil, err
 		}
 		binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
+		shouldCalculateDataSize := false
 
 		if fieldIndexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
-			mmapEnabled = isIndexMmapEnable(fieldSchema, fieldIndexInfo)
-			neededMemSize, neededDiskSize, err := getIndexAttrCache().GetIndexResourceUsage(fieldIndexInfo, multiplyFactor.memoryIndexUsageFactor, fieldBinlog)
+			var estimateResult ResourceEstimate
+			err := GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
+				loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
+				estimateResult = GetResourceEstimate(&loadResourceRequest)
+				return nil
+			})
 			if err != nil {
-				return nil, errors.Wrapf(err, "failed to get index size collection %d, segment %d, indexBuildID %d",
+				return nil, errors.Wrapf(err, "failed to estimate resource usage of index, collection %d, segment %d, indexBuildID %d",
 					loadInfo.GetCollectionID(),
 					loadInfo.GetSegmentID(),
 					fieldIndexInfo.GetBuildID())
 			}
-			indexMemorySize += neededMemSize
-			if mmapEnabled {
-				segmentDiskSize += neededMemSize + neededDiskSize
-			} else {
-				segmentDiskSize += neededDiskSize
-			}
-			if !hasRawData(fieldIndexInfo) {
-				dataMmapEnable := isDataMmapEnable(fieldSchema)
-				segmentMemorySize += binlogSize
-				if dataMmapEnable {
-					segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
-				} else {
-					segmentMemorySize += binlogSize
-				}
+
+			indexMemorySize += estimateResult.MaxMemoryCost
+			segmentDiskSize += estimateResult.MaxDiskCost
+			if !estimateResult.HasRawData {
+				shouldCalculateDataSize = true
 			}
 		} else {
+			shouldCalculateDataSize = true
+		}
+
+		if shouldCalculateDataSize {
+			calculateDataSizeCount += 1
 			mmapEnabled = isDataMmapEnable(fieldSchema)
 
-			segmentMemorySize += binlogSize
-			if mmapEnabled {
-				segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
-			} else {
-				if multiplyFactor.enableTempSegmentIndex {
+			if !mmapEnabled || common.IsSystemField(fieldSchema.GetFieldID()) {
+				segmentMemorySize += binlogSize
+				if multiplyFactor.enableTempSegmentIndex && SupportInterimIndexDataType(fieldSchema.GetDataType()) {
 					segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
 				}
+				if DoubleMemorySystemField(fieldSchema.GetFieldID()) || DoubleMemoryDataType(fieldSchema.GetDataType()) {
+					segmentMemorySize += binlogSize
+				}
+			} else {
+				segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
 			}
 		}
+
 		if mmapEnabled {
 			mmapFieldCount++
 		}
@@ -1339,9 +1485,6 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 	for _, fieldBinlog := range loadInfo.Statslogs {
 		segmentMemorySize += uint64(getBinlogDataMemorySize(fieldBinlog))
 	}
-
-	// binlog & statslog use general load factor
-	segmentMemorySize = uint64(float64(segmentMemorySize) * multiplyFactor.memoryUsageFactor)
 
 	// get size of delete data
 	for _, fieldBinlog := range loadInfo.Deltalogs {
@@ -1363,6 +1506,21 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 		DiskSize:       segmentDiskSize,
 		MmapFieldCount: mmapFieldCount,
 	}, nil
+}
+
+func DoubleMemoryDataType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_String ||
+		dataType == schemapb.DataType_VarChar ||
+		dataType == schemapb.DataType_JSON
+}
+
+func DoubleMemorySystemField(fieldID int64) bool {
+	return fieldID == common.TimeStampField
+}
+
+func SupportInterimIndexDataType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_FloatVector ||
+		dataType == schemapb.DataType_SparseFloatVector
 }
 
 func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb.DataType, error) {

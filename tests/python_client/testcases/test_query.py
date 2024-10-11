@@ -3555,7 +3555,7 @@ class TestQueryCount(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
 
         # 2. insert data
-        nb = 500
+        nb = 1000
         for i in range(10):
             data = [
                 cf.gen_vectors(nb, dim),
@@ -3574,21 +3574,38 @@ class TestQueryCount(TestcaseBase):
         collection_w.load()
 
         # 4. search and query with different expressions. All the expressions will return 10 results
-        query_exprs = [f'{json_int} < 10 ', f'{json_float} <= 200.0 and {json_float} > 190.0',
-                       f'{json_string} in ["1","2","3","4","5","6","7","8","9","10"]',
-                       f'{json_bool} == true and {json_float} <= 10',
-                       f'{json_array} == [4001,4002,4003,4004,4005,4006,4007,4008,4009,4010] or {json_int} < 9',
-                       f'{json_embedded_object}["{json_embedded_object}"]["number"] < 10',
-                       f'{json_objects_array}[0]["level2"]["level2_str"] like "99%" and {json_objects_array}[1]["float"] > 100']
+        query_exprs = [
+            f'json_contains_any({json_embedded_object}["{json_embedded_object}"]["level2"]["level2_array"], [1,3,5,7,9])',
+            f'json_contains_any({json_embedded_object}["array"], [1,3,5,7,9])',
+            f'{json_int} < 10',
+            f'{json_float} <= 200.0 and {json_float} > 190.0',
+            f'{json_string} in ["1","2","3","4","5","6","7","8","9","10"]',
+            f'{json_bool} == true and {json_float} <= 10',
+            f'{json_array} == [4001,4002,4003,4004,4005,4006,4007,4008,4009,4010] or {json_int} < 9',
+            f'{json_embedded_object}["{json_embedded_object}"]["number"] < 10',
+            f'{json_objects_array}[0]["level2"]["level2_str"] like "199%" and {json_objects_array}[1]["float"] >= 1990'
+        ]
         search_data = cf.gen_vectors(2, dim)
         search_param = {}
         for expr in query_exprs:
+            log.debug(f"query_expr: {expr}")
             collection_w.query(expr=expr, output_fields=[count],
                                check_task=CheckTasks.check_query_results, check_items={exp_res: [{count: 10}]})
             collection_w.search(data=search_data, anns_field=ct.default_float_vec_field_name,
                                 param=search_param, limit=10, expr=expr,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": 2, "limit": 10})
+
+        # verify for issue #36718
+        for expr in [f'{json_embedded_object}["{json_embedded_object}"]["number"] in []',
+                     f'{json_embedded_object}["{json_embedded_object}"] in []']:
+            log.debug(f"query_expr: {expr}")
+            collection_w.query(expr=expr, output_fields=[count],
+                               check_task=CheckTasks.check_query_results, check_items={exp_res: [{count: 0}]})
+            collection_w.search(data=search_data, anns_field=ct.default_float_vec_field_name,
+                                param=search_param, limit=10, expr=expr,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": 2, "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_count_with_pagination_param(self):
@@ -3964,6 +3981,49 @@ class TestQueryCount(TestcaseBase):
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": ct.default_nb,
                                                  "batch_size": batch_size})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.repeat(3)
+    @pytest.mark.skip(reason="issue #36538")
+    def test_count_query_search_after_release_partition_load(self):
+        """
+        target: test query count(*) after release collection and load partition
+        method: 1. create a collection and 2 partitions with nullable and default value fields
+                2. insert data
+                3. load one partition
+                4. delete half data in each partition
+                5. release the collection and load one partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=True)[0]
+        collection_w.query(expr='', output_fields=[ct.default_count_output],
+                          check_task=CheckTasks.check_query_results,
+                          check_items={"exp_res": [{ct.default_count_output: 200}]})
+        collection_w.release()
+        partition_w1, partition_w2 = collection_w.partitions
+        # load
+        partition_w1.load()
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # release
+        collection_w.release()
+        # partition_w1.load()
+        collection_w.load(partition_names=[partition_w1.name])
+        # search on collection, partition1, partition2
+        collection_w.query(expr='', output_fields=[ct.default_count_output],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={"exp_res": [{ct.default_count_output: 50}]})
+        partition_w1.query(expr='', output_fields=[ct.default_count_output],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={"exp_res": [{ct.default_count_output: 50}]})
+        vectors = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
+        collection_w.search(vectors[:1], ct.default_float_vec_field_name, ct.default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
 
 
 class TestQueryIterator(TestcaseBase):
@@ -4503,6 +4563,51 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #36538")
+    def test_query_none_count(self, null_data_percent):
+        """
+        target: test query count(*) with None and default data
+        method: 1. create a collection and 2 partitions with nullable and default value fields
+                2. insert data
+                3. load one partition
+                4. delete half data in each partition
+                5. release the collection and load one partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=True,
+                                                    nullable_fields={ct.default_float_field_name: null_data_percent},
+                                                    default_value_fields={ct.default_string_field_name: "data"})[0]
+        collection_w.query(expr='', output_fields=[ct.default_count_output],
+                          check_task=CheckTasks.check_query_results,
+                          check_items={"exp_res": [{ct.default_count_output: 200}]})
+        collection_w.release()
+        partition_w1, partition_w2 = collection_w.partitions
+        # load
+        partition_w1.load()
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # release
+        collection_w.release()
+        # partition_w1.load()
+        collection_w.load(partition_names=[partition_w1.name])
+        # search on collection, partition1, partition2
+        collection_w.query(expr='', output_fields=[ct.default_count_output],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={"exp_res": [{ct.default_count_output: 50}]})
+        partition_w1.query(expr='', output_fields=[ct.default_count_output],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={"exp_res": [{ct.default_count_output: 50}]})
+        vectors = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
+        collection_w.search(vectors[:1], ct.default_float_vec_field_name, ct.default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+
+
 class TestQueryTextMatch(TestcaseBase):
     """
     ******************************************************************
@@ -4524,7 +4629,7 @@ class TestQueryTextMatch(TestcaseBase):
                 3. verify the result
         expected: text match successfully and result is correct
         """
-        analyzer_params = {
+        tokenizer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -4534,30 +4639,34 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
+                enable_tokenizer=True,
+				enable_match=True,
                 is_partition_key=enable_partition_key,
-                analyzer_params=analyzer_params,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -4649,7 +4758,7 @@ class TestQueryTextMatch(TestcaseBase):
                 3. verify the result
         expected: get the correct token, text match successfully and result is correct
         """
-        analyzer_params = {
+        tokenizer_params = {
             "tokenizer": "standard",
             "alpha_num_only": True,
             "ascii_folding": True,
@@ -4676,29 +4785,33 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -4773,7 +4886,7 @@ class TestQueryTextMatch(TestcaseBase):
                 3. verify the result
         expected: query successfully and result is correct
         """
-        analyzer_params = {
+        tokenizer_params = {
             "tokenizer": "default",
         }
         # 1. initialize with data
@@ -4784,29 +4897,33 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -4883,7 +5000,7 @@ class TestQueryTextMatch(TestcaseBase):
                 3. verify the result
         expected: query successfully and result is correct
         """
-        analyzer_params = {
+        tokenizer_params = {
             "tokenizer": "default",
         }
         # 1. initialize with data
@@ -4894,29 +5011,33 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -5022,7 +5143,7 @@ class TestQueryTextMatch(TestcaseBase):
         """
 
         # 1. initialize with data
-        analyzer_params = {
+        tokenizer_params = {
             "tokenizer": "default",
         }
         # 1. initialize with data
@@ -5033,29 +5154,33 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -5163,7 +5288,7 @@ class TestQueryTextMatch(TestcaseBase):
         """
         # 1. initialize with data
         fake_en = Faker("en_US")
-        analyzer_params = {
+        tokenizer_params = {
             "tokenizer": "default",
         }
         dim = 128
@@ -5173,29 +5298,33 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -5269,7 +5398,7 @@ class TestQueryTextMatch(TestcaseBase):
         expected: text match successfully and result is correct
         """
         # 1. initialize with data
-        analyzer_params = {
+        tokenizer_params = {
             "tokenizer": "default",
         }
         # 1. initialize with data
@@ -5280,29 +5409,33 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -5406,7 +5539,7 @@ class TestQueryTextMatchNegative(TestcaseBase):
                 2. create collection
         expected: create collection failed and return error
         """
-        analyzer_params = {
+        tokenizer_params = {
             "tokenizer": "Unsupported",
         }
         dim = 128
@@ -5416,36 +5549,41 @@ class TestQueryTextMatchNegative(TestcaseBase):
                 name="title",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="overview",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="genres",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="producer",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(
                 name="cast",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_match=True,
-                analyzer_params=analyzer_params,
+                enable_tokenizer=True,
+				enable_match=True,
+                tokenizer_params=tokenizer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]

@@ -17,8 +17,6 @@ import (
 
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
 
-	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
 	segcorepb "github.com/milvus-io/milvus/internal/proto/segcorepb"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
@@ -288,6 +286,49 @@ func (_c *MockSegment_ExistIndex_Call) Return(_a0 bool) *MockSegment_ExistIndex_
 }
 
 func (_c *MockSegment_ExistIndex_Call) RunAndReturn(run func(int64) bool) *MockSegment_ExistIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetBM25Stats provides a mock function with given fields:
+func (_m *MockSegment) GetBM25Stats() map[int64]*storage.BM25Stats {
+	ret := _m.Called()
+
+	var r0 map[int64]*storage.BM25Stats
+	if rf, ok := ret.Get(0).(func() map[int64]*storage.BM25Stats); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64]*storage.BM25Stats)
+		}
+	}
+
+	return r0
+}
+
+// MockSegment_GetBM25Stats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetBM25Stats'
+type MockSegment_GetBM25Stats_Call struct {
+	*mock.Call
+}
+
+// GetBM25Stats is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) GetBM25Stats() *MockSegment_GetBM25Stats_Call {
+	return &MockSegment_GetBM25Stats_Call{Call: _e.mock.On("GetBM25Stats")}
+}
+
+func (_c *MockSegment_GetBM25Stats_Call) Run(run func()) *MockSegment_GetBM25Stats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_GetBM25Stats_Call) Return(_a0 map[int64]*storage.BM25Stats) *MockSegment_GetBM25Stats_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_GetBM25Stats_Call) RunAndReturn(run func() map[int64]*storage.BM25Stats) *MockSegment_GetBM25Stats_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -589,6 +630,47 @@ func (_c *MockSegment_IsLazyLoad_Call) RunAndReturn(run func() bool) *MockSegmen
 	return _c
 }
 
+// IsSorted provides a mock function with given fields:
+func (_m *MockSegment) IsSorted() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockSegment_IsSorted_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsSorted'
+type MockSegment_IsSorted_Call struct {
+	*mock.Call
+}
+
+// IsSorted is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) IsSorted() *MockSegment_IsSorted_Call {
+	return &MockSegment_IsSorted_Call{Call: _e.mock.On("IsSorted")}
+}
+
+func (_c *MockSegment_IsSorted_Call) Run(run func()) *MockSegment_IsSorted_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_IsSorted_Call) Return(_a0 bool) *MockSegment_IsSorted_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_IsSorted_Call) RunAndReturn(run func() bool) *MockSegment_IsSorted_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LastDeltaTimestamp provides a mock function with given fields:
 func (_m *MockSegment) LastDeltaTimestamp() uint64 {
 	ret := _m.Called()
@@ -710,49 +792,6 @@ func (_c *MockSegment_LoadDeltaData_Call) Return(_a0 error) *MockSegment_LoadDel
 }
 
 func (_c *MockSegment_LoadDeltaData_Call) RunAndReturn(run func(context.Context, *storage.DeleteData) error) *MockSegment_LoadDeltaData_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// LoadDeltaData2 provides a mock function with given fields: ctx, schema
-func (_m *MockSegment) LoadDeltaData2(ctx context.Context, schema *schemapb.CollectionSchema) error {
-	ret := _m.Called(ctx, schema)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *schemapb.CollectionSchema) error); ok {
-		r0 = rf(ctx, schema)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockSegment_LoadDeltaData2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadDeltaData2'
-type MockSegment_LoadDeltaData2_Call struct {
-	*mock.Call
-}
-
-// LoadDeltaData2 is a helper method to define mock.On call
-//   - ctx context.Context
-//   - schema *schemapb.CollectionSchema
-func (_e *MockSegment_Expecter) LoadDeltaData2(ctx interface{}, schema interface{}) *MockSegment_LoadDeltaData2_Call {
-	return &MockSegment_LoadDeltaData2_Call{Call: _e.mock.On("LoadDeltaData2", ctx, schema)}
-}
-
-func (_c *MockSegment_LoadDeltaData2_Call) Run(run func(ctx context.Context, schema *schemapb.CollectionSchema)) *MockSegment_LoadDeltaData2_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*schemapb.CollectionSchema))
-	})
-	return _c
-}
-
-func (_c *MockSegment_LoadDeltaData2_Call) Return(_a0 error) *MockSegment_LoadDeltaData2_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockSegment_LoadDeltaData2_Call) RunAndReturn(run func(context.Context, *schemapb.CollectionSchema) error) *MockSegment_LoadDeltaData2_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1570,6 +1609,39 @@ func (_c *MockSegment_Unpin_Call) Return() *MockSegment_Unpin_Call {
 }
 
 func (_c *MockSegment_Unpin_Call) RunAndReturn(run func()) *MockSegment_Unpin_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateBM25Stats provides a mock function with given fields: stats
+func (_m *MockSegment) UpdateBM25Stats(stats map[int64]*storage.BM25Stats) {
+	_m.Called(stats)
+}
+
+// MockSegment_UpdateBM25Stats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateBM25Stats'
+type MockSegment_UpdateBM25Stats_Call struct {
+	*mock.Call
+}
+
+// UpdateBM25Stats is a helper method to define mock.On call
+//   - stats map[int64]*storage.BM25Stats
+func (_e *MockSegment_Expecter) UpdateBM25Stats(stats interface{}) *MockSegment_UpdateBM25Stats_Call {
+	return &MockSegment_UpdateBM25Stats_Call{Call: _e.mock.On("UpdateBM25Stats", stats)}
+}
+
+func (_c *MockSegment_UpdateBM25Stats_Call) Run(run func(stats map[int64]*storage.BM25Stats)) *MockSegment_UpdateBM25Stats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[int64]*storage.BM25Stats))
+	})
+	return _c
+}
+
+func (_c *MockSegment_UpdateBM25Stats_Call) Return() *MockSegment_UpdateBM25Stats_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegment_UpdateBM25Stats_Call) RunAndReturn(run func(map[int64]*storage.BM25Stats)) *MockSegment_UpdateBM25Stats_Call {
 	_c.Call.Return(run)
 	return _c
 }

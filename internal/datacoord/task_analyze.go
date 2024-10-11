@@ -118,15 +118,18 @@ func (at *analyzeTask) GetFailReason() string {
 	return at.taskInfo.GetFailReason()
 }
 
-func (at *analyzeTask) UpdateVersion(ctx context.Context, meta *meta) error {
-	return meta.analyzeMeta.UpdateVersion(at.GetTaskID())
-}
-
-func (at *analyzeTask) UpdateMetaBuildingState(nodeID int64, meta *meta) error {
-	if err := meta.analyzeMeta.BuildingTask(at.GetTaskID(), nodeID); err != nil {
+func (at *analyzeTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error {
+	if err := meta.analyzeMeta.UpdateVersion(at.GetTaskID(), nodeID); err != nil {
 		return err
 	}
 	at.nodeID = nodeID
+	return nil
+}
+
+func (at *analyzeTask) UpdateMetaBuildingState(meta *meta) error {
+	if err := meta.analyzeMeta.BuildingTask(at.GetTaskID()); err != nil {
+		return err
+	}
 	return nil
 }
 

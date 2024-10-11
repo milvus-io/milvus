@@ -129,13 +129,15 @@ const (
 )
 
 const (
-	ParamAnnsField    = "anns_field"
-	Params            = "params"
-	ParamRoundDecimal = "round_decimal"
-	ParamOffset       = "offset"
-	ParamLimit        = "limit"
-	ParamRadius       = "radius"
-	ParamRangeFilter  = "range_filter"
-	ParamGroupByField = "group_by_field"
-	BoundedTimestamp  = 2
+	ParamAnnsField       = "anns_field"
+	Params               = "params"
+	ParamRoundDecimal    = "round_decimal"
+	ParamOffset          = "offset"
+	ParamLimit           = "limit"
+	ParamRadius          = "radius"
+	ParamRangeFilter     = "range_filter"
+	ParamGroupByField    = "group_by_field"
+	ParamGroupSize       = "group_size"
+	ParamGroupStrictSize = "group_strict_size"
+	BoundedTimestamp     = 2
 )

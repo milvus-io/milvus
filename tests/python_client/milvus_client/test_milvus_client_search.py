@@ -18,6 +18,7 @@ from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
 from common.constants import *
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
+from pymilvus import DataType
 from base.high_level_api_wrapper import HighLevelApiWrapper
 client_w = HighLevelApiWrapper()
 
@@ -170,7 +171,7 @@ class TestMilvusClientSearchValid(TestcaseBase):
     ******************************************************************
     """
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_search_query_default(self):
         """
         target: test search (high level api) normal case
@@ -213,6 +214,37 @@ class TestMilvusClientSearchValid(TestcaseBase):
                                     "primary_field": default_primary_key_field_name})
         client_w.release_collection(client, collection_name)
         client_w.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #36484")
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_milvus_client_search_query_self_creation_default(self, nullable):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: create collection with default schema, index, and load successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 128
+        # 1. create collection
+        schema = client_w.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True, auto_id = False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
+        schema.add_field("nullable_field", DataType.INT64, nullable=True, default_value=10)
+        schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=12,
+                         max_length=64, nullable=True)
+        index_params = client_w.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        client_w.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_string_field_name: str(i), "nullable_field": None, "array_field": None} for i in range(default_nb)]
+        client_w.insert(client, collection_name, rows)
+        if client_w.has_collection(client, collection_name)[0]:
+            client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_rename_search_query_default(self):

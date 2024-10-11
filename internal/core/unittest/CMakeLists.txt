@@ -41,6 +41,7 @@ set(MILVUS_TEST_FILES
         test_concurrent_vector.cpp
         test_c_stream_reduce.cpp
         test_c_tokenizer.cpp
+        test_loading.cpp
         test_data_codec.cpp
         test_disk_file_manager_test.cpp
         test_exec.cpp
@@ -115,6 +116,14 @@ if (DEFINED AZURE_BUILD_DIR)
                 #test_remote_chunk_manager.cpp
                 )
     include_directories("${AZURE_BUILD_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
+endif()
+
+if (ENABLE_GCP_NATIVE)
+    add_definitions(-DENABLE_GCP_NATIVE)
+    set(MILVUS_TEST_FILES
+                ${MILVUS_TEST_FILES}
+                test_gcp_native_chunk_manager.cpp
+                )
 endif()
 
 if (LINUX)

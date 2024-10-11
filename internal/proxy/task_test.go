@@ -3116,6 +3116,10 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 				Key:   "max_length",
 				Value: strconv.Itoa(testMaxVarCharLength),
 			},
+			{
+				Key:   "enable_tokenizer",
+				Value: "true",
+			},
 		},
 	}
 	floatVecField := &schemapb.FieldSchema{

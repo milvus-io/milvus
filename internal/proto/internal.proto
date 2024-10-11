@@ -96,6 +96,7 @@ message SubSearchRequest {
   string metricType = 9;
   int64 group_by_field_id = 10;
   int64 group_size = 11;
+  int64 field_id = 12;
 }
 
 message SearchRequest {
@@ -124,6 +125,7 @@ message SearchRequest {
   common.ConsistencyLevel consistency_level = 22;
   int64 group_by_field_id = 23;
   int64 group_size = 24;
+  int64 field_id = 25;
 }
 
 message SubSearchResults {
@@ -304,8 +306,8 @@ enum ImportJobState {
   Importing = 3;
   Failed = 4;
   Completed = 5;
-  Stats = 6;
-  IndexBuilding = 7;
+  IndexBuilding = 6;
+  Stats = 7;
 }
 
 message ImportFile {

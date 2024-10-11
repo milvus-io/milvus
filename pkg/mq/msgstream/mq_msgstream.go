@@ -966,7 +966,8 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 						zap.Int64("source", tsMsg.SourceID()),
 						zap.String("type", tsMsg.Type().String()),
 						zap.Int("size", tsMsg.Size()),
-						zap.Any("position", tsMsg.Position()),
+						zap.Uint64("msgTs", tsMsg.BeginTs()),
+						zap.Uint64("posTs", mp.GetTimestamp()),
 					)
 				}
 			}

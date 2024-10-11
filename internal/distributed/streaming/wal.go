@@ -93,7 +93,7 @@ func (w *walAccesserImpl) Txn(ctx context.Context, opts TxnOption) (Txn, error) 
 		w.lifetime.Done()
 		return nil, status.NewInvaildArgument("vchannel is required")
 	}
-	if opts.Keepalive < 1*time.Millisecond {
+	if opts.Keepalive != 0 && opts.Keepalive < 1*time.Millisecond {
 		w.lifetime.Done()
 		return nil, status.NewInvaildArgument("ttl must be greater than or equal to 1ms")
 	}

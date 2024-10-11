@@ -53,6 +53,7 @@ type Segment interface {
 	StartPosition() *msgpb.MsgPosition
 	Type() SegmentType
 	Level() datapb.SegmentLevel
+	IsSorted() bool
 	LoadInfo() *querypb.SegmentLoadInfo
 	// PinIfNotReleased the segment to prevent it from being released
 	PinIfNotReleased() error
@@ -85,6 +86,10 @@ type Segment interface {
 	UpdateBloomFilter(pks []storage.PrimaryKey)
 	MayPkExist(lc *storage.LocationsCache) bool
 	BatchPkExist(lc *storage.BatchLocationsCache) []bool
+
+	// BM25 stats
+	UpdateBM25Stats(stats map[int64]*storage.BM25Stats)
+	GetBM25Stats() map[int64]*storage.BM25Stats
 
 	// Read operations
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)

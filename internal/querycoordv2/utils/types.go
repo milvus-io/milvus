@@ -45,6 +45,7 @@ func MergeMetaSegmentIntoSegmentInfo(info *querypb.SegmentInfo, segments ...*met
 			SegmentState: commonpb.SegmentState_Sealed,
 			IndexInfos:   make([]*querypb.FieldIndexInfo, 0),
 			Level:        first.Level,
+			IsSorted:     first.GetIsSorted(),
 		}
 		for _, indexInfo := range first.IndexInfo {
 			info.IndexName = indexInfo.IndexName
@@ -80,6 +81,7 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 		NumOfRows:      segment.NumOfRows,
 		Statslogs:      segment.Statslogs,
 		Deltalogs:      segment.Deltalogs,
+		Bm25Logs:       segment.Bm25Statslogs,
 		InsertChannel:  segment.InsertChannel,
 		IndexInfos:     indexes,
 		StartPosition:  segment.GetStartPosition(),

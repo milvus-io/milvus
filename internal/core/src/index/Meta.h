@@ -42,6 +42,7 @@ constexpr const char* METRIC_TYPE = "metric_type";
 // scalar index type
 constexpr const char* ASCENDING_SORT = "STL_SORT";
 constexpr const char* MARISA_TRIE = "Trie";
+constexpr const char* MARISA_TRIE_UPPER = "TRIE";
 constexpr const char* INVERTED_INDEX_TYPE = "INVERTED";
 constexpr const char* BITMAP_INDEX_TYPE = "BITMAP";
 constexpr const char* HYBRID_INDEX_TYPE = "HYBRID";

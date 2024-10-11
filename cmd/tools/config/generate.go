@@ -333,6 +333,11 @@ func WriteYaml(w io.Writer) {
 			header: `
 # Any configuration related to the streaming node server.`,
 		},
+		{
+			name: "streaming",
+			header: `
+# Any configuration related to the streaming service.`,
+		},
 	}
 	marshller := YamlMarshaller{w, groups, result}
 	marshller.writeYamlRecursive(lo.Filter(result, func(d DocContent, _ int) bool {

@@ -31,7 +31,7 @@ TEST(ValidateTextSchema, JieBa) {
     milvus::proto::schema::FieldSchema schema;
     {
         auto kv = schema.add_type_params();
-        kv->set_key("analyzer_params");
+        kv->set_key("tokenizer_params");
         kv->set_value(R"({"tokenizer": "jieba"})");
     }
 

@@ -45,6 +45,8 @@ get_storage_config(const milvus::proto::clustering::StorageConfig& config) {
     storage_config.region = config.region();
     storage_config.useVirtualHost = config.use_virtual_host();
     storage_config.requestTimeoutMs = config.request_timeout_ms();
+    storage_config.gcp_credential_json =
+        std::string(config.gcpcredentialjson());
     return storage_config;
 }
 

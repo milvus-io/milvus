@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
@@ -27,6 +28,7 @@ func newPartitionSegmentManager(
 	collectionID int64,
 	paritionID int64,
 	segments []*segmentAllocManager,
+	metrics *metricsutil.SegmentAssignMetrics,
 ) *partitionSegmentManager {
 	return &partitionSegmentManager{
 		mu: sync.Mutex{},
@@ -40,6 +42,7 @@ func newPartitionSegmentManager(
 		collectionID: collectionID,
 		paritionID:   paritionID,
 		segments:     segments,
+		metrics:      metrics,
 	}
 }
 
@@ -53,6 +56,7 @@ type partitionSegmentManager struct {
 	paritionID           int64
 	segments             []*segmentAllocManager // there will be very few segments in this list.
 	fencedAssignTimeTick uint64                 // the time tick that the assign operation is fenced.
+	metrics              *metricsutil.SegmentAssignMetrics
 }
 
 func (m *partitionSegmentManager) CollectionID() int64 {
@@ -80,7 +84,7 @@ func (m *partitionSegmentManager) SealAllSegmentsAndFenceUntil(timeTick uint64) 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	segmentManagers := m.collectShouldBeSealedWithPolicy(func(segmentMeta *segmentAllocManager) bool { return true })
+	segmentManagers := m.collectShouldBeSealedWithPolicy(func(segmentMeta *segmentAllocManager) (policy.PolicyName, bool) { return policy.PolicyNameFenced, true })
 	// fence the assign operation until the incoming time tick or latest assigned timetick.
 	// The new incoming assignment request will be fenced.
 	// So all the insert operation before the fenced time tick cannot added to the growing segment (no more insert can be applied on it).
@@ -107,7 +111,7 @@ func (m *partitionSegmentManager) CollectionMustSealed(segmentID int64) *segment
 	var target *segmentAllocManager
 	m.segments = lo.Filter(m.segments, func(segment *segmentAllocManager, _ int) bool {
 		if segment.inner.GetSegmentId() == segmentID {
-			target = segment
+			target = segment.WithSealPolicy(policy.PolicyNameForce)
 			return false
 		}
 		return true
@@ -116,13 +120,13 @@ func (m *partitionSegmentManager) CollectionMustSealed(segmentID int64) *segment
 }
 
 // collectShouldBeSealedWithPolicy collects all segments that should be sealed by policy.
-func (m *partitionSegmentManager) collectShouldBeSealedWithPolicy(predicates func(segmentMeta *segmentAllocManager) bool) []*segmentAllocManager {
+func (m *partitionSegmentManager) collectShouldBeSealedWithPolicy(predicates func(segmentMeta *segmentAllocManager) (policy.PolicyName, bool)) []*segmentAllocManager {
 	shouldBeSealedSegments := make([]*segmentAllocManager, 0, len(m.segments))
 	segments := make([]*segmentAllocManager, 0, len(m.segments))
 	for _, segment := range m.segments {
 		// A already sealed segment may be came from recovery.
 		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED {
-			shouldBeSealedSegments = append(shouldBeSealedSegments, segment)
+			shouldBeSealedSegments = append(shouldBeSealedSegments, segment.WithSealPolicy(policy.PolicyNameRecover))
 			m.logger.Info("segment has been sealed, remove it from assignment",
 				zap.Int64("segmentID", segment.GetSegmentID()),
 				zap.String("state", segment.GetState().String()),
@@ -132,10 +136,16 @@ func (m *partitionSegmentManager) collectShouldBeSealedWithPolicy(predicates fun
 		}
 
 		// policy hitted growing segment should be removed from assignment manager.
-		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING &&
-			predicates(segment) {
-			shouldBeSealedSegments = append(shouldBeSealedSegments, segment)
-			continue
+		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
+			if policyName, shouldBeSealed := predicates(segment); shouldBeSealed {
+				shouldBeSealedSegments = append(shouldBeSealedSegments, segment.WithSealPolicy(policyName))
+				m.logger.Info("segment should be sealed by policy",
+					zap.Int64("segmentID", segment.GetSegmentID()),
+					zap.String("policy", string(policyName)),
+					zap.Any("stat", segment.GetStat()),
+				)
+				continue
+			}
 		}
 		segments = append(segments, segment)
 	}
@@ -159,7 +169,7 @@ func (m *partitionSegmentManager) CollectDirtySegmentsAndClear() []*segmentAlloc
 }
 
 // CollectAllCanBeSealedAndClear collects all segments that can be sealed and clear the manager.
-func (m *partitionSegmentManager) CollectAllCanBeSealedAndClear() []*segmentAllocManager {
+func (m *partitionSegmentManager) CollectAllCanBeSealedAndClear(policy policy.PolicyName) []*segmentAllocManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -167,7 +177,7 @@ func (m *partitionSegmentManager) CollectAllCanBeSealedAndClear() []*segmentAllo
 	for _, segment := range m.segments {
 		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING ||
 			segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED {
-			canBeSealed = append(canBeSealed, segment)
+			canBeSealed = append(canBeSealed, segment.WithSealPolicy(policy))
 		}
 	}
 	m.segments = make([]*segmentAllocManager, 0)
@@ -175,20 +185,20 @@ func (m *partitionSegmentManager) CollectAllCanBeSealedAndClear() []*segmentAllo
 }
 
 // hitSealPolicy checks if the segment should be sealed by policy.
-func (m *partitionSegmentManager) hitSealPolicy(segmentMeta *segmentAllocManager) bool {
+func (m *partitionSegmentManager) hitSealPolicy(segmentMeta *segmentAllocManager) (policy.PolicyName, bool) {
 	stat := segmentMeta.GetStat()
 	for _, p := range policy.GetSegmentAsyncSealPolicy() {
 		if result := p.ShouldBeSealed(stat); result.ShouldBeSealed {
 			m.logger.Info("segment should be sealed by policy",
 				zap.Int64("segmentID", segmentMeta.GetSegmentID()),
-				zap.String("policy", result.PolicyName),
+				zap.String("policy", string(result.PolicyName)),
 				zap.Any("stat", stat),
 				zap.Any("extraInfo", result.ExtraInfo),
 			)
-			return true
+			return result.PolicyName, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // allocNewGrowingSegment allocates a new growing segment.
@@ -258,8 +268,9 @@ func (m *partitionSegmentManager) createNewPendingSegment(ctx context.Context) (
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to allocate segment id")
 	}
-	meta := newSegmentAllocManager(m.pchannel, m.collectionID, m.paritionID, int64(segmentID), m.vchannel)
+	meta := newSegmentAllocManager(m.pchannel, m.collectionID, m.paritionID, int64(segmentID), m.vchannel, m.metrics)
 	tx := meta.BeginModification()
+	tx.IntoPending()
 	if err := tx.Commit(ctx); err != nil {
 		return nil, errors.Wrap(err, "failed to commit segment assignment modification")
 	}

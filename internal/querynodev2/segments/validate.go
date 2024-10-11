@@ -62,6 +62,11 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 	// validate segment
 	segments := make([]Segment, 0, len(segmentIDs))
 	var err error
+	defer func() {
+		if err != nil {
+			manager.Segment.Unpin(segments)
+		}
+	}()
 	if len(segmentIDs) == 0 {
 		for _, partID := range searchPartIDs {
 			segments, err = manager.Segment.GetAndPinBy(WithPartition(partID), segmentFilter)
@@ -76,7 +81,7 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 		}
 		for _, segment := range segments {
 			if !funcutil.SliceContain(searchPartIDs, segment.Partition()) {
-				err := fmt.Errorf("segment %d belongs to partition %d, which is not in %v", segment.ID(), segment.Partition(), searchPartIDs)
+				err = fmt.Errorf("segment %d belongs to partition %d, which is not in %v", segment.ID(), segment.Partition(), searchPartIDs)
 				return nil, err
 			}
 		}

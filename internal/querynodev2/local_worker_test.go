@@ -71,7 +71,7 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 	paramtable.Init()
 	suite.params = paramtable.Get()
 	// close GC at test to avoid data race
-	suite.params.Save(suite.params.QueryNodeCfg.GCEnabled.Key, "false")
+	suite.params.Save(suite.params.CommonCfg.GCEnabled.Key, "false")
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	// init node

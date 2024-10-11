@@ -27,11 +27,14 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -63,10 +66,12 @@ import (
 
 // InsertData
 type InsertData struct {
-	RowIDs        []int64
-	PrimaryKeys   []storage.PrimaryKey
-	Timestamps    []uint64
-	InsertRecord  *segcorepb.InsertRecord
+	RowIDs       []int64
+	PrimaryKeys  []storage.PrimaryKey
+	Timestamps   []uint64
+	InsertRecord *segcorepb.InsertRecord
+	BM25Stats    map[int64]*storage.BM25Stats
+
 	StartPosition *msgpb.MsgPosition
 	PartitionID   int64
 }
@@ -149,6 +154,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			if !sd.pkOracle.Exists(growing, paramtable.GetNodeID()) {
 				// register created growing segment after insert, avoid to add empty growing to delegator
 				sd.pkOracle.Register(growing, paramtable.GetNodeID())
+				sd.idfOracle.Register(segmentID, insertData.BM25Stats, segments.SegmentTypeGrowing)
 				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
 				sd.addGrowing(SegmentEntry{
 					NodeID:        paramtable.GetNodeID(),
@@ -158,10 +164,12 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					TargetVersion: initialTargetVersion,
 				})
 			}
-			sd.growingSegmentLock.Unlock()
-		}
 
-		log.Debug("insert into growing segment",
+			sd.growingSegmentLock.Unlock()
+		} else {
+			sd.idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
+		}
+		log.Info("insert into growing segment",
 			zap.Int64("collectionID", growing.Collection()),
 			zap.Int64("segmentID", segmentID),
 			zap.Int("rowCount", len(insertData.RowIDs)),
@@ -375,8 +383,11 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	segmentIDs = lo.Map(loaded, func(segment segments.Segment, _ int) int64 { return segment.ID() })
 	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
 
-	for _, candidate := range loaded {
-		sd.pkOracle.Register(candidate, paramtable.GetNodeID())
+	for _, segment := range loaded {
+		sd.pkOracle.Register(segment, paramtable.GetNodeID())
+		if sd.hasBM25Field {
+			sd.idfOracle.Register(segment.ID(), segment.GetBM25Stats(), segments.SegmentTypeGrowing)
+		}
 	}
 	sd.addGrowing(lo.Map(loaded, func(segment segments.Segment, _ int) SegmentEntry {
 		return SegmentEntry{
@@ -472,6 +483,16 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
 			return !sd.pkOracle.Exists(pkoracle.NewCandidateKey(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed), targetNodeID)
 		})
+
+		var bm25Stats *typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats]
+		if sd.hasBM25Field {
+			bm25Stats, err = sd.loader.LoadBM25Stats(ctx, req.GetCollectionID(), infos...)
+			if err != nil {
+				log.Warn("failed to load bm25 stats for segment", zap.Error(err))
+				return err
+			}
+		}
+
 		candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), req.GetVersion(), infos...)
 		if err != nil {
 			log.Warn("failed to load bloom filter set for segment", zap.Error(err))
@@ -479,7 +500,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		}
 
 		log.Debug("load delete...")
-		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker)
+		err = sd.loadStreamDelete(ctx, candidates, bm25Stats, infos, req, targetNodeID, worker)
 		if err != nil {
 			log.Warn("load stream delete failed", zap.Error(err))
 			return err
@@ -552,6 +573,7 @@ func (sd *shardDelegator) RefreshLevel0DeletionStats() {
 
 func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	candidates []*pkoracle.BloomFilterSet,
+	bm25Stats *typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats],
 	infos []*querypb.SegmentLoadInfo,
 	req *querypb.LoadSegmentsRequest,
 	targetNodeID int64,
@@ -665,6 +687,14 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		)
 		sd.pkOracle.Register(candidate, targetNodeID)
 	}
+
+	if bm25Stats != nil {
+		bm25Stats.Range(func(segmentID int64, stats map[int64]*storage.BM25Stats) bool {
+			sd.idfOracle.Register(segmentID, stats, segments.SegmentTypeSealed)
+			return false
+		})
+	}
+
 	log.Info("load delete done")
 
 	return nil
@@ -962,4 +992,48 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 	if sd.excludedSegments.ShouldClean() {
 		sd.excludedSegments.CleanInvalid(ts)
 	}
+}
+
+func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, error) {
+	pb := &commonpb.PlaceholderGroup{}
+	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
+
+	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) != 1 {
+		return 0, merr.WrapErrParameterInvalidMsg("please provide varchar for bm25")
+	}
+
+	holder := pb.Placeholders[0]
+	if holder.Type != commonpb.PlaceholderType_VarChar {
+		return 0, fmt.Errorf("can't build BM25 IDF for data not varchar")
+	}
+
+	str := funcutil.GetVarCharFromPlaceholder(holder)
+	functionRunner, ok := sd.functionRunners[req.GetFieldId()]
+	if !ok {
+		return 0, fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
+	}
+
+	// get search text term frequency
+	output, err := functionRunner.BatchRun(str)
+	if err != nil {
+		return 0, err
+	}
+
+	tfArray, ok := output[0].(*schemapb.SparseFloatArray)
+	if !ok {
+		return 0, fmt.Errorf("functionRunner return unknown data")
+	}
+
+	idfSparseVector, avgdl, err := sd.idfOracle.BuildIDF(req.GetFieldId(), tfArray)
+	if err != nil {
+		return 0, err
+	}
+
+	err = SetBM25Params(req, avgdl)
+	if err != nil {
+		return 0, err
+	}
+
+	req.PlaceholderGroup = funcutil.SparseVectorDataToPlaceholderGroupBytes(idfSparseVector)
+	return avgdl, nil
 }

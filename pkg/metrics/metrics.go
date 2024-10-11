@@ -57,6 +57,9 @@ const (
 	FlushingSegmentLabel = "Flushing"
 	DroppedSegmentLabel  = "Dropped"
 
+	StreamingDataSourceLabel  = "streaming"
+	BulkinsertDataSourceLabel = "bulkinsert"
+
 	Leader     = "OnLeader"
 	FromLeader = "FromLeader"
 
@@ -74,6 +77,12 @@ const (
 	Executing = "executing"
 	Done      = "done"
 
+	ImportStagePending    = "pending"
+	ImportStagePreImport  = "preimport"
+	ImportStageImport     = "import"
+	ImportStageStats      = "stats"
+	ImportStageBuildIndex = "build_index"
+
 	compactionTypeLabelName  = "compaction_type"
 	isVectorFieldLabelName   = "is_vector_field"
 	segmentPruneLabelName    = "segment_prune_label"
@@ -85,7 +94,6 @@ const (
 	collectionIDLabelName    = "collection_id"
 	partitionIDLabelName     = "partition_id"
 	channelNameLabelName     = "channel_name"
-	channelTermLabelName     = "channel_term"
 	functionLabelName        = "function_name"
 	queryTypeLabelName       = "query_type"
 	collectionName           = "collection_name"
@@ -96,11 +104,14 @@ const (
 	segmentStateLabelName    = "segment_state"
 	segmentIDLabelName       = "segment_id"
 	segmentLevelLabelName    = "segment_level"
+	segmentIsSortedLabelName = "segment_is_sorted"
 	usernameLabelName        = "username"
 	roleNameLabelName        = "role_name"
 	cacheNameLabelName       = "cache_name"
 	cacheStateLabelName      = "cache_state"
 	indexCountLabelName      = "indexed_field_count"
+	dataSourceLabelName      = "data_source"
+	importStageLabelName     = "import_stage"
 	requestScope             = "scope"
 	fullMethodLabelName      = "full_method"
 	reduceLevelName          = "reduce_level"

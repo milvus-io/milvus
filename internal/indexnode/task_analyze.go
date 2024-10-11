@@ -92,20 +92,21 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 	log.Info("Begin to build analyze task")
 
 	storageConfig := &clusteringpb.StorageConfig{
-		Address:          at.req.GetStorageConfig().GetAddress(),
-		AccessKeyID:      at.req.GetStorageConfig().GetAccessKeyID(),
-		SecretAccessKey:  at.req.GetStorageConfig().GetSecretAccessKey(),
-		UseSSL:           at.req.GetStorageConfig().GetUseSSL(),
-		BucketName:       at.req.GetStorageConfig().GetBucketName(),
-		RootPath:         at.req.GetStorageConfig().GetRootPath(),
-		UseIAM:           at.req.GetStorageConfig().GetUseIAM(),
-		IAMEndpoint:      at.req.GetStorageConfig().GetIAMEndpoint(),
-		StorageType:      at.req.GetStorageConfig().GetStorageType(),
-		UseVirtualHost:   at.req.GetStorageConfig().GetUseVirtualHost(),
-		Region:           at.req.GetStorageConfig().GetRegion(),
-		CloudProvider:    at.req.GetStorageConfig().GetCloudProvider(),
-		RequestTimeoutMs: at.req.GetStorageConfig().GetRequestTimeoutMs(),
-		SslCACert:        at.req.GetStorageConfig().GetSslCACert(),
+		Address:           at.req.GetStorageConfig().GetAddress(),
+		AccessKeyID:       at.req.GetStorageConfig().GetAccessKeyID(),
+		SecretAccessKey:   at.req.GetStorageConfig().GetSecretAccessKey(),
+		UseSSL:            at.req.GetStorageConfig().GetUseSSL(),
+		BucketName:        at.req.GetStorageConfig().GetBucketName(),
+		RootPath:          at.req.GetStorageConfig().GetRootPath(),
+		UseIAM:            at.req.GetStorageConfig().GetUseIAM(),
+		IAMEndpoint:       at.req.GetStorageConfig().GetIAMEndpoint(),
+		StorageType:       at.req.GetStorageConfig().GetStorageType(),
+		UseVirtualHost:    at.req.GetStorageConfig().GetUseVirtualHost(),
+		Region:            at.req.GetStorageConfig().GetRegion(),
+		CloudProvider:     at.req.GetStorageConfig().GetCloudProvider(),
+		RequestTimeoutMs:  at.req.GetStorageConfig().GetRequestTimeoutMs(),
+		SslCACert:         at.req.GetStorageConfig().GetSslCACert(),
+		GcpCredentialJSON: at.req.GetStorageConfig().GetGcpCredentialJSON(),
 	}
 
 	numRowsMap := make(map[int64]int64)

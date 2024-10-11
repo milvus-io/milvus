@@ -358,7 +358,7 @@ func readDoubleArray(blobReaders []io.Reader) []float64 {
 	return ret
 }
 
-func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemapb.CollectionSchema) (idata *InsertData, err error) {
+func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemapb.CollectionSchema, skipFunction bool) (idata *InsertData, err error) {
 	blobReaders := make([]io.Reader, 0)
 	for _, blob := range msg.RowData {
 		blobReaders = append(blobReaders, bytes.NewReader(blob.GetValue()))
@@ -371,7 +371,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 	}
 
 	for _, field := range collSchema.Fields {
-		if field.GetIsFunctionOutput() {
+		if skipFunction && field.GetIsFunctionOutput() {
 			continue
 		}
 
@@ -696,7 +696,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 func InsertMsgToInsertData(msg *msgstream.InsertMsg, schema *schemapb.CollectionSchema) (idata *InsertData, err error) {
 	if msg.IsRowBased() {
-		return RowBasedInsertMsgToInsertData(msg, schema)
+		return RowBasedInsertMsgToInsertData(msg, schema, true)
 	}
 	return ColumnBasedInsertMsgToInsertData(msg, schema)
 }
@@ -1272,7 +1272,7 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 
 func TransferInsertMsgToInsertRecord(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) (*segcorepb.InsertRecord, error) {
 	if msg.IsRowBased() {
-		insertData, err := RowBasedInsertMsgToInsertData(msg, schema)
+		insertData, err := RowBasedInsertMsgToInsertData(msg, schema, false)
 		if err != nil {
 			return nil, err
 		}
@@ -1281,7 +1281,8 @@ func TransferInsertMsgToInsertRecord(schema *schemapb.CollectionSchema, msg *msg
 
 	// column base insert msg
 	insertRecord := &segcorepb.InsertRecord{
-		NumRows: int64(msg.NumRows),
+		NumRows:    int64(msg.NumRows),
+		FieldsData: make([]*schemapb.FieldData, 0),
 	}
 
 	insertRecord.FieldsData = append(insertRecord.FieldsData, msg.FieldsData...)

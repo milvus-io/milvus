@@ -2,9 +2,7 @@ package producer
 
 import (
 	"io"
-	"strconv"
 	"sync"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -14,12 +12,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // CreateProduceServer create a new producer.
@@ -47,12 +43,14 @@ func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb
 	}); err != nil {
 		return nil, errors.Wrap(err, "at send created")
 	}
+	metrics := newProducerMetrics(l.Channel())
 	return &ProduceServer{
 		wal:              l,
 		produceServer:    produceServer,
 		logger:           log.With(zap.String("channel", l.Channel().Name), zap.Int64("term", l.Channel().Term)),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse),
 		appendWG:         sync.WaitGroup{},
+		metrics:          metrics,
 	}, nil
 }
 
@@ -63,6 +61,7 @@ type ProduceServer struct {
 	logger           *log.MLogger
 	produceMessageCh chan *streamingpb.ProduceMessageResponse // All processing messages result should sent from theses channel.
 	appendWG         sync.WaitGroup
+	metrics          *producerMetrics
 }
 
 // Execute starts the producer.
@@ -79,7 +78,9 @@ func (p *ProduceServer) Execute() error {
 	// the loop will be blocked until:
 	// 1. the stream is broken.
 	// 2. recv arm recv closed and all response is sent.
-	return p.sendLoop()
+	err := p.sendLoop()
+	p.metrics.Close()
+	return err
 }
 
 // sendLoop sends the message to client.
@@ -175,22 +176,23 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 
 	p.appendWG.Add(1)
 	p.logger.Debug("recv produce message from client", zap.Int64("requestID", req.RequestId))
+	// Update metrics.
 	msg := message.NewMutableMessage(req.GetMessage().GetPayload(), req.GetMessage().GetProperties())
+	metricsGuard := p.metrics.StartProduce()
 	if err := p.validateMessage(msg); err != nil {
 		p.logger.Warn("produce message validation failed", zap.Int64("requestID", req.RequestId), zap.Error(err))
 		p.sendProduceResult(req.RequestId, nil, err)
+		metricsGuard.Finish(err)
 		p.appendWG.Done()
 		return
 	}
 
 	// Append message to wal.
 	// Concurrent append request can be executed concurrently.
-	messageSize := msg.EstimateSize()
-	now := time.Now()
 	p.wal.AppendAsync(p.produceServer.Context(), msg, func(appendResult *wal.AppendResult, err error) {
 		defer func() {
+			metricsGuard.Finish(err)
 			p.appendWG.Done()
-			p.updateMetrics(messageSize, time.Since(now).Seconds(), err)
 		}()
 		p.sendProduceResult(req.RequestId, appendResult, err)
 	})
@@ -240,23 +242,4 @@ func (p *ProduceServer) sendProduceResult(reqID int64, appendResult *wal.AppendR
 		p.logger.Warn("stream closed before produce message response sent", zap.Int64("requestID", reqID), zap.Any("appendResult", appendResult), zap.Error(err))
 		return
 	}
-}
-
-// updateMetrics updates the metrics.
-func (p *ProduceServer) updateMetrics(messageSize int, cost float64, err error) {
-	name := p.wal.Channel().Name
-	term := strconv.FormatInt(p.wal.Channel().Term, 10)
-	metrics.StreamingNodeProduceBytes.WithLabelValues(paramtable.GetStringNodeID(), name, term, getStatusLabel(err)).Observe(float64(messageSize))
-	metrics.StreamingNodeProduceDurationSeconds.WithLabelValues(paramtable.GetStringNodeID(), name, term, getStatusLabel(err)).Observe(cost)
-}
-
-// getStatusLabel returns the status label of error.
-func getStatusLabel(err error) string {
-	if status.IsCanceled(err) {
-		return metrics.CancelLabel
-	}
-	if err != nil {
-		return metrics.FailLabel
-	}
-	return metrics.SuccessLabel
 }

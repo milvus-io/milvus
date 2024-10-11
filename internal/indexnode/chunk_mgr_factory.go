@@ -39,6 +39,7 @@ func (m *chunkMgrFactory) NewChunkManager(ctx context.Context, config *indexpb.S
 		storage.RequestTimeout(config.GetRequestTimeoutMs()),
 		storage.Region(config.GetRegion()),
 		storage.CreateBucket(true),
+		storage.GcpCredentialJSON(config.GetGcpCredentialJSON()),
 	)
 	return chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 }

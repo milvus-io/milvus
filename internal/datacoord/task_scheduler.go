@@ -384,7 +384,7 @@ func (s *taskScheduler) processInit(task Task) bool {
 	log.Ctx(s.ctx).Info("pick client success", zap.Int64("taskID", task.GetTaskID()), zap.Int64("nodeID", nodeID))
 
 	// 2. update version
-	if err := task.UpdateVersion(s.ctx, s.meta); err != nil {
+	if err := task.UpdateVersion(s.ctx, nodeID, s.meta); err != nil {
 		log.Ctx(s.ctx).Warn("update task version failed", zap.Int64("taskID", task.GetTaskID()), zap.Error(err))
 		return false
 	}
@@ -402,7 +402,7 @@ func (s *taskScheduler) processInit(task Task) bool {
 	log.Ctx(s.ctx).Info("assign task to client success", zap.Int64("taskID", task.GetTaskID()), zap.Int64("nodeID", nodeID))
 
 	// 4. update meta state
-	if err := task.UpdateMetaBuildingState(nodeID, s.meta); err != nil {
+	if err := task.UpdateMetaBuildingState(s.meta); err != nil {
 		log.Ctx(s.ctx).Warn("update meta building state failed", zap.Int64("taskID", task.GetTaskID()), zap.Error(err))
 		task.SetState(indexpb.JobState_JobStateRetry, "update meta building state failed")
 		return false

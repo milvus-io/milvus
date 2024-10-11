@@ -65,7 +65,7 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
 }  // namespace impl
 
 static SearchResult
-empty_search_result(int64_t num_queries, SearchInfo& search_info) {
+empty_search_result(int64_t num_queries) {
     SearchResult final_result;
     final_result.total_nq_ = num_queries;
     final_result.unity_topK_ = 0;  // no result
@@ -119,7 +119,8 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 
     // PreExecute: skip all calculation
     if (active_count == 0) {
-        search_result_opt_ = std::move(SearchResult());
+        search_result_opt_ = std::move(
+            empty_search_result(placeholder_group_->at(0).num_of_queries_));
         return;
     }
 

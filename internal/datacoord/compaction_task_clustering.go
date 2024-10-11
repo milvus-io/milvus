@@ -20,18 +20,21 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strconv"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -299,19 +302,92 @@ func (t *clusteringCompactionTask) processMetaSaved() error {
 func (t *clusteringCompactionTask) processStats() error {
 	// just the memory step, if it crashes at this step, the state after recovery is CompactionTaskState_statistic.
 	resultSegments := make([]int64, 0, len(t.GetTmpSegments()))
-	for _, segmentID := range t.GetTmpSegments() {
-		to, ok := t.meta.(*meta).GetCompactionTo(segmentID)
-		if !ok {
+	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+		existNonStats := false
+		tmpToResultSegments := make(map[int64][]int64, len(t.GetTmpSegments()))
+		for _, segmentID := range t.GetTmpSegments() {
+			to, ok := t.meta.(*meta).GetCompactionTo(segmentID)
+			if !ok || to == nil {
+				select {
+				case getStatsTaskChSingleton() <- segmentID:
+				default:
+				}
+				existNonStats = true
+				continue
+			}
+			tmpToResultSegments[segmentID] = lo.Map(to, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })
+			resultSegments = append(resultSegments, lo.Map(to, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })...)
+		}
+
+		if existNonStats {
 			return nil
 		}
-		resultSegments = append(resultSegments, lo.Map(to, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })...)
+
+		if err := t.regeneratePartitionStats(tmpToResultSegments); err != nil {
+			log.Warn("regenerate partition stats failed, wait for retry", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+			return merr.WrapErrClusteringCompactionMetaError("regeneratePartitionStats", err)
+		}
+	} else {
+		log.Info("stats task is not enable, set tmp segments to result segments", zap.Int64("planID", t.GetPlanID()))
+		resultSegments = t.GetTmpSegments()
 	}
 
-	log.Info("clustering compaction stats task finished",
+	log.Info("clustering compaction stats task finished", zap.Int64("planID", t.GetPlanID()),
 		zap.Int64s("tmp segments", t.GetTmpSegments()),
 		zap.Int64s("result segments", resultSegments))
 
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing), setResultSegments(resultSegments))
+}
+
+// this is just a temporary solution. A more long-term solution should be for the indexnode
+// to regenerate the clustering information corresponding to each segment and merge them at the vshard level.
+func (t *clusteringCompactionTask) regeneratePartitionStats(tmpToResultSegments map[int64][]int64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
+	cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
+	if err != nil {
+		log.Error("chunk manager init failed", zap.Error(err))
+		return err
+	}
+	partitionStatsFile := path.Join(cli.RootPath(), common.PartitionStatsPath,
+		metautil.JoinIDPath(t.GetCollectionID(), t.GetPartitionID()), t.plan.GetChannel(),
+		strconv.FormatInt(t.GetPlanID(), 10))
+
+	value, err := cli.Read(ctx, partitionStatsFile)
+	if err != nil {
+		log.Warn("read partition stats file failed", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		return err
+	}
+
+	partitionStats, err := storage.DeserializePartitionsStatsSnapshot(value)
+	if err != nil {
+		log.Warn("deserialize partition stats failed", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		return err
+	}
+
+	for from, to := range tmpToResultSegments {
+		stats := partitionStats.SegmentStats[from]
+		// stats task only one to
+		for _, toID := range to {
+			partitionStats.SegmentStats[toID] = stats
+		}
+		delete(partitionStats.SegmentStats, from)
+	}
+
+	partitionStatsBytes, err := storage.SerializePartitionStatsSnapshot(partitionStats)
+	if err != nil {
+		log.Warn("serialize partition stats failed", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		return err
+	}
+
+	err = cli.Write(ctx, partitionStatsFile, partitionStatsBytes)
+	if err != nil {
+		log.Warn("save partition stats file failed", zap.Int64("planID", t.GetPlanID()),
+			zap.String("path", partitionStatsFile), zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 func (t *clusteringCompactionTask) processIndexing() error {
@@ -506,33 +582,7 @@ func (t *clusteringCompactionTask) doCompact() error {
 }
 
 func (t *clusteringCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask {
-	taskClone := &datapb.CompactionTask{
-		PlanID:             t.GetPlanID(),
-		TriggerID:          t.GetTriggerID(),
-		State:              t.GetState(),
-		StartTime:          t.GetStartTime(),
-		EndTime:            t.GetEndTime(),
-		TimeoutInSeconds:   t.GetTimeoutInSeconds(),
-		Type:               t.GetType(),
-		CollectionTtl:      t.CollectionTtl,
-		CollectionID:       t.GetCollectionID(),
-		PartitionID:        t.GetPartitionID(),
-		Channel:            t.GetChannel(),
-		InputSegments:      t.GetInputSegments(),
-		ResultSegments:     t.GetResultSegments(),
-		TotalRows:          t.TotalRows,
-		Schema:             t.Schema,
-		NodeID:             t.GetNodeID(),
-		FailReason:         t.GetFailReason(),
-		RetryTimes:         t.GetRetryTimes(),
-		Pos:                t.GetPos(),
-		ClusteringKeyField: t.GetClusteringKeyField(),
-		MaxSegmentRows:     t.GetMaxSegmentRows(),
-		PreferSegmentRows:  t.GetPreferSegmentRows(),
-		AnalyzeTaskID:      t.GetAnalyzeTaskID(),
-		AnalyzeVersion:     t.GetAnalyzeVersion(),
-		LastStateStartTime: t.GetLastStateStartTime(),
-	}
+	taskClone := proto.Clone(t).(*datapb.CompactionTask)
 	for _, opt := range opts {
 		opt(taskClone)
 	}

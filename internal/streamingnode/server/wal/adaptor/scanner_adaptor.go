@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -15,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var _ wal.Scanner = (*scannerAdaptorImpl)(nil)
@@ -25,6 +25,7 @@ func newScannerAdaptor(
 	name string,
 	l walimpls.WALImpls,
 	readOption wal.ReadOption,
+	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
 ) wal.Scanner {
 	if readOption.MesasgeHandler == nil {
@@ -38,11 +39,12 @@ func newScannerAdaptor(
 		readOption:       readOption,
 		filterFunc:       options.GetFilterFunc(readOption.MessageFilter),
 		reorderBuffer:    utility.NewReOrderBuffer(),
-		pendingQueue:     typeutil.NewMultipartQueue[message.ImmutableMessage](),
-		txnBuffer:        utility.NewTxnBuffer(logger),
+		pendingQueue:     utility.NewPendingQueue(),
+		txnBuffer:        utility.NewTxnBuffer(logger, scanMetrics),
 		cleanup:          cleanup,
 		ScannerHelper:    helper.NewScannerHelper(name),
 		lastTimeTickInfo: inspector.TimeTickInfo{},
+		metrics:          scanMetrics,
 	}
 	go s.executeConsume()
 	return s
@@ -55,11 +57,12 @@ type scannerAdaptorImpl struct {
 	innerWAL         walimpls.WALImpls
 	readOption       wal.ReadOption
 	filterFunc       func(message.ImmutableMessage) bool
-	reorderBuffer    *utility.ReOrderByTimeTickBuffer                   // only support time tick reorder now.
-	pendingQueue     *typeutil.MultipartQueue[message.ImmutableMessage] //
-	txnBuffer        *utility.TxnBuffer                                 // txn buffer for txn message.
+	reorderBuffer    *utility.ReOrderByTimeTickBuffer // only support time tick reorder now.
+	pendingQueue     *utility.PendingQueue
+	txnBuffer        *utility.TxnBuffer // txn buffer for txn message.
 	cleanup          func()
 	lastTimeTickInfo inspector.TimeTickInfo
+	metrics          *metricsutil.ScannerMetrics
 }
 
 // Channel returns the channel assignment info of the wal.
@@ -79,6 +82,7 @@ func (s *scannerAdaptorImpl) Close() error {
 	if s.cleanup != nil {
 		s.cleanup()
 	}
+	s.metrics.Close()
 	return err
 }
 
@@ -112,6 +116,7 @@ func (s *scannerAdaptorImpl) executeConsume() {
 		}
 		if handleResult.MessageHandled {
 			s.pendingQueue.UnsafeAdvance()
+			s.metrics.UpdatePendingQueueSize(s.pendingQueue.Bytes())
 		}
 		if handleResult.Incoming != nil {
 			s.handleUpstream(handleResult.Incoming)
@@ -141,17 +146,22 @@ func (s *scannerAdaptorImpl) getUpstream(scanner walimpls.ScannerImpls) <-chan m
 }
 
 func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
+	// Observe the message.
+	s.metrics.ObserveMessage(msg.MessageType(), msg.EstimateSize())
 	if msg.MessageType() == message.MessageTypeTimeTick {
 		// If the time tick message incoming,
 		// the reorder buffer can be consumed until latest confirmed timetick.
 		messages := s.reorderBuffer.PopUtilTimeTick(msg.TimeTick())
+		s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
 
 		// There's some txn message need to hold until confirmed, so we need to handle them in txn buffer.
 		msgs := s.txnBuffer.HandleImmutableMessages(messages, msg.TimeTick())
+		s.metrics.UpdateTxnBufSize(s.txnBuffer.Bytes())
 
 		// Push the confirmed messages into pending queue for consuming.
 		// and push forward timetick info.
 		s.pendingQueue.Add(msgs)
+		s.metrics.UpdatePendingQueueSize(s.pendingQueue.Bytes())
 		s.lastTimeTickInfo = inspector.TimeTickInfo{
 			MessageID:              msg.MessageID(),
 			TimeTick:               msg.TimeTick(),
@@ -167,12 +177,16 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	}
 	// otherwise add message into reorder buffer directly.
 	if err := s.reorderBuffer.Push(msg); err != nil {
+		s.metrics.ObserveTimeTickViolation(msg.MessageType())
 		s.logger.Warn("failed to push message into reorder buffer",
 			zap.Any("msgID", msg.MessageID()),
 			zap.Uint64("timetick", msg.TimeTick()),
 			zap.String("vchannel", msg.VChannel()),
 			zap.Error(err))
 	}
+	// Observe the filtered message.
+	s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
+	s.metrics.ObserveFilteredMessage(msg.MessageType(), msg.EstimateSize())
 }
 
 func (s *scannerAdaptorImpl) handleTimeTickUpdated(timeTickNotifier *inspector.TimeTickNotifier) {
@@ -189,5 +203,6 @@ func (s *scannerAdaptorImpl) handleTimeTickUpdated(timeTickNotifier *inspector.T
 			return
 		}
 		s.pendingQueue.AddOne(msg.IntoImmutableMessage(s.lastTimeTickInfo.MessageID))
+		s.metrics.UpdatePendingQueueSize(s.pendingQueue.Bytes())
 	}
 }

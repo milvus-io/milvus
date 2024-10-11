@@ -2,20 +2,22 @@ package storage
 
 // Option for setting params used by chunk manager client.
 type config struct {
-	address           string
-	bucketName        string
-	accessKeyID       string
-	secretAccessKeyID string
-	useSSL            bool
-	sslCACert         string
-	createBucket      bool
-	rootPath          string
-	useIAM            bool
-	cloudProvider     string
-	iamEndpoint       string
-	useVirtualHost    bool
-	region            string
-	requestTimeoutMs  int64
+	address              string
+	bucketName           string
+	accessKeyID          string
+	secretAccessKeyID    string
+	useSSL               bool
+	sslCACert            string
+	createBucket         bool
+	rootPath             string
+	useIAM               bool
+	cloudProvider        string
+	iamEndpoint          string
+	useVirtualHost       bool
+	region               string
+	requestTimeoutMs     int64
+	gcpCredentialJSON    string
+	gcpNativeWithoutAuth bool // used for Unit Testing
 }
 
 func newDefaultConfig() *config {
@@ -106,5 +108,11 @@ func Region(region string) Option {
 func RequestTimeout(requestTimeoutMs int64) Option {
 	return func(c *config) {
 		c.requestTimeoutMs = requestTimeoutMs
+	}
+}
+
+func GcpCredentialJSON(gcpCredentialJSON string) Option {
+	return func(c *config) {
+		c.gcpCredentialJSON = gcpCredentialJSON
 	}
 }

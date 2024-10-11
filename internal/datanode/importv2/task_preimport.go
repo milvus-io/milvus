@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -99,6 +100,10 @@ func (t *PreImportTask) GetType() TaskType {
 
 func (t *PreImportTask) GetSchema() *schemapb.CollectionSchema {
 	return t.schema
+}
+
+func (t *PreImportTask) GetSlots() int64 {
+	return int64(funcutil.Min(len(t.GetFileStats()), paramtable.Get().DataNodeCfg.MaxTaskSlotNum.GetAsInt()))
 }
 
 func (t *PreImportTask) Cancel() {

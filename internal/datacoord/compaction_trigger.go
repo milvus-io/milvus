@@ -335,7 +335,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.segments = FilterInIndexedSegments(t.handler, t.meta, group.segments...)
+			group.segments = FilterInIndexedSegments(t.handler, t.meta, signal.isForce, group.segments...)
 		}
 
 		coll, err := t.getCollection(group.collectionID)
@@ -693,7 +693,7 @@ func reverseGreedySelect(candidates []*SegmentInfo, free int64, maxSegment int) 
 func (t *compactionTrigger) getCandidateSegments(channel string, partitionID UniqueID) []*SegmentInfo {
 	segments := t.meta.GetSegmentsByChannel(channel)
 	if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-		segments = FilterInIndexedSegments(t.handler, t.meta, segments...)
+		segments = FilterInIndexedSegments(t.handler, t.meta, false, segments...)
 	}
 
 	var res []*SegmentInfo

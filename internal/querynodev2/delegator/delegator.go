@@ -34,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -43,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -54,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -110,7 +113,9 @@ type shardDelegator struct {
 
 	lifetime lifetime.Lifetime[lifetime.State]
 
-	distribution   *distribution
+	distribution *distribution
+	idfOracle    IDFOracle
+
 	segmentManager segments.SegmentManager
 	tsafeManager   tsafe.Manager
 	pkOracle       pkoracle.PkOracle
@@ -135,6 +140,10 @@ type shardDelegator struct {
 	// in order to make add/remove growing be atomic, need lock before modify these meta info
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
+
+	// fieldId -> functionRunner map for search function field
+	functionRunners map[UniqueID]function.FunctionRunner
+	hasBM25Field    bool
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -233,6 +242,19 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 			PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
 				PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 		}()
+	}
+
+	// build idf for bm25 search
+	if req.GetReq().GetMetricType() == metric.BM25 {
+		avgdl, err := sd.buildBM25IDF(req.GetReq())
+		if err != nil {
+			return nil, err
+		}
+
+		if avgdl <= 0 {
+			log.Warn("search bm25 from empty data, skip search", zap.String("channel", sd.vchannelName), zap.Float64("avgdl", avgdl))
+			return []*internalpb.SearchResults{}, nil
+		}
 	}
 
 	// get final sealedNum after possible segment prune
@@ -335,6 +357,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				IsAdvanced:         false,
 				GroupByFieldId:     subReq.GetGroupByFieldId(),
 				GroupSize:          subReq.GetGroupSize(),
+				FieldId:            subReq.GetFieldId(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{
@@ -862,6 +885,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	excludedSegments := NewExcludedSegments(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.GetAsDuration(time.Second))
 
+	idfOracle := NewIDFOracle(collection.Schema().GetFunctions())
 	sd := &shardDelegator{
 		collectionID:     collectionID,
 		replicaID:        replicaID,
@@ -871,7 +895,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		segmentManager:   manager.Segment,
 		workerManager:    workerManager,
 		lifetime:         lifetime.NewLifetime(lifetime.Initializing),
-		distribution:     NewDistribution(),
+		distribution:     NewDistribution(idfOracle),
 		deleteBuffer:     deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock),
 		pkOracle:         pkoracle.NewPkOracle(),
 		tsafeManager:     tsafeManager,
@@ -880,9 +904,25 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		factory:          factory,
 		queryHook:        queryHook,
 		chunkManager:     chunkManager,
+		idfOracle:        idfOracle,
 		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
 		excludedSegments: excludedSegments,
+		functionRunners:  make(map[int64]function.FunctionRunner),
 	}
+
+	for _, tf := range collection.Schema().GetFunctions() {
+		if tf.GetType() == schemapb.FunctionType_BM25 {
+			functionRunner, err := function.NewFunctionRunner(collection.Schema(), tf)
+			if err != nil {
+				return nil, err
+			}
+			sd.functionRunners[tf.OutputFieldIds[0]] = functionRunner
+			if tf.GetType() == schemapb.FunctionType_BM25 {
+				sd.hasBM25Field = true
+			}
+		}
+	}
+
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
 	if sd.lifetime.Add(lifetime.NotStopped) == nil {

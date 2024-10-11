@@ -118,13 +118,16 @@ func (it *indexBuildTask) GetFailReason() string {
 	return it.taskInfo.FailReason
 }
 
-func (it *indexBuildTask) UpdateVersion(ctx context.Context, meta *meta) error {
-	return meta.indexMeta.UpdateVersion(it.taskID)
+func (it *indexBuildTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error {
+	if err := meta.indexMeta.UpdateVersion(it.taskID, nodeID); err != nil {
+		return err
+	}
+	it.nodeID = nodeID
+	return nil
 }
 
-func (it *indexBuildTask) UpdateMetaBuildingState(nodeID int64, meta *meta) error {
-	it.nodeID = nodeID
-	return meta.indexMeta.BuildIndex(it.taskID, nodeID)
+func (it *indexBuildTask) UpdateMetaBuildingState(meta *meta) error {
+	return meta.indexMeta.BuildIndex(it.taskID)
 }
 
 func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskScheduler) bool {
@@ -199,24 +202,20 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 			it.SetState(indexpb.JobState_JobStateInit, err.Error())
 			return true
 		}
-		partitionKeyField, err := typeutil.GetPartitionKeyFieldSchema(schema)
-		if partitionKeyField == nil || err != nil {
-			log.Ctx(ctx).Warn("index builder get partition key field failed", zap.Int64("taskID", it.taskID), zap.Error(err))
-		} else {
-			if typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyField) {
-				optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
-					FieldID:   partitionKeyField.FieldID,
-					FieldName: partitionKeyField.Name,
-					FieldType: int32(partitionKeyField.DataType),
-					DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
-				})
-				iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collectionInfo.Properties)
-				if isoErr != nil {
-					log.Ctx(ctx).Warn("failed to parse partition key isolation", zap.Error(isoErr))
-				}
-				if iso {
-					partitionKeyIsolation = true
-				}
+		partitionKeyField, _ := typeutil.GetPartitionKeyFieldSchema(schema)
+		if partitionKeyField != nil && typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyField) {
+			optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
+				FieldID:   partitionKeyField.FieldID,
+				FieldName: partitionKeyField.Name,
+				FieldType: int32(partitionKeyField.DataType),
+				DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
+			})
+			iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collectionInfo.Properties)
+			if isoErr != nil {
+				log.Ctx(ctx).Warn("failed to parse partition key isolation", zap.Error(isoErr))
+			}
+			if iso {
+				partitionKeyIsolation = true
 			}
 		}
 	}

@@ -676,7 +676,7 @@ def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.de
                   gen_array_field(name=ct.default_float_array_field_name, element_type=DataType.FLOAT,
                                   max_capacity=max_capacity),
                   gen_array_field(name=ct.default_string_array_field_name, element_type=DataType.VARCHAR,
-                                  max_capacity=max_capacity, max_length=max_length)]
+                                  max_capacity=max_capacity, max_length=max_length, nullable=True)]
         if with_json is False:
             fields.remove(gen_json_field())
 
@@ -1143,8 +1143,9 @@ def gen_json_data_for_diff_json_types(nb=ct.default_nb, start=0, json_type="json
     Method: gen json data for different json types. Refer to RFC7159
     """
     if json_type == "json_embedded_object":                 # a json object with an embedd json object
-        return [{json_type: {"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i)}, "float": i*1.0}, "str": str(i)}
-                       for i in range(start, start + nb)]
+        return [{json_type: {"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i), "level2_array": [i for i in range(i, i + 10)]},
+                             "float": i*1.0}, "str": str(i), "array": [i for i in range(i, i + 10)], "bool": bool(i)}
+                for i in range(start, start + nb)]
     if json_type == "json_objects_array":                   # a json-objects array with 2 json objects
         return [[{"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i)}, "float": i*1.0, "str": str(i)},
                  {"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i)}, "float": i*1.0, "str": str(i)}
@@ -2934,7 +2935,7 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
     return vectors
 
 
-def gen_vectors_based_on_vector_type(num, dim, vector_data_type):
+def gen_vectors_based_on_vector_type(num, dim, vector_data_type=ct.float_type):
     """
     generate float16 vector data
     raw_vectors : the vectors
