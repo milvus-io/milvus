@@ -496,12 +496,12 @@ func TestInsertWithDynamicFields(t *testing.T) {
 	req := InsertReq{}
 	coll := generateCollectionSchema(schemapb.DataType_Int64)
 	var err error
-	err, req.Data = checkAndSetData(body, coll)
+	err, req.Data, _ = checkAndSetData(body, coll)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, int64(0), req.Data[0]["id"])
 	assert.Equal(t, int64(1), req.Data[0]["book_id"])
 	assert.Equal(t, int64(2), req.Data[0]["word_count"])
-	fieldsData, err := anyToColumns(req.Data, coll)
+	fieldsData, err := anyToColumns(req.Data, nil, coll)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, true, fieldsData[len(fieldsData)-1].IsDynamic)
 	assert.Equal(t, schemapb.DataType_JSON, fieldsData[len(fieldsData)-1].Type)
@@ -521,7 +521,7 @@ func TestInsertWithoutVector(t *testing.T) {
 	float16VectorField.Name = "float16Vector"
 	bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
 	bfloat16VectorField.Name = "bfloat16Vector"
-	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+	err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
 		Name: DefaultCollectionName,
 		Fields: []*schemapb.FieldSchema{
 			primaryField, floatVectorField,
@@ -530,7 +530,7 @@ func TestInsertWithoutVector(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+	err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
 		Name: DefaultCollectionName,
 		Fields: []*schemapb.FieldSchema{
 			primaryField, binaryVectorField,
@@ -539,7 +539,7 @@ func TestInsertWithoutVector(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+	err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
 		Name: DefaultCollectionName,
 		Fields: []*schemapb.FieldSchema{
 			primaryField, float16VectorField,
@@ -548,7 +548,7 @@ func TestInsertWithoutVector(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+	err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
 		Name: DefaultCollectionName,
 		Fields: []*schemapb.FieldSchema{
 			primaryField, bfloat16VectorField,
@@ -568,16 +568,81 @@ func TestInsertWithInt64(t *testing.T) {
 		DataType:    schemapb.DataType_Array,
 		ElementType: schemapb.DataType_Int64,
 	})
-	err, data := checkAndSetData(body, coll)
+	err, data, validData := checkAndSetData(body, coll)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 1, len(data))
+	assert.Equal(t, 0, len(validData))
 	assert.Equal(t, int64(9999999999999999), data[0][FieldBookID])
 	arr, _ := data[0][arrayFieldName].(*schemapb.ScalarField)
 	assert.Equal(t, int64(9999999999999999), arr.GetLongData().GetData()[0])
+}
 
-	body = "{\"data\": {\"book_id\": 9999999999999999, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999.0]}}"
-	err, _ = checkAndSetData(body, coll)
-	assert.Error(t, err)
+func TestInsertWithNullableField(t *testing.T) {
+	arrayFieldName := "array-int64"
+	coll := generateCollectionSchema(schemapb.DataType_Int64)
+	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+		Name:        arrayFieldName,
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64,
+	})
+	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+		Name:     "nullable",
+		DataType: schemapb.DataType_Int64,
+		Nullable: true,
+	})
+	body := "{\"data\": [{\"book_id\": 9999999999999999, \"\nullable\": null,\"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]},{\"book_id\": 1, \"nullable\": 1,\"book_intro\": [0.3, 0.4], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}]"
+	err, data, validData := checkAndSetData(body, coll)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, 2, len(data))
+	assert.Equal(t, 1, len(validData))
+	assert.Equal(t, 2, len(validData["nullable"]))
+	assert.False(t, validData["nullable"][0])
+	assert.True(t, validData["nullable"][1])
+	assert.Equal(t, int64(9999999999999999), data[0][FieldBookID])
+	arr, _ := data[0][arrayFieldName].(*schemapb.ScalarField)
+	assert.Equal(t, int64(9999999999999999), arr.GetLongData().GetData()[0])
+	assert.Equal(t, 4, len(data[0]))
+	assert.Equal(t, 5, len(data[1]))
+
+	fieldData, err := anyToColumns(data, validData, coll)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, len(coll.Fields)+1, len(fieldData))
+}
+
+func TestInsertWithDefaultValueField(t *testing.T) {
+	arrayFieldName := "array-int64"
+	coll := generateCollectionSchema(schemapb.DataType_Int64)
+	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+		Name:        arrayFieldName,
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64,
+	})
+	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+		Name:     "fid",
+		DataType: schemapb.DataType_Int64,
+		DefaultValue: &schemapb.ValueField{
+			Data: &schemapb.ValueField_LongData{
+				LongData: 10,
+			},
+		},
+	})
+	body := "{\"data\": [{\"book_id\": 9999999999999999, \"\fid\": null,\"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]},{\"book_id\": 1, \"fid\": 1,\"book_intro\": [0.3, 0.4], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}]"
+	err, data, validData := checkAndSetData(body, coll)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, 2, len(data))
+	assert.Equal(t, 1, len(validData))
+	assert.Equal(t, 2, len(validData["fid"]))
+	assert.False(t, validData["fid"][0])
+	assert.True(t, validData["fid"][1])
+	assert.Equal(t, int64(9999999999999999), data[0][FieldBookID])
+	arr, _ := data[0][arrayFieldName].(*schemapb.ScalarField)
+	assert.Equal(t, int64(9999999999999999), arr.GetLongData().GetData()[0])
+	assert.Equal(t, 4, len(data[0]))
+	assert.Equal(t, 5, len(data[1]))
+
+	fieldData, err := anyToColumns(data, validData, coll)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, len(coll.Fields)+1, len(fieldData))
 }
 
 func TestSerialize(t *testing.T) {
@@ -1076,6 +1141,247 @@ func newFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schemapb.Data
 	}
 }
 
+func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schemapb.DataType) []*schemapb.FieldData {
+	fieldData1 := schemapb.FieldData{
+		Type:      schemapb.DataType_Bool,
+		FieldName: "field-bool",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BoolData{
+					BoolData: &schemapb.BoolArray{
+						Data: []bool{true, true, true},
+					},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData1)
+
+	fieldData2 := schemapb.FieldData{
+		Type:      schemapb.DataType_Int8,
+		FieldName: "field-int8",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{0, 1, 2},
+					},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData2)
+
+	fieldData3 := schemapb.FieldData{
+		Type:      schemapb.DataType_Int16,
+		FieldName: "field-int16",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{0, 1, 2},
+					},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData3)
+
+	fieldData4 := schemapb.FieldData{
+		Type:      schemapb.DataType_Int32,
+		FieldName: "field-int32",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{0, 1, 2},
+					},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData4)
+
+	fieldData5 := schemapb.FieldData{
+		Type:      schemapb.DataType_Float,
+		FieldName: "field-float",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_FloatData{
+					FloatData: &schemapb.FloatArray{
+						Data: []float32{0, 1, 2},
+					},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData5)
+
+	fieldData6 := schemapb.FieldData{
+		Type:      schemapb.DataType_Double,
+		FieldName: "field-double",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DoubleData{
+					DoubleData: &schemapb.DoubleArray{
+						Data: []float64{0, 1, 2},
+					},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData6)
+
+	fieldData7 := schemapb.FieldData{
+		Type:      schemapb.DataType_String,
+		FieldName: "field-string",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: []string{"0", "1", "2"},
+					},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData7)
+
+	fieldData8 := schemapb.FieldData{
+		Type:      schemapb.DataType_VarChar,
+		FieldName: "field-varchar",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: []string{"0", "1", "2"},
+					},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData8)
+
+	fieldData9 := schemapb.FieldData{
+		Type:      schemapb.DataType_JSON,
+		FieldName: "field-json",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_JsonData{
+					JsonData: &schemapb.JSONArray{
+						Data: [][]byte{[]byte(`{"XXX": 0}`), []byte(`{"XXX": 0}`), []byte(`{"XXX": 0}`)},
+					},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData9)
+
+	fieldData10 := schemapb.FieldData{
+		Type:      schemapb.DataType_Array,
+		FieldName: "field-array",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						Data: []*schemapb.ScalarField{
+							{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true}}}},
+							{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true}}}},
+							{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true}}}},
+						},
+					},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+		IsDynamic: false,
+	}
+
+	fieldData11 := schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "field-int64",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: []int64{0, 1, 2},
+					},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData11)
+
+	switch firstFieldType {
+	case schemapb.DataType_None:
+		return fieldDatas
+	case schemapb.DataType_Bool:
+		return []*schemapb.FieldData{&fieldData1}
+	case schemapb.DataType_Int8:
+		return []*schemapb.FieldData{&fieldData2}
+	case schemapb.DataType_Int16:
+		return []*schemapb.FieldData{&fieldData3}
+	case schemapb.DataType_Int32:
+		return []*schemapb.FieldData{&fieldData4}
+	case schemapb.DataType_Float:
+		return []*schemapb.FieldData{&fieldData5}
+	case schemapb.DataType_Double:
+		return []*schemapb.FieldData{&fieldData6}
+	case schemapb.DataType_String:
+		return []*schemapb.FieldData{&fieldData7}
+	case schemapb.DataType_VarChar:
+		return []*schemapb.FieldData{&fieldData8}
+	case schemapb.DataType_BinaryVector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_FloatVector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_Float16Vector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_BFloat16Vector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_Array:
+		return []*schemapb.FieldData{&fieldData10}
+	case schemapb.DataType_JSON:
+		return []*schemapb.FieldData{&fieldData9}
+	case schemapb.DataType_SparseFloatVector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_Int64:
+		return []*schemapb.FieldData{&fieldData11}
+	default:
+		return []*schemapb.FieldData{
+			{
+				FieldName: "wrong-field-type",
+				Type:      firstFieldType,
+			},
+		}
+	}
+}
+
 func newSearchResult(results []map[string]interface{}) []map[string]interface{} {
 	for i, result := range results {
 		result["field-bool"] = true
@@ -1229,19 +1535,21 @@ func newRowsWithArray(results []map[string]interface{}) []map[string]interface{}
 func TestArray(t *testing.T) {
 	body, _ := generateRequestBody(schemapb.DataType_Int64)
 	collectionSchema := generateCollectionSchema(schemapb.DataType_Int64)
-	err, rows := checkAndSetData(string(body), collectionSchema)
+	err, rows, validRows := checkAndSetData(string(body), collectionSchema)
 	assert.Equal(t, nil, err)
+	assert.Equal(t, 0, len(validRows))
 	assert.Equal(t, true, compareRows(rows, generateRawRows(schemapb.DataType_Int64), compareRow))
-	data, err := anyToColumns(rows, collectionSchema)
+	data, err := anyToColumns(rows, validRows, collectionSchema)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, len(collectionSchema.Fields)+1, len(data))
 
 	body, _ = generateRequestBodyWithArray(schemapb.DataType_Int64)
 	collectionSchema = newCollectionSchemaWithArray(generateCollectionSchema(schemapb.DataType_Int64))
-	err, rows = checkAndSetData(string(body), collectionSchema)
+	err, rows, validRows = checkAndSetData(string(body), collectionSchema)
 	assert.Equal(t, nil, err)
+	assert.Equal(t, 0, len(validRows))
 	assert.Equal(t, true, compareRows(rows, newRowsWithArray(generateRawRows(schemapb.DataType_Int64)), compareRow))
-	data, err = anyToColumns(rows, collectionSchema)
+	data, err = anyToColumns(rows, validRows, collectionSchema)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, len(collectionSchema.Fields)+1, len(data))
 }
@@ -1297,7 +1605,7 @@ func TestVector(t *testing.T) {
 		},
 		EnableDynamicField: true,
 	}
-	err, rows := checkAndSetData(string(body), collectionSchema)
+	err, rows, validRows := checkAndSetData(string(body), collectionSchema)
 	assert.Equal(t, nil, err)
 	for _, row := range rows {
 		assert.Equal(t, 1, len(row[binaryVector].([]byte)))
@@ -1306,7 +1614,8 @@ func TestVector(t *testing.T) {
 		// all test sparse rows have 2 elements, each should be of 8 bytes
 		assert.Equal(t, 16, len(row[sparseFloatVector].([]byte)))
 	}
-	data, err := anyToColumns(rows, collectionSchema)
+	assert.Equal(t, 0, len(validRows))
+	data, err := anyToColumns(rows, validRows, collectionSchema)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, len(collectionSchema.Fields)+1, len(data))
 
@@ -1317,7 +1626,7 @@ func TestVector(t *testing.T) {
 		}
 		row[field] = value
 		body, _ = wrapRequestBody([]map[string]interface{}{row})
-		err, _ = checkAndSetData(string(body), collectionSchema)
+		err, _, _ = checkAndSetData(string(body), collectionSchema)
 		assert.Error(t, err)
 	}
 
