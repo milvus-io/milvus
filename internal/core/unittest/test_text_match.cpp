@@ -40,6 +40,7 @@ GenTestSchema(std::map<std::string, std::string> params = {}) {
                     65536,
                     false,
                     true,
+                    true,
                     params);
         schema->AddField(std::move(f));
     }
@@ -76,14 +77,14 @@ TEST(ParseJson, Naive) {
     }
 }
 
-TEST(ParseTokenizerParams, NoAnalyzerParams) {
+TEST(ParseTokenizerParams, NoTokenizerParams) {
     TypeParams params{{"k", "v"}};
     auto p = ParseTokenizerParams(params);
     ASSERT_EQ(0, p.size());
 }
 
 TEST(ParseTokenizerParams, Default) {
-    TypeParams params{{"analyzer_params", R"({"tokenizer": "default"})"}};
+    TypeParams params{{"tokenizer_params", R"({"tokenizer": "default"})"}};
     auto p = ParseTokenizerParams(params);
     ASSERT_EQ(1, p.size());
     auto iter = p.find("tokenizer");
@@ -251,7 +252,8 @@ TEST(TextMatch, SealedNaive) {
 TEST(TextMatch, GrowingJieBa) {
     auto schema = GenTestSchema({
         {"enable_match", "true"},
-        {"analyzer_params", R"({"tokenizer": "jieba"})"},
+        {"enable_tokenizer", "true"},
+        {"tokenizer_params", R"({"tokenizer": "jieba"})"},
     });
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     std::vector<std::string> raw_str = {"青铜时代", "黄金时代"};
@@ -327,7 +329,8 @@ TEST(TextMatch, GrowingJieBa) {
 TEST(TextMatch, SealedJieBa) {
     auto schema = GenTestSchema({
         {"enable_match", "true"},
-        {"analyzer_params", R"({"tokenizer": "jieba"})"},
+        {"enable_tokenizer", "true"},
+        {"tokenizer_params", R"({"tokenizer": "jieba"})"},
     });
     auto seg = CreateSealedSegment(schema, empty_index_meta);
     std::vector<std::string> raw_str = {"青铜时代", "黄金时代"};

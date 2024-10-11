@@ -697,6 +697,10 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 			return fmt.Errorf("only one VARCHAR input field is allowed for a BM25 Function, got %d field with type %s",
 				len(fields), fields[0].DataType.String())
 		}
+		h := typeutil.CreateFieldSchemaHelper(fields[0])
+		if !h.EnableTokenizer() {
+			return fmt.Errorf("BM25 input field must set enable_tokenizer to true")
+		}
 
 	default:
 		return fmt.Errorf("check input field with unknown function type")
@@ -739,7 +743,7 @@ func checkFunctionParams(function *schemapb.FunctionSchema) error {
 					return fmt.Errorf("bm25_avgdl must large than zero but now %f", avgdl)
 				}
 
-			case "analyzer_params":
+			case "tokenizer_params":
 				// TODO ADD tokenizer check
 			default:
 				return fmt.Errorf("invalid function params, key: %s, value:%s", kv.GetKey(), kv.GetValue())

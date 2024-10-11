@@ -23,6 +23,10 @@ func ValidateTextSchema(fieldSchema *schemapb.FieldSchema) error {
 		return nil
 	}
 
+	if !h.EnableTokenizer() {
+		return fmt.Errorf("field %s is set to enable match but not enable tokenizer", fieldSchema.Name)
+	}
+
 	bs, err := proto.Marshal(fieldSchema)
 	if err != nil {
 		return fmt.Errorf("failed to marshal field schema: %w", err)

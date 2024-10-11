@@ -56,6 +56,9 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 								{
 									Key: "enable_match", Value: "true",
 								},
+								{
+									Key: "enable_tokenizer", Value: "true",
+								},
 							},
 						},
 					},
