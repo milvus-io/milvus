@@ -19,6 +19,7 @@
 package expr
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/expr-lang/expr"
@@ -37,7 +38,9 @@ var (
 
 func Init() {
 	v = &vm.VM{}
-	env = make(map[string]any)
+	env = map[string]any{
+		"ctx": context.TODO(),
+	}
 	authKey = paramtable.Get().EtcdCfg.RootPath.GetValue()
 }
 
@@ -65,7 +68,7 @@ func Exec(code, auth string) (res string, err error) {
 	if authKey != auth {
 		return "", fmt.Errorf("the expr auth is invalid")
 	}
-	program, err := expr.Compile(code, expr.Env(env))
+	program, err := expr.Compile(code, expr.Env(env), expr.WithContext("ctx"))
 	if err != nil {
 		log.Warn("expr compile failed", zap.String("code", code), zap.Error(err))
 		return "", err
