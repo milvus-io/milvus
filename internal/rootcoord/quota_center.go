@@ -1057,7 +1057,7 @@ func (q *QuotaCenter) getDeleteBufferRowCountFactor() map[int64]float64 {
 	}
 
 	collectionFactor := make(map[int64]float64)
-	for collID, rowCount := range map[int64]int64{100: 1000} {
+	for collID, rowCount := range deleteBufferNum {
 		if rowCount < deleteBufferRowCountLowWaterLevel {
 			continue
 		}
@@ -1083,7 +1083,7 @@ func (q *QuotaCenter) getDeleteBufferSizeFactor() map[int64]float64 {
 	}
 
 	collectionFactor := make(map[int64]float64)
-	for collID, rowCount := range map[int64]int64{100: 1000} {
+	for collID, rowCount := range deleteBufferSize {
 		if rowCount < deleteBufferRowCountLowWaterLevel {
 			continue
 		}
