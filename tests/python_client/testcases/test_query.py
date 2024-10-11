@@ -3448,17 +3448,17 @@ class TestQueryCount(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
 
         # 2. insert data
-        nb = 500
+        nb = 1000
         for i in range(10):
             data = [
                 cf.gen_vectors(nb, dim),
-                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_int),
-                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_float),
-                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_string),
-                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_bool),
-                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_array),
-                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_embedded_object),
-                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_objects_array)
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_int),
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_float),
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_string),
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_bool),
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_array),
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_embedded_object),
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_objects_array)
             ]
             collection_w.insert(data)
 
@@ -3467,21 +3467,38 @@ class TestQueryCount(TestcaseBase):
         collection_w.load()
 
         # 4. search and query with different expressions. All the expressions will return 10 results
-        query_exprs = [f'{json_int} < 10 ', f'{json_float} <= 200.0 and {json_float} > 190.0',
-                       f'{json_string} in ["1","2","3","4","5","6","7","8","9","10"]',
-                       f'{json_bool} == true and {json_float} <= 10',
-                       f'{json_array} == [4001,4002,4003,4004,4005,4006,4007,4008,4009,4010] or {json_int} < 9',
-                       f'{json_embedded_object}["{json_embedded_object}"]["number"] < 10',
-                       f'{json_objects_array}[0]["level2"]["level2_str"] like "99%" and {json_objects_array}[1]["float"] > 100']
+        query_exprs = [
+            f'json_contains_any({json_embedded_object}["{json_embedded_object}"]["level2"]["level2_array"], [1,3,5,7,9])',
+            f'json_contains_any({json_embedded_object}["array"], [1,3,5,7,9])',
+            f'{json_int} < 10',
+            f'{json_float} <= 200.0 and {json_float} > 190.0',
+            f'{json_string} in ["1","2","3","4","5","6","7","8","9","10"]',
+            f'{json_bool} == true and {json_float} <= 10',
+            f'{json_array} == [4001,4002,4003,4004,4005,4006,4007,4008,4009,4010] or {json_int} < 9',
+            f'{json_embedded_object}["{json_embedded_object}"]["number"] < 10',
+            f'{json_objects_array}[0]["level2"]["level2_str"] like "199%" and {json_objects_array}[1]["float"] >= 1990'
+        ]
         search_data = cf.gen_vectors(2, dim)
         search_param = {}
         for expr in query_exprs:
+            log.debug(f"query_expr: {expr}")
             collection_w.query(expr=expr, output_fields=[count],
                                check_task=CheckTasks.check_query_results, check_items={exp_res: [{count: 10}]})
             collection_w.search(data=search_data, anns_field=ct.default_float_vec_field_name,
                                 param=search_param, limit=10, expr=expr,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": 2, "limit": 10})
+
+        # verify for issue #36718
+        for expr in [f'{json_embedded_object}["{json_embedded_object}"]["number"] in []',
+                     f'{json_embedded_object}["{json_embedded_object}"] in []']:
+            log.debug(f"query_expr: {expr}")
+            collection_w.query(expr=expr, output_fields=[count],
+                               check_task=CheckTasks.check_query_results, check_items={exp_res: [{count: 0}]})
+            collection_w.search(data=search_data, anns_field=ct.default_float_vec_field_name,
+                                param=search_param, limit=10, expr=expr,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": 2, "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_count_with_pagination_param(self):
