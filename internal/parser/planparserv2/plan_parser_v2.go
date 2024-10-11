@@ -6,7 +6,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/antlr4-go/antlr/v4"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -32,10 +32,12 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
 	parseKey := exprParseKey{collectionName: schema.GetCollectionName(), expr: exprStr}
 	val, ok := exprCache.Get(parseKey)
 	if !ok {
+		exprStr = convertHanToASCII(exprStr)
 		val = handleExprWithErrorListener(schema, exprStr, &errorListenerImpl{})
 		// Note that the errors will be cached, too.
 		exprCache.Add(parseKey, val)
 	}
+
 	return val
 }
 
@@ -159,8 +161,6 @@ func convertHanToASCII(s string) string {
 }
 
 func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) (*planpb.PlanNode, error) {
-	exprStr = convertHanToASCII(exprStr)
-
 	parse := func() (*planpb.Expr, error) {
 		if len(exprStr) <= 0 {
 			return nil, nil
