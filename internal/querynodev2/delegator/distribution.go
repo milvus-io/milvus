@@ -74,6 +74,8 @@ type distribution struct {
 	// current is the snapshot for quick usage for search/query
 	// generated for each change of distribution
 	current *atomic.Pointer[snapshot]
+
+	idfOracle IDFOracle
 	// protects current & segments
 	mut sync.RWMutex
 }
@@ -89,7 +91,7 @@ type SegmentEntry struct {
 }
 
 // NewDistribution creates a new distribution instance with all field initialized.
-func NewDistribution() *distribution {
+func NewDistribution(idfOracle IDFOracle) *distribution {
 	dist := &distribution{
 		serviceable:     atomic.NewBool(false),
 		growingSegments: make(map[UniqueID]SegmentEntry),
@@ -98,6 +100,7 @@ func NewDistribution() *distribution {
 		current:         atomic.NewPointer[snapshot](nil),
 		offlines:        typeutil.NewSet[int64](),
 		targetVersion:   atomic.NewInt64(initialTargetVersion),
+		idfOracle:       idfOracle,
 	}
 
 	dist.genSnapshot()
@@ -367,6 +370,7 @@ func (d *distribution) genSnapshot() chan struct{} {
 	d.current.Store(newSnapShot)
 	// shall be a new one
 	d.snapshots.GetOrInsert(d.snapshotVersion, newSnapShot)
+	d.idfOracle.SyncDistribution(newSnapShot)
 
 	// first snapshot, return closed chan
 	if last == nil {

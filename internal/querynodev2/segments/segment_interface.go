@@ -87,6 +87,10 @@ type Segment interface {
 	MayPkExist(lc *storage.LocationsCache) bool
 	BatchPkExist(lc *storage.BatchLocationsCache) []bool
 
+	// BM25 stats
+	UpdateBM25Stats(stats map[int64]*storage.BM25Stats)
+	GetBM25Stats() map[int64]*storage.BM25Stats
+
 	// Read operations
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
 	Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error)

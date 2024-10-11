@@ -1035,7 +1035,7 @@ func TestRowBasedInsertMsgToInsertData(t *testing.T) {
 	fieldIDs = fieldIDs[:len(fieldIDs)-2]
 	msg, _, columns := genRowBasedInsertMsg(numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim)
 
-	idata, err := RowBasedInsertMsgToInsertData(msg, schema)
+	idata, err := RowBasedInsertMsgToInsertData(msg, schema, false)
 	assert.NoError(t, err)
 	for idx, fID := range fieldIDs {
 		column := columns[idx]
@@ -1096,7 +1096,7 @@ func TestRowBasedInsertMsgToInsertFloat16VectorDataError(t *testing.T) {
 			},
 		},
 	}
-	_, err := RowBasedInsertMsgToInsertData(msg, schema)
+	_, err := RowBasedInsertMsgToInsertData(msg, schema, false)
 	assert.Error(t, err)
 }
 
@@ -1139,7 +1139,7 @@ func TestRowBasedInsertMsgToInsertBFloat16VectorDataError(t *testing.T) {
 			},
 		},
 	}
-	_, err := RowBasedInsertMsgToInsertData(msg, schema)
+	_, err := RowBasedInsertMsgToInsertData(msg, schema, false)
 	assert.Error(t, err)
 }
 

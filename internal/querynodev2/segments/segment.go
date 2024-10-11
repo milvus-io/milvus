@@ -91,6 +91,8 @@ type baseSegment struct {
 	isLazyLoad     bool
 	channel        metautil.Channel
 
+	bm25Stats map[int64]*storage.BM25Stats
+
 	resourceUsageCache *atomic.Pointer[ResourceUsage]
 
 	needUpdatedVersion *atomic.Int64 // only for lazy load mode update index
@@ -107,6 +109,7 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 		version:        atomic.NewInt64(version),
 		segmentType:    segmentType,
 		bloomFilterSet: pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
+		bm25Stats:      make(map[int64]*storage.BM25Stats),
 		channel:        channel,
 		isLazyLoad:     isLazyLoad(collection, segmentType),
 
@@ -183,6 +186,20 @@ func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
 
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
 	s.bloomFilterSet.UpdateBloomFilter(pks)
+}
+
+func (s *baseSegment) UpdateBM25Stats(stats map[int64]*storage.BM25Stats) {
+	for fieldID, new := range stats {
+		if current, ok := s.bm25Stats[fieldID]; ok {
+			current.Merge(new)
+		} else {
+			s.bm25Stats[fieldID] = new
+		}
+	}
+}
+
+func (s *baseSegment) GetBM25Stats() map[int64]*storage.BM25Stats {
+	return s.bm25Stats
 }
 
 // MayPkExist returns true if the given PK exists in the PK range and being positive through the bloom filter,
