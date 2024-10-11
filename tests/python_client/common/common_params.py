@@ -1,7 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Dict
-
-from pymilvus import DataType
+from typing import List, Dict, Optional
 
 """ Define param names"""
 
@@ -284,6 +282,18 @@ class IndexPrams(BasePrams):
     params: dict = None
     metric_type: str = None
 
+@dataclass
+class SearchInsidePrams(BasePrams):
+    # inside params
+    radius: Optional[float] = None
+    range_filter: Optional[float] = None
+    group_by_field: Optional[str] = None
+
+@dataclass
+class SearchPrams(BasePrams):
+    metric_type: str = MetricType.L2
+    params: dict = None
+
 
 """ Define default params """
 
@@ -307,9 +317,15 @@ class DefaultVectorIndexParams:
         }
 
     @staticmethod
-    def HNSW(field: str, m: int = 8, ef: int = 200, metric_type=MetricType.L2):
+    def HNSW(field: str, m: int = 8, efConstruction: int = 200, metric_type=MetricType.L2):
         return {
-            field: IndexPrams(index_type=IndexName.HNSW, params={"M": m, "efConstruction": ef}, metric_type=metric_type)
+            field: IndexPrams(index_type=IndexName.HNSW, params={"M": m, "efConstruction": efConstruction}, metric_type=metric_type)
+        }
+
+    @staticmethod
+    def SCANN(field: str, nlist: int = 128, metric_type=MetricType.L2):
+        return {
+            field: IndexPrams(index_type=IndexName.SCANN, params={"nlist": nlist}, metric_type=metric_type)
         }
 
     @staticmethod
@@ -330,19 +346,18 @@ class DefaultVectorIndexParams:
         }
 
     @staticmethod
-    def SPARSE_WAND(field: str, drop_ratio_build: int = 0.2, metric_type=MetricType.IP):
+    def SPARSE_WAND(field: str, drop_ratio_build: float = 0.2, metric_type=MetricType.IP):
         return {
             field: IndexPrams(index_type=IndexName.SPARSE_WAND, params={"drop_ratio_build": drop_ratio_build},
                               metric_type=metric_type)
         }
 
     @staticmethod
-    def SPARSE_INVERTED_INDEX(field: str, drop_ratio_build: int = 0.2, metric_type=MetricType.IP):
+    def SPARSE_INVERTED_INDEX(field: str, drop_ratio_build: float = 0.2, metric_type=MetricType.IP):
         return {
             field: IndexPrams(index_type=IndexName.SPARSE_INVERTED_INDEX, params={"drop_ratio_build": drop_ratio_build},
                               metric_type=metric_type)
         }
-
 
 class DefaultScalarIndexParams:
 
@@ -389,6 +404,107 @@ class AlterIndexParams:
     def index_mmap(enable: bool = True):
         return {'mmap.enabled': enable}
 
+class DefaultVectorSearchParams:
+
+    @staticmethod
+    def FLAT(metric_type=MetricType.L2, inside_params: SearchInsidePrams = None, **kwargs):
+        inside_params_dict = {}
+        if inside_params is not None:
+            inside_params_dict.update(inside_params.to_dict)
+
+        sp = SearchPrams(params=inside_params_dict, metric_type=metric_type).to_dict
+        sp.update(kwargs)
+        return sp
+
+    @staticmethod
+    def IVF_FLAT(metric_type=MetricType.L2, nprobe: int = 32, inside_params: SearchInsidePrams = None, **kwargs):
+        inside_params_dict = {"nprobe": nprobe}
+        if inside_params is not None:
+            inside_params_dict.update(inside_params.to_dict)
+
+        sp = SearchPrams(params=inside_params_dict, metric_type=metric_type).to_dict
+        sp.update(kwargs)
+        return sp
+
+    @staticmethod
+    def IVF_SQ8(metric_type=MetricType.L2, nprobe: int = 32, inside_params: SearchInsidePrams = None, **kwargs):
+        inside_params_dict = {"nprobe": nprobe}
+        if inside_params is not None:
+            inside_params_dict.update(inside_params.to_dict)
+
+        sp = SearchPrams(params=inside_params_dict, metric_type=metric_type).to_dict
+        sp.update(kwargs)
+        return sp
+
+    @staticmethod
+    def HNSW(metric_type=MetricType.L2, ef: int = 200, inside_params: SearchInsidePrams = None, **kwargs):
+        inside_params_dict = {"ef": ef}
+        if inside_params is not None:
+            inside_params_dict.update(inside_params.to_dict)
+
+        sp = SearchPrams(params=inside_params_dict, metric_type=metric_type).to_dict
+        sp.update(kwargs)
+        return sp
+
+    @staticmethod
+    def SCANN(metric_type=MetricType.L2, nprobe: int = 32, reorder_k: int = 200, inside_params: SearchInsidePrams = None, **kwargs):
+        inside_params_dict = {"nprobe": nprobe, "reorder_k": reorder_k}
+        if inside_params is not None:
+            inside_params_dict.update(inside_params.to_dict)
+
+        sp = SearchPrams(params=inside_params_dict, metric_type=metric_type).to_dict
+        sp.update(kwargs)
+        return sp
+
+    @staticmethod
+    def DISKANN(metric_type=MetricType.L2, search_list: int = 30, inside_params: SearchInsidePrams = None, **kwargs):
+        inside_params_dict = {"search_list": search_list}
+        if inside_params is not None:
+            inside_params_dict.update(inside_params.to_dict)
+
+        sp = SearchPrams(params=inside_params_dict, metric_type=metric_type).to_dict
+        sp.update(kwargs)
+        return sp
+
+    @staticmethod
+    def BIN_FLAT(metric_type=MetricType.JACCARD, inside_params: SearchInsidePrams = None, **kwargs):
+        inside_params_dict = {}
+        if inside_params is not None:
+            inside_params_dict.update(inside_params.to_dict)
+
+        sp = SearchPrams(params=inside_params_dict, metric_type=metric_type).to_dict
+        sp.update(kwargs)
+        return sp
+
+    @staticmethod
+    def BIN_IVF_FLAT(metric_type=MetricType.JACCARD, nprobe: int = 32, inside_params: SearchInsidePrams = None, **kwargs):
+        inside_params_dict = {"nprobe": nprobe}
+        if inside_params is not None:
+            inside_params_dict.update(inside_params.to_dict)
+
+        sp = SearchPrams(params=inside_params_dict, metric_type=metric_type).to_dict
+        sp.update(kwargs)
+        return sp
+
+    @staticmethod
+    def SPARSE_WAND(metric_type=MetricType.IP, drop_ratio_search: float = 0.2, inside_params: SearchInsidePrams = None, **kwargs):
+        inside_params_dict = {"drop_ratio_search": drop_ratio_search}
+        if inside_params is not None:
+            inside_params_dict.update(inside_params.to_dict)
+
+        sp = SearchPrams(params=inside_params_dict, metric_type=metric_type).to_dict
+        sp.update(kwargs)
+        return sp
+
+    @staticmethod
+    def SPARSE_INVERTED_INDEX(metric_type=MetricType.IP, drop_ratio_search: float = 0.2, inside_params: SearchInsidePrams = None, **kwargs):
+        inside_params_dict = {"drop_ratio_search": drop_ratio_search}
+        if inside_params is not None:
+            inside_params_dict.update(inside_params.to_dict)
+
+        sp = SearchPrams(params=inside_params_dict, metric_type=metric_type).to_dict
+        sp.update(kwargs)
+        return sp
 
 @dataclass
 class ExprCheckParams:
