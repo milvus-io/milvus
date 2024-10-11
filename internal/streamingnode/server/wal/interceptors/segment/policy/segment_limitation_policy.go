@@ -29,6 +29,7 @@ type SegmentLimitationPolicy interface {
 type jitterSegmentLimitationPolicyExtraInfo struct {
 	Jitter         float64
 	JitterRatio    float64
+	Proportion     float64
 	MaxSegmentSize uint64
 }
 
@@ -46,13 +47,15 @@ func (p jitterSegmentLimitationPolicy) GenerateLimitation() SegmentLimitation {
 		jitterRatio = 1
 	}
 	maxSegmentSize := uint64(paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024)
-	segmentSize := uint64(jitterRatio * float64(maxSegmentSize))
+	proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
+	segmentSize := uint64(jitterRatio * float64(maxSegmentSize) * proportion)
 	return SegmentLimitation{
 		PolicyName:  "jitter_segment_limitation",
 		SegmentSize: segmentSize,
 		ExtraInfo: jitterSegmentLimitationPolicyExtraInfo{
 			Jitter:         jitter,
 			JitterRatio:    jitterRatio,
+			Proportion:     proportion,
 			MaxSegmentSize: maxSegmentSize,
 		},
 	}
