@@ -3575,6 +3575,8 @@ class TestQueryCount(TestcaseBase):
 
         # 4. search and query with different expressions. All the expressions will return 10 results
         query_exprs = [
+            f'json_contains_any({json_embedded_object}["{json_embedded_object}"]["level2"]["level2_array"], [1,3,5,7,9])',
+            f'json_contains_any({json_embedded_object}["array"], [1,3,5,7,9])',
             f'{json_int} < 10',
             f'{json_float} <= 200.0 and {json_float} > 190.0',
             f'{json_string} in ["1","2","3","4","5","6","7","8","9","10"]',
