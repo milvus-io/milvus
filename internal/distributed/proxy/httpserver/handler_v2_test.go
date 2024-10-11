@@ -1072,7 +1072,7 @@ func TestMethodPost(t *testing.T) {
 		State:    internalpb.ImportJobState_Completed,
 		Reason:   "",
 		Progress: 100,
-	}, nil).Once()
+	}, nil).Twice()
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
 	queryTestCases = append(queryTestCases, rawTestCase{
@@ -1139,6 +1139,9 @@ func TestMethodPost(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(ImportJobCategory, GetProgressAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(ImportJobCategory, DescribeAction),
 	})
 
 	for _, testcase := range queryTestCases {
