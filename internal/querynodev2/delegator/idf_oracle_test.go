@@ -178,15 +178,15 @@ func (suite *IDFOracleSuite) TestStats() {
 		OutputFieldIds: []int64{102},
 	}})
 
-	suite.Panics(func() {
+	suite.NotPanics(func() {
 		stats.Merge(map[int64]*storage.BM25Stats{103: storage.NewBM25Stats()})
 	})
 
 	suite.Panics(func() {
-		stats.Minus(map[int64]*storage.BM25Stats{103: storage.NewBM25Stats()})
+		stats.Minus(map[int64]*storage.BM25Stats{104: storage.NewBM25Stats()})
 	})
 
-	_, err := stats.GetStats(103)
+	_, err := stats.GetStats(104)
 	suite.Error(err)
 
 	_, err = stats.GetStats(102)

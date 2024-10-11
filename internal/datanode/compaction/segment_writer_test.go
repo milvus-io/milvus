@@ -19,9 +19,10 @@ package compaction
 import (
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/stretchr/testify/suite"
 )
 
 func TestSegmentWriterSuite(t *testing.T) {

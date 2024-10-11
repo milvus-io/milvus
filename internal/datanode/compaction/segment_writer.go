@@ -128,7 +128,7 @@ func (w *MultiSegmentWriter) finishCurrent() error {
 	}
 
 	if len(w.bm25Fields) > 0 {
-		bmBinlogs, err := bmSerializeWrite(context.TODO(), w.binlogIO, w.allocator.getLogIDAllocator(), writer)
+		bmBinlogs, err := bm25SerializeWrite(context.TODO(), w.binlogIO, w.allocator.getLogIDAllocator(), writer)
 		if err != nil {
 			log.Warn("compact wrong, failed to serialize write segment bm25 stats", zap.Error(err))
 			return err

@@ -259,7 +259,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 
 	var bm25StatsLogs []*datapb.FieldBinlog
 	if len(bm25FieldIds) > 0 {
-		binlogNums, bm25StatsLogs, err = bm25SerializerWrite(ctx, st.binlogIO, st.req.GetStartLogID()+st.logIDOffset, writer, numRows)
+		binlogNums, bm25StatsLogs, err = bm25SerializeWrite(ctx, st.binlogIO, st.req.GetStartLogID()+st.logIDOffset, writer, numRows)
 		if err != nil {
 			log.Warn("compact wrong, failed to serialize write segment bm25 stats", zap.Error(err))
 			return nil, err
@@ -337,8 +337,6 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			return err
 		}
 	}
-
-	// TODO： support bm25
 
 	return nil
 }
@@ -581,7 +579,7 @@ func statSerializeWrite(ctx context.Context, io io.BinlogIO, startID int64, writ
 	return binlogNum, statFieldLog, nil
 }
 
-func bm25SerializerWrite(ctx context.Context, io io.BinlogIO, startID int64, writer *compaction.SegmentWriter, finalRowCount int64) (int64, []*datapb.FieldBinlog, error) {
+func bm25SerializeWrite(ctx context.Context, io io.BinlogIO, startID int64, writer *compaction.SegmentWriter, finalRowCount int64) (int64, []*datapb.FieldBinlog, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "bm25log serializeWrite")
 	defer span.End()
 	stats, err := writer.GetBm25StatsBlob()
@@ -602,7 +600,7 @@ func bm25SerializerWrite(ctx context.Context, io io.BinlogIO, startID int64, wri
 					LogSize:    int64(len(blob.GetValue())),
 					MemorySize: int64(len(blob.GetValue())),
 					LogPath:    key,
-					EntriesNum: writer.GetRowNum(),
+					EntriesNum: finalRowCount,
 				},
 			},
 		}

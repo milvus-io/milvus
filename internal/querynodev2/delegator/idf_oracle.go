@@ -54,7 +54,8 @@ func (s *bm25Stats) Merge(stats map[int64]*storage.BM25Stats) {
 		if stats, ok := s.stats[fieldID]; ok {
 			stats.Merge(newstats)
 		} else {
-			log.Panic("merge failed, BM25 stats not exist", zap.Int64("fieldID", fieldID))
+			s.stats[fieldID] = storage.NewBM25Stats()
+			s.stats[fieldID].Merge(newstats)
 		}
 	}
 }

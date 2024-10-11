@@ -1327,11 +1327,8 @@ func (t *clusteringCompactionTask) generateBM25Stats(ctx context.Context, segmen
 		key, _ := binlog.BuildLogPath(storage.BM25Binlog, t.collectionID, t.partitionID, segmentID, fieldID, logID)
 		bytes, err := stats.Serialize()
 		if err != nil {
-			log.Warn("failed to seralize bm25 stats",
-				zap.Int64("collection", t.collectionID),
-				zap.Int64("partition", t.partitionID),
-				zap.Int64("segment", segmentID),
-				zap.Error(err))
+			log.Warn("failed to seralize bm25 stats", zap.Int64("collection", t.collectionID),
+				zap.Int64("partition", t.partitionID), zap.Int64("segment", segmentID), zap.Error(err))
 			return nil, err
 		}
 
