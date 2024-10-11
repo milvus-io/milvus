@@ -158,11 +158,12 @@ func printFieldDetails(fields []*schemapb.FieldSchema, oldVersion bool) []gin.H 
 	var res []gin.H
 	for _, field := range fields {
 		fieldDetail := gin.H{
-			HTTPReturnFieldName:         field.Name,
-			HTTPReturnFieldPrimaryKey:   field.IsPrimaryKey,
-			HTTPReturnFieldPartitionKey: field.IsPartitionKey,
-			HTTPReturnFieldAutoID:       field.AutoID,
-			HTTPReturnDescription:       field.Description,
+			HTTPReturnFieldName:          field.Name,
+			HTTPReturnFieldPrimaryKey:    field.IsPrimaryKey,
+			HTTPReturnFieldPartitionKey:  field.IsPartitionKey,
+			HTTPReturnFieldClusteringKey: field.IsClusteringKey,
+			HTTPReturnFieldAutoID:        field.AutoID,
+			HTTPReturnDescription:        field.Description,
 		}
 		if typeutil.IsVectorType(field.DataType) {
 			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
@@ -1286,4 +1287,22 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 	}
 	metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.SuccessLabel).Inc()
 	return nil, nil
+}
+
+func convertToExtraParams(indexParam IndexParam) ([]*commonpb.KeyValuePair, error) {
+	var params []*commonpb.KeyValuePair
+	if indexParam.IndexType != "" {
+		params = append(params, &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: indexParam.IndexType})
+	}
+	if indexParam.MetricType != "" {
+		params = append(params, &commonpb.KeyValuePair{Key: common.MetricTypeKey, Value: indexParam.MetricType})
+	}
+	if len(indexParam.Params) != 0 {
+		v, err := json.Marshal(indexParam.Params)
+		if err != nil {
+			return nil, err
+		}
+		params = append(params, &commonpb.KeyValuePair{Key: common.IndexParamsKey, Value: string(v)})
+	}
+	return params, nil
 }
