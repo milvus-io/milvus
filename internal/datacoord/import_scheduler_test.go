@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type ImportSchedulerSuite struct {
@@ -85,6 +86,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 			CollectionID: s.collectionID,
 			State:        datapb.ImportTaskStateV2_Pending,
 		},
+		tr: timerecord.NewTimeRecorder("preimport task"),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
@@ -95,6 +97,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 			TimeoutTs:    math.MaxUint64,
 			Schema:       &schemapb.CollectionSchema{},
 		},
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.imeta.AddJob(job)
 	s.NoError(err)
@@ -156,6 +159,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 				},
 			},
 		},
+		tr: timerecord.NewTimeRecorder("import task"),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
@@ -168,6 +172,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 			Schema:       &schemapb.CollectionSchema{},
 			TimeoutTs:    math.MaxUint64,
 		},
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.imeta.AddJob(job)
 	s.NoError(err)
@@ -222,6 +227,7 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 			SegmentIDs:   []int64{2, 3},
 			State:        datapb.ImportTaskStateV2_Failed,
 		},
+		tr: timerecord.NewTimeRecorder("import task"),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
@@ -234,6 +240,7 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 			Schema:       &schemapb.CollectionSchema{},
 			TimeoutTs:    math.MaxUint64,
 		},
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.imeta.AddJob(job)
 	s.NoError(err)

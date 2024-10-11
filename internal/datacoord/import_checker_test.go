@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -95,6 +96,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 				},
 			},
 		},
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 
 	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
@@ -114,6 +116,7 @@ func (s *ImportCheckerSuite) TestLogStats() {
 			TaskID: 1,
 			State:  datapb.ImportTaskStateV2_Failed,
 		},
+		tr: timerecord.NewTimeRecorder("preimport task"),
 	}
 	err := s.imeta.AddTask(pit1)
 	s.NoError(err)
@@ -125,6 +128,7 @@ func (s *ImportCheckerSuite) TestLogStats() {
 			SegmentIDs: []int64{10, 11, 12},
 			State:      datapb.ImportTaskStateV2_Pending,
 		},
+		tr: timerecord.NewTimeRecorder("import task"),
 	}
 	err = s.imeta.AddTask(it1)
 	s.NoError(err)
@@ -286,6 +290,7 @@ func (s *ImportCheckerSuite) TestCheckTimeout() {
 			TaskID: 1,
 			State:  datapb.ImportTaskStateV2_InProgress,
 		},
+		tr: timerecord.NewTimeRecorder("preimport task"),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
@@ -307,6 +312,7 @@ func (s *ImportCheckerSuite) TestCheckFailure() {
 			State:      datapb.ImportTaskStateV2_Pending,
 			SegmentIDs: []int64{2},
 		},
+		tr: timerecord.NewTimeRecorder("import task"),
 	}
 	err := s.imeta.AddTask(it)
 	s.NoError(err)
@@ -336,6 +342,7 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 			State:      datapb.ImportTaskStateV2_Failed,
 			SegmentIDs: []int64{2},
 		},
+		tr: timerecord.NewTimeRecorder("import task"),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
@@ -405,6 +412,7 @@ func (s *ImportCheckerSuite) TestCheckCollection() {
 			TaskID: 1,
 			State:  datapb.ImportTaskStateV2_Pending,
 		},
+		tr: timerecord.NewTimeRecorder("preimport task"),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)

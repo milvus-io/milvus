@@ -17,9 +17,12 @@
 package datacoord
 
 import (
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type TaskType int
@@ -131,33 +134,62 @@ type ImportTask interface {
 	GetState() datapb.ImportTaskStateV2
 	GetReason() string
 	GetFileStats() []*datapb.ImportFileStats
+	GetTR() *timerecord.TimeRecorder
+	GetSlots() int64
 	Clone() ImportTask
 }
 
 type preImportTask struct {
 	*datapb.PreImportTask
+	tr *timerecord.TimeRecorder
 }
 
 func (p *preImportTask) GetType() TaskType {
 	return PreImportTaskType
 }
 
+func (p *preImportTask) GetTR() *timerecord.TimeRecorder {
+	return p.tr
+}
+
+func (p *preImportTask) GetSlots() int64 {
+	return int64(funcutil.Min(len(p.GetFileStats()), paramtable.Get().DataNodeCfg.MaxTaskSlotNum.GetAsInt()))
+}
+
 func (p *preImportTask) Clone() ImportTask {
 	return &preImportTask{
 		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
+		tr:            p.tr,
 	}
 }
 
 type importTask struct {
 	*datapb.ImportTaskV2
+	tr *timerecord.TimeRecorder
 }
 
 func (t *importTask) GetType() TaskType {
 	return ImportTaskType
 }
 
+func (t *importTask) GetTR() *timerecord.TimeRecorder {
+	return t.tr
+}
+
+func (t *importTask) GetSlots() int64 {
+	// Consider the following two scenarios:
+	// 1. Importing a large number of small files results in
+	//    a small total data size, making file count unsuitable as a slot number.
+	// 2. Importing a file with many shards number results in many segments and a small total data size,
+	//    making segment count unsuitable as a slot number.
+	// Taking these factors into account, we've decided to use the
+	// minimum value between segment count and file count as the slot number.
+	return int64(funcutil.Min(len(t.GetFileStats()), len(t.GetSegmentIDs()), paramtable.Get().DataNodeCfg.MaxTaskSlotNum.GetAsInt()))
+}
+
 func (t *importTask) Clone() ImportTask {
 	return &importTask{
 		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
+		tr:           t.tr,
 	}
 }
