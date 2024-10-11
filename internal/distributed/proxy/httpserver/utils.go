@@ -1482,3 +1482,21 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("Unexpected default value type: %d", dataType))
 	}
 }
+
+func convertToExtraParams(indexParam IndexParam) ([]*commonpb.KeyValuePair, error) {
+	var params []*commonpb.KeyValuePair
+	if indexParam.IndexType != "" {
+		params = append(params, &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: indexParam.IndexType})
+	}
+	if indexParam.MetricType != "" {
+		params = append(params, &commonpb.KeyValuePair{Key: common.MetricTypeKey, Value: indexParam.MetricType})
+	}
+	if len(indexParam.Params) != 0 {
+		v, err := json.Marshal(indexParam.Params)
+		if err != nil {
+			return nil, err
+		}
+		params = append(params, &commonpb.KeyValuePair{Key: common.IndexParamsKey, Value: string(v)})
+	}
+	return params, nil
+}

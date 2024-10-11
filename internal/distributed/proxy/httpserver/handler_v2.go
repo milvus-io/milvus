@@ -1152,8 +1152,14 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		}
 		enableDynamic := EnableDynamic
 		if enStr, ok := httpReq.Params["enableDynamicField"]; ok {
-			if en, err := strconv.ParseBool(fmt.Sprintf("%v", enStr)); err == nil {
-				enableDynamic = en
+			enableDynamic, err = strconv.ParseBool(fmt.Sprintf("%v", enStr))
+			if err != nil {
+				log.Ctx(ctx).Warn("high level restful api, parse enableDynamicField fail", zap.Error(err), zap.Any("request", anyReq))
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: "parse enableDynamicField fail, err:" + err.Error(),
+				})
+				return nil, err
 			}
 		}
 		schema, err = proto.Marshal(&schemapb.CollectionSchema{
@@ -1340,7 +1346,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	if err != nil {
 		return resp, err
 	}
-	if httpReq.Schema.Fields == nil || len(httpReq.Schema.Fields) == 0 {
+	if len(httpReq.Schema.Fields) == 0 {
 		if len(httpReq.MetricType) == 0 {
 			httpReq.MetricType = DefaultMetricType
 		}
@@ -1377,8 +1383,15 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				IndexName:      indexParam.IndexName,
 				ExtraParams:    []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: indexParam.MetricType}},
 			}
-			for key, value := range indexParam.Params {
-				createIndexReq.ExtraParams = append(createIndexReq.ExtraParams, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+			createIndexReq.ExtraParams, err = convertToExtraParams(indexParam)
+			if err != nil {
+				// will not happen
+				log.Ctx(ctx).Warn("high level restful api, convertToExtraParams fail", zap.Error(err), zap.Any("request", anyReq))
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: err.Error(),
+				})
+				return resp, err
 			}
 			statusResponse, err := wrapperProxyWithLimit(ctx, c, createIndexReq, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateIndex", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 				return h.proxy.CreateIndex(ctx, req.(*milvuspb.CreateIndexRequest))
