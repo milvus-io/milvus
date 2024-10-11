@@ -1186,7 +1186,7 @@ func assertSegmentAssignPlanElementMatch(suite *suite.Suite, left []SegmentAssig
 	suite.Equal(len(left), len(right))
 
 	type comparablePlan struct {
-		Segment   *meta.Segment
+		Segment   int64
 		ReplicaID int64
 		From      int64
 		To        int64
@@ -1199,7 +1199,7 @@ func assertSegmentAssignPlanElementMatch(suite *suite.Suite, left []SegmentAssig
 			replicaID = p.Replica.GetID()
 		}
 		leftPlan = append(leftPlan, comparablePlan{
-			Segment:   p.Segment,
+			Segment:   p.Segment.ID,
 			ReplicaID: replicaID,
 			From:      p.From,
 			To:        p.To,
@@ -1213,7 +1213,7 @@ func assertSegmentAssignPlanElementMatch(suite *suite.Suite, left []SegmentAssig
 			replicaID = p.Replica.GetID()
 		}
 		rightPlan = append(rightPlan, comparablePlan{
-			Segment:   p.Segment,
+			Segment:   p.Segment.ID,
 			ReplicaID: replicaID,
 			From:      p.From,
 			To:        p.To,
@@ -1229,7 +1229,7 @@ func assertSegmentAssignPlanElementMatch(suite *suite.Suite, left []SegmentAssig
 // remove it after resource group enhancement.
 func assertChannelAssignPlanElementMatch(suite *suite.Suite, left []ChannelAssignPlan, right []ChannelAssignPlan, subset ...bool) {
 	type comparablePlan struct {
-		Channel   *meta.DmChannel
+		Channel   string
 		ReplicaID int64
 		From      int64
 		To        int64
@@ -1242,7 +1242,7 @@ func assertChannelAssignPlanElementMatch(suite *suite.Suite, left []ChannelAssig
 			replicaID = p.Replica.GetID()
 		}
 		leftPlan = append(leftPlan, comparablePlan{
-			Channel:   p.Channel,
+			Channel:   p.Channel.GetChannelName(),
 			ReplicaID: replicaID,
 			From:      p.From,
 			To:        p.To,
@@ -1256,7 +1256,7 @@ func assertChannelAssignPlanElementMatch(suite *suite.Suite, left []ChannelAssig
 			replicaID = p.Replica.GetID()
 		}
 		rightPlan = append(rightPlan, comparablePlan{
-			Channel:   p.Channel,
+			Channel:   p.Channel.GetChannelName(),
 			ReplicaID: replicaID,
 			From:      p.From,
 			To:        p.To,

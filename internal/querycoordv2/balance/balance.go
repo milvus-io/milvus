@@ -39,7 +39,7 @@ type SegmentAssignPlan struct {
 	SegmentScore int64
 }
 
-func (segPlan *SegmentAssignPlan) ToString() string {
+func (segPlan *SegmentAssignPlan) String() string {
 	return fmt.Sprintf("SegmentPlan:[collectionID: %d, replicaID: %d, segmentID: %d, from: %d, to: %d, fromScore: %d, toScore: %d, segmentScore: %d]\n",
 		segPlan.Segment.CollectionID, segPlan.Replica.GetID(), segPlan.Segment.ID, segPlan.From, segPlan.To, segPlan.FromScore, segPlan.ToScore, segPlan.SegmentScore)
 }
@@ -51,7 +51,7 @@ type ChannelAssignPlan struct {
 	To      int64
 }
 
-func (chanPlan *ChannelAssignPlan) ToString() string {
+func (chanPlan *ChannelAssignPlan) String() string {
 	return fmt.Sprintf("ChannelPlan:[collectionID: %d, channel: %s, replicaID: %d, from: %d, to: %d]\n",
 		chanPlan.Channel.CollectionID, chanPlan.Channel.ChannelName, chanPlan.Replica.GetID(), chanPlan.From, chanPlan.To)
 }
