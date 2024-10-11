@@ -161,6 +161,7 @@ type Task interface {
 	GetState() datapb.ImportTaskStateV2
 	GetReason() string
 	GetSchema() *schemapb.CollectionSchema
+	GetSlots() int64
 	Cancel()
 	Clone() Task
 }

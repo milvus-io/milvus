@@ -304,6 +304,7 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
 
     if (term_set.empty()) {
         res.reset();
+        MoveCursor();
         return res_vec;
     }
 
@@ -312,11 +313,6 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
                                 TargetBitmapView res,
                                 int index,
                                 const std::unordered_set<ValueType>& term_set) {
-        if (term_set.empty()) {
-            for (int i = 0; i < size; ++i) {
-                res[i] = false;
-            }
-        }
         for (int i = 0; i < size; ++i) {
             if (index >= data[i].length()) {
                 res[i] = false;
@@ -414,9 +410,8 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
     }
 
     if (term_set.empty()) {
-        for (size_t i = 0; i < real_batch_size; ++i) {
-            res[i] = false;
-        }
+        res.reset();
+        MoveCursor();
         return res_vec;
     }
 

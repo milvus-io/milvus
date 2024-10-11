@@ -2834,9 +2834,9 @@ class TestLoadCollection(TestcaseBase):
         # verify load different replicas thrown an exception
         error = {ct.err_code: 1100, ct.err_msg: "call query coordinator LoadCollection: can't change the replica number"
                                                 " for loaded collection: invalid parameter[expected=1][actual=2]"}
-        collection_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.load(replica_number=2)
         one_replica, _ = collection_w.get_replicas()
-        assert len(one_replica.groups) == 1
+        assert len(one_replica.groups) == 2
 
         collection_w.release()
         collection_w.load(replica_number=2)
@@ -3141,6 +3141,28 @@ class TestDescribeCollection(TestcaseBase):
         del res['collection_id']
         log.info(res)
         assert description == res
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #36596")
+    def test_collection_describe_nullable_default_value(self):
+        """
+        target: test describe collection with nullable and default_value fields
+        method: create a collection with nullable and default_value fields, then check its information when describe
+        expected: return correct information
+        """
+        collection_w = self.init_collection_general(prefix, False,
+                                                    nullable_fields={ct.default_float_field_name: 0},
+                                                    default_value_fields={ct.default_string_field_name: "1"})[0]
+        res = collection_w.describe()[0]
+        for field in res["fields"]:
+            if field["name"] == ct.default_float_field_name:
+                assert field["nullable"] is True
+            if field["name"] == ct.default_string_field_name:
+                if "default_value" not in field.keys():
+                    log.error("there is no default_value key in the result of describe collection, please file a bug")
+                    assert False
+                else:
+                    assert field["default_value"] == "1"
 
 
 class TestReleaseAdvanced(TestcaseBase):

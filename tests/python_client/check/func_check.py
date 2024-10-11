@@ -239,6 +239,14 @@ class ResponseChecker:
             assert res["fields"][1]["name"] == check_items.get("vector_name", "vector")
         if check_items.get("dim", None) is not None:
             assert res["fields"][1]["params"]["dim"] == check_items.get("dim")
+        if check_items.get("nullable_fields", None) is not None:
+            nullable_fields = check_items.get("nullable_fields")
+            if not isinstance(nullable_fields, list):
+                log.error("nullable_fields should be a list including all the nullable fields name")
+                assert False
+            for field in res["fields"]:
+                if field["name"] in nullable_fields:
+                    assert field["nullable"] is True
         assert res["fields"][0]["is_primary"] is True
         assert res["fields"][0]["field_id"] == 100 and (res["fields"][0]["type"] == 5 or 21)
         assert res["fields"][1]["field_id"] == 101 and res["fields"][1]["type"] == 101

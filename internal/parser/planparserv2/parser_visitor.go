@@ -131,7 +131,7 @@ func (v *ParserVisitor) VisitFloating(ctx *parser.FloatingContext) interface{} {
 
 // VisitString translates expr to GenericValue.
 func (v *ParserVisitor) VisitString(ctx *parser.StringContext) interface{} {
-	pattern, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	pattern, err := convertEscapeSingle(ctx.GetText())
 	if err != nil {
 		return err
 	}

@@ -203,7 +203,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     }
 
     file.Seek(0, SEEK_SET);
-    if (config.contains(ENABLE_MMAP)) {
+    if (config.contains(MMAP_FILE_PATH)) {
         trie_.mmap(file_name.c_str());
     } else {
         trie_.read(file.Descriptor());

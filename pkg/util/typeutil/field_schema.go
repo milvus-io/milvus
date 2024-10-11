@@ -53,6 +53,18 @@ func (h *FieldSchemaHelper) EnableMatch() bool {
 	return err == nil && enable
 }
 
+func (h *FieldSchemaHelper) EnableTokenizer() bool {
+	if !IsStringType(h.schema.GetDataType()) {
+		return false
+	}
+	s, err := h.typeParams.Get("enable_tokenizer")
+	if err != nil {
+		return false
+	}
+	enable, err := strconv.ParseBool(s)
+	return err == nil && enable
+}
+
 func CreateFieldSchemaHelper(schema *schemapb.FieldSchema) *FieldSchemaHelper {
 	return &FieldSchemaHelper{
 		schema:      schema,

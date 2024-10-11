@@ -121,9 +121,16 @@ class Schema {
              int64_t max_length,
              bool nullable,
              bool enable_match,
+             bool enable_tokenizer,
              std::map<std::string, std::string>& params) {
-        auto field_meta = FieldMeta(
-            name, id, data_type, max_length, nullable, enable_match, params);
+        auto field_meta = FieldMeta(name,
+                                    id,
+                                    data_type,
+                                    max_length,
+                                    nullable,
+                                    enable_match,
+                                    enable_tokenizer,
+                                    params);
         this->AddField(std::move(field_meta));
     }
 

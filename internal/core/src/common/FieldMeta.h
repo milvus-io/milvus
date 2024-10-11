@@ -64,11 +64,13 @@ class FieldMeta {
               int64_t max_length,
               bool nullable,
               bool enable_match,
+              bool enable_tokenizer,
               std::map<std::string, std::string>& params)
         : name_(name),
           id_(id),
           type_(type),
-          string_info_(StringInfo{max_length, enable_match, std::move(params)}),
+          string_info_(StringInfo{
+              max_length, enable_match, enable_tokenizer, std::move(params)}),
           nullable_(nullable) {
         Assert(IsStringDataType(type_));
     }
@@ -121,6 +123,9 @@ class FieldMeta {
 
     bool
     enable_match() const;
+
+    bool
+    enable_tokenizer() const;
 
     TokenizerParams
     get_tokenizer_params() const;
@@ -198,6 +203,7 @@ class FieldMeta {
     struct StringInfo {
         int64_t max_length;
         bool enable_match;
+        bool enable_tokenizer;
         std::map<std::string, std::string> params;
     };
     FieldName name_;

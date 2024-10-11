@@ -90,7 +90,7 @@ func NewChannelManager(pipelineParams *util.PipelineParams, fgManager pipeline.F
 func (m *ChannelManagerImpl) Submit(info *datapb.ChannelWatchInfo) error {
 	channel := info.GetVchan().GetChannelName()
 
-	// skip enqueue datacoord re-submit the same operations
+	// skip enqueue the same operation resubmmited by datacoord
 	if runner, ok := m.opRunners.Get(channel); ok {
 		if _, exists := runner.Exist(info.GetOpID()); exists {
 			log.Warn("op already exist, skip", zap.Int64("opID", info.GetOpID()), zap.String("channel", channel))
@@ -400,7 +400,7 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 				return
 
 			case <-tickler.GetProgressSig():
-				log.Info("Reset timer for tickler updated")
+				log.Info("Reset timer for tickler updated", zap.Int32("current progress", tickler.Progress()))
 				timer.Reset(watchTimeout)
 
 			case <-successSig:

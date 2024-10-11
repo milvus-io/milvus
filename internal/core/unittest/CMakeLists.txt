@@ -41,6 +41,7 @@ set(MILVUS_TEST_FILES
         test_concurrent_vector.cpp
         test_c_stream_reduce.cpp
         test_c_tokenizer.cpp
+        test_loading.cpp
         test_data_codec.cpp
         test_disk_file_manager_test.cpp
         test_exec.cpp
