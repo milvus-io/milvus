@@ -76,6 +76,41 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	meta := mockrootcoord.NewIMetaTable(t)
+	properties = append(properties, &commonpb.KeyValuePair{Key: common.DatabaseForceDenyReadingKey, Value: "true"})
+
+	meta.On("GetDatabaseByName",
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+	).Return(&model.Database{ID: int64(1), Properties: properties}, nil).Maybe()
+	meta.On("AlterDatabase",
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+	).Return(nil).Maybe()
+
+	t.Run("alter skip due to no change", func(t *testing.T) {
+		core := newTestCore(withMeta(meta))
+		task := &alterDatabaseTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req: &rootcoordpb.AlterDatabaseRequest{
+				DbName: "cn",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DatabaseForceDenyReadingKey,
+						Value: "true",
+					},
+				},
+			},
+		}
+
+		err := task.Execute(context.Background())
+		assert.NoError(t, err)
+	})
+
 	t.Run("alter step failed", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("GetDatabaseByName",
