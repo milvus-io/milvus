@@ -219,17 +219,6 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		resendTTCh = make(chan resendTTMsg, 100)
 	)
 
-	err := node.writeBufferManager.Register(channelName, metacache, storageV2Cache, writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(node.broker, config.serverID)), writebuffer.WithIDAllocator(node.allocator))
-	if err != nil {
-		log.Warn("failed to register channel buffer", zap.Error(err))
-		return nil, err
-	}
-	defer func() {
-		if err != nil {
-			defer node.writeBufferManager.RemoveChannel(channelName)
-		}
-	}()
-
 	ctx, cancel := context.WithCancel(node.ctx)
 	ds := &dataSyncService{
 		ctx:        ctx,
@@ -307,6 +296,15 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		return nil, err
 	}
 	ds.fg = fg
+
+	// Register channel after channel pipeline is ready.
+	// This'll reject any FlushChannel and FlushSegments calls to prevent inconsistency between DN and DC over flushTs
+	// if fail to init flowgraph nodes.
+	err = node.writeBufferManager.Register(channelName, metacache, storageV2Cache, writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(node.broker, config.serverID)), writebuffer.WithIDAllocator(node.allocator))
+	if err != nil {
+		log.Warn("failed to register channel buffer", zap.String("channel", channelName), zap.Error(err))
+		return nil, err
+	}
 
 	return ds, nil
 }
