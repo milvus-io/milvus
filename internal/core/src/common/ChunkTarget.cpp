@@ -17,7 +17,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-const uint32_t PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
+const uint32_t SYS_PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
 namespace milvus {
 void
 MemChunkTarget::write(const void* data, size_t size, bool append) {
@@ -95,7 +95,8 @@ std::pair<char*, size_t>
 MmapChunkTarget::get() {
     // Write padding to align with the page size, ensuring the offset_ aligns with the page size.
     auto padding_size =
-        (size_ / PAGE_SIZE + (size_ % PAGE_SIZE != 0)) * PAGE_SIZE - size_;
+        (size_ / SYS_PAGE_SIZE + (size_ % SYS_PAGE_SIZE != 0)) * SYS_PAGE_SIZE -
+        size_;
     char padding[padding_size];
     memset(padding, 0, sizeof(padding));
     write(padding, padding_size);
