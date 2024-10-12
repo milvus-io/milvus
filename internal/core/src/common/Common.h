@@ -17,6 +17,8 @@
 #pragma once
 
 #include <iostream>
+#include <utility>
+#include <variant>
 #include "common/Consts.h"
 
 namespace milvus {
@@ -47,11 +49,14 @@ void
 SetDefaultExecEvalExprBatchSize(int64_t val);
 
 struct BufferView {
-    char* data_;
-    size_t size_;
+    struct Element {
+        const char* data_;
+        uint64_t* offsets_;
+        int start_;
+        int end_;
+    };
 
-    BufferView(char* data_ptr, size_t size) : data_(data_ptr), size_(size) {
-    }
+    std::variant<std::vector<Element>, std::pair<char*, size_t>> data_;
 };
 
 }  // namespace milvus

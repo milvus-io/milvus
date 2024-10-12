@@ -27,6 +27,7 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "fmt/format.h"
+#include "mmap/ChunkedColumn.h"
 #include "mmap/Column.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
@@ -487,12 +488,52 @@ struct InsertRecord {
 
     void
     insert_pks(milvus::DataType data_type,
-               const std::shared_ptr<ColumnBase>& data) {
+               const std::shared_ptr<ChunkedColumnBase>& data) {
         std::lock_guard lck(shared_mutex_);
         int64_t offset = 0;
         switch (data_type) {
             case DataType::INT64: {
-                auto column = std::dynamic_pointer_cast<Column>(data);
+                auto column = std::dynamic_pointer_cast<ChunkedColumn>(data);
+                auto num_chunk = column->num_chunks();
+                for (int i = 0; i < num_chunk; ++i) {
+                    auto pks =
+                        reinterpret_cast<const int64_t*>(column->Data(i));
+                    for (int i = 0; i < column->NumRows(); ++i) {
+                        pk2offset_->insert(pks[i], offset++);
+                    }
+                }
+                break;
+            }
+            case DataType::VARCHAR: {
+                auto column = std::dynamic_pointer_cast<
+                    ChunkedVariableColumn<std::string>>(data);
+
+                auto num_chunk = column->num_chunks();
+                for (int i = 0; i < num_chunk; ++i) {
+                    auto pks = column->StringViews(i).first;
+                    for (auto& pk : pks) {
+                        pk2offset_->insert(std::string(pk), offset++);
+                    }
+                }
+                break;
+            }
+            default: {
+                PanicInfo(DataTypeInvalid,
+                          fmt::format("unsupported primary key data type",
+                                      data_type));
+            }
+        }
+    }
+
+    void
+    insert_pks(milvus::DataType data_type,
+               const std::shared_ptr<SingleChunkColumnBase>& data) {
+        std::lock_guard lck(shared_mutex_);
+        int64_t offset = 0;
+        switch (data_type) {
+            case DataType::INT64: {
+                auto column =
+                    std::dynamic_pointer_cast<SingleChunkColumn>(data);
                 auto pks = reinterpret_cast<const int64_t*>(column->Data());
                 for (int i = 0; i < column->NumRows(); ++i) {
                     pk2offset_->insert(pks[i], offset++);
@@ -500,9 +541,8 @@ struct InsertRecord {
                 break;
             }
             case DataType::VARCHAR: {
-                auto column =
-                    std::dynamic_pointer_cast<VariableColumn<std::string>>(
-                        data);
+                auto column = std::dynamic_pointer_cast<
+                    SingleChunkVariableColumn<std::string>>(data);
                 auto pks = column->Views();
 
                 for (int i = 0; i < column->NumRows(); ++i) {

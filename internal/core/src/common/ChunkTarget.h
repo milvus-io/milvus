@@ -37,9 +37,34 @@ class ChunkTarget {
 };
 
 class MmapChunkTarget : public ChunkTarget {
+    struct Buffer {
+        char buf[1 << 14];
+        size_t pos = 0;
+
+        bool
+        sufficient(size_t size) {
+            return pos + size <= sizeof(buf);
+        }
+
+        void
+        write(const void* data, size_t size) {
+            memcpy(buf + pos, data, size);
+            pos += size;
+        }
+
+        void
+        clear() {
+            pos = 0;
+        }
+    };
+
  public:
     MmapChunkTarget(File& file, size_t offset) : file_(file), offset_(offset) {
     }
+
+    void
+    flush();
+
     void
     write(const void* data, size_t size, bool append = true) override;
 
@@ -59,17 +84,23 @@ class MmapChunkTarget : public ChunkTarget {
     File& file_;
     size_t offset_ = 0;
     size_t size_ = 0;
+    Buffer buffer_;
 };
 
 class MemChunkTarget : public ChunkTarget {
  public:
     MemChunkTarget(size_t cap) : cap_(cap) {
-        data_ = reinterpret_cast<char*>(mmap(nullptr,
-                                             cap,
-                                             PROT_READ | PROT_WRITE,
-                                             MAP_PRIVATE | MAP_ANON,
-                                             -1,
-                                             0));
+        auto m = mmap(nullptr,
+                      cap,
+                      PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANON,
+                      -1,
+                      0);
+        AssertInfo(m != MAP_FAILED,
+                   "failed to map: {}, map_size={}",
+                   strerror(errno),
+                   size_);
+        data_ = reinterpret_cast<char*>(m);
     }
 
     void

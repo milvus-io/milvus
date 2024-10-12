@@ -564,6 +564,15 @@ func TestCreateCollection(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
             "fields": [
                 {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+				{"fieldName": "null_fid", "dataType": "Int64", "nullable": true},
+				{"fieldName": "default_fid_bool", "dataType": "Bool", "defaultValue": true},
+				{"fieldName": "default_fid_int8", "dataType": "Int8", "defaultValue": 10},
+				{"fieldName": "default_fid_int16", "dataType": "Int16", "defaultValue": 10},
+				{"fieldName": "default_fid_int32", "dataType": "Int32", "defaultValue": 10},
+				{"fieldName": "default_fid_int64", "dataType": "Int64", "defaultValue": 10},
+				{"fieldName": "default_fid_float32", "dataType": "Float", "defaultValue": 10},
+				{"fieldName": "default_fid_double", "dataType": "Double", "defaultValue": 10},
+				{"fieldName": "default_fid_varchar", "dataType": "VarChar", "defaultValue": "a"},
                 {"fieldName": "word_count", "dataType": "Array", "elementDataType": "Int64", "elementTypeParams": {"max_capacity": 2}},
                 {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
             ]
@@ -649,6 +658,90 @@ func TestCreateCollection(t *testing.T) {
         }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
 		errMsg:  "",
 		errCode: 65535,
+	})
+
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+	        "fields": [
+	            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+	            {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+				{"fieldName": "default_fid", "dataType": "Bool", "defaultValue":10, "elementTypeParams": {}},
+	            {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
+	        ]
+	    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
+		errMsg:  "convert defaultValue fail, err:Wrong defaultValue type: invalid parameter[expected=bool][actual=10]",
+		errCode: 1100,
+	})
+
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+	        "fields": [
+	            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+	            {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+				{"fieldName": "default_fid", "dataType": "VarChar", "defaultValue":true, "elementTypeParams": {}},
+	            {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
+	        ]
+	    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
+		errMsg:  "convert defaultValue fail, err:Wrong defaultValue type: invalid parameter[expected=string][actual=true]",
+		errCode: 1100,
+	})
+
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+	        "fields": [
+	            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+	            {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+				{"fieldName": "default_fid", "dataType": "Int8", "defaultValue":"10", "elementTypeParams": {}},
+	            {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
+	        ]
+	    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
+		errMsg:  "convert defaultValue fail, err:Wrong defaultValue type: invalid parameter[expected=number][actual=10]",
+		errCode: 1100,
+	})
+
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+	        "fields": [
+	            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+	            {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+				{"fieldName": "default_fid", "dataType": "Int64", "defaultValue":"10", "elementTypeParams": {}},
+	            {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
+	        ]
+	    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
+		errMsg:  "convert defaultValue fail, err:Wrong defaultValue type: invalid parameter[expected=number][actual=10]",
+		errCode: 1100,
+	})
+
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+	        "fields": [
+	            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+	            {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+				{"fieldName": "default_fid", "dataType": "Float", "defaultValue":"10", "elementTypeParams": {}},
+	            {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
+	        ]
+	    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
+		errMsg:  "convert defaultValue fail, err:Wrong defaultValue type: invalid parameter[expected=number][actual=10]",
+		errCode: 1100,
+	})
+
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+	        "fields": [
+	            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+	            {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+				{"fieldName": "default_fid", "dataType": "Double", "defaultValue":"10", "elementTypeParams": {}},
+	            {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
+	        ]
+	    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
+		errMsg:  "convert defaultValue fail, err:Wrong defaultValue type: invalid parameter[expected=number][actual=10]",
+		errCode: 1100,
 	})
 
 	for _, testcase := range postTestCases {
@@ -1072,7 +1165,7 @@ func TestMethodPost(t *testing.T) {
 		State:    internalpb.ImportJobState_Completed,
 		Reason:   "",
 		Progress: 100,
-	}, nil).Once()
+	}, nil).Twice()
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
 	queryTestCases = append(queryTestCases, rawTestCase{
@@ -1139,6 +1232,9 @@ func TestMethodPost(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(ImportJobCategory, GetProgressAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(ImportJobCategory, DescribeAction),
 	})
 
 	for _, testcase := range queryTestCases {

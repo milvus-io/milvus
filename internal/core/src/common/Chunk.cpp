@@ -18,15 +18,13 @@
 
 namespace milvus {
 
-std::vector<std::string_view>
-StringChunk::StringViews() const {
+std::pair<std::vector<std::string_view>, FixedVector<bool>>
+StringChunk::StringViews() {
     std::vector<std::string_view> ret;
-    for (int i = 0; i < row_nums_ - 1; i++) {
+    for (int i = 0; i < row_nums_; i++) {
         ret.emplace_back(data_ + offsets_[i], offsets_[i + 1] - offsets_[i]);
     }
-    ret.emplace_back(data_ + offsets_[row_nums_ - 1],
-                     size_ - MMAP_STRING_PADDING - offsets_[row_nums_ - 1]);
-    return ret;
+    return {ret, valid_};
 }
 
 void
@@ -34,20 +32,22 @@ ArrayChunk::ConstructViews() {
     views_.reserve(row_nums_);
 
     for (int i = 0; i < row_nums_; ++i) {
-        auto data_ptr = data_ + offsets_[i];
-        auto next_data_ptr = i == row_nums_ - 1
-                                 ? data_ + size_ - MMAP_ARRAY_PADDING
-                                 : data_ + offsets_[i + 1];
-        auto offsets_len = lens_[i] * sizeof(uint64_t);
+        int offset = offsets_lens_[2 * i];
+        int next_offset = offsets_lens_[2 * (i + 1)];
+        int len = offsets_lens_[2 * i + 1];
+
+        auto data_ptr = data_ + offset;
+        auto offsets_len = 0;
         std::vector<uint64_t> element_indices = {};
         if (IsStringDataType(element_type_)) {
+            offsets_len = len * sizeof(uint64_t);
             std::vector<uint64_t> tmp(
                 reinterpret_cast<uint64_t*>(data_ptr),
                 reinterpret_cast<uint64_t*>(data_ptr + offsets_len));
             element_indices = std::move(tmp);
         }
         views_.emplace_back(data_ptr + offsets_len,
-                            next_data_ptr - data_ptr - offsets_len,
+                            next_offset - offset - offsets_len,
                             element_type_,
                             std::move(element_indices));
     }
@@ -55,7 +55,10 @@ ArrayChunk::ConstructViews() {
 
 SpanBase
 ArrayChunk::Span() const {
-    return SpanBase(views_.data(), views_.size(), sizeof(ArrayView));
+    return SpanBase(views_.data(),
+                    nullable_ ? valid_.data() : nullptr,
+                    views_.size(),
+                    sizeof(ArrayView));
 }
 
 }  // namespace milvus

@@ -59,6 +59,11 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	if ContainsKeyPairArray(a.Req.GetProperties(), oldColl.Properties) {
+		log.Info("skip to alter collection due to no changes were detected in the properties", zap.Int64("collectionID", oldColl.CollectionID))
+		return nil
+	}
+
 	newColl := oldColl.Clone()
 	newColl.Properties = MergeProperties(oldColl.Properties, a.Req.GetProperties())
 

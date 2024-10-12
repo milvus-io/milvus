@@ -26,9 +26,11 @@
 #include "log/Log.h"
 #include "mmap/Types.h"
 #include "segcore/Collection.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/Utils.h"
+#include "storage/Event.h"
 #include "storage/Util.h"
 #include "futures/Future.h"
 #include "futures/Executor.h"
@@ -59,8 +61,20 @@ NewSegment(CCollection collection,
                     segment_id,
                     milvus::segcore::SegcoreConfig::default_config(),
                     false,
-                    is_sorted_by_pk);
+                    is_sorted_by_pk,
+                    false);
                 break;
+            case ChunkedSealed:
+                segment = milvus::segcore::CreateSealedSegment(
+                    col->get_schema(),
+                    col->get_index_meta(),
+                    segment_id,
+                    milvus::segcore::SegcoreConfig::default_config(),
+                    false,
+                    is_sorted_by_pk,
+                    true);
+                break;
+
             default:
                 PanicInfo(milvus::UnexpectedError,
                           "invalid segment type: {}",
@@ -82,7 +96,7 @@ DeleteSegment(CSegmentInterface c_segment) {
 
 void
 ClearSegmentData(CSegmentInterface c_segment) {
-    auto s = static_cast<milvus::segcore::SegmentSealedImpl*>(c_segment);
+    auto s = static_cast<milvus::segcore::SegmentSealed*>(c_segment);
     s->ClearData();
 }
 
@@ -549,8 +563,7 @@ WarmupChunkCache(CSegmentInterface c_segment,
 
 void
 RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id) {
-    auto segment =
-        reinterpret_cast<milvus::segcore::SegmentSealedImpl*>(c_segment);
+    auto segment = reinterpret_cast<milvus::segcore::SegmentSealed*>(c_segment);
     segment->RemoveFieldFile(milvus::FieldId(field_id));
 }
 

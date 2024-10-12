@@ -185,6 +185,45 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+		).Return(&model.Collection{
+			CollectionID: int64(1),
+			Properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.CollectionTTLConfigKey,
+					Value: "1",
+				},
+				{
+					Key:   common.CollectionAutoCompactionKey,
+					Value: "true",
+				},
+			},
+		}, nil)
+		core := newTestCore(withValidProxyManager(), withMeta(meta))
+		task := &alterCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
+				CollectionName: "cn",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.CollectionAutoCompactionKey,
+						Value: "true",
+					},
+				},
+			},
+		}
+
+		err := task.Execute(context.Background())
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter successfully", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
 		).Return(&model.Collection{CollectionID: int64(1)}, nil)
 		meta.On("AlterCollection",
 			mock.Anything,

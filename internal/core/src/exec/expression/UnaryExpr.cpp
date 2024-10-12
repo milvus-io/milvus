@@ -363,15 +363,27 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(bool reverse) {
             }
 
             // filtering by index, get candidates.
-            auto size_per_chunk = segment_->size_per_chunk();
-            auto retrieve = [ size_per_chunk, this ](int64_t offset) -> auto {
-                auto chunk_idx = offset / size_per_chunk;
-                auto chunk_offset = offset % size_per_chunk;
-                const auto& chunk =
-                    segment_->template chunk_data<milvus::ArrayView>(field_id_,
-                                                                     chunk_idx);
-                return chunk.data() + chunk_offset;
-            };
+            std::function<const milvus::ArrayView*(int64_t)> retrieve;
+            if (segment_->is_chunked()) {
+                retrieve = [this](int64_t offset) -> const milvus::ArrayView* {
+                    auto [chunk_idx, chunk_offset] =
+                        segment_->get_chunk_by_offset(field_id_, offset);
+                    const auto& chunk =
+                        segment_->template chunk_data<milvus::ArrayView>(
+                            field_id_, chunk_idx);
+                    return chunk.data() + chunk_offset;
+                };
+            } else {
+                auto size_per_chunk = segment_->size_per_chunk();
+                retrieve = [ size_per_chunk, this ](int64_t offset) -> auto {
+                    auto chunk_idx = offset / size_per_chunk;
+                    auto chunk_offset = offset % size_per_chunk;
+                    const auto& chunk =
+                        segment_->template chunk_data<milvus::ArrayView>(
+                            field_id_, chunk_idx);
+                    return chunk.data() + chunk_offset;
+                };
+            }
 
             // compare the array via the raw data.
             auto filter = [&retrieve, &val, reverse](size_t offset) -> bool {
