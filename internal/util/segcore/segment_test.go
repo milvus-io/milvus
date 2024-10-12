@@ -24,6 +24,7 @@ func TestGrowingSegment(t *testing.T) {
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
 	err := initcore.InitMmapManager(paramtable.Get(), 1)
+	initcore.InitAggregationFunctions()
 	assert.NoError(t, err)
 
 	collectionID := int64(100)

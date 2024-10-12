@@ -15,32 +15,22 @@
 // limitations under the License.
 
 #pragma once
-
-#include <memory>
-#include <string>
-
-#include "exec/Driver.h"
-#include "exec/expression/Expr.h"
 #include "exec/operator/Operator.h"
-#include "exec/QueryContext.h"
+#include "exec/operator/query-agg/GroupingSet.h"
+#include "common/Types.h"
 
 namespace milvus {
 namespace exec {
-
-class PhyGroupByNode : public Operator {
+class PhyAggregationNode : public Operator {
  public:
-    PhyGroupByNode(int32_t operator_id,
-                   DriverContext* ctx,
-                   const std::shared_ptr<const plan::GroupByNode>& node);
-
-    bool
-    IsFilter() override {
-        return false;
-    }
+    PhyAggregationNode(
+        int32_t operator_id,
+        DriverContext* ctx,
+        const std::shared_ptr<const plan::AggregationNode>& node);
 
     bool
     NeedInput() const override {
-        return !is_finished_;
+        return true;
     }
 
     void
@@ -50,28 +40,52 @@ class PhyGroupByNode : public Operator {
     GetOutput() override;
 
     bool
-    IsFinished() override;
+    IsFinished() override {
+        return finished_;
+    }
 
-    void
-    Close() override {
+    bool
+    IsFilter() const override {
+        return false;
     }
 
     BlockingReason
-    IsBlocked(ContinueFuture* /* unused */) override {
+    IsBlocked(ContinueFuture* future) {
         return BlockingReason::kNotBlocked;
     }
 
-    virtual std::string
+    void
+    Close() override {
+        input_ = nullptr;
+        results_.clear();
+    }
+
+    void
+    initialize() override;
+
+    std::string
     ToString() const override {
-        return "PhyGroupByNode";
+        return "PhyAggregationNode";
     }
 
  private:
-    const milvus::segcore::SegmentInternalInterface* segment_;
-    QueryContext* query_context_;
-    bool is_finished_{false};
+    void
+    prepareOutput(vector_size_t size);
 
-    milvus::SearchInfo search_info_;
+    RowVectorPtr output_;
+    std::unique_ptr<GroupingSet> grouping_set_;
+    std::shared_ptr<const plan::AggregationNode> aggregationNode_;
+    const bool isGlobal_;
+
+    // Count the number of input rows. It is reset on partial aggregation output
+    // flush.
+    int64_t numInputRows_ = 0;
+    // Count the number of output rows. It is reset on partial aggregation output
+    // flush.
+    int64_t numOutputRows_ = 0;
+    bool finished_ = false;
+
+    const int64_t group_limit_;
 };
 }  // namespace exec
 }  // namespace milvus

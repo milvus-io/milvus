@@ -654,6 +654,8 @@ TEST(GroupBY, GrowingRawData) {
     schema->set_primary_field_id(int64_field_id);
 
     auto config = SegcoreConfig::default_config();
+    auto original_chunk_rows = config.get_chunk_rows();
+    DeferLambda([&]() { config.set_chunk_rows(original_chunk_rows); });
     config.set_chunk_rows(128);
     config.set_enable_interim_segment_index(
         false);  //no growing index, test brute force
@@ -752,6 +754,8 @@ TEST(GroupBY, GrowingIndex) {
         std::make_shared<CollectionIndexMeta>(10000, std::move(fieldMap));
 
     auto config = SegcoreConfig::default_config();
+    auto original_chunk_rows = config.get_chunk_rows();
+    DeferLambda([&]() { config.set_chunk_rows(original_chunk_rows); });
     config.set_chunk_rows(128);
     config.set_enable_interim_segment_index(
         true);  //no growing index, test growing inter index

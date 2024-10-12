@@ -85,7 +85,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	initcore.InitRemoteChunkManager(paramtable.Get())
 	initcore.InitLocalChunkManager(suite.rootPath)
 	initcore.InitMmapManager(paramtable.Get(), 1)
-
+	initcore.InitAggregationFunctions()
 	// Data
 	suite.schema = mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
 	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, suite.schema)

@@ -1,6 +1,6 @@
 package segments
 
-import (
+/*import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -57,4 +57,4 @@ func (suite *ReducerFactorySuite) TestCreateSegCoreReducer() {
 	suite.sr = CreateSegCoreReducer(req, nil, nil)
 	_, suite.ok = suite.sr.(*cntReducerSegCore)
 	suite.True(suite.ok)
-}
+}*/

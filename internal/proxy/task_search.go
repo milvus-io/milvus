@@ -170,7 +170,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
+	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, _, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
 	if err != nil {
 		log.Warn("translate output fields failed", zap.Error(err), zap.Any("schema", t.schema))
 		return err

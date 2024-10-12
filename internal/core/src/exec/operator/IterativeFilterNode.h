@@ -37,7 +37,7 @@ class PhyIterativeFilterNode : public Operator {
         const std::shared_ptr<const plan::FilterNode>& filter);
 
     bool
-    IsFilter() override {
+    IsFilter() const override {
         return true;
     }
 

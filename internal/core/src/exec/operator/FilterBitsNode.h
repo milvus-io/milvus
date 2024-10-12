@@ -34,7 +34,7 @@ class PhyFilterBitsNode : public Operator {
         const std::shared_ptr<const plan::FilterBitsNode>& filter);
 
     bool
-    IsFilter() override {
+    IsFilter() const override {
         return true;
     }
 

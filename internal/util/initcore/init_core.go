@@ -25,6 +25,7 @@ package initcore
 #include "segcore/segcore_init_c.h"
 #include "storage/storage_c.h"
 #include "segcore/arrow_fs_c.h"
+#include "exec/operator/init_c.h"
 */
 import "C"
 
@@ -449,6 +450,10 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(denseVecIndexRefineQuantType))
 	status = C.SegcoreSetDenseVectorInterminIndexRefineQuantType(denseVecIndexRefineQuantType)
 	return HandleCStatus(&status, "InitInterminIndexConfig failed")
+}
+
+func InitAggregationFunctions() {
+	C.RegisterAggregationFunctions()
 }
 
 func CleanRemoteChunkManager() {

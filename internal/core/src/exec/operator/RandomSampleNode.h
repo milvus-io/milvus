@@ -31,7 +31,7 @@ class PhyRandomSampleNode : public Operator {
                             random_sample_node);
 
     bool
-    IsFilter() override {
+    IsFilter() const override {
         return false;
     }
 

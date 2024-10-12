@@ -14,23 +14,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "GroupByNode.h"
+#include "SearchGroupByNode.h"
 
-#include "exec/operator/groupby/SearchGroupByOperator.h"
+#include "exec/operator/search-groupby/SearchGroupByOperator.h"
 #include "monitor/Monitor.h"
 
 namespace milvus {
 namespace exec {
 
-PhyGroupByNode::PhyGroupByNode(
+PhySearchGroupByNode::PhySearchGroupByNode(
     int32_t operator_id,
     DriverContext* driverctx,
-    const std::shared_ptr<const plan::GroupByNode>& node)
+    const std::shared_ptr<const plan::SearchGroupByNode>& node)
     : Operator(driverctx,
                node->output_type(),
                operator_id,
                node->id(),
-               "PhyGroupByNode") {
+               "PhySearchGroupByNode") {
     ExecContext* exec_context = operator_context_->get_exec_context();
     query_context_ = exec_context->get_query_context();
     segment_ = query_context_->get_segment();
@@ -38,12 +38,12 @@ PhyGroupByNode::PhyGroupByNode(
 }
 
 void
-PhyGroupByNode::AddInput(RowVectorPtr& input) {
+PhySearchGroupByNode::AddInput(RowVectorPtr& input) {
     input_ = std::move(input);
 }
 
 RowVectorPtr
-PhyGroupByNode::GetOutput() {
+PhySearchGroupByNode::GetOutput() {
     if (is_finished_ || !no_more_input_) {
         return nullptr;
     }
@@ -90,7 +90,7 @@ PhyGroupByNode::GetOutput() {
 }
 
 bool
-PhyGroupByNode::IsFinished() {
+PhySearchGroupByNode::IsFinished() {
     return is_finished_;
 }
 

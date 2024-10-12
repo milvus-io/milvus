@@ -50,6 +50,19 @@ GetRawDataSizeOfDataArray(const DataArray* data,
 std::unique_ptr<DataArray>
 CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta);
 
+void
+SetUpScalarFieldData(milvus::proto::schema::ScalarField*& scalar_array,
+                     DataType data_type,
+                     DataType element_type,
+                     int64_t count);
+
+void
+CreateScalarDataArray(DataArray& data_array,
+                      int64_t count,
+                      DataType data_type,
+                      DataType element_type,
+                      bool nullable);
+
 std::unique_ptr<DataArray>
 CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta);
 
@@ -135,4 +148,11 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
 CacheWarmupPolicy
 getCacheWarmupPolicy(bool is_vector, bool is_index, bool in_load_list = true);
 
+FieldDataPtr
+bulk_script_field_data(FieldId fieldId,
+                       DataType dataType,
+                       const int64_t* seg_offsets,
+                       int64_t count,
+                       const segcore::SegmentInternalInterface* segment,
+                       TargetBitmapView& valid_view);
 }  // namespace milvus::segcore
