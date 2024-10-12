@@ -235,7 +235,7 @@ func TestSearchIteratorInvalid(t *testing.T) {
 
 	// search iterator with count(*)
 	_, err = mc.SearchIterator(ctx, client.NewSearchIteratorOption(schema.CollectionName, vector).WithOutputFields(common.QueryCountFieldName))
-	common.CheckErr(t, err, false, "field count(*) not exist")
+	common.CheckErr(t, err, false, "aggregates are not supported in search request")
 
 	// search iterator with invalid batch size
 	for _, batch := range []int{-1, 0, -2} {

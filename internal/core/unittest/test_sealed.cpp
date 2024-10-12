@@ -25,6 +25,7 @@
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
+#include "exec/expression/function/FunctionFactory.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -670,6 +671,9 @@ TEST(Sealed, LoadFieldData) {
 }
 
 TEST(Sealed, ClearData) {
+    milvus::exec::expression::FunctionFactory& factory =
+        milvus::exec::expression::FunctionFactory::Instance();
+    factory.Initialize();
     auto dim = 4;
     auto topK = 5;
     auto N = ROW_COUNT;
@@ -1382,6 +1386,9 @@ TEST(Sealed, DeleteCount) {
 }
 
 TEST(Sealed, RealCount) {
+    milvus::exec::expression::FunctionFactory& factory =
+        milvus::exec::expression::FunctionFactory::Instance();
+    factory.Initialize();
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk);

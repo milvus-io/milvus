@@ -637,6 +637,17 @@ class ArrayView {
         }
     }
 
+    void
+    output_data(Array& array) const {
+        // Create a new Array object from ArrayView's data and assign it to the
+        // output array
+        array = Array(data_,
+                      length_,
+                      static_cast<size_t>(size_),
+                      element_type_,
+                      offsets_ptr_);
+    }
+
     ScalarFieldProto
     output_data() const {
         ScalarFieldProto data_array;

@@ -1064,7 +1064,7 @@ func TestQueryOutputInvalidOutputFieldCount(t *testing.T) {
 		{countField: "ccount(*)", errMsg: "field ccount(*) not exist"},
 		{countField: "count[*]", errMsg: "field count[*] not exist"},
 		{countField: "count", errMsg: "field count not exist"},
-		{countField: "count(**)", errMsg: "field count(**) not exist"},
+		{countField: "count(**)", errMsg: "target field ** for aggregation:count does not exist"},
 	}
 	for _, invalidCount := range invalidOutputFieldCount {
 		queryExpr := fmt.Sprintf("%s >= 0", common.DefaultInt64FieldName)

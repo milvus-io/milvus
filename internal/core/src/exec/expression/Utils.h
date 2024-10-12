@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <algorithm>
+
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -287,6 +289,26 @@ GetValueWithCastNumber(const milvus::proto::plan::GenericValue& value_proto) {
     } else {
         return GetValueFromProto<T>(value_proto);
     }
+}
+
+// Locale-independent ASCII lowercase conversion
+// Converts only ASCII uppercase letters (A-Z) to lowercase (a-z)
+// Non-ASCII characters and non-uppercase characters remain unchanged
+inline unsigned char
+asciiToLower(unsigned char c) {
+    if (c >= 'A' && c <= 'Z') {
+        return static_cast<unsigned char>('a' + (c - 'A'));
+    }
+    return c;
+}
+
+inline std::string
+sanitizeName(const std::string& name) {
+    std::string sanitizedName;
+    sanitizedName.resize(name.size());
+    std::transform(
+        name.begin(), name.end(), sanitizedName.begin(), asciiToLower);
+    return sanitizedName;
 }
 
 }  // namespace exec

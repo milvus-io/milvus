@@ -1229,12 +1229,39 @@ SegmentGrowingImpl::bulk_subscript_ptr_impl(
     google::protobuf::RepeatedPtrField<std::string>* dst) const {
     auto vec = dynamic_cast<const ConcurrentVector<S>*>(vec_raw);
     auto& src = *vec;
+    if constexpr (std::is_same_v<S, Json>) {
+        // For Json type, we must use operator[] instead of view_element()
+        // to ensure the Json object lives long enough. view_element() returns
+        // a string_view that may point to memory owned by a temporary Json
+        // object, which gets destroyed before we can construct std::string.
+        // Using operator[] copies the Json object, extending its lifetime.
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = seg_offsets[i];
+            Json json = src[offset];  // Copy Json object to extend lifetime
+            dst->at(i) = std::string(json.data());
+        }
+    } else {
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = seg_offsets[i];
+            dst->at(i) = std::string(src.view_element(offset));
+        }
+    }
+}
+
+template <typename S, typename T>
+void
+SegmentGrowingImpl::bulk_subscript_ptr_impl(const VectorBase* vec_raw,
+                                            const int64_t* seg_offsets,
+                                            int64_t count,
+                                            T* dst) const {
+    auto vec = dynamic_cast<const ConcurrentVector<S>*>(vec_raw);
+    auto& src = *vec;
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        if (IsVariableTypeSupportInChunk<S> && src.is_mmap()) {
-            dst->at(i) = std::move(std::string(src.view_element(offset)));
+        if (offset != INVALID_SEG_OFFSET) {
+            dst[i] = T(src.view_element(offset));
         } else {
-            dst->at(i) = std::move(std::string(src[offset]));
+            dst[i] = T();  // Default-initialize for invalid offsets
         }
     }
 }
@@ -1291,7 +1318,8 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
                                         const VectorBase* vec_raw,
                                         const int64_t* seg_offsets,
                                         int64_t count,
-                                        T* output) const {
+                                        T* output,
+                                        bool small_int_raw_type) const {
     static_assert(IsScalar<S>);
     auto vec_ptr = dynamic_cast<const ConcurrentVector<S>*>(vec_raw);
     AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
@@ -1360,6 +1388,135 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         default:
             ThrowInfo(DataTypeInvalid, "unknown subscript fields");
+    }
+}
+
+void
+SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
+                                   FieldId field_id,
+                                   DataType data_type,
+                                   const int64_t* seg_offsets,
+                                   int64_t count,
+                                   void* data,
+                                   TargetBitmap& valid_map,
+                                   bool small_int_raw_type) const {
+    auto vec_ptr = insert_record_.get_data_base(field_id);
+    auto& field_meta = schema_->operator[](field_id);
+    valid_map.set();
+    if (field_meta.is_nullable()) {
+        auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
+        for (auto i = 0; i < count; i++) {
+            valid_map.set(i, valid_vec_ptr->is_valid(seg_offsets[i]));
+        }
+    }
+
+    switch (field_meta.get_data_type()) {
+        case DataType::BOOL: {
+            bulk_subscript_impl<bool>(
+                op_ctx, vec_ptr, seg_offsets, count, static_cast<bool*>(data));
+            break;
+        }
+        case DataType::INT8: {
+            if (small_int_raw_type) {
+                bulk_subscript_impl<int8_t>(op_ctx,
+                                            vec_ptr,
+                                            seg_offsets,
+                                            count,
+                                            static_cast<int8_t*>(data));
+            } else {
+                bulk_subscript_impl<int8_t, int32_t>(
+                    op_ctx,
+                    vec_ptr,
+                    seg_offsets,
+                    count,
+                    static_cast<int32_t*>(data));
+            }
+            break;
+        }
+        case DataType::INT16: {
+            if (small_int_raw_type) {
+                bulk_subscript_impl<int16_t>(op_ctx,
+                                             vec_ptr,
+                                             seg_offsets,
+                                             count,
+                                             static_cast<int16_t*>(data));
+            } else {
+                bulk_subscript_impl<int16_t, int32_t>(
+                    op_ctx,
+                    vec_ptr,
+                    seg_offsets,
+                    count,
+                    static_cast<int32_t*>(data));
+            }
+            break;
+        }
+        case DataType::INT32: {
+            bulk_subscript_impl<int32_t>(op_ctx,
+                                         vec_ptr,
+                                         seg_offsets,
+                                         count,
+                                         static_cast<int32_t*>(data));
+            break;
+        }
+        case DataType::TIMESTAMPTZ:
+        case DataType::INT64: {
+            bulk_subscript_impl<int64_t>(op_ctx,
+                                         vec_ptr,
+                                         seg_offsets,
+                                         count,
+                                         static_cast<int64_t*>(data));
+            break;
+        }
+        case DataType::FLOAT: {
+            bulk_subscript_impl<float>(
+                op_ctx, vec_ptr, seg_offsets, count, static_cast<float*>(data));
+            break;
+        }
+        case DataType::DOUBLE: {
+            bulk_subscript_impl<double>(op_ctx,
+                                        vec_ptr,
+                                        seg_offsets,
+                                        count,
+                                        static_cast<double*>(data));
+            break;
+        }
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
+            bulk_subscript_ptr_impl<std::string>(
+                vec_ptr, seg_offsets, count, static_cast<std::string*>(data));
+            break;
+        }
+        case DataType::JSON: {
+            bulk_subscript_ptr_impl<Json>(
+                vec_ptr, seg_offsets, count, static_cast<Json*>(data));
+            break;
+        }
+        case DataType::GEOMETRY: {
+            bulk_subscript_ptr_impl<std::string>(
+                vec_ptr, seg_offsets, count, static_cast<std::string*>(data));
+            break;
+        }
+        case DataType::ARRAY: {
+            auto vec = dynamic_cast<const ConcurrentVector<Array>*>(vec_ptr);
+            AssertInfo(vec, "Pointer of vec_ptr is nullptr for ARRAY type");
+            auto& src = *vec;
+            auto dst = static_cast<Array*>(data);
+            for (int64_t i = 0; i < count; ++i) {
+                auto offset = seg_offsets[i];
+                if (offset != INVALID_SEG_OFFSET) {
+                    dst[i] = src[offset];
+                } else {
+                    dst[i] =
+                        Array();  // Default-construct empty Array for invalid offsets
+                }
+            }
+            break;
+        }
+        default: {
+            ThrowInfo(
+                DataTypeInvalid,
+                fmt::format("unsupported type {}", field_meta.get_data_type()));
+        }
     }
 }
 

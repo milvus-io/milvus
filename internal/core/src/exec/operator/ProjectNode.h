@@ -15,32 +15,25 @@
 // limitations under the License.
 
 #pragma once
-
-#include <memory>
-#include <string>
-
-#include "exec/Driver.h"
-#include "exec/expression/Expr.h"
-#include "exec/operator/Operator.h"
-#include "exec/QueryContext.h"
+#include "Operator.h"
+#include "plan/PlanNode.h"
 
 namespace milvus {
 namespace exec {
-
-class PhyGroupByNode : public Operator {
+class PhyProjectNode : public Operator {
  public:
-    PhyGroupByNode(int32_t operator_id,
+    PhyProjectNode(int32_t operator_id,
                    DriverContext* ctx,
-                   const std::shared_ptr<const plan::GroupByNode>& node);
+                   const std::shared_ptr<const plan::ProjectNode>& projectNode);
 
     bool
-    IsFilter() override {
+    IsFilter() const override {
         return false;
     }
 
     bool
     NeedInput() const override {
-        return !is_finished_;
+        return true;
     }
 
     void
@@ -50,10 +43,8 @@ class PhyGroupByNode : public Operator {
     GetOutput() override;
 
     bool
-    IsFinished() override;
-
-    void
-    Close() override {
+    IsFinished() override {
+        return is_finished_;
     }
 
     BlockingReason
@@ -61,17 +52,16 @@ class PhyGroupByNode : public Operator {
         return BlockingReason::kNotBlocked;
     }
 
-    virtual std::string
+    std::string
     ToString() const override {
-        return "PhyGroupByNode";
+        return "Project Operator";
     }
 
  private:
-    const milvus::segcore::SegmentInternalInterface* segment_;
-    QueryContext* query_context_;
+    const segcore::SegmentInternalInterface* segment_;
     bool is_finished_{false};
-
-    milvus::SearchInfo search_info_;
+    const std::vector<FieldId> fields_to_project_;
+    OpContext* op_context_;
 };
 }  // namespace exec
 }  // namespace milvus

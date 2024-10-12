@@ -1359,7 +1359,7 @@ ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
 
 std::pair<std::vector<OffsetMap::OffsetType>, bool>
 ChunkedSegmentSealedImpl::find_first(int64_t limit,
-                                     const BitsetType& bitset) const {
+                                     const BitsetTypeView& bitset) const {
     if (!is_sorted_by_pk_) {
         return insert_record_.pk2offset_->find_first(limit, bitset);
     }
@@ -1472,6 +1472,144 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
     }
 }
 
+void
+ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
+                                         FieldId field_id,
+                                         DataType data_type,
+                                         const int64_t* seg_offsets,
+                                         int64_t count,
+                                         void* data,
+                                         TargetBitmap& valid_map,
+                                         bool small_int_raw_type) const {
+    auto& field_meta = schema_->operator[](field_id);
+    // DO NOT directly access the column by map like: `fields_.at(field_id)->Data()`,
+    // we have to clone the shared pointer, to make sure it won't get released
+    // if segment released
+    auto column = get_column(field_id);
+    AssertInfo(column != nullptr,
+               "field {} must exist when doing bulk_subscript",
+               field_id.get());
+    valid_map.set();
+    if (column->IsNullable()) {
+        for (auto i = 0; i < count; i++) {
+            valid_map.set(i, column->IsValid(op_ctx, seg_offsets[i]));
+        }
+    }
+    switch (data_type) {
+        case DataType::BOOL: {
+            bulk_subscript_impl<bool>(op_ctx,
+                                      column.get(),
+                                      seg_offsets,
+                                      count,
+                                      static_cast<bool*>(data));
+            break;
+        }
+        case DataType::INT8: {
+            bulk_subscript_impl<int8_t>(op_ctx,
+                                        column.get(),
+                                        seg_offsets,
+                                        count,
+                                        static_cast<int8_t*>(data),
+                                        small_int_raw_type);
+            break;
+        }
+        case DataType::INT16: {
+            bulk_subscript_impl<int16_t>(op_ctx,
+                                         column.get(),
+                                         seg_offsets,
+                                         count,
+                                         static_cast<int16_t*>(data),
+                                         small_int_raw_type);
+            break;
+        }
+        case DataType::INT32: {
+            bulk_subscript_impl<int32_t>(op_ctx,
+                                         column.get(),
+                                         seg_offsets,
+                                         count,
+                                         static_cast<int32_t*>(data));
+            break;
+        }
+        case DataType::TIMESTAMPTZ:
+        case DataType::INT64: {
+            bulk_subscript_impl<int64_t>(op_ctx,
+                                         column.get(),
+                                         seg_offsets,
+                                         count,
+                                         static_cast<int64_t*>(data));
+            break;
+        }
+        case DataType::FLOAT: {
+            bulk_subscript_impl<float>(op_ctx,
+                                       column.get(),
+                                       seg_offsets,
+                                       count,
+                                       static_cast<float*>(data));
+            break;
+        }
+        case DataType::DOUBLE: {
+            bulk_subscript_impl<double>(op_ctx,
+                                        column.get(),
+                                        seg_offsets,
+                                        count,
+                                        static_cast<double*>(data));
+            break;
+        }
+        case DataType::VARCHAR:
+        case DataType::STRING:
+        case DataType::TEXT: {
+            // dst must have at least count elements; the callback's offset
+            // parameter is guaranteed to be in [0, count)
+            bulk_subscript_ptr_impl<std::string>(
+                op_ctx,
+                column.get(),
+                seg_offsets,
+                count,
+                static_cast<std::string*>(data));
+            break;
+        }
+        case DataType::JSON: {
+            // dst must have at least count elements; the callback's offset
+            // parameter is guaranteed to be in [0, count)
+            bulk_subscript_ptr_impl<Json>(op_ctx,
+                                          column.get(),
+                                          seg_offsets,
+                                          count,
+                                          static_cast<Json*>(data));
+            break;
+        }
+        case DataType::GEOMETRY: {
+            // dst must have at least count elements; the callback's offset
+            // parameter is guaranteed to be in [0, count)
+            bulk_subscript_ptr_impl<std::string>(
+                op_ctx,
+                column.get(),
+                seg_offsets,
+                count,
+                static_cast<std::string*>(data));
+            break;
+        }
+        case DataType::ARRAY: {
+            // dst must have at least count elements; the callback's index
+            // parameter is guaranteed to be in [0, count)
+            auto dst = static_cast<Array*>(data);
+            column->BulkArrayAt(
+                op_ctx,
+                [dst](const ArrayView& view, size_t i) {
+                    view.output_data(dst[i]);
+                },
+                seg_offsets,
+                count);
+            break;
+        }
+        default: {
+            ThrowInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type {}",
+                                  field_meta.get_data_type()));
+        }
+    }
+}
+
 template <typename S, typename T>
 void
 ChunkedSegmentSealedImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
@@ -1492,11 +1630,15 @@ ChunkedSegmentSealedImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
                                               ChunkedColumnInterface* field,
                                               const int64_t* seg_offsets,
                                               int64_t count,
-                                              T* dst) {
+                                              T* dst,
+                                              bool small_int_raw_type) {
     static_assert(std::is_fundamental_v<S> && std::is_fundamental_v<T>);
     // use field->data_type_ to determine the type of dst
-    field->BulkPrimitiveValueAt(
-        op_ctx, static_cast<void*>(dst), seg_offsets, count);
+    field->BulkPrimitiveValueAt(op_ctx,
+                                static_cast<void*>(dst),
+                                seg_offsets,
+                                count,
+                                small_int_raw_type);
 }
 
 // for dense vector
@@ -1534,6 +1676,34 @@ ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
             op_ctx,
             [dst](std::string_view value, size_t offset, bool is_valid) {
                 dst->at(offset) = std::move(std::string(value));
+            },
+            seg_offsets,
+            count);
+    }
+}
+
+template <typename S, typename T>
+void
+ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
+    milvus::OpContext* op_ctx,
+    const ChunkedColumnInterface* column,
+    const int64_t* seg_offsets,
+    int64_t count,
+    T* dst) {
+    if constexpr (std::is_same_v<S, Json>) {
+        column->BulkRawJsonAt(
+            op_ctx,
+            [&](Json json, size_t offset, bool is_valid) {
+                dst[offset] = std::move(T(json));
+            },
+            seg_offsets,
+            count);
+    } else {
+        static_assert(std::is_same_v<S, std::string>);
+        column->BulkRawStringAt(
+            op_ctx,
+            [&](std::string_view value, size_t offset, bool is_valid) {
+                dst[offset] = std::move(T(value));
             },
             seg_offsets,
             count);
@@ -1899,14 +2069,15 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::TIMESTAMPTZ: {
-            bulk_subscript_impl<int64_t>(op_ctx,
-                                         column.get(),
-                                         seg_offsets,
-                                         count,
-                                         ret->mutable_scalars()
-                                             ->mutable_timestamptz_data()
-                                             ->mutable_data()
-                                             ->mutable_data());
+            bulk_subscript_impl<int64_t, int64_t>(
+                op_ctx,
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_scalars()
+                    ->mutable_timestamptz_data()
+                    ->mutable_data()
+                    ->mutable_data());
             break;
         }
         case DataType::VECTOR_FLOAT: {

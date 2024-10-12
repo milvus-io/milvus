@@ -501,7 +501,7 @@ class TestUtilityParams(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collection_not_existed_collection(self):
         """
-        target: test rename_collection when the collection name is not existed
+        target: test rename_collection when the collection name does not exist
         method: input not existing collection name
         expected: raise exception
         """

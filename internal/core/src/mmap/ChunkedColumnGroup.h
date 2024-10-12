@@ -454,16 +454,27 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
                          void* dst,
                          const int64_t* offsets,
-                         int64_t count) override {
+                         int64_t count,
+                         bool small_int_raw_type) override {
         switch (data_type_) {
             case DataType::INT8: {
-                BulkPrimitiveValueAtImpl<int8_t, int32_t>(
-                    op_ctx, dst, offsets, count);
+                if (small_int_raw_type) {
+                    BulkPrimitiveValueAtImpl<int8_t, int8_t>(
+                        op_ctx, dst, offsets, count);
+                } else {
+                    BulkPrimitiveValueAtImpl<int8_t, int32_t>(
+                        op_ctx, dst, offsets, count);
+                }
                 break;
             }
             case DataType::INT16: {
-                BulkPrimitiveValueAtImpl<int16_t, int32_t>(
-                    op_ctx, dst, offsets, count);
+                if (small_int_raw_type) {
+                    BulkPrimitiveValueAtImpl<int16_t, int16_t>(
+                        op_ctx, dst, offsets, count);
+                } else {
+                    BulkPrimitiveValueAtImpl<int16_t, int32_t>(
+                        op_ctx, dst, offsets, count);
+                }
                 break;
             }
             case DataType::INT32: {

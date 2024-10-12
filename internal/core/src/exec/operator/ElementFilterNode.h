@@ -38,7 +38,7 @@ class PhyElementFilterNode : public Operator {
                              element_filter_node);
 
     bool
-    IsFilter() override {
+    IsFilter() const override {
         return true;
     }
 

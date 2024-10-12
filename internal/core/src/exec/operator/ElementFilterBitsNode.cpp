@@ -29,9 +29,9 @@ PhyElementFilterBitsNode::PhyElementFilterBitsNode(
     const std::shared_ptr<const plan::ElementFilterBitsNode>&
         element_filter_bits_node)
     : Operator(driverctx,
-               DataType::NONE,
+               element_filter_bits_node->output_type(),
                operator_id,
-               "element_filter_bits_plan_node",
+               element_filter_bits_node->id(),
                "PhyElementFilterBitsNode"),
       struct_name_(element_filter_bits_node->struct_name()) {
     ExecContext* exec_context = operator_context_->get_exec_context();
