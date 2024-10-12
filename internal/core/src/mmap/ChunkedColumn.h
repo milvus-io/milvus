@@ -353,8 +353,8 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
                 {chunks_[start_chunk_id]->Data(),
                  std::dynamic_pointer_cast<StringChunk>(chunks_[start_chunk_id])
                      ->Offsets(),
-                 start_offset_in_chunk,
-                 start_offset_in_chunk + len});
+                 static_cast<int>(start_offset_in_chunk),
+                 static_cast<int>(start_offset_in_chunk + len)});
 
             start_offset_in_chunk = 0;
             length -= len;
