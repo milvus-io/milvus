@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 )
 
 // ReCalcRowCount re-calculates number of rows of `oldSeg` based on its bin log count, and correct its value in its
@@ -35,4 +36,17 @@ func CalcRowCountFromBinLog(seg *datapb.SegmentInfo) int64 {
 		}
 	}
 	return rowCt
+}
+
+// MergeRequestCost merge the costs of request, the cost may came from different worker in same channel
+// or different channel in same collection, for now we just choose the part with the highest response time
+func MergeRequestCost(requestCosts []*internalpb.CostAggregation) *internalpb.CostAggregation {
+	var result *internalpb.CostAggregation
+	for _, cost := range requestCosts {
+		if result == nil || result.ResponseTime < cost.ResponseTime {
+			result = cost
+		}
+	}
+
+	return result
 }

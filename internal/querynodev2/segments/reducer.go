@@ -20,8 +20,8 @@ type internalReducer interface {
 }
 
 func CreateInternalReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema) internalReducer {
-	if req.GetReq().GetIsCount() {
-		return &cntReducer{}
+	if len(req.GetReq().GetAggregates()) > 0 || len(req.GetReq().GetGroupByFieldIds()) > 0 {
+		return NewInternalAggReducer(req.GetReq().GetGroupByFieldIds(), req.GetReq().GetAggregates(), req.GetReq().GetLimit(), schema)
 	}
 	return newDefaultLimitReducer(req, schema)
 }
@@ -31,9 +31,10 @@ type segCoreReducer interface {
 }
 
 func CreateSegCoreReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, manager *Manager) segCoreReducer {
-	if req.GetReq().GetIsCount() {
-		return &cntReducerSegCore{}
+	if len(req.GetReq().GetGroupByFieldIds()) > 0 || len(req.GetReq().GetAggregates()) > 0 {
+		return NewSegcoreAggReducer(req.GetReq().GetGroupByFieldIds(), req.GetReq().GetAggregates(), req.GetReq().GetLimit(), schema)
 	}
+
 	return newDefaultLimitReducerSegcore(req, schema, manager)
 }
 
