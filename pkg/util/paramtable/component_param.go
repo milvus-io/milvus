@@ -2318,7 +2318,6 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	}
 	p.ClusterLevelLoadResourceGroups.Init(base.mgr)
 }
-
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
@@ -2331,6 +2330,7 @@ type queryNodeConfig struct {
 	// segcore
 	KnowhereThreadPoolSize        ParamItem `refreshable:"false"`
 	ChunkRows                     ParamItem `refreshable:"false"`
+	RetrieveResultSize            ParamItem `refreshable:"false"`
 	EnableTempSegmentIndex        ParamItem `refreshable:"false"`
 	InterimIndexNlist             ParamItem `refreshable:"false"`
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
@@ -2497,6 +2497,16 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export: true,
 	}
 	p.ChunkRows.Init(base.mgr)
+
+	p.RetrieveResultSize = ParamItem{
+		Key:          "queryNode.retrieveResultSize",
+		Version:      "2.4.13",
+		DefaultValue: "268435456",
+		Doc:          "the maximum size of results to retrieve in a single query",
+		Export:       true,
+	}
+	p.RetrieveResultSize.Init(base.mgr)
+
 
 	p.EnableTempSegmentIndex = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.enableIndex",

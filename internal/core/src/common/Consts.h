@@ -66,8 +66,6 @@ const int64_t DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE = 8192;
 constexpr const char* RADIUS = knowhere::meta::RADIUS;
 constexpr const char* RANGE_FILTER = knowhere::meta::RANGE_FILTER;
 
-const int64_t DEFAULT_MAX_OUTPUT_SIZE = 67108864;  // bytes, 64MB
-
 const int64_t DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS = 10000;
 
 const int64_t DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND = 500;

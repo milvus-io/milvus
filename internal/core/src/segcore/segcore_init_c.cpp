@@ -33,6 +33,13 @@ SegcoreSetChunkRows(const int64_t value) {
 }
 
 extern "C" void
+SegcoreSetRetrieveSizeLimit(const int64_t limit) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_retrieve_size_limit(limit);
+}
+
+extern "C" void
 SegcoreSetEnableTempSegmentIndex(const bool value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();

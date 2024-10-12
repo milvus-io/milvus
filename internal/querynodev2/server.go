@@ -186,6 +186,10 @@ func (node *QueryNode) InitSegcore() error {
 	cChunkRows := C.int64_t(paramtable.Get().QueryNodeCfg.ChunkRows.GetAsInt64())
 	C.SegcoreSetChunkRows(cChunkRows)
 
+	// set retrieve size limit
+	cRetrieveResultSize := C.int64_t(paramtable.Get().QueryNodeCfg.RetrieveResultSize.GetAsInt64())
+	C.SegcoreSetRetrieveSizeLimit(cRetrieveResultSize)
+
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
 

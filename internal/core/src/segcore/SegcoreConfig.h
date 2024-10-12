@@ -43,6 +43,16 @@ class SegcoreConfig {
         chunk_rows_ = chunk_rows;
     }
 
+    void
+    set_retrieve_size_limit(int64_t retrieve_limit) {
+        retrieve_size_limit_ = retrieve_limit;
+    }
+
+    int64_t
+    get_retrieve_size_limit() const {
+        return retrieve_size_limit_;
+    }
+
     int64_t
     get_nlist() const {
         return nlist_;
@@ -78,6 +88,7 @@ class SegcoreConfig {
     inline static int64_t chunk_rows_ = 32 * 1024;
     inline static int64_t nlist_ = 100;
     inline static int64_t nprobe_ = 4;
+    inline static int64_t retrieve_size_limit_ = 268435456;  // Default value, can be adjusted as needed
 };
 
 }  // namespace milvus::segcore

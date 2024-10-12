@@ -50,6 +50,9 @@ SegcoreSetKnowhereGpuMemoryPoolSize(const uint32_t init_size,
 void
 SegcoreCloseGlog();
 
+void
+SegcoreSetRetrieveSizeLimit(const int64_t limit);
+
 int32_t
 GetCurrentIndexVersion();
 
