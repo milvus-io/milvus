@@ -215,6 +215,7 @@ func (suite *ServiceSuite) SetupTest() {
 		ctx:                 context.Background(),
 	}
 
+	suite.server.registerMetricsRequest()
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
@@ -1511,7 +1512,7 @@ func (suite *ServiceSuite) TestGetMetrics() {
 		suite.cluster.EXPECT().GetMetrics(ctx, node, mock.Anything).Return(&milvuspb.GetMetricsResponse{
 			Status:        merr.Success(),
 			ComponentName: "QueryNode",
-		}, nil)
+		}, nil).Maybe()
 	}
 
 	metricReq := make(map[string]string)

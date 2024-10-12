@@ -772,7 +772,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	// due to implicit rule of MQ priority，the default address should be empty
 	k.Address = ParamItem{
 		Key:          "kafka.brokerList",
-		DefaultValue: "",
+		DefaultValue: "localhost:9092",
 		Version:      "2.1.0",
 		Export:       true,
 	}

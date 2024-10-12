@@ -24,6 +24,7 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -165,7 +166,8 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		}, nil
 	}
 
-	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	ret := gjson.Parse(req.GetRequest())
+	metricType, err := metricsinfo.ParseMetricRequestType(ret)
 	if err != nil {
 		log.Warn("DataNode.GetMetrics failed to parse metric type",
 			zap.Int64("nodeID", node.GetNodeID()),

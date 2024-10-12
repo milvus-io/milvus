@@ -43,6 +43,7 @@ const (
 const (
 	RouteTriggerStopPath     = "/management/stop"
 	RouteCheckComponentReady = "/management/check/ready"
+	RouteWebUI               = "/webui/"
 )
 
 // proxy management restful api root path
@@ -60,4 +61,16 @@ const (
 	RouteListQueryNode              = "/management/querycoord/node/list"
 	RouteGetQueryNodeDistribution   = "/management/querycoord/distribution/get"
 	RouteCheckQueryNodeDistribution = "/management/querycoord/distribution/check"
+)
+
+// for WebUI restful api root path
+const (
+	ClusterInfoPath         = "/_cluster/info"
+	ClusterConfigsPath      = "/_cluster/configs"
+	ClusterClientsPath      = "/_cluster/clients"
+	ClusterDependenciesPath = "/_cluster/dependencies"
+	HookConfigsPath         = "/_hook/configs"
+	QcoordSegmentsPath      = "/_qcoord/segments"
+	QcoordChannelsPath      = "/_qcoord/channels"
+	QcoordTasksPath         = "/_qcoord/tasks"
 )

@@ -26,7 +26,9 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -37,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
@@ -4293,7 +4296,8 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		}, nil
 	}
 
-	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	ret := gjson.Parse(req.GetRequest())
+	metricType, err := metricsinfo.ParseMetricRequestType(ret)
 	if err != nil {
 		log.Warn("Proxy.GetMetrics failed to parse metric type",
 			zap.Int64("nodeID", paramtable.GetNodeID()),
@@ -4356,7 +4360,8 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 		}, nil
 	}
 
-	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	ret := gjson.Parse(req.GetRequest())
+	metricType, err := metricsinfo.ParseMetricRequestType(ret)
 	if err != nil {
 		log.Warn("Proxy.GetProxyMetrics failed to parse metric type",
 			zap.Error(err))
@@ -6418,4 +6423,21 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 func DeregisterSubLabel(subLabel string) {
 	rateCol.DeregisterSubLabel(internalpb.RateType_DQLQuery.String(), subLabel)
 	rateCol.DeregisterSubLabel(internalpb.RateType_DQLSearch.String(), subLabel)
+}
+
+// RegisterRestRouter registers the router for the proxy
+func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
+	// Cluster request
+	router.GET(http.ClusterInfoPath, getClusterInfo(node))
+	router.GET(http.ClusterConfigsPath, getConfigs(paramtable.Get().GetAll()))
+	router.GET(http.ClusterClientsPath, getConnectedClients)
+	router.GET(http.ClusterDependenciesPath, getDependencies)
+
+	// Hook request
+	router.GET(http.HookConfigsPath, getConfigs(paramtable.GetHookParams().GetAll()))
+
+	// QueryCoord request
+	router.GET(http.QcoordSegmentsPath, getQueryComponentMetrics(node, metricsinfo.QuerySegmentDist))
+	router.GET(http.QcoordChannelsPath, getQueryComponentMetrics(node, metricsinfo.QueryChannelDist))
+	router.GET(http.QcoordTasksPath, getQueryComponentMetrics(node, metricsinfo.QueryTasks))
 }
