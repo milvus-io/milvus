@@ -107,6 +107,7 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 		},
 	})
 	s.mockSessionMgr.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.mockSessionMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
 
 	task := s.generateBasicTask(false)
 
@@ -372,6 +373,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 				},
 			},
 		}, nil).Once()
+		s.mockSessionMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil).Once()
 		s.Equal(false, task.Process())
 		s.Equal(datapb.CompactionTaskState_statistic, task.GetState())
 	})
@@ -405,6 +407,8 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 				},
 			},
 		}, nil).Once()
+		// DropCompactionPlan fail
+		s.mockSessionMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(merr.WrapErrNodeNotFound(1)).Once()
 		s.Equal(false, task.Process())
 		s.Equal(datapb.CompactionTaskState_statistic, task.GetState())
 	})
@@ -440,6 +444,8 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 				},
 			},
 		}, nil).Once()
+		s.mockSessionMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil).Once()
+
 		time.Sleep(time.Second * 1)
 		s.Equal(true, task.Process())
 		s.Equal(datapb.CompactionTaskState_cleaned, task.GetState())

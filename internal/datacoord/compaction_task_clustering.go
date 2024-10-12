@@ -296,6 +296,11 @@ func (t *clusteringCompactionTask) processExecuting() error {
 }
 
 func (t *clusteringCompactionTask) processMetaSaved() error {
+	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+		PlanID: t.GetPlanID(),
+	}); err != nil {
+		log.Warn("clusteringCompactionTask processFailedOrTimeout unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+	}
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_statistic))
 }
 
@@ -477,6 +482,13 @@ func (t *clusteringCompactionTask) resetSegmentCompacting() {
 
 func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 	log.Info("clean task", zap.Int64("triggerID", t.GetTriggerID()), zap.Int64("planID", t.GetPlanID()), zap.String("state", t.GetState().String()))
+
+	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+		PlanID: t.GetPlanID(),
+	}); err != nil {
+		log.Warn("clusteringCompactionTask processFailedOrTimeout unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+	}
+
 	// revert segments meta
 	var operators []UpdateOperator
 	// revert level of input segments
