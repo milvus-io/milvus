@@ -336,13 +336,18 @@ inline GeneratedData DataGen(SchemaPtr schema,
     auto insert_cols =
         [&insert_data](
             auto& data, int64_t count, auto& field_meta, bool random_valid) {
-            FixedVector<bool> valid_data(count);
+            FixedVector<bool> valid_data(count, true);
             if (field_meta.is_nullable()) {
                 for (int i = 0; i < count; ++i) {
                     int x = i;
                     if (random_valid)
                         x = rand();
-                    valid_data[i] = x % 2 == 0 ? true : false;
+                    valid_data[i] = x % 2 == 0;
+                    if (field_meta.get_data_type() == DataType::INT8 ||
+                        field_meta.get_data_type() == DataType::VARCHAR ||
+                        field_meta.get_data_type() == DataType::FLOAT ||
+                        field_meta.get_data_type() == DataType::DOUBLE) {
+                    }
                 }
             }
             auto array = milvus::segcore::CreateDataArrayFrom(

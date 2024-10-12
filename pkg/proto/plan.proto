@@ -237,10 +237,26 @@ message VectorANNS {
   string placeholder_tag = 5;  // always be "$0"
 }
 
+enum AggregateOp {
+  sum = 0;
+  count = 1;
+  avg = 2;
+  min = 3;
+  max = 4;
+}
+
+message Aggregate {
+  AggregateOp op = 1;
+  int64 field_id = 2;
+}
+
 message QueryPlanNode {
   Expr predicates = 1;
   bool is_count = 2;
   int64 limit = 3;
+  repeated int64 group_by_field_ids = 4;
+  repeated Aggregate aggregates = 5;
+  bool ignore_null_keys = 6;
 };
 
 message PlanNode {

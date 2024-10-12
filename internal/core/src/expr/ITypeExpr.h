@@ -233,14 +233,25 @@ using InputTypeExprPtr = std::shared_ptr<const InputTypeExpr>;
 // NOTE: unused
 class FieldAccessTypeExpr : public ITypeExpr {
  public:
-    FieldAccessTypeExpr(DataType type, const std::string& name)
-        : ITypeExpr{type}, name_(name), is_input_column_(true) {
+    FieldAccessTypeExpr(DataType type, const std::string& name, FieldId fieldId)
+        : ITypeExpr{type},
+          name_(name),
+          field_id_(fieldId),
+          is_input_column_(true) {
+    }
+
+    FieldAccessTypeExpr(DataType type, FieldId fieldId)
+        : ITypeExpr{type},
+          name_(""),
+          field_id_(fieldId),
+          is_input_column_(true) {
     }
 
     FieldAccessTypeExpr(DataType type,
                         const TypedExprPtr& input,
-                        const std::string& name)
-        : ITypeExpr{type, {std::move(input)}}, name_(name) {
+                        const std::string& name,
+                        FieldId fieldId)
+        : ITypeExpr{type, {std::move(input)}}, name_(name), field_id_(fieldId) {
         is_input_column_ =
             dynamic_cast<const InputTypeExpr*>(inputs_[0].get()) != nullptr;
     }
@@ -250,17 +261,24 @@ class FieldAccessTypeExpr : public ITypeExpr {
         return is_input_column_;
     }
 
+    const std::string&
+    name() const {
+        return name_;
+    }
+
     std::string
     ToString() const override {
         if (inputs_.empty()) {
             return fmt::format("{}", name_);
         }
 
-        return fmt::format("{}[{}]", inputs_[0]->ToString(), name_);
+        return fmt::format(
+            "{}[{}{}]", inputs_[0]->ToString(), name_, field_id_.get());
     }
 
  private:
     std::string name_;
+    const FieldId field_id_;
     bool is_input_column_;
 };
 

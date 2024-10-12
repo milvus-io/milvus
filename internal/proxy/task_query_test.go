@@ -968,77 +968,6 @@ func Test_filterSystemFields(t *testing.T) {
 	assert.ElementsMatch(t, []UniqueID{common.StartOfUserFieldID}, filtered)
 }
 
-func Test_matchCountRule(t *testing.T) {
-	type args struct {
-		outputs []string
-	}
-	tests := []struct {
-		name string
-		args args
-		want bool
-	}{
-		{
-			args: args{
-				outputs: nil,
-			},
-			want: false,
-		},
-		{
-			args: args{
-				outputs: []string{"count(*)", "count(*)"},
-			},
-			want: false,
-		},
-		{
-			args: args{
-				outputs: []string{"not count(*)"},
-			},
-			want: false,
-		},
-		{
-			args: args{
-				outputs: []string{"count(*)"},
-			},
-			want: true,
-		},
-		{
-			args: args{
-				outputs: []string{"COUNT(*)"},
-			},
-			want: true,
-		},
-		{
-			args: args{
-				outputs: []string{"      count(*)"},
-			},
-			want: true,
-		},
-		{
-			args: args{
-				outputs: []string{"      COUNT(*)"},
-			},
-			want: true,
-		},
-		{
-			args: args{
-				outputs: []string{"count(*)     "},
-			},
-			want: true,
-		},
-		{
-			args: args{
-				outputs: []string{"COUNT(*)     "},
-			},
-			want: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equalf(t, tt.want, matchCountRule(tt.args.outputs), "matchCountRule(%v)", tt.args.outputs)
-		})
-	}
-}
-
 func Test_createCntPlan(t *testing.T) {
 	t.Run("plan without filter", func(t *testing.T) {
 		plan, err := createCntPlan("", nil, nil)
@@ -1069,21 +998,6 @@ func Test_createCntPlan(t *testing.T) {
 
 func Test_queryTask_createPlan(t *testing.T) {
 	collSchema := newTestSchema()
-	t.Run("match count rule", func(t *testing.T) {
-		schema := newSchemaInfo(collSchema)
-		tsk := &queryTask{
-			request: &milvuspb.QueryRequest{
-				OutputFields: []string{"count(*)"},
-			},
-			schema: schema,
-		}
-		err := tsk.createPlan(context.TODO())
-		assert.NoError(t, err)
-		plan := tsk.plan
-		assert.True(t, plan.GetQuery().GetIsCount())
-		assert.Nil(t, plan.GetQuery().GetPredicates())
-	})
-
 	t.Run("query without expression", func(t *testing.T) {
 		schema := newSchemaInfo(collSchema)
 		tsk := &queryTask{

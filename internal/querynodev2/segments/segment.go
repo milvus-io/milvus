@@ -76,7 +76,7 @@ const (
 
 var ErrSegmentUnhealthy = errors.New("segment unhealthy")
 
-// IndexedFieldInfo contains binlog info of vector field
+// IndexedFieldInfo find binlog info of vector field
 type IndexedFieldInfo struct {
 	FieldBinlog *datapb.FieldBinlog
 	IndexInfo   *querypb.FieldIndexInfo

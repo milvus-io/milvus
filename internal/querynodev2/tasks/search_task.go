@@ -326,6 +326,7 @@ func (t *SearchTask) Done(err error) {
 }
 
 func (t *SearchTask) Canceled() error {
+	t.ctx.Deadline()
 	return t.ctx.Err()
 }
 
