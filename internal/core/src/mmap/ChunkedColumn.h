@@ -123,7 +123,7 @@ class ChunkedColumnBase : public ColumnBase {
         chunks_.push_back(chunk);
     }
 
-    virtual uint64_t
+    virtual size_t
     DataByteSize() const override {
         auto size = 0;
         for (auto& chunk : chunks_) {
