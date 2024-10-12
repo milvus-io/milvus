@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/goccy/go-json"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -67,7 +69,7 @@ type replicaSegmentIndex struct {
 }
 
 func NewReplicaSegmentIndex(task *SegmentTask) replicaSegmentIndex {
-	isGrowing := task.Actions()[0].(*SegmentAction).Scope() == querypb.DataScope_Streaming
+	isGrowing := task.Actions()[0].(*SegmentAction).GetScope() == querypb.DataScope_Streaming
 	return replicaSegmentIndex{
 		ReplicaID: task.ReplicaID(),
 		SegmentID: task.SegmentID(),
@@ -144,6 +146,7 @@ type Scheduler interface {
 	GetExecutedFlag(nodeID int64) <-chan struct{}
 	GetChannelTaskNum() int
 	GetSegmentTaskNum() int
+	GetTasksJSON() string
 
 	GetSegmentTaskDelta(nodeID int64, collectionID int64) int
 	GetChannelTaskDelta(nodeID int64, collectionID int64) int
@@ -167,6 +170,7 @@ type taskScheduler struct {
 	channelTasks map[replicaChannelIndex]Task
 	processQueue *taskQueue
 	waitQueue    *taskQueue
+	taskStats    *expirable.LRU[UniqueID, Task]
 }
 
 func NewScheduler(ctx context.Context,
@@ -198,6 +202,7 @@ func NewScheduler(ctx context.Context,
 		channelTasks: make(map[replicaChannelIndex]Task),
 		processQueue: newTaskQueue(),
 		waitQueue:    newTaskQueue(),
+		taskStats:    expirable.NewLRU[UniqueID, Task](512, nil, time.Minute*30),
 	}
 }
 
@@ -279,6 +284,7 @@ func (scheduler *taskScheduler) Add(task Task) error {
 		scheduler.segmentTasks[index] = task
 	}
 
+	scheduler.taskStats.Add(task.ID(), task)
 	scheduler.updateTaskMetrics()
 	log.Ctx(task.Context()).Info("task added", zap.String("task", task.String()))
 	task.RecordStartTs()
@@ -526,8 +532,8 @@ func (scheduler *taskScheduler) calculateTaskDelta(collectionID int64, targetAct
 		switch action := action.(type) {
 		case *SegmentAction:
 			// skip growing segment's count, cause doesn't know realtime row number of growing segment
-			if action.Scope() == querypb.DataScope_Historical {
-				segment := scheduler.targetMgr.GetSealedSegment(collectionID, action.segmentID, meta.NextTargetFirst)
+			if action.Scope == querypb.DataScope_Historical {
+				segment := scheduler.targetMgr.GetSealedSegment(collectionID, action.SegmentID, meta.NextTargetFirst)
 				if segment != nil {
 					sum += int(segment.GetNumOfRows()) * delta
 				}
@@ -563,6 +569,22 @@ func (scheduler *taskScheduler) GetSegmentTaskNum() int {
 	defer scheduler.rwmutex.RUnlock()
 
 	return len(scheduler.segmentTasks)
+}
+
+// GetTasksJSON returns the JSON string of all tasks.
+// the task stats object is thread safe and can be accessed without lock
+func (scheduler *taskScheduler) GetTasksJSON() string {
+	if scheduler.taskStats.Len() == 0 {
+		return ""
+	}
+
+	tasks := scheduler.taskStats.Values()
+	ret, err := json.Marshal(tasks)
+	if err != nil {
+		log.Warn("marshal tasks fail", zap.Error(err))
+		return ""
+	}
+	return string(ret)
 }
 
 // schedule selects some tasks to execute, follow these steps for each started selected tasks:
@@ -685,7 +707,7 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 				// causes a few time to load delta log, if reduce the old delegator in advance,
 				// new delegator can't service search and query, will got no available channel error
 				channelAction := actions[step].(*ChannelAction)
-				leader := scheduler.distMgr.LeaderViewManager.GetLeaderShardView(channelAction.Node(), channelAction.Shard())
+				leader := scheduler.distMgr.LeaderViewManager.GetLeaderShardView(channelAction.Node(), channelAction.Shard)
 				ready = leader.UnServiceableError == nil
 			default:
 				ready = true

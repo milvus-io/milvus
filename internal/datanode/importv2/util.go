@@ -95,7 +95,7 @@ func NewSyncTask(ctx context.Context,
 		WithTimeRange(ts, ts).
 		WithLevel(segmentLevel).
 		WithDataSource(metrics.BulkinsertDataSourceLabel).
-		WithBatchSize(int64(insertData.GetRowNum()))
+		WithBatchRows(int64(insertData.GetRowNum()))
 	if bm25Stats != nil {
 		syncPack.WithBM25Stats(bm25Stats)
 	}

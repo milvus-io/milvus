@@ -18,10 +18,12 @@ package datacoord
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -39,7 +41,9 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 func TestImportUtil_NewPreImportTasks(t *testing.T) {
@@ -644,4 +648,70 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, int64(100), progress)
 	assert.Equal(t, internalpb.ImportJobState_Completed, state)
 	assert.Equal(t, "", reason)
+}
+
+func TestPreImportTask_MarshalJSON(t *testing.T) {
+	task := &preImportTask{
+		PreImportTask: &datapb.PreImportTask{
+			JobID:        1,
+			TaskID:       2,
+			CollectionID: 3,
+			NodeID:       4,
+			State:        datapb.ImportTaskStateV2_Pending,
+			Reason:       "test reason",
+			CreatedTime:  time.Now().Format(time.RFC3339),
+			CompleteTime: time.Now().Add(time.Hour).Format(time.RFC3339),
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	jsonData, err := task.MarshalJSON()
+	assert.NoError(t, err)
+
+	var importTask metricsinfo.ImportTask
+	err = json.Unmarshal(jsonData, &importTask)
+	assert.NoError(t, err)
+
+	assert.Equal(t, task.GetJobID(), importTask.JobID)
+	assert.Equal(t, task.GetTaskID(), importTask.TaskID)
+	assert.Equal(t, task.GetCollectionID(), importTask.CollectionID)
+	assert.Equal(t, task.GetNodeID(), importTask.NodeID)
+	assert.Equal(t, task.GetState().String(), importTask.State)
+	assert.Equal(t, task.GetReason(), importTask.Reason)
+	assert.Equal(t, "PreImportTask", importTask.TaskType)
+	assert.Equal(t, task.GetCreatedTime(), importTask.CreatedTime)
+	assert.Equal(t, task.GetCompleteTime(), importTask.CompleteTime)
+}
+
+func TestImportTask_MarshalJSON(t *testing.T) {
+	task := &importTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			JobID:        1,
+			TaskID:       2,
+			CollectionID: 3,
+			NodeID:       4,
+			State:        datapb.ImportTaskStateV2_Pending,
+			Reason:       "test reason",
+			CreatedTime:  time.Now().Format(time.RFC3339),
+			CompleteTime: time.Now().Add(time.Hour).Format(time.RFC3339),
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	jsonData, err := task.MarshalJSON()
+	assert.NoError(t, err)
+
+	var importTask metricsinfo.ImportTask
+	err = json.Unmarshal(jsonData, &importTask)
+	assert.NoError(t, err)
+
+	assert.Equal(t, task.GetJobID(), importTask.JobID)
+	assert.Equal(t, task.GetTaskID(), importTask.TaskID)
+	assert.Equal(t, task.GetCollectionID(), importTask.CollectionID)
+	assert.Equal(t, task.GetNodeID(), importTask.NodeID)
+	assert.Equal(t, task.GetState().String(), importTask.State)
+	assert.Equal(t, task.GetReason(), importTask.Reason)
+	assert.Equal(t, "ImportTask", importTask.TaskType)
+	assert.Equal(t, task.GetCreatedTime(), importTask.CreatedTime)
+	assert.Equal(t, task.GetCompleteTime(), importTask.CompleteTime)
 }

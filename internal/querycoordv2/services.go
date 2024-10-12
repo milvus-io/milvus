@@ -847,7 +847,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 			paramtable.GetNodeID()),
 	}
 
-	ret, err := metricsinfo.ExecuteMetricsRequest(ctx, req)
+	ret, err := s.metricsRequest.ExecuteMetricsRequest(ctx, req)
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil

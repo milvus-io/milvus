@@ -1,4 +1,3 @@
-var MILVUS_URI = "http://127.0.0.1:9091/api/v1"
 
 function renderNodesMetrics(data) {
     let tableHTML = '<thead class="thead-light"><tr>' +
@@ -104,7 +103,7 @@ function renderClientsInfo(data) {
                 <td>${client['sdk_type']}</td>
                 <td>${client['sdk_version']}</td>
                 <td>${client['local_time']}</td>
-                <td>${client['reserved']['last_active_time']}</td>
+                <td>${client['reserved'] ? client['reserved']['last_active_time']: ""}</td>
             </tr>`;
         tableHTML += tr
     });

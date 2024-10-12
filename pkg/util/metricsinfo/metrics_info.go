@@ -13,6 +13,9 @@ package metricsinfo
 
 import (
 	"encoding/json"
+	"time"
+
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // ComponentInfos defines the interface of all component infos
@@ -160,6 +163,17 @@ type DataNodeConfiguration struct {
 	FlushInsertBufferSize int64 `json:"flush_insert_buffer_size"`
 }
 
+type SyncTask struct {
+	SegmentID     int64              `json:"segment_id,omitempty"`
+	BatchRows     int64              `json:"batch_rows,omitempty"`
+	SegmentLevel  string             `json:"segment_level,omitempty"`
+	TsFrom        typeutil.Timestamp `json:"ts_from,omitempty"`
+	TsTo          typeutil.Timestamp `json:"ts_to,omitempty"`
+	DeltaRowCount int64              `json:"delta_row_count,omitempty"`
+	FlushSize     int64              `json:"flush_size,omitempty"`
+	RunningTime   time.Duration      `json:"running_time,omitempty"`
+}
+
 // DataNodeInfos implements ComponentInfos
 type DataNodeInfos struct {
 	BaseComponentInfos
@@ -193,6 +207,31 @@ type DataCoordInfos struct {
 	SystemConfigurations DataCoordConfiguration      `json:"system_configurations"`
 	QuotaMetrics         *DataCoordQuotaMetrics      `json:"quota_metrics"`
 	CollectionMetrics    *DataCoordCollectionMetrics `json:"collection_metrics"`
+}
+
+type ImportTask struct {
+	JobID        int64  `json:"job_id,omitempty"`
+	TaskID       int64  `json:"task_id,omitempty"`
+	CollectionID int64  `json:"collection_id,omitempty"`
+	NodeID       int64  `json:"node_id,omitempty"`
+	State        string `json:"state,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	TaskType     string `json:"task_type,omitempty"`
+	CreatedTime  string `json:"created_time,omitempty"`
+	CompleteTime string `json:"complete_time,omitempty"`
+}
+
+type CompactionTask struct {
+	PlanID         int64   `json:"plan_id,omitempty"`
+	CollectionID   int64   `json:"collection_id,omitempty"`
+	Type           string  `json:"type,omitempty"`
+	State          string  `json:"state,omitempty"`
+	FailReason     string  `json:"fail_reason,omitempty"`
+	StartTime      int64   `json:"start_time,omitempty"`
+	EndTime        int64   `json:"end_time,omitempty"`
+	TotalRows      int64   `json:"total_rows,omitempty"`
+	InputSegments  []int64 `json:"input_segments,omitempty"`
+	ResultSegments []int64 `json:"result_segments,omitempty"`
 }
 
 // RootCoordConfiguration records the configuration of RootCoord.

@@ -1807,6 +1807,40 @@ func (suite *TaskSuite) TestBalanceChannelWithL0SegmentTask() {
 	suite.Equal(2, task.step)
 }
 
+func (suite *TaskSuite) TestGetTasksJSON() {
+	ctx := context.Background()
+	scheduler := suite.newScheduler()
+
+	// Add some tasks to the scheduler
+	task1, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		NewSegmentAction(1, ActionTypeGrow, "", 1),
+	)
+	suite.NoError(err)
+	err = scheduler.Add(task1)
+	suite.NoError(err)
+
+	task2, err := NewChannelTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		NewChannelAction(1, ActionTypeGrow, "channel-1"),
+	)
+	suite.NoError(err)
+	err = scheduler.Add(task2)
+	suite.NoError(err)
+
+	actualJSON := scheduler.GetTasksJSON()
+	suite.Contains(actualJSON, "SegmentTask")
+	suite.Contains(actualJSON, "ChannelTask")
+}
+
 func TestTask(t *testing.T) {
 	suite.Run(t, new(TaskSuite))
 }

@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/tidwall/gjson"
@@ -44,19 +45,34 @@ const (
 	MetricRequestParamsSeparator = ","
 
 	// QuerySegmentDist request for segment distribution on the query node
-	QuerySegmentDist = "query_segment_dist"
+	QuerySegmentDist = "qc_segment_dist"
 
 	// QueryChannelDist request for channel distribution on the query node
-	QueryChannelDist = "query_channel_dist"
+	QueryChannelDist = "qc_channel_dist"
 
-	// QueryTasks request for get tasks on the querycoord
-	QueryTasks = "query_tasks"
+	// QueryCoordAllTasks request for get tasks on the querycoord
+	QueryCoordAllTasks = "qc_tasks_all"
 
 	// QueryReplicas request for get replica on the querycoord
-	QueryReplicas = "query_replica"
+	QueryReplicas = "qc_replica"
 
 	// QueryResourceGroups request for get resource groups on the querycoord
-	QueryResourceGroups = "query_resource_group"
+	QueryResourceGroups = "qc_resource_group"
+
+	// DataCoordAllTasks request for get tasks on the datacoord
+	DataCoordAllTasks = "dc_tasks_all"
+
+	// ImportTasks request for get import tasks from the datacoord
+	ImportTasks = "dc_import_tasks"
+
+	// CompactionTasks request for get compaction tasks from the datacoord
+	CompactionTasks = "dc_compaction_tasks"
+
+	// BuildIndexTasks request for get building index tasks from the datacoord
+	BuildIndexTasks = "dc_build_index_tasks"
+
+	// SyncTasks request for get sync tasks from the datanode
+	SyncTasks = "dn_sync_tasks"
 
 	// MetricRequestParamVerboseKey as a request parameter decide to whether return verbose value
 	MetricRequestParamVerboseKey = "verbose"
@@ -64,19 +80,30 @@ const (
 
 type MetricsRequestAction func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error)
 
-var metricsReqType2Action = make(map[string]MetricsRequestAction)
+type MetricsRequest struct {
+	metricsReqType2Action map[string]MetricsRequestAction
+	lock                  sync.Mutex
+}
 
-func RegisterMetricsRequest(reqType string, action MetricsRequestAction) {
-	_, ok := metricsReqType2Action[reqType]
+func NewMetricsRequest() *MetricsRequest {
+	return &MetricsRequest{
+		metricsReqType2Action: make(map[string]MetricsRequestAction),
+	}
+}
+
+func (mr *MetricsRequest) RegisterMetricsRequest(reqType string, action MetricsRequestAction) {
+	mr.lock.Lock()
+	defer mr.lock.Unlock()
+	_, ok := mr.metricsReqType2Action[reqType]
 	if ok {
 		log.Info("metrics request type already exists", zap.String("reqType", reqType))
 		return
 	}
 
-	metricsReqType2Action[reqType] = action
+	mr.metricsReqType2Action[reqType] = action
 }
 
-func ExecuteMetricsRequest(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
+func (mr *MetricsRequest) ExecuteMetricsRequest(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
 	jsonReq := gjson.Parse(req.Request)
 	reqType, err := ParseMetricRequestType(jsonReq)
 	if err != nil {
@@ -84,11 +111,14 @@ func ExecuteMetricsRequest(ctx context.Context, req *milvuspb.GetMetricsRequest)
 		return "", err
 	}
 
-	action, ok := metricsReqType2Action[reqType]
+	mr.lock.Lock()
+	action, ok := mr.metricsReqType2Action[reqType]
 	if !ok {
+		mr.lock.Unlock()
 		log.Warn("unimplemented metric request type", zap.String("req_type", reqType))
 		return "", errors.New(MsgUnimplementedMetric)
 	}
+	mr.lock.Unlock()
 
 	actionRet, err := action(ctx, req, jsonReq)
 	if err != nil {
