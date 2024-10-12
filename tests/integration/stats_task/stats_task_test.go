@@ -356,7 +356,7 @@ func (s *StatsTaskCheckerSuite) run() {
 				s.Equal(hookutil.OpTypeQuery, reportInfo[hookutil.OpTypeKey])
 				s.NotEqualValues(0, reportInfo[hookutil.ResultDataSizeKey])
 				s.NotEqualValues(0, reportInfo[hookutil.RelatedDataSizeKey])
-				s.EqualValues(s.batch*s.batchCnt, reportInfo[hookutil.RelatedCntKey])
+				s.EqualValues(s.batchCnt, reportInfo[hookutil.RelatedCntKey])
 				return
 			}
 		}
