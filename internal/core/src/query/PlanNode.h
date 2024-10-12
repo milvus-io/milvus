@@ -78,7 +78,6 @@ struct RetrievePlanNode : PlanNode {
 
     std::shared_ptr<milvus::plan::PlanNode> plannodes_;
 
-    bool is_count_;
     int64_t limit_;
 };
 

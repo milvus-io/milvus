@@ -886,7 +886,6 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
-		zap.Bool("isCount", req.GetReq().GetIsCount()),
 	)
 	tr := timerecord.NewTimeRecorderWithTrace(ctx, "QueryRequest")
 
@@ -967,7 +966,6 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
-		zap.Bool("isCount", req.GetReq().GetIsCount()),
 	)
 
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {

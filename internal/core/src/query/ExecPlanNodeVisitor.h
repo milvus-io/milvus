@@ -92,6 +92,18 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     ExecuteTask(plan::PlanFragment& plan,
                 std::shared_ptr<milvus::exec::QueryContext> query_context);
 
+    static RowVectorPtr
+    ExecuteTask2(plan::PlanFragment& plan,
+                 std::shared_ptr<milvus::exec::QueryContext> query_context);
+
+    void
+    setupRetrieveResult(
+        const RowVectorPtr& result,
+        const std::shared_ptr<milvus::exec::QueryContext> query_context,
+        const RetrievePlanNode& node,
+        RetrieveResult& tmp_retrieve_result,
+        const segcore::SegmentInternalInterface* segment);
+
  private:
     template <typename VectorType>
     void
