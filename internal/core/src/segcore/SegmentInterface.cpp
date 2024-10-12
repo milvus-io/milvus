@@ -148,25 +148,22 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     }
 
     results->set_all_retrieve_count(retrieve_results.total_data_cnt_);
-    if (plan->plan_node_->is_count_) {
-        AssertInfo(retrieve_results.field_data_.size() == 1,
-                   "count result should only have one column");
-        *results->add_fields_data() = retrieve_results.field_data_[0];
-        return results;
-    }
-
     results->mutable_offset()->Add(retrieve_results.result_offsets_.begin(),
                                    retrieve_results.result_offsets_.end());
 
     std::chrono::high_resolution_clock::time_point get_target_entry_start =
         std::chrono::high_resolution_clock::now();
-    FillTargetEntry(trace_ctx,
-                    plan,
-                    results,
-                    retrieve_results.result_offsets_.data(),
-                    retrieve_results.result_offsets_.size(),
-                    ignore_non_pk,
-                    true);
+    if (retrieve_results.field_data_.empty()) {
+        FillTargetEntry(trace_ctx,
+                        plan,
+                        results,
+                        retrieve_results.result_offsets_.data(),
+                        retrieve_results.result_offsets_.size(),
+                        ignore_non_pk,
+                        true);
+    } else {
+        FillTargetEntryDirectly(trace_ctx, results, retrieve_results);
+    }
     std::chrono::high_resolution_clock::time_point get_target_entry_end =
         std::chrono::high_resolution_clock::now();
     double get_entry_cost = std::chrono::duration<double, std::micro>(
@@ -176,6 +173,22 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         get_entry_cost / 1000);
     milvus::futures::throwIfCancelled(cancel_token);
     return results;
+}
+
+void
+SegmentInternalInterface::FillTargetEntryDirectly(
+    tracer::TraceContext* trace_ctx,
+    const std::unique_ptr<proto::segcore::RetrieveResults>& results,
+    RetrieveResult& retrieveResult) const {
+    auto fields_data = results->mutable_fields_data();
+    for (auto& field_data : retrieveResult.field_data_) {
+        // Dynamically allocate a copy of the field data
+        auto* allocated_data = new DataArray(std::move(field_data));
+
+        // Transfer ownership to protobuf
+        fields_data->AddAllocated(allocated_data);
+    }
+    retrieveResult.field_data_.clear();
 }
 
 void
@@ -327,10 +340,24 @@ SegmentInternalInterface::get_real_count() const {
     plannode = std::make_shared<milvus::plan::MvccNode>(
         milvus::plan::GetNextPlanNodeId());
     sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-    plannode = std::make_shared<milvus::plan::CountNode>(
-        milvus::plan::GetNextPlanNodeId(), sources);
+
+    std::string agg_name = "count";
+    std::vector<plan::AggregationNode::Aggregate> aggregates;
+    {
+        auto call = std::make_shared<const expr::CallExpr>(
+            agg_name, std::vector<expr::TypedExprPtr>{}, nullptr);
+        aggregates.emplace_back(plan::AggregationNode::Aggregate{call});
+        aggregates.back().resultType_ =
+            GetAggResultType(agg_name, DataType::NONE);
+    }
+    plannode = std::make_shared<plan::AggregationNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<expr::FieldAccessTypeExprPtr>{},
+        std::vector<std::string>{agg_name},
+        std::move(aggregates),
+        sources);
+
     plan->plan_node_->plannodes_ = plannode;
-    plan->plan_node_->is_count_ = true;
     auto res = Retrieve(nullptr,
                         plan.get(),
                         MAX_TIMESTAMP,

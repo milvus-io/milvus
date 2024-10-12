@@ -27,14 +27,15 @@
 namespace milvus {
 namespace exec {
 
-class PhyCountNode : public Operator {
+class PhySearchGroupByNode : public Operator {
  public:
-    PhyCountNode(int32_t operator_id,
-                 DriverContext* ctx,
-                 const std::shared_ptr<const plan::CountNode>& node);
+    PhySearchGroupByNode(
+        int32_t operator_id,
+        DriverContext* ctx,
+        const std::shared_ptr<const plan::SearchGroupByNode>& node);
 
     bool
-    IsFilter() override {
+    IsFilter() const override {
         return false;
     }
 
@@ -44,7 +45,7 @@ class PhyCountNode : public Operator {
     }
 
     void
-    AddInput(RowVectorPtr& input);
+    AddInput(RowVectorPtr& input) override;
 
     RowVectorPtr
     GetOutput() override;
@@ -63,16 +64,15 @@ class PhyCountNode : public Operator {
 
     virtual std::string
     ToString() const override {
-        return "PhyCountNode";
+        return "PhySearchGroupByNode";
     }
 
  private:
-    const segcore::SegmentInternalInterface* segment_;
-    milvus::Timestamp query_timestamp_;
-    int64_t active_count_;
+    const milvus::segcore::SegmentInternalInterface* segment_;
     QueryContext* query_context_;
     bool is_finished_{false};
-};
 
+    milvus::SearchInfo search_info_;
+};
 }  // namespace exec
 }  // namespace milvus

@@ -17,7 +17,6 @@
 #include "FilterBitsNode.h"
 #include "common/Tracer.h"
 #include "fmt/format.h"
-
 #include "monitor/Monitor.h"
 
 namespace milvus {

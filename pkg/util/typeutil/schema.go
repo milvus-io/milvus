@@ -750,6 +750,12 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 						Data: make([]int64, 0, topK),
 					},
 				}
+			case *schemapb.ScalarField_TimestamptzData:
+				scalar.Scalars.Data = &schemapb.ScalarField_TimestamptzData{
+					TimestamptzData: &schemapb.TimestamptzArray{
+						Data: make([]int64, 0, topK),
+					},
+				}
 			case *schemapb.ScalarField_FloatData:
 				scalar.Scalars.Data = &schemapb.ScalarField_FloatData{
 					FloatData: &schemapb.FloatArray{
