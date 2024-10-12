@@ -236,7 +236,8 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     void
     BulkPrimitiveValueAt(void* dst,
                          const int64_t* offsets,
-                         int64_t count) override {
+                         int64_t count,
+                         bool int_raw_type = false) override {
         ThrowInfo(ErrorCode::Unsupported,
                   "BulkPrimitiveValueAt only supported for ChunkedColumn");
     }
@@ -397,14 +398,27 @@ class ChunkedColumn : public ChunkedColumnBase {
     void
     BulkPrimitiveValueAt(void* dst,
                          const int64_t* offsets,
-                         int64_t count) override {
+                         int64_t count,
+                         bool int_raw_type) override {
         switch (data_type_) {
             case DataType::INT8: {
-                BulkPrimitiveValueAtImpl<int8_t, int32_t>(dst, offsets, count);
+                if (int_raw_type) {
+                    BulkPrimitiveValueAtImpl<int8_t, int8_t>(
+                        dst, offsets, count);
+                } else {
+                    BulkPrimitiveValueAtImpl<int8_t, int32_t>(
+                        dst, offsets, count);
+                }
                 break;
             }
             case DataType::INT16: {
-                BulkPrimitiveValueAtImpl<int16_t, int32_t>(dst, offsets, count);
+                if (int_raw_type) {
+                    BulkPrimitiveValueAtImpl<int16_t, int16_t>(
+                        dst, offsets, count);
+                } else {
+                    BulkPrimitiveValueAtImpl<int16_t, int32_t>(
+                        dst, offsets, count);
+                }
                 break;
             }
             case DataType::INT32: {
