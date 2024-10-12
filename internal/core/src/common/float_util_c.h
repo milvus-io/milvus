@@ -14,12 +14,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "Operator.h"
+#pragma once
 
-namespace milvus {
-namespace exec {
-void Operator::initialize() {
-// TODO check memory and set up memory pool in the future
+#include <type_traits>
+#include <folly/Hash.h>
+
+namespace milvus{
+
+template <
+    typename FLOAT,
+    std::enable_if_t<std::is_floating_point<FLOAT>::value, bool> = true>
+struct NaNAwareHash {
+  std::size_t operator()(const FLOAT& val) const noexcept {
+    static const std::size_t kNanHash =
+        folly::hasher<FLOAT>{}(std::numeric_limits<FLOAT>::quiet_NaN());
+    if (std::isnan(val)) {
+      return kNanHash;
+    }
+    return folly::hasher<FLOAT>{}(val);
+  }
+};    
+
 }
-}
-}  // namespace milvus

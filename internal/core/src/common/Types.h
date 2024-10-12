@@ -60,6 +60,8 @@ using bfloat16 = knowhere::bf16;
 using bin1 = knowhere::bin1;
 
 // See also: https://github.com/milvus-io/milvus-proto/blob/master/proto/schema.proto
+using vector_size_t = int32_t;
+
 enum class DataType {
     NONE = 0,
     BOOL = 1,
@@ -478,7 +480,7 @@ struct TypeTraits<DataType::INT32> {
 
 template <>
 struct TypeTraits<DataType::INT64> {
-    using NativeType = int32_t;
+    using NativeType = int64_t;
     static constexpr DataType TypeKind = DataType::INT64;
     static constexpr bool IsPrimitiveType = true;
     static constexpr bool IsFixedWidth = true;
@@ -562,6 +564,8 @@ struct TypeTraits<DataType::VECTOR_FLOAT> {
     static constexpr bool IsFixedWidth = false;
     static constexpr const char* Name = "VECTOR_FLOAT";
 };
+
+bool IsFixedSizeType(DataType type);
 
 }  // namespace milvus
 template <>
@@ -684,3 +688,68 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
         return formatter<string_view>::format(name, ctx);
     }
 };
+
+using column_index_t = uint32_t;
+class RowType final {
+public:
+    RowType(std::vector<std::string>&& names, std::vector<milvus::DataType>&& types):
+        names_(std::move(names)), columns_types_(std::move(types)){};
+
+    static const std::shared_ptr<const RowType> None;
+
+    column_index_t GetChildIndex(std::string name) const {
+        std::optional<column_index_t> idx;
+        for(auto i = 0; i < names_.size(); i++) {
+            if (names_[i] == name) {
+                idx = i;
+            }
+        }
+        AssertInfo(idx.has_value(), "Cannot find target column in the rowType list");
+        return idx.value();
+    }
+
+    milvus::DataType column_type(uint32_t idx) const {
+        return columns_types_.at(idx);
+    }
+
+private:
+    const std::vector<std::string> names_;
+    const std::vector<milvus::DataType> columns_types_;
+};
+
+using RowTypePtr = std::shared_ptr<const RowType>;
+
+#define MILVUS_DYNAMIC_TYPE_DISPATCH(TEMPLATE_FUNC, DATETYPE, ...) \
+    MILVUS_DYNAMIC_TYPE_DISPATCH_IMPL(TEMPLATE_FUNC,,DATETYPE, __VA_ARGS__)
+
+#define MILVUS_DYNAMIC_TYPE_DISPATCH_IMPL(PREFIX, SUFFIX, DATATYPE, ...) \
+  [&]() {                                                                \
+    switch (DATATYPE) {                                                  \
+      case milvus::DataType::BOOL:                                       \
+        return PREFIX<milvus::DataType::BOOL> SUFFIX(__VA_ARGS__);       \
+      case milvus::DataType::INT8:                                       \
+        return PREFIX<milvus::DataType::INT8> SUFFIX(__VA_ARGS__);       \
+      case milvus::DataType::INT16:                                      \
+        return PREFIX<milvus::DataType::INT16> SUFFIX(__VA_ARGS__);      \
+      case milvus::DataType::INT32:                                      \
+        return PREFIX<milvus::DataType::INT32> SUFFIX(__VA_ARGS__);      \
+      case milvus::DataType::INT64:                                      \
+        return PREFIX<milvus::DataType::INT64> SUFFIX(__VA_ARGS__);      \
+      case milvus::DataType::FLOAT:                                      \
+        return PREFIX<milvus::DataType::FLOAT> SUFFIX(__VA_ARGS__);      \
+      case milvus::DataType::DOUBLE:                                     \
+        return PREFIX<milvus::DataType::DOUBLE> SUFFIX(__VA_ARGS__);     \
+      case milvus::DataType::VARCHAR:                                    \
+        return PREFIX<milvus::DataType::VARCHAR> SUFFIX(__VA_ARGS__);    \
+      case milvus::DataType::STRING:                                     \
+        return PREFIX<milvus::DataType::STRING> SUFFIX(__VA_ARGS__);     \
+      case milvus::DataType::JSON:                                       \
+        return PREFIX<milvus::DataType::JSON> SUFFIX(__VA_ARGS__);       \
+      case milvus::DataType::ARRAY:                                      \
+        return PREFIX<milvus::DataType::ARRAY> SUFFIX(__VA_ARGS__);      \
+      case milvus::DataType::ROW:                                        \
+        return PREFIX<milvus::DataType::ROW> SUFFIX(__VA_ARGS__);        \
+      default:                                                           \
+        PanicInfo(milvus::DataTypeInvalid, "UnsupportedDataType for MILVUS_DYNAMIC_TYPE_DISPATCH_IMPL"); \
+    }                                                                    \
+  }()

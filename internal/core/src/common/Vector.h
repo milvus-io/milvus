@@ -41,12 +41,12 @@ class BaseVector {
     virtual ~BaseVector() = default;
 
     int64_t
-    size() {
+    size() const {
         return length_;
     }
 
     DataType
-    type() {
+    type() const{
         return type_kind_;
     }
 

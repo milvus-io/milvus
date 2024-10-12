@@ -13,13 +13,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#pragma once
 
-#include "Operator.h"
+#include "exec/VectorHasher.h"
+#include "common/Types.h"
 
 namespace milvus {
 namespace exec {
-void Operator::initialize() {
-// TODO check memory and set up memory pool in the future
 }
 }
-}  // namespace milvus
