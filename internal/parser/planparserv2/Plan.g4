@@ -56,9 +56,9 @@ GE: '>=';
 EQ: '==';
 NE: '!=';
 
-LIKE: 'like' | 'LIKE';
-EXISTS: 'exists' | 'EXISTS';
-TEXTMATCH: 'TextMatch' | 'textmatch' | 'TEXTMATCH';
+LIKE options { caseInsensitive = true; } : 'like';
+EXISTS options { caseInsensitive = true; } : 'exists';
+TEXTMATCH options { caseInsensitive = true; } : 'textmatch';
 
 ADD: '+';
 SUB: '-';
@@ -79,18 +79,18 @@ BNOT: '~';
 NOT: '!' | 'not';
 
 EmptyArray: '[' (Whitespace | Newline)* ']';
-IN: 'in' | 'In' | 'IN';
+IN options { caseInsensitive = true; } : 'in';
 
-JSONContains: 'json_contains' | 'JSON_CONTAINS';
-JSONContainsAll: 'json_contains_all' | 'JSON_CONTAINS_ALL';
-JSONContainsAny: 'json_contains_any' | 'JSON_CONTAINS_ANY';
+JSONContains options { caseInsensitive = true; } : 'json_contains';
+JSONContainsAll options { caseInsensitive = true; } : 'json_contains_all';
+JSONContainsAny  options { caseInsensitive = true; } : 'json_contains_any';
 
-ArrayContains: 'array_contains' | 'ARRAY_CONTAINS';
-ArrayContainsAll: 'array_contains_all' | 'ARRAY_CONTAINS_ALL';
-ArrayContainsAny: 'array_contains_any' | 'ARRAY_CONTAINS_ANY';
-ArrayLength: 'array_length' | 'ARRAY_LENGTH';
+ArrayContains options { caseInsensitive = true; } : 'array_contains';
+ArrayContainsAll options { caseInsensitive = true; } : 'array_contains_all';
+ArrayContainsAny options { caseInsensitive = true; } : 'array_contains_any';
+ArrayLength options { caseInsensitive = true; } : 'array_length';
 
-BooleanConstant: 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE';
+BooleanConstant options { caseInsensitive = true; } : 'true' | 'false';
 
 IntegerConstant:
 	DecimalConstant

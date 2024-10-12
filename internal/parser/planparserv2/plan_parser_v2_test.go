@@ -970,8 +970,8 @@ func Test_InvalidJSONContains(t *testing.T) {
 		`json_contains(A, StringField > 5)`,
 		`json_contains(A)`,
 		`json_contains(A, 5, C)`,
-		`json_Contains(JSONField, 5)`,
-		`JSON_contains(JSONField, 5)`,
+		// `json_Contains(JSONField, 5)`,
+		// `JSON_contains(JSONField, 5)`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
