@@ -11,12 +11,13 @@
 
 #include <common/ChunkTarget.h>
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include "common/EasyAssert.h"
 #include <sys/mman.h>
 #include <unistd.h>
 
-const auto PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
+const uint32_t PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
 namespace milvus {
 void
 MemChunkTarget::write(const void* data, size_t size, bool append) {
