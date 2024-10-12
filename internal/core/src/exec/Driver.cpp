@@ -27,7 +27,9 @@
 #include "exec/operator/MvccNode.h"
 #include "exec/operator/Operator.h"
 #include "exec/operator/VectorSearchNode.h"
-#include "exec/operator/GroupByNode.h"
+#include "exec/operator/SearchGroupByNode.h"
+#include "exec/operator/AggregationNode.h"
+#include "exec/operator/ProjectNode.h"
 #include "exec/Task.h"
 
 #include "common/EasyAssert.h"
@@ -78,11 +80,21 @@ DriverFactory::CreateDriver(std::unique_ptr<DriverContext> ctx,
                            plannode)) {
             operators.push_back(std::make_unique<PhyVectorSearchNode>(
                 id, ctx.get(), vectorsearchnode));
-        } else if (auto groupbynode =
-                       std::dynamic_pointer_cast<const plan::GroupByNode>(
+        } else if (auto vectorGroupByNode =
+                       std::dynamic_pointer_cast<const plan::SearchGroupByNode>(
+                           plannode)) {
+            operators.push_back(std::make_unique<PhySearchGroupByNode>(
+                id, ctx.get(), vectorGroupByNode));
+        } else if (auto queryGroupByNode =
+                       std::dynamic_pointer_cast<const plan::AggregationNode>(
+                           plannode)) {
+            operators.push_back(std::make_unique<PhyAggregationNode>(
+                id, ctx.get(), queryGroupByNode));
+        } else if (auto projectNode =
+                       std::dynamic_pointer_cast<const plan::ProjectNode>(
                            plannode)) {
             operators.push_back(
-                std::make_unique<PhyGroupByNode>(id, ctx.get(), groupbynode));
+                std::make_unique<PhyProjectNode>(id, ctx.get(), projectNode));
         }
         // TODO: add more operators
     }
@@ -132,6 +144,17 @@ Driver::Run(std::shared_ptr<Driver> self) {
             return;
         default:
             AssertInfo(false, "Unhandled stop reason");
+    }
+}
+
+void
+Driver::initializeOperators() {
+    if (operatorsInitialized_) {
+        return;
+    }
+    operatorsInitialized_ = true;
+    for (auto& op : operators_) {
+        op->initialize();
     }
 }
 
@@ -200,13 +223,13 @@ Driver::RunInternal(std::shared_ptr<Driver>& self,
                     std::shared_ptr<BlockingState>& blocking_state,
                     RowVectorPtr& result) {
     try {
+        initializeOperators();
         int num_operators = operators_.size();
         ContinueFuture future;
 
         for (;;) {
             for (int32_t i = num_operators - 1; i >= 0; --i) {
                 auto op = operators_[i].get();
-
                 current_operator_index_ = i;
                 CALL_OPERATOR(
                     blocking_reason_ = op->IsBlocked(&future), op, "IsBlocked");
