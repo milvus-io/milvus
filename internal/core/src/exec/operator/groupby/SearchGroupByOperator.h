@@ -62,8 +62,7 @@ class SealedDataGetter : public DataGetter<T> {
     const index::ScalarIndex<T>* field_index_;
 
  public:
-    SealedDataGetter(const segcore::SegmentSealedImpl& segment,
-                     FieldId& field_id) {
+    SealedDataGetter(const segcore::SegmentSealed& segment, FieldId& field_id) {
         if (segment.HasFieldData(field_id)) {
             if constexpr (std::is_same_v<T, std::string>) {
                 str_field_data_ =
@@ -114,8 +113,8 @@ GetDataGetter(const segcore::SegmentInternalInterface& segment,
             dynamic_cast<const segcore::SegmentGrowingImpl*>(&segment)) {
         return std::make_shared<GrowingDataGetter<T>>(*growing_segment,
                                                       fieldId);
-    } else if (const segcore::SegmentSealedImpl* sealed_segment =
-                   dynamic_cast<const segcore::SegmentSealedImpl*>(&segment)) {
+    } else if (const segcore::SegmentSealed* sealed_segment =
+                   dynamic_cast<const segcore::SegmentSealed*>(&segment)) {
         return std::make_shared<SealedDataGetter<T>>(*sealed_segment, fieldId);
     } else {
         PanicInfo(UnexpectedError,

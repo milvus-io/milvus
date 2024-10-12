@@ -27,7 +27,7 @@ namespace milvus::storage {
 
 // deserialize remote insert and index file
 std::unique_ptr<DataCodec>
-DeserializeRemoteFileData(BinlogReaderPtr reader) {
+DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data) {
     DescriptorEvent descriptor_event(reader);
     DataType data_type =
         DataType(descriptor_event.event_data.fix_part.data_type);
@@ -45,10 +45,17 @@ DeserializeRemoteFileData(BinlogReaderPtr reader) {
         case EventType::InsertEvent: {
             auto event_data_length =
                 header.event_length_ - GetEventHeaderSize(header);
-            auto insert_event_data =
-                InsertEventData(reader, event_data_length, data_type, nullable);
-            auto insert_data =
-                std::make_unique<InsertData>(insert_event_data.field_data);
+            auto insert_event_data = InsertEventData(
+                reader, event_data_length, data_type, nullable, is_field_data);
+
+            std::unique_ptr<InsertData> insert_data;
+            if (is_field_data) {
+                insert_data =
+                    std::make_unique<InsertData>(insert_event_data.field_data);
+            } else {
+                insert_data = std::make_unique<InsertData>(
+                    insert_event_data.payload_reader);
+            }
             insert_data->SetFieldDataMeta(data_meta);
             insert_data->SetTimestamps(insert_event_data.start_timestamp,
                                        insert_event_data.end_timestamp);
@@ -105,13 +112,14 @@ DeserializeLocalFileData(BinlogReaderPtr reader) {
 
 std::unique_ptr<DataCodec>
 DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
-                    int64_t length) {
+                    int64_t length,
+                    bool is_field_data) {
     auto binlog_reader = std::make_shared<BinlogReader>(input_data, length);
     auto medium_type = ReadMediumType(binlog_reader);
     std::unique_ptr<DataCodec> res;
     switch (medium_type) {
         case StorageType::Remote: {
-            res = DeserializeRemoteFileData(binlog_reader);
+            res = DeserializeRemoteFileData(binlog_reader, is_field_data);
             break;
         }
         case StorageType::LocalDisk: {

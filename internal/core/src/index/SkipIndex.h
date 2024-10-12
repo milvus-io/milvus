@@ -16,6 +16,7 @@
 #include "common/Types.h"
 #include "log/Log.h"
 #include "mmap/Column.h"
+#include "mmap/ChunkedColumn.h"
 
 namespace milvus {
 
@@ -100,10 +101,32 @@ class SkipIndex {
                   const bool* valid_data,
                   int64_t count);
 
+    template <typename T>
     void
     LoadString(milvus::FieldId field_id,
                int64_t chunk_id,
-               const milvus::VariableColumn<std::string>& var_column);
+               const T& var_column) {
+        int num_rows = var_column.NumRows();
+        auto chunkMetrics = std::make_unique<FieldChunkMetrics>();
+        if (num_rows > 0) {
+            auto info = ProcessStringFieldMetrics(var_column);
+            chunkMetrics->min_ = Metrics(info.min_);
+            chunkMetrics->max_ = Metrics(info.max_);
+            chunkMetrics->null_count_ = info.null_count_;
+        }
+
+        chunkMetrics->hasValue_ =
+            chunkMetrics->null_count_ == num_rows ? false : true;
+
+        std::unique_lock lck(mutex_);
+        if (fieldChunkMetrics_.count(field_id) == 0) {
+            fieldChunkMetrics_.insert(std::make_pair(
+                field_id,
+                std::unordered_map<int64_t,
+                                   std::unique_ptr<FieldChunkMetrics>>()));
+        }
+        fieldChunkMetrics_[field_id].emplace(chunk_id, std::move(chunkMetrics));
+    }
 
  private:
     const FieldChunkMetrics&
@@ -269,9 +292,9 @@ class SkipIndex {
         return {minValue, maxValue, null_count};
     }
 
+    template <typename T>
     metricInfo<std::string>
-    ProcessStringFieldMetrics(
-        const milvus::VariableColumn<std::string>& var_column) {
+    ProcessStringFieldMetrics(const T& var_column) {
         int num_rows = var_column.NumRows();
         // find first not null value
         int64_t start = 0;

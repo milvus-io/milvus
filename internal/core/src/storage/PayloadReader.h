@@ -17,6 +17,7 @@
 #pragma once
 
 #include <memory>
+#include <arrow/record_batch.h>
 #include <parquet/arrow/reader.h>
 
 #include "common/FieldData.h"
@@ -29,16 +30,27 @@ class PayloadReader {
     explicit PayloadReader(const uint8_t* data,
                            int length,
                            DataType data_type,
-                           bool nullable_);
+                           bool nullable,
+                           bool is_field_data = true);
 
     ~PayloadReader() = default;
 
     void
-    init(std::shared_ptr<arrow::io::BufferReader> buffer);
+    init(std::shared_ptr<arrow::io::BufferReader> buffer, bool is_field_data);
 
     const FieldDataPtr
     get_field_data() const {
         return field_data_;
+    }
+
+    std::shared_ptr<arrow::RecordBatchReader>
+    get_reader() {
+        return record_batch_reader_;
+    }
+
+    std::shared_ptr<parquet::arrow::FileReader>
+    get_file_reader() {
+        return arrow_reader_;
     }
 
  private:
@@ -46,6 +58,9 @@ class PayloadReader {
     int dim_;
     bool nullable_;
     FieldDataPtr field_data_;
+
+    std::shared_ptr<parquet::arrow::FileReader> arrow_reader_;
+    std::shared_ptr<arrow::RecordBatchReader> record_batch_reader_;
 };
 
 }  // namespace milvus::storage
