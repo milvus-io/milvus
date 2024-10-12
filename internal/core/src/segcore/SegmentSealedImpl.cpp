@@ -52,35 +52,38 @@
 #include "storage/ThreadPools.h"
 #include "storage/MmapManager.h"
 
-
 namespace milvus::segcore {
 
 #ifdef CHECK_SORTED
-#define ASSERT_COLUMN_ORDERED(data_type, column) \
-    {                                            \
-        switch (data_type) { \
-            case DataType::INT64: { \
-                auto col = std::dynamic_pointer_cast<SingleChunkColumn>(column); \
-                auto pks = reinterpret_cast<const int64_t*>(col->Data()); \
-                for (int i = 1; i < col->NumRows(); ++i) { \
-                    assert(pks[i - 1] <= pks[i] && "INT64 Column is not ordered!"); \
-                } \
-                break; \
-            } \
-            case DataType::VARCHAR: { \
-                auto col = std::dynamic_pointer_cast<SingleChunkVariableColumn<std::string>>(column); \
-                auto pks = col->Views(); \
-                for (int i = 1; i < col->NumRows(); ++i) { \
-                    assert(pks[i - 1] <= pks[i] && "VARCHAR Column is not ordered!"); \
-                } \
-                break; \
-            } \
-            default: { \
-                PanicInfo(DataTypeInvalid, \
+#define ASSERT_COLUMN_ORDERED(data_type, column)                           \
+    {                                                                      \
+        switch (data_type) {                                               \
+            case DataType::INT64: {                                        \
+                auto col =                                                 \
+                    std::dynamic_pointer_cast<SingleChunkColumn>(column);  \
+                auto pks = reinterpret_cast<const int64_t*>(col->Data());  \
+                for (int i = 1; i < col->NumRows(); ++i) {                 \
+                    assert(pks[i - 1] <= pks[i] &&                         \
+                           "INT64 Column is not ordered!");                \
+                }                                                          \
+                break;                                                     \
+            }                                                              \
+            case DataType::VARCHAR: {                                      \
+                auto col = std::dynamic_pointer_cast<                      \
+                    SingleChunkVariableColumn<std::string>>(column);       \
+                auto pks = col->Views();                                   \
+                for (int i = 1; i < col->NumRows(); ++i) {                 \
+                    assert(pks[i - 1] <= pks[i] &&                         \
+                           "VARCHAR Column is not ordered!");              \
+                }                                                          \
+                break;                                                     \
+            }                                                              \
+            default: {                                                     \
+                PanicInfo(DataTypeInvalid,                                 \
                           fmt::format("unsupported primary key data type", \
-                                      data_type)); \
-            } \
-        } \
+                                      data_type));                         \
+            }                                                              \
+        }                                                                  \
     }
 #else
 #define ASSERT_COLUMN_ORDERED(data_type, column) ((void)0)
