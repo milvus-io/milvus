@@ -1355,7 +1355,7 @@ func BenchmarkWithString(b *testing.B) {
 		return string(result)
 	}
 
-	randomAsciiString := func(length int) string {
+	randomASCIIString := func(length int) string {
 		return randomString(length, 65, 90)
 	}
 
@@ -1388,7 +1388,7 @@ func BenchmarkWithString(b *testing.B) {
 			b.StopTimer()
 			expr := ""
 			for i := 0; i < 100; i++ {
-				expr += fmt.Sprintf(`"%s",`, randomAsciiString(100))
+				expr += fmt.Sprintf(`"%s",`, randomASCIIString(100))
 			}
 			expr = "StringField in [" + expr + "]"
 			b.StartTimer()
