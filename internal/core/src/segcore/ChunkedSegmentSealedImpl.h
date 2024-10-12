@@ -243,6 +243,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    void* output) const override;
 
     void
+    bulk_subscript(FieldId field_id,
+                   DataType data_type,
+                   const int64_t* seg_offsets,
+                   int64_t count,
+                   void* data,
+                   TargetBitmapView& valid_map) const override;
+
+    void
     check_search(const query::Plan* plan) const override;
 
     int64_t
@@ -281,6 +289,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                             const int64_t* seg_offsets,
                             int64_t count,
                             google::protobuf::RepeatedPtrField<T>* dst_raw);
+
+    template <typename S, typename T = S>
+    static void
+    bulk_subscript_ptr_impl(const ChunkedColumnBase* field,
+                            const int64_t* seg_offsets,
+                            int64_t count,
+                            T* dst);
 
     template <typename T>
     static void

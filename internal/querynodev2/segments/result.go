@@ -354,23 +354,6 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	if skipDupCnt > 0 {
 		log.Debug("skip duplicated query result while reducing internal.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
 	}
-
-	requestCosts := lo.FilterMap(retrieveResults, func(result *internalpb.RetrieveResults, _ int) (*internalpb.CostAggregation, bool) {
-		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
-			return result.GetCostAggregation(), true
-		}
-
-		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
-			return result.GetCostAggregation(), true
-		}
-
-		return nil, false
-	})
-	ret.CostAggregation = mergeRequestCost(requestCosts)
-	if ret.CostAggregation == nil {
-		ret.CostAggregation = &internalpb.CostAggregation{}
-	}
-	ret.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	return ret, nil
 }
 
