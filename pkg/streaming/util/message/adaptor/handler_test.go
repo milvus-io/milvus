@@ -1,6 +1,7 @@
 package adaptor
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -26,7 +27,9 @@ func TestMsgPackAdaptorHandler(t *testing.T) {
 		}
 		close(ch)
 	}()
-	h.Handle(insertImmutableMessage)
+	ok, err := h.Handle(context.Background(), insertImmutableMessage)
+	assert.True(t, ok)
+	assert.NoError(t, err)
 	msgPack := <-ch
 
 	assert.Equal(t, uint64(10), msgPack.BeginTs)
@@ -60,7 +63,9 @@ func TestMsgPackAdaptorHandler(t *testing.T) {
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(id)
 
-	h.Handle(deleteImmutableMsg)
+	ok, err = h.Handle(context.Background(), deleteImmutableMsg)
+	assert.True(t, ok)
+	assert.NoError(t, err)
 	msgPack = <-ch
 	assert.Equal(t, uint64(11), msgPack.BeginTs)
 	assert.Equal(t, uint64(11), msgPack.EndTs)
@@ -114,7 +119,9 @@ func TestMsgPackAdaptorHandler(t *testing.T) {
 		Build(commitImmutableMsg)
 	assert.NoError(t, err)
 
-	h.Handle(txn)
+	ok, err = h.Handle(context.Background(), txn)
+	assert.True(t, ok)
+	assert.NoError(t, err)
 	msgPack = <-ch
 
 	assert.Equal(t, uint64(12), msgPack.BeginTs)
@@ -133,7 +140,9 @@ func TestMsgPackAdaptorHandler(t *testing.T) {
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(4))
 
-	h.Handle(flushMsg)
+	ok, err = h.Handle(context.Background(), flushMsg)
+	assert.True(t, ok)
+	assert.NoError(t, err)
 
 	msgPack = <-ch
 
@@ -142,4 +151,19 @@ func TestMsgPackAdaptorHandler(t *testing.T) {
 
 	h.Close()
 	<-ch
+}
+
+func TestMsgPackAdaptorHandlerTimeout(t *testing.T) {
+	id := rmq.NewRmqID(1)
+
+	insertMsg := message.CreateTestInsertMessage(t, 1, 100, 10, id)
+	insertImmutableMessage := insertMsg.IntoImmutableMessage(id)
+
+	h := NewMsgPackAdaptorHandler()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ok, err := h.Handle(ctx, insertImmutableMessage)
+	assert.True(t, ok)
+	assert.ErrorIs(t, err, ctx.Err())
 }

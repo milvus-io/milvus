@@ -74,10 +74,11 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 	// consumer need to resume when error occur, so message handler shouldn't close if the internal consumer encounter failure.
 	nopCloseMH := nopCloseHandler{
 		Handler: rc.mh,
-		HandleInterceptor: func(msg message.ImmutableMessage, handle func(message.ImmutableMessage)) {
+		HandleInterceptor: func(ctx context.Context, msg message.ImmutableMessage, handle handleFunc) (bool, error) {
 			g := rc.metrics.StartConsume(msg.EstimateSize())
-			handle(msg)
+			ok, err := handle(ctx, msg)
 			g.Finish()
+			return ok, err
 		},
 	}
 
