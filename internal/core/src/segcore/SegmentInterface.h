@@ -21,6 +21,7 @@
 
 #include "DeletedRecord.h"
 #include "FieldIndexing.h"
+#include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/SystemProperty.h"
@@ -201,6 +202,16 @@ class SegmentInternalInterface : public SegmentInterface {
         return *ptr;
     }
 
+    template <typename T>
+    const index::ScalarIndex<T>&
+    chunk_scalar_index(std::string path, int64_t chunk_id) const {
+        using IndexType = index::ScalarIndex<T>;
+        auto base_ptr = chunk_index_impl(path, chunk_id);
+        auto ptr = dynamic_cast<const IndexType*>(base_ptr);
+        AssertInfo(ptr, "entry mismatch");
+        return *ptr;
+    }
+
     std::unique_ptr<SearchResult>
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_group,
@@ -230,6 +241,10 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual bool
     HasIndex(FieldId field_id) const = 0;
 
+    virtual bool
+    HasIndex(const std::string& nested_path) const {
+        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+    };
     virtual bool
     HasFieldData(FieldId field_id) const = 0;
 
@@ -384,6 +399,11 @@ class SegmentInternalInterface : public SegmentInterface {
     // internal API: return chunk_index in span, support scalar index only
     virtual const index::IndexBase*
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const = 0;
+
+    virtual const index::IndexBase*
+    chunk_index_impl(std::string path, int64_t chunk_id) const {
+        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+    };
 
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
     virtual void

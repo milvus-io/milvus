@@ -21,6 +21,7 @@ type SegmentIndex struct {
 	CreateTime    uint64
 	IndexFileKeys []string
 	IndexSize     uint64
+	IsJson        bool
 	// deprecated
 	WriteHandoff        bool
 	CurrentIndexVersion int32
@@ -49,6 +50,7 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 		IndexSize:           segIndex.SerializeSize,
 		WriteHandoff:        segIndex.WriteHandoff,
 		CurrentIndexVersion: segIndex.GetCurrentIndexVersion(),
+		IsJson:              segIndex.IsJson,
 	}
 }
 
@@ -74,6 +76,7 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 		SerializeSize:       segIdx.IndexSize,
 		WriteHandoff:        segIdx.WriteHandoff,
 		CurrentIndexVersion: segIdx.CurrentIndexVersion,
+		IsJson:              segIdx.IsJson,
 	}
 }
 
@@ -95,5 +98,6 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		IndexSize:           segIndex.IndexSize,
 		WriteHandoff:        segIndex.WriteHandoff,
 		CurrentIndexVersion: segIndex.CurrentIndexVersion,
+		IsJson:              segIndex.IsJson,
 	}
 }

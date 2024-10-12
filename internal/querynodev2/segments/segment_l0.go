@@ -120,6 +120,10 @@ func (s *L0Segment) Indexes() []*IndexedFieldInfo {
 	return nil
 }
 
+func (s *L0Segment) JsonIndexes() []*IndexedFieldInfo {
+	return nil
+}
+
 func (s *L0Segment) ResetIndexesLazyLoad(lazyState bool) {
 }
 

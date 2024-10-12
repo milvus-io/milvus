@@ -4,7 +4,9 @@
 #include <set>
 #include <iostream>
 #include <map>
+#include <type_traits>
 
+#include "log/Log.h"
 #include "tantivy-binding.h"
 #include "rust-binding.h"
 #include "rust-array.h"

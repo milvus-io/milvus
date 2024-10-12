@@ -16,6 +16,9 @@
 
 #include "UnaryExpr.h"
 #include "common/Json.h"
+#include "common/Types.h"
+#include "common/type_c.h"
+#include "log/Log.h"
 
 namespace milvus {
 namespace exec {
@@ -187,25 +190,49 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             auto val_type = expr_->val_.val_case();
-            switch (val_type) {
-                case proto::plan::GenericValue::ValCase::kBoolVal:
-                    result = ExecRangeVisitorImplJson<bool>();
-                    break;
-                case proto::plan::GenericValue::ValCase::kInt64Val:
-                    result = ExecRangeVisitorImplJson<int64_t>();
-                    break;
-                case proto::plan::GenericValue::ValCase::kFloatVal:
-                    result = ExecRangeVisitorImplJson<double>();
-                    break;
-                case proto::plan::GenericValue::ValCase::kStringVal:
-                    result = ExecRangeVisitorImplJson<std::string>();
-                    break;
-                case proto::plan::GenericValue::ValCase::kArrayVal:
-                    result = ExecRangeVisitorImplJson<proto::plan::Array>();
-                    break;
-                default:
-                    PanicInfo(
-                        DataTypeInvalid, "unknown data type: {}", val_type);
+            if (CanUseIndexForJson()) {
+                switch (val_type) {
+                    case proto::plan::GenericValue::ValCase::kBoolVal:
+                        result = ExecRangeVisitorImplForIndex<bool>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        result = ExecRangeVisitorImplForIndex<int64_t>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        result = ExecRangeVisitorImplForIndex<double>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kStringVal:
+                        result = ExecRangeVisitorImplForIndex<std::string>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kArrayVal:
+                        result =
+                            ExecRangeVisitorImplForIndex<proto::plan::Array>();
+                        break;
+                    default:
+                        PanicInfo(
+                            DataTypeInvalid, "unknown data type: {}", val_type);
+                }
+            } else {
+                switch (val_type) {
+                    case proto::plan::GenericValue::ValCase::kBoolVal:
+                        result = ExecRangeVisitorImplJson<bool>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        result = ExecRangeVisitorImplJson<int64_t>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        result = ExecRangeVisitorImplJson<double>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kStringVal:
+                        result = ExecRangeVisitorImplJson<std::string>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kArrayVal:
+                        result = ExecRangeVisitorImplJson<proto::plan::Array>();
+                        break;
+                    default:
+                        PanicInfo(
+                            DataTypeInvalid, "unknown data type: {}", val_type);
+                }
             }
             break;
         }
@@ -859,6 +886,13 @@ PhyUnaryRangeFilterExpr::CanUseIndex() {
     bool res = is_index_mode_ && SegmentExpr::CanUseIndex<T>(expr_->op_type_);
     use_index_ = res;
     return res;
+}
+
+bool
+PhyUnaryRangeFilterExpr::CanUseIndexForJson() {
+    use_index_ =
+        segment_->HasIndex(milvus::Json::pointer(expr_->column_.nested_path_));
+    return use_index_;
 }
 
 VectorPtr

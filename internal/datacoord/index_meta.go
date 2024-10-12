@@ -281,6 +281,9 @@ func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest) (UniqueID, e
 			return 0, fmt.Errorf("CreateIndex failed: %s", errMsg)
 		}
 		if req.FieldID == index.FieldID {
+			if index.IsJson {
+				continue
+			}
 			// creating multiple indexes on same field is not supported
 			errMsg := "CreateIndex failed: creating multiple indexes on same field is not supported"
 			log.Warn(errMsg)
@@ -979,6 +982,7 @@ func (m *indexMeta) AreAllDiskIndex(collectionID int64, schema *schemapb.Collect
 		return t.FieldID, GetIndexType(t.IndexParams)
 	})
 	vectorFieldsWithDiskIndex := lo.Filter(vectorFields, func(field *schemapb.FieldSchema, _ int) bool {
+
 		if indexType, ok := fieldIndexTypes[field.FieldID]; ok {
 			return indexparamcheck.IsDiskIndex(indexType)
 		}

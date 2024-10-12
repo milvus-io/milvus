@@ -170,13 +170,20 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_->operator[](field_id);
 
-    auto row_count = info.index->Count();
-    AssertInfo(row_count > 0, "Index count is 0");
-
     std::unique_lock lck(mutex_);
     AssertInfo(
         !get_bit(index_ready_bitset_, field_id),
         "scalar index has been exist at " + std::to_string(field_id.get()));
+
+    if (field_meta.get_data_type() == DataType::JSON) {
+        auto path = info.index_params.at("json_path");
+        json_indexings_[path] =
+            std::move(const_cast<LoadIndexInfo&>(info).index);
+        return;
+    }
+    auto row_count = info.index->Count();
+    AssertInfo(row_count > 0, "Index count is 0");
+
     if (num_rows_.has_value()) {
         AssertInfo(num_rows_.value() == row_count,
                    "field (" + std::to_string(field_id.get()) +
@@ -185,7 +192,6 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                        ") than other column's row count (" +
                        std::to_string(num_rows_.value()) + ")");
     }
-
     scalar_indexings_[field_id] =
         std::move(const_cast<LoadIndexInfo&>(info).index);
     // reverse pk from scalar index and set pks to offset
@@ -742,6 +748,13 @@ SegmentSealedImpl::chunk_index_impl(FieldId field_id, int64_t chunk_id) const {
                    std::to_string(field_id.get()));
     auto ptr = scalar_indexings_.at(field_id).get();
     return ptr;
+}
+
+const index::IndexBase*
+SegmentSealedImpl::chunk_index_impl(std::string path, int64_t chunk_id) const {
+    AssertInfo(json_indexings_.find(path) != json_indexings_.end(),
+               "Cannot find json index with path: " + path);
+    return json_indexings_.at(path).get();
 }
 
 int64_t
@@ -1686,6 +1699,11 @@ SegmentSealedImpl::HasIndex(FieldId field_id) const {
 }
 
 bool
+SegmentSealedImpl::HasIndex(const std::string& path) const {
+    return json_indexings_.find(path) != json_indexings_.end();
+}
+
+bool
 SegmentSealedImpl::HasFieldData(FieldId field_id) const {
     std::shared_lock lck(mutex_);
     if (SystemProperty::Instance().IsSystem(field_id)) {
@@ -1710,6 +1728,8 @@ SegmentSealedImpl::HasRawData(int64_t field_id) const {
                 field_indexing->indexing_.get());
             return vec_index->HasRawData();
         }
+    } else if (IsJsonDataType(field_meta.get_data_type())) {
+        return false;
     } else {
         auto scalar_index = scalar_indexings_.find(fieldID);
         if (scalar_index != scalar_indexings_.end()) {

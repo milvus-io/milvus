@@ -362,6 +362,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 			IndexVersion:        info.GetIndexVersion(),
 			NumRows:             info.GetNumRows(),
 			CurrentIndexVersion: info.GetCurrentIndexVersion(),
+			IsJson:              info.GetIsJson(),
 		})
 	}
 
