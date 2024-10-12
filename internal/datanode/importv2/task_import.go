@@ -195,6 +195,12 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		if err != nil {
 			return err
 		}
+		if !importutilv2.IsBackup(t.req.GetOptions()) {
+			err = RunEmbeddingFunction(t, data)
+			if err != nil {
+				return err
+			}
+		}
 		hashedData, err := HashData(t, data)
 		if err != nil {
 			return err
@@ -236,8 +242,17 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 			if err != nil {
 				return nil, nil, err
 			}
+			bm25Stats := make(map[int64]*storage.BM25Stats)
+			for _, fn := range t.req.GetSchema().GetFunctions() {
+				if fn.GetType() == schemapb.FunctionType_BM25 {
+					// BM25 function guarantees single output field
+					outputSparseFieldId := fn.GetOutputFieldIds()[0]
+					bm25Stats[outputSparseFieldId] = storage.NewBM25Stats()
+					bm25Stats[outputSparseFieldId].AppendFieldData(data.Data[outputSparseFieldId].(*storage.SparseFloatVectorFieldData))
+				}
+			}
 			syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
-				segmentID, partitionID, t.GetCollectionID(), channel, data, nil)
+				segmentID, partitionID, t.GetCollectionID(), channel, data, nil, bm25Stats)
 			if err != nil {
 				return nil, nil, err
 			}

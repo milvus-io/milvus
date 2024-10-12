@@ -111,6 +111,26 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 			},
 		},
 	}
+
+	if dt == schemapb.DataType_VarChar {
+		// Add a BM25 function if data type is VarChar
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:          103,
+			Name:             "sparse",
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+		schema.Functions = append(schema.Functions, &schemapb.FunctionSchema{
+			Id:               1000,
+			Name:             "bm25",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldIds:    []int64{102},
+			InputFieldNames:  []string{dt.String()},
+			OutputFieldIds:   []int64{103},
+			OutputFieldNames: []string{"sparse"},
+		})
+	}
+
 	insertData, err := testutil.CreateInsertData(schema, suite.numRows)
 	suite.NoError(err)
 	fieldIDToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
@@ -118,6 +138,9 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	})
 	files := make(map[int64]string)
 	for _, field := range schema.GetFields() {
+		if field.GetIsFunctionOutput() {
+			continue
+		}
 		files[field.GetFieldID()] = fmt.Sprintf("%s.npy", field.GetName())
 	}
 
@@ -451,5 +474,20 @@ func TestCreateReaders(t *testing.T) {
 		},
 	}
 	_, err = CreateReaders(ctx, cm, schema, []string{"pk", "vec"})
+	assert.NoError(t, err)
+
+	// auto id and Function
+	schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{Name: "vec", DataType: schemapb.DataType_FloatVector},
+			{Name: "text", DataType: schemapb.DataType_VarChar},
+			{Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{Name: "bm25", InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse"}},
+		},
+	}
+	_, err = CreateReaders(ctx, cm, schema, []string{"vec", "text"})
 	assert.NoError(t, err)
 }

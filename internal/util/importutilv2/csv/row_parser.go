@@ -26,10 +26,20 @@ type rowParser struct {
 }
 
 func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey string) (RowParser, error) {
-	name2Field := lo.KeyBy(schema.GetFields(),
-		func(field *schemapb.FieldSchema) string {
-			return field.GetName()
-		})
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return nil, err
+	}
+	dynamicField := typeutil.GetDynamicField(schema)
+
+	name2Field := lo.SliceToMap(
+		lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+			return !field.GetIsFunctionOutput() && !typeutil.IsAutoPKField(field) && field.GetName() != dynamicField.GetName()
+		}),
+		func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
+			return field.GetName(), field
+		},
+	)
 
 	name2Dim := make(map[string]int)
 	for name, field := range name2Field {
@@ -40,20 +50,6 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 			}
 			name2Dim[name] = int(dim)
 		}
-	}
-
-	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return nil, err
-	}
-
-	if pkField.GetAutoID() {
-		delete(name2Field, pkField.GetName())
-	}
-
-	dynamicField := typeutil.GetDynamicField(schema)
-	if dynamicField != nil {
-		delete(name2Field, dynamicField.GetName())
 	}
 
 	// check if csv header provides the primary key while it should be auto-generated
