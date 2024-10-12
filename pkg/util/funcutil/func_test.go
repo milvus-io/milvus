@@ -544,8 +544,9 @@ func TestMapToJSON(t *testing.T) {
 	s := `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`
 	m, err := JSONToMap(s)
 	assert.NoError(t, err)
-	j := MapToJSON(m)
-	got, err := JSONToMap(string(j))
+	j, err := MapToJSON(m)
+	assert.NoError(t, err)
+	got, err := JSONToMap(j)
 	assert.NoError(t, err)
 	assert.True(t, reflect.DeepEqual(m, got))
 }
