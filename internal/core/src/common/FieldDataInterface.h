@@ -356,6 +356,7 @@ class FieldDataImpl : public FieldDataBase {
         data_ = std::move(data);
         Assert(data_.size() % dim == 0);
         num_rows_ = data_.size() / dim;
+        length_ = num_rows_;
     }
 
     explicit FieldDataImpl(size_t dim,
@@ -370,6 +371,7 @@ class FieldDataImpl : public FieldDataBase {
         valid_data_ = std::move(valid_data);
         Assert(data_.size() % dim == 0);
         num_rows_ = data_.size() / dim;
+        length_ = num_rows_;
     }
 
     void

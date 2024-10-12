@@ -44,3 +44,41 @@ func HashKey2Partitions(fieldSchema *schemapb.FieldSchema, keys []*planpb.Generi
 
 	return result, nil
 }
+
+// hashMix computes a hash by mixing the upper and lower 64-bit values.
+// This is inspired by MurmurHash.
+func HashMix(upper, lower uint64) uint64 {
+	const kMul uint64 = 0x9ddfea08eb382d69
+
+	// Step 1: Mix lower and upper with kMul
+	a := (lower ^ upper) * kMul
+	a ^= a >> 47
+
+	// Step 2: Mix the result with upper and kMul
+	b := (upper ^ a) * kMul
+	b ^= b >> 47
+
+	// Step 3: Final mix
+	b *= kMul
+
+	return b
+}
+
+// NextPowerOfTwo computes the next power of two greater than or equal to n
+func NextPowerOfTwo(n int) int {
+	if n <= 1 {
+		return 1
+	}
+
+	n-- // Decrement n to handle cases where n is already a power of two
+	n |= n >> 1
+	n |= n >> 2
+	n |= n >> 4
+	n |= n >> 8
+	n |= n >> 16
+	if n>>32 != 0 { // Handle larger integers on 64-bit systems
+		n |= n >> 32
+	}
+	n++ // Increment to get the next power of two
+	return n
+}
