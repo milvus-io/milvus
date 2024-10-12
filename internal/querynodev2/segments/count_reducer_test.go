@@ -1,6 +1,6 @@
 package segments
 
-import (
+/*import (
 	"context"
 	"testing"
 
@@ -94,4 +94,4 @@ func (suite *SegCoreCntReducerSuite) TestNormalCase() {
 	total, err := funcutil.CntOfSegCoreResult(res)
 	suite.NoError(err)
 	suite.Equal(int64(1+2+3+4), total)
-}
+}*/

@@ -9,7 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <boost/format.hpp>
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <memory>
@@ -20,7 +19,6 @@
 #include "query/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentSealed.h"
-#include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
 #include "plan/PlanNode.h"
 #include "exec/Task.h"

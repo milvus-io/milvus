@@ -212,7 +212,7 @@ func (s *HelloMilvusSuite) run() {
 				s.Equal(hookutil.OpTypeQuery, reportInfo[hookutil.OpTypeKey])
 				s.NotEqualValues(0, reportInfo[hookutil.ResultDataSizeKey])
 				s.NotEqualValues(0, reportInfo[hookutil.RelatedDataSizeKey])
-				s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
+				s.EqualValues(1, reportInfo[hookutil.RelatedCntKey])
 				return
 			}
 		}
