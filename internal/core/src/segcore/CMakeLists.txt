@@ -12,3 +12,11 @@
 
 add_source_at_current_directory_recursively()
 add_library(milvus_segcore OBJECT ${SOURCE_FILES})
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(CHECK_SORTED ON)
+else()
+    set(CHECK_SORTED OFF)
+endif()
+
+add_definitions(-DCHECK_SORTED=${CHECK_SORTED})
