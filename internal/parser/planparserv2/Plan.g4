@@ -5,25 +5,22 @@ expr:
 	| FloatingConstant										                     # Floating
 	| BooleanConstant										                     # Boolean
 	| StringLiteral											                     # String
-	| Identifier											                     # Identifier
 	| JSONIdentifier                                                             # JSONIdentifier
-	| '(' expr ')'											                     # Parens
-	| '[' expr (',' expr)* ','? ']'                                              # Array
+	| LPAREN expr RPAREN											             # Parens
+	| LBRACK expr (COMMA expr)* COMMA? RBRACK                                    # Array
 	| EmptyArray                                                                 # EmptyArray
 	| expr LIKE StringLiteral                                                    # Like
-	| TEXTMATCH'('Identifier',' StringLiteral')'                                 # TextMatch
+	| TEXTMATCH LPAREN Identifier COMMA StringLiteral RPAREN                     # TextMatch
 	| expr POW expr											                     # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                     # Unary
-//	| '(' typeName ')' expr									                     # Cast
 	| expr op = (MUL | DIV | MOD) expr						                     # MulDivMod
 	| expr op = (ADD | SUB) expr							                     # AddSub
 	| expr op = (SHL | SHR) expr							                     # Shift
 	| expr op = NOT? IN expr                                                     # Term
-//	| EmptyTerm                                                                  # EmptyTerm
-	| (JSONContains | ArrayContains)'('expr',' expr')'                           # JSONContains
-	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                     # JSONContainsAll
-	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                     # JSONContainsAny
-	| ArrayLength'('(Identifier | JSONIdentifier)')'                             # ArrayLength
+	| (JSONContains | ArrayContains) LPAREN expr COMMA expr RPAREN               # JSONContains
+	| (JSONContainsAll | ArrayContainsAll) LPAREN expr COMMA expr RPAREN         # JSONContainsAll
+	| (JSONContainsAny | ArrayContainsAny) LPAREN expr COMMA expr RPAREN         # JSONContainsAny
+	| ArrayLength LPAREN (Identifier | JSONIdentifier) RPAREN                    # ArrayLength
 	| expr op1 = (LT | LE) (Identifier | JSONIdentifier) op2 = (LT | LE) expr	 # Range
 	| expr op1 = (GT | GE) (Identifier | JSONIdentifier) op2 = (GT | GE) expr    # ReverseRange
 	| expr op = (LT | LE | GT | GE) expr					                     # Relational
@@ -33,7 +30,9 @@ expr:
 	| expr BOR expr											                     # BitOr
 	| expr AND expr											                     # LogicalAnd
 	| expr OR expr											                     # LogicalOr
-	| EXISTS expr                                                                # Exists;
+	| EXISTS expr                                                                # Exists
+	| Identifier											                     # Identifier
+	;
 
 // typeName: ty = (BOOL | INT8 | INT16 | INT32 | INT64 | FLOAT | DOUBLE);
 
@@ -45,6 +44,11 @@ expr:
 // FLOAT: 'float';
 // DOUBLE: 'double';
 
+LPAREN : '(' ;
+RPAREN : ')' ;
+COMMA : ',';
+LBRACK : '[';
+RBRACK : ']';
 LT: '<';
 LE: '<=';
 GT: '>';
@@ -54,7 +58,7 @@ NE: '!=';
 
 LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
-TEXTMATCH: 'TextMatch'|'textmatch'|'TEXTMATCH';
+TEXTMATCH: 'TextMatch' | 'textmatch' | 'TEXTMATCH';
 
 ADD: '+';
 SUB: '-';
@@ -74,8 +78,8 @@ OR: '||' | 'or';
 BNOT: '~';
 NOT: '!' | 'not';
 
-IN: 'in' | 'IN';
 EmptyArray: '[' (Whitespace | Newline)* ']';
+IN: 'in' | 'In' | 'IN';
 
 JSONContains: 'json_contains' | 'JSON_CONTAINS';
 JSONContainsAll: 'json_contains_all' | 'JSON_CONTAINS_ALL';
@@ -100,16 +104,13 @@ FloatingConstant:
 
 Identifier: Nondigit (Nondigit | Digit)* | '$meta';
 
-StringLiteral: EncodingPrefix? ('"' DoubleSCharSequence? '"' | '\'' SingleSCharSequence? '\'');
+StringLiteral: EncodingPrefix? ('"' DoubleSChar* '"' | '\'' SingleSChar* '\'');
 JSONIdentifier: Identifier('[' (StringLiteral | DecimalConstant) ']')+;
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 
-fragment DoubleSCharSequence: DoubleSChar+;
-fragment SingleSCharSequence: SingleSChar+;
-
-fragment DoubleSChar: ~["\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
-fragment SingleSChar: ~['\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
+fragment DoubleSChar: EscapeSequence | ~["];
+fragment SingleSChar: EscapeSequence | ~['];
 fragment Nondigit: [a-zA-Z_];
 fragment Digit: [0-9];
 fragment BinaryConstant: '0' [bB] [0-1]+;
