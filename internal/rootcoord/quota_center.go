@@ -571,7 +571,8 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 	for _, collectionID := range collectionIDs {
 		dbID, ok := q.collectionIDToDBID.Get(collectionID)
 		if !ok {
-			return fmt.Errorf("db ID not found of collection ID: %d", collectionID)
+			log.Warn("cannot find db id for collection", zap.Int64("collection", collectionID))
+			continue
 		}
 		collectionLimiter := q.rateLimiter.GetCollectionLimiters(dbID, collectionID)
 		if collectionLimiter == nil {
@@ -588,7 +589,8 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 		for _, partitionID := range partitionIDs {
 			dbID, ok := q.collectionIDToDBID.Get(collectionID)
 			if !ok {
-				return fmt.Errorf("db ID not found of collection ID: %d", collectionID)
+				log.Warn("cannot find db id for collection", zap.Int64("collection", collectionID))
+				continue
 			}
 			partitionLimiter := q.rateLimiter.GetPartitionLimiters(dbID, collectionID, partitionID)
 			if partitionLimiter == nil {
@@ -778,7 +780,8 @@ func (q *QuotaCenter) calculateWriteRates() error {
 
 		dbID, ok := q.collectionIDToDBID.Get(collection)
 		if !ok {
-			return fmt.Errorf("db ID not found of collection ID: %d", collection)
+			log.Warn("db ID not found for collection", zap.Int64("collectionID", collection))
+			continue
 		}
 		collectionLimiter := q.rateLimiter.GetCollectionLimiters(dbID, collection)
 		if collectionLimiter == nil {
