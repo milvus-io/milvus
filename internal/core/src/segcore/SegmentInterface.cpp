@@ -125,14 +125,35 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
 
     results->mutable_offset()->Add(retrieve_results.result_offsets_.begin(),
                                    retrieve_results.result_offsets_.end());
-    FillTargetEntry(trace_ctx,
-                    plan,
-                    results,
-                    retrieve_results.result_offsets_.data(),
-                    retrieve_results.result_offsets_.size(),
-                    ignore_non_pk,
-                    true);
+    if (retrieve_results.field_data_.empty()) {
+        FillTargetEntry(trace_ctx,
+                        plan,
+                        results,
+                        retrieve_results.result_offsets_.data(),
+                        retrieve_results.result_offsets_.size(),
+                        ignore_non_pk,
+                        true);
+    } else {
+        FillTargetEntryDirectly(trace_ctx, results, retrieve_results);
+    }
+
     return results;
+}
+
+void
+SegmentInternalInterface::FillTargetEntryDirectly(
+    tracer::TraceContext* trace_ctx,
+    const std::unique_ptr<proto::segcore::RetrieveResults>& results,
+    RetrieveResult& retrieveResult) const {
+    auto fields_data = results->mutable_fields_data();
+    for (auto& field_data : retrieveResult.field_data_) {
+        // Dynamically allocate a copy of the field data
+        auto* allocated_data = new DataArray(std::move(field_data));
+
+        // Transfer ownership to protobuf
+        fields_data->AddAllocated(allocated_data);
+    }
+    retrieveResult.field_data_.clear();
 }
 
 void
