@@ -18,6 +18,8 @@ package logutil
 
 import (
 	"context"
+	"runtime"
+	"strings"
 	"sync"
 
 	"go.uber.org/zap"
@@ -171,4 +173,23 @@ func Logger(ctx context.Context) *zap.Logger {
 
 func WithModule(ctx context.Context, module string) context.Context {
 	return log.WithModule(ctx, module)
+}
+
+func formatStack(skip int) string {
+	buffer := make([]byte, 1024)
+	for {
+		n := runtime.Stack(buffer, false)
+		if n < len(buffer) {
+			buffer = buffer[:n]
+			break
+		}
+		buffer = make([]byte, 2*len(buffer))
+	}
+
+	lines := strings.Split(string(buffer), "\n")
+	return strings.Join(lines[2*skip+1:], "\n")
+}
+
+func StackTrace(skip int) zapcore.Field {
+	return zap.String("stacktrace", formatStack(skip+1))
 }
