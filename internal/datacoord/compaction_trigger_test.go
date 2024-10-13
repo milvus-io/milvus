@@ -70,7 +70,6 @@ func (h *spyCompactionHandler) enqueueCompaction(task *datapb.CompactionTask) er
 	}
 	alloc := newMock0Allocator(h.t)
 	t.allocator = alloc
-	t.ResultSegments = []int64{100, 200}
 	plan, err := t.BuildCompactionRequest()
 	h.spyChan <- plan
 	return err
@@ -532,7 +531,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			},
 			[]*datapb.CompactionPlan{
 				{
-					PlanID: 0,
+					PlanID: 100,
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 						{
 							SegmentID: 1,
@@ -580,12 +579,13 @@ func Test_compactionTrigger_force(t *testing.T) {
 						},
 					},
 					// StartTime:        0,
+					BeginLogID:             100,
 					TimeoutInSeconds:       Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
 					Type:                   datapb.CompactionType_MixCompaction,
 					Channel:                "ch1",
 					TotalRows:              200,
 					Schema:                 schema,
-					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 100, End: 200},
+					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 101, End: 200},
 					MaxSize:                1342177280,
 				},
 			},
@@ -878,6 +878,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 							IsSorted: true,
 						},
 					},
+					BeginLogID:       100,
 					StartTime:        3,
 					TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
 					Type:             datapb.CompactionType_MixCompaction,
