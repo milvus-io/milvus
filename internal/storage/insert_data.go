@@ -68,14 +68,17 @@ func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFuncti
 
 	for _, field := range schema.Fields {
 		if field.IsPrimaryKey && field.GetNullable() {
-			return nil, merr.WrapErrParameterInvalidMsg("primary key field not support nullable")
+			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("primary key field should not be nullable (field: %s)", field.Name))
 		}
 		if field.IsPartitionKey && field.GetNullable() {
-			return nil, merr.WrapErrParameterInvalidMsg("partition key field not support nullable")
+			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("partition key field should not be nullable (field: %s)", field.Name))
 		}
 		if field.IsFunctionOutput {
 			if field.IsPrimaryKey || field.IsPartitionKey {
-				return nil, merr.WrapErrParameterInvalidMsg("function output field should not be primary key or partition key")
+				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("function output field should not be primary key or partition key (field: %s)", field.Name))
+			}
+			if field.GetNullable() {
+				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("function output field should not be nullable (field: %s)", field.Name))
 			}
 			if !withFunctionOutput {
 				continue
