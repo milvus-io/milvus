@@ -21,10 +21,12 @@ package expr
 import (
 	"context"
 	"fmt"
+	"unsafe"
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -40,6 +42,13 @@ func Init() {
 	v = &vm.VM{}
 	env = map[string]any{
 		"ctx": context.TODO(),
+		"objSize": func(p any) int {
+			message, ok := p.(proto.Message)
+			if !ok {
+				return int(unsafe.Sizeof(p))
+			}
+			return proto.Size(message)
+		},
 	}
 	authKey = paramtable.Get().EtcdCfg.RootPath.GetValue()
 }
