@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.53.0') _
+@Library('jenkins-shared-library@v0.59.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
@@ -50,7 +50,6 @@ pipeline {
             steps {
                 container('tkn') {
                     script {
-
                         def job_name = tekton.run arch: 'amd64',
                                               isPr: isPr,
                                               gitMode: gitMode ,
@@ -81,6 +80,9 @@ pipeline {
                 agent {
                     kubernetes {
                         cloud '4am'
+                        // 'milvus' template defined a ephemeral volume used for pytest result archiving
+                        // pvc name would be <pod-name>-volume-0
+                        inheritFrom 'milvus'
                         yaml pod
                     }
                 }
@@ -96,8 +98,11 @@ pipeline {
                             container('tkn') {
                                 script {
                                     def helm_release_name =  get_helm_release_name milvus_deployment_option
+                                    // pvc name would be <pod-name>-volume-0, used for pytest result archiving
+                                    def pvc = env.JENKINS_AGENT_NAME + '-volume-0'
 
                                     tekton.pytest helm_release_name: helm_release_name,
+                                              pvc: pvc,
                                               milvus_helm_version: milvus_helm_chart_version,
                                               ciMode: 'nightly',
                                               milvus_image_tag: milvus_image_tag,
@@ -126,6 +131,11 @@ pipeline {
                                                                     release_name: helm_release_name ,
                                                                      change_id: env.CHANGE_ID,
                                                                      build_id: env.BUILD_ID
+                                    }
+                                }
+                                container('jnlp') {
+                                    script {
+                                        tekton.archive_pytest_logs(milvus_deployment_option)
                                     }
                                 }
                             }
