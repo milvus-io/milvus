@@ -1846,7 +1846,7 @@ def gen_values(schema: CollectionSchema, nb, start_id=0, default_values: dict = 
         if default_value is not None:
             data.append(default_value)
         elif field.auto_id is False:
-            data.append(gen_data_by_collection_field(field, nb, start_id * nb))
+            data.append(gen_data_by_collection_field(field, nb, start_id))
     return data
 
 
