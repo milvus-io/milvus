@@ -135,8 +135,8 @@ func TestSegmentAllocManager(t *testing.T) {
 	assert.True(t, m.IsNoWaitSeal())
 
 	// Try to seal with a policy
-	resource.Resource().SegmentAssignStatsManager().UpdateOnFlush(6000, stats.FlushOperationMetrics{
-		BinLogCounter: 100,
+	resource.Resource().SegmentAssignStatsManager().UpdateOnSync(6000, stats.SyncOperationMetrics{
+		BinLogCounterIncr: 100,
 	})
 	// ask a unacknowledgement seal for partition 3 to avoid seal operation.
 	result, err = m.AssignSegment(ctx, &AssignSegmentRequest{
@@ -266,6 +266,7 @@ func initializeTestState(t *testing.T) {
 	//			s 6000g
 
 	paramtable.Init()
+	paramtable.Get().DataCoordCfg.SegmentSealProportion.SwapTempValue("1.0")
 	paramtable.Get().DataCoordCfg.SegmentSealProportionJitter.SwapTempValue("0.0")
 	paramtable.Get().DataCoordCfg.SegmentMaxSize.SwapTempValue("1")
 

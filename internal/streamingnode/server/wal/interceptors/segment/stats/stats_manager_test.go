@@ -60,11 +60,11 @@ func TestStatsManager(t *testing.T) {
 	assert.Equal(t, uint64(350), m.pchannelStats["pchannel"].BinarySize)
 	assert.Equal(t, uint64(250), m.pchannelStats["pchannel2"].BinarySize)
 
-	m.UpdateOnFlush(3, FlushOperationMetrics{BinLogCounter: 100})
+	m.UpdateOnSync(3, SyncOperationMetrics{BinLogCounterIncr: 100})
 	<-m.SealNotifier().WaitChan()
 	infos = m.SealNotifier().Get()
 	assert.Len(t, infos, 1)
-	m.UpdateOnFlush(1000, FlushOperationMetrics{BinLogCounter: 100})
+	m.UpdateOnSync(1000, SyncOperationMetrics{BinLogCounterIncr: 100})
 	shouldBlock(t, m.SealNotifier().WaitChan())
 
 	m.AllocRows(3, InsertMetrics{Rows: 400, BinarySize: 400})

@@ -68,8 +68,8 @@ func TestSegmentStats(t *testing.T) {
 	assert.Equal(t, stat.Insert.Rows, uint64(160))
 	assert.Equal(t, stat.Insert.BinarySize, uint64(320))
 
-	stat.UpdateOnFlush(FlushOperationMetrics{
-		BinLogCounter: 4,
+	stat.UpdateOnSync(SyncOperationMetrics{
+		BinLogCounterIncr: 4,
 	})
-	assert.Equal(t, uint64(4), stat.BinLogCounter)
+	assert.Equal(t, uint64(7), stat.BinLogCounter)
 }
