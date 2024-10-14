@@ -2007,7 +2007,7 @@ class TestGroupSearch(TestCaseClassBase):
         index_params = {
             **DefaultVectorIndexParams.IVF_SQ8(DataType.FLOAT16_VECTOR.name, metric_type=MetricType.L2),
             **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name, metric_type=MetricType.IP),
-            **DefaultVectorIndexParams.IVF_FLAT(DataType.BFLOAT16_VECTOR.name, metric_type=MetricType.COSINE),
+            **DefaultVectorIndexParams.DISKANN(DataType.BFLOAT16_VECTOR.name, metric_type=MetricType.COSINE),
             **DefaultVectorIndexParams.SPARSE_WAND(DataType.SPARSE_FLOAT_VECTOR.name, metric_type=MetricType.IP),
             # index params for varchar field
             **DefaultScalarIndexParams.INVERTED(self.inverted_string_field)
