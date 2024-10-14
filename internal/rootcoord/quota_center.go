@@ -571,7 +571,7 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 	for _, collectionID := range collectionIDs {
 		dbID, ok := q.collectionIDToDBID.Get(collectionID)
 		if !ok {
-			log.Warn("cannot find db id for collection", zap.Int64("collection", collectionID))
+			log.Warn("cannot find db for collection", zap.Int64("collection", collectionID))
 			continue
 		}
 		collectionLimiter := q.rateLimiter.GetCollectionLimiters(dbID, collectionID)
@@ -589,7 +589,7 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 		for _, partitionID := range partitionIDs {
 			dbID, ok := q.collectionIDToDBID.Get(collectionID)
 			if !ok {
-				log.Warn("cannot find db id for collection", zap.Int64("collection", collectionID))
+				log.Warn("cannot find db for collection", zap.Int64("collection", collectionID))
 				continue
 			}
 			partitionLimiter := q.rateLimiter.GetPartitionLimiters(dbID, collectionID, partitionID)
@@ -780,7 +780,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 
 		dbID, ok := q.collectionIDToDBID.Get(collection)
 		if !ok {
-			log.Warn("db ID not found for collection", zap.Int64("collectionID", collection))
+			log.Warn("cannot find db for collection", zap.Int64("collection", collection))
 			continue
 		}
 		collectionLimiter := q.rateLimiter.GetCollectionLimiters(dbID, collection)
@@ -1233,7 +1233,7 @@ func (q *QuotaCenter) checkDiskQuota(denyWritingDBs map[int64]struct{}) error {
 		}
 		dbID, ok := q.collectionIDToDBID.Get(collection)
 		if !ok {
-			log.Warn("cannot find db id for collection", zap.Int64("collection", collection))
+			log.Warn("cannot find db for collection", zap.Int64("collection", collection))
 			continue
 		}
 
