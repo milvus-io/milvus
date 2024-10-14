@@ -279,22 +279,23 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 			// get segment's replica first, then get shard leader by replica
 			replica := ex.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
 			if replica == nil {
-				msg := "node doesn't belong to any replica"
+				msg := "node doesn't belong to any replica, try to send release to worker"
 				err := merr.WrapErrNodeNotAvailable(action.Node())
 				log.Warn(msg, zap.Error(err))
-				return
+				dstNode = action.Node()
+				req.NeedTransfer = false
+			} else {
+				view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard()))
+				if view == nil {
+					msg := "no shard leader for the segment to execute releasing"
+					err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
+					log.Warn(msg, zap.Error(err))
+					return
+				}
+				dstNode = view.ID
+				log = log.With(zap.Int64("shardLeader", view.ID))
+				req.NeedTransfer = true
 			}
-			view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard()))
-			if view == nil {
-				msg := "no shard leader for the segment to execute releasing"
-				err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
-				log.Warn(msg, zap.Error(err))
-				return
-			}
-
-			dstNode = view.ID
-			log = log.With(zap.Int64("shardLeader", view.ID))
-			req.NeedTransfer = true
 		}
 	}
 
@@ -365,6 +366,8 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		loadFields,
 		partitions...,
 	)
+
+	ex.setMetricTypeForMetaInfo(loadMeta, indexInfo)
 
 	dmChannel := ex.targetMgr.GetDmChannel(task.CollectionID(), action.ChannelName(), meta.NextTarget)
 	if dmChannel == nil {
@@ -738,4 +741,5 @@ func (ex *Executor) setMetricTypeForMetaInfo(metaInfo *querypb.LoadMetaInfo, ind
 			}
 		}
 	}
+	log.Warn("metric type not found in index info, set it to default", zap.Any("indexInfos", indexInfos), zap.Any("metaInfo", metaInfo))
 }

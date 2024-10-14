@@ -254,11 +254,13 @@ type commonConfig struct {
 	UseVectorAsClusteringKey       ParamItem `refreshable:"true"`
 	EnableVectorClusteringKey      ParamItem `refreshable:"true"`
 
-	GCEnabled                           ParamItem `refreshable:"false"`
-	GCHelperEnabled                     ParamItem `refreshable:"false"`
+	// GC
+	GCEnabled         ParamItem `refreshable:"false"`
+	GCHelperEnabled   ParamItem `refreshable:"false"`
+	MaximumGOGCConfig ParamItem `refreshable:"false"`
+	MinimumGOGCConfig ParamItem `refreshable:"false"`
+
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
-	MaximumGOGCConfig                   ParamItem `refreshable:"false"`
-	MinimumGOGCConfig                   ParamItem `refreshable:"false"`
 	ReadOnlyPrivileges                  ParamItem `refreshable:"false"`
 	ReadWritePrivileges                 ParamItem `refreshable:"false"`
 	AdminPrivileges                     ParamItem `refreshable:"false"`
@@ -850,6 +852,7 @@ This helps Milvus-CDC synchronize incremental data`,
 
 	p.GCEnabled = ParamItem{
 		Key:          "common.gcenabled",
+		FallbackKeys: []string{"queryNode.gcenabled"},
 		Version:      "2.4.7",
 		DefaultValue: "true",
 	}
@@ -857,6 +860,7 @@ This helps Milvus-CDC synchronize incremental data`,
 
 	p.GCHelperEnabled = ParamItem{
 		Key:          "common.gchelper.enabled",
+		FallbackKeys: []string{"queryNode.gchelper.enabled"},
 		Version:      "2.4.7",
 		DefaultValue: "true",
 	}
@@ -875,6 +879,7 @@ This helps Milvus-CDC synchronize incremental data`,
 
 	p.MaximumGOGCConfig = ParamItem{
 		Key:          "common.gchelper.maximumGoGC",
+		FallbackKeys: []string{"queryNode.gchelper.maximumGoGC"},
 		Version:      "2.4.7",
 		DefaultValue: "200",
 	}
@@ -882,6 +887,7 @@ This helps Milvus-CDC synchronize incremental data`,
 
 	p.MinimumGOGCConfig = ParamItem{
 		Key:          "common.gchelper.minimumGoGC",
+		FallbackKeys: []string{"queryNode.gchelper.minimumGoGC"},
 		Version:      "2.4.7",
 		DefaultValue: "30",
 	}
@@ -1221,7 +1227,9 @@ type proxyConfig struct {
 	ShardLeaderCacheInterval     ParamItem `refreshable:"false"`
 	ReplicaSelectionPolicy       ParamItem `refreshable:"false"`
 	CheckQueryNodeHealthInterval ParamItem `refreshable:"false"`
-	CostMetricsExpireTime        ParamItem `refreshable:"true"`
+	CostMetricsExpireTime        ParamItem `refreshable:"false"`
+	CheckWorkloadRequestNum      ParamItem `refreshable:"false"`
+	WorkloadToleranceFactor      ParamItem `refreshable:"false"`
 	RetryTimesOnReplica          ParamItem `refreshable:"true"`
 	RetryTimesOnHealthCheck      ParamItem `refreshable:"true"`
 	PartitionNameRegexp          ParamItem `refreshable:"true"`
@@ -1541,6 +1549,23 @@ please adjust in embedded Milvus: false`,
 		Doc:          "expire time for query node cost metrics, in ms",
 	}
 	p.CostMetricsExpireTime.Init(base.mgr)
+
+	p.CheckWorkloadRequestNum = ParamItem{
+		Key:          "proxy.checkWorkloadRequestNum",
+		Version:      "2.4.12",
+		DefaultValue: "10",
+		Doc:          "after every requestNum requests has been assigned, try to check workload for query node",
+	}
+	p.CheckWorkloadRequestNum.Init(base.mgr)
+
+	p.WorkloadToleranceFactor = ParamItem{
+		Key:          "proxy.workloadToleranceFactor",
+		Version:      "2.4.12",
+		DefaultValue: "0.1",
+		Doc: `tolerance factor for query node workload difference, default to 10%, which means if query node's workload diff is higher than this factor, 
+		proxy will compute each querynode's workload score, and assign request to the lowest workload node; otherwise, it will assign request to the node by round robin`,
+	}
+	p.WorkloadToleranceFactor.Init(base.mgr)
 
 	p.RetryTimesOnReplica = ParamItem{
 		Key:          "proxy.retryTimesOnReplica",
@@ -2352,19 +2377,15 @@ type queryNodeConfig struct {
 	TopKMergeRatio        ParamItem `refreshable:"true"`
 	CPURatio              ParamItem `refreshable:"true"`
 	MaxTimestampLag       ParamItem `refreshable:"true"`
-	GCEnabled             ParamItem `refreshable:"true"`
-
-	GCHelperEnabled     ParamItem `refreshable:"false"`
-	MinimumGOGCConfig   ParamItem `refreshable:"false"`
-	MaximumGOGCConfig   ParamItem `refreshable:"false"`
-	GracefulStopTimeout ParamItem `refreshable:"false"`
+	GracefulStopTimeout   ParamItem `refreshable:"false"`
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
 	DeleteBufferBlockSize  ParamItem `refreshable:"false"`
 
-	// level zero
-	LevelZeroForwardPolicy ParamItem `refreshable:"true"`
+	// delta forward
+	LevelZeroForwardPolicy      ParamItem `refreshable:"true"`
+	StreamingDeltaForwardPolicy ParamItem `refreshable:"true"`
 
 	// loader
 	IoPoolSize             ParamItem `refreshable:"false"`
@@ -2905,34 +2926,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.MaxTimestampLag.Init(base.mgr)
 
-	p.GCEnabled = ParamItem{
-		Key:          "queryNode.gcenabled",
-		Version:      "2.3.0",
-		DefaultValue: "true",
-	}
-	p.GCEnabled.Init(base.mgr)
-
-	p.GCHelperEnabled = ParamItem{
-		Key:          "queryNode.gchelper.enabled",
-		Version:      "2.0.0",
-		DefaultValue: "true",
-	}
-	p.GCHelperEnabled.Init(base.mgr)
-
-	p.MaximumGOGCConfig = ParamItem{
-		Key:          "queryNode.gchelper.maximumGoGC",
-		Version:      "2.0.0",
-		DefaultValue: "200",
-	}
-	p.MaximumGOGCConfig.Init(base.mgr)
-
-	p.MinimumGOGCConfig = ParamItem{
-		Key:          "queryNode.gchelper.minimumGoGC",
-		Version:      "2.0.0",
-		DefaultValue: "30",
-	}
-	p.MinimumGOGCConfig.Init(base.mgr)
-
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "queryNode.gracefulStopTimeout",
 		Version:      "2.2.1",
@@ -2963,6 +2956,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.LevelZeroForwardPolicy.Init(base.mgr)
+
+	p.StreamingDeltaForwardPolicy = ParamItem{
+		Key:          "queryNode.streamingDeltaForwardPolicy",
+		Version:      "2.4.12",
+		Doc:          "delegator streaming deletion forward policy, possible option[\"FilterByBF\", \"Direct\"]",
+		DefaultValue: "FilterByBF",
+		Export:       true,
+	}
+	p.StreamingDeltaForwardPolicy.Init(base.mgr)
 
 	p.IoPoolSize = ParamItem{
 		Key:          "queryNode.ioPoolSize",
@@ -3182,7 +3184,6 @@ type dataCoordConfig struct {
 	ClusteringCompactionMaxClusterSize         ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
-	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
 	LevelZeroCompactionTriggerMinSize        ParamItem `refreshable:"true"`
 	LevelZeroCompactionTriggerMaxSize        ParamItem `refreshable:"true"`
 	LevelZeroCompactionTriggerDeltalogMinNum ParamItem `refreshable:"true"`
@@ -3563,15 +3564,6 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.SyncSegmentsInterval.Init(base.mgr)
-
-	// LevelZeroCompaction
-	p.EnableLevelZeroSegment = ParamItem{
-		Key:          "dataCoord.segment.enableLevelZero",
-		Version:      "2.4.0",
-		Doc:          "Whether to enable LevelZeroCompaction",
-		DefaultValue: "true",
-	}
-	p.EnableLevelZeroSegment.Init(base.mgr)
 
 	p.LevelZeroCompactionTriggerMinSize = ParamItem{
 		Key:          "dataCoord.compaction.levelzero.forceTrigger.minSize",
@@ -4083,6 +4075,7 @@ type dataNodeConfig struct {
 	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
 	MaxImportFileSizeInGB      ParamItem `refreshable:"true"`
 	ReadBufferSizeInMB         ParamItem `refreshable:"true"`
+	MaxTaskSlotNum             ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -4387,11 +4380,21 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.ReadBufferSizeInMB.Init(base.mgr)
 
+	p.MaxTaskSlotNum = ParamItem{
+		Key:          "dataNode.import.maxTaskSlotNum",
+		Version:      "2.4.13",
+		Doc:          "The maximum number of slots occupied by each import/pre-import task.",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxTaskSlotNum.Init(base.mgr)
+
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",
 		Version:      "2.4.0",
 		Doc:          "The minimal memory ratio of free memory for level zero compaction executing in batch mode",
-		DefaultValue: "0.05",
+		DefaultValue: "0.5",
 		Export:       true,
 	}
 	p.L0BatchMemoryRatio.Init(base.mgr)

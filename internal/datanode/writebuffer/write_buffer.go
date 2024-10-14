@@ -106,14 +106,7 @@ func NewWriteBuffer(channel string, metacache metacache.MetaCache, storageV2Cach
 		opt(option)
 	}
 
-	switch option.deletePolicy {
-	case DeletePolicyBFPkOracle:
-		return NewBFWriteBuffer(channel, metacache, storageV2Cache, syncMgr, option)
-	case DeletePolicyL0Delta:
-		return NewL0WriteBuffer(channel, metacache, storageV2Cache, syncMgr, option)
-	default:
-		return nil, merr.WrapErrParameterInvalid("valid delete policy config", option.deletePolicy)
-	}
+	return NewL0WriteBuffer(channel, metacache, storageV2Cache, syncMgr, option)
 }
 
 // writeBufferBase is the common component for buffering data
@@ -616,6 +609,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithStartPosition(startPos).
 		WithTimeRange(tsFrom, tsTo).
 		WithLevel(segmentInfo.Level()).
+		WithDataSource(metrics.StreamingDataSourceLabel).
 		WithCheckpoint(wb.checkpoint).
 		WithBatchSize(batchSize)
 

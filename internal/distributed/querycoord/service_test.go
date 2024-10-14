@@ -78,6 +78,8 @@ func Test_NewServer(t *testing.T) {
 			server.dataCoord = mdc
 			server.rootCoord = mrc
 
+			err = server.Prepare()
+			assert.NoError(t, err)
 			err = server.Run()
 			assert.NoError(t, err)
 		})

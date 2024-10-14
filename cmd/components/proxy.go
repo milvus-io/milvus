@@ -49,6 +49,10 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	return n, nil
 }
 
+func (n *Proxy) Prepare() error {
+	return n.svr.Prepare()
+}
+
 // Run starts service
 func (n *Proxy) Run() error {
 	if err := n.svr.Run(); err != nil {

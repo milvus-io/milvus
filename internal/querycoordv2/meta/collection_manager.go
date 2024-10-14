@@ -659,3 +659,25 @@ func (m *CollectionManager) removePartition(collectionID typeutil.UniqueID, part
 
 	return nil
 }
+
+func (m *CollectionManager) UpdateReplicaNumber(collectionID typeutil.UniqueID, replicaNumber int32) error {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	collection, ok := m.collections[collectionID]
+	if !ok {
+		return merr.WrapErrCollectionNotFound(collectionID)
+	}
+	newCollection := collection.Clone()
+	newCollection.ReplicaNumber = replicaNumber
+
+	partitions := m.getPartitionsByCollection(collectionID)
+	newPartitions := make([]*Partition, 0, len(partitions))
+	for _, partition := range partitions {
+		newPartition := partition.Clone()
+		newPartition.ReplicaNumber = replicaNumber
+		newPartitions = append(newPartitions, newPartition)
+	}
+
+	return m.putCollection(true, newCollection, newPartitions...)
+}

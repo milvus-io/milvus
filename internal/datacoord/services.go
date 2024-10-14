@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -395,7 +396,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			info = s.meta.GetSegment(id)
 			// TODO: GetCompactionTo should be removed and add into GetSegment method and protected by lock.
 			// Too much modification need to be applied to SegmentInfo, a refactor is needed.
-			child, ok := s.meta.GetCompactionTo(id)
+			children, ok := s.meta.GetCompactionTo(id)
 
 			// info may be not-nil, but ok is false when the segment is being dropped concurrently.
 			if info == nil || !ok {
@@ -406,7 +407,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			}
 
 			clonedInfo := info.Clone()
-			if child != nil {
+			for _, child := range children {
 				clonedChild := child.Clone()
 				// child segment should decompress binlog path
 				binlog.DecompressBinLog(storage.DeleteBinlog, clonedChild.GetCollectionID(), clonedChild.GetPartitionID(), clonedChild.GetID(), clonedChild.GetDeltalogs())
@@ -1680,6 +1681,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		return importFile
 	})
 
+	startTime := time.Now()
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
 			JobID:          idStart,
@@ -1693,8 +1695,9 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			State:          internalpb.ImportJobState_Pending,
 			Files:          files,
 			Options:        in.GetOptions(),
-			StartTime:      time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			StartTime:      startTime.Format("2006-01-02T15:04:05Z07:00"),
 		},
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.importMeta.AddJob(job)
 	if err != nil {

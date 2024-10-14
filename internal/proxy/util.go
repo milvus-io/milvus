@@ -756,8 +756,8 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 	}
 }
 
-// fillFieldIDBySchema set fieldID to fieldData according FieldSchemas
-func fillFieldIDBySchema(columns []*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
+// fillFieldPropertiesBySchema set fieldID to fieldData according FieldSchemas
+func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
 	if len(columns) != len(schema.GetFields()) {
 		return fmt.Errorf("len(columns) mismatch the len(fields), len(columns): %d, len(fields): %d",
 			len(columns), len(schema.GetFields()))
@@ -771,6 +771,16 @@ func fillFieldIDBySchema(columns []*schemapb.FieldData, schema *schemapb.Collect
 		if fieldSchema, ok := fieldName2Schema[fieldData.FieldName]; ok {
 			fieldData.FieldId = fieldSchema.FieldID
 			fieldData.Type = fieldSchema.DataType
+
+			// Set the ElementType because it may not be set in the insert request.
+			if fieldData.Type == schemapb.DataType_Array {
+				fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
+				if !ok {
+					return fmt.Errorf("field convert FieldData_Scalars fail in fieldData, fieldName: %s,"+
+						" collectionName:%s", fieldData.FieldName, schema.Name)
+				}
+				fd.Scalars.GetArrayData().ElementType = fieldSchema.ElementType
+			}
 		} else {
 			return fmt.Errorf("fieldName %v not exist in collection schema", fieldData.FieldName)
 		}
@@ -1085,6 +1095,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 						}
 						resultFieldNameMap[common.MetaFieldName] = true
 						userOutputFieldsMap[outputFieldName] = true
+						userDynamicFieldsMap[outputFieldName] = true
 					} else {
 						// TODO after cold field be able to fetched with chunk cache, this check shall be removed
 						return nil, nil, nil, fmt.Errorf("field %s cannot be returned since dynamic field not loaded", outputFieldName)

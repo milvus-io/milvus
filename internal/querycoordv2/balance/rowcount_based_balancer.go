@@ -18,6 +18,7 @@ package balance
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 
@@ -77,9 +78,8 @@ func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*me
 		if len(plans) > balanceBatchSize {
 			break
 		}
-		// change node's priority and push back
-		p := ni.getPriority()
-		ni.setPriority(p + int(s.GetNumOfRows()))
+		// change node's score and push back
+		ni.AddCurrentScoreDelta(float64(s.GetNumOfRows()))
 		queue.push(ni)
 	}
 	return plans
@@ -119,9 +119,8 @@ func (b *RowCountBasedBalancer) AssignChannel(channels []*meta.DmChannel, nodes 
 			Channel: c,
 		}
 		plans = append(plans, plan)
-		// change node's priority and push back
-		p := ni.getPriority()
-		ni.setPriority(p + 1)
+		// change node's score and push back
+		ni.AddCurrentScoreDelta(1)
 		queue.push(ni)
 	}
 	return plans
@@ -168,12 +167,21 @@ func (b *RowCountBasedBalancer) convertToNodeItemsByChannel(nodeIDs []int64) []*
 	return ret
 }
 
-func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) (segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan) {
 	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.RowCountBasedBalancer", 1, 60).With(
 		zap.Int64("collectionID", replica.GetCollectionID()),
 		zap.Int64("replicaID", replica.GetCollectionID()),
 		zap.String("resourceGroup", replica.GetResourceGroup()),
 	)
+	br := NewBalanceReport()
+	defer func() {
+		if len(segmentPlans) == 0 && len(channelPlans) == 0 {
+			log.WithRateGroup(fmt.Sprintf("scorebasedbalance-noplan-%d", replica.GetID()), 1, 60).
+				RatedDebug(60, "no plan generated, balance report", zap.Stringers("records", br.detailRecords))
+		} else {
+			log.Info("balance plan generated", zap.Stringers("report details", br.records))
+		}
+	}()
 	if replica.NodesCount() == 0 {
 		return nil, nil
 	}
@@ -185,7 +193,7 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 		return nil, nil
 	}
 
-	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
+	segmentPlans, channelPlans = make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
 	if len(roNodes) != 0 {
 		if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
 			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
@@ -203,7 +211,7 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 		}
 	} else {
 		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
-			channelPlans = append(channelPlans, b.genChannelPlan(replica, rwNodes)...)
+			channelPlans = append(channelPlans, b.genChannelPlan(br, replica, rwNodes)...)
 		}
 
 		if len(channelPlans) == 0 {
@@ -310,7 +318,7 @@ func (b *RowCountBasedBalancer) genStoppingChannelPlan(replica *meta.Replica, rw
 	return channelPlans
 }
 
-func (b *RowCountBasedBalancer) genChannelPlan(replica *meta.Replica, rwNodes []int64) []ChannelAssignPlan {
+func (b *RowCountBasedBalancer) genChannelPlan(br *balanceReport, replica *meta.Replica, rwNodes []int64) []ChannelAssignPlan {
 	channelPlans := make([]ChannelAssignPlan, 0)
 	if len(rwNodes) > 1 {
 		// start to balance channels on all available nodes
@@ -342,6 +350,7 @@ func (b *RowCountBasedBalancer) genChannelPlan(replica *meta.Replica, rwNodes []
 		for i := range channelPlans {
 			channelPlans[i].From = channelPlans[i].Channel.Node
 			channelPlans[i].Replica = replica
+			br.AddRecord(StrRecordf("add channel plan %s", channelPlans[i]))
 		}
 
 		return channelPlans
@@ -366,14 +375,51 @@ func NewRowCountBasedBalancer(
 
 type nodeItem struct {
 	baseItem
-	nodeID int64
+	fmt.Stringer
+	nodeID        int64
+	assignedScore float64
+	currentScore  float64
 }
 
-func newNodeItem(priority int, nodeID int64) nodeItem {
+func newNodeItem(currentScore int, nodeID int64) nodeItem {
 	return nodeItem{
-		baseItem: baseItem{
-			priority: priority,
-		},
-		nodeID: nodeID,
+		baseItem:     baseItem{},
+		nodeID:       nodeID,
+		currentScore: float64(currentScore),
 	}
+}
+
+func (b *nodeItem) getPriority() int {
+	// if node lacks more score between assignedScore and currentScore, then higher priority
+	return int(b.currentScore - b.assignedScore)
+}
+
+func (b *nodeItem) setPriority(priority int) {
+	panic("not supported, use updatePriority instead")
+}
+
+func (b *nodeItem) getPriorityWithCurrentScoreDelta(delta float64) int {
+	return int((b.currentScore + delta) - b.assignedScore)
+}
+
+func (b *nodeItem) getCurrentScore() float64 {
+	return b.currentScore
+}
+
+func (b *nodeItem) AddCurrentScoreDelta(delta float64) {
+	b.currentScore += delta
+	b.priority = b.getPriority()
+}
+
+func (b *nodeItem) getAssignedScore() float64 {
+	return b.assignedScore
+}
+
+func (b *nodeItem) setAssignedScore(delta float64) {
+	b.assignedScore += delta
+	b.priority = b.getPriority()
+}
+
+func (b *nodeItem) String() string {
+	return fmt.Sprintf("{NodeID: %d, AssignedScore: %f, CurrentScore: %f, Priority: %d}", b.nodeID, b.assignedScore, b.currentScore, b.priority)
 }

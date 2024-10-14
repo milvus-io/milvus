@@ -315,6 +315,7 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
 
     if (term_set.empty()) {
         res.reset();
+        MoveCursor();
         return res_vec;
     }
 
@@ -323,11 +324,6 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
                                 TargetBitmapView res,
                                 int index,
                                 const std::unordered_set<ValueType>& term_set) {
-        if (term_set.empty()) {
-            for (int i = 0; i < size; ++i) {
-                res[i] = false;
-            }
-        }
         for (int i = 0; i < size; ++i) {
             if (index >= data[i].length()) {
                 res[i] = false;
@@ -425,9 +421,8 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
     }
 
     if (term_set.empty()) {
-        for (size_t i = 0; i < real_batch_size; ++i) {
-            res[i] = false;
-        }
+        res.reset();
+        MoveCursor();
         return res_vec;
     }
 
@@ -492,14 +487,12 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
 
     std::vector<IndexInnerType> vals;
     for (auto& val : expr_->vals_) {
-        auto converted_val = GetValueFromProto<T>(val);
         // Integral overflow process
-        if constexpr (std::is_integral_v<T>) {
-            if (milvus::query::out_of_range<T>(converted_val)) {
-                continue;
-            }
+        bool overflowed = false;
+        auto converted_val = GetValueFromProtoWithOverflow<T>(val, overflowed);
+        if (!overflowed) {
+            vals.emplace_back(converted_val);
         }
-        vals.emplace_back(converted_val);
     }
     auto execute_sub_batch = [](Index* index_ptr,
                                 const std::vector<IndexInnerType>& vals) {

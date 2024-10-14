@@ -14,9 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "ChunkCache.h"
 #include <future>
 #include <memory>
+
+#include "ChunkCache.h"
 #include "common/Types.h"
 
 namespace milvus::storage {
@@ -68,7 +69,7 @@ ChunkCache::Read(const std::string& filepath,
         if (mmap_enabled && mmap_rss_not_need) {
             auto ok = madvise(reinterpret_cast<void*>(
                                   const_cast<char*>(column->MmappedData())),
-                              column->ByteSize(),
+                              column->DataByteSize(),
                               ReadAheadPolicy_Map["dontneed"]);
             if (ok != 0) {
                 LOG_WARN(
@@ -77,7 +78,7 @@ ChunkCache::Read(const std::string& filepath,
                     "{}",
                     filepath,
                     static_cast<const void*>(column->MmappedData()),
-                    column->ByteSize(),
+                    column->DataByteSize(),
                     strerror(errno));
             }
         }
@@ -124,14 +125,14 @@ ChunkCache::Prefetch(const std::string& filepath) {
     auto column = it->second.second.get();
     auto ok = madvise(
         reinterpret_cast<void*>(const_cast<char*>(column->MmappedData())),
-        column->ByteSize(),
+        column->DataByteSize(),
         read_ahead_policy_);
     if (ok != 0) {
         LOG_WARN(
             "failed to madvise to the data file {}, addr {}, size {}, err: {}",
             filepath,
             static_cast<const void*>(column->MmappedData()),
-            column->ByteSize(),
+            column->DataByteSize(),
             strerror(errno));
     }
 }
@@ -141,43 +142,29 @@ ChunkCache::Mmap(const FieldDataPtr& field_data,
                  const MmapChunkDescriptorPtr& descriptor,
                  const FieldMeta& field_meta,
                  bool mmap_enabled) {
-    auto dim = field_data->get_dim();
-    auto data_type = field_data->get_data_type();
-
     auto data_size = field_data->Size();
 
     std::shared_ptr<ColumnBase> column{};
 
     if (IsSparseFloatVectorDataType(data_type)) {
-        std::vector<uint64_t> indices{};
-        uint64_t offset = 0;
-        for (auto i = 0; i < field_data->get_num_rows(); ++i) {
-            indices.push_back(offset);
-            offset += field_data->Size(i);
-        }
         std::shared_ptr<SparseFloatColumn> sparse_column;
         if (mmap_enabled) {
-            sparse_column = std::make_shared<SparseFloatColumn>(
-                data_size, dim, data_type, mcm_, descriptor);
+            sparse_column = std::make_shared<SparseFloatColumn>(mcm_, descriptor);
         } else {
             sparse_column = std::make_shared<SparseFloatColumn>(field_meta);
         }
-        sparse_column->AppendBatchMmap(field_data);
-        sparse_column->Seal(std::move(indices));
-        column = std::move(sparse_column);
     } else if (IsVariableDataType(data_type)) {
         AssertInfo(
             false, "TODO: unimplemented for variable data type: {}", data_type);
     } else {
         if (mmap_enabled) {
-            column = std::make_shared<Column>(
-                data_size, dim, data_type, mcm_, descriptor);
+            column = std::make_shared<Column>(data_size, data_type, mcm_, descriptor);
         } else {
             column = std::make_shared<Column>(field_data->get_num_rows(),
                                               field_meta);
         }
-        column->AppendBatch(field_data);
     }
+    column->AppendBatch(field_data);
     return column;
 }
 }  // namespace milvus::storage

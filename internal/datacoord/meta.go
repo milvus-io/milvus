@@ -462,18 +462,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 func (m *meta) SetStoredIndexFileSizeMetric() uint64 {
 	m.RLock()
 	defer m.RUnlock()
-	var total uint64
-
-	metrics.DataCoordStoredIndexFilesSize.Reset()
-	for _, segmentIdx := range m.indexMeta.GetAllSegIndexes() {
-		coll, ok := m.collections[segmentIdx.CollectionID]
-		if ok {
-			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName,
-				fmt.Sprint(segmentIdx.CollectionID), fmt.Sprint(segmentIdx.SegmentID)).Set(float64(segmentIdx.IndexSize))
-			total += segmentIdx.IndexSize
-		}
-	}
-	return total
+	return m.indexMeta.SetStoredIndexFileSizeMetric(m.collections)
 }
 
 func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
@@ -1012,10 +1001,12 @@ func (m *meta) UpdateSegmentsInfo(operators ...UpdateOperator) error {
 	}
 
 	for _, operator := range operators {
-		ok := operator(updatePack)
-		if !ok {
-			return nil
-		}
+		operator(updatePack)
+	}
+
+	// skip if all segment not exist
+	if len(updatePack.segments) == 0 {
+		return nil
 	}
 
 	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
@@ -1644,7 +1635,7 @@ func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
 }
 
 // GetCompactionTo returns the segment info of the segment to be compacted to.
-func (m *meta) GetCompactionTo(segmentID int64) (*SegmentInfo, bool) {
+func (m *meta) GetCompactionTo(segmentID int64) ([]*SegmentInfo, bool) {
 	m.RLock()
 	defer m.RUnlock()
 

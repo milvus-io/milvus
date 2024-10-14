@@ -203,6 +203,9 @@ func TestComponentParam(t *testing.T) {
 		assert.False(t, Params.SkipPartitionKeyCheck.GetAsBool())
 		params.Save("proxy.skipPartitionKeyCheck", "true")
 		assert.True(t, Params.SkipPartitionKeyCheck.GetAsBool())
+
+		assert.Equal(t, int64(10), Params.CheckWorkloadRequestNum.GetAsInt64())
+		assert.Equal(t, float64(0.1), Params.WorkloadToleranceFactor.GetAsFloat())
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {
@@ -551,6 +554,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 16, maxConcurrentImportTaskNum)
 		assert.Equal(t, int64(16), Params.MaxImportFileSizeInGB.GetAsInt64())
 		assert.Equal(t, 16, Params.ReadBufferSizeInMB.GetAsInt())
+		assert.Equal(t, 16, Params.MaxTaskSlotNum.GetAsInt())
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
@@ -621,6 +625,8 @@ func TestCachedParam(t *testing.T) {
 
 	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())
 	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())
+
+	assert.Equal(t, 60, params.ServiceParam.MQCfg.PursuitBufferTime.GetAsInt())
 
 	assert.Equal(t, int64(1024), params.DataCoordCfg.SegmentMaxSize.GetAsInt64())
 	assert.Equal(t, int64(1024), params.DataCoordCfg.SegmentMaxSize.GetAsInt64())

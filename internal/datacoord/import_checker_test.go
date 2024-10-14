@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -67,9 +68,8 @@ func (s *ImportCheckerSuite) SetupTest() {
 	s.NoError(err)
 
 	broker := broker2.NewMockBroker(s.T())
-	sm := NewMockManager(s.T())
 
-	checker := NewImportChecker(meta, broker, cluster, alloc, sm, imeta).(*importChecker)
+	checker := NewImportChecker(meta, broker, cluster, alloc, imeta).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -96,6 +96,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 				},
 			},
 		},
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 
 	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
@@ -115,6 +116,7 @@ func (s *ImportCheckerSuite) TestLogStats() {
 			TaskID: 1,
 			State:  datapb.ImportTaskStateV2_Failed,
 		},
+		tr: timerecord.NewTimeRecorder("preimport task"),
 	}
 	err := s.imeta.AddTask(pit1)
 	s.NoError(err)
@@ -126,6 +128,7 @@ func (s *ImportCheckerSuite) TestLogStats() {
 			SegmentIDs: []int64{10, 11, 12},
 			State:      datapb.ImportTaskStateV2_Pending,
 		},
+		tr: timerecord.NewTimeRecorder("import task"),
 	}
 	err = s.imeta.AddTask(it1)
 	s.NoError(err)
@@ -171,7 +174,7 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	s.Equal(internalpb.ImportJobState_Importing, s.imeta.GetJob(job.GetJobID()).GetState())
 
 	// test checkImportingJob
-	s.checker.checkImportingJob(job) // not completed
+	s.checker.checkImportingJob(job)
 	s.Equal(internalpb.ImportJobState_Importing, s.imeta.GetJob(job.GetJobID()).GetState())
 	for _, t := range importTasks {
 		task := s.imeta.GetTask(t.GetTaskID())
@@ -201,6 +204,10 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		s.NoError(err)
 	}
 	s.checker.checkImportingJob(job)
+	s.Equal(internalpb.ImportJobState_IndexBuilding, s.imeta.GetJob(job.GetJobID()).GetState())
+
+	// test check IndexBuilding job
+	s.checker.checkIndexBuildingJob(job)
 	for _, t := range importTasks {
 		task := s.imeta.GetTask(t.GetTaskID())
 		for _, id := range task.(*importTask).GetSegmentIDs() {
@@ -283,6 +290,7 @@ func (s *ImportCheckerSuite) TestCheckTimeout() {
 			TaskID: 1,
 			State:  datapb.ImportTaskStateV2_InProgress,
 		},
+		tr: timerecord.NewTimeRecorder("preimport task"),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
@@ -295,39 +303,31 @@ func (s *ImportCheckerSuite) TestCheckTimeout() {
 
 func (s *ImportCheckerSuite) TestCheckFailure() {
 	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
-	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
+	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 
-	pit1 := &preImportTask{
-		PreImportTask: &datapb.PreImportTask{
-			JobID:  s.jobID,
-			TaskID: 1,
-			State:  datapb.ImportTaskStateV2_Pending,
+	it := &importTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			JobID:      s.jobID,
+			TaskID:     1,
+			State:      datapb.ImportTaskStateV2_Pending,
+			SegmentIDs: []int64{2},
 		},
+		tr: timerecord.NewTimeRecorder("import task"),
 	}
-	err := s.imeta.AddTask(pit1)
-	s.NoError(err)
-
-	pit2 := &preImportTask{
-		PreImportTask: &datapb.PreImportTask{
-			JobID:  s.jobID,
-			TaskID: 2,
-			State:  datapb.ImportTaskStateV2_Completed,
-		},
-	}
-	err = s.imeta.AddTask(pit2)
+	err := s.imeta.AddTask(it)
 	s.NoError(err)
 
 	catalog.ExpectedCalls = nil
-	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(errors.New("mock error"))
+	catalog.EXPECT().SaveImportTask(mock.Anything).Return(errors.New("mock error"))
 	s.checker.tryFailingTasks(s.imeta.GetJob(s.jobID))
 	tasks := s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(0, len(tasks))
 
 	catalog.ExpectedCalls = nil
-	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
+	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	s.checker.tryFailingTasks(s.imeta.GetJob(s.jobID))
 	tasks = s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
-	s.Equal(2, len(tasks))
+	s.Equal(1, len(tasks))
 }
 
 func (s *ImportCheckerSuite) TestCheckGC() {
@@ -342,6 +342,7 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 			State:      datapb.ImportTaskStateV2_Failed,
 			SegmentIDs: []int64{2},
 		},
+		tr: timerecord.NewTimeRecorder("import task"),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
@@ -411,6 +412,7 @@ func (s *ImportCheckerSuite) TestCheckCollection() {
 			TaskID: 1,
 			State:  datapb.ImportTaskStateV2_Pending,
 		},
+		tr: timerecord.NewTimeRecorder("preimport task"),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)

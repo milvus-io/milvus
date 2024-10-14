@@ -441,8 +441,6 @@ InvertedIndexTantivy<T>::build_index_for_array(
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
-            assert(array_column[i].get_element_type() ==
-                   static_cast<DataType>(schema_.element_type()));
             wrapper_->template add_multi_data(
                 reinterpret_cast<const T*>(array_column[i].data()),
                 array_column[i].length());

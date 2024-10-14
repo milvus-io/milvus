@@ -76,6 +76,7 @@ func stopRocksmq() {
 
 type component interface {
 	healthz.Indicator
+	Prepare() error
 	Run() error
 	Stop() error
 }
@@ -116,6 +117,9 @@ func runComponent[T component](ctx context.Context,
 		var err error
 		role, err = creator(ctx, factory)
 		if err != nil {
+			panic(err)
+		}
+		if err := role.Prepare(); err != nil {
 			panic(err)
 		}
 		close(sign)
@@ -398,10 +402,10 @@ func (mr *MilvusRoles) Run() {
 			action := func(GOGC uint32) {
 				debug.SetGCPercent(int(GOGC))
 			}
-			gc.NewTuner(paramtable.Get().CommonCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(), uint32(paramtable.Get().QueryNodeCfg.MinimumGOGCConfig.GetAsInt()), uint32(paramtable.Get().QueryNodeCfg.MaximumGOGCConfig.GetAsInt()), action)
+			gc.NewTuner(paramtable.Get().CommonCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(), uint32(paramtable.Get().CommonCfg.MinimumGOGCConfig.GetAsInt()), uint32(paramtable.Get().CommonCfg.MaximumGOGCConfig.GetAsInt()), action)
 		} else {
 			action := func(uint32) {}
-			gc.NewTuner(paramtable.Get().CommonCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(), uint32(paramtable.Get().QueryNodeCfg.MinimumGOGCConfig.GetAsInt()), uint32(paramtable.Get().QueryNodeCfg.MaximumGOGCConfig.GetAsInt()), action)
+			gc.NewTuner(paramtable.Get().CommonCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(), uint32(paramtable.Get().CommonCfg.MinimumGOGCConfig.GetAsInt()), uint32(paramtable.Get().CommonCfg.MaximumGOGCConfig.GetAsInt()), action)
 		}
 	}
 

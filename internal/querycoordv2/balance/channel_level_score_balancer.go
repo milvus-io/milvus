@@ -17,6 +17,7 @@
 package balance
 
 import (
+	"fmt"
 	"math"
 	"sort"
 
@@ -48,12 +49,22 @@ func NewChannelLevelScoreBalancer(scheduler task.Scheduler,
 	}
 }
 
-func (b *ChannelLevelScoreBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+func (b *ChannelLevelScoreBalancer) BalanceReplica(replica *meta.Replica) (segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan) {
 	log := log.With(
 		zap.Int64("collection", replica.GetCollectionID()),
 		zap.Int64("replica id", replica.GetID()),
 		zap.String("replica group", replica.GetResourceGroup()),
 	)
+
+	br := NewBalanceReport()
+	defer func() {
+		if len(segmentPlans) == 0 && len(channelPlans) == 0 {
+			log.WithRateGroup(fmt.Sprintf("scorebasedbalance-noplan-%d", replica.GetID()), 1, 60).
+				RatedDebug(60, "no plan generated, balance report", zap.Stringers("records", br.detailRecords))
+		} else {
+			log.Info("balance plan generated", zap.Stringers("report details", br.records))
+		}
+	}()
 
 	exclusiveMode := true
 	channels := b.targetMgr.GetDmChannelsByCollection(replica.GetCollectionID(), meta.CurrentTarget)
@@ -69,8 +80,8 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(replica *meta.Replica) ([]Seg
 		return b.ScoreBasedBalancer.BalanceReplica(replica)
 	}
 
-	channelPlans := make([]ChannelAssignPlan, 0)
-	segmentPlans := make([]SegmentAssignPlan, 0)
+	channelPlans = make([]ChannelAssignPlan, 0)
+	segmentPlans = make([]SegmentAssignPlan, 0)
 	for channelName := range channels {
 		if replica.NodesCount() == 0 {
 			return nil, nil
@@ -120,7 +131,7 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(replica *meta.Replica) ([]Seg
 			}
 
 			if len(channelPlans) == 0 {
-				segmentPlans = append(segmentPlans, b.genSegmentPlan(replica, channelName, rwNodes)...)
+				segmentPlans = append(segmentPlans, b.genSegmentPlan(br, replica, channelName, rwNodes)...)
 			}
 		}
 	}
@@ -159,10 +170,17 @@ func (b *ChannelLevelScoreBalancer) genStoppingSegmentPlan(replica *meta.Replica
 	return segmentPlans
 }
 
-func (b *ChannelLevelScoreBalancer) genSegmentPlan(replica *meta.Replica, channelName string, onlineNodes []int64) []SegmentAssignPlan {
+func (b *ChannelLevelScoreBalancer) genSegmentPlan(br *balanceReport, replica *meta.Replica, channelName string, onlineNodes []int64) []SegmentAssignPlan {
 	segmentDist := make(map[int64][]*meta.Segment)
-	nodeScore := b.convertToNodeItems(replica.GetCollectionID(), onlineNodes)
-	totalScore := 0
+	nodeItemsMap := b.convertToNodeItems(br, replica.GetCollectionID(), onlineNodes)
+	if len(nodeItemsMap) == 0 {
+		return nil
+	}
+	log.Info("node workload status",
+		zap.Int64("collectionID", replica.GetCollectionID()),
+		zap.Int64("replicaID", replica.GetID()),
+		zap.String("channelName", channelName),
+		zap.Stringers("nodes", lo.Values(nodeItemsMap)))
 
 	// list all segment which could be balanced, and calculate node's score
 	for _, node := range onlineNodes {
@@ -171,19 +189,14 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(replica *meta.Replica, channe
 			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
 		})
 		segmentDist[node] = segments
-		totalScore += nodeScore[node].getPriority()
-	}
-
-	if totalScore == 0 {
-		return nil
 	}
 
 	// find the segment from the node which has more score than the average
 	segmentsToMove := make([]*meta.Segment, 0)
-	average := totalScore / len(onlineNodes)
 	for node, segments := range segmentDist {
-		leftScore := nodeScore[node].getPriority()
-		if leftScore <= average {
+		currentScore := nodeItemsMap[node].getCurrentScore()
+		assignedScore := nodeItemsMap[node].getAssignedScore()
+		if currentScore <= assignedScore {
 			continue
 		}
 
@@ -192,8 +205,8 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(replica *meta.Replica, channe
 		})
 		for _, s := range segments {
 			segmentsToMove = append(segmentsToMove, s)
-			leftScore -= b.calculateSegmentScore(s)
-			if leftScore <= average {
+			currentScore -= b.calculateSegmentScore(s)
+			if currentScore <= assignedScore {
 				break
 			}
 		}

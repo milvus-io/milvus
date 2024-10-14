@@ -1543,36 +1543,47 @@ func TestMqttStream_continueBuffering(t *testing.T) {
 		Params.Save(Params.ServiceParam.MQCfg.PursuitBufferSize.Key, "1024")
 
 		type testCase struct {
-			tag    string
-			endTs  uint64
-			size   uint64
-			expect bool
+			tag       string
+			endTs     uint64
+			size      uint64
+			expect    bool
+			startTime time.Time
 		}
 
 		currTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		cases := []testCase{
 			{
-				tag:    "first_run",
-				endTs:  0,
-				size:   0,
-				expect: true,
+				tag:       "first_run",
+				endTs:     0,
+				size:      0,
+				expect:    true,
+				startTime: time.Now(),
 			},
 			{
-				tag:    "lag_large",
-				endTs:  1,
-				size:   10,
-				expect: false,
+				tag:       "lag_large",
+				endTs:     1,
+				size:      10,
+				expect:    false,
+				startTime: time.Now(),
 			},
 			{
-				tag:    "currTs",
-				endTs:  currTs,
-				size:   10,
-				expect: false,
+				tag:       "currTs",
+				endTs:     currTs,
+				size:      10,
+				expect:    false,
+				startTime: time.Now(),
+			},
+			{
+				tag:       "bufferTs",
+				endTs:     10,
+				size:      0,
+				expect:    false,
+				startTime: time.Now().Add(-time.Hour),
 			},
 		}
 		for _, tc := range cases {
 			t.Run(tc.tag, func(t *testing.T) {
-				assert.Equal(t, tc.expect, ms.continueBuffering(tc.endTs, tc.size))
+				assert.Equal(t, tc.expect, ms.continueBuffering(tc.endTs, tc.size, tc.startTime))
 			})
 		}
 	})
@@ -1618,7 +1629,7 @@ func TestMqttStream_continueBuffering(t *testing.T) {
 		}
 		for _, tc := range cases {
 			t.Run(tc.tag, func(t *testing.T) {
-				assert.Equal(t, tc.expect, ms.continueBuffering(tc.endTs, tc.size))
+				assert.Equal(t, tc.expect, ms.continueBuffering(tc.endTs, tc.size, time.Now()))
 			})
 		}
 	})

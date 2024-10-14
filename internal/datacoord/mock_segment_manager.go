@@ -5,7 +5,6 @@ package datacoord
 import (
 	context "context"
 
-	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -20,65 +19,6 @@ type MockManager_Expecter struct {
 
 func (_m *MockManager) EXPECT() *MockManager_Expecter {
 	return &MockManager_Expecter{mock: &_m.Mock}
-}
-
-// AllocImportSegment provides a mock function with given fields: ctx, taskID, collectionID, partitionID, channelName, level
-func (_m *MockManager) AllocImportSegment(ctx context.Context, taskID int64, collectionID int64, partitionID int64, channelName string, level datapb.SegmentLevel) (*SegmentInfo, error) {
-	ret := _m.Called(ctx, taskID, collectionID, partitionID, channelName, level)
-
-	var r0 *SegmentInfo
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, string, datapb.SegmentLevel) (*SegmentInfo, error)); ok {
-		return rf(ctx, taskID, collectionID, partitionID, channelName, level)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, string, datapb.SegmentLevel) *SegmentInfo); ok {
-		r0 = rf(ctx, taskID, collectionID, partitionID, channelName, level)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*SegmentInfo)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, int64, int64, int64, string, datapb.SegmentLevel) error); ok {
-		r1 = rf(ctx, taskID, collectionID, partitionID, channelName, level)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockManager_AllocImportSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllocImportSegment'
-type MockManager_AllocImportSegment_Call struct {
-	*mock.Call
-}
-
-// AllocImportSegment is a helper method to define mock.On call
-//   - ctx context.Context
-//   - taskID int64
-//   - collectionID int64
-//   - partitionID int64
-//   - channelName string
-//   - level datapb.SegmentLevel
-func (_e *MockManager_Expecter) AllocImportSegment(ctx interface{}, taskID interface{}, collectionID interface{}, partitionID interface{}, channelName interface{}, level interface{}) *MockManager_AllocImportSegment_Call {
-	return &MockManager_AllocImportSegment_Call{Call: _e.mock.On("AllocImportSegment", ctx, taskID, collectionID, partitionID, channelName, level)}
-}
-
-func (_c *MockManager_AllocImportSegment_Call) Run(run func(ctx context.Context, taskID int64, collectionID int64, partitionID int64, channelName string, level datapb.SegmentLevel)) *MockManager_AllocImportSegment_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(int64), args[4].(string), args[5].(datapb.SegmentLevel))
-	})
-	return _c
-}
-
-func (_c *MockManager_AllocImportSegment_Call) Return(_a0 *SegmentInfo, _a1 error) *MockManager_AllocImportSegment_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockManager_AllocImportSegment_Call) RunAndReturn(run func(context.Context, int64, int64, int64, string, datapb.SegmentLevel) (*SegmentInfo, error)) *MockManager_AllocImportSegment_Call {
-	_c.Call.Return(run)
-	return _c
 }
 
 // AllocSegment provides a mock function with given fields: ctx, collectionID, partitionID, channelName, requestRows
@@ -113,11 +53,11 @@ type MockManager_AllocSegment_Call struct {
 }
 
 // AllocSegment is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-//   - partitionID int64
-//   - channelName string
-//   - requestRows int64
+//  - ctx context.Context
+//  - collectionID int64
+//  - partitionID int64
+//  - channelName string
+//  - requestRows int64
 func (_e *MockManager_Expecter) AllocSegment(ctx interface{}, collectionID interface{}, partitionID interface{}, channelName interface{}, requestRows interface{}) *MockManager_AllocSegment_Call {
 	return &MockManager_AllocSegment_Call{Call: _e.mock.On("AllocSegment", ctx, collectionID, partitionID, channelName, requestRows)}
 }
@@ -150,8 +90,8 @@ type MockManager_DropSegment_Call struct {
 }
 
 // DropSegment is a helper method to define mock.On call
-//   - ctx context.Context
-//   - segmentID int64
+//  - ctx context.Context
+//  - segmentID int64
 func (_e *MockManager_Expecter) DropSegment(ctx interface{}, segmentID interface{}) *MockManager_DropSegment_Call {
 	return &MockManager_DropSegment_Call{Call: _e.mock.On("DropSegment", ctx, segmentID)}
 }
@@ -184,8 +124,8 @@ type MockManager_DropSegmentsOfChannel_Call struct {
 }
 
 // DropSegmentsOfChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - channel string
+//  - ctx context.Context
+//  - channel string
 func (_e *MockManager_Expecter) DropSegmentsOfChannel(ctx interface{}, channel interface{}) *MockManager_DropSegmentsOfChannel_Call {
 	return &MockManager_DropSegmentsOfChannel_Call{Call: _e.mock.On("DropSegmentsOfChannel", ctx, channel)}
 }
@@ -227,8 +167,8 @@ type MockManager_ExpireAllocations_Call struct {
 }
 
 // ExpireAllocations is a helper method to define mock.On call
-//   - channel string
-//   - ts uint64
+//  - channel string
+//  - ts uint64
 func (_e *MockManager_Expecter) ExpireAllocations(channel interface{}, ts interface{}) *MockManager_ExpireAllocations_Call {
 	return &MockManager_ExpireAllocations_Call{Call: _e.mock.On("ExpireAllocations", channel, ts)}
 }
@@ -246,50 +186,6 @@ func (_c *MockManager_ExpireAllocations_Call) Return(_a0 error) *MockManager_Exp
 }
 
 func (_c *MockManager_ExpireAllocations_Call) RunAndReturn(run func(string, uint64) error) *MockManager_ExpireAllocations_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// FlushImportSegments provides a mock function with given fields: ctx, collectionID, segmentIDs
-func (_m *MockManager) FlushImportSegments(ctx context.Context, collectionID int64, segmentIDs []int64) error {
-	ret := _m.Called(ctx, collectionID, segmentIDs)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64) error); ok {
-		r0 = rf(ctx, collectionID, segmentIDs)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockManager_FlushImportSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FlushImportSegments'
-type MockManager_FlushImportSegments_Call struct {
-	*mock.Call
-}
-
-// FlushImportSegments is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-//   - segmentIDs []int64
-func (_e *MockManager_Expecter) FlushImportSegments(ctx interface{}, collectionID interface{}, segmentIDs interface{}) *MockManager_FlushImportSegments_Call {
-	return &MockManager_FlushImportSegments_Call{Call: _e.mock.On("FlushImportSegments", ctx, collectionID, segmentIDs)}
-}
-
-func (_c *MockManager_FlushImportSegments_Call) Run(run func(ctx context.Context, collectionID int64, segmentIDs []int64)) *MockManager_FlushImportSegments_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].([]int64))
-	})
-	return _c
-}
-
-func (_c *MockManager_FlushImportSegments_Call) Return(_a0 error) *MockManager_FlushImportSegments_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockManager_FlushImportSegments_Call) RunAndReturn(run func(context.Context, int64, []int64) error) *MockManager_FlushImportSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -326,9 +222,9 @@ type MockManager_GetFlushableSegments_Call struct {
 }
 
 // GetFlushableSegments is a helper method to define mock.On call
-//   - ctx context.Context
-//   - channel string
-//   - ts uint64
+//  - ctx context.Context
+//  - channel string
+//  - ts uint64
 func (_e *MockManager_Expecter) GetFlushableSegments(ctx interface{}, channel interface{}, ts interface{}) *MockManager_GetFlushableSegments_Call {
 	return &MockManager_GetFlushableSegments_Call{Call: _e.mock.On("GetFlushableSegments", ctx, channel, ts)}
 }
@@ -382,9 +278,9 @@ type MockManager_SealAllSegments_Call struct {
 }
 
 // SealAllSegments is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-//   - segIDs []int64
+//  - ctx context.Context
+//  - collectionID int64
+//  - segIDs []int64
 func (_e *MockManager_Expecter) SealAllSegments(ctx interface{}, collectionID interface{}, segIDs interface{}) *MockManager_SealAllSegments_Call {
 	return &MockManager_SealAllSegments_Call{Call: _e.mock.On("SealAllSegments", ctx, collectionID, segIDs)}
 }

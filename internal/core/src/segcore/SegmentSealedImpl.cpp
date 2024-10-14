@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -404,8 +405,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         var_column->Append(std::move(field_data));
                     }
                     var_column->Seal();
-                    field_data_size = var_column->ByteSize();
-                    stats_.mem_size += var_column->ByteSize();
+                    field_data_size = var_column->DataByteSize();
+                    stats_.mem_size += var_column->MemoryUsageBytes();
                     LoadStringSkipIndex(field_id, 0, *var_column);
                     column = std::move(var_column);
                     break;
@@ -419,8 +420,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         var_column->Append(std::move(field_data));
                     }
                     var_column->Seal();
-                    stats_.mem_size += var_column->ByteSize();
-                    field_data_size = var_column->ByteSize();
+                    stats_.mem_size += var_column->MemoryUsageBytes();
+                    field_data_size = var_column->DataByteSize();
                     column = std::move(var_column);
                     break;
                 }
@@ -586,8 +587,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             }
             case milvus::DataType::VECTOR_SPARSE_FLOAT: {
                 auto sparse_column = std::make_shared<SparseFloatColumn>(
-                    file, total_written, field_meta);
-                sparse_column->Seal(std::move(indices));
+                    file, total_written, field_meta, std::move(indices));
                 column = std::move(sparse_column);
                 break;
             }
@@ -638,8 +638,38 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     ParsePksFromIDs(pks, field_meta.get_data_type(), *info.primary_keys);
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
-    // step 2: fill pks and timestamps
-    deleted_record_.push(pks, timestamps);
+    std::vector<std::tuple<Timestamp, PkType>> ordering(size);
+    for (int i = 0; i < size; i++) {
+        ordering[i] = std::make_tuple(timestamps[i], pks[i]);
+    }
+
+    if (!insert_record_.empty_pks()) {
+        auto end = std::remove_if(
+            ordering.begin(),
+            ordering.end(),
+            [&](const std::tuple<Timestamp, PkType>& record) {
+                return !insert_record_.contain(std::get<1>(record));
+            });
+        size = end - ordering.begin();
+        ordering.resize(size);
+    }
+
+    // all record filtered
+    if (size == 0) {
+        return;
+    }
+
+    std::sort(ordering.begin(), ordering.end());
+    std::vector<PkType> sort_pks(size);
+    std::vector<Timestamp> sort_timestamps(size);
+
+    for (int i = 0; i < size; i++) {
+        auto [t, pk] = ordering[i];
+        sort_timestamps[i] = t;
+        sort_pks[i] = pk;
+    }
+
+    deleted_record_.push(sort_pks, sort_timestamps.data());
 }
 
 void
@@ -977,10 +1007,10 @@ SegmentSealedImpl::get_vector(FieldId field_id,
                        "column not found");
             const auto& column = path_to_column.at(data_path);
             AssertInfo(
-                offset_in_binlog * row_bytes < column->ByteSize(),
+                offset_in_binlog < column->NumRows(),
                 "column idx out of range, idx: {}, size: {}, data_path: {}",
-                offset_in_binlog * row_bytes,
-                column->ByteSize(),
+                offset_in_binlog,
+                column->NumRows(),
                 data_path);
             auto vector = &column->Data()[offset_in_binlog * row_bytes];
             std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
@@ -1678,6 +1708,7 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
             return false;
         }
         // check data type
+        // TODO: QianYa when add other data type, please check the SupportInterimIndexDataType method in the go code
         if (field_meta.get_data_type() != DataType::VECTOR_FLOAT &&
             !is_sparse) {
             return false;

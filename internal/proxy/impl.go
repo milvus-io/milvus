@@ -2506,7 +2506,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
-		SetInboundLabel(method).
+		SetInboundLabel(metrics.InsertLabel).
 		SetCollectionName(request.GetCollectionName())
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 
@@ -2635,7 +2635,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
-		SetInboundLabel(method).
+		SetInboundLabel(metrics.DeleteLabel).
 		SetCollectionName(request.GetCollectionName())
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -2744,7 +2744,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
-		SetInboundLabel(method).
+		SetInboundLabel(metrics.UpsertLabel).
 		SetCollectionName(request.GetCollectionName())
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()

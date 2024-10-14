@@ -150,6 +150,7 @@ func (s *storageV1Serializer) setTaskMeta(task *SyncTask, pack *SyncPack) {
 		WithStartPosition(pack.startPosition).
 		WithCheckpoint(pack.checkpoint).
 		WithLevel(pack.level).
+		WithDataSource(pack.dataSource).
 		WithTimeRange(pack.tsFrom, pack.tsTo).
 		WithMetaCache(s.metacache).
 		WithMetaWriter(s.metaWriter).

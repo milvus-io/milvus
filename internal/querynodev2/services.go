@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -648,6 +649,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		zap.Int64("collectionID", req.Req.GetCollectionID()),
 		zap.String("channel", channel),
 		zap.String("scope", req.GetScope().String()),
+		zap.Any("metric_type", req.GetReq().GetMetricType()),
 	)
 	channelsMvcc := make(map[string]uint64)
 	for _, ch := range req.GetDmlChannels() {
@@ -750,6 +752,9 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	if collection == nil {
 		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(req.GetReq().GetCollectionID()))
 		return resp, nil
+	}
+	if req.Req.MetricType == "" && !req.GetReq().GetIsAdvanced() {
+		req.Req.MetricType = collection.GetMetricType()
 	}
 
 	toReduceResults := make([]*internalpb.SearchResults, len(req.GetDmlChannels()))
@@ -1261,12 +1266,13 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	})
 
 	return &querypb.GetDataDistributionResponse{
-		Status:       merr.Success(),
-		NodeID:       node.GetNodeID(),
-		Segments:     segmentVersionInfos,
-		Channels:     channelVersionInfos,
-		LeaderViews:  leaderViews,
-		LastModifyTs: lastModifyTs,
+		Status:          merr.Success(),
+		NodeID:          node.GetNodeID(),
+		Segments:        segmentVersionInfos,
+		Channels:        channelVersionInfos,
+		LeaderViews:     leaderViews,
+		LastModifyTs:    lastModifyTs,
+		MemCapacityInMB: float64(hardware.GetMemoryCount() / 1024 / 1024),
 	}, nil
 }
 
@@ -1335,6 +1341,13 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				return id, action.GetCheckpoint().Timestamp
 			})
 			shardDelegator.AddExcludedSegments(droppedInfos)
+			flushedInfo := lo.SliceToMap(action.GetSealedInTarget(), func(id int64) (int64, uint64) {
+				if action.GetCheckpoint() == nil {
+					return id, typeutil.MaxTimestamp
+				}
+				return id, action.GetCheckpoint().Timestamp
+			})
+			shardDelegator.AddExcludedSegments(flushedInfo)
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
 				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
 		case querypb.SyncType_UpdatePartitionStats:
