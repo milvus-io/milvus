@@ -30,11 +30,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -203,16 +203,16 @@ func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
 	return invalidIndex
 }
 
-func isFlatIndex(indexType string) bool {
-	return indexType == indexparamcheck.IndexFaissIDMap || indexType == indexparamcheck.IndexFaissBinIDMap
+func isNoTrainIndex(indexType string) bool {
+	return vecindexmgr.GetVecIndexMgrInstance().IsNoTrainIndex(indexType)
 }
 
 func isOptionalScalarFieldSupported(indexType string) bool {
-	return indexType == indexparamcheck.IndexHNSW
+	return vecindexmgr.GetVecIndexMgrInstance().IsMvSupported(indexType)
 }
 
 func isDiskANNIndex(indexType string) bool {
-	return indexType == indexparamcheck.IndexDISKANN
+	return vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType)
 }
 
 func parseBuildIDFromFilePath(key string) (UniqueID, error) {

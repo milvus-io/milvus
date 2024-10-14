@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -340,7 +341,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 		if !exist {
 			return fmt.Errorf("IndexType not specified")
 		}
-		if indexType == indexparamcheck.IndexDISKANN {
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 			err := indexparams.FillDiskIndexParams(Params, indexParamsMap)
 			if err != nil {
 				return err
