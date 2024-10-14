@@ -1463,7 +1463,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.insert(data=data)
         param = cf.get_index_params_params(index)
         params = {"index_type": index, "metric_type": metric_type, "params": param}
-        error = {ct.err_code: 65535, ct.err_msg: "only IP is the supported metric type for sparse index"}
+        error = {ct.err_code: 65535, ct.err_msg: "only IP&BM25 is the supported metric type for sparse index"}
         index, _ = self.index_wrap.init_index(collection_w.collection, ct.default_sparse_vec_field_name, params,
                                               check_task=CheckTasks.err_res,
                                               check_items=error)

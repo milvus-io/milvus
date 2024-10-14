@@ -1,6 +1,8 @@
 package adaptor
 
 import (
+	"context"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -27,12 +29,17 @@ func (m *MsgPackAdaptorHandler) Chan() <-chan *msgstream.MsgPack {
 }
 
 // Handle is the callback for handling message.
-func (m *MsgPackAdaptorHandler) Handle(msg message.ImmutableMessage) {
+func (m *MsgPackAdaptorHandler) Handle(ctx context.Context, msg message.ImmutableMessage) (bool, error) {
 	m.base.GenerateMsgPack(msg)
 	for m.base.PendingMsgPack.Len() > 0 {
-		m.base.Channel <- m.base.PendingMsgPack.Next()
-		m.base.PendingMsgPack.UnsafeAdvance()
+		select {
+		case <-ctx.Done():
+			return true, ctx.Err()
+		case m.base.Channel <- m.base.PendingMsgPack.Next():
+			m.base.PendingMsgPack.UnsafeAdvance()
+		}
 	}
+	return true, nil
 }
 
 // Close is the callback for closing message.

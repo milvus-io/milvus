@@ -385,7 +385,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 
 	for _, segment := range loaded {
 		sd.pkOracle.Register(segment, paramtable.GetNodeID())
-		if sd.hasBM25Field {
+		if len(sd.isBM25Field) > 0 {
 			sd.idfOracle.Register(segment.ID(), segment.GetBM25Stats(), segments.SegmentTypeGrowing)
 		}
 	}
@@ -485,7 +485,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		})
 
 		var bm25Stats *typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats]
-		if sd.hasBM25Field {
+		if len(sd.isBM25Field) > 0 {
 			bm25Stats, err = sd.loader.LoadBM25Stats(ctx, req.GetCollectionID(), infos...)
 			if err != nil {
 				log.Warn("failed to load bm25 stats for segment", zap.Error(err))

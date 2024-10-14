@@ -147,48 +147,73 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 // --------------------- collection details --------------------- //
 
 func printFields(fields []*schemapb.FieldSchema) []gin.H {
-	return printFieldDetails(fields, true)
+	var res []gin.H
+	for _, field := range fields {
+		fieldDetail := printFieldDetail(field, true)
+		res = append(res, fieldDetail)
+	}
+	return res
 }
 
 func printFieldsV2(fields []*schemapb.FieldSchema) []gin.H {
-	return printFieldDetails(fields, false)
-}
-
-func printFieldDetails(fields []*schemapb.FieldSchema, oldVersion bool) []gin.H {
 	var res []gin.H
 	for _, field := range fields {
-		fieldDetail := gin.H{
-			HTTPReturnFieldName:         field.Name,
-			HTTPReturnFieldPrimaryKey:   field.IsPrimaryKey,
-			HTTPReturnFieldPartitionKey: field.IsPartitionKey,
-			HTTPReturnFieldAutoID:       field.AutoID,
-			HTTPReturnDescription:       field.Description,
-		}
-		if typeutil.IsVectorType(field.DataType) {
-			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
-			if oldVersion {
-				dim, _ := getDim(field)
-				fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(dim, 10) + ")"
-			}
-		} else if field.DataType == schemapb.DataType_VarChar {
-			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
-			if oldVersion {
-				maxLength, _ := parameterutil.GetMaxLength(field)
-				fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(maxLength, 10) + ")"
-			}
-		} else {
-			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
-		}
-		if !oldVersion {
-			fieldDetail[HTTPReturnFieldID] = field.FieldID
-			if field.TypeParams != nil {
-				fieldDetail[Params] = field.TypeParams
-			}
-			if field.DataType == schemapb.DataType_Array {
-				fieldDetail[HTTPReturnFieldElementType] = field.GetElementType().String()
-			}
-		}
+		fieldDetail := printFieldDetail(field, false)
 		res = append(res, fieldDetail)
+	}
+	return res
+}
+
+func printFieldDetail(field *schemapb.FieldSchema, oldVersion bool) gin.H {
+	fieldDetail := gin.H{
+		HTTPReturnFieldName:         field.Name,
+		HTTPReturnFieldPrimaryKey:   field.IsPrimaryKey,
+		HTTPReturnFieldPartitionKey: field.IsPartitionKey,
+		HTTPReturnFieldAutoID:       field.AutoID,
+		HTTPReturnDescription:       field.Description,
+	}
+	if field.GetIsFunctionOutput() {
+		fieldDetail[HTTPReturnFieldIsFunctionOutput] = true
+	}
+	if typeutil.IsVectorType(field.DataType) {
+		fieldDetail[HTTPReturnFieldType] = field.DataType.String()
+		if oldVersion {
+			dim, _ := getDim(field)
+			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(dim, 10) + ")"
+		}
+	} else if field.DataType == schemapb.DataType_VarChar {
+		fieldDetail[HTTPReturnFieldType] = field.DataType.String()
+		if oldVersion {
+			maxLength, _ := parameterutil.GetMaxLength(field)
+			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(maxLength, 10) + ")"
+		}
+	} else {
+		fieldDetail[HTTPReturnFieldType] = field.DataType.String()
+	}
+	if !oldVersion {
+		fieldDetail[HTTPReturnFieldID] = field.FieldID
+		if field.TypeParams != nil {
+			fieldDetail[Params] = field.TypeParams
+		}
+		if field.DataType == schemapb.DataType_Array {
+			fieldDetail[HTTPReturnFieldElementType] = field.GetElementType().String()
+		}
+	}
+	return fieldDetail
+}
+
+func printFunctionDetails(functions []*schemapb.FunctionSchema) []gin.H {
+	var res []gin.H
+	for _, function := range functions {
+		res = append(res, gin.H{
+			HTTPReturnFunctionName:             function.Name,
+			HTTPReturnDescription:              function.Description,
+			HTTPReturnFunctionType:             function.Type,
+			HTTPReturnFunctionID:               function.Id,
+			HTTPReturnFunctionInputFieldNames:  function.InputFieldNames,
+			HTTPReturnFunctionOutputFieldNames: function.OutputFieldNames,
+			HTTPReturnFunctionParams:           function.Params,
+		})
 	}
 	return res
 }
@@ -254,6 +279,14 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 				if field.IsPrimaryKey && field.AutoID {
 					if dataString != "" {
 						return merr.WrapErrParameterInvalid("", "set primary key but autoID == true"), reallyDataArray, validDataMap
+					}
+					continue
+				}
+
+				// if field is a function output field, user must not provide data for it
+				if field.GetIsFunctionOutput() {
+					if dataString != "" {
+						return merr.WrapErrParameterInvalid("", "not allowed to provide input data for function output field: "+fieldName), reallyDataArray, validDataMap
 					}
 					continue
 				}
@@ -626,9 +659,14 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 	nameColumns := make(map[string]interface{})
 	nameDims := make(map[string]int64)
 	fieldData := make(map[string]*schemapb.FieldData)
+
 	for _, field := range sch.Fields {
 		// skip auto id pk field
 		if (field.IsPrimaryKey && field.AutoID) || field.IsDynamic {
+			continue
+		}
+		// skip function output field
+		if field.GetIsFunctionOutput() {
 			continue
 		}
 		var data interface{}
@@ -685,8 +723,8 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			IsDynamic: field.IsDynamic,
 		}
 	}
-	if len(nameDims) == 0 {
-		return nil, fmt.Errorf("collection: %s has no vector field", sch.Name)
+	if len(nameDims) == 0 && len(sch.Functions) == 0 {
+		return nil, fmt.Errorf("collection: %s has no vector field or functions", sch.Name)
 	}
 
 	dynamicCol := make([][]byte, 0, rowsLen)
@@ -707,6 +745,12 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			}
 			candi, ok := set[field.Name]
 			if (field.Nullable || field.DefaultValue != nil) && !ok {
+				continue
+			}
+			if field.GetIsFunctionOutput() {
+				if ok {
+					return nil, fmt.Errorf("row %d has data provided for function output field %s", idx, field.Name)
+				}
 				continue
 			}
 			if !ok {
@@ -1035,7 +1079,7 @@ func serializeSparseFloatVectors(vectors []gjson.Result, dataType schemapb.DataT
 	return values, nil
 }
 
-func convertVectors2Placeholder(body string, dataType schemapb.DataType, dimension int64) (*commonpb.PlaceholderValue, error) {
+func convertQueries2Placeholder(body string, dataType schemapb.DataType, dimension int64) (*commonpb.PlaceholderValue, error) {
 	var valueType commonpb.PlaceholderType
 	var values [][]byte
 	var err error
@@ -1055,6 +1099,12 @@ func convertVectors2Placeholder(body string, dataType schemapb.DataType, dimensi
 	case schemapb.DataType_SparseFloatVector:
 		valueType = commonpb.PlaceholderType_SparseFloatVector
 		values, err = serializeSparseFloatVectors(gjson.Get(body, HTTPRequestData).Array(), dataType)
+	case schemapb.DataType_VarChar:
+		valueType = commonpb.PlaceholderType_VarChar
+		res := gjson.Get(body, HTTPRequestData).Array()
+		for _, v := range res {
+			values = append(values, []byte(v.String()))
+		}
 	}
 	if err != nil {
 		return nil, err

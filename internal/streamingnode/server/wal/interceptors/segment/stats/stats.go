@@ -48,9 +48,9 @@ func NewProtoFromSegmentStat(stat *SegmentStats) *streamingpb.SegmentAssignmentS
 	}
 }
 
-// FlushOperationMetrics is the metrics of flush operation.
-type FlushOperationMetrics struct {
-	BinLogCounter uint64
+// SyncOperationMetrics is the metrics of sync operation.
+type SyncOperationMetrics struct {
+	BinLogCounterIncr uint64 // the counter increment of bin log.
 }
 
 // AllocRows alloc space of rows on current segment.
@@ -71,9 +71,9 @@ func (s *SegmentStats) BinaryCanBeAssign() uint64 {
 	return s.MaxBinarySize - s.Insert.BinarySize
 }
 
-// UpdateOnFlush updates the stats of segment on flush.
-func (s *SegmentStats) UpdateOnFlush(f FlushOperationMetrics) {
-	s.BinLogCounter = f.BinLogCounter
+// UpdateOnSync updates the stats of segment on sync.
+func (s *SegmentStats) UpdateOnSync(f SyncOperationMetrics) {
+	s.BinLogCounter += f.BinLogCounterIncr
 }
 
 // Copy copies the segment stats.

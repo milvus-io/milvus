@@ -318,21 +318,18 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		return nil, err
 	}
 	plan := &datapb.CompactionPlan{
-		PlanID:           t.GetPlanID(),
-		StartTime:        t.GetStartTime(),
-		TimeoutInSeconds: t.GetTimeoutInSeconds(),
-		Type:             t.GetType(),
-		Channel:          t.GetChannel(),
-		CollectionTtl:    t.GetCollectionTtl(),
-		TotalRows:        t.GetTotalRows(),
-		Schema:           t.GetSchema(),
-		BeginLogID:       beginLogID,
-		PreAllocatedSegmentIDs: &datapb.IDRange{
-			Begin: t.GetResultSegments()[0],
-			End:   t.GetResultSegments()[1],
-		},
-		SlotUsage: t.GetSlotUsage(),
-		MaxSize:   t.GetMaxSize(),
+		PlanID:                 t.GetPlanID(),
+		StartTime:              t.GetStartTime(),
+		TimeoutInSeconds:       t.GetTimeoutInSeconds(),
+		Type:                   t.GetType(),
+		Channel:                t.GetChannel(),
+		CollectionTtl:          t.GetCollectionTtl(),
+		TotalRows:              t.GetTotalRows(),
+		Schema:                 t.GetSchema(),
+		BeginLogID:             beginLogID,
+		PreAllocatedSegmentIDs: t.GetPreAllocatedSegmentIDs(),
+		SlotUsage:              t.GetSlotUsage(),
+		MaxSize:                t.GetMaxSize(),
 	}
 	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 

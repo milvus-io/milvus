@@ -57,6 +57,8 @@ type mixCompactionTask struct {
 	maxRows      int64
 	pkID         int64
 
+	bm25FieldIDs []int64
+
 	done chan struct{}
 	tr   *timerecord.TimeRecorder
 }
@@ -97,6 +99,7 @@ func (t *mixCompactionTask) preCompact() error {
 	t.collectionID = t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 	t.partitionID = t.plan.GetSegmentBinlogs()[0].GetPartitionID()
 	t.targetSize = t.plan.GetMaxSize()
+	t.bm25FieldIDs = GetBM25FieldIDs(t.plan.GetSchema())
 
 	currSize := int64(0)
 	for _, segmentBinlog := range t.plan.GetSegmentBinlogs() {
@@ -140,7 +143,7 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter := NewMultiSegmentWriter(t.binlogIO, compAlloc, t.plan, t.maxRows, t.partitionID, t.collectionID)
+	mWriter := NewMultiSegmentWriter(t.binlogIO, compAlloc, t.plan, t.maxRows, t.partitionID, t.collectionID, t.bm25FieldIDs)
 
 	deletedRowCount := int64(0)
 	expiredRowCount := int64(0)
@@ -285,7 +288,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	if allSorted && len(t.plan.GetSegmentBinlogs()) > 1 {
 		log.Info("all segments are sorted, use merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
-			t.plan.GetSegmentBinlogs(), deltaPk2Ts, t.tr, t.currentTs, t.plan.GetCollectionTtl())
+			t.plan.GetSegmentBinlogs(), deltaPk2Ts, t.tr, t.currentTs, t.plan.GetCollectionTtl(), t.bm25FieldIDs)
 		if err != nil {
 			log.Warn("compact wrong, fail to merge sort segments", zap.Error(err))
 			return nil, err
@@ -340,4 +343,13 @@ func (t *mixCompactionTask) GetCollection() typeutil.UniqueID {
 
 func (t *mixCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
+}
+
+func GetBM25FieldIDs(coll *schemapb.CollectionSchema) []int64 {
+	return lo.FilterMap(coll.GetFunctions(), func(function *schemapb.FunctionSchema, _ int) (int64, bool) {
+		if function.GetType() == schemapb.FunctionType_BM25 {
+			return function.GetOutputFieldIds()[0], true
+		}
+		return 0, false
+	})
 }

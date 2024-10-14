@@ -620,10 +620,14 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 	})
 	usedOutputField := typeutil.NewSet[string]()
 	usedFunctionName := typeutil.NewSet[string]()
-	// validate function
+
 	for _, function := range coll.GetFunctions() {
+		if err := checkFunctionBasicParams(function); err != nil {
+			return err
+		}
+
 		if usedFunctionName.Contain(function.GetName()) {
-			return fmt.Errorf("duplicate function name %s", function.GetName())
+			return fmt.Errorf("duplicate function name: %s", function.GetName())
 		}
 
 		usedFunctionName.Insert(function.GetName())
@@ -631,13 +635,15 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 		for _, name := range function.GetInputFieldNames() {
 			inputField, ok := nameMap[name]
 			if !ok {
-				return fmt.Errorf("function input field not found %s", function.InputFieldNames)
+				return fmt.Errorf("function input field not found: %s", name)
+			}
+			if inputField.GetNullable() {
+				return fmt.Errorf("function input field cannot be nullable: function %s, field %s", function.GetName(), inputField.GetName())
 			}
 			inputFields = append(inputFields, inputField)
 		}
 
-		err := checkFunctionInputField(function, inputFields)
-		if err != nil {
+		if err := checkFunctionInputField(function, inputFields); err != nil {
 			return err
 		}
 
@@ -645,21 +651,30 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 		for i, name := range function.GetOutputFieldNames() {
 			outputField, ok := nameMap[name]
 			if !ok {
-				return fmt.Errorf("function output field not found %s", function.InputFieldNames)
+				return fmt.Errorf("function output field not found: %s", name)
 			}
+
+			if outputField.GetIsPrimaryKey() {
+				return fmt.Errorf("function output field cannot be primary key: function %s, field %s", function.GetName(), outputField.GetName())
+			}
+
+			if outputField.GetIsPartitionKey() || outputField.GetIsClusteringKey() {
+				return fmt.Errorf("function output field cannot be partition key or clustering key: function %s, field %s", function.GetName(), outputField.GetName())
+			}
+
+			if outputField.GetNullable() {
+				return fmt.Errorf("function output field cannot be nullable: function %s, field %s", function.GetName(), outputField.GetName())
+			}
+
 			outputField.IsFunctionOutput = true
 			outputFields[i] = outputField
 			if usedOutputField.Contain(name) {
-				return fmt.Errorf("duplicate function output %s", name)
+				return fmt.Errorf("duplicate function output field: function %s, field %s", function.GetName(), name)
 			}
 			usedOutputField.Insert(name)
 		}
 
 		if err := checkFunctionOutputField(function, outputFields); err != nil {
-			return err
-		}
-
-		if err := checkFunctionParams(function); err != nil {
 			return err
 		}
 	}
@@ -670,19 +685,11 @@ func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schem
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
 		if len(fields) != 1 {
-			return fmt.Errorf("bm25 only need 1 output field, but now %d", len(fields))
+			return fmt.Errorf("BM25 function only need 1 output field, but got %d", len(fields))
 		}
 
 		if !typeutil.IsSparseFloatVectorType(fields[0].GetDataType()) {
-			return fmt.Errorf("bm25 only need sparse embedding output field, but now %s", fields[0].DataType.String())
-		}
-
-		if fields[0].GetIsPrimaryKey() {
-			return fmt.Errorf("bm25 output field can't be primary key")
-		}
-
-		if fields[0].GetIsPartitionKey() || fields[0].GetIsClusteringKey() {
-			return fmt.Errorf("bm25 output field can't be partition key or cluster key field")
+			return fmt.Errorf("BM25 function output field must be a SparseFloatVector field, but got %s", fields[0].DataType.String())
 		}
 	default:
 		return fmt.Errorf("check output field for unknown function type")
@@ -694,12 +701,12 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
 		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_VarChar {
-			return fmt.Errorf("only one VARCHAR input field is allowed for a BM25 Function, got %d field with type %s",
+			return fmt.Errorf("BM25 function input field must be a VARCHAR field, got %d field with type %s",
 				len(fields), fields[0].DataType.String())
 		}
 		h := typeutil.CreateFieldSchemaHelper(fields[0])
 		if !h.EnableTokenizer() {
-			return fmt.Errorf("BM25 input field must set enable_tokenizer to true")
+			return fmt.Errorf("BM25 function input field must set enable_tokenizer to true")
 		}
 
 	default:
@@ -708,46 +715,40 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 	return nil
 }
 
-func checkFunctionParams(function *schemapb.FunctionSchema) error {
+func checkFunctionBasicParams(function *schemapb.FunctionSchema) error {
+	if function.GetName() == "" {
+		return fmt.Errorf("function name cannot be empty")
+	}
+	if len(function.GetInputFieldNames()) == 0 {
+		return fmt.Errorf("function input field names cannot be empty, function: %s", function.GetName())
+	}
+	if len(function.GetOutputFieldNames()) == 0 {
+		return fmt.Errorf("function output field names cannot be empty, function: %s", function.GetName())
+	}
+	for _, input := range function.GetInputFieldNames() {
+		if input == "" {
+			return fmt.Errorf("function input field name cannot be empty string, function: %s", function.GetName())
+		}
+		// if input occurs more than once, error
+		if lo.Count(function.GetInputFieldNames(), input) > 1 {
+			return fmt.Errorf("each function input field should be used exactly once in the same function, function: %s, input field: %s", function.GetName(), input)
+		}
+	}
+	for _, output := range function.GetOutputFieldNames() {
+		if output == "" {
+			return fmt.Errorf("function output field name cannot be empty string, function: %s", function.GetName())
+		}
+		if lo.Count(function.GetInputFieldNames(), output) > 0 {
+			return fmt.Errorf("a single field cannot be both input and output in the same function, function: %s, field: %s", function.GetName(), output)
+		}
+		if lo.Count(function.GetOutputFieldNames(), output) > 1 {
+			return fmt.Errorf("each function output field should be used exactly once in the same function, function: %s, output field: %s", function.GetName(), output)
+		}
+	}
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
-		for _, kv := range function.GetParams() {
-			switch kv.GetKey() {
-			case "bm25_k1":
-				k1, err := strconv.ParseFloat(kv.GetValue(), 64)
-				if err != nil {
-					return fmt.Errorf("failed to parse bm25_k1 value, %w", err)
-				}
-
-				if k1 < 0 || k1 > 3 {
-					return fmt.Errorf("bm25_k1 must in [0,3] but now %f", k1)
-				}
-
-			case "bm25_b":
-				b, err := strconv.ParseFloat(kv.GetValue(), 64)
-				if err != nil {
-					return fmt.Errorf("failed to parse bm25_b value, %w", err)
-				}
-
-				if b < 0 || b > 1 {
-					return fmt.Errorf("bm25_b must in [0,1] but now %f", b)
-				}
-
-			case "bm25_avgdl":
-				avgdl, err := strconv.ParseFloat(kv.GetValue(), 64)
-				if err != nil {
-					return fmt.Errorf("failed to parse bm25_avgdl value, %w", err)
-				}
-
-				if avgdl <= 0 {
-					return fmt.Errorf("bm25_avgdl must large than zero but now %f", avgdl)
-				}
-
-			case "tokenizer_params":
-				// TODO ADD tokenizer check
-			default:
-				return fmt.Errorf("invalid function params, key: %s, value:%s", kv.GetKey(), kv.GetValue())
-			}
+		if len(function.GetParams()) != 0 {
+			return fmt.Errorf("BM25 function accepts no params")
 		}
 	default:
 		return fmt.Errorf("check function params with unknown function type")

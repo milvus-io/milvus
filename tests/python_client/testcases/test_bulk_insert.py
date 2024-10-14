@@ -9,6 +9,7 @@ from pathlib import Path
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
+from common.common_params import DefaultVectorIndexParams, DefaultVectorSearchParams
 from common.milvus_sys import MilvusSys
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_log import test_log as log
@@ -2160,3 +2161,77 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 empty_partition_num += 1
             num_entities += p.num_entities
         assert num_entities == entities * file_nums
+
+    @pytest.mark.parametrize("pk_field", [df.pk_field, df.string_field])
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_bulk_import_random_pk_stats_task(self, pk_field):
+        # connect -> prepare json data
+        self._connect()
+        collection_name = cf.gen_unique_str("stats_task")
+        nb = 3000
+        fields = []
+        files = ""
+
+        # prepare data: int64_pk -> json data; varchar_pk -> numpy data
+        if pk_field == df.pk_field:
+            fields = [
+                cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=False),
+                cf.gen_float_vec_field(name=df.float_vec_field, dim=ct.default_dim),
+            ]
+            data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+            files = prepare_bulk_insert_new_json_files(
+                minio_endpoint=self.minio_endpoint, bucket_name=self.bucket_name,
+                is_row_based=True, rows=nb, dim=ct.default_dim, auto_id=False, data_fields=data_fields, force=True,
+                shuffle=True
+            )
+        elif pk_field == df.string_field:
+            fields = [
+                cf.gen_string_field(name=df.string_field, is_primary=True, auto_id=False),
+                cf.gen_float_vec_field(name=df.float_vec_field, dim=ct.default_dim),
+            ]
+            data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+            files = prepare_bulk_insert_numpy_files(
+                minio_endpoint=self.minio_endpoint, bucket_name=self.bucket_name,
+                rows=nb, dim=ct.default_dim, data_fields=data_fields, enable_dynamic_field=False, force=True,
+                shuffle_pk=True
+            )
+        else:
+            log.error(f"pk_field name {pk_field} not supported now, [{df.pk_field}, {df.string_field}] expected~")
+
+        # create collection -> create vector index
+        schema = cf.gen_collection_schema(fields=fields)
+        self.collection_wrap.init_collection(collection_name, schema=schema)
+        self.build_multi_index(index_params=DefaultVectorIndexParams.IVF_SQ8(df.float_vec_field))
+
+        # bulk_insert data
+        t0 = time.time()
+        task_id, _ = self.utility_wrap.do_bulk_insert(
+            collection_name=collection_name, files=files
+        )
+        logging.info(f"bulk insert task ids:{task_id}")
+        completed, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+            task_ids=[task_id], timeout=300
+        )
+        tt = time.time() - t0
+        log.info(f"bulk insert state:{completed} with latency {tt}")
+        assert completed
+
+        # load -> get_segment_info -> verify stats task
+        self.collection_wrap.load()
+        res_segment_info, _ = self.utility_wrap.get_query_segment_info(collection_name)
+        assert len(res_segment_info) > 0  # maybe mix compaction to 1 segment
+        cnt = 0
+        for r in res_segment_info:
+            log.info(f"segmentID {r.segmentID}: state: {r.state}; num_rows: {r.num_rows}; is_sorted: {r.is_sorted} ")
+            cnt += r.num_rows
+            assert r.is_sorted is True
+        assert cnt == nb
+
+        # verify search
+        self.collection_wrap.search(
+            data=cf.gen_vectors(ct.default_nq, ct.default_dim, vector_data_type=DataType.FLOAT_VECTOR.name),
+            anns_field=df.float_vec_field, param=DefaultVectorSearchParams.IVF_SQ8(),
+            limit=ct.default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": ct.default_nq,
+                         "limit": ct.default_limit})

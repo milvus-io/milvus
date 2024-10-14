@@ -143,7 +143,7 @@ type shardDelegator struct {
 
 	// fieldId -> functionRunner map for search function field
 	functionRunners map[UniqueID]function.FunctionRunner
-	hasBM25Field    bool
+	isBM25Field     map[UniqueID]bool
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -245,7 +245,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	}
 
 	// build idf for bm25 search
-	if req.GetReq().GetMetricType() == metric.BM25 {
+	if req.GetReq().GetMetricType() == metric.BM25 || (req.GetReq().GetMetricType() == metric.EMPTY && sd.isBM25Field[req.GetReq().GetFieldId()]) {
 		avgdl, err := sd.buildBM25IDF(req.GetReq())
 		if err != nil {
 			return nil, err
@@ -296,7 +296,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	defer sd.lifetime.Done()
 
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
-		log.Warn("deletgator received search request not belongs to it",
+		log.Warn("delegator received search request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
 		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
@@ -908,6 +908,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
 		excludedSegments: excludedSegments,
 		functionRunners:  make(map[int64]function.FunctionRunner),
+		isBM25Field:      make(map[int64]bool),
 	}
 
 	for _, tf := range collection.Schema().GetFunctions() {
@@ -918,7 +919,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 			}
 			sd.functionRunners[tf.OutputFieldIds[0]] = functionRunner
 			if tf.GetType() == schemapb.FunctionType_BM25 {
-				sd.hasBM25Field = true
+				sd.isBM25Field[tf.OutputFieldIds[0]] = true
 			}
 		}
 	}

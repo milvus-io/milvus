@@ -38,4 +38,6 @@ const (
 	SUPERSTRUCTURE MetricType = "SUPERSTRUCTURE"
 
 	BM25 MetricType = "BM25"
+
+	EMPTY MetricType = ""
 )
