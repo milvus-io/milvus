@@ -468,7 +468,9 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		}
 	})
 
-	collectionName = collection.Schema.GetName()
+	if collectionName == "" {
+		collectionName = collection.Schema.GetName()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	_, dbOk := m.collInfo[database]
@@ -492,7 +494,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		partitionKeyIsolation: isolation,
 	}
 
-	log.Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName), zap.Int64("collectionID", collection.CollectionID))
+	log.Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName),
+		zap.String("actual collection Name", collection.Schema.GetName()), zap.Int64("collectionID", collection.CollectionID))
 	return m.collInfo[database][collectionName], nil
 }
 
