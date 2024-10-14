@@ -26,7 +26,7 @@ func TestResumableConsumer(t *testing.T) {
 	rc := NewResumableConsumer(func(ctx context.Context, opts *handler.ConsumerOptions) (consumer.Consumer, error) {
 		if i == 0 {
 			i++
-			opts.MessageHandler.Handle(message.NewImmutableMesasge(
+			ok, err := opts.MessageHandler.Handle(context.Background(), message.NewImmutableMesasge(
 				walimplstest.NewTestMessageID(123),
 				[]byte("payload"),
 				map[string]string{
@@ -36,6 +36,8 @@ func TestResumableConsumer(t *testing.T) {
 					"_v":  "1",
 					"_lc": walimplstest.NewTestMessageID(123).Marshal(),
 				}))
+			assert.True(t, ok)
+			assert.NoError(t, err)
 			return c, nil
 		} else if i == 1 {
 			i++
@@ -76,7 +78,7 @@ func TestHandler(t *testing.T) {
 	hNop := nopCloseHandler{
 		Handler: message.ChanMessageHandler(ch),
 	}
-	hNop.Handle(nil)
+	hNop.Handle(context.Background(), nil)
 	assert.Nil(t, <-ch)
 	hNop.Close()
 	select {

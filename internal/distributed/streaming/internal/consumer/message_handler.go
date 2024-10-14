@@ -1,24 +1,28 @@
 package consumer
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
-// timeTickOrderMessageHandler is a message handler that will do metrics and record the last sent message id.
+// timeTickOrderMessageHandler is a message handler that will record the last sent message id.
 type timeTickOrderMessageHandler struct {
 	inner                  message.Handler
 	lastConfirmedMessageID message.MessageID
 	lastTimeTick           uint64
 }
 
-func (mh *timeTickOrderMessageHandler) Handle(msg message.ImmutableMessage) {
+func (mh *timeTickOrderMessageHandler) Handle(ctx context.Context, msg message.ImmutableMessage) (bool, error) {
 	lastConfirmedMessageID := msg.LastConfirmedMessageID()
 	timetick := msg.TimeTick()
 
-	mh.inner.Handle(msg)
-
-	mh.lastConfirmedMessageID = lastConfirmedMessageID
-	mh.lastTimeTick = timetick
+	ok, err := mh.inner.Handle(ctx, msg)
+	if ok {
+		mh.lastConfirmedMessageID = lastConfirmedMessageID
+		mh.lastTimeTick = timetick
+	}
+	return ok, err
 }
 
 func (mh *timeTickOrderMessageHandler) Close() {
