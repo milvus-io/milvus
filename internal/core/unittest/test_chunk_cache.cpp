@@ -116,7 +116,8 @@ TEST_P(ChunkCacheTest, Read) {
     auto cc = milvus::storage::MmapManager::GetInstance().GetChunkCache();
 
     // validate dense data
-    const auto& dense_column = cc->Read(dense_file_name, descriptor, dense_field_meta, true);
+    const auto& dense_column =
+        cc->Read(dense_file_name, descriptor, dense_field_meta, true);
     Assert(dense_column->DataByteSize() == dim * N * 4);
     auto actual_dense = (const float*)(dense_column->Data());
     for (auto i = 0; i < N * dim; i++) {
@@ -126,7 +127,8 @@ TEST_P(ChunkCacheTest, Read) {
     }
 
     // validate sparse data
-    const auto& sparse_column = cc->Read(sparse_file_name, descriptor, sparse_field_meta, true);
+    const auto& sparse_column =
+        cc->Read(sparse_file_name, descriptor, sparse_field_meta, true);
     auto expected_sparse_size = 0;
     auto actual_sparse =
         (const knowhere::sparse::SparseRow<float>*)(sparse_column->Data());
@@ -141,7 +143,7 @@ TEST_P(ChunkCacheTest, Read) {
         auto bytes = actual_sparse_row.data_byte_size();
         AssertInfo(
             memcmp(actual_sparse_row.data(), expect_sparse_row.data(), bytes) ==
-            0,
+                0,
             fmt::format("Incorrect data of sparse row: expect {}, actual {}",
                         expect_sparse_row.data(),
                         actual_sparse_row.data()));
@@ -192,7 +194,7 @@ TEST_F(ChunkCacheTest, ReadByMemoryMode) {
                           sparse_metric_type);
 
     auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
-        .GetChunkManager();
+                   .GetChunkManager();
     auto dense_data = dataset.get_col<float>(fake_dense_vec_id);
     auto sparse_data =
         dataset.get_col<knowhere::sparse::SparseRow<float>>(fake_sparse_vec_id);
@@ -220,7 +222,8 @@ TEST_F(ChunkCacheTest, ReadByMemoryMode) {
     auto cc = milvus::storage::MmapManager::GetInstance().GetChunkCache();
 
     // validate dense data
-    const auto& dense_column = cc->Read(dense_file_name, descriptor, dense_field_meta, false);
+    const auto& dense_column =
+        cc->Read(dense_file_name, descriptor, dense_field_meta, false);
     Assert(dense_column->DataByteSize() == dim * N * 4);
     auto actual_dense = (const float*)(dense_column->Data());
     for (auto i = 0; i < N * dim; i++) {
@@ -230,7 +233,8 @@ TEST_F(ChunkCacheTest, ReadByMemoryMode) {
     }
 
     // validate sparse data
-    const auto& sparse_column = cc->Read(sparse_file_name, descriptor, sparse_field_meta, false);
+    const auto& sparse_column =
+        cc->Read(sparse_file_name, descriptor, sparse_field_meta, false);
     auto expected_sparse_size = 0;
     auto actual_sparse =
         (const knowhere::sparse::SparseRow<float>*)(sparse_column->Data());
@@ -245,7 +249,7 @@ TEST_F(ChunkCacheTest, ReadByMemoryMode) {
         auto bytes = actual_sparse_row.data_byte_size();
         AssertInfo(
             memcmp(actual_sparse_row.data(), expect_sparse_row.data(), bytes) ==
-            0,
+                0,
             fmt::format("Incorrect data of sparse row: expect {}, actual {}",
                         expect_sparse_row.data(),
                         actual_sparse_row.data()));
@@ -296,7 +300,7 @@ TEST_P(ChunkCacheTest, TestMultithreads) {
                           sparse_metric_type);
 
     auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
-        .GetChunkManager();
+                   .GetChunkManager();
     auto dense_data = dataset.get_col<float>(fake_dense_vec_id);
     auto sparse_data =
         dataset.get_col<knowhere::sparse::SparseRow<float>>(fake_sparse_vec_id);
@@ -326,7 +330,8 @@ TEST_P(ChunkCacheTest, TestMultithreads) {
     constexpr int threads = 16;
     std::vector<int64_t> total_counts(threads);
     auto executor = [&](int thread_id) {
-        const auto& dense_column = cc->Read(dense_file_name, descriptor, dense_field_meta, true);
+        const auto& dense_column =
+            cc->Read(dense_file_name, descriptor, dense_field_meta, true);
         Assert(dense_column->DataByteSize() == dim * N * 4);
 
         auto actual_dense = (const float*)dense_column->Data();
@@ -337,7 +342,8 @@ TEST_P(ChunkCacheTest, TestMultithreads) {
                     "expect {}, actual {}", dense_data[i], actual_dense[i]));
         }
 
-        const auto& sparse_column = cc->Read(sparse_file_name, descriptor, sparse_field_meta, true);
+        const auto& sparse_column =
+            cc->Read(sparse_file_name, descriptor, sparse_field_meta, true);
         auto actual_sparse =
             (const knowhere::sparse::SparseRow<float>*)sparse_column->Data();
         for (auto i = 0; i < N; i++) {
