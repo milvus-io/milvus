@@ -40,6 +40,14 @@ const (
 	IndexDISKANN         IndexType = "DISKANN"
 	IndexSparseInverted  IndexType = "SPARSE_INVERTED_INDEX"
 	IndexSparseWand      IndexType = "SPARSE_WAND"
+	// For temporary use, will be removed in the future.
+	// 1. All Index related param check will be moved to Knowhere recently.
+	// 2. FAISS_HNSW_xxx will be rename to HNSW_xxx after QA test. We keep the original name for comparison purpose.
+	// TODO: @liliu-z @foxspy
+	IndexFaissHNSW    IndexType = "FAISS_HNSW_FLAT"
+	IndexFaissHNSWPQ  IndexType = "FAISS_HNSW_PQ"
+	IndexFaissHNSWSQ  IndexType = "FAISS_HNSW_SQ"
+	IndexFaissHNSWPRQ IndexType = "FAISS_HNSW_PRQ"
 
 	// scalar index
 	IndexSTLSORT  IndexType = "STL_SORT"
