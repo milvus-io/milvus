@@ -28,6 +28,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	tr *timerecord.TimeRecorder,
 	currentTs typeutil.Timestamp,
 	collectionTtl int64,
+	bm25FieldIds []int64,
 ) ([]*datapb.CompactionSegment, error) {
 	_ = tr.RecordSpan()
 
@@ -39,7 +40,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegmentIDs().GetBegin(), plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter := NewMultiSegmentWriter(binlogIO, compAlloc, plan, maxRows, partitionID, collectionID)
+	mWriter := NewMultiSegmentWriter(binlogIO, compAlloc, plan, maxRows, partitionID, collectionID, bm25FieldIds)
 
 	var (
 		expiredRowCount int64 // the number of expired entities
@@ -87,7 +88,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 			}
 			binlogPaths[idx] = batchPaths
 		}
-		segmentReaders[i] = NewSegmentDeserializeReader(ctx, binlogPaths, binlogIO, pkField.GetFieldID())
+		segmentReaders[i] = NewSegmentDeserializeReader(ctx, binlogPaths, binlogIO, pkField.GetFieldID(), bm25FieldIds)
 	}
 
 	pq := make(PriorityQueue, 0)

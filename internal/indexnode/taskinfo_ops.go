@@ -323,6 +323,7 @@ type statsTaskInfo struct {
 	insertLogs    []*datapb.FieldBinlog
 	statsLogs     []*datapb.FieldBinlog
 	textStatsLogs map[int64]*datapb.TextIndexStats
+	bm25Logs      []*datapb.FieldBinlog
 }
 
 func (i *IndexNode) loadOrStoreStatsTask(clusterID string, taskID UniqueID, info *statsTaskInfo) *statsTaskInfo {
@@ -370,6 +371,7 @@ func (i *IndexNode) storePKSortStatsResult(
 	numRows int64,
 	insertLogs []*datapb.FieldBinlog,
 	statsLogs []*datapb.FieldBinlog,
+	bm25Logs []*datapb.FieldBinlog,
 ) {
 	key := taskKey{ClusterID: ClusterID, TaskID: taskID}
 	i.stateLock.Lock()
@@ -382,6 +384,7 @@ func (i *IndexNode) storePKSortStatsResult(
 		info.numRows = numRows
 		info.insertLogs = insertLogs
 		info.statsLogs = statsLogs
+		info.bm25Logs = bm25Logs
 		return
 	}
 }
@@ -424,6 +427,7 @@ func (i *IndexNode) getStatsTaskInfo(clusterID string, taskID UniqueID) *statsTa
 			insertLogs:    info.insertLogs,
 			statsLogs:     info.statsLogs,
 			textStatsLogs: info.textStatsLogs,
+			bm25Logs:      info.bm25Logs,
 		}
 	}
 	return nil

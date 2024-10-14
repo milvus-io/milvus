@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/clusteringpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -101,6 +102,8 @@ type clusteringCompactionTask struct {
 	// vector
 	segmentIDOffsetMapping map[int64]string
 	offsetToBufferFunc     func(int64, []uint32) *ClusterBuffer
+	// bm25
+	bm25FieldIds []int64
 }
 
 type ClusterBuffer struct {
@@ -115,6 +118,8 @@ type ClusterBuffer struct {
 	currentSegmentRowNum atomic.Int64
 	// segID -> fieldID -> binlogs
 	flushedBinlogs map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog
+	// segID -> fieldID -> binlogs
+	flushedBM25stats map[typeutil.UniqueID]map[int64]*storage.BM25Stats
 
 	uploadedSegments     []*datapb.CompactionSegment
 	uploadedSegmentStats map[typeutil.UniqueID]storage.SegmentStats
@@ -205,6 +210,13 @@ func (t *clusteringCompactionTask) init() error {
 			t.clusteringKeyField = field
 		}
 	}
+
+	for _, function := range t.plan.Schema.Functions {
+		if function.GetType() == schemapb.FunctionType_BM25 {
+			t.bm25FieldIds = append(t.bm25FieldIds, function.GetOutputFieldIds()[0])
+		}
+	}
+
 	t.primaryKeyField = pkField
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
 	t.currentTs = tsoutil.GetCurrentTime()
@@ -310,6 +322,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			id:                      id,
 			flushedRowNum:           map[typeutil.UniqueID]atomic.Int64{},
 			flushedBinlogs:          make(map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog, 0),
+			flushedBM25stats:        make(map[int64]map[int64]*storage.BM25Stats, 0),
 			uploadedSegments:        make([]*datapb.CompactionSegment, 0),
 			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
@@ -461,6 +474,7 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 				Field2StatslogPaths: seg.GetField2StatslogPaths(),
 				Deltalogs:           seg.GetDeltalogs(),
 				Channel:             seg.GetChannel(),
+				Bm25Logs:            seg.GetBm25Logs(),
 			}
 			log.Debug("put segment into final compaction result", zap.String("segment", se.String()))
 			resultSegments = append(resultSegments, se)
@@ -566,6 +580,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
 			return &storage.Blob{Key: paths[i], Value: v}
 		})
+
 		pkIter, err := storage.NewBinlogDeserializeReader(blobs, t.primaryKeyField.GetFieldID())
 		if err != nil {
 			log.Warn("new insert binlogs Itr wrong", zap.Strings("paths", paths), zap.Error(err))
@@ -892,6 +907,15 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 		Field2StatslogPaths: []*datapb.FieldBinlog{statsLogs},
 		Channel:             t.plan.GetChannel(),
 	}
+
+	if len(t.bm25FieldIds) > 0 {
+		bm25Logs, err := t.generateBM25Stats(ctx, segmentID, buffer.flushedBM25stats[segmentID])
+		if err != nil {
+			return err
+		}
+		seg.Bm25Logs = bm25Logs
+	}
+
 	buffer.uploadedSegments = append(buffer.uploadedSegments, seg)
 	segmentStats := storage.SegmentStats{
 		FieldStats: []storage.FieldStats{buffer.clusteringKeyFieldStats.Clone()},
@@ -914,6 +938,10 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 
 	// clear segment binlogs cache
 	delete(buffer.flushedBinlogs, segmentID)
+
+	if len(t.bm25FieldIds) > 0 {
+		delete(buffer.flushedBM25stats, segmentID)
+	}
 	return nil
 }
 
@@ -964,6 +992,23 @@ func (t *clusteringCompactionTask) flushBinlog(ctx context.Context, buffer *Clus
 
 	if info, ok := buffer.flushedBinlogs[segmentID]; !ok || info == nil {
 		buffer.flushedBinlogs[segmentID] = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
+	}
+
+	// if has bm25 failed, cache bm25 stats
+	if len(t.bm25FieldIds) > 0 {
+		statsMap, ok := buffer.flushedBM25stats[segmentID]
+		if !ok || statsMap == nil {
+			buffer.flushedBM25stats[segmentID] = make(map[int64]*storage.BM25Stats)
+			statsMap = buffer.flushedBM25stats[segmentID]
+		}
+
+		for fieldID, newstats := range writer.GetBm25Stats() {
+			if stats, ok := statsMap[fieldID]; ok {
+				stats.Merge(newstats)
+			} else {
+				statsMap[fieldID] = newstats
+			}
+		}
 	}
 
 	for fID, path := range partialBinlogs {
@@ -1230,7 +1275,7 @@ func (t *clusteringCompactionTask) refreshBufferWriterWithPack(buffer *ClusterBu
 		buffer.currentSegmentRowNum.Store(0)
 	}
 
-	writer, err := NewSegmentWriter(t.plan.GetSchema(), t.plan.MaxSegmentRows, segmentID, t.partitionID, t.collectionID)
+	writer, err := NewSegmentWriter(t.plan.GetSchema(), t.plan.MaxSegmentRows, segmentID, t.partitionID, t.collectionID, t.bm25FieldIds)
 	if err != nil {
 		return pack, err
 	}
@@ -1245,7 +1290,7 @@ func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) er
 	segmentID = buffer.writer.Load().(*SegmentWriter).GetSegmentID()
 	buffer.bufferMemorySize.Add(int64(buffer.writer.Load().(*SegmentWriter).WrittenMemorySize()))
 
-	writer, err := NewSegmentWriter(t.plan.GetSchema(), t.plan.MaxSegmentRows, segmentID, t.partitionID, t.collectionID)
+	writer, err := NewSegmentWriter(t.plan.GetSchema(), t.plan.MaxSegmentRows, segmentID, t.partitionID, t.collectionID, t.bm25FieldIds)
 	if err != nil {
 		return err
 	}
@@ -1268,6 +1313,48 @@ func (t *clusteringCompactionTask) checkBuffersAfterCompaction() error {
 		}
 	}
 	return nil
+}
+
+func (t *clusteringCompactionTask) generateBM25Stats(ctx context.Context, segmentID int64, statsMap map[int64]*storage.BM25Stats) ([]*datapb.FieldBinlog, error) {
+	binlogs := []*datapb.FieldBinlog{}
+	kvs := map[string][]byte{}
+	logID, _, err := t.logIDAlloc.Alloc(uint32(len(statsMap)))
+	if err != nil {
+		return nil, err
+	}
+
+	for fieldID, stats := range statsMap {
+		key, _ := binlog.BuildLogPath(storage.BM25Binlog, t.collectionID, t.partitionID, segmentID, fieldID, logID)
+		bytes, err := stats.Serialize()
+		if err != nil {
+			log.Warn("failed to seralize bm25 stats", zap.Int64("collection", t.collectionID),
+				zap.Int64("partition", t.partitionID), zap.Int64("segment", segmentID), zap.Error(err))
+			return nil, err
+		}
+
+		kvs[key] = bytes
+
+		binlogs = append(binlogs, &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{{
+				LogSize:    int64(len(bytes)),
+				MemorySize: int64(len(bytes)),
+				LogPath:    key,
+				EntriesNum: stats.NumRow(),
+			}},
+		})
+		logID++
+	}
+
+	if err := t.binlogIO.Upload(ctx, kvs); err != nil {
+		log.Warn("failed to upload bm25 stats log",
+			zap.Int64("collection", t.collectionID),
+			zap.Int64("partition", t.partitionID),
+			zap.Int64("segment", segmentID),
+			zap.Error(err))
+		return nil, err
+	}
+	return binlogs, nil
 }
 
 func (t *clusteringCompactionTask) generatePkStats(ctx context.Context, segmentID int64,

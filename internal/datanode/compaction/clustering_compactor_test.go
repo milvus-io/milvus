@@ -51,7 +51,6 @@ type ClusteringCompactionTaskSuite struct {
 	mockBinlogIO *io.MockBinlogIO
 	mockAlloc    *allocator.MockAllocator
 	mockID       atomic.Int64
-	segWriter    *SegmentWriter
 
 	task *clusteringCompactionTask
 
@@ -172,7 +171,7 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	schema := genCollectionSchema()
 	var segmentID int64 = 1001
-	segWriter, err := NewSegmentWriter(schema, 1000, segmentID, PartitionID, CollectionID)
+	segWriter, err := NewSegmentWriter(schema, 1000, segmentID, PartitionID, CollectionID, []int64{})
 	s.Require().NoError(err)
 	for i := 0; i < 10240; i++ {
 		v := storage.Value{
@@ -186,6 +185,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	segWriter.FlushAndIsFull()
 
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
+	s.NoError(err)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(lo.Values(kvs), nil)
 
 	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
@@ -237,6 +237,89 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	s.Equal(totalRowNum, statsRowNum)
 }
 
+func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
+	schema := genCollectionSchemaWithBM25()
+	var segmentID int64 = 1001
+	segWriter, err := NewSegmentWriter(schema, 1000, segmentID, PartitionID, CollectionID, []int64{102})
+	s.Require().NoError(err)
+
+	for i := 0; i < 10240; i++ {
+		v := storage.Value{
+			PK:        storage.NewInt64PrimaryKey(int64(i)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Value:     genRowWithBM25(int64(i)),
+		}
+		err = segWriter.Write(&v)
+		s.Require().NoError(err)
+	}
+	segWriter.FlushAndIsFull()
+
+	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
+	s.NoError(err)
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(lo.Values(kvs), nil)
+
+	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
+		{
+			SegmentID:    segmentID,
+			FieldBinlogs: lo.Values(fBinlogs),
+		},
+	}
+
+	s.task.bm25FieldIds = []int64{102}
+	s.task.plan.Schema = schema
+	s.task.plan.ClusteringKeyField = 100
+	s.task.plan.PreferSegmentRows = 2048
+	s.task.plan.MaxSegmentRows = 2048
+	s.task.plan.PreAllocatedSegmentIDs = &datapb.IDRange{
+		Begin: time.Now().UnixMilli(),
+		End:   time.Now().UnixMilli() + 1000,
+	}
+
+	// 8 + 8 + 8 + 7 + 8 = 39
+	// 39*1024 = 39936
+	// writer will automatically flush after 1024 rows.
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "39935")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
+
+	compactionResult, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Equal(5, len(s.task.clusterBuffers))
+	s.Equal(5, len(compactionResult.GetSegments()))
+	totalBinlogNum := 0
+	totalRowNum := int64(0)
+	for _, fb := range compactionResult.GetSegments()[0].GetInsertLogs() {
+		for _, b := range fb.GetBinlogs() {
+			totalBinlogNum++
+			if fb.GetFieldID() == 100 {
+				totalRowNum += b.GetEntriesNum()
+			}
+		}
+	}
+	statsBinlogNum := 0
+	statsRowNum := int64(0)
+	for _, sb := range compactionResult.GetSegments()[0].GetField2StatslogPaths() {
+		for _, b := range sb.GetBinlogs() {
+			statsBinlogNum++
+			statsRowNum += b.GetEntriesNum()
+		}
+	}
+	s.Equal(2, totalBinlogNum/len(schema.GetFields()))
+	s.Equal(1, statsBinlogNum)
+	s.Equal(totalRowNum, statsRowNum)
+
+	bm25BinlogNum := 0
+	bm25RowNum := int64(0)
+	for _, bmb := range compactionResult.GetSegments()[0].GetBm25Logs() {
+		for _, b := range bmb.GetBinlogs() {
+			bm25BinlogNum++
+			bm25RowNum += b.GetEntriesNum()
+		}
+	}
+
+	s.Equal(1, bm25BinlogNum)
+	s.Equal(totalRowNum, bm25RowNum)
+}
+
 func (s *ClusteringCompactionTaskSuite) TestCheckBuffersAfterCompaction() {
 	s.Run("no leak", func() {
 		task := &clusteringCompactionTask{clusterBuffers: []*ClusterBuffer{{}}}
@@ -260,6 +343,71 @@ func (s *ClusteringCompactionTaskSuite) TestCheckBuffersAfterCompaction() {
 			},
 		}
 		s.Error(task.checkBuffersAfterCompaction())
+	})
+}
+
+func (s *ClusteringCompactionTaskSuite) TestGenerateBM25Stats() {
+	s.Run("normal case", func() {
+		segmentID := int64(1)
+		task := &clusteringCompactionTask{
+			collectionID: 111,
+			partitionID:  222,
+			bm25FieldIds: []int64{102},
+			logIDAlloc:   s.mockAlloc,
+			binlogIO:     s.mockBinlogIO,
+		}
+
+		statsMap := make(map[int64]*storage.BM25Stats)
+		statsMap[102] = storage.NewBM25Stats()
+		statsMap[102].Append(map[uint32]float32{1: 1})
+
+		binlogs, err := task.generateBM25Stats(context.Background(), segmentID, statsMap)
+		s.NoError(err)
+		s.Equal(1, len(binlogs))
+		s.Equal(1, len(binlogs[0].Binlogs))
+		s.Equal(int64(102), binlogs[0].FieldID)
+		s.Equal(int64(1), binlogs[0].Binlogs[0].GetEntriesNum())
+	})
+
+	s.Run("alloc ID failed", func() {
+		segmentID := int64(1)
+		mockAlloc := allocator.NewMockAllocator(s.T())
+		mockAlloc.EXPECT().Alloc(mock.Anything).Return(0, 0, fmt.Errorf("mock error")).Once()
+
+		task := &clusteringCompactionTask{
+			collectionID: 111,
+			partitionID:  222,
+			bm25FieldIds: []int64{102},
+			logIDAlloc:   mockAlloc,
+		}
+
+		statsMap := make(map[int64]*storage.BM25Stats)
+		statsMap[102] = storage.NewBM25Stats()
+		statsMap[102].Append(map[uint32]float32{1: 1})
+
+		_, err := task.generateBM25Stats(context.Background(), segmentID, statsMap)
+		s.Error(err)
+	})
+
+	s.Run("upload failed", func() {
+		segmentID := int64(1)
+		mockBinlogIO := io.NewMockBinlogIO(s.T())
+		mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
+
+		task := &clusteringCompactionTask{
+			collectionID: 111,
+			partitionID:  222,
+			bm25FieldIds: []int64{102},
+			logIDAlloc:   s.mockAlloc,
+			binlogIO:     mockBinlogIO,
+		}
+
+		statsMap := make(map[int64]*storage.BM25Stats)
+		statsMap[102] = storage.NewBM25Stats()
+		statsMap[102].Append(map[uint32]float32{1: 1})
+
+		_, err := task.generateBM25Stats(context.Background(), segmentID, statsMap)
+		s.Error(err)
 	})
 }
 
@@ -304,7 +452,7 @@ func (s *ClusteringCompactionTaskSuite) TestGeneratePkStats() {
 
 	s.Run("upload failed", func() {
 		schema := genCollectionSchema()
-		segWriter, err := NewSegmentWriter(schema, 1000, SegmentID, PartitionID, CollectionID)
+		segWriter, err := NewSegmentWriter(schema, 1000, SegmentID, PartitionID, CollectionID, []int64{})
 		s.Require().NoError(err)
 		for i := 0; i < 2000; i++ {
 			v := storage.Value{
@@ -401,5 +549,66 @@ func genCollectionSchema() *schemapb.CollectionSchema {
 				},
 			},
 		},
+	}
+}
+
+func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name:        "schema",
+		Description: "schema",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  common.RowIDField,
+				Name:     "row_id",
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  common.TimeStampField,
+				Name:     "Timestamp",
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:  101,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.MaxLengthKey,
+						Value: "8",
+					},
+				},
+			},
+			{
+				FieldID:  102,
+				Name:     "sparse",
+				DataType: schemapb.DataType_SparseFloatVector,
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name:             "BM25",
+			Id:               100,
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			InputFieldIds:    []int64{101},
+			OutputFieldNames: []string{"sparse"},
+			OutputFieldIds:   []int64{102},
+		}},
+	}
+}
+
+func genRowWithBM25(magic int64) map[int64]interface{} {
+	ts := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
+	return map[int64]interface{}{
+		common.RowIDField:     magic,
+		common.TimeStampField: int64(ts),
+		100:                   magic,
+		101:                   "varchar",
+		102:                   typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1}),
 	}
 }

@@ -194,6 +194,7 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		kv[key] = string(binlogBytes)
 	}
 
+	// bm25log
 	for _, bm25log := range bm25logs {
 		if err := checkLogID(bm25log); err != nil {
 			return nil, err
