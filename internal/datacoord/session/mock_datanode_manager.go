@@ -971,13 +971,13 @@ func (_c *MockDataNodeManager_QuerySlot_Call) RunAndReturn(run func(int64) (*dat
 	return _c
 }
 
-// SyncSegments provides a mock function with given fields: nodeID, req
-func (_m *MockDataNodeManager) SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error {
-	ret := _m.Called(nodeID, req)
+// SyncSegments provides a mock function with given fields: ctx, nodeID, req
+func (_m *MockDataNodeManager) SyncSegments(ctx context.Context, nodeID int64, req *datapb.SyncSegmentsRequest) error {
+	ret := _m.Called(ctx, nodeID, req)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.SyncSegmentsRequest) error); ok {
-		r0 = rf(nodeID, req)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *datapb.SyncSegmentsRequest) error); ok {
+		r0 = rf(ctx, nodeID, req)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -991,15 +991,16 @@ type MockDataNodeManager_SyncSegments_Call struct {
 }
 
 // SyncSegments is a helper method to define mock.On call
+//   - ctx context.Context
 //   - nodeID int64
 //   - req *datapb.SyncSegmentsRequest
-func (_e *MockDataNodeManager_Expecter) SyncSegments(nodeID interface{}, req interface{}) *MockDataNodeManager_SyncSegments_Call {
-	return &MockDataNodeManager_SyncSegments_Call{Call: _e.mock.On("SyncSegments", nodeID, req)}
+func (_e *MockDataNodeManager_Expecter) SyncSegments(ctx interface{}, nodeID interface{}, req interface{}) *MockDataNodeManager_SyncSegments_Call {
+	return &MockDataNodeManager_SyncSegments_Call{Call: _e.mock.On("SyncSegments", ctx, nodeID, req)}
 }
 
-func (_c *MockDataNodeManager_SyncSegments_Call) Run(run func(nodeID int64, req *datapb.SyncSegmentsRequest)) *MockDataNodeManager_SyncSegments_Call {
+func (_c *MockDataNodeManager_SyncSegments_Call) Run(run func(ctx context.Context, nodeID int64, req *datapb.SyncSegmentsRequest)) *MockDataNodeManager_SyncSegments_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.SyncSegmentsRequest))
+		run(args[0].(context.Context), args[1].(int64), args[2].(*datapb.SyncSegmentsRequest))
 	})
 	return _c
 }
@@ -1009,7 +1010,7 @@ func (_c *MockDataNodeManager_SyncSegments_Call) Return(_a0 error) *MockDataNode
 	return _c
 }
 
-func (_c *MockDataNodeManager_SyncSegments_Call) RunAndReturn(run func(int64, *datapb.SyncSegmentsRequest) error) *MockDataNodeManager_SyncSegments_Call {
+func (_c *MockDataNodeManager_SyncSegments_Call) RunAndReturn(run func(context.Context, int64, *datapb.SyncSegmentsRequest) error) *MockDataNodeManager_SyncSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }
