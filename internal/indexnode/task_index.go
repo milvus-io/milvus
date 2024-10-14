@@ -210,6 +210,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		zap.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()))
 
 	indexType := it.newIndexParams[common.IndexTypeKey]
+	var fieldDataSize uint64
 	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 		// check index node support disk index
 		if !Params.IndexNodeCfg.EnableDisk.GetAsBool() {
@@ -225,7 +226,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 			log.Warn("IndexNode get local used size failed")
 			return err
 		}
-		fieldDataSize, err := estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
+		fieldDataSize, err = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
 		if err != nil {
 			log.Warn("IndexNode get local used size failed")
 			return err
@@ -245,6 +246,10 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 			log.Warn("failed to fill disk index params", zap.Error(err))
 			return err
 		}
+	}
+
+	if Params.IndexEngineConfig.Enable.GetAsBool() {
+		it.newIndexParams, _ = Params.IndexEngineConfig.MergeWithResource(fieldDataSize, it.newIndexParams)
 	}
 
 	storageConfig := &indexcgopb.StorageConfig{
