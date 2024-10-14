@@ -7,6 +7,7 @@ from pymilvus.exceptions import MilvusException
 from base.client_base import TestcaseBase
 from base.collection_wrapper import ApiCollectionWrapper
 from base.utility_wrapper import ApiUtilityWrapper
+from common.common_params import FieldParams, DefaultVectorIndexParams, DefaultVectorSearchParams
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
@@ -1359,24 +1360,98 @@ class TestUtilityAdvanced(TestcaseBase):
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("index must created before load, but create_index will trigger flush")
-    def test_get_sealed_query_segment_info(self):
+    @pytest.mark.parametrize("primary_field", ["int64_pk", "varchar_pk"])
+    def test_get_sealed_query_segment_info(self, primary_field):
         """
-        target: test getting sealed query segment info of collection without index
-        method: init a collection, insert data, flush, load, and get query segment info
+        target: test getting sealed query segment info of collection with data
+        method: init a collection, insert data, flush, index, load, and get query segment info
         expected:
-            1. length of segment is equal to 0
+            1. length of segment is greater than 0
+            2. the sum num_rows of each segment is equal to num of entities
+            3. all segment is_sorted true
         """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
         nb = 3000
-        df = cf.gen_default_dataframe_data(nb)
-        collection_w.insert(df)
-        collection_w.num_entities
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-        collection_w.load()
-        res, _ = self.utility_wrap.get_query_segment_info(c_name)
-        assert len(res) == 0
+        segment_num = 2
+        collection_name = cf.gen_unique_str(prefix)
+
+        # connect -> create collection
+        self._connect()
+        self.collection_wrap.init_collection(
+            name=collection_name,
+            schema=cf.set_collection_schema(
+                fields=[primary_field, ct.default_float_vec_field_name],
+                field_params={
+                    primary_field: FieldParams(is_primary=True, max_length=128).to_dict,
+                    ct.default_float_vec_field_name: FieldParams(dim=ct.default_dim).to_dict,
+                },
+            )
+        )
+
+        for _ in range(segment_num):
+            # insert random pks, ***start=None will generate random data***
+            data = cf.gen_values(self.collection_wrap.schema, nb=nb, start_id=None)
+            self.collection_wrap.insert(data)
+            self.collection_wrap.flush()
+
+        # flush -> index -> load -> sealed segments is sorted
+        self.build_multi_index(index_params=DefaultVectorIndexParams.IVF_SQ8(ct.default_float_vec_field_name))
+        self.collection_wrap.load()
+
+        # get_query_segment_info and verify results
+        res_sealed, _ = self.utility_wrap.get_query_segment_info(collection_name)
+        assert len(res_sealed) > 0 # maybe mix compaction to 1 segment
+        cnt = 0
+        for r in res_sealed:
+            log.info(f"segmentID {r.segmentID}: state: {r.state}; num_rows: {r.num_rows}; is_sorted: {r.is_sorted} ")
+            cnt += r.num_rows
+            assert r.is_sorted is True
+        assert cnt == nb * segment_num
+
+        # verify search
+        self.collection_wrap.search(data=cf.gen_vectors(ct.default_nq, ct.default_dim),
+                                    anns_field=ct.default_float_vec_field_name, param=DefaultVectorSearchParams.IVF_SQ8(),
+                                    limit=ct.default_limit,
+                                    check_task=CheckTasks.check_search_results,
+                                    check_items={"nq": ct.default_nq,
+                                                 "limit": ct.default_limit})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_get_growing_query_segment_info(self):
+        """
+        target: test getting growing query segment info of collection with data
+        method: init a collection, index, load, insert data, and get query segment info
+        expected:
+            1. length of segment is 0, growing segment is not visible for get_query_segment_info
+        """
+        nb = 3000
+        primary_field = "int64"
+        collection_name = cf.gen_unique_str(prefix)
+
+        # connect -> create collection
+        self._connect()
+        self.collection_wrap.init_collection(
+            name=collection_name,
+            schema=cf.set_collection_schema(
+                fields=[primary_field, ct.default_float_vec_field_name],
+                field_params={
+                    primary_field: FieldParams(is_primary=True, max_length=128).to_dict,
+                    ct.default_float_vec_field_name: FieldParams(dim=ct.default_dim).to_dict,
+                },
+            )
+        )
+
+        # index -> load
+        self.build_multi_index(index_params=DefaultVectorIndexParams.IVF_SQ8(ct.default_float_vec_field_name))
+        self.collection_wrap.load()
+
+        # insert random pks, ***start=None will generate random data***
+        data = cf.gen_values(self.collection_wrap.schema, nb=nb, start_id=None)
+        self.collection_wrap.insert(data)
+
+        # get_query_segment_info and verify results
+        res_sealed, _ = self.utility_wrap.get_query_segment_info(collection_name)
+        assert len(res_sealed) == 0
+
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_get_sealed_query_segment_info_after_create_index(self):
