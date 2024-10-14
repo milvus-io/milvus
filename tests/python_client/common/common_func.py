@@ -1977,6 +1977,8 @@ def gen_simple_index():
             continue
         elif ct.all_index_types[i] in ct.sparse_support:
             continue
+        elif ct.all_index_types[i] in ct.gpu_support:
+            continue
         dic = {"index_type": ct.all_index_types[i], "metric_type": "L2"}
         dic.update({"params": ct.default_all_indexes_params[i]})
         index_params.append(dic)

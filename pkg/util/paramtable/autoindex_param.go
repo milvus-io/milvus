@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 )
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -235,6 +234,7 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 	p.ScalarBoolIndexType.Init(base.mgr)
 }
 
+// TODO：move this code to the core module
 func (p *autoIndexConfig) panicIfNotValidAndSetDefaultMetricType(mgr *config.Manager) {
 	p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
 	p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.BinaryIndexParams.Key, p.BinaryIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector, mgr)
@@ -246,20 +246,9 @@ func (p *autoIndexConfig) panicIfNotValidAndSetDefaultMetricTypeHelper(key strin
 		panic(fmt.Sprintf("%s invalid, should be json format", key))
 	}
 
-	indexType, ok := m[common.IndexTypeKey]
+	_, ok := m[common.IndexTypeKey]
 	if !ok {
 		panic(fmt.Sprintf("%s invalid, index type not found", key))
-	}
-
-	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
-	if err != nil {
-		panic(fmt.Sprintf("%s invalid, unsupported index type: %s", key, indexType))
-	}
-
-	checker.SetDefaultMetricTypeIfNotExist(m, dtype)
-
-	if err := checker.StaticCheck(m); err != nil {
-		panic(fmt.Sprintf("%s invalid, parameters invalid, error: %s", key, err.Error()))
 	}
 
 	p.reset(key, m, mgr)

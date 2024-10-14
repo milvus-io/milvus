@@ -33,6 +33,7 @@ func NewDiskANNIndex(metricType MetricType) Index {
 	return &diskANNIndex{
 		baseIndex: baseIndex{
 			metricType: metricType,
+			indexType:  DISKANN,
 		},
 	}
 }
