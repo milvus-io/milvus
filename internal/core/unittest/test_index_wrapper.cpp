@@ -175,7 +175,6 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         auto nb_for_nq = NQ + query_offset;
         auto dataset = GenDataset(nb_for_nq, metric_type, false);
         auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
-        auto xb_dataset = knowhere::GenDataSet(nb_for_nq, DIM, xb_data.data());
         auto xq_dataset =
             knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
         result = vec_index->Query(xq_dataset, search_info, nullptr);
@@ -192,10 +191,9 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         auto nb_for_nq = NQ + query_offset;
         auto dataset = GenDataset(nb_for_nq, metric_type, true);
         auto xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
-        auto xb_dataset =
-            knowhere::GenDataSet(nb_for_nq, DIM, xb_bin_data.data());
+        // offset of binary vector is 8-aligned bit-wise representation.
         auto xq_dataset = knowhere::GenDataSet(
-            NQ, DIM, xb_bin_data.data() + DIM * query_offset);
+            NQ, DIM, xb_bin_data.data() + ((DIM + 7) / 8) * query_offset);
         result = vec_index->Query(xq_dataset, search_info, nullptr);
     }
 
