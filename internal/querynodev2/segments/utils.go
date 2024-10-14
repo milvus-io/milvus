@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -265,7 +266,7 @@ func isIndexMmapEnable(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.Fie
 	var indexSupportMmap bool
 	var defaultEnableMmap bool
 	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
-		indexSupportMmap = indexparamcheck.IsVectorMmapIndex(indexType)
+		indexSupportMmap = vecindexmgr.GetVecIndexMgrInstance().IsMMapSupported(indexType)
 		defaultEnableMmap = params.Params.QueryNodeCfg.MmapVectorIndex.GetAsBool()
 	} else {
 		indexSupportMmap = indexparamcheck.IsScalarMmapIndex(indexType)

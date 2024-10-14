@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/cgo"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -1114,7 +1115,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	delete(indexParams, common.MmapEnabledKey)
 
 	// some build params also exist in indexParams, which are useless during loading process
-	if indexParams["index_type"] == indexparamcheck.IndexDISKANN {
+	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
 		if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
 			return err
 		}
