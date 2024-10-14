@@ -142,16 +142,17 @@ ChunkCache::Mmap(const FieldDataPtr& field_data,
                  const MmapChunkDescriptorPtr& descriptor,
                  const FieldMeta& field_meta,
                  bool mmap_enabled) {
+    auto data_type = field_data->get_data_type();
+
     auto data_size = field_data->Size();
 
     std::shared_ptr<ColumnBase> column{};
 
     if (IsSparseFloatVectorDataType(data_type)) {
-        std::shared_ptr<SparseFloatColumn> sparse_column;
         if (mmap_enabled) {
-            sparse_column = std::make_shared<SparseFloatColumn>(mcm_, descriptor);
+            column = std::make_shared<SparseFloatColumn>(mcm_, descriptor);
         } else {
-            sparse_column = std::make_shared<SparseFloatColumn>(field_meta);
+            column = std::make_shared<SparseFloatColumn>(field_meta);
         }
     } else if (IsVariableDataType(data_type)) {
         AssertInfo(
