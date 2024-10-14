@@ -18,6 +18,7 @@ package mock
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"sync"
 
@@ -37,6 +38,7 @@ type GRPCClientBase[T any] struct {
 	newGrpcClient func(cc *grpc.ClientConn) T
 
 	grpcClient       T
+	cpInternalTLS    *x509.CertPool
 	conn             *grpc.ClientConn
 	grpcClientMtx    sync.RWMutex
 	GetGrpcClientErr error
@@ -58,6 +60,10 @@ func (c *GRPCClientBase[T]) SetRole(role string) {
 }
 
 func (c *GRPCClientBase[T]) EnableEncryption() {
+}
+
+func (c *GRPCClientBase[T]) SetInternalTLSCertPool(cp *x509.CertPool) {
+	c.cpInternalTLS = cp
 }
 
 func (c *GRPCClientBase[T]) SetNewGrpcClientFunc(f func(cc *grpc.ClientConn) T) {

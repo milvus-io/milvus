@@ -1,0 +1,175 @@
+version: '3.5'
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
+    command: etcd -listen-peer-urls=http://127.0.0.1:2380 -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379,http://0.0.0.0:4001 -initial-advertise-peer-urls=http://127.0.0.1:2380 --initial-cluster default=http://127.0.0.1:2380 --data-dir /etcd
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+      - "4001:4001"
+
+  pulsar:
+    image: apachepulsar/pulsar:2.8.2
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/pulsar:/pulsar/data
+    environment:
+      # bin/apply-config-from-env.py script will modify the configuration file based on the environment variables
+      # nettyMaxFrameSizeBytes must be calculated from maxMessageSize + 10240 (padding)
+      - nettyMaxFrameSizeBytes=104867840 # this is 104857600 + 10240 (padding)
+      - defaultRetentionTimeInMinutes=10080
+      - defaultRetentionSizeInMB=8192
+      # maxMessageSize is missing from standalone.conf, must use PULSAR_PREFIX_ to get it configured
+      - PULSAR_PREFIX_maxMessageSize=104857600
+      - PULSAR_GC=-XX:+UseG1GC
+    command: |
+      /bin/bash -c \
+      "bin/apply-config-from-env.py conf/standalone.conf && \
+      exec bin/pulsar standalone --no-functions-worker --no-stream-storage"
+    ports:
+      - "6650:6650"
+      - "18080:8080"
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:9000/minio/health/live"
+        ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/azurite:/data
+    command: azurite-blob --blobHost 0.0.0.0
+    ports:
+      - "10000:10000"
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "6831:6831/udp"
+      - "4317:4317" # OLTP over gRPC
+      - "4318:4318" # OLTP over HTTP
+      - "16686:16686" # frontent
+      - "14268:14268" # jaeger.thirft
+
+  zookeeper:
+    image: wurstmeister/zookeeper:latest
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: 'bitnami/kafka:3.1.0'
+    ports:
+      - '9092:9092'
+    environment:
+      - KAFKA_BROKER_ID=0
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://127.0.0.1:9092
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      # set kafka server config
+      - KAFKA_CFG_MAX_PARTITION_FETCH_BYTES=5242880
+      - KAFKA_CFG_MAX_REQUEST_SIZE=5242880
+      - KAFKA_CFG_MESSAGE_MAX_BYTES=5242880
+      - KAFKA_CFG_REPLICA_FETCH_MAX_BYTES=5242880
+      - KAFKA_CFG_FETCH_MESSAGE_MAX_BYTES=5242880
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+    depends_on:
+      - zookeeper
+
+  milvus-proxy:
+    image: ghostbaby/milvus:master_2
+    command: sh -c "envsubst < /milvus/configs/milvus_internaltls.yaml > /milvus/configs/milvus.yaml && milvus run proxy"
+    hostname: milvus-proxy
+    environment:
+      - MINIO_ADDRESS=minio:9000
+      - ETCD_ENDPOINTS=etcd:2379
+      - PULSAR_ADDRESS=pulsar://pulsar:6650
+    ports:
+      - "19530:19530"
+    depends_on:
+      - milvus-rootcoord
+      - milvus-datacoord
+
+  milvus-rootcoord:
+    image: ghostbaby/milvus:master_2
+    command: sh -c "envsubst < /milvus/configs/milvus_internaltls.yaml > /milvus/configs/milvus.yaml && milvus run rootcoord"
+    hostname: milvus-rootcoord
+    environment:
+      - MINIO_ADDRESS=minio:9000
+      - ETCD_ENDPOINTS=etcd:2379
+      - PULSAR_ADDRESS=pulsar://pulsar:6650
+
+  milvus-datacoord:
+    image: ghostbaby/milvus:master_2
+    command: sh -c "envsubst < /milvus/configs/milvus_internaltls.yaml > /milvus/configs/milvus.yaml && milvus run datacoord"
+    hostname: milvus-datacoord
+    environment:
+      - MINIO_ADDRESS=minio:9000
+      - ETCD_ENDPOINTS=etcd:2379
+      - PULSAR_ADDRESS=pulsar://pulsar:6650
+
+  milvus-querycoord:
+    image: ghostbaby/milvus:master_2
+    command: sh -c "envsubst < /milvus/configs/milvus_internaltls.yaml > /milvus/configs/milvus.yaml && milvus run querycoord"
+    hostname: milvus-querycoord
+    environment:
+      - MINIO_ADDRESS=minio:9000
+      - ETCD_ENDPOINTS=etcd:2379
+      - PULSAR_ADDRESS=pulsar://pulsar:6650
+
+  milvus-querynode:
+    image: ghostbaby/milvus:master_2
+    command: sh -c "envsubst < /milvus/configs/milvus_internaltls.yaml > /milvus/configs/milvus.yaml && milvus run querynode"
+    hostname: milvus-querynode
+    environment:
+      - MINIO_ADDRESS=minio:9000
+      - ETCD_ENDPOINTS=etcd:2379
+      - PULSAR_ADDRESS=pulsar://pulsar:6650
+
+  milvus-datanode:
+    image: ghostbaby/milvus:master_2
+    command: sh -c "envsubst < /milvus/configs/milvus_internaltls.yaml > /milvus/configs/milvus.yaml && milvus run datanode"
+    hostname: milvus-datanode
+    environment:
+      - MINIO_ADDRESS=minio:9000
+      - ETCD_ENDPOINTS=etcd:2379
+      - PULSAR_ADDRESS=pulsar://pulsar:6650
+
+  milvus-indexnode:
+    image: ghostbaby/milvus:master_2
+    command: sh -c "envsubst < /milvus/configs/milvus_internaltls.yaml > /milvus/configs/milvus.yaml && milvus run indexnode"
+    hostname: milvus-indexnode
+    environment:
+      - MINIO_ADDRESS=minio:9000
+      - ETCD_ENDPOINTS=etcd:2379
+      - PULSAR_ADDRESS=pulsar://pulsar:6650
+
+networks:
+  default:
+    name: milvus_dev
