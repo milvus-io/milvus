@@ -45,6 +45,7 @@ float_type = "FLOAT_VECTOR"
 float16_type = "FLOAT16_VECTOR"
 bfloat16_type = "BFLOAT16_VECTOR"
 sparse_vector = "SPARSE_FLOAT_VECTOR"
+text_sparse_vector = "TEXT_SPARSE_VECTOR"
 append_vector_type = [float16_type, bfloat16_type, sparse_vector]
 all_dense_vector_types = [float_type, float16_type, bfloat16_type]
 all_vector_data_types = [float_type, float16_type, bfloat16_type, sparse_vector]
@@ -254,6 +255,8 @@ default_flat_index = {"index_type": "FLAT", "params": {}, "metric_type": default
 default_bin_flat_index = {"index_type": "BIN_FLAT", "params": {}, "metric_type": "JACCARD"}
 default_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP",
                                  "params": {"drop_ratio_build": 0.2}}
+default_text_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "BM25",
+                                 "params": {"drop_ratio_build": 0.2, "bm25_k1": 1.5, "bm25_b": 0.75,}}
 
 default_search_params = {"params": default_all_search_params_params[2].copy()}
 default_search_ip_params = {"metric_type": "IP", "params": default_all_search_params_params[2].copy()}
@@ -263,7 +266,7 @@ default_binary_index = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", 
 default_diskann_index = {"index_type": "DISKANN", "metric_type": default_L0_metric, "params": {}}
 default_diskann_search_params = {"params": {"search_list": 30}}
 default_sparse_search_params = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}}
-
+default_text_sparse_search_params = {"metric_type": "BM25", "params": {}}
 
 class CheckTasks:
     """ The name of the method used to check the result """

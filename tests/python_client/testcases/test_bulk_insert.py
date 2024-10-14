@@ -2,7 +2,7 @@ import logging
 import random
 import time
 import pytest
-from pymilvus import DataType
+from pymilvus import DataType, Function, FunctionType
 from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
 import numpy as np
 from pathlib import Path
@@ -17,6 +17,7 @@ from common.bulk_insert_data import (
     prepare_bulk_insert_new_json_files,
     prepare_bulk_insert_numpy_files,
     prepare_bulk_insert_parquet_files,
+    prepare_bulk_insert_files,
     DataField as df,
 )
 from faker import Faker
@@ -770,7 +771,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_int64_field(name=df.int_field, nullable=nullable),
             cf.gen_float_field(name=df.float_field, nullable=nullable),
             cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key, nullable=nullable),
-            cf.gen_string_field(name=df.text_field, enable_match=True, nullable=nullable),
+            cf.gen_string_field(name=df.text_field, enable_match=True, enable_tokenizer=True, nullable=nullable, ),
             cf.gen_json_field(name=df.json_field, nullable=nullable),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
@@ -1469,6 +1470,169 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     if enable_dynamic_field and include_meta:
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("auto_id", [True])
+    @pytest.mark.parametrize("dim", [128])  # 128
+    @pytest.mark.parametrize("entities", [2000])
+    @pytest.mark.parametrize("file_format", ["json"])
+    def test_full_text_search_for_bulk_insert(self, auto_id, dim, entities, file_format):
+        """
+        collection schema 1: [pk, int64, float64, string float_vector]
+        data file: vectors.parquet and uid.parquet,
+        Steps:
+        1. create collection
+        2. import data
+        3. verify
+        """
+        nullable = False
+        enable_partition_key = True
+        enable_dynamic_field = False
+        float_vec_field_dim = dim
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
+            cf.gen_int64_field(name=df.int_field, nullable=nullable),
+            cf.gen_float_field(name=df.float_field, nullable=nullable),
+            cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key, nullable=nullable),
+            # cf.gen_string_field(name=df.text_field, enable_match=True, enable_tokenizer=True),
+            cf.gen_json_field(name=df.json_field, nullable=nullable),
+            cf.gen_float_vec_field(name=df.float_vec_field, dim=float_vec_field_dim),
+            # cf.gen_sparse_vec_field(name=df.text_sparse_vec_field),
+            cf.gen_sparse_vec_field(name=df.sparse_vec_field),
+        ]
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert")
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
+        # bm25_function = Function(
+        #     name="text_bm25_emb",
+        #     function_type=FunctionType.BM25,
+        #     input_field_names=[df.text_field],
+        #     output_field_names=[df.text_sparse_vec_field],
+        #     params={},
+        # )
+        # schema.add_function(bm25_function)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+        # remove text_sparse_vec_field from data_fields
+        # data_fields.remove(df.text_sparse_vec_field)
+        log.info(f"schema {schema}")
+
+        files = prepare_bulk_insert_files(
+            file_format=file_format,
+            minio_endpoint=self.minio_endpoint,
+            bucket_name=self.bucket_name,
+            rows=entities,
+            dim=dim,
+            data_fields=data_fields,
+            enable_dynamic_field=enable_dynamic_field,
+            force=True,
+            schema=schema
+        )
+
+        # import data
+        t0 = time.time()
+        task_id, _ = self.utility_wrap.do_bulk_insert(
+            collection_name=c_name, files=files
+        )
+        logging.info(f"bulk insert task ids:{task_id}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+            task_ids=[task_id], timeout=300
+        )
+        tt = time.time() - t0
+        log.info(f"bulk insert state:{success} in {tt} with states:{states}")
+        assert success
+        num_entities = self.collection_wrap.num_entities
+        log.info(f" collection entities: {num_entities}")
+        assert num_entities == entities
+        # verify imported data is available for search
+        index_params = ct.default_index
+        float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
+        binary_vec_fields = [f.name for f in fields if "vec" in f.name and "binary" in f.name]
+        sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name and not "text" in f.name]
+        text_sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name and "text" in f.name]
+        for f in float_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=index_params
+            )
+        for f in binary_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=ct.default_binary_index
+            )
+        for f in sparse_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=ct.default_sparse_inverted_index
+            )
+        for f in text_sparse_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=ct.default_text_sparse_inverted_index
+            )
+        self.collection_wrap.load()
+        log.info(f"wait for load finished and be ready for search")
+        time.sleep(2)
+        # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
+
+        for f in [df.float_vec_field, df.sparse_vec_field, df.text_sparse_vec_field]:
+            if f == df.float_vec_field:
+                dim = float_vec_field_dim
+                vector_data_type = "FLOAT_VECTOR"
+                search_params = ct.default_search_params
+            elif f == df.sparse_vec_field:
+                dim = 10000
+                vector_data_type = "SPARSE_FLOAT_VECTOR"
+                search_params = ct.default_sparse_search_params
+            elif f == df.text_sparse_vec_field:
+                dim = 10000 # just a placeholder
+                vector_data_type = "TEXT_SPARSE_VECTOR"
+                search_params = ct.default_text_sparse_search_params
+            else:
+                raise Exception("unsupported field")
+
+            search_data = cf.gen_vectors(1, dim, vector_data_type=vector_data_type)
+            res, _ = self.collection_wrap.search(
+                search_data,
+                f,
+                param=search_params,
+                limit=1,
+                output_fields=["*"],
+            )
+            log.info(f"search data: {search_data}")
+            log.info(f"search result for field {f}: {res}")
+            assert len(res) == 1
+            for hit in res:
+                for r in hit:
+                    fields_from_search = r.fields.keys()
+                    for f in fields:
+                        assert f.name in fields_from_search
+                    if enable_dynamic_field:
+                        assert "name" in fields_from_search
+                        assert "address" in fields_from_search
+        # query data
+        if not nullable:
+            expr_field = df.string_field
+            expr = f"{expr_field} >= '0'"
+        else:
+            res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field])
+            assert len(res) == 0
+            expr_field = df.pk_field
+            expr = f"{expr_field} >= 0"
+
+        res, _ = self.collection_wrap.query(expr=f"{expr}", output_fields=[df.string_field])
+        assert len(res) == entities
+        query_data = [r[expr_field] for r in res][:len(self.collection_wrap.partitions)]
+        res, _ = self.collection_wrap.query(expr=f"{expr_field} in {query_data}", output_fields=[expr_field])
+        assert len(res) == len(query_data)
+        res, _ = self.collection_wrap.query(expr=f"TextMatch({df.text_field}, 'milvus')", output_fields=[df.text_field])
+        if not nullable:
+            assert len(res) == entities
+        else:
+            assert 0 < len(res) < entities
+
+        if enable_partition_key:
+            assert len(self.collection_wrap.partitions) > 1
+
+
+
+
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])

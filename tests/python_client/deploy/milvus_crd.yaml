@@ -2,7 +2,7 @@
 apiVersion: milvus.io/v1beta1
 kind: Milvus
 metadata:
-  name: operator-demo
+  name: full-text-search-test-master
   namespace: chaos-testing
   labels:
     app: milvus
@@ -29,7 +29,7 @@ spec:
   components:
     enableRollingUpdate: true
     imageUpdateMode: rollingUpgrade
-    image: harbor.milvus.io/milvus/milvus:master-20240426-4fb8044a-amd64
+    image: harbor.milvus.io/milvus/milvus:milvus-io-master-5ec4163-20241014
     disableMetric: false
     dataNode:
       replicas: 3
@@ -37,6 +37,13 @@ spec:
       replicas: 3
     queryNode:
       replicas: 3
+      resources:
+        requests:
+          cpu: 4
+          memory: 16Gi
+        limits:
+          cpu: 4
+          memory: 16Gi
   dependencies:
     msgStreamType: kafka
     etcd:

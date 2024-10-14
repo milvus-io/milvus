@@ -27,6 +27,7 @@ class DataField:
     vec_field = "vectors"
     float_vec_field = "float32_vectors"
     sparse_vec_field = "sparse_vectors"
+    text_sparse_vec_field = "text_sparse_vectors"
     image_float_vec_field = "image_float_vec_field"
     text_float_vec_field = "text_float_vec_field"
     binary_vec_field = "binary_vec_field"
@@ -573,9 +574,9 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
                 data = [None for _ in range(start, rows + start)]
         elif data_field == DataField.text_field:
             if not nullable:
-                data = [fake.text() + " milvus " for i in range(start, rows + start)]
+                data = [" milvus " + fake.text() for i in range(start, rows + start)]
             else:
-                data = [None if random.random() < 0.5 else  fake.text() + " milvus " for _ in range(start, rows + start)]
+                data = [None if random.random() < 0.5 else " milvus " + fake.text()for _ in range(start, rows + start)]
         elif data_field == DataField.bool_field:
             if not nullable:
                 data = [random.choice([True, False]) for i in range(start, rows + start)]
@@ -971,6 +972,9 @@ def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, row_
             all_field_data["$meta"] = gen_dynamic_field_data_in_parquet_file(rows=rows, start=0)
         df = pd.DataFrame(all_field_data)
         log.info(f"df: \n{df}")
+        for column in df.columns:
+            log.info(f"column: {column} data type: {df[column].dtype} data shape: {df[column].shape}")
+            log.info(f"column: {column} data: {df[column]}")
         file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{file_nums}-error-{err_type}-{int(time.time())}.parquet"
         if row_group_size is not None:
             df.to_parquet(f"{data_source_new}/{file_name}", engine='pyarrow', row_group_size=row_group_size)
@@ -1176,6 +1180,18 @@ def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-buc
                               file_nums=file_nums, include_meta=include_meta, sparse_format=sparse_format, **kwargs)
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
+
+
+def prepare_bulk_insert_files(file_format="", minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, auto_id=True, float_vector=True, data_fields=[], file_nums=1, force=False, **kwargs):
+    if file_format == "parquet":
+        return prepare_bulk_insert_parquet_files(minio_endpoint=minio_endpoint, bucket_name=bucket_name, rows=rows, dim=dim, data_fields=data_fields, file_nums=file_nums, force=force, **kwargs)
+    elif file_format == "numpy":
+        return prepare_bulk_insert_numpy_files(minio_endpoint=minio_endpoint, bucket_name=bucket_name, rows=rows, dim=dim, data_fields=data_fields, file_nums=file_nums, force=force, **kwargs)
+    elif file_format == "json":
+        return prepare_bulk_insert_new_json_files(minio_endpoint=minio_endpoint, bucket_name=bucket_name, rows=rows, dim=dim, auto_id=auto_id, float_vector=float_vector, data_fields=data_fields, file_nums=file_nums, force=force, **kwargs)
+    else:
+        raise Exception("unsupported file format")
+
 
 
 def gen_csv_file(file, float_vector, data_fields, rows, dim, start_uid):

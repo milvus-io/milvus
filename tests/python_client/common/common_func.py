@@ -124,9 +124,9 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
     }
     fields = [
         FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=10000, is_primary=True),
-        FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
         FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=25536,
-                    enable_tokenizer=True, tokenizer_params=tokenizer_params,),
+                    enable_tokenizer=True, tokenizer_params=tokenizer_params, ),
+        FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
     ]
     schema = CollectionSchema(fields=fields, description="beir test collection")
     bm25_function = Function(
@@ -142,6 +142,8 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
     batch_size = 5000
     for i in tqdm(range(0, len(corpus_data), batch_size),desc="Inserting data"):
         hello_bm25.insert(corpus_data[i:i + batch_size])
+
+
     log.info(f"Data inserted successfully, start to create index")
     hello_bm25.create_index(
         "sparse",
@@ -1186,6 +1188,8 @@ def gen_vectors(nb, dim, vector_data_type="FLOAT_VECTOR"):
         vectors = gen_bf16_vectors(nb, dim)[1]
     elif vector_data_type == "SPARSE_FLOAT_VECTOR":
         vectors = gen_sparse_vectors(nb, dim)
+    elif vector_data_type == "TEXT_SPARSE_VECTOR":
+        vectors = gen_text_vectors(nb)
 
     if dim > 1:
         if vector_data_type == "FLOAT_VECTOR":
@@ -3170,6 +3174,15 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
     return vectors
 
 
+def gen_text_vectors(nb, language="en"):
+
+    fake = Faker("en_US")
+    if language == "zh":
+        fake = Faker("zh_CN")
+    vectors = [" milvus " + fake.text() for _ in range(nb)]
+    return vectors
+
+
 def gen_vectors_based_on_vector_type(num, dim, vector_data_type=ct.float_type):
     """
     generate float16 vector data
@@ -3185,6 +3198,10 @@ def gen_vectors_based_on_vector_type(num, dim, vector_data_type=ct.float_type):
         vectors = gen_bf16_vectors(num, dim)[1]
     elif vector_data_type == ct.sparse_vector:
         vectors = gen_sparse_vectors(num, dim)
+    elif vector_data_type == ct.text_sparse_vector:
+        vectors = gen_text_vectors(num)
+    else:
+        raise Exception("vector data type is invalid")
 
     return vectors
 
