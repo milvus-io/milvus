@@ -480,7 +480,7 @@ func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
 
 // AddSegment records segment info, persisting info into kv store
 func (m *meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(zap.String("channel", segment.GetInsertChannel()))
 	log.Info("meta update: adding segment - Start", zap.Int64("segmentID", segment.GetID()))
 	m.Lock()
 	defer m.Unlock()
