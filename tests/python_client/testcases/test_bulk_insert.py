@@ -1475,7 +1475,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("dim", [128])  # 128
     @pytest.mark.parametrize("entities", [2000])
-    @pytest.mark.parametrize("file_format", ["json"])
+    @pytest.mark.parametrize("file_format", ["json", "parquet", "numpy"])
     def test_full_text_search_for_bulk_insert(self, auto_id, dim, entities, file_format):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
@@ -1494,27 +1494,26 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_int64_field(name=df.int_field, nullable=nullable),
             cf.gen_float_field(name=df.float_field, nullable=nullable),
             cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key, nullable=nullable),
-            # cf.gen_string_field(name=df.text_field, enable_match=True, enable_tokenizer=True),
+            cf.gen_string_field(name=df.text_field, enable_match=True, enable_tokenizer=True),
             cf.gen_json_field(name=df.json_field, nullable=nullable),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=float_vec_field_dim),
-            # cf.gen_sparse_vec_field(name=df.text_sparse_vec_field),
-            cf.gen_sparse_vec_field(name=df.sparse_vec_field),
+            cf.gen_sparse_vec_field(name=df.text_sparse_vec_field),
         ]
         self._connect()
         c_name = cf.gen_unique_str("bulk_insert")
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
-        # bm25_function = Function(
-        #     name="text_bm25_emb",
-        #     function_type=FunctionType.BM25,
-        #     input_field_names=[df.text_field],
-        #     output_field_names=[df.text_sparse_vec_field],
-        #     params={},
-        # )
-        # schema.add_function(bm25_function)
+        bm25_function = Function(
+            name="text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=[df.text_field],
+            output_field_names=[df.text_sparse_vec_field],
+            params={},
+        )
+        schema.add_function(bm25_function)
         self.collection_wrap.init_collection(c_name, schema=schema)
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         # remove text_sparse_vec_field from data_fields
-        # data_fields.remove(df.text_sparse_vec_field)
+        data_fields.remove(df.text_sparse_vec_field)
         log.info(f"schema {schema}")
 
         files = prepare_bulk_insert_files(
@@ -1548,8 +1547,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         index_params = ct.default_index
         float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
         binary_vec_fields = [f.name for f in fields if "vec" in f.name and "binary" in f.name]
-        sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name and not "text" in f.name]
+        sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name and (not "text" in f.name)]
         text_sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name and "text" in f.name]
+        ann_fields = [f.name for f in fields if "vec" in f.name]
         for f in float_vec_fields:
             self.collection_wrap.create_index(
                 field_name=f, index_params=index_params
@@ -1571,7 +1571,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
-        for f in [df.float_vec_field, df.sparse_vec_field, df.text_sparse_vec_field]:
+        for f in ann_fields:
             if f == df.float_vec_field:
                 dim = float_vec_field_dim
                 vector_data_type = "FLOAT_VECTOR"

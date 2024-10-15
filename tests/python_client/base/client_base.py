@@ -18,8 +18,8 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_params import IndexPrams
 
-from pymilvus import ResourceGroupInfo, DataType
-
+from pymilvus import ResourceGroupInfo, DataType, utility
+import pymilvus
 
 class Base:
     """ Initialize class object """
@@ -44,6 +44,8 @@ class Base:
 
     def setup_method(self, method):
         log.info(("*" * 35) + " setup " + ("*" * 35))
+        log.info(f"pymilvus version: {pymilvus.__version__}")
+
         log.info("[setup_method] Start setup test case %s." % method.__name__)
         self._setup_objects()
 
@@ -159,6 +161,8 @@ class TestcaseBase(Base):
                                                             host=cf.param_info.param_host,
                                                             port=cf.param_info.param_port)
 
+        server_version = utility.get_server_version()
+        log.info(f"server version: {server_version}")
         return res
 
     def init_collection_wrap(self, name=None, schema=None, check_task=None, check_items=None,

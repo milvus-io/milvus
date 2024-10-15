@@ -1512,6 +1512,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             limit=limit,
         )
         candidates_num = len(res)
+        log.info(f"search data: {search_data}")
         res_list, _ = collection_w.search(
                         data=search_data,
                         anns_field="text_sparse_emb",
@@ -1539,6 +1540,194 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 overlap, word_freq_a, word_freq_b = cf.check_token_overlap(search_text, result_text, language=language)
                 log.info(f"overlap {overlap}")
                 assert len(overlap) > 0, f"query text: {search_text}, \ntext: {result_text} \n overlap: {overlap} \n word freq a: {word_freq_a} \n word freq b: {word_freq_b}\n result: {r}"
+
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("empty_percent", [0])
+    @pytest.mark.parametrize("enable_partition_key", [True])
+    @pytest.mark.parametrize("enable_inverted_index", [True])
+    @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
+    @pytest.mark.parametrize("expr", [None, "text_match", "id_range"])
+    @pytest.mark.parametrize("tokenizer", ["default"])
+    def test_full_text_search_with_range_search(
+            self, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type
+    ):
+        """
+        target: test full text search
+        method: 1. enable full text search and insert data with varchar
+                2. search with text
+                3. verify the result
+        expected: full text search successfully and result is correct
+        """
+        tokenizer_params = {
+            "tokenizer": tokenizer,
+        }
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="word",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+                is_partition_key=enable_partition_key,
+            ),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="paragraph",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                enable_match=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        bm25_function = Function(
+            name="text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["text_sparse_emb"],
+            params={},
+        )
+        schema.add_function(bm25_function)
+        data_size = 5000
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
+        fake = fake_en
+        if tokenizer == "jieba":
+            language = "zh"
+            fake = fake_zh
+        else:
+            language = "en"
+
+        data = [
+            {
+                "id": i,
+                "word": fake.word().lower() if random.random() >= empty_percent else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
+                "text": fake.text().lower() if random.random() >= empty_percent else "",
+                "emb": [random.random() for _ in range(dim)],
+            }
+            for i in range(data_size)
+        ]
+        df = pd.DataFrame(data)
+        corpus = df["text"].to_list()
+        log.info(f"dataframe\n{df}")
+        texts = df["text"].to_list()
+        word_freq = cf.analyze_documents(texts, language=language)
+        tokens = list(word_freq.keys())
+        if len(tokens) == 0:
+            log.info(f"empty tokens, add a dummy token")
+            tokens = ["dummy"]
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(
+                data[i : i + batch_size]
+                if i + batch_size < len(df)
+                else data[i : len(df)]
+            )
+            collection_w.flush()
+        collection_w.create_index(
+            "emb",
+            {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
+        )
+        collection_w.create_index(
+            "text_sparse_emb",
+            {
+                "index_type": index_type,
+                "metric_type": "BM25",
+                "params": {
+                    "bm25_k1": 1.5,
+                    "bm25_b": 0.75,
+                }
+            }
+        )
+        if enable_inverted_index:
+            collection_w.create_index("text", {"index_type": "INVERTED"})
+        collection_w.load()
+        nq= 2
+        limit = 100
+        search_data = [fake.text().lower()+" "+random.choice(tokens) for _ in range(nq)]
+        if expr == "text_match":
+            filter = f"TextMatch(text, '{tokens[0]}')"
+            res, _ = collection_w.query(
+                expr=filter,
+            )
+        elif expr == "id_range":
+            filter = f"id < {data_size//2}"
+        else:
+            filter = ""
+        res, _ = collection_w.query(
+            expr=filter,
+            limit=limit,
+        )
+        candidates_num = len(res)
+        log.info(f"search data: {search_data}")
+        res_list, _ = collection_w.search(
+                        data=search_data,
+                        anns_field="text_sparse_emb",
+                        expr=filter,
+                        param={},
+                        limit=limit,
+                        output_fields=["id", "text", "text_sparse_emb"])
+
+        res_list, _ = collection_w.search(
+                        data=search_data,
+                        anns_field="text_sparse_emb",
+                        expr=filter,
+                        param={
+                            "params": {
+                                "radius": 0.8,
+                                "range_filter": 1.0
+                            }
+                        },
+                        limit=limit,
+                        output_fields=["id", "text", "text_sparse_emb"])
+
+        # verify correctness
+        for i in range(nq):
+            assert len(res_list[i]) <= min(limit, candidates_num)
+            search_text = search_data[i]
+            log.info(f"res: {res_list[i]}")
+            res = res_list[i]
+            for j in range(len(res)):
+                r = res[j]
+                _id  = r.id
+                result_text = r.text
+                # verify search result satisfies the filter
+                if expr == "text_match":
+                    assert tokens[0] in result_text
+                if expr == "id_range":
+                    assert _id < data_size//2
+                # verify search result has overlap with search text
+                overlap, word_freq_a, word_freq_b = cf.check_token_overlap(search_text, result_text, language=language)
+                log.info(f"overlap {overlap}")
+                assert len(overlap) > 0, f"query text: {search_text}, \ntext: {result_text} \n overlap: {overlap} \n word freq a: {word_freq_a} \n word freq b: {word_freq_b}\n result: {r}"
+
+
+
+
+
+
 
 
 class TestSearchWithFullTextSearchNegative(TestcaseBase):
@@ -1866,7 +2055,7 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
     def test_search_with_full_text_search(self, dataset, index_type):
         self._connect()
         BASE_URL = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{}.zip"
-        data_path = beir.util.download_and_unzip(BASE_URL.format(dataset), out_dir="./tmp/dataset")
+        data_path = beir.util.download_and_unzip(BASE_URL.format(dataset), out_dir="/tmp/dataset")
         split = "test" if dataset != "msmarco" else "dev"
         corpus, queries, qrels = GenericDataLoader(data_folder=data_path).load(split=split)
         collection_name = cf.gen_unique_str(prefix)
