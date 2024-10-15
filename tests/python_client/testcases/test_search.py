@@ -184,6 +184,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         method: search with invalid data
         expected: raise exception and report the error
         """
+        if get_invalid_vectors in [[" "], ['a']]:
+            pytest.skip("['a'] and [' '] is valid now")
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, dim=32)[0]
         # 2. search with invalid field
