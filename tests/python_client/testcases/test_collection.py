@@ -3136,7 +3136,8 @@ class TestDescribeCollection(TestcaseBase):
                  {'field_id': 103, 'name': 'json_field', 'description': '', 'type': 23, 'params': {}},
                  {'field_id': 104, 'name': 'float_vector', 'description': '', 'type': 101, 'params': {'dim': 128}}
              ],
-             'aliases': [], 'consistency_level': 0, 'properties': {}, 'num_partitions': 1, 'enable_dynamic_field': False}
+             'functions': [], 'aliases': [], 'consistency_level': 0, 'properties': {},
+             'num_partitions': 1, 'enable_dynamic_field': False}
         res = collection_w.describe()[0]
         del res['collection_id']
         log.info(res)
