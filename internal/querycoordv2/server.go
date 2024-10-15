@@ -191,7 +191,13 @@ func (s *Server) registerMetricsRequest() {
 	getSystemInfoAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 		return s.getSystemInfoMetrics(ctx, req)
 	}
+
+	QueryTasksAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+		return s.taskScheduler.GetTasksJSON(), nil
+	}
+
 	metricsinfo.RegisterMetricsRequest(metricsinfo.SystemInfoMetrics, getSystemInfoAction)
+	metricsinfo.RegisterMetricsRequest(metricsinfo.QueryTasks, QueryTasksAction)
 	log.Info("register metrics actions finished")
 }
 

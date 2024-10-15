@@ -2,9 +2,12 @@ package syncmgr
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -51,7 +54,8 @@ type syncManager struct {
 	*keyLockDispatcher[int64]
 	chunkManager storage.ChunkManager
 
-	tasks *typeutil.ConcurrentMap[string, Task]
+	tasks     *typeutil.ConcurrentMap[string, Task]
+	taskStats *expirable.LRU[string, Task]
 }
 
 func NewSyncManager(chunkManager storage.ChunkManager) SyncManager {
@@ -64,6 +68,7 @@ func NewSyncManager(chunkManager storage.ChunkManager) SyncManager {
 		keyLockDispatcher: dispatcher,
 		chunkManager:      chunkManager,
 		tasks:             typeutil.NewConcurrentMap[string, Task](),
+		taskStats:         expirable.NewLRU[string, Task](512, nil, time.Minute*15),
 	}
 	// setup config update watcher
 	params.Watch(params.DataNodeCfg.MaxParallelSyncMgrTasks.Key, config.NewHandler("datanode.syncmgr.poolsize", syncMgr.resizeHandler))
@@ -103,6 +108,7 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...fu
 func (mgr *syncManager) safeSubmitTask(ctx context.Context, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
 	mgr.tasks.Insert(taskKey, task)
+	mgr.taskStats.Add(taskKey, task)
 
 	key := task.SegmentID()
 	return mgr.submit(ctx, key, task, callbacks...)
@@ -119,4 +125,17 @@ func (mgr *syncManager) submit(ctx context.Context, key int64, task Task, callba
 	callbacks = append([]func(error) error{handler}, callbacks...)
 	log.Info("sync mgr sumbit task with key", zap.Int64("key", key))
 	return mgr.Submit(ctx, key, task, callbacks...)
+}
+
+func (mgr *syncManager) TaskStatsJSON() string {
+	tasks := mgr.taskStats.Values()
+	if len(tasks) == 0 {
+		return ""
+	}
+
+	ret, err := json.Marshal(tasks)
+	if err != nil {
+		return ""
+	}
+	return string(ret)
 }
