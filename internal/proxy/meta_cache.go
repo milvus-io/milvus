@@ -469,6 +469,9 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	})
 
 	collectionName = collection.Schema.GetName()
+	if database == "" {
+		log.Warn("database is empty, use default database name", zap.String("collectionName", collectionName), zap.Stack("stack"))
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	_, dbOk := m.collInfo[database]
