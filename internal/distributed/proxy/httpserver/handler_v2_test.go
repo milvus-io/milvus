@@ -847,7 +847,7 @@ func TestCreateCollection(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
             "fields": [
                 {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
-                {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                {"fieldName": "word_count", "dataType": "Int64","isClusteringKey":true, "elementTypeParams": {}},
                 {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
             ]
         }, "indexParams": [{"fieldName": "book_xxx", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
@@ -982,6 +982,13 @@ func TestCreateCollection(t *testing.T) {
 	    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
 		errMsg:  "convert defaultValue fail, err:Wrong defaultValue type: invalid parameter[expected=number][actual=10]",
 		errCode: 1100,
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar",` +
+			`"params": {"max_length": 256, "enableDynamicField": 100, "shardsNum": 2, "consistencyLevel": "unknown", "ttlSeconds": 3600}}`),
+		errMsg:  "parse enableDynamicField fail, err:strconv.ParseBool: parsing \"100\": invalid syntax",
+		errCode: 65535,
 	})
 
 	for _, testcase := range postTestCases {
