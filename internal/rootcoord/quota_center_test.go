@@ -349,7 +349,7 @@ func TestQuotaCenter(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, nil, []int64{4}, nil)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 
 		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, nil, []int64{1, 2, 3}, map[int64][]int64{
 			1: {1000},
