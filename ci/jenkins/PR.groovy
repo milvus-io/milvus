@@ -87,7 +87,7 @@ pipeline {
                                     // pvc name would be <pod-name>-volume-0, used for pytest result archiving
                                     def pvc = env.JENKINS_AGENT_NAME + '-volume-0'
 
-                                    if (milvus_deployment_option == 'distributed-streaming-service') {
+                                    if (milvus_deployment_option == 'standalone-one-pod') {
                                         try {
                                             tekton.pytest helm_release_name: helm_release_name,
                                                     pvc: pvc,
