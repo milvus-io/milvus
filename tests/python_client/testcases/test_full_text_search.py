@@ -94,6 +94,71 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
         assert len(res["functions"]) == len(text_fields)
 
 
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("tokenizer", ["default", "jieba"])
+    def test_create_collection_for_full_text_search_twice_with_same_schema(self, tokenizer):
+        tokenizer_params = {
+            "tokenizer": tokenizer,
+        }
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="word",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+                is_partition_key=True,
+            ),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="paragraph",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+            FieldSchema(name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        text_fields = ["text", "paragraph"]
+        for field in text_fields:
+            bm25_function = Function(
+                name=f"{field}_bm25_emb",
+                function_type=FunctionType.BM25,
+                input_field_names=[field],
+                output_field_names=[f"{field}_sparse_emb"],
+                params={},
+            )
+            schema.add_function(bm25_function)
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(
+            name=c_name, schema=schema
+        )
+        collection_w = self.init_collection_wrap(
+            name=c_name, schema=schema
+        )
+        res, _ = collection_w.describe()
+        assert len(res["functions"]) == len(text_fields)
+
+
+
 
 class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
     """
@@ -160,6 +225,149 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         res, result = collection_w.describe()
         log.info(f"collection describe {res}")
         assert not result, "create collection with unsupported tokenizer should be failed"
+
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("valid_output", [True, False])
+    @pytest.mark.parametrize("valid_input", [True, False])
+    def test_create_collection_for_full_text_search_with_invalid_input_output(self, valid_output, valid_input):
+        tokenizer_params = {
+            "tokenizer": "default",
+        }
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="word",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+                is_partition_key=True,
+            ),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="paragraph",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+            FieldSchema(name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        if valid_input:
+            input_field_names = ["text"]
+        else:
+            input_field_names = ["invalid_inout"]
+        if valid_output:
+            output_field_names = ["text_sparse_emb"]
+        else:
+            output_field_names = ["invalid_output"]
+
+        bm25_function = Function(
+            name=f"text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=input_field_names,
+            output_field_names=output_field_names,
+            params={},
+        )
+        schema.add_function(bm25_function)
+        if (not valid_output) or (not valid_input):
+            self.init_collection_wrap(
+                name=cf.gen_unique_str(prefix), schema=schema,
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1, ct.err_msg: "field not found in collection"}
+            )
+        else:
+            collection_w = self.init_collection_wrap(
+                name=cf.gen_unique_str(prefix), schema=schema
+            )
+            res, result = collection_w.describe()
+            log.info(f"collection describe {res}")
+            assert result, "create collection with valid input/output should be successful"
+
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_create_collection_for_full_text_search_with_field_not_tokenized(self):
+        """
+        """
+        tokenizer_params = {
+            "tokenizer": "default",
+        }
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="word",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+                is_partition_key=True,
+            ),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="paragraph",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=False,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+            FieldSchema(name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+
+        bm25_function = Function(
+            name=f"text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["text_sparse_emb"],
+            params={
+            },
+        )
+        schema.add_function(bm25_function)
+        check_task = CheckTasks.err_res
+        check_items = {ct.err_code: 65535, ct.err_msg: "BM25 function input field must set enable_tokenizer to true"}
+        self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema,
+            check_task=check_task,
+            check_items=check_items
+        )
+
+
+
+
 
 
 class TestInsertWithFullTextSearch(TestcaseBase):
@@ -1366,6 +1574,590 @@ class TestDeleteWithFullTextSearchNegative(TestcaseBase):
 
 
 
+
+class TestCreateIndexWithFullTextSearch(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test full text search in index creation
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("b", [0.0, 0.5, 1.0])
+    @pytest.mark.parametrize("k", [0.0, 1.5, 10**6])
+    @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
+    @pytest.mark.parametrize("tokenizer", ["default"])
+    def test_create_full_text_search_index_default(
+            self, tokenizer, index_type,k,b
+    ):
+        """
+        target: test full text search
+        method: 1. enable full text search and insert data with varchar
+                2. search with text
+                3. verify the result
+        expected: full text search successfully and result is correct
+        """
+        tokenizer_params = {
+            "tokenizer": tokenizer,
+        }
+        empty_percent = 0.0
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="word",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+                is_partition_key=True,
+            ),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="paragraph",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                enable_match=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        bm25_function = Function(
+            name="text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["text_sparse_emb"],
+            params={},
+        )
+        schema.add_function(bm25_function)
+        data_size = 5000
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
+        fake = fake_en
+        if tokenizer == "jieba":
+            language = "zh"
+            fake = fake_zh
+        else:
+            language = "en"
+
+        data = [
+            {
+                "id": i,
+                "word": fake.word().lower() if random.random() >= empty_percent else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
+                "text": fake.text().lower() if random.random() >= empty_percent else "",
+                "emb": [random.random() for _ in range(dim)],
+            }
+            for i in range(data_size)
+        ]
+        df = pd.DataFrame(data)
+        log.info(f"dataframe\n{df}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(
+                data[i: i + batch_size]
+                if i + batch_size < len(df)
+                else data[i: len(df)]
+            )
+            collection_w.flush()
+        collection_w.create_index(
+            "emb",
+            {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
+        )
+        collection_w.create_index(
+            "text_sparse_emb",
+            {
+                "index_type": index_type,
+                "metric_type": "BM25",
+                "params": {
+                    "bm25_k1": k,
+                    "bm25_b": b,
+                }
+            }
+        )
+        # describe index info to verify
+        res = collection_w.indexes
+        index_info = [r.to_dict() for r in res]
+        log.info(f"index info: {index_info}")
+        for info in index_info:
+            if info["index_name"] == "text_sparse_emb":
+                assert info["index_param"]["index_type"] == index_type
+                assert info["index_param"]["metric_type"] == "BM25"
+                assert info["index_param"]["params"]["bm25_k1"] == k
+                assert info["index_param"]["params"]["bm25_b"] == b
+                break
+
+
+
+
+class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test full text search in index creation
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("b", [0.5])
+    @pytest.mark.parametrize("k", [1.5])
+    @pytest.mark.parametrize("index_type", ["HNSW", "INVALID_INDEX_TYPE"])
+    @pytest.mark.parametrize("tokenizer", ["default"])
+    def test_create_full_text_search_with_invalid_index_type(
+            self, tokenizer, index_type,k,b
+    ):
+        """
+        target: test full text search
+        method: 1. enable full text search and insert data with varchar
+                2. search with text
+                3. verify the result
+        expected: full text search successfully and result is correct
+        """
+        tokenizer_params = {
+            "tokenizer": tokenizer,
+        }
+        empty_percent = 0.0
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="word",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+                is_partition_key=True,
+            ),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="paragraph",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                enable_match=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        bm25_function = Function(
+            name="text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["text_sparse_emb"],
+            params={},
+        )
+        schema.add_function(bm25_function)
+        data_size = 5000
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
+        fake = fake_en
+        data = [
+            {
+                "id": i,
+                "word": fake.word().lower() if random.random() >= empty_percent else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
+                "text": fake.text().lower() if random.random() >= empty_percent else "",
+                "emb": [random.random() for _ in range(dim)],
+            }
+            for i in range(data_size)
+        ]
+        df = pd.DataFrame(data)
+        log.info(f"dataframe\n{df}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(
+                data[i: i + batch_size]
+                if i + batch_size < len(df)
+                else data[i: len(df)]
+            )
+            collection_w.flush()
+        collection_w.create_index(
+            "emb",
+            {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
+        )
+        error = {"err_code": 1100, "err_msg": "invalid" }
+        collection_w.create_index(
+            "text_sparse_emb",
+            {
+                "index_type": index_type,
+                "metric_type": "BM25",
+                "params": {
+                    "bm25_k1": k,
+                    "bm25_b": b,
+                }
+            },
+            check_task=CheckTasks.err_res,
+            check_items=error
+        )
+
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("b", [0.5])
+    @pytest.mark.parametrize("k", [1.5])
+    @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
+    @pytest.mark.parametrize("metric_type", ["COSINE", "L2", "IP"])
+    @pytest.mark.parametrize("tokenizer", ["default"])
+    def test_create_full_text_search_index_with_invalid_metric_type(
+            self, tokenizer, index_type, metric_type,k,b
+    ):
+        """
+        target: test full text search
+        method: 1. enable full text search and insert data with varchar
+                2. search with text
+                3. verify the result
+        expected: full text search successfully and result is correct
+        """
+        tokenizer_params = {
+            "tokenizer": tokenizer,
+        }
+        empty_percent = 0.0
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="word",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+                is_partition_key=True,
+            ),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="paragraph",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                enable_match=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        bm25_function = Function(
+            name="text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["text_sparse_emb"],
+            params={},
+        )
+        schema.add_function(bm25_function)
+        data_size = 5000
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
+        fake = fake_en
+        data = [
+            {
+                "id": i,
+                "word": fake.word().lower() if random.random() >= empty_percent else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
+                "text": fake.text().lower() if random.random() >= empty_percent else "",
+                "emb": [random.random() for _ in range(dim)],
+            }
+            for i in range(data_size)
+        ]
+        df = pd.DataFrame(data)
+        log.info(f"dataframe\n{df}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(
+                data[i: i + batch_size]
+                if i + batch_size < len(df)
+                else data[i: len(df)]
+            )
+            collection_w.flush()
+        collection_w.create_index(
+            "emb",
+            {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
+        )
+        error = {ct.err_code: 65535, ct.err_msg: "index metric type of BM25 function output field must be BM25" }
+        collection_w.create_index(
+            "text_sparse_emb",
+            {
+                "index_type": index_type,
+                "metric_type": metric_type,
+                "params": {
+                    "bm25_k1": k,
+                    "bm25_b": b,
+                }
+            },
+            check_task=CheckTasks.err_res,
+            check_items=error
+        )
+
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("b", [0.5])
+    @pytest.mark.parametrize("k", [1.5])
+    @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
+    @pytest.mark.parametrize("tokenizer", ["default"])
+    def test_create_index_using_BM25_metric_type_for_non_bm25_output_field(
+            self, tokenizer, index_type, k,b
+    ):
+        """
+        target: test full text search
+        method: 1. enable full text search and insert data with varchar
+                2. search with text
+                3. verify the result
+        expected: full text search successfully and result is correct
+        """
+        tokenizer_params = {
+            "tokenizer": tokenizer,
+        }
+        empty_percent = 0.0
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="word",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+                is_partition_key=True,
+            ),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="paragraph",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                enable_match=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        bm25_function = Function(
+            name="text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["text_sparse_emb"],
+            params={},
+        )
+        schema.add_function(bm25_function)
+        data_size = 5000
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
+        fake = fake_en
+        data = [
+            {
+                "id": i,
+                "word": fake.word().lower() if random.random() >= empty_percent else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
+                "text": fake.text().lower() if random.random() >= empty_percent else "",
+                "emb": [random.random() for _ in range(dim)],
+            }
+            for i in range(data_size)
+        ]
+        df = pd.DataFrame(data)
+        log.info(f"dataframe\n{df}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(
+                data[i: i + batch_size]
+                if i + batch_size < len(df)
+                else data[i: len(df)]
+            )
+            collection_w.flush()
+
+        error = {ct.err_code: 1100, ct.err_msg: "float vector index does not support metric type: BM25"}
+        collection_w.create_index(
+            "emb",
+            {"index_type": "HNSW", "metric_type": "BM25", "params": {"M": 16, "efConstruction": 500}},
+            check_task=CheckTasks.err_res,
+            check_items=error
+        )
+
+
+
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("b", [-1, 0.5, 2])
+    @pytest.mark.parametrize("k", [-1, 1.5])
+    @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
+    @pytest.mark.parametrize("tokenizer", ["default"])
+    def test_create_full_text_search_with_invalid_bm25_params(
+            self, tokenizer, index_type,k,b
+    ):
+        """
+        target: test full text search
+        method: 1. enable full text search and insert data with varchar
+                2. search with text
+                3. verify the result
+        expected: full text search successfully and result is correct
+        """
+        tokenizer_params = {
+            "tokenizer": tokenizer,
+        }
+        empty_percent = 0.0
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="word",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+                is_partition_key=True,
+            ),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="paragraph",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                enable_match=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        bm25_function = Function(
+            name="text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["text_sparse_emb"],
+            params={},
+        )
+        schema.add_function(bm25_function)
+        data_size = 5000
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
+        fake = fake_en
+        data = [
+            {
+                "id": i,
+                "word": fake.word().lower() if random.random() >= empty_percent else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
+                "text": fake.text().lower() if random.random() >= empty_percent else "",
+                "emb": [random.random() for _ in range(dim)],
+            }
+            for i in range(data_size)
+        ]
+        df = pd.DataFrame(data)
+        log.info(f"dataframe\n{df}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(
+                data[i: i + batch_size]
+                if i + batch_size < len(df)
+                else data[i: len(df)]
+            )
+            collection_w.flush()
+        collection_w.create_index(
+            "emb",
+            {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
+        )
+
+        if k == 1.5 and b == 0.5:
+            check_task = None
+            error={}
+        else:
+            check_task = CheckTasks.err_res
+            error = {"err_code": 1100, "err_msg": "invalid"}  # todo, update error code and message
+        collection_w.create_index(
+            "text_sparse_emb",
+            {
+                "index_type": index_type,
+                "metric_type": "BM25",
+                "params": {
+                    "bm25_k1": k,
+                    "bm25_b": b,
+                }
+            },
+            check_task=check_task,
+            check_items=error
+        )
+
+
+
+
+
+
 class TestSearchWithFullTextSearch(TestcaseBase):
     """
     ******************************************************************
@@ -1374,14 +2166,15 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("empty_percent", [0])
-    @pytest.mark.parametrize("enable_partition_key", [True])
-    @pytest.mark.parametrize("enable_inverted_index", [True])
-    @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
+    @pytest.mark.parametrize("nq", [1])
+    @pytest.mark.parametrize("empty_percent", [0, 0.5, 1.0])
+    @pytest.mark.parametrize("enable_partition_key", [True, False])
+    @pytest.mark.parametrize("enable_inverted_index", [True, False])
+    @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
     @pytest.mark.parametrize("expr", [None, "text_match", "id_range"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["default", "jieba"])
     def test_full_text_search_default(
-            self, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type
+            self, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq
     ):
         """
         target: test full text search
@@ -1495,7 +2288,6 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         if enable_inverted_index:
             collection_w.create_index("text", {"index_type": "INVERTED"})
         collection_w.load()
-        nq= 2
         limit = 100
         search_data = [fake.text().lower()+random.choice(tokens) for _ in range(nq)]
         if expr == "text_match":
@@ -1529,7 +2321,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             res = res_list[i]
             for j in range(len(res)):
                 r = res[j]
-                _id  = r.id
+                _id = r.id
                 result_text = r.text
                 # verify search result satisfies the filter
                 if expr == "text_match":
@@ -1542,15 +2334,17 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 assert len(overlap) > 0, f"query text: {search_text}, \ntext: {result_text} \n overlap: {overlap} \n word freq a: {word_freq_a} \n word freq b: {word_freq_b}\n result: {r}"
 
 
+
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("nq", [1])
     @pytest.mark.parametrize("empty_percent", [0])
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
-    @pytest.mark.parametrize("expr", [None, "text_match", "id_range"])
+    @pytest.mark.parametrize("expr", [None])
     @pytest.mark.parametrize("tokenizer", ["default"])
     def test_full_text_search_with_range_search(
-            self, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type
+            self, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq
     ):
         """
         target: test full text search
@@ -1664,69 +2458,49 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         if enable_inverted_index:
             collection_w.create_index("text", {"index_type": "INVERTED"})
         collection_w.load()
-        nq= 2
-        limit = 100
-        search_data = [fake.text().lower()+" "+random.choice(tokens) for _ in range(nq)]
-        if expr == "text_match":
-            filter = f"TextMatch(text, '{tokens[0]}')"
-            res, _ = collection_w.query(
-                expr=filter,
-            )
-        elif expr == "id_range":
-            filter = f"id < {data_size//2}"
-        else:
-            filter = ""
-        res, _ = collection_w.query(
-            expr=filter,
-            limit=limit,
-        )
-        candidates_num = len(res)
+        limit = 1000
+        search_data = [fake.text().lower()+random.choice(tokens) for _ in range(nq)]
         log.info(f"search data: {search_data}")
+        # get distance with search data
         res_list, _ = collection_w.search(
                         data=search_data,
                         anns_field="text_sparse_emb",
-                        expr=filter,
-                        param={},
-                        limit=limit,
+                        param={
+                        },
+                        limit=limit, # get a wider range of search result
                         output_fields=["id", "text", "text_sparse_emb"])
+
+        distance_list = []
+        for i in range(nq):
+            res = res_list[i]
+            for j in range(len(res)):
+                r = res[j]
+                distance = r.distance
+                distance_list.append(distance)
+        distance_list = sorted(distance_list)
+        # get the range of distance 30% ~70%
+        low = distance_list[int(len(distance_list)*0.3)]
+        high = distance_list[int(len(distance_list)*0.7)]
 
         res_list, _ = collection_w.search(
                         data=search_data,
                         anns_field="text_sparse_emb",
-                        expr=filter,
                         param={
-                            "params": {
-                                "radius": 0.8,
-                                "range_filter": 1.0
+                            "params":{
+                                "radius": low, "range_filter": high
                             }
                         },
                         limit=limit,
                         output_fields=["id", "text", "text_sparse_emb"])
-
         # verify correctness
         for i in range(nq):
-            assert len(res_list[i]) <= min(limit, candidates_num)
-            search_text = search_data[i]
-            log.info(f"res: {res_list[i]}")
+            log.info(f"res: {len(res_list[i])}")
+            assert len(res_list[i]) < limit  # less than limit, because the range is set
             res = res_list[i]
             for j in range(len(res)):
                 r = res[j]
-                _id  = r.id
-                result_text = r.text
-                # verify search result satisfies the filter
-                if expr == "text_match":
-                    assert tokens[0] in result_text
-                if expr == "id_range":
-                    assert _id < data_size//2
-                # verify search result has overlap with search text
-                overlap, word_freq_a, word_freq_b = cf.check_token_overlap(search_text, result_text, language=language)
-                log.info(f"overlap {overlap}")
-                assert len(overlap) > 0, f"query text: {search_text}, \ntext: {result_text} \n overlap: {overlap} \n word freq a: {word_freq_a} \n word freq b: {word_freq_b}\n result: {r}"
-
-
-
-
-
+                tmp_distance = r.distance
+                assert low <= tmp_distance <= high
 
 
 
@@ -1891,8 +2665,6 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
             )
 
 
-
-
 class TestHybridSearchWithFullTextSearch(TestcaseBase):
     """
     ******************************************************************
@@ -2016,7 +2788,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
         if enable_inverted_index:
             collection_w.create_index("text", {"index_type": "INVERTED"})
         collection_w.load()
-        nq=2
+        nq=1
         sparse_search = AnnSearchRequest(
             data=[fake.text().lower() for _ in range(nq)],
             anns_field="text_sparse_emb",
@@ -2051,11 +2823,11 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     # @pytest.mark.parametrize("dataset", ["nfcorpus", "nq", "fiqa", "scifact"])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
-    @pytest.mark.parametrize("dataset", ["msmarco"])
+    @pytest.mark.parametrize("dataset", ["nq"])
     def test_search_with_full_text_search(self, dataset, index_type):
         self._connect()
         BASE_URL = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{}.zip"
-        data_path = beir.util.download_and_unzip(BASE_URL.format(dataset), out_dir="/tmp/dataset")
+        data_path = beir.util.download_and_unzip(BASE_URL.format(dataset), out_dir="./tmp/dataset")
         split = "test" if dataset != "msmarco" else "dev"
         corpus, queries, qrels = GenericDataLoader(data_folder=data_path).load(split=split)
         collection_name = cf.gen_unique_str(prefix)

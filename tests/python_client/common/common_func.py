@@ -165,7 +165,7 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
     }
     start_time = time.time()
     result_list = []
-    q_batch_size = 1000
+    q_batch_size = 1
     for i in range(0, len(texts_to_search), q_batch_size):
         log.info(f"Searching {i} to {i + q_batch_size}")
         t0 = time.time()
