@@ -48,6 +48,15 @@ InitTrace(CTraceConfig* config);
 void
 SetTrace(CTraceConfig* config);
 
+void
+InitDefaultJSONKeyIndexMemoryBudget(int64_t val);
+
+void
+InitDefaultJSONKeyIndexCommitInterval(int64_t val);
+
+void
+InitDefaultJSONKeyIndexEnable(bool val);
+
 #ifdef __cplusplus
 };
 #endif

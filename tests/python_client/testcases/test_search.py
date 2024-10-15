@@ -10152,7 +10152,7 @@ class TestCollectionSearchJSON(TestcaseBase):
             }
             array.append(data)
         collection_w.insert(array)
-
+        time.sleep(1)
         # 2. search
         collection_w.load()
         log.info("test_search_with_output_field_json_contains: Searching collection %s" %
@@ -10190,7 +10190,7 @@ class TestCollectionSearchJSON(TestcaseBase):
                 data.pop(default_int64_field_name, None)
             array.append(data)
         collection_w.insert(array)
-
+        time.sleep(1)
         # 2. search
         collection_w.load()
         log.info("test_search_with_output_field_json_contains: Searching collection %s" %
@@ -10228,7 +10228,7 @@ class TestCollectionSearchJSON(TestcaseBase):
             }
             array.append(data)
         collection_w.insert(array)
-
+        time.sleep(1)
         # 2. search
         collection_w.load()
         log.info("test_search_with_output_field_json_contains: Searching collection %s" %
