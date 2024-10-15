@@ -1665,12 +1665,23 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			return len(file.GetPaths()) > 0
 		})
 		if len(files) == 0 {
-			resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg(fmt.Sprintf("no binlog to import, input=%s", in.GetFiles())))
+			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("no binlog to import, input=%s", in.GetFiles())))
 			return resp, nil
 		}
 		log.Info("list binlogs prefixes for import", zap.Any("binlog_prefixes", files))
 	}
 
+	// Check if the number of jobs exceeds the limit.
+	maxNum := paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt()
+	jobs := s.importMeta.GetJobBy(WithJobStates(internalpb.ImportJobState_Pending, internalpb.ImportJobState_PreImporting,
+		internalpb.ImportJobState_Importing, internalpb.ImportJobState_IndexBuilding, internalpb.ImportJobState_Stats))
+	if len(jobs) >= maxNum {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(
+			fmt.Sprintf("The number of jobs has reached the limit, please try again later.")))
+		return resp, nil
+	}
+
+	// Allocate file ids.
 	idStart, _, err := s.allocator.allocN(int64(len(files)) + 1)
 	if err != nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc id failed, err=%w", err)))
