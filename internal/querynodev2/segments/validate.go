@@ -42,17 +42,16 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 	if len(partitionIDs) == 0 {
 		searchPartIDs = collection.GetPartitions()
 	} else {
-		if collection.ExistPartition(partitionIDs...) {
-			searchPartIDs = partitionIDs
-		}
+		// use request partition ids directly, ignoring meta partition ids
+		// partitions shall be controled by delegator distribution
+		searchPartIDs = partitionIDs
 	}
 
 	log.Ctx(ctx).Debug("read target partitions", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", searchPartIDs))
 
 	// all partitions have been released
 	if len(searchPartIDs) == 0 && collection.GetLoadType() == querypb.LoadType_LoadPartition {
-		return nil, errors.New("partitions have been released , collectionID = " +
-			fmt.Sprintln(collectionID) + "target partitionIDs = " + fmt.Sprintln(searchPartIDs))
+		return nil, errors.Newf("partitions have been released , collectionID = %d target partitionIDs = %v", collectionID, searchPartIDs)
 	}
 
 	if len(searchPartIDs) == 0 && collection.GetLoadType() == querypb.LoadType_LoadCollection {

@@ -160,7 +160,7 @@ func (t *SearchTask) Execute() error {
 			t.segmentManager,
 			searchReq,
 			req.GetReq().GetCollectionID(),
-			nil,
+			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
 		)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
@@ -169,7 +169,7 @@ func (t *SearchTask) Execute() error {
 			t.segmentManager,
 			searchReq,
 			req.GetReq().GetCollectionID(),
-			nil,
+			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
 		)
 	}
@@ -475,7 +475,7 @@ func (t *StreamingSearchTask) Execute() error {
 			t.segmentManager,
 			searchReq,
 			req.GetReq().GetCollectionID(),
-			nil,
+			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
 		)
 		defer segments.DeleteSearchResults(results)
