@@ -154,7 +154,6 @@ CompileExpression(const expr::TypedExprPtr& expr,
                   const std::unordered_set<std::string>& flatten_candidates,
                   bool enable_constant_folding) {
     ExprPtr result;
-
     auto compiled_inputs = CompileInputs(expr, context, flatten_candidates);
 
     auto GetTypes = [](const std::vector<ExprPtr>& exprs) {
@@ -183,7 +182,8 @@ CompileExpression(const expr::TypedExprPtr& expr,
             "PhyUnaryRangeFilterExpr",
             context->get_segment(),
             context->get_active_count(),
-            context->query_config()->get_expr_batch_size());
+            context->query_config()->get_expr_batch_size(),
+            context->get_consistency_level());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::LogicalUnaryExpr>(expr)) {
         result = std::make_shared<PhyLogicalUnaryExpr>(
@@ -197,7 +197,8 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_segment(),
             context->get_active_count(),
             context->get_query_timestamp(),
-            context->query_config()->get_expr_batch_size());
+            context->query_config()->get_expr_batch_size(),
+            context->get_consistency_level());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::LogicalBinaryExpr>(expr)) {
         if (casted_expr->op_type_ ==
@@ -220,7 +221,8 @@ CompileExpression(const expr::TypedExprPtr& expr,
             "PhyBinaryRangeFilterExpr",
             context->get_segment(),
             context->get_active_count(),
-            context->query_config()->get_expr_batch_size());
+            context->query_config()->get_expr_batch_size(),
+            context->get_consistency_level());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::AlwaysTrueExpr>(expr)) {
         result = std::make_shared<PhyAlwaysTrueExpr>(
@@ -238,7 +240,8 @@ CompileExpression(const expr::TypedExprPtr& expr,
             "PhyBinaryArithOpEvalRangeExpr",
             context->get_segment(),
             context->get_active_count(),
-            context->query_config()->get_expr_batch_size());
+            context->query_config()->get_expr_batch_size(),
+            context->get_consistency_level());
     } else if (auto casted_expr =
                    std::dynamic_pointer_cast<const milvus::expr::CompareExpr>(
                        expr)) {
@@ -258,7 +261,8 @@ CompileExpression(const expr::TypedExprPtr& expr,
             "PhyExistsFilterExpr",
             context->get_segment(),
             context->get_active_count(),
-            context->query_config()->get_expr_batch_size());
+            context->query_config()->get_expr_batch_size(),
+            context->get_consistency_level());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::JsonContainsExpr>(expr)) {
         result = std::make_shared<PhyJsonContainsFilterExpr>(
@@ -267,7 +271,8 @@ CompileExpression(const expr::TypedExprPtr& expr,
             "PhyJsonContainsFilterExpr",
             context->get_segment(),
             context->get_active_count(),
-            context->query_config()->get_expr_batch_size());
+            context->query_config()->get_expr_batch_size(),
+            context->get_consistency_level());
     } else if (auto value_expr =
                    std::dynamic_pointer_cast<const milvus::expr::ValueExpr>(
                        expr)) {
@@ -298,7 +303,8 @@ CompileExpression(const expr::TypedExprPtr& expr,
             "PhyNullExpr",
             context->get_segment(),
             context->get_active_count(),
-            context->query_config()->get_expr_batch_size());
+            context->query_config()->get_expr_batch_size(),
+            context->get_consistency_level());
     } else {
         PanicInfo(ExprInvalid, "unsupport expr: ", expr->ToString());
     }
@@ -481,7 +487,8 @@ ConvertMultiOrToInExpr(std::vector<std::shared_ptr<Expr>>& exprs,
         query_context->get_segment(),
         query_context->get_active_count(),
         query_context->get_query_timestamp(),
-        query_context->query_config()->get_expr_batch_size());
+        query_context->query_config()->get_expr_batch_size(),
+        query_context->get_consistency_level());
 }
 
 inline void

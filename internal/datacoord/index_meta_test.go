@@ -440,7 +440,6 @@ func newSegmentIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 }
 
 func TestMeta_CreateIndex(t *testing.T) {
-
 	indexParams := []*commonpb.KeyValuePair{
 		{
 			Key:   common.IndexTypeKey,

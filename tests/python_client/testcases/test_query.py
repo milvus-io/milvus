@@ -662,7 +662,7 @@ class TestQueryParams(TestcaseBase):
                                     "list": [m for m in range(i, i + limit)]}
 
         collection_w.insert(array)
-
+        time.sleep(0.4)
         # 3. query
         collection_w.load()
         expression = f"{expr_prefix}({json_field}['list'], 1000)"
@@ -691,7 +691,7 @@ class TestQueryParams(TestcaseBase):
             }
             array.append(data)
         collection_w.insert(array)
-
+        time.sleep(0.4)
         # 3. query
         collection_w.load()
         expression = f"{expr_prefix}({json_field}, '1000')"
@@ -716,7 +716,7 @@ class TestQueryParams(TestcaseBase):
             array[i][ct.default_json_field_name] = {"number": i, "list": [m for m in range(i, i + limit)]}
 
         collection_w.insert(array)
-
+        time.sleep(0.4)
         # 3. query
         collection_w.load()
         tar = 1000
@@ -757,7 +757,7 @@ class TestQueryParams(TestcaseBase):
             array[i][ct.default_json_field_name] = content
 
         collection_w.insert(array)
-
+        time.sleep(0.4)
         # 3. query
         collection_w.load()
         # test for int
@@ -820,7 +820,7 @@ class TestQueryParams(TestcaseBase):
             array[i]["listMix"] = [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]]  # test for mixed data
 
         collection_w.insert(array)
-
+        time.sleep(0.4)
         # 3. query
         collection_w.load()
 
@@ -893,7 +893,7 @@ class TestQueryParams(TestcaseBase):
             array[i][ct.default_json_field_name] = content
 
         collection_w.insert(array)
-
+        time.sleep(0.4)
         # 3. query
         collection_w.load()
 
@@ -966,7 +966,7 @@ class TestQueryParams(TestcaseBase):
             array[i]["listMix"] = mix_data[i]  # test for mixed data
 
         collection_w.insert(array)
-
+        time.sleep(0.4)
         # 3. query
         collection_w.load()
 
@@ -1024,7 +1024,7 @@ class TestQueryParams(TestcaseBase):
             array[i][json_field] = {"list": [[i, i + 1], [i, i + 2], [i, i + 3]]}
 
         collection_w.insert(array)
-
+        time.sleep(0.4)
         # 3. query
         collection_w.load()
         _id = random.randint(3, ct.default_nb - 3)
@@ -1058,7 +1058,7 @@ class TestQueryParams(TestcaseBase):
                                     "list": [m for m in range(i, i + 10)]}
 
         collection_w.insert(array)
-
+        time.sleep(0.4)
         # 3. query
         collection_w.load()
         expression = f"{expr_prefix}({json_field}['list'], {not_list})"
@@ -1084,7 +1084,7 @@ class TestQueryParams(TestcaseBase):
                                     "list": [m for m in range(i, i + limit)]}
 
         collection_w.insert(array)
-
+        time.sleep(0.4)
         # 3. query
         collection_w.load()
         expression = f"{expr_prefix}({json_field}['list'], 1000)"
@@ -3578,7 +3578,7 @@ class TestQueryCount(TestcaseBase):
                 array[i][json_field] = {"string": str(i), "bool": bool(i), "number": i}
 
         collection_w.insert(array)
-
+        time.sleep(0.4)
         # 3. query
         collection_w.load()
         expression = f'{ct.default_json_field_name}["number"] < 100'
@@ -3628,7 +3628,7 @@ class TestQueryCount(TestcaseBase):
                 cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_objects_array)
             ]
             collection_w.insert(data)
-
+        time.sleep(0.4)
         # 3. build index and load
         collection_w.create_index(ct.default_float_vec_field_name, index_params=default_index_params)
         collection_w.load()

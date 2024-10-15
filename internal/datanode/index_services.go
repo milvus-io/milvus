@@ -462,18 +462,19 @@ func (node *DataNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2
 			info := node.taskManager.GetStatsTaskInfo(req.GetClusterID(), taskID)
 			if info != nil {
 				results = append(results, &workerpb.StatsResult{
-					TaskID:        taskID,
-					State:         info.State,
-					FailReason:    info.FailReason,
-					CollectionID:  info.CollID,
-					PartitionID:   info.PartID,
-					SegmentID:     info.SegID,
-					Channel:       info.InsertChannel,
-					InsertLogs:    info.InsertLogs,
-					StatsLogs:     info.StatsLogs,
-					TextStatsLogs: info.TextStatsLogs,
-					Bm25Logs:      info.Bm25Logs,
-					NumRows:       info.NumRows,
+					TaskID:           taskID,
+					State:            info.State,
+					FailReason:       info.FailReason,
+					CollectionID:     info.CollID,
+					PartitionID:      info.PartID,
+					SegmentID:        info.SegID,
+					Channel:          info.InsertChannel,
+					InsertLogs:       info.InsertLogs,
+					StatsLogs:        info.StatsLogs,
+					TextStatsLogs:    info.TextStatsLogs,
+					Bm25Logs:         info.Bm25Logs,
+					NumRows:          info.NumRows,
+					JsonKeyStatsLogs: info.JSONKeyStatsLogs,
 				})
 			}
 		}

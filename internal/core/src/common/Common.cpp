@@ -30,6 +30,9 @@ int CPU_NUM = DEFAULT_CPU_NUM;
 int64_t EXEC_EVAL_EXPR_BATCH_SIZE = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
 bool OPTIMIZE_EXPR_ENABLED = DEFAULT_OPTIMIZE_EXPR_ENABLED;
 
+int64_t JSON_KEY_STATS_COMMIT_INTERVAL = DEFAULT_JSON_KEY_STATS_COMMIT_INTERVAL;
+bool GROWING_JSON_KEY_STATS_ENABLED = DEFAULT_GROWING_JSON_KEY_STATS_ENABLED;
+
 void
 SetIndexSliceSize(const int64_t size) {
     FILE_SLICE_SIZE = size << 20;
@@ -72,6 +75,20 @@ void
 SetDefaultOptimizeExprEnable(bool val) {
     OPTIMIZE_EXPR_ENABLED = val;
     LOG_INFO("set default optimize expr enabled: {}", OPTIMIZE_EXPR_ENABLED);
+}
+
+void
+SetDefaultJSONKeyStatsCommitInterval(int64_t val) {
+    JSON_KEY_STATS_COMMIT_INTERVAL = val;
+    LOG_INFO("set default json key Stats commit interval: {}",
+             JSON_KEY_STATS_COMMIT_INTERVAL);
+}
+
+void
+SetDefaultGrowingJSONKeyStatsEnable(bool val) {
+    GROWING_JSON_KEY_STATS_ENABLED = val;
+    LOG_INFO("set default growing json key index enable: {}",
+             GROWING_JSON_KEY_STATS_ENABLED);
 }
 
 }  // namespace milvus

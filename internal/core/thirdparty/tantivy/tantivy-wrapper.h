@@ -84,6 +84,7 @@ struct TantivyIndexWrapper {
                         const char* path,
                         uint32_t tantivy_index_version,
                         bool inverted_single_semgnent = false,
+                        bool in_ram = false,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
@@ -101,7 +102,8 @@ struct TantivyIndexWrapper {
                                      path,
                                      tantivy_index_version,
                                      num_threads,
-                                     overall_memory_budget_in_bytes));
+                                     overall_memory_budget_in_bytes,
+                                     in_ram));
         }
         AssertInfo(res.result_->success,
                    "failed to create index: {}",
@@ -146,7 +148,6 @@ struct TantivyIndexWrapper {
         writer_ = res.result_->value.ptr._0;
         path_ = std::string(path);
     }
-
     // create reader.
     void
     create_reader() {
@@ -624,6 +625,22 @@ struct TantivyIndexWrapper {
         AssertInfo(res.result_->value.tag == Value::Tag::RustArray,
                    "TantivyIndexWrapper.term_query: invalid result type");
         return RustArrayWrapper(std::move(res.result_->value.rust_array._0));
+    }
+
+    RustArrayI64Wrapper
+    term_query_i64(std::string term) {
+        auto array = [&]() {
+            return tantivy_term_query_keyword_i64(reader_, term.c_str());
+        }();
+
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.term_query_i64: {}",
+                   res.result_->error);
+        AssertInfo(res.result_->value.tag == Value::Tag::RustArrayI64,
+                   "TantivyIndexWrapper.term_query_i64: invalid result type");
+        return RustArrayI64Wrapper(
+            std::move(res.result_->value.rust_array_i64._0));
     }
 
     template <typename T>

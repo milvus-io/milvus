@@ -118,6 +118,9 @@ const (
 
 	// TextIndexPath storage path const for text index
 	TextIndexPath = "text_log"
+
+	// JSONIndexPath storage path const for json index
+	JSONIndexPath = "json_key_index_log"
 )
 
 // Search, Index parameter keys
