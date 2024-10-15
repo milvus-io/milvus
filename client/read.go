@@ -29,30 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-type ResultSets struct{}
-
-type ResultSet struct {
-	ResultCount  int // the returning entry count
-	GroupByValue column.Column
-	IDs          column.Column // auto generated id, can be mapped to the columns from `Insert` API
-	Fields       DataSet       // output field data
-	Scores       []float32     // distance to the target vector
-	Err          error         // search error if any
-}
-
-// DataSet is an alias type for column slice.
-type DataSet []column.Column
-
-// GetColumn returns column with provided field name.
-func (rs ResultSet) GetColumn(fieldName string) column.Column {
-	for _, column := range rs.Fields {
-		if column.Name() == fieldName {
-			return column
-		}
-	}
-	return nil
-}
-
 func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ...grpc.CallOption) ([]ResultSet, error) {
 	req := option.Request()
 	collection, err := c.getCollection(ctx, req.GetCollectionName())
