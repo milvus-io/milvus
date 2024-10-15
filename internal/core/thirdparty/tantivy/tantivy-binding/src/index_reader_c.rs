@@ -193,6 +193,13 @@ pub extern "C" fn tantivy_term_query_keyword(ptr: *mut c_void, term: *const c_ch
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_term_query_keyword_i64(ptr: *mut c_void, term: *const c_char) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let term = cstr_to_str!(term);
+    unsafe { (*real).term_query_keyword_i64(term).into() }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_lower_bound_range_query_keyword(
     ptr: *mut c_void,
     lower_bound: *const c_char,

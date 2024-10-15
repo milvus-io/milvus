@@ -120,7 +120,7 @@ macro_rules! impl_from_for_enum {
     };
 }
 
-impl_from_for_enum!(Value, None => (), RustArrayI64 => RustArrayI64, RustArray => RustArray, RustArray => Vec<u32>, U32 => u32, Ptr => *mut c_void);
+impl_from_for_enum!(Value, None => (), RustArrayI64 => RustArrayI64, RustArrayI64 => Vec<i64>, RustArray => RustArray, RustArray => Vec<u32>, U32 => u32, Ptr => *mut c_void);
 
 #[repr(C)]
 pub struct RustResult {
@@ -202,7 +202,7 @@ macro_rules! cstr_to_str {
 
 #[no_mangle]
 pub extern "C" fn test_enum_with_array() -> RustResult {
-    let array = vec![1, 2, 3];
+    let array: Vec<u32> = vec![1, 2, 3];
     RustResult::from(Result::Ok(array))
 }
 

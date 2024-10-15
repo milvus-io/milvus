@@ -333,6 +333,12 @@ class SingleChunkColumnBase : public ColumnBase {
                   "viewsbyoffsets only supported for VariableColumn");
     }
 
+    virtual std::string_view
+    RawAt(const size_t i) const {
+        PanicInfo(ErrorCode::Unsupported,
+                  "RawAt only supported for VariableColumn");
+    }
+
     virtual void
     AppendBatch(const FieldDataPtr data) override {
         size_t required_size = data_size_ + data->DataSize();
@@ -801,7 +807,7 @@ class SingleChunkVariableColumn : public SingleChunkColumnBase {
     }
 
     std::string_view
-    RawAt(const int i) const {
+    RawAt(const size_t i) const {
         return std::string_view((*this)[i]);
     }
 

@@ -2147,4 +2147,29 @@ SegmentSealedImpl::LoadTextIndex(FieldId field_id,
     text_indexes_[field_id] = std::move(index);
 }
 
+void
+SegmentSealedImpl::LoadJsonKeyIndex(
+    FieldId field_id, std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) {
+    std::unique_lock lck(mutex_);
+    const auto& field_meta = schema_->operator[](field_id);
+    json_key_indexes_[field_id] = std::move(index);
+}
+
+index::JsonKeyStatsInvertedIndex*
+SegmentSealedImpl::GetJsonKeyIndex(FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    auto iter = json_key_indexes_.find(field_id);
+    if (iter == json_key_indexes_.end()) {
+        return nullptr;
+    }
+    return iter->second.get();
+}
+
+std::pair<std::string_view, bool>
+SegmentSealedImpl::GetJsonData(FieldId field_id, size_t offset) const {
+    auto column = fields_.at(field_id);
+    bool is_valid = column->IsValid(offset);
+    return std::make_pair(std::move(column->RawAt(offset)), is_valid);
+}
+
 }  // namespace milvus::segcore
