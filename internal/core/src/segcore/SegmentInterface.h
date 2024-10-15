@@ -37,6 +37,7 @@
 #include "index/SkipIndex.h"
 #include "mmap/Column.h"
 #include "index/TextMatchIndex.h"
+#include "index/JsonKeyInvertedIndex.h"
 
 namespace milvus::segcore {
 
