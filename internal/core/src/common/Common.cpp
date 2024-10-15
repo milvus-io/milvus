@@ -29,6 +29,10 @@ int64_t LOW_PRIORITY_THREAD_CORE_COEFFICIENT =
 int CPU_NUM = DEFAULT_CPU_NUM;
 int64_t EXEC_EVAL_EXPR_BATCH_SIZE = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
 
+int64_t JSON_INDEX_MEMORY_BUDGET = DEFAULT_JSON_INDEX_MEMORY_BUDGET;
+int64_t JSON_INDEX_COMMIT_INTERVAL = DEFAULT_JSON_INDEX_COMMIT_INTERVAL;
+bool JSON_INDEX_ENABLED = DEFAULT_JSON_INDEX_ENABLED;
+
 void
 SetIndexSliceSize(const int64_t size) {
     FILE_SLICE_SIZE = size << 20;
@@ -65,6 +69,26 @@ SetDefaultExecEvalExprBatchSize(int64_t val) {
 void
 SetCpuNum(const int num) {
     CPU_NUM = num;
+}
+
+void
+SetDefaultJSONKeyIndexMemoryBudget(int64_t val) {
+    JSON_INDEX_MEMORY_BUDGET = val;
+    LOG_INFO("set default json key index memory budget: {}",
+             JSON_INDEX_MEMORY_BUDGET);
+}
+
+void
+SetDefaultJSONKeyIndexCommitInterval(int64_t val) {
+    JSON_INDEX_COMMIT_INTERVAL = val;
+    LOG_INFO("set default json key index commit interval: {}",
+             JSON_INDEX_COMMIT_INTERVAL);
+}
+
+void
+SetDefaultJSONKeyIndexEnable(bool val) {
+    JSON_INDEX_ENABLED = val;
+    LOG_INFO("set default json key index enable: {}", JSON_INDEX_ENABLED);
 }
 
 }  // namespace milvus

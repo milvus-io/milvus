@@ -122,7 +122,8 @@ struct ArithOpElementFunc {
                         res[i] = (src[offset] / right_operand) == val;
                     } else if constexpr (arith_op ==
                                          proto::plan::ArithOpType::Mod) {
-                        res[i] = (fmod(src[offset], right_operand)) == val;
+                        res[i] =
+                            (long(src[offset]) % long(right_operand)) == val;
                     } else {
                         PanicInfo(OpTypeInvalid,
                                   fmt::format("unsupported arith type:{} for "
@@ -143,7 +144,8 @@ struct ArithOpElementFunc {
                         res[i] = (src[offset] / right_operand) != val;
                     } else if constexpr (arith_op ==
                                          proto::plan::ArithOpType::Mod) {
-                        res[i] = (fmod(src[offset], right_operand)) != val;
+                        res[i] =
+                            (long(src[offset]) % long(right_operand)) != val;
                     } else {
                         PanicInfo(OpTypeInvalid,
                                   fmt::format("unsupported arith type:{} for "
@@ -165,7 +167,8 @@ struct ArithOpElementFunc {
                         res[i] = (src[offset] / right_operand) > val;
                     } else if constexpr (arith_op ==
                                          proto::plan::ArithOpType::Mod) {
-                        res[i] = (fmod(src[offset], right_operand)) > val;
+                        res[i] =
+                            (long(src[offset]) % long(right_operand)) > val;
                     } else {
                         PanicInfo(OpTypeInvalid,
                                   fmt::format("unsupported arith type:{} for "
@@ -187,7 +190,8 @@ struct ArithOpElementFunc {
                         res[i] = (src[offset] / right_operand) >= val;
                     } else if constexpr (arith_op ==
                                          proto::plan::ArithOpType::Mod) {
-                        res[i] = (fmod(src[offset], right_operand)) >= val;
+                        res[i] =
+                            (long(src[offset]) % long(right_operand)) >= val;
                     } else {
                         PanicInfo(OpTypeInvalid,
                                   fmt::format("unsupported arith type:{} for "
@@ -208,7 +212,8 @@ struct ArithOpElementFunc {
                         res[i] = (src[offset] / right_operand) < val;
                     } else if constexpr (arith_op ==
                                          proto::plan::ArithOpType::Mod) {
-                        res[i] = (fmod(src[offset], right_operand)) < val;
+                        res[i] =
+                            (long(src[offset]) % long(right_operand)) < val;
                     } else {
                         PanicInfo(OpTypeInvalid,
                                   fmt::format("unsupported arith type:{} for "
@@ -229,7 +234,8 @@ struct ArithOpElementFunc {
                         res[i] = (src[offset] / right_operand) <= val;
                     } else if constexpr (arith_op ==
                                          proto::plan::ArithOpType::Mod) {
-                        res[i] = (fmod(src[offset], right_operand)) <= val;
+                        res[i] =
+                            (long(src[offset]) % long(right_operand)) <= val;
                     } else {
                         PanicInfo(OpTypeInvalid,
                                   fmt::format("unsupported arith type:{} for "

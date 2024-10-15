@@ -355,6 +355,10 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     template <typename ExprValueType>
     VectorPtr
+    ExecRangeVisitorImplJsonForIndex();
+
+    template <typename ExprValueType>
+    VectorPtr
     ExecRangeVisitorImplArray(OffsetVector* input = nullptr);
 
     template <typename T>
@@ -380,6 +384,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     VectorPtr
     ExecTextMatch();
+
+    std::pair<std::string, std::string>
+    SplitAtFirstSlashDigit(std::string input);
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;

@@ -72,6 +72,7 @@ func NewCheckerController(
 		// todo temporary work around must fix
 		// utils.LeaderChecker:  NewLeaderChecker(meta, dist, targetMgr, nodeMgr, true),
 		utils.LeaderChecker: NewLeaderChecker(meta, dist, targetMgr, nodeMgr),
+		utils.StatsChecker:  NewStatsChecker(meta, dist, broker, nodeMgr, targetMgr),
 	}
 
 	manualCheckChs := map[utils.CheckerType]chan struct{}{
@@ -112,6 +113,8 @@ func getCheckerInterval(checker utils.CheckerType) time.Duration {
 		return Params.QueryCoordCfg.IndexCheckInterval.GetAsDuration(time.Millisecond)
 	case utils.LeaderChecker:
 		return Params.QueryCoordCfg.LeaderViewUpdateInterval.GetAsDuration(time.Second)
+	case utils.StatsChecker:
+		return Params.QueryCoordCfg.IndexCheckInterval.GetAsDuration(time.Millisecond)
 	default:
 		return Params.QueryCoordCfg.CheckInterval.GetAsDuration(time.Millisecond)
 	}

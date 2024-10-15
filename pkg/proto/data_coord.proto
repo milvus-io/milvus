@@ -361,6 +361,8 @@ message SegmentInfo {
   // This field is used to indicate that some intermediate state segments should not be loaded.
   // For example, segments that have been clustered but haven't undergone stats yet.
   bool is_invisible = 28;
+  // jsonKeyStats is used to record json key index for fields.
+  map<int64, JsonKeyStats> jsonKeyStats = 29;
 }
 
 message SegmentStartPosition {
@@ -440,6 +442,15 @@ message FieldBinlog{
 }
 
 message TextIndexStats {
+  int64 fieldID = 1;
+  int64 version = 2;
+  repeated string files = 3;
+  int64 log_size = 4;
+  int64 memory_size = 5;
+  int64 buildID = 6;
+}
+
+message JsonKeyStats {
   int64 fieldID = 1;
   int64 version = 2;
   repeated string files = 3;

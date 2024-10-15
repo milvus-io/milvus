@@ -37,6 +37,7 @@
 #include "index/SkipIndex.h"
 #include "mmap/Column.h"
 #include "index/TextMatchIndex.h"
+#include "index/JsonKeyInvertedIndex.h"
 
 namespace milvus::segcore {
 
@@ -133,6 +134,12 @@ class SegmentInterface {
 
     virtual index::TextMatchIndex*
     GetTextIndex(FieldId field_id) const = 0;
+
+    virtual index::JsonKeyInvertedIndex*
+    GetJsonKeyIndex(FieldId field_id) const = 0;
+
+    virtual std::pair<std::string_view, bool>
+    GetJsonData(FieldId field_id, size_t offset) const = 0;
 };
 
 // internal API for DSL calculation
@@ -314,6 +321,9 @@ class SegmentInternalInterface : public SegmentInterface {
     index::TextMatchIndex*
     GetTextIndex(FieldId field_id) const override;
 
+    virtual index::JsonKeyInvertedIndex*
+    GetJsonKeyIndex(FieldId field_id) const override;
+
  public:
     virtual void
     vector_search(SearchInfo& search_info,
@@ -486,6 +496,9 @@ class SegmentInternalInterface : public SegmentInterface {
     // text-indexes used to do match.
     std::unordered_map<FieldId, std::unique_ptr<index::TextMatchIndex>>
         text_indexes_;
+
+    std::unordered_map<FieldId, std::unique_ptr<index::JsonKeyInvertedIndex>>
+        json_indexes_;
 };
 
 }  // namespace milvus::segcore

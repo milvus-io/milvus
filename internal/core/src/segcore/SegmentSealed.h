@@ -55,6 +55,16 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual InsertRecord<true>&
     get_insert_record() = 0;
 
+    virtual void
+    LoadJsonKeyIndex(FieldId field_id,
+                     std::unique_ptr<index::JsonKeyInvertedIndex> index) = 0;
+
+    virtual index::JsonKeyInvertedIndex*
+    GetJsonKeyIndex(FieldId field_id) const = 0;
+
+    virtual std::pair<std::string_view, bool>
+    GetJsonData(FieldId field_id, size_t offset) const = 0;
+
     SegmentType
     type() const override {
         return SegmentType::Sealed;

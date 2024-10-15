@@ -27,7 +27,9 @@
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
 #include "query/PlanProto.h"
-
+#include "segcore/SegmentSealedImpl.h"
+#include "segcore/SegmentInterface.h"
+#include "segcore/SegmentGrowingImpl.h"
 namespace milvus {
 namespace exec {
 
@@ -1061,6 +1063,23 @@ class SegmentExpr : public Expr {
     void
     SetNotUseIndex() {
         use_index_ = false;
+    }
+
+    bool
+    CanUseJsonKeyIndex(FieldId field_id) const {
+        if (segment_->type() == SegmentType::Sealed) {
+            auto sealed_seg =
+                dynamic_cast<const segcore::SegmentSealed*>(segment_);
+            Assert(sealed_seg != nullptr);
+            if (sealed_seg->GetJsonKeyIndex(field_id) != nullptr) {
+                return true;
+            }
+        } else if (segment_->type() == SegmentType ::Growing) {
+            if (segment_->GetJsonKeyIndex(field_id) != nullptr) {
+                return true;
+            }
+        }
+        return false;
     }
 
  protected:

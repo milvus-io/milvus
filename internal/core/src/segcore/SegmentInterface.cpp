@@ -401,4 +401,14 @@ SegmentInternalInterface::GetTextIndex(FieldId field_id) const {
     return iter->second.get();
 }
 
+index::JsonKeyInvertedIndex*
+SegmentInternalInterface::GetJsonKeyIndex(FieldId field_id) const {
+    std::shared_lock lock(mutex_);
+    auto iter = json_indexes_.find(field_id);
+    if (iter == json_indexes_.end()) {
+        return nullptr;
+    }
+    return iter->second.get();
+}
+
 }  // namespace milvus::segcore
