@@ -130,7 +130,7 @@ StringIndexMarisa::Build(size_t n,
     {
         // fill key set.
         for (size_t i = 0; i < n; i++) {
-            if (!valid_data || valid_data[i]) {
+            if (valid_data == nullptr || valid_data[i]) {
                 keyset.push_back(values[i].c_str());
             }
         }
@@ -501,7 +501,7 @@ StringIndexMarisa::fill_str_ids(size_t n,
                                 const bool* valid_data) {
     str_ids_.resize(n, MARISA_NULL_KEY_ID);
     for (size_t i = 0; i < n; i++) {
-        if (valid_data && !valid_data[i]) {
+        if (valid_data != nullptr && !valid_data[i]) {
             continue;
         }
         auto str = values[i];

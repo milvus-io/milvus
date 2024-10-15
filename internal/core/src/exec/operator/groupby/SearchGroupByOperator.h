@@ -100,9 +100,9 @@ class SealedDataGetter : public DataGetter<T> {
             }
             return field_data_->operator[](idx);
         } else {
-            auto value = (*field_index_).Reverse_Lookup(idx);
-            AssertInfo(value.has_value(), "field data not found");
-            return value.value();
+            auto raw = (*field_index_).Reverse_Lookup(idx);
+            AssertInfo(raw.has_value(), "field data not found");
+            return raw.value();
         }
     }
 };

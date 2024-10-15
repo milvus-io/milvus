@@ -93,7 +93,7 @@ BitmapIndex<T>::Build(size_t n, const T* data, const bool* valid_data) {
 
     T* p = const_cast<T*>(data);
     for (int i = 0; i < n; ++i, ++p) {
-        if (!valid_data || valid_data[i]) {
+        if (valid_data == nullptr || valid_data[i]) {
             data_[*p].add(i);
             valid_bitset_.set(i);
         }
@@ -1127,11 +1127,11 @@ BitmapIndex<T>::Reverse_Lookup(size_t idx) const {
             }
         }
     }
-    return std::nullopt;
     PanicInfo(UnexpectedError,
               fmt::format(
                   "scalar bitmap index can not lookup target value of index {}",
                   idx));
+    return std::nullopt;
 }
 
 template <typename T>

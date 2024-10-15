@@ -272,7 +272,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
             return false;
         };
         for (int i = 0; i < size; ++i) {
-            if (valid_data && !valid_data[i]) {
+            if (valid_data != nullptr && !valid_data[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -331,7 +331,7 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
                                 int index,
                                 const std::unordered_set<ValueType>& term_set) {
         for (int i = 0; i < size; ++i) {
-            if (valid_data && !valid_data[i]) {
+            if (valid_data != nullptr && !valid_data[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -400,7 +400,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
             return false;
         };
         for (size_t i = 0; i < size; ++i) {
-            if (valid_data && !valid_data[i]) {
+            if (valid_data != nullptr && !valid_data[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -472,7 +472,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
             return terms.find(ValueType(x.value())) != terms.end();
         };
         for (size_t i = 0; i < size; ++i) {
-            if (valid_data && !valid_data[i]) {
+            if (valid_data != nullptr && !valid_data[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -592,7 +592,7 @@ PhyTermFilterExpr::ExecVisitorImplForData() {
                                 const std::unordered_set<T>& vals) {
         TermElementFuncSet<T> func;
         for (size_t i = 0; i < size; ++i) {
-            if (valid_data && !valid_data[i]) {
+            if (valid_data != nullptr && !valid_data[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }

@@ -261,16 +261,26 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData() {
                                  HighPrecisionType val2) {
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFunc<T, true, true> func;
-            func(val1, val2, data, valid_data, size, res, valid_res);
+            func(val1, val2, data, size, res);
         } else if (lower_inclusive && !upper_inclusive) {
             BinaryRangeElementFunc<T, true, false> func;
-            func(val1, val2, data, valid_data, size, res, valid_res);
+            func(val1, val2, data, size, res);
         } else if (!lower_inclusive && upper_inclusive) {
             BinaryRangeElementFunc<T, false, true> func;
-            func(val1, val2, data, valid_data, size, res, valid_res);
+            func(val1, val2, data, size, res);
         } else {
             BinaryRangeElementFunc<T, false, false> func;
-            func(val1, val2, data, valid_data, size, res, valid_res);
+            func(val1, val2, data, size, res);
+        }
+        // there is a batch operation in BinaryRangeElementFunc,
+        // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
+        // but to mask res with valid_data after the batch operation.
+        if (valid_data != nullptr) {
+            for (int i = 0; i < size; i++) {
+                if (!valid_data[i]) {
+                    res[i] = valid_res[i] = false;
+                }
+            }
         }
     };
     auto skip_index_func =

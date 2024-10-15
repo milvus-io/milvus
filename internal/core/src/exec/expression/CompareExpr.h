@@ -268,16 +268,19 @@ class PhyCompareFilterExpr : public Expr {
 
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
-    ProcessBothDataChunks(FUNC func, TargetBitmapView res, ValTypes... values) {
+    ProcessBothDataChunks(FUNC func,
+                          TargetBitmapView res,
+                          TargetBitmapView valid_res,
+                          ValTypes... values) {
         if (segment_->is_chunked()) {
             return ProcessBothDataChunksForMultipleChunk<T,
                                                          U,
                                                          FUNC,
                                                          ValTypes...>(
-                func, res, values...);
+                func, res, valid_res, values...);
         } else {
             return ProcessBothDataChunksForSingleChunk<T, U, FUNC, ValTypes...>(
-                func, res, values...);
+                func, res, valid_res, values...);
         }
     }
 

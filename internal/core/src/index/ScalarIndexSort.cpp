@@ -365,10 +365,10 @@ ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
     AssertInfo(idx < idx_to_offsets_.size(), "out of range of total count");
     AssertInfo(is_built_, "index has not been built");
 
-    auto offset = idx_to_offsets_[idx];
-    if (offset < 0) {
+    if (!valid_bitset_[idx]) {
         return std::nullopt;
     }
+    auto offset = idx_to_offsets_[idx];
     return data_[offset].a_;
 }
 

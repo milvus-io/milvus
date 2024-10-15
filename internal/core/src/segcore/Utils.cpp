@@ -696,16 +696,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<bool> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
                 // if has no value, means nullable must be true, no need to check nullable again here
-                if (!value.has_value()) {
+                if (!raw.has_value()) {
                     valid_data[i] = false;
                     continue;
                 }
                 if (nullable) {
                     valid_data[i] = true;
                 }
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_bool_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -716,16 +716,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<int8_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
                 // if has no value, means nullable must be true, no need to check nullable again here
-                if (!value.has_value()) {
+                if (!raw.has_value()) {
                     valid_data[i] = false;
                     continue;
                 }
                 if (nullable) {
                     valid_data[i] = true;
                 }
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_int_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -736,16 +736,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<int16_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
                 // if has no value, means nullable must be true, no need to check nullable again here
-                if (!value.has_value()) {
+                if (!raw.has_value()) {
                     valid_data[i] = false;
                     continue;
                 }
                 if (nullable) {
                     valid_data[i] = true;
                 }
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_int_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -756,16 +756,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<int32_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
                 // if has no value, means nullable must be true, no need to check nullable again here
-                if (!value.has_value()) {
+                if (!raw.has_value()) {
                     valid_data[i] = false;
                     continue;
                 }
                 if (nullable) {
                     valid_data[i] = true;
                 }
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_int_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -776,16 +776,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<int64_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
                 // if has no value, means nullable must be true, no need to check nullable again here
-                if (!value.has_value()) {
+                if (!raw.has_value()) {
                     valid_data[i] = false;
                     continue;
                 }
                 if (nullable) {
                     valid_data[i] = true;
                 }
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_long_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -796,16 +796,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<float> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
                 // if has no value, means nullable must be true, no need to check nullable again here
-                if (!value.has_value()) {
+                if (!raw.has_value()) {
                     valid_data[i] = false;
                     continue;
                 }
                 if (nullable) {
                     valid_data[i] = true;
                 }
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_float_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -816,16 +816,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<double> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
                 // if has no value, means nullable must be true, no need to check nullable again here
-                if (!value.has_value()) {
+                if (!raw.has_value()) {
                     valid_data[i] = false;
                     continue;
                 }
                 if (nullable) {
                     valid_data[i] = true;
                 }
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_double_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -836,16 +836,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<std::string> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
                 // if has no value, means nullable must be true, no need to check nullable again here
-                if (!value.has_value()) {
+                if (!raw.has_value()) {
                     valid_data[i] = false;
                     continue;
                 }
                 if (nullable) {
                     valid_data[i] = true;
                 }
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_string_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};

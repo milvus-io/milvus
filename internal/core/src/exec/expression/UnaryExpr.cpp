@@ -507,7 +507,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
         switch (op_type) {
             case proto::plan::GreaterThan: {
                 for (size_t i = 0; i < size; ++i) {
-                    if (valid_data && !valid_data[i]) {
+                    if (valid_data != nullptr && !valid_data[i]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -521,7 +521,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
             }
             case proto::plan::GreaterEqual: {
                 for (size_t i = 0; i < size; ++i) {
-                    if (valid_data && !valid_data[i]) {
+                    if (valid_data != nullptr && !valid_data[i]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -535,7 +535,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
             }
             case proto::plan::LessThan: {
                 for (size_t i = 0; i < size; ++i) {
-                    if (valid_data && !valid_data[i]) {
+                    if (valid_data != nullptr && !valid_data[i]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -549,7 +549,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
             }
             case proto::plan::LessEqual: {
                 for (size_t i = 0; i < size; ++i) {
-                    if (valid_data && !valid_data[i]) {
+                    if (valid_data != nullptr && !valid_data[i]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -563,7 +563,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
             }
             case proto::plan::Equal: {
                 for (size_t i = 0; i < size; ++i) {
-                    if (valid_data && !valid_data[i]) {
+                    if (valid_data != nullptr && !valid_data[i]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -583,7 +583,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
             }
             case proto::plan::NotEqual: {
                 for (size_t i = 0; i < size; ++i) {
-                    if (valid_data && !valid_data[i]) {
+                    if (valid_data != nullptr && !valid_data[i]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -603,7 +603,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
             }
             case proto::plan::PrefixMatch: {
                 for (size_t i = 0; i < size; ++i) {
-                    if (valid_data && !valid_data[i]) {
+                    if (valid_data != nullptr && !valid_data[i]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -621,7 +621,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
                 auto regex_pattern = translator(val);
                 RegexMatcher matcher(regex_pattern);
                 for (size_t i = 0; i < size; ++i) {
-                    if (valid_data && !valid_data[i]) {
+                    if (valid_data != nullptr && !valid_data[i]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -848,42 +848,42 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData() {
         switch (expr_type) {
             case proto::plan::GreaterThan: {
                 UnaryElementFunc<T, proto::plan::GreaterThan> func;
-                func(data, valid_data, size, val, res, valid_res);
+                func(data, size, val, res);
                 break;
             }
             case proto::plan::GreaterEqual: {
                 UnaryElementFunc<T, proto::plan::GreaterEqual> func;
-                func(data, valid_data, size, val, res, valid_res);
+                func(data, size, val, res);
                 break;
             }
             case proto::plan::LessThan: {
                 UnaryElementFunc<T, proto::plan::LessThan> func;
-                func(data, valid_data, size, val, res, valid_res);
+                func(data, size, val, res);
                 break;
             }
             case proto::plan::LessEqual: {
                 UnaryElementFunc<T, proto::plan::LessEqual> func;
-                func(data, valid_data, size, val, res, valid_res);
+                func(data, size, val, res);
                 break;
             }
             case proto::plan::Equal: {
                 UnaryElementFunc<T, proto::plan::Equal> func;
-                func(data, valid_data, size, val, res, valid_res);
+                func(data, size, val, res);
                 break;
             }
             case proto::plan::NotEqual: {
                 UnaryElementFunc<T, proto::plan::NotEqual> func;
-                func(data, valid_data, size, val, res, valid_res);
+                func(data, size, val, res);
                 break;
             }
             case proto::plan::PrefixMatch: {
                 UnaryElementFunc<T, proto::plan::PrefixMatch> func;
-                func(data, valid_data, size, val, res, valid_res);
+                func(data, size, val, res);
                 break;
             }
             case proto::plan::Match: {
                 UnaryElementFunc<T, proto::plan::Match> func;
-                func(data, valid_data, size, val, res, valid_res);
+                func(data, size, val, res);
                 break;
             }
             default:
@@ -891,6 +891,16 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData() {
                     OpTypeInvalid,
                     fmt::format("unsupported operator type for unary expr: {}",
                                 expr_type));
+        }
+        // there is a batch operation in BinaryRangeElementFunc,
+        // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
+        // but to mask res with valid_data after the batch operation.
+        if (valid_data != nullptr) {
+            for (int i = 0; i < size; i++) {
+                if (!valid_data[i]) {
+                    res[i] = valid_res[i] = false;
+                }
+            }
         }
     };
     auto skip_index_func = [expr_type, val](const SkipIndex& skip_index,

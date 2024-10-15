@@ -260,6 +260,8 @@ class SegmentExpr : public Expr {
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             auto views_info = segment_->get_batch_views<T>(
                 field_id_, 0, current_data_chunk_pos_, need_size);
+            // first is the raw data, second is valid_data
+            // use valid_data to see if raw data is null
             func(views_info.first.data(),
                  views_info.second.data(),
                  need_size,
@@ -335,6 +337,7 @@ class SegmentExpr : public Expr {
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         TargetBitmapView res,
+        TargetBitmapView valid_res,
         ValTypes... values) {
         int64_t processed_size = 0;
 
@@ -369,13 +372,21 @@ class SegmentExpr : public Expr {
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json>) {
                     if (segment_->type() == SegmentType::Sealed) {
+                        // first is the raw data, second is valid_data
+                        // use valid_data to see if raw data is null
                         auto data_vec = segment_
                                             ->get_batch_views<T>(
                                                 field_id_, i, data_pos, size)
                                             .first;
+                        auto valid_data = segment_
+                                              ->get_batch_views<T>(
+                                                  field_id_, i, data_pos, size)
+                                              .second;
                         func(data_vec.data(),
+                             valid_data.data(),
                              size,
                              res + processed_size,
+                             valid_res + processed_size,
                              values...);
                         is_seal = true;
                     }
@@ -383,7 +394,16 @@ class SegmentExpr : public Expr {
                 if (!is_seal) {
                     auto chunk = segment_->chunk_data<T>(field_id_, i);
                     const T* data = chunk.data() + data_pos;
-                    func(data, size, res + processed_size, values...);
+                    const bool* valid_data = chunk.valid_data();
+                    if (valid_data != nullptr) {
+                        valid_data += data_pos;
+                    }
+                    func(data,
+                         valid_data,
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
                 }
             }
 

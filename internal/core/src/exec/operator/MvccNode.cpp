@@ -51,7 +51,8 @@ PhyMvccNode::GetOutput() {
         is_finished_ = true;
         return nullptr;
     }
-
+    // the first vector is filtering result and second bitset is a valid bitset
+    // if valid_bitset[i]==false, means result[i] is null
     auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
                                            TargetBitmap(active_count_),
                                            TargetBitmap(active_count_))

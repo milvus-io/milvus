@@ -58,7 +58,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment() {
                                 TargetBitmapView valid_res,
                                 const std::string& pointer) {
         for (int i = 0; i < size; ++i) {
-            if (valid_data && !valid_data[i]) {
+            if (valid_data != nullptr && !valid_data[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }

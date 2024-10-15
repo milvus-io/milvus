@@ -200,7 +200,7 @@ PhyJsonContainsFilterExpr::ExecArrayContains() {
             return false;
         };
         for (int i = 0; i < size; ++i) {
-            if (valid_data && !valid_data[i]) {
+            if (valid_data != nullptr && !valid_data[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -266,7 +266,7 @@ PhyJsonContainsFilterExpr::ExecJsonContains() {
             return false;
         };
         for (size_t i = 0; i < size; ++i) {
-            if (valid_data && !valid_data[i]) {
+            if (valid_data != nullptr && !valid_data[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -337,7 +337,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray() {
                 return false;
             };
             for (size_t i = 0; i < size; ++i) {
-                if (valid_data && !valid_data[i]) {
+                if (valid_data != nullptr && !valid_data[i]) {
                     res[i] = valid_res[i] = false;
                     continue;
                 }
@@ -398,7 +398,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll() {
             return tmp_elements.size() == 0;
         };
         for (int i = 0; i < size; ++i) {
-            if (valid_data && !valid_data[i]) {
+            if (valid_data != nullptr && !valid_data[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -468,7 +468,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll() {
             return tmp_elements.size() == 0;
         };
         for (size_t i = 0; i < size; ++i) {
-            if (valid_data && !valid_data[i]) {
+            if (valid_data != nullptr && !valid_data[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -598,7 +598,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType() {
                 return tmp_elements_index.size() == 0;
             };
             for (size_t i = 0; i < size; ++i) {
-                if (valid_data && !valid_data[i]) {
+                if (valid_data != nullptr && !valid_data[i]) {
                     res[i] = valid_res[i] = false;
                     continue;
                 }
@@ -679,7 +679,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray() {
                 return exist_elements_index.size() == elements.size();
             };
             for (size_t i = 0; i < size; ++i) {
-                if (valid_data && !valid_data[i]) {
+                if (valid_data != nullptr && !valid_data[i]) {
                     res[i] = valid_res[i] = false;
                     continue;
                 }
@@ -801,7 +801,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType() {
                 return false;
             };
             for (size_t i = 0; i < size; ++i) {
-                if (valid_data && !valid_data[i]) {
+                if (valid_data != nullptr && !valid_data[i]) {
                     res[i] = valid_res[i] = false;
                     continue;
                 }
