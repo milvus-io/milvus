@@ -120,6 +120,7 @@ type Server struct {
 	importMeta       ImportMeta
 	importScheduler  ImportScheduler
 	importChecker    ImportChecker
+	vshardManager    VshardManager
 
 	compactionTrigger        trigger
 	compactionHandler        compactionPlanContext
@@ -380,6 +381,10 @@ func (s *Server) initDataCoord() error {
 
 	s.initJobManager()
 	log.Info("init statsJobManager done")
+
+	// vshardManger should init before compaction
+	s.initVshardManager()
+	log.Info("init vshard manager done")
 
 	s.initCompaction()
 	log.Info("init compaction done")
@@ -687,9 +692,13 @@ func (s *Server) initIndexNodeManager() {
 	}
 }
 
+func (s *Server) initVshardManager() {
+	s.vshardManager = NewVshardManagerImpl(s.meta, s.allocator)
+}
+
 func (s *Server) initCompaction() {
-	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.channelManager, s.meta, s.allocator, s.taskScheduler, s.handler)
-	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler, s.meta)
+	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.channelManager, s.meta, s.allocator, s.taskScheduler, s.handler, s.vshardManager)
+	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler, s.meta, s.vshardManager)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
 }
 
@@ -725,6 +734,7 @@ func (s *Server) startServerLoop() {
 		s.startCompaction()
 	}
 
+	s.vshardManager.Start()
 	s.serverLoopWg.Add(2)
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
@@ -1067,6 +1077,8 @@ func (s *Server) Stop() error {
 	s.importScheduler.Close()
 	s.importChecker.Close()
 	s.syncSegmentsScheduler.Stop()
+	s.vshardManager.Stop()
+	logutil.Logger(s.ctx).Info("datacoord vshardManager stopped")
 
 	s.stopCompaction()
 	logutil.Logger(s.ctx).Info("datacoord compaction stopped")

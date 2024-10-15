@@ -47,6 +47,17 @@ func isExpiredEntity(ttl int64, now, ts typeutil.Timestamp) bool {
 	return expireTime.Before(pnow)
 }
 
+func isDeletedEntity(v *storage.Value, delta map[interface{}]typeutil.Timestamp) bool {
+	ts, ok := delta[v.PK.GetValue()]
+	// insert task and delete task has the same ts when upsert
+	// here should be < instead of <=
+	// to avoid the upsert data to be deleted after compact
+	if ok && uint64(v.Timestamp) < ts {
+		return true
+	}
+	return false
+}
+
 func mergeDeltalogs(ctx context.Context, io io.BinlogIO, dpaths map[typeutil.UniqueID][]string) (map[interface{}]typeutil.Timestamp, error) {
 	pk2ts := make(map[interface{}]typeutil.Timestamp)
 

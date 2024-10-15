@@ -40,7 +40,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegmentIDs().GetBegin(), plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter := NewMultiSegmentWriter(binlogIO, compAlloc, plan, maxRows, partitionID, collectionID, bm25FieldIds)
+	mWriter := NewMultiSegmentWriter(binlogIO, compAlloc, plan.GetSchema(), plan.GetChannel(), plan.GetMaxSize(), maxRows, partitionID, collectionID, bm25FieldIds, false)
 
 	var (
 		expiredRowCount int64 // the number of expired entities

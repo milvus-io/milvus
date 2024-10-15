@@ -352,3 +352,11 @@ func buildAnalyzeTaskKey(taskID int64) string {
 func buildStatsTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", StatsTaskPrefix, taskID)
 }
+
+func buildVshardInfoPath(collID, partID int64, channel string, vshardNum, vshardID int32) string {
+	return fmt.Sprintf("%s/%d/%d/%s/%d-%d", VshardInfoPrefix, collID, partID, channel, vshardNum, vshardID)
+}
+
+func buildVshardTaskPath(collID, partID int64, channel string, id int64) string {
+	return fmt.Sprintf("%s/%d/%d/%s/%d", VshardTaskPrefix, collID, partID, channel, id)
+}
