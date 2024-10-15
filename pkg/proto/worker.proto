@@ -202,6 +202,7 @@ message StatsResult {
   map<int64, data.TextIndexStats> text_stats_logs = 10;
   int64 num_rows = 11;
   repeated data.FieldBinlog bm25_logs = 12;
+  map<int64, data.JsonKeyStats> json_key_stats_logs = 13;
 }
 
 message StatsResults {

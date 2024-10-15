@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
@@ -82,6 +83,7 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 			jm.triggerSortStatsTask()
 			jm.triggerTextStatsTask()
 			jm.triggerBM25StatsTask()
+			jm.triggerJsonKeyIndexStatsTask()
 
 		case segID := <-getStatsTaskChSingleton():
 			log.Info("receive new segment to trigger stats task", zap.Int64("segmentID", segID))
@@ -139,6 +141,13 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	return false
 }
 
+func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
+	if !isFlush(segment) {
+		return false
+	}
+	return true
+}
+
 func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	// TODO: docking bm25 stats task
 	return false
@@ -163,6 +172,28 @@ func (jm *statsJobManager) triggerTextStatsTask() {
 		for _, segment := range segments {
 			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_TextIndexJob, true); err != nil {
 				log.Warn("create stats task with text index for segment failed, wait for retry",
+					zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+				continue
+			}
+		}
+	}
+}
+
+func (jm *statsJobManager) triggerJsonKeyIndexStatsTask() {
+	collections := jm.mt.GetCollections()
+	for _, collection := range collections {
+		needTriggerFieldIDs := make([]UniqueID, 0)
+		for _, field := range collection.Schema.GetFields() {
+			if field.GetDataType() == schemapb.DataType_JSON {
+				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
+			}
+		}
+		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
+			return needDoJsonKeyIndex(seg, needTriggerFieldIDs)
+		}))
+		for _, segment := range segments {
+			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob, true); err != nil {
+				log.Warn("create stats task with json key index for segment failed, wait for retry:",
 					zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 				continue
 			}
