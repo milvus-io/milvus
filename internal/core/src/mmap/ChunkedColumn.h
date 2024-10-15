@@ -149,6 +149,12 @@ class ChunkedColumnBase : public ColumnBase {
                   "GetBatchBuffer only supported for VariableColumn");
     }
 
+    virtual std::string_view
+    RawAt(const size_t i) const {
+        PanicInfo(ErrorCode::Unsupported,
+                  "RawAt only supported for VariableColumn");
+    }
+
     virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
     StringViews(int64_t chunk_id) const {
         PanicInfo(ErrorCode::Unsupported,
@@ -374,7 +380,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     }
 
     std::string_view
-    RawAt(const int i) const {
+    RawAt(const size_t i) const {
         return std::string_view((*this)[i]);
     }
 };

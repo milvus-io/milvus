@@ -415,7 +415,7 @@ func TestUpsertDynamicField(t *testing.T) {
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
-
+	time.Sleep(time.Second * 4)
 	// verify that dynamic field exists
 	upsertNb := 10
 	resSet, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s < %d", common.DefaultDynamicNumberField, upsertNb)).
@@ -441,7 +441,7 @@ func TestUpsertDynamicField(t *testing.T) {
 	dynamicColumns := hp.GenDynamicColumnData(common.DefaultNb, upsertNb)
 	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(pkColumn2, vecColumn2).WithColumns(dynamicColumns...))
 	common.CheckErr(t, err, true)
-
+	time.Sleep(time.Second * 4)
 	// query and gets dynamic field
 	resSet, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s >= %d", common.DefaultDynamicNumberField, common.DefaultNb)).
 		WithOutputFields(common.DefaultDynamicFieldName).WithConsistencyLevel(entity.ClStrong))
