@@ -1137,6 +1137,40 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 	return HandleCStatus(ctx, &status, "LoadTextIndex failed")
 }
 
+func (s *LocalSegment) LoadJsonKeyIndex(ctx context.Context, jsonKeyStats *datapb.JsonKeyStats, schemaHelper *typeutil.SchemaHelper) error {
+	log.Ctx(ctx).Info("load json key index", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
+
+	f, err := schemaHelper.GetFieldFromID(jsonKeyStats.GetFieldID())
+	if err != nil {
+		return err
+	}
+
+	cgoProto := &indexcgopb.LoadJsonKeyIndexInfo{
+		FieldID:      jsonKeyStats.GetFieldID(),
+		Version:      jsonKeyStats.GetVersion(),
+		BuildID:      jsonKeyStats.GetBuildID(),
+		Files:        jsonKeyStats.GetFiles(),
+		Schema:       f,
+		CollectionID: s.Collection(),
+		PartitionID:  s.Partition(),
+	}
+
+	marshaled, err := proto.Marshal(cgoProto)
+	if err != nil {
+		return err
+	}
+
+	var status C.CStatus
+	_, _ = GetLoadPool().Submit(func() (any, error) {
+		traceCtx := ParseCTraceContext(ctx)
+		status = C.LoadJsonKeyIndex(traceCtx.ctx, s.ptr, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)))
+		return nil, nil
+	}).Await()
+
+	return HandleCStatus(ctx, &status, "Load JsonKeyStats failed")
+
+}
+
 func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),

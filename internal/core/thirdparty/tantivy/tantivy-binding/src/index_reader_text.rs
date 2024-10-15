@@ -10,7 +10,8 @@ use crate::{index_reader::IndexReaderWrapper, tokenizer::standard_analyzer};
 impl IndexReaderWrapper {
     // split the query string into multiple tokens using index's default tokenizer,
     // and then execute the disconjunction of term query.
-    pub(crate) fn match_query(&self, q: &str) -> Result<Vec<u32>> {
+    pub(crate) fn match_query(&self, q: &str) -> Result<Vec<i64>> {
+        // clone the tokenizer to make `match_query` thread-safe.
         let mut tokenizer = self
             .index
             .tokenizer_for_field(self.field)
@@ -28,7 +29,7 @@ impl IndexReaderWrapper {
 
     // split the query string into multiple tokens using index's default tokenizer,
     // and then execute the disconjunction of term query.
-    pub(crate) fn phrase_match_query(&self, q: &str, slop: u32) -> Result<Vec<u32>> {
+    pub(crate) fn phrase_match_query(&self, q: &str, slop: u32) -> Result<Vec<i64>> {
         // clone the tokenizer to make `match_query` thread-safe.
         let mut tokenizer = self
             .index
