@@ -53,7 +53,8 @@ type GcOption struct {
 	dropTolerance    time.Duration        // dropped segment related key tolerance time
 	scanInterval     time.Duration        // interval for scan residue for interupted log wrttien
 
-	removeLogPool *conc.Pool[struct{}]
+	removeLogPool                 *conc.Pool[struct{}]
+	useCollectionIdBasedIndexPath bool
 }
 
 // garbageCollector handles garbage files in object storage
@@ -81,12 +82,14 @@ type gcCmd struct {
 // newGarbageCollector create garbage collector with meta and option
 func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageCollector {
 	ctx, cancel := context.WithCancel(context.Background())
+	opt.useCollectionIdBasedIndexPath = Params.CommonCfg.UseCollectionIdBasedIndexPath.GetAsBool()
 	log.Info("GC with option",
 		zap.Bool("enabled", opt.enabled),
 		zap.Duration("interval", opt.checkInterval),
 		zap.Duration("scanInterval", opt.scanInterval),
 		zap.Duration("missingTolerance", opt.missingTolerance),
-		zap.Duration("dropTolerance", opt.dropTolerance))
+		zap.Duration("dropTolerance", opt.dropTolerance),
+		zap.Bool("useCollectionIdBasedIndexPath", opt.useCollectionIdBasedIndexPath))
 	opt.removeLogPool = conc.NewPool[struct{}](Params.DataCoordCfg.GCRemoveConcurrent.GetAsInt(), conc.WithExpiryDuration(time.Minute))
 	return &garbageCollector{
 		ctx:     ctx,
@@ -510,13 +513,40 @@ func (gc *garbageCollector) recycleUnusedSegIndexes() {
 	}
 }
 
+func (gc *garbageCollector) getBuildIdKeys(ctx context.Context, prefix string) ([]string, error) {
+	keys, _, err := gc.option.cli.ListWithPrefix(ctx, prefix, false)
+	if err != nil {
+		log.Warn("garbageCollector recycleUnusedIndexFiles list keys from chunk manager failed", zap.Error(err))
+		return nil, err
+	}
+
+	/*
+		this means keys has paths till collection id, we need to go one more level below
+	*/
+	if gc.option.useCollectionIdBasedIndexPath {
+		totalBuildIdKeys := make([]string, 0)
+		for _, key := range keys {
+			log.Debug("listing path for garbage collection", zap.String("prefix", prefix))
+			buildIdKeysForCollection, _, errWhileCollectionIndexList := gc.option.cli.ListWithPrefix(ctx, key, false)
+			if errWhileCollectionIndexList != nil {
+				log.Warn("garbageCollector recycleUnusedIndexFiles list keys from chunk manager failed", zap.Error(errWhileCollectionIndexList))
+				return totalBuildIdKeys, errWhileCollectionIndexList
+			}
+			totalBuildIdKeys = append(totalBuildIdKeys, buildIdKeysForCollection...)
+		}
+		return totalBuildIdKeys, err
+	} else {
+		return keys, err
+	}
+}
+
 // recycleUnusedIndexFiles is used to delete those index files that no longer exist in the meta.
 func (gc *garbageCollector) recycleUnusedIndexFiles() {
 	log.Info("start recycleUnusedIndexFiles")
 	startTs := time.Now()
 	prefix := path.Join(gc.option.cli.RootPath(), common.SegmentIndexPath) + "/"
 	// list dir first
-	keys, _, err := gc.option.cli.ListWithPrefix(gc.ctx, prefix, false)
+	keys, err := gc.getBuildIdKeys(gc.ctx, prefix)
 	if err != nil {
 		log.Warn("garbageCollector recycleUnusedIndexFiles list keys from chunk manager failed", zap.Error(err))
 		return
@@ -557,8 +587,12 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 		}
 		filesMap := make(map[string]struct{})
 		for _, fileID := range segIdx.IndexFileKeys {
-			filepath := metautil.BuildSegmentIndexFilePath(gc.option.cli.RootPath(), segIdx.BuildID, segIdx.IndexVersion,
-				segIdx.PartitionID, segIdx.SegmentID, fileID)
+			var filepath string
+			if gc.option.useCollectionIdBasedIndexPath {
+				filepath = metautil.BuildSegmentIndexFilePathWithCollectionID(gc.option.cli.RootPath(), segIdx.CollectionID, segIdx.BuildID, segIdx.IndexVersion, segIdx.PartitionID, segIdx.SegmentID, fileID)
+			} else {
+				filepath = metautil.BuildSegmentIndexFilePath(gc.option.cli.RootPath(), segIdx.BuildID, segIdx.IndexVersion, segIdx.PartitionID, segIdx.SegmentID, fileID)
+			}
 			filesMap[filepath] = struct{}{}
 		}
 		files, _, err := gc.option.cli.ListWithPrefix(gc.ctx, key, true)
@@ -576,6 +610,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 				return
 			}
 			if _, ok := filesMap[file]; !ok {
+				log.Debug("Removing file ", zap.String("file", file))
 				if err = gc.option.cli.Remove(gc.ctx, file); err != nil {
 					log.Warn("garbageCollector recycleUnusedIndexFiles remove file failed",
 						zap.Int64("buildID", buildID), zap.String("file", file), zap.Error(err))

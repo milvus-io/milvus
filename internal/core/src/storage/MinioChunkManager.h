@@ -174,6 +174,9 @@ class MinioChunkManager : public ChunkManager {
     std::vector<std::string>
     ListBuckets();
 
+    bool
+    UseCollectionIdBasedIndexPath() const { return use_collectionId_based_index_path_; }
+
  public:
     bool
     ObjectExists(const std::string& bucket_name,
@@ -232,6 +235,7 @@ class MinioChunkManager : public ChunkManager {
     std::shared_ptr<Aws::S3::S3Client> client_;
     std::string default_bucket_name_;
     std::string remote_root_path_;
+    bool use_collectionId_based_index_path_;
 };
 
 class AwsChunkManager : public MinioChunkManager {

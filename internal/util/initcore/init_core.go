@@ -88,21 +88,22 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cRegion))
 	defer C.free(unsafe.Pointer(cSslCACert))
 	storageConfig := C.CStorageConfig{
-		address:          cAddress,
-		bucket_name:      cBucketName,
-		access_key_id:    cAccessKey,
-		access_key_value: cAccessValue,
-		root_path:        cRootPath,
-		storage_type:     cStorageType,
-		cloud_provider:   cCloudProvider,
-		iam_endpoint:     cIamEndPoint,
-		useSSL:           C.bool(params.MinioCfg.UseSSL.GetAsBool()),
-		sslCACert:        cSslCACert,
-		useIAM:           C.bool(params.MinioCfg.UseIAM.GetAsBool()),
-		log_level:        cLogLevel,
-		region:           cRegion,
-		useVirtualHost:   C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
-		requestTimeoutMs: C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
+		address:                  cAddress,
+		bucket_name:              cBucketName,
+		access_key_id:            cAccessKey,
+		access_key_value:         cAccessValue,
+		root_path:                cRootPath,
+		storage_type:             cStorageType,
+		cloud_provider:           cCloudProvider,
+		iam_endpoint:             cIamEndPoint,
+		useSSL:                   C.bool(params.MinioCfg.UseSSL.GetAsBool()),
+		sslCACert:                cSslCACert,
+		useIAM:                   C.bool(params.MinioCfg.UseIAM.GetAsBool()),
+		log_level:                cLogLevel,
+		region:                   cRegion,
+		useVirtualHost:           C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
+		requestTimeoutMs:         C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
+		useCollectionIdIndexPath: C.bool(params.CommonCfg.UseCollectionIdBasedIndexPath.GetAsBool()),
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)

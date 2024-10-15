@@ -97,6 +97,7 @@ struct StorageConfig {
     bool useIAM = false;
     bool useVirtualHost = false;
     int64_t requestTimeoutMs = 3000;
+    bool useCollectionIdIndexPath = false;
 
     std::string
     ToString() const {
@@ -109,7 +110,8 @@ struct StorageConfig {
            << ", sslCACert=" << sslCACert.size()  // only print cert length
            << ", useIAM=" << std::boolalpha << useIAM
            << ", useVirtualHost=" << std::boolalpha << useVirtualHost
-           << ", requestTimeoutMs=" << requestTimeoutMs << "]";
+           << ", requestTimeoutMs=" << requestTimeoutMs
+           << ", useCollectionIdIndexPath=" << std::boolalpha << useCollectionIdIndexPath << "]";
 
         return ss.str();
     }
