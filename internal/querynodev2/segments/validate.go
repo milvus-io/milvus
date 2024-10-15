@@ -43,7 +43,7 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 		searchPartIDs = collection.GetPartitions()
 	} else {
 		// use request partition ids directly, ignoring meta partition ids
-		// partitions shall be controled by delegator distribution
+		// partitions shall be controlled by delegator distribution
 		searchPartIDs = partitionIDs
 	}
 
