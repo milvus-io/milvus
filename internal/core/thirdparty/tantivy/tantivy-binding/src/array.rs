@@ -2,13 +2,13 @@ use libc::size_t;
 
 #[repr(C)]
 pub struct RustArray {
-    array: *mut u32,
+    array: *mut i64,
     len: size_t,
     cap: size_t,
 }
 
 impl RustArray {
-    pub fn from_vec(vec: Vec<u32>) -> RustArray {
+    pub fn from_vec(vec: Vec<i64>) -> RustArray {
         let len = vec.len();
         let cap = vec.capacity();
         let v = vec.leak();

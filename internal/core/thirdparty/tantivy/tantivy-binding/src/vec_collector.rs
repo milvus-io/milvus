@@ -7,7 +7,7 @@ use tantivy::{
 pub struct VecCollector;
 
 impl Collector for VecCollector {
-    type Fruit = Vec<DocId>;
+    type Fruit = Vec<i64>;
 
     type Child = VecChildCollector;
 
@@ -23,7 +23,7 @@ impl Collector for VecCollector {
         false
     }
 
-    fn merge_fruits(&self, segment_fruits: Vec<Vec<DocId>>) -> tantivy::Result<Vec<DocId>> {
+    fn merge_fruits(&self, segment_fruits: Vec<Vec<i64>>) -> tantivy::Result<Vec<i64>> {
         if segment_fruits.len() == 1 {
             Ok(segment_fruits.into_iter().next().unwrap())
         } else {
@@ -44,14 +44,14 @@ impl Collector for VecCollector {
 }
 
 pub struct VecChildCollector {
-    docs: Vec<DocId>,
+    docs: Vec<i64>,
 }
 
 impl SegmentCollector for VecChildCollector {
-    type Fruit = Vec<DocId>;
+    type Fruit = Vec<i64>;
 
     fn collect(&mut self, doc: DocId, _score: tantivy::Score) {
-        self.docs.push(doc);
+        self.docs.push(doc as i64);
     }
 
     fn harvest(self) -> Self::Fruit {

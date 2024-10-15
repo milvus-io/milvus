@@ -46,6 +46,7 @@
 #include "segcore/load_index_c.h"
 #include "test_utils/c_api_test_utils.h"
 #include "segcore/vector_index_c.h"
+#include "common/jsmn.h"
 
 namespace chrono = std::chrono;
 
@@ -5279,4 +5280,387 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_BFLOAT16) {
 
 TEST(CApiTest, IsLoadWithDisk) {
     ASSERT_TRUE(IsLoadWithDisk(INVERTED_INDEX_TYPE, 0));
+}
+
+// 1000 keys
+std::string
+GenerateJson(int N) {
+    std::vector<std::string> data(N);
+    std::default_random_engine er(67);
+    std::normal_distribution<> distr(0, 1);
+    std::vector<std::string> keys;
+    for (int i = 0; i < N; i++) {
+        keys.push_back("keys" + std::to_string(i));
+    }
+    std::string json_string;
+    std::vector<std::string> values(N);
+    for (int i = 0; i < N; i++) {
+        if (i % 7 == 0 || i % 7 == 4) {
+            values[i] = std::to_string(er());
+        } else if (i % 7 == 1 || i % 7 == 5) {
+            values[i] = std::to_string(static_cast<double>(er()));
+        } else if (i % 7 == 2 || i % 7 == 6) {
+            values[i] = er() / 2 == 0 ? "true" : "false";
+        } else if (i % 7 == 3) {
+            values[i] = "\"xxxx" + std::to_string(i) + "\"";
+            // } else if (i % 7 == 4) {
+            //     std::vector<std::string> intvec(10);
+            //     for (int j = 0; j < 10; j++) {
+            //         intvec[j] = std::to_string(i + j);
+            //     }
+            //     values[i] = "[" + join(intvec, ",") + "]";
+            // } else if (i % 7 == 5) {
+            //     std::vector<std::string> doublevec(10);
+            //     for (int j = 0; j < 10; j++) {
+            //         doublevec[j] =
+            //             std::to_string(static_cast<double>(i + j + er()));
+            //     }
+            //     values[i] = "[" + join(doublevec, ",") + "]";
+            // } else if (i % 7 == 6) {
+            //     std::vector<std::string> stringvec(10);
+            //     for (int j = 0; j < 10; j++) {
+            //         stringvec[j] = "\"xxx" + std::to_string(j) + "\"";
+            //     }
+            //     values[i] = "[" + join(stringvec, ",") + "]";
+        }
+    }
+    json_string += "{";
+    for (int i = 0; i < N - 1; i++) {
+        json_string += R"(")" + keys[i] + R"(":)" + values[i] + R"(,)";
+    }
+    json_string += R"(")" + keys[N - 1] + R"(":)" + values[N - 1];
+    json_string += "}";
+    return json_string;
+}
+
+void
+ParseJson(const std::string& json) {
+    jsmn_parser p;
+    jsmntok_t t[2002];
+
+    jsmn_init(&p);
+    int r = jsmn_parse(
+        &p, json.c_str(), strlen(json.c_str()), t, sizeof(t) / sizeof(t[0]));
+    if (r < 0) {
+        printf("Failed to parse JSON: %d\n", r);
+        return;
+    }
+    if (r < 1 || t[0].type != JSMN_OBJECT) {
+        printf("Object expected\n");
+        return;
+    }
+    //std::cout << r << std::endl;
+}
+
+TEST(CApiTest, test_parse_perform) {
+    for (int i = 0; i < 10000; i++) {
+        {
+            int64_t all_cost = 0;
+            for (int j = 0; j < 10000; j++) {
+                auto json_string = GenerateJson(1000);
+                if (j == 0) {
+                    std::cout << json_string.size() << std::endl;
+                }
+                //std::cout << json_string << std::endl;
+                auto start = std::chrono::steady_clock::now();
+                ParseJson(json_string);
+                all_cost +=
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - start)
+                        .count();
+            }
+            std::cout << "cost: " << all_cost << "us" << std::endl;
+        }
+        {
+            int64_t all_cost = 0;
+            for (int j = 0; j < 10000; j++) {
+                auto json_string = GenerateJson(100);
+                if (j == 0) {
+                    std::cout << json_string.size() << std::endl;
+                }
+                //std::cout << json_string << std::endl;
+                auto start = std::chrono::steady_clock::now();
+                ParseJson(json_string);
+                all_cost +=
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - start)
+                        .count();
+            }
+            std::cout << "cost: " << all_cost << "us" << std::endl;
+        }
+        {
+            int64_t all_cost = 0;
+            for (int j = 0; j < 10000; j++) {
+                auto json_string = GenerateJson(50);
+                if (j == 0) {
+                    std::cout << json_string.size() << std::endl;
+                }
+                auto start = std::chrono::steady_clock::now();
+                ParseJson(json_string);
+                all_cost +=
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - start)
+                        .count();
+            }
+            std::cout << "cost: " << all_cost << "us" << std::endl;
+        }
+    }
+}
+
+void
+extract_key_value_pairs(const char* json, size_t len) {
+    jsmn_parser parser;
+    jsmntok_t* tokens =
+        (jsmntok_t*)malloc(16 * sizeof(jsmntok_t));  // Initial allocation
+    if (!tokens) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return;
+    }
+    int num_tokens = 0;
+    int token_capacity = 16;
+
+    // Initialize the parser
+    jsmn_init(&parser);
+
+    size_t pos = 0;
+    while (pos < len) {
+        size_t chunk_size =
+            len - pos > 256 ? 256 : len - pos;  // Read in chunks of 256 bytes
+        int r =
+            jsmn_parse(&parser, json + pos, chunk_size, tokens, token_capacity);
+        if (r < 0) {
+            if (r == JSMN_ERROR_NOMEM) {
+                // Reallocate tokens array if not enough space
+                token_capacity *= 2;  // Double the capacity
+                tokens = (jsmntok_t*)realloc(
+                    tokens, token_capacity * sizeof(jsmntok_t));
+                if (!tokens) {
+                    fprintf(stderr, "Memory reallocation failed\n");
+                    return;
+                }
+                continue;  // Try parsing again
+            } else {
+                fprintf(stderr, "Failed to parse JSON: %d\n", r);
+                free(tokens);
+                return;
+            }
+        }
+
+        // Update the position
+        pos += chunk_size;
+    }
+
+    // Iterate through the tokens
+    for (int i = 0; i < parser.toknext; i++) {
+        if (tokens[i].type == JSMN_OBJECT) {
+            for (int j = 0; j < tokens[i].size; j++) {
+                // The next token is the key (string)
+                j++;
+                printf("Key: %.*s\n",
+                       tokens[j].end - tokens[j].start,
+                       json + tokens[j].start);
+
+                // The next token is the value
+                j++;
+                printf("Value: %.*s\n",
+                       tokens[j].end - tokens[j].start,
+                       json + tokens[j].start);
+            }
+        }
+    }
+
+    // Clean up
+    free(tokens);
+}
+
+void
+TravelJson(const char* json,
+           jsmntok* tokens,
+           int& index,
+           std::vector<std::string>& path) {
+    jsmntok current = tokens[0];
+    if (current.type == JSMN_OBJECT) {
+        int j = 1;
+        for (int i = 0; i < current.size; i++) {
+            assert(tokens[j].type == JSMN_STRING && tokens[j].size != 0);
+            std::string key(json + tokens[j].start,
+                            tokens[j].end - tokens[j].start);
+            path.push_back(key);
+            j++;
+            int consumed = 0;
+            TravelJson(json, tokens + j, consumed, path);
+            path.pop_back();
+            j += consumed;
+        }
+        index = j;
+    } else if (current.type == JSMN_PRIMITIVE) {
+        std::cout << "key:" << Join(path, ".") << "values:"
+                  << std::string(json + current.start,
+                                 current.end - current.start)
+                  << std::endl;
+        index++;
+    } else if (current.type == JSMN_ARRAY) {
+        std::cout << "key:" << Join(path, ".") << "values:"
+                  << std::string(json + current.start,
+                                 current.end - current.start)
+                  << std::endl;
+        // skip next array parse
+        int count = current.size;
+        int j = 1;
+        while (count > 0) {
+            if (tokens[j].size == 0) {
+                count--;
+            } else {
+                count += tokens[j].size;
+            }
+            j++;
+        }
+        index = j;
+
+    } else if (current.type == JSMN_STRING) {
+        if (current.size == 0) {
+            std::cout << "key:" << Join(path, ".") << " values:"
+                      << std::string(json + current.start,
+                                     current.end - current.start)
+                      << std::endl;
+            index++;
+        } else {
+            throw std::runtime_error("not should happen");
+        }
+    } else {
+        throw std::runtime_error("not should happen");
+    }
+}
+
+void
+extract_key_value_pairs(const char* json) {
+    jsmn_parser parser;
+    jsmntok_t* tokens =
+        (jsmntok_t*)malloc(16 * sizeof(jsmntok_t));  // Initial allocation
+    if (!tokens) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return;
+    }
+    int num_tokens = 0;
+    int token_capacity = 16;
+
+    // Initialize the parser
+    jsmn_init(&parser);
+
+    // Parse the JSON string
+    while (1) {
+        int r = jsmn_parse(&parser, json, strlen(json), tokens, token_capacity);
+        if (r < 0) {
+            if (r == JSMN_ERROR_NOMEM) {
+                // Reallocate tokens array if not enough space
+                token_capacity *= 2;  // Double the capacity
+                tokens = (jsmntok_t*)realloc(
+                    tokens, token_capacity * sizeof(jsmntok_t));
+                if (!tokens) {
+                    fprintf(stderr, "Memory reallocation failed\n");
+                    return;
+                }
+                continue;  // Try parsing again
+            } else {
+                fprintf(stderr, "Failed to parse JSON: %d\n", r);
+                free(tokens);
+                return;
+            }
+        }
+        num_tokens = r;
+        break;  // Exit the loop if parsing was successful
+    }
+
+    std::cout << "num_tokens:" << num_tokens << std::endl;
+    // Iterate through the tokens
+    for (int i = 0; i < num_tokens; i++) {
+        std::cout << "i:" << i << "type: " << tokens[i].type
+                  << "token size:" << tokens[i].size << std::endl;
+        printf("value: %.*s\n",
+               tokens[i].end - tokens[i].start,
+               json + tokens[i].start);
+    }
+
+    std::cout << "-----------------" << std::endl;
+    int index = 0;
+    std::vector<std::string> path;
+    TravelJson(json, tokens, index, path);
+
+    // Clean up
+    free(tokens);
+}
+
+void
+extract_json(const char* json) {
+    jsmn_parser parser;
+    jsmntok_t* tokens =
+        (jsmntok_t*)malloc(16 * sizeof(jsmntok_t));  // Initial allocation
+    if (!tokens) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return;
+    }
+    int num_tokens = 0;
+    int token_capacity = 16;
+
+    // Initialize the parser
+    jsmn_init(&parser);
+
+    // Parse the JSON string
+    while (1) {
+        int r = jsmn_parse(&parser, json, strlen(json), tokens, token_capacity);
+        if (r < 0) {
+            if (r == JSMN_ERROR_NOMEM) {
+                // Reallocate tokens array if not enough space
+                token_capacity *= 2;  // Double the capacity
+                tokens = (jsmntok_t*)realloc(
+                    tokens, token_capacity * sizeof(jsmntok_t));
+                if (!tokens) {
+                    fprintf(stderr, "Memory reallocation failed\n");
+                    return;
+                }
+                continue;  // Try parsing again
+            } else {
+                fprintf(stderr, "Failed to parse JSON: %d\n", r);
+                free(tokens);
+                return;
+            }
+        }
+        num_tokens = r;
+        break;  // Exit the loop if parsing was successful
+    }
+
+    // assert(tokens[0].type == JSMN_OBJECT);
+
+    // Iterate through the tokens
+    for (int i = 0; i < num_tokens; i++) {
+        std::cout << "i:" << i << "type: " << tokens[i].type
+                  << "token size:" << tokens[i].size << std::endl;
+        printf("value: %.*s\n",
+               tokens[i].end - tokens[i].start,
+               json + tokens[i].start);
+    }
+
+    // Clean up
+    free(tokens);
+}
+
+TEST(CApiTest, test_jsmn_function) {
+    int64_t all_cost = 0;
+    // auto json_string = GenerateJson(50);
+    // std::cout << json_string << std::endl;
+    // extract_key_value_pairs(json_string.c_str());
+
+    std::string json_string =
+        R"({"keys0": ["value0", 234, "values1"], "keys1": ["value3", 1235]})";
+    std::cout << json_string << std::endl;
+    extract_key_value_pairs(json_string.c_str());
+
+    json_string =
+        R"({"keys0": [{"keys1": 1234, "keys2": "xxx"}, {"keys3": 567, "keys4": "xxxxx"}]})";
+    std::cout << json_string << std::endl;
+    extract_key_value_pairs(json_string.c_str());
+
+    json_string = R"({"keys0": {"keys1": { "keys2": "xxx", "keys3" :1234}}})";
+    std::cout << json_string << std::endl;
+    extract_key_value_pairs(json_string.c_str());
 }

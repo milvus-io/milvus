@@ -2001,6 +2001,7 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 		Statslogs:                 result.GetStatsLogs(),
 		TextStatsLogs:             result.GetTextStatsLogs(),
 		Bm25Statslogs:             result.GetBm25Logs(),
+		JsonKeyStats:              result.GetJsonKeyStatsLogs(),
 		Deltalogs:                 nil,
 		CreatedByCompaction:       true,
 		CompactionFrom:            []int64{oldSegmentID},
