@@ -117,6 +117,10 @@ class PhyTermFilterExpr : public SegmentExpr {
     VectorPtr
     ExecTermArrayFieldInVariable(OffsetVector* input = nullptr);
 
+    template <typename ValueType>
+    VectorPtr
+    ExecJsonInVariableByKeyIndex();
+
  private:
     std::shared_ptr<const milvus::expr::TermFilterExpr> expr_;
     milvus::Timestamp query_timestamp_;

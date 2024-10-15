@@ -53,6 +53,13 @@ func (h *FieldSchemaHelper) EnableMatch() bool {
 	return err == nil && enable
 }
 
+func (h *FieldSchemaHelper) EnableJsonKeyIndex() bool {
+	if IsJSONType(h.schema.GetDataType()) {
+		return true
+	}
+	return false
+}
+
 func (h *FieldSchemaHelper) EnableAnalyzer() bool {
 	if !IsStringType(h.schema.GetDataType()) {
 		return false
