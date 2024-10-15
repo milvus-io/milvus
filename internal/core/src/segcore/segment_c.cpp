@@ -480,6 +480,60 @@ LoadTextIndex(CSegmentInterface c_segment,
 }
 
 CStatus
+LoadJsonKeyIndex(CTraceContext c_trace,
+                 CSegmentInterface c_segment,
+                 const uint8_t* serialized_load_json_key_index_info,
+                 const uint64_t len) {
+    try {
+        auto ctx = milvus::tracer::TraceContext{
+            c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment =
+            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+
+        auto info_proto =
+            std::make_unique<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>();
+        info_proto->ParseFromArray(serialized_load_json_key_index_info, len);
+
+        milvus::storage::FieldDataMeta field_meta{info_proto->collectionid(),
+                                                  info_proto->partitionid(),
+                                                  segment->get_segment_id(),
+                                                  info_proto->fieldid(),
+                                                  info_proto->schema()};
+        milvus::storage::IndexMeta index_meta{segment->get_segment_id(),
+                                              info_proto->fieldid(),
+                                              info_proto->buildid(),
+                                              info_proto->version()};
+        auto remote_chunk_manager =
+            milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                .GetRemoteChunkManager();
+
+        milvus::Config config;
+        std::vector<std::string> files;
+        for (const auto& f : info_proto->files()) {
+            files.push_back(f);
+        }
+        config["index_files"] = files;
+
+        milvus::storage::FileManagerContext file_ctx(
+            field_meta, index_meta, remote_chunk_manager);
+
+        auto index = std::make_unique<milvus::index::JsonKeyInvertedIndex>(
+            file_ctx, true);
+        index->Load(ctx, config);
+
+        segment->LoadJsonKeyIndex(milvus::FieldId(info_proto->fieldid()),
+                                  std::move(index));
+
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 UpdateFieldRawDataSize(CSegmentInterface c_segment,
                        int64_t field_id,
                        int64_t num_rows,
