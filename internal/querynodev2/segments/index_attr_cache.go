@@ -29,10 +29,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -60,7 +61,7 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 	if err != nil {
 		return 0, 0, fmt.Errorf("index type not exist in index params")
 	}
-	if indexType == indexparamcheck.IndexDISKANN {
+	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 		neededMemSize := indexInfo.IndexSize / UsedDiskMemoryRatio
 		neededDiskSize := indexInfo.IndexSize - neededMemSize
 		return uint64(neededMemSize), uint64(neededDiskSize), nil

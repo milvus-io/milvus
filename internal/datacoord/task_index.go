@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -146,7 +147,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	}
 	indexParams := dependency.meta.indexMeta.GetIndexParams(segIndex.CollectionID, segIndex.IndexID)
 	indexType := GetIndexType(indexParams)
-	if isFlatIndex(indexType) || segIndex.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
+	if isNoTrainIndex(indexType) || segIndex.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
 		log.Ctx(ctx).Info("segment does not need index really", zap.Int64("taskID", it.taskID),
 			zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("num rows", segIndex.NumRows))
 		it.SetStartTime(time.Now())
@@ -159,6 +160,17 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 
 	fieldID := dependency.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID)
 	binlogIDs := getBinLogIDs(segment, fieldID)
+	if Params.IndexEngineConfig.Enable.GetAsBool() {
+		var ret error
+		indexParams, ret = Params.IndexEngineConfig.MergeRequestParam(GetIndexType(indexParams), paramtable.BuildStage, indexParams)
+
+		if ret != nil {
+			log.Ctx(ctx).Warn("failed to construct index build params", zap.Int64("taskID", it.taskID), zap.Error(ret))
+			it.SetState(indexpb.JobState_JobStateInit, ret.Error())
+			return true
+		}
+	}
+
 	if isDiskANNIndex(GetIndexType(indexParams)) {
 		var err error
 		indexParams, err = indexparams.UpdateDiskIndexBuildParams(Params, indexParams)

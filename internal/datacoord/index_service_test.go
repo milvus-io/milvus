@@ -42,9 +42,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -620,13 +620,13 @@ func TestServer_AlterIndex(t *testing.T) {
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 
 	t.Run("mmap_unsupported", func(t *testing.T) {
-		indexParams[0].Value = indexparamcheck.IndexRaftCagra
+		indexParams[0].Value = "GPU_CAGRA"
 
 		resp, err := s.AlterIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 
-		indexParams[0].Value = indexparamcheck.IndexFaissIvfFlat
+		indexParams[0].Value = "IVF_FLAT"
 	})
 
 	t.Run("param_value_invalied", func(t *testing.T) {
