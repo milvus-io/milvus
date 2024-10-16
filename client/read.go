@@ -63,6 +63,7 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 		entry := ResultSet{
 			ResultCount: rc,
 			Scores:      results.GetScores()[offset : offset+rc],
+			sch:         schema,
 		}
 
 		entry.IDs, entry.Err = column.IDColumns(schema, results.GetIds(), offset, offset+rc)

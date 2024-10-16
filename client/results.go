@@ -18,6 +18,7 @@ package client
 
 import (
 	"reflect"
+	"runtime/debug"
 
 	"github.com/cockroachdb/errors"
 
@@ -64,7 +65,7 @@ func (sr *ResultSet) Unmarshal(receiver any) (err error) {
 func (sr *ResultSet) fillPKEntry(receiver any) (err error) {
 	defer func() {
 		if x := recover(); x != nil {
-			err = errors.Newf("failed to unmarshal result set: %v", x)
+			err = errors.Newf("failed to unmarshal result set: %v, stack: %v", x, string(debug.Stack()))
 		}
 	}()
 	rr := reflect.ValueOf(receiver)
@@ -132,7 +133,7 @@ func (ds DataSet) Len() int {
 func (ds DataSet) Unmarshal(receiver any) (err error) {
 	defer func() {
 		if x := recover(); x != nil {
-			err = errors.Newf("failed to unmarshal result set: %v", x)
+			err = errors.Newf("failed to unmarshal result set: %v, stack: %v", x, string(debug.Stack()))
 		}
 	}()
 	rr := reflect.ValueOf(receiver)
