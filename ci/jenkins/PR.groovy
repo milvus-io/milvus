@@ -35,113 +35,21 @@ pipeline {
         }
         stage('build') {
             steps {
-                container('tkn') {
+                container('jnlp') {
                     script {
-                        def job_name = tekton.run arch: 'amd64',
-                                              isPr: isPr,
-                                              gitMode: gitMode ,
-                                              gitBaseRef: gitBaseRef,
-                                              pullRequestNumber: "$env.CHANGE_ID",
-                                              suppress_suffix_of_image_tag: true,
-                                              images: '["milvus","pytest","helm"]'
-
-                        milvus_image_tag = tekton.query_result job_name, 'milvus-image-tag'
-                        pytest_image =  tekton.query_result job_name, 'pytest-image-fqdn'
-                        helm_image =  tekton.query_result job_name, 'helm-image-fqdn'
-                    }
-                }
-            }
-            post {
-                always {
-                    container('tkn') {
-                        script {
-                            tekton.sure_stop()
-                        }
-                    }
-                }
-            }
-        }
-        stage('E2E Test') {
-            matrix {
-                agent {
-                    kubernetes {
-                        cloud '4am'
-                        // 'milvus' template defined a ephemeral volume used for pytest result archiving
-                        // pvc name would be <pod-name>-volume-0
-                        inheritFrom 'milvus'
-                        yaml pod
-                    }
-                }
-                axes {
-                    axis {
-                        name 'milvus_deployment_option'
-                        values 'standalone', 'distributed', 'standalone-kafka-mmap', 'distributed-streaming-service'
-                    }
-                }
-                stages {
-                    stage('E2E Test') {
-                        steps {
-                            container('tkn') {
-                                script {
-                                    def helm_release_name =  get_helm_release_name milvus_deployment_option
-                                    // pvc name would be <pod-name>-volume-0, used for pytest result archiving
-                                    def pvc = env.JENKINS_AGENT_NAME + '-volume-0'
-
-                                    if (milvus_deployment_option == 'distributed-streaming-service') {
-                                        try {
-                                            tekton.pytest helm_release_name: helm_release_name,
-                                                    pvc: pvc,
-                                                    milvus_helm_version: milvus_helm_chart_version,
-                                                    ciMode: 'e2e',
-                                                    milvus_image_tag: milvus_image_tag,
-                                                    pytest_image: pytest_image,
-                                                    helm_image: helm_image,
-                                                    milvus_deployment_option: milvus_deployment_option,
-                                                    verbose: 'false'
-                                        } catch (Exception e) {
-                                            println e
-                                        }
-                                    } else {
-                                        tekton.pytest helm_release_name: helm_release_name,
-                                                    pvc: pvc,
-                                                    milvus_helm_version: milvus_helm_chart_version,
-                                                    ciMode: 'e2e',
-                                                    milvus_image_tag: milvus_image_tag,
-                                                    pytest_image: pytest_image,
-                                                    helm_image: helm_image,
-                                                    milvus_deployment_option: milvus_deployment_option,
-                                                    verbose: 'false'
-                                    }
-                                }
+                    echo "hello"
+                    def changeLogSets = currentBuild.changeSets
+                    for (int i = 0; i < changeLogSets.size(); i++) {
+                        def entries = changeLogSets[i].items
+                        for (int j = 0; j < entries.length; j++) {
+                            def entry = entries[j]
+                            def files = new ArrayList(entry.affectedFiles)
+                            for (int k = 0; k < files.size(); k++) {
+                                def file = files[k]
+                                echo "File affected: ${file.path}"
                             }
                         }
-
-                        post {
-                            always {
-                                container('tkn') {
-                                    script {
-                                        tekton.sure_stop()
-                                    }
-                                }
-
-                                container('archive') {
-                                    script {
-                                        def helm_release_name =  get_helm_release_name milvus_deployment_option
-
-                                        tekton.archive  milvus_deployment_option: milvus_deployment_option,
-                                                                    release_name: helm_release_name ,
-                                                                     change_id: env.CHANGE_ID,
-                                                                     build_id: env.BUILD_ID
-                                    }
-                                }
-                                container('jnlp') {
-                                    script {
-                                        tekton.archive_pytest_logs(milvus_deployment_option)
-                                    }
-                                }
-                            }
-                        }
-                    }
+                   }
                 }
             }
         }
