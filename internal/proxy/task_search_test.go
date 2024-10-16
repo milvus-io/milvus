@@ -301,6 +301,55 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		task.request.OutputFields = []string{testFloatVecField}
 		assert.NoError(t, task.PreExecute(ctx))
 	})
+
+	t.Run("search consistent iterator pre_ts", func(t *testing.T) {
+		collName := "search_with_timeout" + funcutil.GenRandomStr()
+		createColl(t, collName, rc)
+
+		st := getSearchTask(t, collName)
+		st.request.SearchParams = getValidSearchParams()
+		st.request.SearchParams = append(st.request.SearchParams, &commonpb.KeyValuePair{
+			Key:   IteratorField,
+			Value: "True",
+		})
+		st.request.GuaranteeTimestamp = 1000
+		st.request.DslType = commonpb.DslType_BoolExprV1
+
+		ctxTimeout, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
+
+		st.ctx = ctxTimeout
+		assert.NoError(t, st.PreExecute(ctx))
+		assert.True(t, st.isIterator)
+		assert.True(t, st.GetMvccTimestamp() > 0)
+		assert.Equal(t, uint64(1000), st.GetGuaranteeTimestamp())
+	})
+
+	t.Run("search consistent iterator post_ts", func(t *testing.T) {
+		collName := "search_with_timeout" + funcutil.GenRandomStr()
+		createColl(t, collName, rc)
+
+		st := getSearchTask(t, collName)
+		st.request.SearchParams = getValidSearchParams()
+		st.request.SearchParams = append(st.request.SearchParams, &commonpb.KeyValuePair{
+			Key:   IteratorField,
+			Value: "True",
+		})
+		st.request.DslType = commonpb.DslType_BoolExprV1
+
+		_, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
+		enqueueTs := uint64(100000)
+		st.SetTs(enqueueTs)
+		assert.NoError(t, st.PreExecute(ctx))
+		assert.True(t, st.isIterator)
+		assert.True(t, st.GetMvccTimestamp() == 0)
+		st.resultBuf.Insert(&internalpb.SearchResults{})
+		st.PostExecute(context.TODO())
+		assert.Equal(t, st.result.GetSessionTs(), enqueueTs)
+	})
 }
 
 func getQueryCoord() *mocks.MockQueryCoord {
@@ -2235,11 +2284,11 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.validParams, nil, nil)
-				assert.NoError(t, err)
-				assert.NotNil(t, info)
+				searchInfo := parseSearchInfo(test.validParams, nil, nil)
+				assert.NoError(t, searchInfo.parseError)
+				assert.NotNil(t, searchInfo.planInfo)
 				if test.description == "offsetParam" {
-					assert.Equal(t, targetOffset, offset)
+					assert.Equal(t, targetOffset, searchInfo.offset)
 				}
 			})
 		}
@@ -2256,11 +2305,11 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			limit: externalLimit,
 		}
 
-		info, offset, err := parseSearchInfo(offsetParam, nil, rank)
-		assert.NoError(t, err)
-		assert.NotNil(t, info)
-		assert.Equal(t, int64(10), info.GetTopk())
-		assert.Equal(t, int64(0), offset)
+		searchInfo := parseSearchInfo(offsetParam, nil, rank)
+		assert.NoError(t, searchInfo.parseError)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.Equal(t, int64(10), searchInfo.planInfo.GetTopk())
+		assert.Equal(t, int64(0), searchInfo.offset)
 	})
 
 	t.Run("parseSearchInfo groupBy info for hybrid search", func(t *testing.T) {
@@ -2309,15 +2358,15 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			Value: "true",
 		})
 
-		info, _, err := parseSearchInfo(params, schema, testRankParams)
-		assert.NoError(t, err)
-		assert.NotNil(t, info)
+		searchInfo := parseSearchInfo(params, schema, testRankParams)
+		assert.NoError(t, searchInfo.parseError)
+		assert.NotNil(t, searchInfo.planInfo)
 
 		// all group_by related parameters should be aligned to parameters
 		// set by main request rather than inner sub request
-		assert.Equal(t, int64(101), info.GetGroupByFieldId())
-		assert.Equal(t, int64(3), info.GetGroupSize())
-		assert.False(t, info.GetGroupStrictSize())
+		assert.Equal(t, int64(101), searchInfo.planInfo.GetGroupByFieldId())
+		assert.Equal(t, int64(3), searchInfo.planInfo.GetGroupSize())
+		assert.False(t, searchInfo.planInfo.GetGroupStrictSize())
 	})
 
 	t.Run("parseSearchInfo error", func(t *testing.T) {
@@ -2399,12 +2448,12 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.invalidParams, nil, nil)
-				assert.Error(t, err)
-				assert.Nil(t, info)
-				assert.Zero(t, offset)
+				searchInfo := parseSearchInfo(test.invalidParams, nil, nil)
+				assert.Error(t, searchInfo.parseError)
+				assert.Nil(t, searchInfo.planInfo)
+				assert.Zero(t, searchInfo.offset)
 
-				t.Logf("err=%s", err.Error())
+				t.Logf("err=%s", searchInfo.parseError)
 			})
 		}
 	})
@@ -2426,9 +2475,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, nil)
-		assert.Nil(t, info)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, searchInfo.planInfo)
+		assert.ErrorIs(t, searchInfo.parseError, merr.ErrParameterInvalid)
 	})
 	t.Run("check range-search and groupBy", func(t *testing.T) {
 		normalParam := getValidSearchParams()
@@ -2445,9 +2494,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, nil)
-		assert.Nil(t, info)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, searchInfo.planInfo)
+		assert.ErrorIs(t, searchInfo.parseError, merr.ErrParameterInvalid)
 	})
 	t.Run("check nullable and groupBy", func(t *testing.T) {
 		normalParam := getValidSearchParams()
@@ -2464,9 +2513,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, nil)
-		assert.Nil(t, info)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, searchInfo.planInfo)
+		assert.ErrorIs(t, searchInfo.parseError, merr.ErrParameterInvalid)
 	})
 	t.Run("check iterator and topK", func(t *testing.T) {
 		normalParam := getValidSearchParams()
@@ -2483,10 +2532,10 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, nil)
-		assert.NotNil(t, info)
-		assert.NoError(t, err)
-		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), info.Topk)
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.NoError(t, searchInfo.parseError)
+		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), searchInfo.planInfo.GetTopk())
 	})
 
 	t.Run("check max group size", func(t *testing.T) {
@@ -2503,15 +2552,15 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, nil)
-		assert.Nil(t, info)
-		assert.Error(t, err)
-		assert.True(t, strings.Contains(err.Error(), "exceeds configured max group size"))
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, searchInfo.planInfo)
+		assert.Error(t, searchInfo.parseError)
+		assert.True(t, strings.Contains(searchInfo.parseError.Error(), "exceeds configured max group size"))
 
 		resetSearchParamsValue(normalParam, GroupSizeKey, `10`)
-		info, _, err = parseSearchInfo(normalParam, schema, nil)
-		assert.NotNil(t, info)
-		assert.NoError(t, err)
+		searchInfo = parseSearchInfo(normalParam, schema, nil)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.NoError(t, searchInfo.parseError)
 	})
 }
 
