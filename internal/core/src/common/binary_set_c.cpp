@@ -76,6 +76,7 @@ GetBinarySetKeys(CBinarySet c_binary_set, void* data) {
     auto binary_set = (knowhere::BinarySet*)c_binary_set;
     auto& map_ = binary_set->binary_map_;
     const char** data_ = (const char**)data;
+
     std::size_t i = 0;
     for (auto it = map_.begin(); it != map_.end(); ++it, i++) {
         data_[i] = it->first.c_str();
