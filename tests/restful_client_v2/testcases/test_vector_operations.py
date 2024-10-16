@@ -1651,7 +1651,7 @@ class TestSearchVector(TestBase):
             "limit": limit,
             "offset": 0,
             "searchParams": {
-                "ignore_growing": ignore_growing
+                "ignoreGrowing": ignore_growing
 
             }
         }

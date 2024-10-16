@@ -1397,8 +1397,8 @@ func convertConsistencyLevel(reqConsistencyLevel string) (commonpb.ConsistencyLe
 		}
 		return commonpb.ConsistencyLevel(level), false, nil
 	}
-	// ConsistencyLevel_Session default in PyMilvus
-	return commonpb.ConsistencyLevel_Session, true, nil
+	// ConsistencyLevel_Bounded default in PyMilvus
+	return commonpb.ConsistencyLevel_Bounded, true, nil
 }
 
 func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schemapb.ValueField, error) {
