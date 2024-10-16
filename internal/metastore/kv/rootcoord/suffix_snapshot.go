@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -42,10 +43,8 @@ import (
 
 var (
 	// SuffixSnapshotTombstone special value for tombstone mark
-	SuffixSnapshotTombstone    = []byte{0xE2, 0x9B, 0xBC}
-	PaginationSize             = 5000
-	DefaultSnapshotReserveTime = 1 * time.Hour
-	DefaultSnapshotTTL         = 24 * time.Hour
+	SuffixSnapshotTombstone = []byte{0xE2, 0x9B, 0xBC}
+	PaginationSize          = 5000
 )
 
 // IsTombstone used in migration tool also.
@@ -653,6 +652,9 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(keyGroup []string, originalKey s
 // It walks through all keys with the snapshot prefix, groups them by original key,
 // and removes expired versions or all versions if the original key has been deleted
 func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time) error {
+	ttlTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotTTLSeconds.GetAsDuration(time.Second)
+	reserveTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotReserveTimeSeconds.GetAsDuration(time.Second)
+
 	candidateExpiredKeys := make([]string, 0)
 	latestOriginalKey := ""
 	latestOriginValue := ""
@@ -673,7 +675,7 @@ func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time) error {
 		for _, key := range candidateExpiredKeys {
 			ts, _ := ss.isTSKey(key)
 			expireTime, _ := tsoutil.ParseTS(ts)
-			if expireTime.Add(DefaultSnapshotTTL).Before(now) {
+			if expireTime.Add(ttlTime).Before(now) {
 				expiredKeys = append(expiredKeys, key)
 			}
 		}
@@ -714,7 +716,7 @@ func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time) error {
 
 		// Record versions that are already expired but not removed
 		time, _ := tsoutil.ParseTS(ts)
-		if time.Add(DefaultSnapshotReserveTime).Before(now) {
+		if time.Add(reserveTime).Before(now) {
 			candidateExpiredKeys = append(candidateExpiredKeys, key)
 		}
 
