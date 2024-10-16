@@ -4047,7 +4047,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.import.maxImportJobNum",
 		Version:      "2.4.14",
 		Doc:          "Maximum number of import jobs that are executing or pending.",
-		DefaultValue: "4096",
+		DefaultValue: "1024",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
