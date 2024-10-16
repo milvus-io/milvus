@@ -2538,7 +2538,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), searchInfo.planInfo.GetTopk())
 	})
 
-	t.Run("check max group size", func(t *testing.T) {
+	t.Run("check correctness of group size", func(t *testing.T) {
 		normalParam := getValidSearchParams()
 		normalParam = append(normalParam, &commonpb.KeyValuePair{
 			Key:   GroupSizeKey,
@@ -2553,14 +2553,26 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			Fields: fields,
 		}
 		searchInfo := parseSearchInfo(normalParam, schema, nil)
-		assert.Nil(t, searchInfo.planInfo)
 		assert.Error(t, searchInfo.parseError)
 		assert.True(t, strings.Contains(searchInfo.parseError.Error(), "exceeds configured max group size"))
-
-		resetSearchParamsValue(normalParam, GroupSizeKey, `10`)
-		searchInfo = parseSearchInfo(normalParam, schema, nil)
-		assert.NotNil(t, searchInfo.planInfo)
-		assert.NoError(t, searchInfo.parseError)
+		{
+			resetSearchParamsValue(normalParam, GroupSizeKey, `10`)
+			searchInfo = parseSearchInfo(normalParam, schema, nil)
+			assert.NoError(t, searchInfo.parseError)
+			assert.Equal(t, int64(10), searchInfo.planInfo.GroupSize)
+		}
+		{
+			resetSearchParamsValue(normalParam, GroupSizeKey, `-1`)
+			searchInfo = parseSearchInfo(normalParam, schema, nil)
+			assert.Error(t, searchInfo.parseError)
+			assert.True(t, strings.Contains(searchInfo.parseError.Error(), "is negative"))
+		}
+		{
+			resetSearchParamsValue(normalParam, GroupSizeKey, `xxx`)
+			searchInfo = parseSearchInfo(normalParam, schema, nil)
+			assert.Error(t, searchInfo.parseError)
+			assert.True(t, strings.Contains(searchInfo.parseError.Error(), "failed to parse input group size"))
+		}
 	})
 }
 
