@@ -308,9 +308,9 @@ func (ss *SuffixSnapshot) Save(key string, value string, ts typeutil.Timestamp) 
 }
 
 func (ss *SuffixSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) {
-	// if ts == 0, load latest by definition
+	// if ts == 0 or typeutil.MaxTimestamp, load latest by definition
 	// and with acceleration logic, just do load key will do
-	if ts == 0 {
+	if ts == 0 || ts == typeutil.MaxTimestamp {
 		value, err := ss.MetaKv.Load(key)
 		if ss.isTombstone(value) {
 			return "", errors.New("no value found")
@@ -434,7 +434,7 @@ func (ss *SuffixSnapshot) generateSaveExecute(kvs map[string]string, ts typeutil
 // LoadWithPrefix load keys with provided prefix and returns value in the ts
 func (ss *SuffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 	// ts 0 case shall be treated as fetch latest/current value
-	if ts == 0 {
+	if ts == 0 || ts == typeutil.MaxTimestamp {
 		keys, values, err := ss.MetaKv.LoadWithPrefix(key)
 		fks := keys[:0]   // make([]string, 0, len(keys))
 		fvs := values[:0] // make([]string, 0, len(values))
