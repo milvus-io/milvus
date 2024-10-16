@@ -64,7 +64,6 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1883")
     def test_milvus_client_insert_column_data(self):
         """
         target: test insert column data
@@ -78,7 +77,7 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         # 2. insert
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nb)]
         data = [[i for i in range(default_nb)], vectors]
-        error = {ct.err_code: 1, ct.err_msg: "Unexpected error, message=<'list' object has no attribute 'items'"}
+        error = {ct.err_code: 999, ct.err_msg: "Input data type is inconsistent with defined schema, please check it."}
         client_w.insert(client, collection_name, data,
                         check_task=CheckTasks.err_res, check_items=error)
         client_w.drop_collection(client, collection_name)
@@ -95,7 +94,7 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"`collection_name` value {collection_name} is illegal"}
+        error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {collection_name} is illegal"}
         client_w.insert(client, collection_name, rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
@@ -152,7 +151,6 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1894")
     @pytest.mark.parametrize("data", ["12-s", "12 s", "(mn)", "中文", "%$#", " "])
     def test_milvus_client_insert_data_invalid_type(self, data):
         """
@@ -165,12 +163,12 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        error = {ct.err_code: 1, ct.err_msg: f"None rows, please provide valid row data."}
+        error = {ct.err_code: 999, ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'str'"}
         client_w.insert(client, collection_name, data,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1895")
+    # @pytest.mark.xfail(reason="pymilvus issue 1895")
     def test_milvus_client_insert_data_empty(self):
         """
         target: test high level api: client.create_collection
@@ -182,8 +180,9 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        error = {ct.err_code: 1, ct.err_msg: f"None rows, please provide valid row data."}
-        client_w.insert(client, collection_name, data= "")
+        error = {ct.err_code: 999, ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'str'"}
+        client_w.insert(client, collection_name, data="",
+                        check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_insert_data_vector_field_missing(self):
@@ -200,8 +199,8 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i,
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"Field vector don't match in entities[0]"}
-        client_w.insert(client, collection_name, data= rows,
+        error = {ct.err_code: 999, ct.err_msg: f"Field vector don't match in entities[0]"}
+        client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -219,8 +218,8 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"Field id don't match in entities[0]"}
-        client_w.insert(client, collection_name, data= rows,
+        error = {ct.err_code: 999, ct.err_msg: f"Field id don't match in entities[0]"}
+        client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -238,9 +237,9 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"Attempt to insert an unexpected field "
-                                             f"to collection without enabling dynamic field"}
-        client_w.insert(client, collection_name, data= rows,
+        error = {ct.err_code: 999, ct.err_msg: f"Attempt to insert an unexpected field `{default_float_field_name}`"
+                                               f" to collection without enabling dynamic field"}
+        client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -277,9 +276,8 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"The Input data type is inconsistent with defined schema, "
-                                             f"please check it."}
-        client_w.insert(client, collection_name, data= rows,
+        error = {ct.err_code: 999, ct.err_msg: f"The Input data type is inconsistent with defined schema"}
+        client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -535,7 +533,6 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1883")
     def test_milvus_client_upsert_column_data(self):
         """
         target: test insert column data
@@ -549,7 +546,7 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         # 2. insert
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nb)]
         data = [[i for i in range(default_nb)], vectors]
-        error = {ct.err_code: 1, ct.err_msg: "Unexpected error, message=<'list' object has no attribute 'items'"}
+        error = {ct.err_code: 999, ct.err_msg: "Input data type is inconsistent with defined schema, please check it."}
         client_w.upsert(client, collection_name, data,
                         check_task=CheckTasks.err_res, check_items=error)
         client_w.drop_collection(client, collection_name)
@@ -566,7 +563,7 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"`collection_name` value {collection_name} is illegal"}
+        error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {collection_name} is illegal"}
         client_w.upsert(client, collection_name, rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
@@ -623,7 +620,6 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1894")
     @pytest.mark.parametrize("data", ["12-s", "12 s", "(mn)", "中文", "%$#", " "])
     def test_milvus_client_upsert_data_invalid_type(self, data):
         """
@@ -636,12 +632,11 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        error = {ct.err_code: 1, ct.err_msg: f"None rows, please provide valid row data."}
+        error = {ct.err_code: 999, ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'str'"}
         client_w.upsert(client, collection_name, data,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1895")
     def test_milvus_client_upsert_data_empty(self):
         """
         target: test high level api: client.create_collection
@@ -653,8 +648,9 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        error = {ct.err_code: 1, ct.err_msg: f"None rows, please provide valid row data."}
-        client_w.upsert(client, collection_name, data= "")
+        error = {ct.err_code: 999, ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'str'"}
+        client_w.upsert(client, collection_name, data="",
+                        check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_upsert_data_vector_field_missing(self):
@@ -671,7 +667,7 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i,
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"Field vector don't match in entities[0]"}
+        error = {ct.err_code: 999, ct.err_msg: f"float vector field 'vector' is illegal, array type mismatch"}
         client_w.upsert(client, collection_name, data= rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
@@ -690,8 +686,8 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"Field id don't match in entities[0]"}
-        client_w.upsert(client, collection_name, data= rows,
+        error = {ct.err_code: 999, ct.err_msg: f"not support vector field as PrimaryField"}
+        client_w.upsert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -709,8 +705,8 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"Attempt to insert an unexpected field "
-                                             f"to collection without enabling dynamic field"}
+        error = {ct.err_code: 999, ct.err_msg: f"Attempt to insert an unexpected field `{default_float_field_name}` "
+                                               f"to collection without enabling dynamic field"}
         client_w.upsert(client, collection_name, data= rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
@@ -748,9 +744,8 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"The Input data type is inconsistent with defined schema, "
-                                             f"please check it."}
-        client_w.upsert(client, collection_name, data= rows,
+        error = {ct.err_code: 999, ct.err_msg: f"The Input data type is inconsistent with defined schema"}
+        client_w.upsert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
