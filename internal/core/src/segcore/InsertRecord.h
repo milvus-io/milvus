@@ -498,8 +498,9 @@ struct InsertRecord {
                 for (int i = 0; i < num_chunk; ++i) {
                     auto pks =
                         reinterpret_cast<const int64_t*>(column->Data(i));
-                    for (int i = 0; i < column->NumRows(); ++i) {
-                        pk2offset_->insert(pks[i], offset++);
+                    auto chunk_num_rows = column->chunk_row_nums(i);
+                    for (int j = 0; j < chunk_num_rows; ++j) {
+                        pk2offset_->insert(pks[j], offset++);
                     }
                 }
                 break;

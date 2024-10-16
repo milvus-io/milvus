@@ -1737,3 +1737,27 @@ func TestConvertConsistencyLevel(t *testing.T) {
 	_, _, err = convertConsistencyLevel("test")
 	assert.NotNil(t, err)
 }
+
+func TestConvertToExtraParams(t *testing.T) {
+	indexParams := IndexParam{
+		MetricType: "L2",
+		IndexType:  "IVF_FLAT",
+		Params: map[string]interface{}{
+			"nlist": 128,
+		},
+	}
+	params, err := convertToExtraParams(indexParams)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, 3, len(params))
+	for _, pair := range params {
+		if pair.Key == common.MetricTypeKey {
+			assert.Equal(t, "L2", pair.Value)
+		}
+		if pair.Key == common.IndexTypeKey {
+			assert.Equal(t, "IVF_FLAT", pair.Value)
+		}
+		if pair.Key == common.IndexParamsKey {
+			assert.Equal(t, string("{\"nlist\":128}"), pair.Value)
+		}
+	}
+}

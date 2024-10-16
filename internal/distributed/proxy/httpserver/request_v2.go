@@ -285,8 +285,9 @@ func (req *GrantReq) GetDbName() string { return req.DbName }
 
 type IndexParam struct {
 	FieldName  string                 `json:"fieldName" binding:"required"`
-	IndexName  string                 `json:"indexName" binding:"required"`
-	MetricType string                 `json:"metricType" binding:"required"`
+	IndexName  string                 `json:"indexName"`
+	MetricType string                 `json:"metricType"`
+	IndexType  string                 `json:"indexType"`
 	Params     map[string]interface{} `json:"params"`
 }
 
@@ -319,6 +320,7 @@ type FieldSchema struct {
 	ElementDataType   string                 `json:"elementDataType"`
 	IsPrimary         bool                   `json:"isPrimary"`
 	IsPartitionKey    bool                   `json:"isPartitionKey"`
+	IsClusteringKey   bool                   `json:"isClusteringKey"`
 	ElementTypeParams map[string]interface{} `json:"elementTypeParams" binding:"required"`
 	Nullable          bool                   `json:"nullable" binding:"required"`
 	DefaultValue      interface{}            `json:"defaultValue" binding:"required"`

@@ -40,14 +40,10 @@ struct FixedLengthChunk {
     size() {
         return size_;
     };
-    Type
-    get(const int i) const {
-        return data_[i];
-    }
     const Type&
     view(const int i) const {
         return data_[i];
-    }
+    };
 
  private:
     int64_t size_ = 0;
@@ -73,18 +69,9 @@ struct VariableLengthChunk {
         throw std::runtime_error(
             "set should be a template specialization function");
     }
-    inline Type
-    get(const int i) const {
-        throw std::runtime_error(
-            "get should be a template specialization function");
-    }
     const ChunkViewType<Type>&
     view(const int i) const {
         return data_[i];
-    }
-    const ChunkViewType<Type>&
-    operator[](const int i) const {
-        return view(i);
     }
     void*
     data() {
@@ -100,6 +87,8 @@ struct VariableLengthChunk {
     FixedVector<ChunkViewType<Type>> data_;
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
 };
+
+// Template specialization for string
 template <>
 inline void
 VariableLengthChunk<std::string>::set(const std::string* src,
@@ -128,12 +117,40 @@ VariableLengthChunk<std::string>::set(const std::string* src,
         offset += data_size;
     }
 }
+
+// Template specialization for sparse vector
 template <>
-inline std::string
-VariableLengthChunk<std::string>::get(const int i) const {
-    // copy to a string
-    return std::string(data_[i]);
+inline void
+VariableLengthChunk<knowhere::sparse::SparseRow<float>>::set(
+    const knowhere::sparse::SparseRow<float>* src,
+    uint32_t begin,
+    uint32_t length) {
+    auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
+    milvus::ErrorCode err_code;
+    AssertInfo(
+        begin + length <= size_,
+        "failed to set a chunk with length: {} from beign {}, map_size={}",
+        length,
+        begin,
+        size_);
+
+    size_t total_size = 0;
+    for (auto i = 0; i < length; i++) {
+        total_size += src[i].data_byte_size();
+    }
+    auto buf = (uint8_t*)mcm->Allocate(mmap_descriptor_, total_size);
+    AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
+    for (auto i = 0, offset = 0; i < length; i++) {
+        auto data_size = src[i].data_byte_size();
+        uint8_t* data_ptr = buf + offset;
+        std::memcpy(data_ptr, (uint8_t*)src[i].data(), data_size);
+        data_[i + begin] =
+            knowhere::sparse::SparseRow<float>(src[i].size(), data_ptr, false);
+        offset += data_size;
+    }
 }
+
+// Template specialization for json
 template <>
 inline void
 VariableLengthChunk<Json>::set(const Json* src,
@@ -162,11 +179,8 @@ VariableLengthChunk<Json>::set(const Json* src,
         offset += data_size;
     }
 }
-template <>
-inline Json
-VariableLengthChunk<Json>::get(const int i) const {
-    return std::move(Json(simdjson::padded_string(data_[i].data())));
-}
+
+// Template specialization for array
 template <>
 inline void
 VariableLengthChunk<Array>::set(const Array* src,
@@ -198,14 +212,5 @@ VariableLengthChunk<Array>::set(const Array* src,
         offset += data_size;
     }
 }
-template <>
-inline Array
-VariableLengthChunk<Array>::get(const int i) const {
-    auto array_view_i = data_[i];
-    char* data = static_cast<char*>(const_cast<void*>(array_view_i.data()));
-    return Array(data,
-                 array_view_i.byte_size(),
-                 array_view_i.get_element_type(),
-                 array_view_i.get_offsets_in_copy());
-}
+
 }  // namespace milvus

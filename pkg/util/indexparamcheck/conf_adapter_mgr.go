@@ -57,6 +57,10 @@ func (mgr *indexCheckerMgrImpl) registerIndexChecker() {
 	mgr.checkers[IndexHNSW] = newHnswChecker()
 	mgr.checkers[IndexDISKANN] = newDiskannChecker()
 	mgr.checkers[IndexSparseInverted] = newSparseInvertedIndexChecker()
+	mgr.checkers[IndexFaissHNSW] = newFloatVectorBaseChecker()
+	mgr.checkers[IndexFaissHNSWPQ] = newFloatVectorBaseChecker()
+	mgr.checkers[IndexFaissHNSWSQ] = newFloatVectorBaseChecker()
+	mgr.checkers[IndexFaissHNSWPRQ] = newFloatVectorBaseChecker()
 	// WAND doesn't have more index params than sparse inverted index, thus
 	// using the same checker.
 	mgr.checkers[IndexSparseWand] = newSparseInvertedIndexChecker()
