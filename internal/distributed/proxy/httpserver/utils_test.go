@@ -1728,7 +1728,7 @@ func TestBuildQueryResps(t *testing.T) {
 func TestConvertConsistencyLevel(t *testing.T) {
 	consistencyLevel, useDefaultConsistency, err := convertConsistencyLevel("")
 	assert.Equal(t, nil, err)
-	assert.Equal(t, consistencyLevel, commonpb.ConsistencyLevel_Session)
+	assert.Equal(t, consistencyLevel, commonpb.ConsistencyLevel_Bounded)
 	assert.Equal(t, true, useDefaultConsistency)
 	consistencyLevel, useDefaultConsistency, err = convertConsistencyLevel("Strong")
 	assert.Equal(t, nil, err)
