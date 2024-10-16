@@ -45,15 +45,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+//go:generate mockery --name=CollectionManager --dir=/home/sheep/workspace/milvus/internal/querynodev2/segments --structname=MockCollectionManager  --output=/home/sheep/workspace/milvus/internal/querynodev2/segments  --filename=mock_collection_manager.go --with-expecter --inpackage --log-level=debug
 type CollectionManager interface {
 	List() []int64
 	Get(collectionID int64) *Collection
-	PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)
-	Ref(collectionID int64, count uint32) bool
-	// unref the collection,
-	// returns true if the collection ref count goes 0, or the collection not exists,
-	// return false otherwise
-	Unref(collectionID int64, count uint32) bool
+	Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)
+	Release(collectionID int64)
 }
 
 type collectionManager struct {
@@ -81,52 +78,31 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 	return m.collections[collectionID]
 }
 
-func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
+func (m *collectionManager) Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
 	if collection, ok := m.collections[collectionID]; ok {
 		// the schema may be changed even the collection is loaded
 		collection.schema.Store(schema)
-		collection.Ref(1)
 		return
 	}
 
 	log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Any("schema", schema))
 	collection := NewCollection(collectionID, schema, meta, loadMeta)
-	collection.Ref(1)
 	m.collections[collectionID] = collection
 }
 
-func (m *collectionManager) Ref(collectionID int64, count uint32) bool {
+func (m *collectionManager) Release(collectionID int64) {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
 	if collection, ok := m.collections[collectionID]; ok {
-		collection.Ref(count)
-		return true
+		delete(m.collections, collectionID)
+		DeleteCollection(collection)
+		metrics.CleanupQueryNodeCollectionMetrics(paramtable.GetNodeID(), collectionID)
+		log.Info("collection released", zap.Int64("collectionID", collectionID))
 	}
-
-	return false
-}
-
-func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
-	m.mut.Lock()
-	defer m.mut.Unlock()
-
-	if collection, ok := m.collections[collectionID]; ok {
-		if collection.Unref(count) == 0 {
-			log.Info("release collection due to ref count to 0", zap.Int64("collectionID", collectionID))
-			delete(m.collections, collectionID)
-			DeleteCollection(collection)
-
-			metrics.CleanupQueryNodeCollectionMetrics(paramtable.GetNodeID(), collectionID)
-			return true
-		}
-		return false
-	}
-
-	return true
 }
 
 // Collection is a wrapper of the underlying C-structure C.CCollection
@@ -147,8 +123,6 @@ type Collection struct {
 	schema     atomic.Pointer[schemapb.CollectionSchema]
 	isGpuIndex bool
 	loadFields typeutil.Set[int64]
-
-	refCount *atomic.Uint32
 }
 
 // GetDBName returns the database name of collection.
@@ -202,24 +176,6 @@ func (c *Collection) RemovePartition(partitionID int64) {
 // getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition
 func (c *Collection) GetLoadType() querypb.LoadType {
 	return c.loadType
-}
-
-func (c *Collection) Ref(count uint32) uint32 {
-	refCount := c.refCount.Add(count)
-	log.Debug("collection ref increment",
-		zap.Int64("collectionID", c.ID()),
-		zap.Uint32("refCount", refCount),
-	)
-	return refCount
-}
-
-func (c *Collection) Unref(count uint32) uint32 {
-	refCount := c.refCount.Sub(count)
-	log.Debug("collection ref decrement",
-		zap.Int64("collectionID", c.ID()),
-		zap.Uint32("refCount", refCount),
-	)
-	return refCount
 }
 
 // newCollection returns a new Collection
@@ -278,7 +234,6 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		loadType:      loadMetaInfo.GetLoadType(),
 		dbName:        loadMetaInfo.GetDbName(),
 		resourceGroup: loadMetaInfo.GetResourceGroup(),
-		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
 		loadFields:    loadFieldIDs,
 	}
@@ -295,7 +250,6 @@ func NewCollectionWithoutSchema(collectionID int64, loadType querypb.LoadType) *
 		id:         collectionID,
 		partitions: typeutil.NewConcurrentSet[int64](),
 		loadType:   loadType,
-		refCount:   atomic.NewUint32(0),
 	}
 }
 
@@ -305,7 +259,6 @@ func NewCollectionWithoutSegcoreForTest(collectionID int64, schema *schemapb.Col
 	coll := &Collection{
 		id:         collectionID,
 		partitions: typeutil.NewConcurrentSet[int64](),
-		refCount:   atomic.NewUint32(0),
 	}
 	coll.schema.Store(schema)
 	return coll

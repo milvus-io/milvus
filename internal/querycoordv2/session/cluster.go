@@ -48,6 +48,7 @@ type Cluster interface {
 	ReleaseSegments(ctx context.Context, nodeID int64, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error)
 	LoadPartitions(ctx context.Context, nodeID int64, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error)
 	ReleasePartitions(ctx context.Context, nodeID int64, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)
+	ReleaseCollection(ctx context.Context, nodeID int64, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
 	GetDataDistribution(ctx context.Context, nodeID int64, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error)
 	GetMetrics(ctx context.Context, nodeID int64, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	SyncDistribution(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) (*commonpb.Status, error)
@@ -190,6 +191,20 @@ func (c *QueryCluster) ReleasePartitions(ctx context.Context, nodeID int64, req 
 		req := proto.Clone(req).(*querypb.ReleasePartitionsRequest)
 		req.Base.TargetID = nodeID
 		status, err = cli.ReleasePartitions(ctx, req)
+	})
+	if err1 != nil {
+		return nil, err1
+	}
+	return status, err
+}
+
+func (c *QueryCluster) ReleaseCollection(ctx context.Context, nodeID int64, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	var status *commonpb.Status
+	var err error
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
+		req := proto.Clone(req).(*querypb.ReleaseCollectionRequest)
+		req.Base.TargetID = nodeID
+		status, err = cli.ReleaseCollection(ctx, req)
 	})
 	if err1 != nil {
 		return nil, err1

@@ -104,7 +104,7 @@ func (s *DelegatorSuite) SetupTest() {
 	}, nil)
 
 	// init schema
-	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+	s.manager.Collection.Put(s.collectionID, &schemapb.CollectionSchema{
 		Name: "TestCollection",
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -181,7 +181,7 @@ func (s *DelegatorSuite) TearDownTest() {
 func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 	s.Run("init function failed", func() {
 		manager := segments.NewManager()
-		manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		manager.Collection.Put(s.collectionID, &schemapb.CollectionSchema{
 			Name: "TestCollection",
 			Fields: []*schemapb.FieldSchema{
 				{
@@ -214,7 +214,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 
 	s.Run("init function failed", func() {
 		manager := segments.NewManager()
-		manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		manager.Collection.Put(s.collectionID, &schemapb.CollectionSchema{
 			Name: "TestCollection",
 			Fields: []*schemapb.FieldSchema{
 				{

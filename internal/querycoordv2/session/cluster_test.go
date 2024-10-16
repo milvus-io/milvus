@@ -140,6 +140,10 @@ func (suite *ClusterTestSuite) createDefaultMockServer() querypb.QueryNodeServer
 		mock.Anything,
 		mock.AnythingOfType("*querypb.ReleasePartitionsRequest"),
 	).Maybe().Return(succStatus, nil)
+	svr.EXPECT().ReleaseCollection(
+		mock.Anything,
+		mock.AnythingOfType("*querypb.ReleaseCollectionRequest"),
+	).Maybe().Return(succStatus, nil)
 	svr.EXPECT().GetDataDistribution(
 		mock.Anything,
 		mock.AnythingOfType("*querypb.GetDataDistributionRequest"),
@@ -192,6 +196,10 @@ func (suite *ClusterTestSuite) createFailedMockServer() querypb.QueryNodeServer 
 	svr.EXPECT().ReleasePartitions(
 		mock.Anything,
 		mock.AnythingOfType("*querypb.ReleasePartitionsRequest"),
+	).Maybe().Return(failStatus, nil)
+	svr.EXPECT().ReleaseCollection(
+		mock.Anything,
+		mock.AnythingOfType("*querypb.ReleaseCollectionRequest"),
 	).Maybe().Return(failStatus, nil)
 	svr.EXPECT().GetDataDistribution(
 		mock.Anything,
@@ -311,6 +319,22 @@ func (suite *ClusterTestSuite) TestLoadAndReleasePartitions() {
 	merr.Ok(status)
 
 	status, err = suite.cluster.ReleasePartitions(ctx, 1, &querypb.ReleasePartitionsRequest{
+		Base: &commonpb.MsgBase{},
+	})
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal("unexpected error", status.GetReason())
+}
+
+func (suite *ClusterTestSuite) TestReleaseCollection() {
+	ctx := context.TODO()
+	status, err := suite.cluster.ReleaseCollection(ctx, 0, &querypb.ReleaseCollectionRequest{
+		Base: &commonpb.MsgBase{},
+	})
+	suite.NoError(err)
+	merr.Ok(status)
+
+	status, err = suite.cluster.ReleaseCollection(ctx, 1, &querypb.ReleaseCollectionRequest{
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)

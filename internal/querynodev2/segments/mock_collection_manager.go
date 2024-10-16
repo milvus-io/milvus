@@ -110,124 +110,71 @@ func (_c *MockCollectionManager_List_Call) RunAndReturn(run func() []int64) *Moc
 	return _c
 }
 
-// PutOrRef provides a mock function with given fields: collectionID, schema, meta, loadMeta
-func (_m *MockCollectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
+// Put provides a mock function with given fields: collectionID, schema, meta, loadMeta
+func (_m *MockCollectionManager) Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
 	_m.Called(collectionID, schema, meta, loadMeta)
 }
 
-// MockCollectionManager_PutOrRef_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PutOrRef'
-type MockCollectionManager_PutOrRef_Call struct {
+// MockCollectionManager_Put_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Put'
+type MockCollectionManager_Put_Call struct {
 	*mock.Call
 }
 
-// PutOrRef is a helper method to define mock.On call
+// Put is a helper method to define mock.On call
 //   - collectionID int64
 //   - schema *schemapb.CollectionSchema
 //   - meta *segcorepb.CollectionIndexMeta
 //   - loadMeta *querypb.LoadMetaInfo
-func (_e *MockCollectionManager_Expecter) PutOrRef(collectionID interface{}, schema interface{}, meta interface{}, loadMeta interface{}) *MockCollectionManager_PutOrRef_Call {
-	return &MockCollectionManager_PutOrRef_Call{Call: _e.mock.On("PutOrRef", collectionID, schema, meta, loadMeta)}
+func (_e *MockCollectionManager_Expecter) Put(collectionID interface{}, schema interface{}, meta interface{}, loadMeta interface{}) *MockCollectionManager_Put_Call {
+	return &MockCollectionManager_Put_Call{Call: _e.mock.On("Put", collectionID, schema, meta, loadMeta)}
 }
 
-func (_c *MockCollectionManager_PutOrRef_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)) *MockCollectionManager_PutOrRef_Call {
+func (_c *MockCollectionManager_Put_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)) *MockCollectionManager_Put_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(int64), args[1].(*schemapb.CollectionSchema), args[2].(*segcorepb.CollectionIndexMeta), args[3].(*querypb.LoadMetaInfo))
 	})
 	return _c
 }
 
-func (_c *MockCollectionManager_PutOrRef_Call) Return() *MockCollectionManager_PutOrRef_Call {
+func (_c *MockCollectionManager_Put_Call) Return() *MockCollectionManager_Put_Call {
 	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockCollectionManager_PutOrRef_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo)) *MockCollectionManager_PutOrRef_Call {
+func (_c *MockCollectionManager_Put_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo)) *MockCollectionManager_Put_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// Ref provides a mock function with given fields: collectionID, count
-func (_m *MockCollectionManager) Ref(collectionID int64, count uint32) bool {
-	ret := _m.Called(collectionID, count)
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(int64, uint32) bool); ok {
-		r0 = rf(collectionID, count)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
+// Release provides a mock function with given fields: collectionID
+func (_m *MockCollectionManager) Release(collectionID int64) {
+	_m.Called(collectionID)
 }
 
-// MockCollectionManager_Ref_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Ref'
-type MockCollectionManager_Ref_Call struct {
+// MockCollectionManager_Release_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Release'
+type MockCollectionManager_Release_Call struct {
 	*mock.Call
 }
 
-// Ref is a helper method to define mock.On call
+// Release is a helper method to define mock.On call
 //   - collectionID int64
-//   - count uint32
-func (_e *MockCollectionManager_Expecter) Ref(collectionID interface{}, count interface{}) *MockCollectionManager_Ref_Call {
-	return &MockCollectionManager_Ref_Call{Call: _e.mock.On("Ref", collectionID, count)}
+func (_e *MockCollectionManager_Expecter) Release(collectionID interface{}) *MockCollectionManager_Release_Call {
+	return &MockCollectionManager_Release_Call{Call: _e.mock.On("Release", collectionID)}
 }
 
-func (_c *MockCollectionManager_Ref_Call) Run(run func(collectionID int64, count uint32)) *MockCollectionManager_Ref_Call {
+func (_c *MockCollectionManager_Release_Call) Run(run func(collectionID int64)) *MockCollectionManager_Release_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(uint32))
+		run(args[0].(int64))
 	})
 	return _c
 }
 
-func (_c *MockCollectionManager_Ref_Call) Return(_a0 bool) *MockCollectionManager_Ref_Call {
-	_c.Call.Return(_a0)
+func (_c *MockCollectionManager_Release_Call) Return() *MockCollectionManager_Release_Call {
+	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockCollectionManager_Ref_Call) RunAndReturn(run func(int64, uint32) bool) *MockCollectionManager_Ref_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// Unref provides a mock function with given fields: collectionID, count
-func (_m *MockCollectionManager) Unref(collectionID int64, count uint32) bool {
-	ret := _m.Called(collectionID, count)
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(int64, uint32) bool); ok {
-		r0 = rf(collectionID, count)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// MockCollectionManager_Unref_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Unref'
-type MockCollectionManager_Unref_Call struct {
-	*mock.Call
-}
-
-// Unref is a helper method to define mock.On call
-//   - collectionID int64
-//   - count uint32
-func (_e *MockCollectionManager_Expecter) Unref(collectionID interface{}, count interface{}) *MockCollectionManager_Unref_Call {
-	return &MockCollectionManager_Unref_Call{Call: _e.mock.On("Unref", collectionID, count)}
-}
-
-func (_c *MockCollectionManager_Unref_Call) Run(run func(collectionID int64, count uint32)) *MockCollectionManager_Unref_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(uint32))
-	})
-	return _c
-}
-
-func (_c *MockCollectionManager_Unref_Call) Return(_a0 bool) *MockCollectionManager_Unref_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockCollectionManager_Unref_Call) RunAndReturn(run func(int64, uint32) bool) *MockCollectionManager_Unref_Call {
+func (_c *MockCollectionManager_Release_Call) RunAndReturn(run func(int64)) *MockCollectionManager_Release_Call {
 	_c.Call.Return(run)
 	return _c
 }

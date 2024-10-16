@@ -147,3 +147,27 @@ func releasePartitions(ctx context.Context,
 		}
 	}
 }
+
+func tryReleaseCollection(ctx context.Context,
+	meta *meta.Meta,
+	cluster session.Cluster,
+	collection int64,
+) {
+	log := log.Ctx(ctx).With(zap.Int64("collection", collection))
+	replicas := meta.ReplicaManager.GetByCollection(collection)
+	releaseReq := &querypb.ReleaseCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ReleaseCollection,
+		},
+		CollectionID: collection,
+	}
+	for _, replica := range replicas {
+		for _, node := range replica.GetNodes() {
+			status, err := cluster.ReleaseCollection(ctx, node, releaseReq)
+			err = merr.CheckRPCCall(status, err)
+			if err != nil {
+				log.Warn("failed to release collection", zap.Int64("node", node), zap.Error(err))
+			}
+		}
+	}
+}

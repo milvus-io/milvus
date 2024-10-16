@@ -236,13 +236,8 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Success(), nil
 	}
 
-	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
-	defer func() {
-		if !merr.Ok(status) {
-			node.manager.Collection.Unref(req.GetCollectionID(), 1)
-		}
-	}()
 
 	delegator, err := delegator.NewShardDelegator(
 		ctx,
@@ -368,8 +363,6 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
 		node.tSafeManager.Remove(ctx, req.GetChannelName())
-
-		node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
 	log.Info("unsubscribed channel")
 
@@ -465,9 +458,8 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Success(), nil
 	}
 
-	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
-	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	if req.GetLoadScope() == querypb.LoadScope_Delta {
 		return node.loadDeltaLogs(ctx, req), nil
@@ -488,21 +480,27 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Status(err), nil
 	}
 
-	node.manager.Collection.Ref(req.GetCollectionID(), uint32(len(loaded)))
-
 	log.Info("load segments done...",
 		zap.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
 
 	return merr.Success(), nil
 }
 
-// ReleaseCollection clears all data related to this collection on the querynode
+// ReleaseCollection release the collection object from querynode
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", in.GetCollectionID()))
+
+	log.Info("received release collection request")
+
+	// check node healthy
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
 
+	node.manager.Collection.Release(in.GetCollectionID())
+
+	log.Info("release collection done")
 	return merr.Success(), nil
 }
 
@@ -578,7 +576,6 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 		_, count := node.manager.Segment.Remove(ctx, id, req.GetScope())
 		sealedCount += count
 	}
-	node.manager.Collection.Unref(req.GetCollectionID(), uint32(sealedCount))
 
 	return merr.Success(), nil
 }

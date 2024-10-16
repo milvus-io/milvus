@@ -306,6 +306,62 @@ func (_c *MockCluster_LoadSegments_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// ReleaseCollection provides a mock function with given fields: ctx, nodeID, req
+func (_m *MockCluster) ReleaseCollection(ctx context.Context, nodeID int64, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, nodeID, req)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)); ok {
+		return rf(ctx, nodeID, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.ReleaseCollectionRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, nodeID, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, *querypb.ReleaseCollectionRequest) error); ok {
+		r1 = rf(ctx, nodeID, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_ReleaseCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReleaseCollection'
+type MockCluster_ReleaseCollection_Call struct {
+	*mock.Call
+}
+
+// ReleaseCollection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *querypb.ReleaseCollectionRequest
+func (_e *MockCluster_Expecter) ReleaseCollection(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_ReleaseCollection_Call {
+	return &MockCluster_ReleaseCollection_Call{Call: _e.mock.On("ReleaseCollection", ctx, nodeID, req)}
+}
+
+func (_c *MockCluster_ReleaseCollection_Call) Run(run func(ctx context.Context, nodeID int64, req *querypb.ReleaseCollectionRequest)) *MockCluster_ReleaseCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(*querypb.ReleaseCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_ReleaseCollection_Call) Return(_a0 *commonpb.Status, _a1 error) *MockCluster_ReleaseCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_ReleaseCollection_Call) RunAndReturn(run func(context.Context, int64, *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)) *MockCluster_ReleaseCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ReleasePartitions provides a mock function with given fields: ctx, nodeID, req
 func (_m *MockCluster) ReleasePartitions(ctx context.Context, nodeID int64, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, nodeID, req)

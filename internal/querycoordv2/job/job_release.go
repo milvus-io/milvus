@@ -97,6 +97,7 @@ func (job *ReleaseCollectionJob) Execute() error {
 
 	job.targetObserver.ReleaseCollection(req.GetCollectionID())
 	waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
+	tryReleaseCollection(job.ctx, job.meta, job.cluster, req.GetCollectionID())
 	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
