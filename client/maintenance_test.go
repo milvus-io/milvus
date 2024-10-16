@@ -140,7 +140,7 @@ func (s *MaintenanceSuite) TestLoadPartitions() {
 		})
 		defer s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Unset()
 
-		task, err := s.client.LoadPartitions(ctx, NewLoadPartitionsOption(collectionName, []string{partitionName}).
+		task, err := s.client.LoadPartitions(ctx, NewLoadPartitionsOption(collectionName, partitionName).
 			WithReplica(replicaNum).
 			WithLoadFields(fieldNames...).
 			WithSkipLoadDynamicField(true))
@@ -174,7 +174,7 @@ func (s *MaintenanceSuite) TestLoadPartitions() {
 
 		s.mock.EXPECT().LoadPartitions(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
-		_, err := s.client.LoadPartitions(ctx, NewLoadPartitionsOption(collectionName, []string{partitionName}))
+		_, err := s.client.LoadPartitions(ctx, NewLoadPartitionsOption(collectionName, partitionName))
 		s.Error(err)
 	})
 }

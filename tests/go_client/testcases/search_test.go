@@ -69,12 +69,12 @@ func TestSearchInvalidCollectionPartitionName(t *testing.T) {
 
 	// search with not exist partition
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	_, err1 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithPartitions([]string{"aaa"}))
+	_, err1 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithPartitions("aaa"))
 	common.CheckErr(t, err1, false, "partition name aaa not found")
 
 	// search with empty partition name []string{""} -> error
 	_, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).
-		WithConsistencyLevel(entity.ClStrong).WithANNSField(common.DefaultFloatVecFieldName).WithPartitions([]string{""}))
+		WithConsistencyLevel(entity.ClStrong).WithANNSField(common.DefaultFloatVecFieldName).WithPartitions(""))
 	common.CheckErr(t, errSearch, false, "Partition name should not be empty")
 }
 
@@ -160,7 +160,7 @@ func TestSearchPartitions(t *testing.T) {
 	// query first ID of _default and parName partition
 	_defId0, _ := insertRes1.IDs.GetAsInt64(0)
 	_parId0, _ := insertRes2.IDs.GetAsInt64(0)
-	queryRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("int64 in [%d, %d]", _defId0, _parId0)).WithOutputFields([]string{"*"}))
+	queryRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("int64 in [%d, %d]", _defId0, _parId0)).WithOutputFields("*"))
 	require.ElementsMatch(t, []int64{_defId0, _parId0}, queryRes.GetColumn(common.DefaultInt64FieldName).(*column.ColumnInt64).Data())
 	for _, vec := range queryRes.GetColumn(common.DefaultFloatVecFieldName).(*column.ColumnFloatVector).Data() {
 		vectors = append(vectors, entity.FloatVector(vec))
@@ -169,7 +169,7 @@ func TestSearchPartitions(t *testing.T) {
 	for _, partitions := range [][]string{{}, {common.DefaultPartition, parName}} {
 		// search with empty partition names slice []string{} -> all partitions
 		searchResult, errSearch1 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, 5, vectors).
-			WithConsistencyLevel(entity.ClStrong).WithANNSField(common.DefaultFloatVecFieldName).WithPartitions(partitions).WithOutputFields([]string{"*"}))
+			WithConsistencyLevel(entity.ClStrong).WithANNSField(common.DefaultFloatVecFieldName).WithPartitions(partitions...).WithOutputFields("*"))
 
 		// check search result contains search vector, which from all partitions
 		common.CheckErr(t, errSearch1, true)
@@ -196,12 +196,12 @@ func TestSearchEmptyOutputFields(t *testing.T) {
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 		vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-		resSearch, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{}))
+		resSearch, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields())
 		common.CheckErr(t, err, true)
 		common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
 		common.CheckOutputFields(t, []string{}, resSearch[0].Fields)
 
-		_, err = mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{""}))
+		_, err = mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields(""))
 		if dynamic {
 			common.CheckErr(t, err, false, "parse output field name failed")
 		} else {
@@ -238,7 +238,7 @@ func TestSearchNotExistOutputFields(t *testing.T) {
 		}
 
 		for _, _dof := range dof {
-			resSearch, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields(_dof.outputFields))
+			resSearch, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields(_dof.outputFields...))
 			if enableDynamic {
 				common.CheckErr(t, err, true)
 				common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
@@ -248,7 +248,7 @@ func TestSearchNotExistOutputFields(t *testing.T) {
 			}
 		}
 		existedRepeatedFields := []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName, common.DefaultInt64FieldName, common.DefaultFloatVecFieldName}
-		resSearch2, err2 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields(existedRepeatedFields))
+		resSearch2, err2 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields(existedRepeatedFields...))
 		common.CheckErr(t, err2, true)
 		common.CheckSearchResult(t, resSearch2, common.DefaultNq, common.DefaultLimit)
 		common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName}, resSearch2[0].Fields)
@@ -275,7 +275,7 @@ func TestSearchOutputAllFields(t *testing.T) {
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 
 	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
-		WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields([]string{"*"}))
+		WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields("*"))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
 	for _, res := range searchRes {
@@ -301,7 +301,7 @@ func TestSearchOutputBinaryPk(t *testing.T) {
 		allFieldsName = append(allFieldsName, field.Name)
 	}
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBinaryVector)
-	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{"*"}))
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields("*"))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
 	for _, res := range searchRes {
@@ -328,7 +328,7 @@ func TestSearchOutputSparse(t *testing.T) {
 	}
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeSparseVector)
 	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
-		WithANNSField(common.DefaultSparseVecFieldName).WithOutputFields([]string{"*"}))
+		WithANNSField(common.DefaultSparseVecFieldName).WithOutputFields("*"))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
 	for _, res := range searchRes {
@@ -675,7 +675,7 @@ func TestSearchJsonFieldExpr(t *testing.T) {
 			log.Debug("TestSearchJsonFieldExpr", zap.String("expr", expr))
 			vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 			searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
-				WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields([]string{common.DefaultInt64FieldName, common.DefaultJSONFieldName}))
+				WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields(common.DefaultInt64FieldName, common.DefaultJSONFieldName))
 			common.CheckErr(t, errSearch, true)
 			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultJSONFieldName}, searchRes[0].Fields)
 			common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
@@ -710,7 +710,7 @@ func TestSearchDynamicFieldExpr(t *testing.T) {
 		log.Debug("TestSearchDynamicFieldExpr", zap.String("expr", expr))
 		vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 		searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
-			WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields([]string{common.DefaultInt64FieldName, "dynamicNumber", "number"}))
+			WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields(common.DefaultInt64FieldName, "dynamicNumber", "number"))
 		common.CheckErr(t, errSearch, true)
 		common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, "dynamicNumber", "number"}, searchRes[0].Fields)
 		if expr == "$meta['dynamicString'] == '1'" {
@@ -733,7 +733,7 @@ func TestSearchDynamicFieldExpr(t *testing.T) {
 		vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 		searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 			WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName).
-			WithOutputFields([]string{common.DefaultInt64FieldName, common.DefaultJSONFieldName, common.DefaultDynamicFieldName, "dynamicNumber", "number"}))
+			WithOutputFields(common.DefaultInt64FieldName, common.DefaultJSONFieldName, common.DefaultDynamicFieldName, "dynamicNumber", "number"))
 		common.CheckErr(t, errSearch, true)
 		common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultJSONFieldName, common.DefaultDynamicFieldName, "dynamicNumber", "number"}, searchRes[0].Fields)
 		for _, res := range searchRes {
@@ -779,7 +779,7 @@ func TestSearchArrayFieldExpr(t *testing.T) {
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 	for _, expr := range exprs {
 		searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
-			WithFilter(expr).WithOutputFields(allArrayFields))
+			WithFilter(expr).WithOutputFields(allArrayFields...))
 		common.CheckErr(t, errSearch, true)
 		common.CheckOutputFields(t, allArrayFields, searchRes[0].Fields)
 		common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
@@ -787,7 +787,7 @@ func TestSearchArrayFieldExpr(t *testing.T) {
 
 	// search hits empty
 	searchRes, errSearchEmpty := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
-		WithFilter(fmt.Sprintf("array_contains (%s, 1000000)", common.DefaultInt32ArrayField)).WithOutputFields(allArrayFields))
+		WithFilter(fmt.Sprintf("array_contains (%s, 1000000)", common.DefaultInt32ArrayField)).WithOutputFields(allArrayFields...))
 	common.CheckErr(t, errSearchEmpty, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, 0)
 }
@@ -858,7 +858,7 @@ func TestSearchMultiVectors(t *testing.T) {
 		expr := fmt.Sprintf("%s > 10", common.DefaultInt64FieldName)
 
 		resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit*2, queryVec).WithConsistencyLevel(entity.ClStrong).
-			WithFilter(expr).WithANNSField(fnt.fieldName).WithOutputFields([]string{"*"}))
+			WithFilter(expr).WithANNSField(fnt.fieldName).WithOutputFields("*"))
 		common.CheckErr(t, errSearch, true)
 		common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit*2)
 		common.CheckOutputFields(t, []string{
@@ -868,7 +868,7 @@ func TestSearchMultiVectors(t *testing.T) {
 
 		// pagination search
 		resPage, errPage := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
-			WithFilter(expr).WithANNSField(fnt.fieldName).WithOutputFields([]string{"*"}).WithOffset(10))
+			WithFilter(expr).WithANNSField(fnt.fieldName).WithOutputFields("*").WithOffset(10))
 
 		common.CheckErr(t, errPage, true)
 		common.CheckSearchResult(t, resPage, common.DefaultNq, common.DefaultLimit)
@@ -903,7 +903,7 @@ func TestSearchSparseVector(t *testing.T) {
 		// search
 		queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeSparseVector)
 		resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
-			WithOutputFields([]string{"*"}))
+			WithOutputFields("*"))
 
 		common.CheckErr(t, errSearch, true)
 		require.Len(t, resSearch, common.DefaultNq)
@@ -1040,12 +1040,12 @@ func TestSearchSparseVectorPagination(t *testing.T) {
 		// search
 		queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeSparseVector)
 		resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
-			WithOutputFields([]string{"*"}))
+			WithOutputFields("*"))
 		common.CheckErr(t, errSearch, true)
 		require.Len(t, resSearch, common.DefaultNq)
 
 		pageSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
-			WithOutputFields([]string{"*"}).WithOffset(5))
+			WithOutputFields("*").WithOffset(5))
 		common.CheckErr(t, errSearch, true)
 		require.Len(t, pageSearch, common.DefaultNq)
 		for i := 0; i < len(resSearch); i++ {

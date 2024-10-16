@@ -71,7 +71,7 @@ func (s *ReadSuite) TestSearch() {
 			entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 				return rand.Float32()
 			})),
-		}).WithPartitions([]string{partitionName}))
+		}).WithPartitions(partitionName))
 		s.NoError(err)
 	})
 
@@ -109,7 +109,7 @@ func (s *ReadSuite) TestSearch() {
 			entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 				return rand.Float32()
 			})),
-		}).WithPartitions([]string{partitionName}))
+		}).WithPartitions(partitionName))
 		s.NoError(err)
 	})
 
@@ -145,7 +145,7 @@ func (s *ReadSuite) TestQuery() {
 			return &milvuspb.QueryResults{}, nil
 		}).Once()
 
-		_, err := s.client.Query(ctx, NewQueryOption(collectionName).WithPartitions([]string{partitionName}))
+		_, err := s.client.Query(ctx, NewQueryOption(collectionName).WithPartitions(partitionName))
 		s.NoError(err)
 	})
 }

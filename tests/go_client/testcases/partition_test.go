@@ -183,7 +183,7 @@ func TestDropPartitionData(t *testing.T) {
 
 	// insert data into partition -> query check
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema).TWithPartitionName(parName), hp.TNewDataOption())
-	res, errQ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithPartitions([]string{parName}).WithOutputFields([]string{common.QueryCountFieldName}))
+	res, errQ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithPartitions(parName).WithOutputFields(common.QueryCountFieldName))
 	common.CheckErr(t, errQ, true)
 	count, _ := res.GetColumn(common.QueryCountFieldName).Get(0)
 	require.EqualValues(t, common.DefaultNb, count)
