@@ -679,8 +679,9 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			startBufTime := time.Now()
 			var endTs uint64
 			var size uint64
+			var containsDropCollectionMsg bool
 
-			for ms.continueBuffering(endTs, size, startBufTime) {
+			for ms.continueBuffering(endTs, size, startBufTime) && !containsDropCollectionMsg {
 				ms.consumerLock.Lock()
 				// wait all channels get ttMsg
 				for _, consumer := range ms.consumers {
@@ -721,6 +722,10 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 							timeTickBuf = append(timeTickBuf, v)
 						} else {
 							tempBuffer = append(tempBuffer, v)
+						}
+						// when drop collection, force to exit the buffer loop
+						if v.Type() == commonpb.MsgType_DropCollection {
+							containsDropCollectionMsg = true
 						}
 					}
 					ms.chanMsgBuf[consumer] = tempBuffer
