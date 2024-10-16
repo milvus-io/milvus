@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -41,10 +42,8 @@ import (
 
 var (
 	// SuffixSnapshotTombstone special value for tombstone mark
-	SuffixSnapshotTombstone    = []byte{0xE2, 0x9B, 0xBC}
-	PaginationSize             = 5000
-	DefaultSnapshotReserveTime = 1 * time.Hour
-	DefaultSnapshotTTL         = 24 * time.Hour
+	SuffixSnapshotTombstone = []byte{0xE2, 0x9B, 0xBC}
+	PaginationSize          = 5000
 )
 
 // IsTombstone used in migration tool also.
@@ -308,9 +307,9 @@ func (ss *SuffixSnapshot) Save(key string, value string, ts typeutil.Timestamp) 
 }
 
 func (ss *SuffixSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) {
-	// if ts == 0, load latest by definition
+	// if ts == 0 or typeutil.MaxTimestamp, load latest by definition
 	// and with acceleration logic, just do load key will do
-	if ts == 0 {
+	if ts == 0 || ts == typeutil.MaxTimestamp {
 		value, err := ss.MetaKv.Load(key)
 		if ss.isTombstone(value) {
 			return "", errors.New("no value found")
@@ -434,7 +433,7 @@ func (ss *SuffixSnapshot) generateSaveExecute(kvs map[string]string, ts typeutil
 // LoadWithPrefix load keys with provided prefix and returns value in the ts
 func (ss *SuffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 	// ts 0 case shall be treated as fetch latest/current value
-	if ts == 0 {
+	if ts == 0 || ts == typeutil.MaxTimestamp {
 		keys, values, err := ss.MetaKv.LoadWithPrefix(key)
 		fks := keys[:0]   // make([]string, 0, len(keys))
 		fvs := values[:0] // make([]string, 0, len(values))
@@ -605,6 +604,9 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(keyGroup []string, originalKey s
 // It walks through all keys with the snapshot prefix, groups them by original key,
 // and removes expired versions or all versions if the original key has been deleted
 func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time) error {
+	ttlTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotTTLSeconds.GetAsDuration(time.Second)
+	reserveTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotReserveTimeSeconds.GetAsDuration(time.Second)
+
 	candidateExpiredKeys := make([]string, 0)
 	latestOriginalKey := ""
 	latestOriginValue := ""
@@ -625,7 +627,7 @@ func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time) error {
 		for _, key := range candidateExpiredKeys {
 			ts, _ := ss.isTSKey(key)
 			expireTime, _ := tsoutil.ParseTS(ts)
-			if expireTime.Add(DefaultSnapshotTTL).Before(now) {
+			if expireTime.Add(ttlTime).Before(now) {
 				expiredKeys = append(expiredKeys, key)
 			}
 		}
@@ -666,7 +668,7 @@ func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time) error {
 
 		// Record versions that are already expired but not removed
 		time, _ := tsoutil.ParseTS(ts)
-		if time.Add(DefaultSnapshotReserveTime).Before(now) {
+		if time.Add(reserveTime).Before(now) {
 			candidateExpiredKeys = append(candidateExpiredKeys, key)
 		}
 
