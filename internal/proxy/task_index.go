@@ -154,8 +154,8 @@ func (cit *createIndexTask) parseFunctionParamsToIndex(indexParamsMap map[string
 		}
 
 		if metricType, ok := indexParamsMap["metric_type"]; !ok {
-			indexParamsMap["metric_type"] = "BM25"
-		} else if metricType != "BM25" {
+			indexParamsMap["metric_type"] = metric.BM25
+		} else if metricType != metric.BM25 {
 			return fmt.Errorf("index metric type of BM25 function output field must be BM25, got %s", metricType)
 		}
 
