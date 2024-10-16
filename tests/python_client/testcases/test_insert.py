@@ -1819,23 +1819,30 @@ class TestUpsertValid(TestcaseBase):
         assert res[0]["count(*)"] == upsert_nb * 10 - step * 9
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_upsert_enable_dynamic_field(self):
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_upsert_in_row_with_enable_dynamic_field(self, auto_id):
         """
-        target: test upsert when enable dynamic field is True
+        target: test upsert in rows when enable dynamic field is True
         method: 1. create a collection and insert data
-                2. upsert
-        expected: not raise exception
+                2. upsert in rows
+        expected: upsert successfully
         """
         upsert_nb = ct.default_nb
         start = ct.default_nb // 2
-        collection_w = self.init_collection_general(pre_upsert, True, enable_dynamic_field=True)[0]
+        collection_w = self.init_collection_general(pre_upsert, insert_data=True, auto_id=auto_id,
+                                                    enable_dynamic_field=True)[0]
         upsert_data = cf.gen_default_rows_data(start=start)
         for i in range(start, start + upsert_nb):
             upsert_data[i - start]["new"] = [i, i + 1]
         collection_w.upsert(data=upsert_data)
-        exp = f"int64 >= {start} && int64 <= {upsert_nb + start}"
-        res = collection_w.query(exp, output_fields=["new"])[0]
-        assert len(res[0]["new"]) == 2
+        expr = f"float >= {start} && float <= {upsert_nb + start}"
+        extra_num = start if auto_id is True else 0  # upsert equals insert in this case if auto_id is True
+        res = collection_w.query(expr=expr, output_fields=['count(*)'])[0]
+        assert res[0].get('count(*)') == upsert_nb + extra_num
+        res = collection_w.query(expr, output_fields=["new"])[0]
+        assert len(res[upsert_nb + extra_num - 1]["new"]) == 2
+        res = collection_w.query(expr="", output_fields=['count(*)'])[0]
+        assert res[0].get('count(*)') == start + upsert_nb + extra_num
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip("not support default_value now")
