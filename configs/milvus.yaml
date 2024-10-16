@@ -64,6 +64,9 @@ etcd:
 
 metastore:
   type: etcd # Default value: etcd, Valid values: [etcd, tikv] 
+  snapshot:
+    ttl: 86400 # snapshot ttl in seconds
+    reserveTime: 3600 # snapshot reserve time in seconds
 
 # Related configuration of tikv, used to store Milvus metadata.
 # Notice that when TiKV is enabled for metastore, you still need to have etcd for service discovery.
