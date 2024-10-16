@@ -908,7 +908,10 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	excludedSegments := NewExcludedSegments(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.GetAsDuration(time.Second))
 
-	idfOracle := NewIDFOracle(collection.Schema().GetFunctions())
+	var idfOracle IDFOracle
+	if len(collection.Schema().GetFunctions()) > 0 {
+		idfOracle = NewIDFOracle(collection.Schema().GetFunctions())
+	}
 	sd := &shardDelegator{
 		collectionID:     collectionID,
 		replicaID:        replicaID,
