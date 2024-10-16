@@ -154,7 +154,9 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			if !sd.pkOracle.Exists(growing, paramtable.GetNodeID()) {
 				// register created growing segment after insert, avoid to add empty growing to delegator
 				sd.pkOracle.Register(growing, paramtable.GetNodeID())
-				sd.idfOracle.Register(segmentID, insertData.BM25Stats, segments.SegmentTypeGrowing)
+				if sd.idfOracle != nil {
+					sd.idfOracle.Register(segmentID, insertData.BM25Stats, segments.SegmentTypeGrowing)
+				}
 				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
 				sd.addGrowing(SegmentEntry{
 					NodeID:        paramtable.GetNodeID(),
@@ -166,7 +168,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			}
 
 			sd.growingSegmentLock.Unlock()
-		} else {
+		} else if sd.idfOracle != nil {
 			sd.idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
 		}
 		log.Info("insert into growing segment",
@@ -385,7 +387,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 
 	for _, segment := range loaded {
 		sd.pkOracle.Register(segment, paramtable.GetNodeID())
-		if len(sd.isBM25Field) > 0 {
+		if sd.idfOracle != nil {
 			sd.idfOracle.Register(segment.ID(), segment.GetBM25Stats(), segments.SegmentTypeGrowing)
 		}
 	}
@@ -688,7 +690,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		sd.pkOracle.Register(candidate, targetNodeID)
 	}
 
-	if bm25Stats != nil {
+	if sd.idfOracle != nil {
 		bm25Stats.Range(func(segmentID int64, stats map[int64]*storage.BM25Stats) bool {
 			sd.idfOracle.Register(segmentID, stats, segments.SegmentTypeSealed)
 			return false
@@ -998,7 +1000,7 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 	pb := &commonpb.PlaceholderGroup{}
 	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
 
-	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) != 1 {
+	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
 		return 0, merr.WrapErrParameterInvalidMsg("please provide varchar for bm25")
 	}
 

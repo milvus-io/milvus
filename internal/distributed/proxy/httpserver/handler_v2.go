@@ -923,14 +923,14 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	})
 }
 
-func generateSearchParams(ctx context.Context, c *gin.Context, reqSearchParams searchParams) ([]*commonpb.KeyValuePair, error) {
+func generateSearchParams(ctx context.Context, c *gin.Context, reqSearchParams searchParams) []*commonpb.KeyValuePair {
 	var searchParams []*commonpb.KeyValuePair
 	bs, _ := json.Marshal(reqSearchParams.Params)
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: Params, Value: string(bs)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.IgnoreGrowing, Value: strconv.FormatBool(reqSearchParams.IgnoreGrowing)})
 	// need to exposure ParamRoundDecimal in req?
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
-	return searchParams, nil
+	return searchParams
 }
 
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
@@ -946,19 +946,22 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	var err error
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
+		log.Ctx(ctx).Warn("high level restful api, search with consistency_level invalid", zap.Error(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
+		})
 		return nil, err
 	}
 	c.Set(ContextRequest, req)
 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
+		// has already throw http in GetCollectionSchema if fails to get schema
 		return nil, err
 	}
 
-	searchParams, err := generateSearchParams(ctx, c, httpReq.SearchParams)
-	if err != nil {
-		return nil, err
-	}
+	searchParams := generateSearchParams(ctx, c, httpReq.SearchParams)
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
@@ -1013,21 +1016,24 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	var err error
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
+		log.Ctx(ctx).Warn("high level restful api, search with consistency_level invalid", zap.Error(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
+		})
 		return nil, err
 	}
 	c.Set(ContextRequest, req)
 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
+		// has already throw http in GetCollectionSchema if fails to get schema
 		return nil, err
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	searchArray := gjson.Get(string(body.([]byte)), "search").Array()
 	for i, subReq := range httpReq.Search {
-		searchParams, err := generateSearchParams(ctx, c, subReq.SearchParams)
-		if err != nil {
-			return nil, err
-		}
+		searchParams := generateSearchParams(ctx, c, subReq.SearchParams)
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(subReq.Limit), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(subReq.Offset), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: subReq.AnnsField})
