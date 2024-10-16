@@ -61,12 +61,6 @@ class ChunkedColumnBase : public ColumnBase {
 
     virtual ~ChunkedColumnBase(){};
 
-    ChunkedColumnBase(ChunkedColumnBase&& column) noexcept
-        : nullable_(column.nullable_), num_rows_(column.num_rows_) {
-        column.num_rows_ = 0;
-        column.nullable_ = false;
-    }
-
     virtual void
     AppendBatch(const FieldDataPtr data) override {
         PanicInfo(ErrorCode::Unsupported, "AppendBatch not supported");
@@ -221,10 +215,6 @@ class ChunkedColumn : public ChunkedColumnBase {
     ChunkedColumn(const FieldMeta& field_meta) : ChunkedColumnBase(field_meta) {
     }
 
-    ChunkedColumn(ChunkedColumn&& column) noexcept
-        : ChunkedColumnBase(std::move(column)) {
-    }
-
     ChunkedColumn(std::vector<std::shared_ptr<Chunk>> chunks) {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
@@ -246,12 +236,6 @@ class ChunkedSparseFloatColumn : public ChunkedColumnBase {
     // memory mode ctor
     ChunkedSparseFloatColumn(const FieldMeta& field_meta)
         : ChunkedColumnBase(field_meta) {
-    }
-
-    ChunkedSparseFloatColumn(ChunkedSparseFloatColumn&& column) noexcept
-        : ChunkedColumnBase(std::move(column)),
-          dim_(column.dim_),
-          vec_(std::move(column.vec_)) {
     }
 
     ChunkedSparseFloatColumn(std::vector<std::shared_ptr<Chunk>> chunks) {
@@ -311,10 +295,6 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
         }
-    }
-
-    ChunkedVariableColumn(ChunkedVariableColumn&& column) noexcept
-        : ChunkedColumnBase(std::move(column)) {
     }
 
     ~ChunkedVariableColumn() override = default;
@@ -390,10 +370,6 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
     // memory mode ctor
     ChunkedArrayColumn(const FieldMeta& field_meta)
         : ChunkedColumnBase(field_meta) {
-    }
-
-    ChunkedArrayColumn(ChunkedArrayColumn&& column) noexcept
-        : ChunkedColumnBase(std::move(column)) {
     }
 
     ChunkedArrayColumn(std::vector<std::shared_ptr<Chunk>> chunks) {
