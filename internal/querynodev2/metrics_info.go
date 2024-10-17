@@ -59,7 +59,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	}
 
 	minTsafeChannel, minTsafe := node.tSafeManager.Min()
-	collections := node.manager.Collection.List()
+	collections := node.manager.Collection.ListWithName()
 	nodeID := fmt.Sprint(node.GetNodeID())
 
 	metrics.QueryNodeNumEntities.Reset()
@@ -70,7 +70,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	growingGroupByCollection := lo.GroupBy(growingSegments, func(seg segments.Segment) int64 {
 		return seg.Collection()
 	})
-	for _, collection := range collections {
+	for collection := range collections {
 		segs := growingGroupByCollection[collection]
 		size := lo.SumBy(segs, func(seg segments.Segment) int64 {
 			return seg.MemSize()
@@ -90,6 +90,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		segment := segs[0]
 		metrics.QueryNodeNumEntities.WithLabelValues(
 			segment.DatabaseName(),
+			collections[segment.Collection()],
 			nodeID,
 			fmt.Sprint(segment.Collection()),
 			fmt.Sprint(segment.Partition()),
@@ -101,7 +102,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	sealedGroupByCollection := lo.GroupBy(sealedSegments, func(seg segments.Segment) int64 {
 		return seg.Collection()
 	})
-	for _, collection := range collections {
+	for collection := range collections {
 		segs := sealedGroupByCollection[collection]
 		size := lo.SumBy(segs, func(seg segments.Segment) int64 {
 			return seg.MemSize()
@@ -119,6 +120,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		segment := segs[0]
 		metrics.QueryNodeNumEntities.WithLabelValues(
 			segment.DatabaseName(),
+			collections[segment.Collection()],
 			nodeID,
 			fmt.Sprint(segment.Collection()),
 			fmt.Sprint(segment.Partition()),
@@ -148,7 +150,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		GrowingSegmentsSize: totalGrowingSize,
 		Effect: metricsinfo.NodeEffect{
 			NodeID:        node.GetNodeID(),
-			CollectionIDs: collections,
+			CollectionIDs: lo.Keys(collections),
 		},
 		DeleteBufferInfo: metricsinfo.DeleteBufferInfo{
 			CollectionDeleteBufferNum:  deleteBufferNum,
