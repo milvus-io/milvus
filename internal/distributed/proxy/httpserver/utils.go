@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
@@ -19,8 +20,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -1499,4 +1502,80 @@ func convertToExtraParams(indexParam IndexParam) ([]*commonpb.KeyValuePair, erro
 		params = append(params, &commonpb.KeyValuePair{Key: common.IndexParamsKey, Value: string(v)})
 	}
 	return params, nil
+}
+
+func MetricsHandlerFunc(c *gin.Context) {
+	path := c.Request.URL.Path
+	metrics.RestfulFunctionCall.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+	).Inc()
+	if c.Request.ContentLength >= 0 {
+		metrics.RestfulReceiveBytes.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+		).Add(float64(c.Request.ContentLength))
+	}
+	start := time.Now()
+
+	// Process request
+	c.Next()
+
+	latency := time.Since(start)
+	metrics.RestfulReqLatency.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+	).Observe(float64(latency.Milliseconds()))
+
+	// see https://github.com/milvus-io/milvus/issues/35767, counter cannot add negative value
+	// when response is not written(say timeout/network broken), panicking may happen if not check
+	if size := c.Writer.Size(); size > 0 {
+		metrics.RestfulSendBytes.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+		).Add(float64(c.Writer.Size()))
+	}
+}
+
+func LoggerHandlerFunc() gin.HandlerFunc {
+	return gin.LoggerWithConfig(gin.LoggerConfig{
+		SkipPaths: proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings(),
+		Formatter: func(param gin.LogFormatterParams) string {
+			if param.Latency > time.Minute {
+				param.Latency = param.Latency.Truncate(time.Second)
+			}
+			traceID, ok := param.Keys["traceID"]
+			if !ok {
+				traceID = ""
+			}
+
+			accesslog.SetHTTPParams(&param)
+			return fmt.Sprintf("[%v] [GIN] [%s] [traceID=%s] [code=%3d] [latency=%v] [client=%s] [method=%s] [error=%s]\n",
+				param.TimeStamp.Format("2006/01/02 15:04:05.000 Z07:00"),
+				param.Path,
+				traceID,
+				param.StatusCode,
+				param.Latency,
+				param.ClientIP,
+				param.Method,
+				param.ErrorMessage,
+			)
+		},
+	})
+}
+
+func RequestHandlerFunc(c *gin.Context) {
+	_, err := strconv.ParseBool(c.Request.Header.Get(mhttp.HTTPHeaderAllowInt64))
+	if err != nil {
+		if paramtable.Get().HTTPCfg.AcceptTypeAllowInt64.GetAsBool() {
+			c.Request.Header.Set(mhttp.HTTPHeaderAllowInt64, "true")
+		} else {
+			c.Request.Header.Set(mhttp.HTTPHeaderAllowInt64, "false")
+		}
+	}
+	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+	c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+	c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+	c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH")
+	if c.Request.Method == "OPTIONS" {
+		c.AbortWithStatus(204)
+		return
+	}
+	c.Next()
 }
