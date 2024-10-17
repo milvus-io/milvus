@@ -16,9 +16,7 @@
  * # limitations under the License.
  */
 
-
 package function
-
 
 import (
 	"fmt"
@@ -26,13 +24,12 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
-
 
 type Runner interface {
 	GetSchema() *schemapb.FunctionSchema
@@ -81,10 +78,10 @@ func NewFunctionExecutor(schema *schemapb.CollectionSchema) (*FunctionExecutor, 
 	return executor, nil
 }
 
-func (executor *FunctionExecutor)processSingleFunction(runner Runner, msg *msgstream.InsertMsg) ([]*schemapb.FieldData, error) {
+func (executor *FunctionExecutor) processSingleFunction(runner Runner, msg *msgstream.InsertMsg) ([]*schemapb.FieldData, error) {
 	inputs := make([]*schemapb.FieldData, 0, len(runner.GetSchema().InputFieldIds))
 	for _, id := range runner.GetSchema().InputFieldIds {
-		for _, field := range msg.FieldsData{
+		for _, field := range msg.FieldsData {
 			if field.FieldId == id {
 				inputs = append(inputs, field)
 			}
@@ -102,14 +99,14 @@ func (executor *FunctionExecutor)processSingleFunction(runner Runner, msg *msgst
 	return outputs, nil
 }
 
-func (executor *FunctionExecutor)ProcessInsert(msg *msgstream.InsertMsg) error {
+func (executor *FunctionExecutor) ProcessInsert(msg *msgstream.InsertMsg) error {
 	numRows := msg.NumRows
 	for _, runner := range executor.runners {
 		if numRows > uint64(runner.MaxBatch()) {
 			return fmt.Errorf("numRows [%d] > function [%s]'s max batch [%d]", numRows, runner.GetSchema().Name, runner.MaxBatch())
 		}
 	}
-	
+
 	outputs := make(chan []*schemapb.FieldData, len(executor.runners))
 	errChan := make(chan error, len(executor.runners))
 	var wg sync.WaitGroup
@@ -138,7 +135,7 @@ func (executor *FunctionExecutor)ProcessInsert(msg *msgstream.InsertMsg) error {
 	return nil
 }
 
-func (executor *FunctionExecutor)processSingleSearch(runner Runner, placeholderGroup []byte) ([]byte, error) {
+func (executor *FunctionExecutor) processSingleSearch(runner Runner, placeholderGroup []byte) ([]byte, error) {
 	pb := &commonpb.PlaceholderGroup{}
 	proto.Unmarshal(placeholderGroup, pb)
 	if len(pb.Placeholders) != 1 {
@@ -154,7 +151,7 @@ func (executor *FunctionExecutor)processSingleSearch(runner Runner, placeholderG
 	return proto.Marshal(res)
 }
 
-func (executor *FunctionExecutor)prcessSearch(req *internalpb.SearchRequest) error {
+func (executor *FunctionExecutor) prcessSearch(req *internalpb.SearchRequest) error {
 	runner, exist := executor.runners[req.FieldId]
 	if !exist {
 		return nil
@@ -170,7 +167,7 @@ func (executor *FunctionExecutor)prcessSearch(req *internalpb.SearchRequest) err
 	return nil
 }
 
-func (executor *FunctionExecutor)prcessAdvanceSearch(req *internalpb.SearchRequest) error {
+func (executor *FunctionExecutor) prcessAdvanceSearch(req *internalpb.SearchRequest) error {
 	outputs := make(chan map[int64][]byte, len(req.GetSubReqs()))
 	errChan := make(chan error, len(req.GetSubReqs()))
 	var wg sync.WaitGroup
@@ -179,6 +176,7 @@ func (executor *FunctionExecutor)prcessAdvanceSearch(req *internalpb.SearchReque
 			if sub.Nq > int64(runner.MaxBatch()) {
 				return fmt.Errorf("Nq [%d] > function [%s]'s max batch [%d]", sub.Nq, runner.GetSchema().Name, runner.MaxBatch())
 			}
+			wg.Add(1)
 			go func(runner Runner, idx int64) {
 				defer wg.Done()
 				if newHolder, err := executor.processSingleSearch(runner, sub.GetPlaceholderGroup()); err != nil {
@@ -205,8 +203,8 @@ func (executor *FunctionExecutor)prcessAdvanceSearch(req *internalpb.SearchReque
 	return nil
 }
 
-func (executor *FunctionExecutor)ProcessSearchReq(req *internalpb.SearchRequest) error {
-	if req.IsAdvanced {
+func (executor *FunctionExecutor) ProcessSearch(req *internalpb.SearchRequest) error {
+	if !req.IsAdvanced {
 		return executor.prcessSearch(req)
 	} else {
 		return executor.prcessAdvanceSearch(req)

@@ -24,9 +24,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
-
 type FunctionBase struct {
-	schema      *schemapb.FunctionSchema
+	schema       *schemapb.FunctionSchema
 	outputFields []*schemapb.FieldSchema
 }
 

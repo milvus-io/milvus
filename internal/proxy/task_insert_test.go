@@ -1,25 +1,24 @@
 package proxy
 
 import (
-	"io"
-	"fmt"
 	"context"
-	"testing"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"encoding/json"
+	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus/internal/models"
-	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/models"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -320,7 +319,7 @@ func TestMaxInsertSize(t *testing.T) {
 }
 
 func TestInsertTask_Function(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req models.EmbeddingRequest
 		body, _ := io.ReadAll(r.Body)
 		defer r.Body.Close()
@@ -331,15 +330,15 @@ func TestInsertTask_Function(t *testing.T) {
 		res.Model = "text-embedding-3-small"
 		for i := 0; i < len(req.Input); i++ {
 			res.Data = append(res.Data, models.EmbeddingData{
-				Object: "embedding",
+				Object:    "embedding",
 				Embedding: make([]float32, req.Dimensions),
-				Index: i,
+				Index:     i,
 			})
 		}
 
 		res.Usage = models.Usage{
 			PromptTokens: 1,
-			TotalTokens: 100,
+			TotalTokens:  100,
 		}
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
@@ -348,8 +347,8 @@ func TestInsertTask_Function(t *testing.T) {
 	defer ts.Close()
 	data := []*schemapb.FieldData{}
 	f := schemapb.FieldData{
-		Type: schemapb.DataType_VarChar,
-		FieldId: 101,
+		Type:      schemapb.DataType_VarChar,
+		FieldId:   101,
 		FieldName: "text",
 		IsDynamic: false,
 		Field: &schemapb.FieldData_Scalars{
@@ -418,10 +417,10 @@ func TestInsertTask_Function(t *testing.T) {
 				},
 				Version:    msgpb.InsertDataVersion_ColumnBased,
 				FieldsData: data,
-				NumRows: 2,
+				NumRows:    2,
 			},
 		},
-		schema: schema,
+		schema:      schema,
 		idAllocator: idAllocator,
 	}
 
