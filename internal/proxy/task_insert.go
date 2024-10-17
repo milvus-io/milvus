@@ -143,17 +143,15 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	it.schema = schema.CollectionSchema
 
 	// Calculate embedding fields
-	exec, err := function.NewFunctionExecutor(schema.CollectionSchema)
-	if err != nil {
-		return err
-	}
-
-	if !exec.Empty() {
+	if function.HasFunctions(schema.CollectionSchema.Functions, []int64{}) {
+		exec, err := function.NewFunctionExecutor(schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
 		if err := exec.ProcessInsert(it.insertMsg); err != nil {
 			return err
 		}
 	}
-
 	rowNums := uint32(it.insertMsg.NRows())
 	// set insertTask.rowIDs
 	var rowIDBegin UniqueID
