@@ -42,7 +42,7 @@ var (
 	parserPool = pool.NewObjectPool(ctx, parserPoolFactory, config)
 )
 
-func getLexer(stream *antlr.InputStream, listeners ...antlr.ErrorListener) *antlrparser.PlanLexer {
+func getLexer(stream antlr.CharStream, listeners ...antlr.ErrorListener) *antlrparser.PlanLexer {
 	cached, _ := lexerPool.BorrowObject(context.Background())
 	lexer, ok := cached.(*antlrparser.PlanLexer)
 	if !ok {
