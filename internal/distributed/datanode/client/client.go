@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -71,7 +72,15 @@ func NewClient(ctx context.Context, addr string, serverID int64) (types.DataNode
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetNodeID(serverID)
 	client.grpcClient.SetSession(sess)
-
+	if config.InternalTLSEnabled.GetAsBool() {
+		client.grpcClient.EnableEncryption()
+		cp, err := utils.CreateCertPoolforClient(Params.DataNodeGrpcClientCfg.InternalTLSCaPemPath.GetValue(), "DataNode")
+		if err != nil {
+			log.Error("Failed to create cert pool for DataNode client")
+			return nil, err
+		}
+		client.grpcClient.SetInternalTLSCertPool(cp)
+	}
 	return client, nil
 }
 

@@ -18,6 +18,7 @@ package grpcproxyclient
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -25,11 +26,13 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	testify_mock "github.com/stretchr/testify/mock"
 )
 
 func Test_NewClient(t *testing.T) {
@@ -49,6 +52,91 @@ func Test_NewClient(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func Test_InternalTLS(t *testing.T) {
+	paramtable.Init()
+	validPath := "../../../../configs/cert1/ca.pem"
+	ctx := context.Background()
+	client, err := NewClient(ctx, "test", 1)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockProxy := mocks.NewMockProxyClient(t)
+	mockGrpcClient := mocks.NewMockGrpcClient[proxypb.ProxyClient](t)
+
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().GetNodeID().Return(1)
+	mockGrpcClient.EXPECT().ReCall(testify_mock.Anything, testify_mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		return f(mockProxy)
+	})
+
+	t.Run("NoCertPool", func(t *testing.T) {
+		var ErrNoCertPool = errors.New("no cert pool")
+		mockGrpcClient.EXPECT().SetInternalTLSCertPool(testify_mock.Anything).Return().Once()
+		client.(*Client).grpcClient = mockGrpcClient
+		client.(*Client).grpcClient.GetNodeID()
+		client.(*Client).grpcClient.SetInternalTLSCertPool(nil)
+
+		mockProxy.EXPECT().GetComponentStates(testify_mock.Anything, testify_mock.Anything).Return(nil, ErrNoCertPool)
+
+		_, err := client.GetComponentStates(ctx, nil)
+		assert.Error(t, err)
+		assert.Equal(t, ErrNoCertPool, err)
+	})
+
+	// Sub-test for invalid certificate path
+	t.Run("InvalidCertPath", func(t *testing.T) {
+		invalidCAPath := "invalid/path/to/ca.pem"
+		cp, err := utils.CreateCertPoolforClient(invalidCAPath, "proxy")
+		assert.NotNil(t, err)
+		assert.Nil(t, cp)
+	})
+
+	// Sub-test for TLS handshake failure
+	t.Run("TlsHandshakeFailed", func(t *testing.T) {
+		cp, err := utils.CreateCertPoolforClient(validPath, "proxy")
+		assert.Nil(t, err)
+		mockProxy.ExpectedCalls = nil
+
+		mockGrpcClient.EXPECT().SetInternalTLSCertPool(cp).Return().Once()
+		mockGrpcClient.EXPECT().GetNodeID().Return(1)
+		mockProxy.EXPECT().GetComponentStates(testify_mock.Anything, testify_mock.Anything).Return(nil, errors.New("TLS handshake failed"))
+
+		client.(*Client).grpcClient.GetNodeID()
+		client.(*Client).grpcClient.SetInternalTLSCertPool(cp)
+
+		_, err = client.GetComponentStates(ctx, nil)
+		assert.NotNil(t, err)
+		assert.EqualError(t, err, "TLS handshake failed")
+	})
+
+	t.Run("TlsHandshakeSuccess", func(t *testing.T) {
+		cp, err := utils.CreateCertPoolforClient(validPath, "proxy")
+		assert.Nil(t, err)
+		mockProxy.ExpectedCalls = nil
+
+		mockGrpcClient.EXPECT().SetInternalTLSCertPool(cp).Return().Once()
+		mockGrpcClient.EXPECT().GetNodeID().Return(1)
+		mockProxy.EXPECT().GetComponentStates(testify_mock.Anything, testify_mock.Anything).Return(&milvuspb.ComponentStates{}, nil)
+
+		client.(*Client).grpcClient.GetNodeID()
+		client.(*Client).grpcClient.SetInternalTLSCertPool(cp)
+
+		componentStates, err := client.GetComponentStates(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, componentStates)
+		assert.IsType(t, &milvuspb.ComponentStates{}, componentStates)
+	})
+
+	t.Run("ContextDeadlineExceeded", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+		defer cancel()
+		time.Sleep(20 * time.Millisecond)
+
+		_, err := client.GetComponentStates(ctx, nil)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+}
 func Test_GetComponentStates(t *testing.T) {
 	paramtable.Init()
 

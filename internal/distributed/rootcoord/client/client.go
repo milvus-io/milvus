@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -69,7 +70,15 @@ func NewClient(ctx context.Context) (types.RootCoordClient, error) {
 	client.grpcClient.SetGetAddrFunc(client.getRootCoordAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetSession(sess)
-
+	if config.InternalTLSEnabled.GetAsBool() {
+		client.grpcClient.EnableEncryption()
+		cp, err := utils.CreateCertPoolforClient(Params.RootCoordGrpcClientCfg.InternalTLSCaPemPath.GetValue(), "RootCoord")
+		if err != nil {
+			log.Error("Failed to create cert pool for RootCoord client")
+			return nil, err
+		}
+		client.grpcClient.SetInternalTLSCertPool(cp)
+	}
 	return client, nil
 }
 
