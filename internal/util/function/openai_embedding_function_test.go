@@ -16,24 +16,22 @@
  * # limitations under the License.
  */
 
-
 package function
 
 import (
+	"encoding/json"
 	"io"
-	"testing"
 	"net/http"
 	"net/http/httptest"
-	"encoding/json"	
+	"testing"
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 
-	"github.com/milvus-io/milvus/internal/models"	
+	"github.com/milvus-io/milvus/internal/models"
 )
-
 
 func TestOpenAIEmbeddingFunction(t *testing.T) {
 	suite.Run(t, new(OpenAIEmbeddingFunctionSuite))
@@ -58,11 +56,11 @@ func (s *OpenAIEmbeddingFunctionSuite) SetupTest() {
 	}
 }
 
-func createData(texts []string) []*schemapb.FieldData{
+func createData(texts []string) []*schemapb.FieldData {
 	data := []*schemapb.FieldData{}
 	f := schemapb.FieldData{
-		Type: schemapb.DataType_VarChar,
-		FieldId: 101,
+		Type:      schemapb.DataType_VarChar,
+		FieldId:   101,
 		IsDynamic: false,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
@@ -84,7 +82,7 @@ func createEmbedding(texts []string, dim int) [][]float32 {
 		f := float32(i)
 		emb := make([]float32, 0)
 		for j := 0; j < dim; j++ {
-			emb = append(emb, f + float32(j) * 0.1)
+			emb = append(emb, f+float32(j)*0.1)
 		}
 		embeddings = append(embeddings, emb)
 	}
@@ -118,20 +116,20 @@ func (s *OpenAIEmbeddingFunctionSuite) TestEmbedding() {
 		embs := createEmbedding(req.Input, 4)
 		for i := 0; i < len(req.Input); i++ {
 			res.Data = append(res.Data, models.EmbeddingData{
-				Object: "embedding",
+				Object:    "embedding",
 				Embedding: embs[i],
-				Index: i,
+				Index:     i,
 			})
 		}
 
 		res.Usage = models.Usage{
 			PromptTokens: 1,
-			TotalTokens: 100,
+			TotalTokens:  100,
 		}
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
 		w.Write(data)
-		
+
 	}))
 
 	defer ts.Close()
@@ -158,19 +156,19 @@ func (s *OpenAIEmbeddingFunctionSuite) TestEmbeddingDimNotMatch() {
 		res.Object = "list"
 		res.Model = "text-embedding-3-small"
 		res.Data = append(res.Data, models.EmbeddingData{
-			Object: "embedding",
+			Object:    "embedding",
 			Embedding: []float32{1.0, 1.0, 1.0, 1.0},
-			Index: 0,
+			Index:     0,
 		})
 
 		res.Data = append(res.Data, models.EmbeddingData{
-			Object: "embedding",
+			Object:    "embedding",
 			Embedding: []float32{1.0, 1.0},
-			Index: 1,
+			Index:     1,
 		})
 		res.Usage = models.Usage{
 			PromptTokens: 1,
-			TotalTokens: 100,
+			TotalTokens:  100,
 		}
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
@@ -193,13 +191,13 @@ func (s *OpenAIEmbeddingFunctionSuite) TestEmbeddingNubmerNotMatch() {
 		res.Object = "list"
 		res.Model = "text-embedding-3-small"
 		res.Data = append(res.Data, models.EmbeddingData{
-			Object: "embedding",
+			Object:    "embedding",
 			Embedding: []float32{1.0, 1.0, 1.0, 1.0},
-			Index: 0,
+			Index:     0,
 		})
 		res.Usage = models.Usage{
 			PromptTokens: 1,
-			TotalTokens: 100,
+			TotalTokens:  100,
 		}
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
@@ -208,7 +206,7 @@ func (s *OpenAIEmbeddingFunctionSuite) TestEmbeddingNubmerNotMatch() {
 
 	defer ts.Close()
 	runner, err := createRunner(ts.URL, s.schema)
-	
+
 	s.NoError(err)
 
 	// embedding dim not match
@@ -291,7 +289,7 @@ func (s *OpenAIEmbeddingFunctionSuite) TestRunnerParamsErr() {
 				{Key: DimParamKey, Value: "4"},
 				{Key: OpenaiApiKeyParamKey, Value: "mock"},
 				{Key: OpenaiEmbeddingUrlParamKey, Value: "mock"},
-			}, 
+			},
 		})
 		s.Error(err)
 	}

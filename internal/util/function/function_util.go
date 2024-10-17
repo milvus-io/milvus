@@ -16,16 +16,14 @@
  * # limitations under the License.
  */
 
-
 package function
 
-
 import (
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-func HasFunctions(functions []*schemapb.FunctionSchema, outputIDs []int64) bool{
+func HasFunctions(functions []*schemapb.FunctionSchema, outputIDs []int64) bool {
 	// Determine whether the column corresponding to outputIDs contains functions, except bm25 function,
 	// if outputIDs is empty, check all cols
 	for _, f_schema := range functions {
