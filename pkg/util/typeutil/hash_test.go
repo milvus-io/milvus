@@ -17,10 +17,12 @@
 package typeutil
 
 import (
+	"fmt"
 	"log"
 	"testing"
 	"unsafe"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -231,4 +233,138 @@ func TestRearrangePartitionsForPartitionKey(t *testing.T) {
 		"p_2": 3,
 		"p_0": 1,
 	})
+}
+
+func TestShardSplitVchar(t *testing.T) {
+	int64IDs := &schemapb.FieldData{
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n"}}}},
+		},
+	}
+
+	ret2, err := HashPK2ShardID(int64IDs, uint32(2))
+	assert.NoError(t, err)
+	ret4, err := HashPK2ShardID(int64IDs, uint32(4))
+	assert.NoError(t, err)
+	ret8, err := HashPK2ShardID(int64IDs, uint32(8))
+	assert.NoError(t, err)
+
+	vshard2_0 := lo.Filter(ret2, func(v uint32, _ int) bool {
+		return v == 0
+	})
+	vshard2_1 := lo.Filter(ret2, func(v uint32, _ int) bool {
+		return v == 1
+	})
+
+	vshard4_0 := lo.Filter(ret4, func(v uint32, _ int) bool {
+		return v == 0
+	})
+	vshard4_1 := lo.Filter(ret4, func(v uint32, _ int) bool {
+		return v == 1
+	})
+	vshard4_2 := lo.Filter(ret4, func(v uint32, _ int) bool {
+		return v == 2
+	})
+	vshard4_3 := lo.Filter(ret4, func(v uint32, _ int) bool {
+		return v == 3
+	})
+	assert.Equal(t, len(vshard2_0), len(vshard4_0)+len(vshard4_2))
+	assert.Equal(t, len(vshard2_1), len(vshard4_1)+len(vshard4_3))
+
+	vshard8_0 := lo.Filter(ret8, func(v uint32, _ int) bool {
+		return v == 0
+	})
+	vshard8_1 := lo.Filter(ret8, func(v uint32, _ int) bool {
+		return v == 1
+	})
+	vshard8_2 := lo.Filter(ret8, func(v uint32, _ int) bool {
+		return v == 2
+	})
+	vshard8_3 := lo.Filter(ret8, func(v uint32, _ int) bool {
+		return v == 3
+	})
+	vshard8_4 := lo.Filter(ret8, func(v uint32, _ int) bool {
+		return v == 4
+	})
+	vshard8_5 := lo.Filter(ret8, func(v uint32, _ int) bool {
+		return v == 5
+	})
+	vshard8_6 := lo.Filter(ret8, func(v uint32, _ int) bool {
+		return v == 6
+	})
+	vshard8_7 := lo.Filter(ret8, func(v uint32, _ int) bool {
+		return v == 7
+	})
+
+	assert.Equal(t, len(vshard2_0), len(vshard8_0)+len(vshard8_2)+len(vshard8_4)+len(vshard8_6))
+	assert.Equal(t, len(vshard2_1), len(vshard8_1)+len(vshard8_3)+len(vshard8_5)+len(vshard8_7))
+	assert.Equal(t, len(vshard4_0), len(vshard8_0)+len(vshard8_4))
+	assert.Equal(t, len(vshard4_1), len(vshard8_1)+len(vshard8_5))
+	assert.Equal(t, len(vshard4_2), len(vshard8_2)+len(vshard8_6))
+	assert.Equal(t, len(vshard4_3), len(vshard8_3)+len(vshard8_7))
+}
+
+func TestShardSplitInt64(t *testing.T) {
+	input := []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+
+	hash2 := lo.Map(input, func(v uint32, _ int) uint32 {
+		return v % 2
+	})
+	hash4 := lo.Map(input, func(v uint32, _ int) uint32 {
+		return v % 4
+	})
+	hash8 := lo.Map(input, func(v uint32, _ int) uint32 {
+		return v % 8
+	})
+
+	print("raw data   : ")
+	lo.Map(input, func(v uint32, _ int) uint32 {
+		print(fmt.Sprintf("%2d,", v))
+		return 0
+	})
+	println()
+	print("shardID(%2): ")
+	lo.Map(hash2, func(v uint32, _ int) uint32 {
+		print(fmt.Sprintf("%2d,", v))
+		return 0
+	})
+	println()
+	print("shardID(%4): ")
+	lo.Map(hash4, func(v uint32, _ int) uint32 {
+		print(fmt.Sprintf("%2d,", v))
+		return 0
+	})
+	println()
+	print("shardID(%8): ")
+	lo.Map(hash8, func(v uint32, _ int) uint32 {
+		print(fmt.Sprintf("%2d,", v))
+		return 0
+	})
+	println()
+
+	getIdsforShard := func(hash []uint32, hashValue uint32) []int {
+		res := make([]int, 0)
+		for idx, hash := range hash {
+			if hash == hashValue {
+				res = append(res, idx)
+			}
+		}
+		return res
+	}
+
+	vshard2_0IDs := getIdsforShard(hash2, 0)
+	vshard4_0IDs := getIdsforShard(hash4, 0)
+	vshard4_2IDs := getIdsforShard(hash4, 2)
+	vshard8_0IDs := getIdsforShard(hash8, 0)
+	vshard8_2IDs := getIdsforShard(hash8, 2)
+	vshard8_4IDs := getIdsforShard(hash8, 4)
+	vshard8_6IDs := getIdsforShard(hash8, 6)
+
+	assert.Equal(t, []int{1, 3, 5, 7, 9, 11, 13, 15}, vshard2_0IDs)
+	assert.Equal(t, []int{3, 7, 11, 15}, vshard4_0IDs)
+	assert.Equal(t, []int{1, 5, 9, 13}, vshard4_2IDs)
+	assert.Equal(t, []int{7, 15}, vshard8_0IDs)
+	assert.Equal(t, []int{3, 11}, vshard8_4IDs)
+	assert.Equal(t, []int{1, 9}, vshard8_2IDs)
+	assert.Equal(t, []int{5, 13}, vshard8_6IDs)
 }
