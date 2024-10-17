@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
-	"sync/atomic"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -31,25 +31,24 @@ import (
 func TestEmbeddingClientCheck(t *testing.T) {
 	{
 		c := OpenAIEmbeddingClient{"", "mock_uri"}
-		err := c.Check();
+		err := c.Check()
 		assert.True(t, err != nil)
 		fmt.Println(err)
 	}
 
 	{
 		c := OpenAIEmbeddingClient{"mock_key", ""}
-		err := c.Check();
+		err := c.Check()
 		assert.True(t, err != nil)
 		fmt.Println(err)
 	}
 
 	{
 		c := OpenAIEmbeddingClient{"mock_key", "mock_uri"}
-		err := c.Check();
+		err := c.Check()
 		assert.True(t, err == nil)
 	}
 }
-
 
 func TestEmbeddingOK(t *testing.T) {
 	var res EmbeddingResponse
@@ -57,16 +56,16 @@ func TestEmbeddingOK(t *testing.T) {
 	res.Model = "text-embedding-3-small"
 	res.Data = []EmbeddingData{
 		{
-			Object: "embedding",
+			Object:    "embedding",
 			Embedding: []float32{1.1, 2.2, 3.3, 4.4},
-			Index: 0,
+			Index:     0,
 		},
 	}
 	res.Usage = Usage{
 		PromptTokens: 1,
-		TotalTokens: 100,
+		TotalTokens:  100,
 	}
-	
+
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
@@ -78,7 +77,7 @@ func TestEmbeddingOK(t *testing.T) {
 
 	{
 		c := OpenAIEmbeddingClient{"mock_key", url}
-		err := c.Check();
+		err := c.Check()
 		assert.True(t, err == nil)
 		ret, err := c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err == nil)
@@ -86,35 +85,34 @@ func TestEmbeddingOK(t *testing.T) {
 	}
 }
 
-
 func TestEmbeddingRetry(t *testing.T) {
 	var res EmbeddingResponse
 	res.Object = "list"
 	res.Model = "text-embedding-3-small"
 	res.Data = []EmbeddingData{
 		{
-			Object: "embedding",
+			Object:    "embedding",
 			Embedding: []float32{1.1, 2.2, 3.2, 4.5},
-			Index: 2,
+			Index:     2,
 		},
 		{
-			Object: "embedding",
+			Object:    "embedding",
 			Embedding: []float32{1.1, 2.2, 3.3, 4.4},
-			Index: 0,
+			Index:     0,
 		},
 		{
-			Object: "embedding",
+			Object:    "embedding",
 			Embedding: []float32{1.1, 2.2, 3.2, 4.3},
-			Index: 1,
+			Index:     1,
 		},
 	}
 	res.Usage = Usage{
 		PromptTokens: 1,
-		TotalTokens: 100,
+		TotalTokens:  100,
 	}
 
 	var count int32 = 0
-	
+
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if atomic.LoadInt32(&count) < 2 {
 			atomic.AddInt32(&count, 1)
@@ -131,7 +129,7 @@ func TestEmbeddingRetry(t *testing.T) {
 
 	{
 		c := OpenAIEmbeddingClient{"mock_key", url}
-		err := c.Check();
+		err := c.Check()
 		assert.True(t, err == nil)
 		ret, err := c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err == nil)
@@ -145,7 +143,6 @@ func TestEmbeddingRetry(t *testing.T) {
 	}
 }
 
-
 func TestEmbeddingFailed(t *testing.T) {
 	var count int32 = 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +155,7 @@ func TestEmbeddingFailed(t *testing.T) {
 
 	{
 		c := OpenAIEmbeddingClient{"mock_key", url}
-		err := c.Check();
+		err := c.Check()
 		assert.True(t, err == nil)
 		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err != nil)
@@ -179,7 +176,7 @@ func TestTimeout(t *testing.T) {
 
 	{
 		c := OpenAIEmbeddingClient{"mock_key", url}
-		err := c.Check();
+		err := c.Check()
 		assert.True(t, err == nil)
 		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 1)
 		assert.True(t, err != nil)

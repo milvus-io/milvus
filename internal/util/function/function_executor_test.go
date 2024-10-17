@@ -16,26 +16,23 @@
  * # limitations under the License.
  */
 
-
 package function
 
-
 import (
+	"encoding/json"
 	"io"
-	"testing"
 	"net/http"
 	"net/http/httptest"
-	"encoding/json"	
+	"testing"
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/models"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"	
 )
-
 
 func TestFunctionExecutor(t *testing.T) {
 	suite.Run(t, new(FunctionExecutorSuite))
@@ -45,8 +42,7 @@ type FunctionExecutorSuite struct {
 	suite.Suite
 }
 
-
-func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSchema{
+func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSchema {
 	return &schemapb.CollectionSchema{
 		Name: "test",
 		Fields: []*schemapb.FieldSchema{
@@ -59,7 +55,7 @@ func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSch
 			{FieldID: 103, Name: "vector2", DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "8"},
-				}},			
+				}},
 		},
 		Functions: []*schemapb.FunctionSchema{
 			{
@@ -72,7 +68,7 @@ func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSch
 					{Key: OpenaiApiKeyParamKey, Value: "mock"},
 					{Key: OpenaiEmbeddingUrlParamKey, Value: url},
 					{Key: DimParamKey, Value: "4"},
-				},				
+				},
 			},
 			{
 				Name:           "test",
@@ -88,15 +84,15 @@ func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSch
 			},
 		},
 	}
-	
+
 }
 
-func (s *FunctionExecutorSuite)createMsg(texts []string) *msgstream.InsertMsg{
+func (s *FunctionExecutorSuite) createMsg(texts []string) *msgstream.InsertMsg {
 
 	data := []*schemapb.FieldData{}
 	f := schemapb.FieldData{
-		Type: schemapb.DataType_VarChar,
-		FieldId: 101,
+		Type:      schemapb.DataType_VarChar,
+		FieldId:   101,
 		IsDynamic: false,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
@@ -118,13 +114,13 @@ func (s *FunctionExecutorSuite)createMsg(texts []string) *msgstream.InsertMsg{
 	return &msg
 }
 
-func (s *FunctionExecutorSuite)createEmbedding(texts []string, dim int) [][]float32{
+func (s *FunctionExecutorSuite) createEmbedding(texts []string, dim int) [][]float32 {
 	embeddings := make([][]float32, 0)
 	for i := 0; i < len(texts); i++ {
 		f := float32(i)
 		emb := make([]float32, 0)
 		for j := 0; j < dim; j++ {
-			emb = append(emb, f + float32(j) * 0.1)
+			emb = append(emb, f+float32(j)*0.1)
 		}
 		embeddings = append(embeddings, emb)
 	}
@@ -132,7 +128,7 @@ func (s *FunctionExecutorSuite)createEmbedding(texts []string, dim int) [][]floa
 }
 
 func (s *FunctionExecutorSuite) TestExecutor() {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req models.EmbeddingRequest
 		body, _ := io.ReadAll(r.Body)
 		defer r.Body.Close()
@@ -144,20 +140,20 @@ func (s *FunctionExecutorSuite) TestExecutor() {
 		embs := s.createEmbedding(req.Input, req.Dimensions)
 		for i := 0; i < len(req.Input); i++ {
 			res.Data = append(res.Data, models.EmbeddingData{
-				Object: "embedding",
+				Object:    "embedding",
 				Embedding: embs[i],
-				Index: i,
+				Index:     i,
 			})
 		}
 
 		res.Usage = models.Usage{
 			PromptTokens: 1,
-			TotalTokens: 100,
+			TotalTokens:  100,
 		}
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
 		w.Write(data)
-		
+
 	}))
 
 	defer ts.Close()
@@ -170,7 +166,7 @@ func (s *FunctionExecutorSuite) TestExecutor() {
 }
 
 func (s *FunctionExecutorSuite) TestErrorEmbedding() {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req models.EmbeddingRequest
 		body, _ := io.ReadAll(r.Body)
 		defer r.Body.Close()
@@ -181,20 +177,20 @@ func (s *FunctionExecutorSuite) TestErrorEmbedding() {
 		res.Model = "text-embedding-3-small"
 		for i := 0; i < len(req.Input); i++ {
 			res.Data = append(res.Data, models.EmbeddingData{
-				Object: "embedding",
+				Object:    "embedding",
 				Embedding: []float32{},
-				Index: i,
+				Index:     i,
 			})
 		}
 
 		res.Usage = models.Usage{
 			PromptTokens: 1,
-			TotalTokens: 100,
+			TotalTokens:  100,
 		}
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
 		w.Write(data)
-		
+
 	}))
 	defer ts.Close()
 	schema := s.creataSchema(ts.URL)
