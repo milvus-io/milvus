@@ -81,6 +81,10 @@ func IsVectorMmapIndex(indexType IndexType) bool {
 		indexType == IndexFaissBinIDMap ||
 		indexType == IndexFaissBinIvfFlat ||
 		indexType == IndexHNSW ||
+		indexType == IndexFaissHNSW ||
+		indexType == IndexFaissHNSWPQ ||
+		indexType == IndexFaissHNSWSQ ||
+		indexType == IndexFaissHNSWPRQ ||
 		indexType == IndexScaNN ||
 		indexType == IndexSparseInverted ||
 		indexType == IndexSparseWand
