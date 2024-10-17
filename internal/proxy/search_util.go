@@ -370,8 +370,15 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 		groupSize = 1
 	} else {
 		groupSize, err = strconv.ParseInt(groupSizeStr, 0, 64)
-		if err != nil || groupSize <= 0 {
-			groupSize = 1
+		if err != nil {
+			ret.err = merr.WrapErrParameterInvalidMsg(
+				fmt.Sprintf("failed to parse input group size:%s", groupSizeStr))
+			return ret
+		}
+		if groupSize <= 0 {
+			ret.err = merr.WrapErrParameterInvalidMsg(
+				fmt.Sprintf("input group size:%d is negative, failed to do search_groupby", groupSize))
+			return ret
 		}
 	}
 	if groupSize > Params.QuotaConfig.MaxGroupSize.GetAsInt64() {
