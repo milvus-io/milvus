@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -31,8 +32,10 @@ import (
 )
 
 type SyncSegmentsScheduler struct {
-	quit chan struct{}
-	wg   sync.WaitGroup
+	ctx        context.Context
+	cancelFunc context.CancelFunc
+	quit       chan struct{}
+	wg         sync.WaitGroup
 
 	meta           *meta
 	channelManager ChannelManager
@@ -40,7 +43,10 @@ type SyncSegmentsScheduler struct {
 }
 
 func newSyncSegmentsScheduler(m *meta, channelManager ChannelManager, sessions session.DataNodeManager) *SyncSegmentsScheduler {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &SyncSegmentsScheduler{
+		ctx:            ctx,
+		cancelFunc:     cancel,
 		quit:           make(chan struct{}),
 		wg:             sync.WaitGroup{},
 		meta:           m,
@@ -65,7 +71,7 @@ func (sss *SyncSegmentsScheduler) Start() {
 				ticker.Stop()
 				return
 			case <-ticker.C:
-				sss.SyncSegmentsForCollections()
+				sss.SyncSegmentsForCollections(sss.ctx)
 			}
 		}
 	}()
@@ -73,11 +79,12 @@ func (sss *SyncSegmentsScheduler) Start() {
 }
 
 func (sss *SyncSegmentsScheduler) Stop() {
+	sss.cancelFunc()
 	close(sss.quit)
 	sss.wg.Wait()
 }
 
-func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections() {
+func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections(ctx context.Context) {
 	collIDs := sss.meta.ListCollections()
 	for _, collID := range collIDs {
 		collInfo := sss.meta.GetCollection(collID)
@@ -99,7 +106,7 @@ func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections() {
 				continue
 			}
 			for _, partitionID := range collInfo.Partitions {
-				if err := sss.SyncSegments(collID, partitionID, channelName, nodeID, pkField.GetFieldID()); err != nil {
+				if err := sss.SyncSegments(ctx, collID, partitionID, channelName, nodeID, pkField.GetFieldID()); err != nil {
 					log.Warn("sync segment with channel failed, retry next ticker",
 						zap.Int64("collectionID", collID),
 						zap.Int64("partitionID", partitionID),
@@ -112,7 +119,7 @@ func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections() {
 	}
 }
 
-func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, channelName string, nodeID, pkFieldID int64) error {
+func (sss *SyncSegmentsScheduler) SyncSegments(ctx context.Context, collectionID, partitionID int64, channelName string, nodeID, pkFieldID int64) error {
 	log := log.With(zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID),
 		zap.String("channelName", channelName), zap.Int64("nodeID", nodeID))
 	// sync all healthy segments, but only check flushed segments on datanode. Because L0 growing segments may not in datacoord's meta.
@@ -147,7 +154,7 @@ func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, 
 		}
 	}
 
-	if err := sss.sessions.SyncSegments(nodeID, req); err != nil {
+	if err := sss.sessions.SyncSegments(ctx, nodeID, req); err != nil {
 		log.Warn("fail to sync segments with node", zap.Error(err))
 		return err
 	}
