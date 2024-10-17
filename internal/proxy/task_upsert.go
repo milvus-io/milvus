@@ -154,19 +154,15 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	// Calculate embedding fields
-	{
+	if function.HasFunctions(it.schema.CollectionSchema.Functions, []int64{}) {
 		exec, err := function.NewFunctionExecutor(it.schema.CollectionSchema)
 		if err != nil {
 			return err
 		}
-
-		if !exec.Empty() {
-			if err := exec.ProcessInsert(it.upsertMsg.InsertMsg); err != nil {
-				return err
-			}
+		if err := exec.ProcessInsert(it.upsertMsg.InsertMsg); err != nil {
+			return err
 		}
 	}
-
 	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
 	// set upsertTask.insertRequest.rowIDs
 	tr := timerecord.NewTimeRecorder("applyPK")
