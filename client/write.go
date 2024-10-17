@@ -56,7 +56,9 @@ func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ..
 			return err
 		}
 
-		return nil
+		// write back pks if needed
+		// pks values shall be written back to struct if receiver field exists
+		return option.WriteBackPKs(collection.Schema, result.IDs)
 	})
 	return result, err
 }
