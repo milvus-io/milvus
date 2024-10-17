@@ -284,3 +284,7 @@ func isDataMmapEnable(fieldSchema *schemapb.FieldSchema) bool {
 	}
 	return params.Params.QueryNodeCfg.MmapScalarField.GetAsBool()
 }
+
+func isGrowingMmapEnable() bool {
+	return params.Params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
+}
