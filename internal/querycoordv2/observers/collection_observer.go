@@ -299,8 +299,8 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 		zap.Int64("partitionID", partition.GetPartitionID()),
 	)
 
-	segmentTargets := ob.targetMgr.GetSealedSegmentsByPartition(partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
-	channelTargets := ob.targetMgr.GetDmChannelsByCollection(partition.GetCollectionID(), meta.NextTarget)
+	segmentTargets := ob.targetMgr.GetSealedSegmentsByPartition(partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTargetFirst)
+	channelTargets := ob.targetMgr.GetDmChannelsByCollection(partition.GetCollectionID(), meta.NextTargetFirst)
 
 	targetNum := len(segmentTargets) + len(channelTargets)
 	if targetNum == 0 {
