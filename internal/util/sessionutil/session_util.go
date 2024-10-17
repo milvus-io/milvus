@@ -100,8 +100,9 @@ type SessionRaw struct {
 	IndexEngineVersion IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
 	LeaseID            *clientv3.LeaseID  `json:"LeaseID,omitempty"`
 
-	HostName   string `json:"HostName,omitempty"`
-	EnableDisk bool   `json:"EnableDisk,omitempty"`
+	HostName    string `json:"HostName,omitempty"`
+	EnableDisk  bool   `json:"EnableDisk,omitempty"`
+	ServerLabel string `json:"NodeLabel,omitempty"`
 }
 
 func (s *SessionRaw) GetAddress() string {
@@ -110,6 +111,10 @@ func (s *SessionRaw) GetAddress() string {
 
 func (s *SessionRaw) GetServerID() int64 {
 	return s.ServerID
+}
+
+func (s *SessionRaw) GetServerLabel() string {
+	return s.ServerLabel
 }
 
 func (s *SessionRaw) IsTriggerKill() bool {
@@ -286,6 +291,7 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 		panic(err)
 	}
 	s.ServerID = serverID
+	s.ServerLabel = s.getServerLabelFromEnv(serverName)
 	log.Info("start server", zap.String("name", serverName), zap.String("address", address), zap.Int64("id", s.ServerID))
 }
 
@@ -327,6 +333,15 @@ func (s *Session) getServerID() (int64, error) {
 		paramtable.SetNodeID(nodeID)
 	}
 	return nodeID, nil
+}
+
+func (s *Session) getServerLabelFromEnv(role string) string {
+	switch role {
+	case "querynode":
+		return os.Getenv("MILVUS_COMPONENT_LABEL")
+	default:
+		return ""
+	}
 }
 
 func (s *Session) checkIDExist() {
