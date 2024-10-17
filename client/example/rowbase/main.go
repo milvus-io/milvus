@@ -5,9 +5,10 @@ import (
 	"log"
 	"math/rand"
 
+	"github.com/samber/lo"
+
 	milvusclient "github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/row"
-	"github.com/samber/lo"
 )
 
 type Data struct {
