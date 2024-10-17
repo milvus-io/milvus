@@ -1007,6 +1007,8 @@ func (suite *ServiceSuite) TestReleaseCollection() {
 
 	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(merr.Success(), nil)
+	suite.cluster.EXPECT().ReleaseCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(merr.Success(), nil)
 
 	// Test release all collections
 	for _, collection := range suite.collections {

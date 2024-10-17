@@ -45,16 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var (
-// ErrRemoveNodeFromRGFailed      = errors.New("failed to remove node from resource group")
-// ErrTransferNodeFailed          = errors.New("failed to transfer node between resource group")
-// ErrTransferReplicaFailed       = errors.New("failed to transfer replica between resource group")
-// ErrListResourceGroupsFailed    = errors.New("failed to list resource group")
-// ErrDescribeResourceGroupFailed = errors.New("failed to describe resource group")
-// ErrLoadUseWrongRG              = errors.New("load operation should use collection's resource group")
-// ErrLoadWithDefaultRG           = errors.New("load operation can't use default resource group and other resource group together")
-)
-
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	log.Ctx(ctx).Info("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
 
