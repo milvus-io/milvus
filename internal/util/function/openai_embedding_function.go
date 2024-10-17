@@ -25,7 +25,9 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/models"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"	
 )
 
@@ -150,31 +152,13 @@ func (runner *OpenAIEmbeddingFunction)MaxBatch() int {
 }
 
 
-func (runner *OpenAIEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error) {
-	if len(inputs) != 1 {
-		return nil, fmt.Errorf("OpenAIEmbedding function only receives one input, bug got [%d]", len(inputs))
-	}
-
-	if inputs[0].Type != schemapb.DataType_VarChar {
-		return nil, fmt.Errorf("OpenAIEmbedding only supports varchar field, the input is not varchar")
-	}
-
-	texts := inputs[0].GetScalars().GetStringData().GetData()
-	if texts == nil {
-		return nil, fmt.Errorf("Input texts is empty")
-	}
-
+func (runner *OpenAIEmbeddingFunction)callEmbedding(texts []string) ([][]float32, error) {
 	numRows := len(texts)
 	if numRows > runner.MaxBatch() {
 		return nil, fmt.Errorf("OpenAI embedding supports up to [%d] pieces of data at a time, got [%d]", runner.MaxBatch(), numRows)
 	}
 	
-	var output_field schemapb.FieldData
-	output_field.FieldId = runner.outputFields[0].FieldID
-	output_field.FieldName = runner.outputFields[0].Name
-	output_field.Type = runner.outputFields[0].DataType
-	output_field.IsDynamic = runner.outputFields[0].IsDynamic
-	data := make([]float32, 0, numRows * int(runner.fieldDim))
+	data := make([][]float32, numRows)
 	for i := 0; i < numRows; i += maxBatch {
 		end := i + maxBatch
 		if end > numRows {
@@ -190,12 +174,43 @@ func (runner *OpenAIEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldDat
 		for _, item := range resp.Data {
 			if len(item.Embedding) != int(runner.fieldDim) {
 				return nil, fmt.Errorf("The required embedding dim for field [%s] is [%d], but the embedding obtained from the model is [%d]",
-					output_field.FieldName, runner.fieldDim, len(item.Embedding))
+					runner.outputFields[0].Name, runner.fieldDim, len(item.Embedding))
 			}
-			data = append(data, item.Embedding...)
+			data = append(data, item.Embedding)
 		}
 	}
-	output_field.Field = &schemapb.FieldData_Vectors{
+	return data, nil
+}
+
+func (runner *OpenAIEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error) {
+	if len(inputs) != 1 {
+		return nil, fmt.Errorf("OpenAIEmbedding function only receives one input, bug got [%d]", len(inputs))
+	}
+
+	if inputs[0].Type != schemapb.DataType_VarChar {
+		return nil, fmt.Errorf("OpenAIEmbedding only supports varchar field, the input is not varchar")
+	}
+
+	texts := inputs[0].GetScalars().GetStringData().GetData()
+	if texts == nil {
+		return nil, fmt.Errorf("Input texts is empty")
+	}
+
+	embds, err := runner.callEmbedding(texts)
+	if err != nil {
+		return nil, err
+	}
+	data := make([]float32, 0, len(texts) * int(runner.fieldDim))
+	for _, emb := range embds {
+		data = append(data, emb...)
+	}
+
+	var outputField schemapb.FieldData
+	outputField.FieldId = runner.outputFields[0].FieldID
+	outputField.FieldName = runner.outputFields[0].Name
+	outputField.Type = runner.outputFields[0].DataType
+	outputField.IsDynamic = runner.outputFields[0].IsDynamic
+	outputField.Field = &schemapb.FieldData_Vectors{
 		Vectors: &schemapb.VectorField{
 			Data: &schemapb.VectorField_FloatVector{
 				FloatVector: &schemapb.FloatArray{
@@ -205,20 +220,14 @@ func (runner *OpenAIEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldDat
 			Dim: runner.fieldDim,
 		},
 	}
-	return []*schemapb.FieldData{&output_field}, nil
+	return []*schemapb.FieldData{&outputField}, nil
 }
 
-func (runner *OpenAIEmbeddingFunction)ProcessSearch(placeholderGroups [][]byte) ([][]byte, error){
-	if len(placeholderGroups) != 1 {
-		return nil, fmt.Errorf("OpenAIEmbedding function only receives one input, bug got [%d]", len(placeholderGroups))
+func (runner *OpenAIEmbeddingFunction)ProcessSearch(placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error){
+	texts := funcutil.GetVarCharFromPlaceholder(placeholderGroup.Placeholders[0]) // Already checked externally
+	embds, err := runner.callEmbedding(texts)
+	if err == nil {
+		return nil, err
 	}
-
-	// get tests from placeholderGroups
-
-	// texts := []string{}
-
-	// calc embedding
-
-	//to placeholderGroups
-	return nil, nil
+	return funcutil.Float32VectorsToPlaceholderGroup(embds), nil
 }
