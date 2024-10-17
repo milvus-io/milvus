@@ -25,16 +25,18 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 		}}
 	}).Times(2)
 	task := &mixCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
-			PlanID:         1,
-			TriggerID:      19530,
-			CollectionID:   1,
-			PartitionID:    10,
-			Type:           datapb.CompactionType_MixCompaction,
-			NodeID:         1,
-			State:          datapb.CompactionTaskState_executing,
-			InputSegments:  []int64{200, 201},
-			ResultSegments: []int64{100, 200},
+		compactionTaskBase: compactionTaskBase{
+			CompactionTask: &datapb.CompactionTask{
+				PlanID:         1,
+				TriggerID:      19530,
+				CollectionID:   1,
+				PartitionID:    10,
+				Type:           datapb.CompactionType_MixCompaction,
+				NodeID:         1,
+				State:          datapb.CompactionTaskState_executing,
+				InputSegments:  []int64{200, 201},
+				ResultSegments: []int64{100, 200},
+			},
 		},
 		// plan: plan,
 		meta: s.mockMeta,
@@ -59,17 +61,20 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 			return nil
 		}).Once()
 		task := &mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
-				PlanID:         1,
-				TriggerID:      19530,
-				CollectionID:   1,
-				PartitionID:    10,
-				Channel:        channel,
-				Type:           datapb.CompactionType_MixCompaction,
-				State:          datapb.CompactionTaskState_executing,
-				NodeID:         1,
-				InputSegments:  []int64{200, 201},
-				ResultSegments: []int64{100, 200},
+			compactionTaskBase: compactionTaskBase{
+				CompactionTask: &datapb.CompactionTask{
+					PlanID:         1,
+					TriggerID:      19530,
+					CollectionID:   1,
+					PartitionID:    10,
+					Channel:        channel,
+					Type:           datapb.CompactionType_MixCompaction,
+					State:          datapb.CompactionTaskState_executing,
+					NodeID:         1,
+					InputSegments:  []int64{200, 201},
+					ResultSegments: []int64{100, 200},
+				},
+				meta: s.mockMeta,
 			},
 			meta: s.mockMeta,
 		}

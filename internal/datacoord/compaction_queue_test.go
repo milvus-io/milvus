@@ -27,23 +27,29 @@ import (
 
 func TestCompactionQueue(t *testing.T) {
 	t1 := &mixCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
-			PlanID: 3,
-			Type:   datapb.CompactionType_MixCompaction,
+		compactionTaskBase: compactionTaskBase{
+			CompactionTask: &datapb.CompactionTask{
+				PlanID: 3,
+				Type:   datapb.CompactionType_MixCompaction,
+			},
 		},
 	}
 
 	t2 := &l0CompactionTask{
-		CompactionTask: &datapb.CompactionTask{
-			PlanID: 1,
-			Type:   datapb.CompactionType_Level0DeleteCompaction,
+		compactionTaskBase: compactionTaskBase{
+			CompactionTask: &datapb.CompactionTask{
+				PlanID: 1,
+				Type:   datapb.CompactionType_Level0DeleteCompaction,
+			},
 		},
 	}
 
 	t3 := &clusteringCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
-			PlanID: 2,
-			Type:   datapb.CompactionType_ClusteringCompaction,
+		compactionTaskBase: compactionTaskBase{
+			CompactionTask: &datapb.CompactionTask{
+				PlanID: 2,
+				Type:   datapb.CompactionType_ClusteringCompaction,
+			},
 		},
 	}
 
@@ -147,9 +153,11 @@ func TestConcurrency(t *testing.T) {
 	wg.Add(c)
 	for i := 0; i < c; i++ {
 		t1 := &mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
-				PlanID: int64(i),
-				Type:   datapb.CompactionType_MixCompaction,
+			compactionTaskBase: compactionTaskBase{
+				CompactionTask: &datapb.CompactionTask{
+					PlanID: int64(i),
+					Type:   datapb.CompactionType_MixCompaction,
+				},
 			},
 		}
 		go func() {

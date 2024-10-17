@@ -2,12 +2,10 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -22,25 +20,26 @@ import (
 var _ CompactionTask = (*mixCompactionTask)(nil)
 
 type mixCompactionTask struct {
-	*datapb.CompactionTask
+	compactionTaskBase
 	plan   *datapb.CompactionPlan
 	result *datapb.CompactionPlanResult
 
-	span          trace.Span
 	allocator     allocator.Allocator
 	sessions      session.DataNodeManager
 	meta          CompactionMeta
 	newSegmentIDs []int64
-	slotUsage     int64
 }
 
 func newMixCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, session session.DataNodeManager) *mixCompactionTask {
 	return &mixCompactionTask{
-		CompactionTask: t,
-		allocator:      allocator,
-		meta:           meta,
-		sessions:       session,
-		slotUsage:      paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
+		compactionTaskBase: compactionTaskBase{
+			CompactionTask: t,
+			meta:           meta,
+			slotUsage:      paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
+		},
+		allocator: allocator,
+		meta:      meta,
+		sessions:  session,
 	}
 }
 
@@ -63,7 +62,7 @@ func (t *mixCompactionTask) processPipelining() bool {
 		return t.processFailed()
 	}
 
-	err = t.sessions.Compaction(context.TODO(), t.GetNodeID(), t.GetPlan())
+	err = t.sessions.Compaction(context.TODO(), t.GetNodeID(), t.plan)
 	if err != nil {
 		log.Warn("mixCompactionTask failed to notify compaction tasks to DataNode", zap.Error(err))
 		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
@@ -201,18 +200,6 @@ func (t *mixCompactionTask) Process() bool {
 	return processResult
 }
 
-func (t *mixCompactionTask) GetResult() *datapb.CompactionPlanResult {
-	return t.result
-}
-
-func (t *mixCompactionTask) GetPlan() *datapb.CompactionPlan {
-	return t.plan
-}
-
-func (t *mixCompactionTask) GetLabel() string {
-	return fmt.Sprintf("%d-%s", t.PartitionID, t.GetChannel())
-}
-
 func (t *mixCompactionTask) NeedReAssignNodeID() bool {
 	return t.GetState() == datapb.CompactionTaskState_pipelining && (t.GetNodeID() == 0 || t.GetNodeID() == NullNodeID)
 }
@@ -282,42 +269,6 @@ func (t *mixCompactionTask) checkTimeout() bool {
 	return false
 }
 
-func (t *mixCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
-	task := t.ShadowClone(opts...)
-	err := t.saveTaskMeta(task)
-	if err != nil {
-		return err
-	}
-	t.CompactionTask = task
-	return nil
-}
-
-func (t *mixCompactionTask) SetNodeID(id UniqueID) error {
-	return t.updateAndSaveTaskMeta(setNodeID(id))
-}
-
-func (t *mixCompactionTask) GetSpan() trace.Span {
-	return t.span
-}
-
-func (t *mixCompactionTask) SetTask(task *datapb.CompactionTask) {
-	t.CompactionTask = task
-}
-
-func (t *mixCompactionTask) SetSpan(span trace.Span) {
-	t.span = span
-}
-
-func (t *mixCompactionTask) SetResult(result *datapb.CompactionPlanResult) {
-	t.result = result
-}
-
-func (t *mixCompactionTask) EndSpan() {
-	if t.span != nil {
-		t.span.End()
-	}
-}
-
 func (t *mixCompactionTask) CleanLogPath() {
 	if t.plan == nil {
 		return
@@ -380,8 +331,4 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	}
 	log.Info("Compaction handler refreshed mix compaction plan", zap.Int64("maxSize", plan.GetMaxSize()), zap.Any("segID2DeltaLogs", segIDMap))
 	return plan, nil
-}
-
-func (t *mixCompactionTask) GetSlotUsage() int64 {
-	return t.slotUsage
 }

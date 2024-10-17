@@ -17,10 +17,17 @@
 package datacoord
 
 import (
+	"fmt"
+	"sync"
+
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type CompactionTask interface {
@@ -41,17 +48,12 @@ type CompactionTask interface {
 	GetStartTime() int64
 	GetTimeoutInSeconds() int32
 	GetPos() *msgpb.MsgPosition
-
-	GetPlan() *datapb.CompactionPlan
-	GetResult() *datapb.CompactionPlanResult
-
 	GetNodeID() UniqueID
 	GetSpan() trace.Span
 	ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask
 	SetNodeID(UniqueID) error
 	SetTask(*datapb.CompactionTask)
 	SetSpan(trace.Span)
-	SetResult(*datapb.CompactionPlanResult)
 	EndSpan()
 	CleanLogPath()
 	NeedReAssignNodeID() bool
@@ -118,4 +120,109 @@ func setLastStateStartTime(lastStateStartTime int64) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
 		task.LastStateStartTime = lastStateStartTime
 	}
+}
+
+type compactionTaskBase struct {
+	*datapb.CompactionTask
+
+	meta      CompactionMeta
+	slotUsage int64
+
+	lock sync.RWMutex
+	span trace.Span
+}
+
+var _ CompactionTask = (*compactionTaskBase)(nil)
+
+// BuildCompactionRequest implements CompactionTask.
+func (t *compactionTaskBase) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
+	panic("unimplemented")
+}
+
+// CleanLogPath implements CompactionTask.
+func (t *compactionTaskBase) CleanLogPath() {
+	panic("unimplemented")
+}
+
+// NeedReAssignNodeID implements CompactionTask.
+func (t *compactionTaskBase) NeedReAssignNodeID() bool {
+	panic("unimplemented")
+}
+
+// Process implements CompactionTask.
+func (t *compactionTaskBase) Process() bool {
+	panic("unimplemented")
+}
+
+func (t *compactionTaskBase) SetTask(task *datapb.CompactionTask) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	t.CompactionTask = task
+}
+
+func (t *compactionTaskBase) SetNodeID(id UniqueID) error {
+	return t.updateAndSaveTaskMeta(setNodeID(id))
+}
+
+func (t *compactionTaskBase) GetSpan() trace.Span {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	return t.span
+}
+
+func (t *compactionTaskBase) SetSpan(span trace.Span) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	t.span = span
+}
+
+func (t *compactionTaskBase) EndSpan() {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	if t.span != nil {
+		t.span.End()
+	}
+}
+
+func (t *compactionTaskBase) SetStartTime(startTime int64) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	t.StartTime = startTime
+}
+
+func (t *compactionTaskBase) GetLabel() string {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	return fmt.Sprintf("%d-%s", t.PartitionID, t.GetChannel())
+}
+
+func (t *compactionTaskBase) GetSlotUsage() int64 {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	return t.slotUsage
+}
+
+func (t *compactionTaskBase) ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask {
+	taskClone := proto.Clone(t).(*datapb.CompactionTask)
+	for _, opt := range opts {
+		opt(taskClone)
+	}
+	return taskClone
+}
+
+func (t *compactionTaskBase) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
+	task := t.ShadowClone(opts...)
+	err := t.SaveTaskMeta()
+	if err != nil {
+		log.Warn("Failed to saveTaskMeta", zap.Error(err))
+		return merr.WrapErrClusteringCompactionMetaError("updateAndSaveTaskMeta", err) // retryable
+	}
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	t.CompactionTask = task
+	return nil
+}
+
+func (t *compactionTaskBase) SaveTaskMeta() error {
+	return t.meta.SaveCompactionTask(t.CompactionTask)
 }
