@@ -58,7 +58,7 @@ type collectionManager struct {
 	collections map[int64]*Collection
 }
 
-func NewCollectionManager() *collectionManager {
+func NewCollectionManager() CollectionManager {
 	return &collectionManager{
 		collections: make(map[int64]*Collection),
 	}

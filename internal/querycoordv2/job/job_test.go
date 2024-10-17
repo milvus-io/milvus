@@ -45,11 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-const (
-	defaultVecFieldID = 1
-	defaultIndexID    = 1
-)
-
 type JobSuite struct {
 	suite.Suite
 
@@ -141,7 +136,10 @@ func (suite *JobSuite) SetupSuite() {
 		Return(merr.Success(), nil)
 	suite.cluster.EXPECT().
 		ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Success(), nil).Maybe()
+		Return(merr.Success(), nil)
+	suite.cluster.EXPECT().
+		ReleaseCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(merr.Success(), nil)
 
 	suite.proxyManager = proxyutil.NewMockProxyClientManager(suite.T())
 	suite.proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -837,6 +835,9 @@ func (suite *JobSuite) TestReleaseCollection() {
 
 	// Test release collection and partition
 	for _, collection := range suite.collections {
+		//_, err := utils.SpawnReplicasWithRG(suite.meta, collection, nil,
+		//	1, suite.channels[collection])
+		//suite.NoError(err)
 		req := &querypb.ReleaseCollectionRequest{
 			CollectionID: collection,
 		}
@@ -849,7 +850,6 @@ func (suite *JobSuite) TestReleaseCollection() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-
 			suite.checkerController,
 		)
 		suite.scheduler.Add(job)
@@ -860,6 +860,9 @@ func (suite *JobSuite) TestReleaseCollection() {
 
 	// Test release again
 	for _, collection := range suite.collections {
+		//_, err := utils.SpawnReplicasWithRG(suite.meta, collection, nil,
+		//	1, suite.channels[collection])
+		//suite.NoError(err)
 		req := &querypb.ReleaseCollectionRequest{
 			CollectionID: collection,
 		}
