@@ -158,7 +158,7 @@ func (runner *OpenAIEmbeddingFunction)callEmbedding(texts []string) ([][]float32
 		return nil, fmt.Errorf("OpenAI embedding supports up to [%d] pieces of data at a time, got [%d]", runner.MaxBatch(), numRows)
 	}
 	
-	data := make([][]float32, numRows)
+	data := make([][]float32, 0, numRows)
 	for i := 0; i < numRows; i += maxBatch {
 		end := i + maxBatch
 		if end > numRows {
@@ -226,7 +226,7 @@ func (runner *OpenAIEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldDat
 func (runner *OpenAIEmbeddingFunction)ProcessSearch(placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error){
 	texts := funcutil.GetVarCharFromPlaceholder(placeholderGroup.Placeholders[0]) // Already checked externally
 	embds, err := runner.callEmbedding(texts)
-	if err == nil {
+	if err != nil {
 		return nil, err
 	}
 	return funcutil.Float32VectorsToPlaceholderGroup(embds), nil

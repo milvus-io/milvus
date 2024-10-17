@@ -422,7 +422,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := exec.ProcessSearchReq(t.SearchRequest); err != nil {
+		if err := exec.ProcessSearch(t.SearchRequest); err != nil {
 			return err
 		}
 	}
@@ -510,7 +510,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := exec.ProcessSearchReq(t.SearchRequest); err != nil {
+		if err := exec.ProcessSearch(t.SearchRequest); err != nil {
 			return err
 		}
 	}

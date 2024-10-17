@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"io"
-	"fmt"
 	"context"
 	"testing"
 	"net/http"

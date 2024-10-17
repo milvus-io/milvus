@@ -179,6 +179,7 @@ func (executor *FunctionExecutor)prcessAdvanceSearch(req *internalpb.SearchReque
 			if sub.Nq > int64(runner.MaxBatch()) {
 				return fmt.Errorf("Nq [%d] > function [%s]'s max batch [%d]", sub.Nq, runner.GetSchema().Name, runner.MaxBatch())
 			}
+			wg.Add(1)
 			go func(runner Runner, idx int64) {
 				defer wg.Done()
 				if newHolder, err := executor.processSingleSearch(runner, sub.GetPlaceholderGroup()); err != nil {
@@ -205,8 +206,8 @@ func (executor *FunctionExecutor)prcessAdvanceSearch(req *internalpb.SearchReque
 	return nil
 }
 
-func (executor *FunctionExecutor)ProcessSearchReq(req *internalpb.SearchRequest) error {
-	if req.IsAdvanced {
+func (executor *FunctionExecutor)ProcessSearch(req *internalpb.SearchRequest) error {
+	if !req.IsAdvanced {
 		return executor.prcessSearch(req)
 	} else {
 		return executor.prcessAdvanceSearch(req)
