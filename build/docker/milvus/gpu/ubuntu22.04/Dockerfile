@@ -3,7 +3,8 @@ FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
 ARG TARGETARCH
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates libaio-dev libgomp1 libopenblas-dev && \
+    apt-get install -y --no-install-recommends curl ca-certificates libaio-dev \
+    libgomp1 libopenblas-openmp-dev && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
