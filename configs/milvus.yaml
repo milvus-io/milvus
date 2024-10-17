@@ -366,7 +366,7 @@ queryCoord:
   enableActiveStandby: false
   checkInterval: 1000
   checkHealthInterval: 3000 # 3s, the interval when query coord try to check health of query node
-  checkHealthRPCTimeout: 2000 # 100ms, the timeout of check health rpc to query node
+  checkHealthRPCTimeout: 2000 # 2000ms, the timeout of check health rpc to query node
   brokerTimeout: 5000 # 5000ms, querycoord broker rpc timeout
   collectionRecoverTimes: 3 # if collection recover times reach the limit during loading state, release it
   observerTaskParallel: 16 # the parallel observer dispatcher task number
@@ -377,7 +377,7 @@ queryCoord:
   channelExclusiveNodeFactor: 4 # the least node number for enable channel's exclusive mode
   collectionObserverInterval: 200 # the interval of collection observer
   checkExecutedFlagInterval: 100 # the interval of check executed flag to force to pull dist
-  updateCollectionLoadStatusInterval: 5 # 5m, max interval of updating collection loaded status for check health
+  updateCollectionLoadStatusInterval: 300s # 300s, max interval of updating collection loaded status for check health, It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord
