@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -13,6 +14,7 @@ var (
 	DefaultResourceGroupName           = "__default_resource_group"
 	defaultResourceGroupCapacity int32 = 1000000
 	resourceGroupTransferBoost         = 10000
+	preferNodeTransferBoost            = 20000
 )
 
 // newResourceGroupConfig create a new resource group config.
@@ -124,6 +126,25 @@ func (rg *ResourceGroup) MissingNumOfNodes() int {
 	return missing
 }
 
+func (rg *ResourceGroup) MissingNumOfPreferNodes(nodeMgr *session.NodeManager) int {
+	if len(rg.GetConfig().GetNodeFilter().GetPreferNodeLabels()) == 0 {
+		return rg.MissingNumOfNodes()
+	}
+
+	preferNodesNum := rg.GetNodesByFilter(func(nodeID int64) bool {
+		if nodeMgr.Get(nodeID) == nil {
+			return false
+		}
+		return rg.PreferAcceptNode(nodeMgr.Get(nodeID))
+	})
+
+	missing := int(rg.cfg.Requests.NodeNum) - len(preferNodesNum)
+	if missing < 0 {
+		return 0
+	}
+	return missing
+}
+
 // ReachLimitNumOfNodes return reach limit nodes count. `limits - len(node)`
 func (rg *ResourceGroup) ReachLimitNumOfNodes() int {
 	reachLimit := int(rg.cfg.Limits.NodeNum) - len(rg.nodes)
@@ -140,6 +161,36 @@ func (rg *ResourceGroup) RedundantNumOfNodes() int {
 		return 0
 	}
 	return redundant
+}
+
+func (rg *ResourceGroup) GetNodesByFilter(f func(nodeID int64) bool) []int64 {
+	ret := make([]int64, 0)
+	rg.nodes.Range(func(nodeID int64) bool {
+		if f(nodeID) {
+			ret = append(ret, nodeID)
+		}
+		return true
+	})
+
+	return ret
+}
+
+func (rg *ResourceGroup) PreferAcceptNode(nodeInfo *session.NodeInfo) bool {
+	if nodeInfo == nil {
+		return false
+	}
+
+	if len(nodeInfo.Label()) == 0 || len(rg.GetConfig().GetNodeFilter().GetPreferNodeLabels()) == 0 {
+		return false
+	}
+
+	for _, label := range rg.GetConfig().GetNodeFilter().GetPreferNodeLabels() {
+		if label == nodeInfo.Label() {
+			return true
+		}
+	}
+
+	return false
 }
 
 // HasFrom return whether given resource group is in `from` of rg.
@@ -184,7 +235,7 @@ func (rg *ResourceGroup) Snapshot() *ResourceGroup {
 
 // MeetRequirement return whether resource group meet requirement.
 // Return error with reason if not meet requirement.
-func (rg *ResourceGroup) MeetRequirement() error {
+func (rg *ResourceGroup) MeetRequirement(nodeMgr *session.NodeManager) error {
 	// if len(node) is less than requests, new node need to be assigned.
 	if rg.nodes.Len() < int(rg.cfg.Requests.NodeNum) {
 		return errors.Errorf(
@@ -201,6 +252,36 @@ func (rg *ResourceGroup) MeetRequirement() error {
 			rg.cfg.Requests.NodeNum,
 		)
 	}
+
+	// check rg node filter
+	if rg.cfg.NodeFilter != nil {
+		nodeLabelSet := typeutil.NewSet(rg.GetConfig().GetNodeFilter().GetPreferNodeLabels()...)
+		nodeFilter := func(nodeID int64) bool {
+			nodeInfo := nodeMgr.Get(nodeID)
+			if nodeInfo == nil {
+				return false
+			}
+			return nodeLabelSet.Contain(nodeInfo.Label())
+		}
+
+		// filter out nodes that do not meet the node filter
+		dirtyNodes := make([]int64, 0)
+		rg.nodes.Range(func(nodeID int64) bool {
+			if !nodeFilter(nodeID) {
+				dirtyNodes = append(dirtyNodes, nodeID)
+				return false
+			}
+			return true
+		})
+
+		if len(dirtyNodes) > 0 {
+			return errors.Errorf(
+				"has dirty nodes[%v], not meet node filter",
+				dirtyNodes,
+			)
+		}
+	}
+
 	return nil
 }
 

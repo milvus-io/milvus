@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/kv"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -618,4 +619,302 @@ func (suite *ResourceManagerSuite) TestUnassignFail() {
 	suite.Panics(func() {
 		suite.manager.HandleNodeDown(1)
 	})
+}
+
+func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
+	suite.manager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 10,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 10,
+		},
+		NodeFilter: &rgpb.ResourceGroupNodeFilter{
+			PreferNodeLabels: []string{"label1"},
+		},
+	})
+
+	suite.manager.AddResourceGroup("rg2", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 10,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 10,
+		},
+		NodeFilter: &rgpb.ResourceGroupNodeFilter{
+			PreferNodeLabels: []string{"label2"},
+		},
+	})
+
+	suite.manager.AddResourceGroup("rg3", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 10,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 10,
+		},
+		NodeFilter: &rgpb.ResourceGroupNodeFilter{
+			PreferNodeLabels: []string{"label3"},
+		},
+	})
+
+	// test that all query nodes has been marked label1
+	for i := 1; i <= 30; i++ {
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   int64(i),
+			Address:  "localhost",
+			Hostname: "localhost",
+			Label:    "label1",
+		}))
+		suite.manager.HandleNodeUp(int64(i))
+	}
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+
+	// test new querynode with label2
+	for i := 31; i <= 40; i++ {
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   int64(i),
+			Address:  "localhost",
+			Hostname: "localhost",
+			Label:    "label2",
+		}))
+		suite.manager.HandleNodeUp(int64(i))
+	}
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+	nodesInRG, _ := suite.manager.GetNodes("rg2")
+	for _, node := range nodesInRG {
+		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Label())
+	}
+
+	suite.manager.AutoRecoverResourceGroup("rg1")
+	suite.manager.AutoRecoverResourceGroup("rg2")
+	suite.manager.AutoRecoverResourceGroup("rg3")
+	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+	nodesInRG, _ = suite.manager.GetNodes("rg2")
+	for _, node := range nodesInRG {
+		suite.Equal("label2", suite.manager.nodeMgr.Get(node).Label())
+	}
+
+	// test new querynode with label3
+	for i := 41; i <= 50; i++ {
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   int64(i),
+			Address:  "localhost",
+			Hostname: "localhost",
+			Label:    "label3",
+		}))
+		suite.manager.HandleNodeUp(int64(i))
+	}
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(20, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+	nodesInRG, _ = suite.manager.GetNodes("rg3")
+	for _, node := range nodesInRG {
+		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Label())
+	}
+
+	suite.manager.AutoRecoverResourceGroup("rg1")
+	suite.manager.AutoRecoverResourceGroup("rg2")
+	suite.manager.AutoRecoverResourceGroup("rg3")
+	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(20, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+	nodesInRG, _ = suite.manager.GetNodes("rg3")
+	for _, node := range nodesInRG {
+		suite.Equal("label3", suite.manager.nodeMgr.Get(node).Label())
+	}
+
+	// test swap rg's label
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg1": {
+			Requests: &rgpb.ResourceGroupLimit{
+				NodeNum: 10,
+			},
+			Limits: &rgpb.ResourceGroupLimit{
+				NodeNum: 10,
+			},
+			NodeFilter: &rgpb.ResourceGroupNodeFilter{
+				PreferNodeLabels: []string{"label2"},
+			},
+		},
+		"rg2": {
+			Requests: &rgpb.ResourceGroupLimit{
+				NodeNum: 10,
+			},
+			Limits: &rgpb.ResourceGroupLimit{
+				NodeNum: 10,
+			},
+			NodeFilter: &rgpb.ResourceGroupNodeFilter{
+				PreferNodeLabels: []string{"label3"},
+			},
+		},
+		"rg3": {
+			Requests: &rgpb.ResourceGroupLimit{
+				NodeNum: 10,
+			},
+			Limits: &rgpb.ResourceGroupLimit{
+				NodeNum: 10,
+			},
+			NodeFilter: &rgpb.ResourceGroupNodeFilter{
+				PreferNodeLabels: []string{"label1"},
+			},
+		},
+	})
+
+	log.Info("test swap rg's label")
+	for i := 0; i < 3; i++ {
+		suite.manager.AutoRecoverResourceGroup("rg1")
+		suite.manager.AutoRecoverResourceGroup("rg2")
+		suite.manager.AutoRecoverResourceGroup("rg3")
+		suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
+	}
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(20, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+	nodesInRG, _ = suite.manager.GetNodes("rg1")
+	for _, node := range nodesInRG {
+		suite.Equal("label2", suite.manager.nodeMgr.Get(node).Label())
+	}
+
+	nodesInRG, _ = suite.manager.GetNodes("rg2")
+	for _, node := range nodesInRG {
+		suite.Equal("label3", suite.manager.nodeMgr.Get(node).Label())
+	}
+
+	nodesInRG, _ = suite.manager.GetNodes("rg3")
+	for _, node := range nodesInRG {
+		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Label())
+	}
+}
+
+func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
+	suite.manager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 10,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 10,
+		},
+		NodeFilter: &rgpb.ResourceGroupNodeFilter{
+			PreferNodeLabels: []string{"label1"},
+		},
+	})
+
+	suite.manager.AddResourceGroup("rg2", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 10,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 10,
+		},
+		NodeFilter: &rgpb.ResourceGroupNodeFilter{
+			PreferNodeLabels: []string{"label2"},
+		},
+	})
+
+	suite.manager.AddResourceGroup("rg3", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 10,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 10,
+		},
+		NodeFilter: &rgpb.ResourceGroupNodeFilter{
+			PreferNodeLabels: []string{"label3"},
+		},
+	})
+
+	// test that all query nodes has been marked label1
+	for i := 1; i <= 10; i++ {
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   int64(i),
+			Address:  "localhost",
+			Hostname: "localhost",
+			Label:    "label1",
+		}))
+		suite.manager.HandleNodeUp(int64(i))
+	}
+
+	// test new querynode with label2
+	for i := 31; i <= 40; i++ {
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   int64(i),
+			Address:  "localhost",
+			Hostname: "localhost",
+			Label:    "label2",
+		}))
+		suite.manager.HandleNodeUp(int64(i))
+	}
+	// test new querynode with label3
+	for i := 41; i <= 50; i++ {
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   int64(i),
+			Address:  "localhost",
+			Hostname: "localhost",
+			Label:    "label3",
+		}))
+		suite.manager.HandleNodeUp(int64(i))
+	}
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
+
+	// test node down with label1
+	suite.manager.HandleNodeDown(int64(1))
+	suite.manager.nodeMgr.Remove(int64(1))
+	suite.Equal(9, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
+
+	// test node up with label2
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(101),
+		Address:  "localhost",
+		Hostname: "localhost",
+		Label:    "label2",
+	}))
+	suite.manager.HandleNodeUp(int64(101))
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
+
+	// test node up with label1
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(102),
+		Address:  "localhost",
+		Hostname: "localhost",
+		Label:    "label1",
+	}))
+	suite.manager.HandleNodeUp(int64(102))
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(1, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+	nodesInRG, _ := suite.manager.GetNodes(DefaultResourceGroupName)
+	for _, node := range nodesInRG {
+		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Label())
+	}
+
+	suite.manager.AutoRecoverResourceGroup("rg1")
+	suite.manager.AutoRecoverResourceGroup("rg2")
+	suite.manager.AutoRecoverResourceGroup("rg3")
+	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
+	nodesInRG, _ = suite.manager.GetNodes(DefaultResourceGroupName)
+	for _, node := range nodesInRG {
+		suite.Equal("label2", suite.manager.nodeMgr.Get(node).Label())
+	}
 }
