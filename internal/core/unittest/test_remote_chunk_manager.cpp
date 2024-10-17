@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-#include "storage/MinioChunkManager.h"
+#include "storage/minio/MinioChunkManager.h"
 #include "storage/Util.h"
 
 using namespace std;
