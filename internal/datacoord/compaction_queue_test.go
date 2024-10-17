@@ -43,7 +43,7 @@ func TestCompactionQueue(t *testing.T) {
 	t3 := &clusteringCompactionTask{
 		CompactionTask: &datapb.CompactionTask{
 			PlanID: 2,
-			Type:   datapb.CompactionType_MajorCompaction,
+			Type:   datapb.CompactionType_ClusteringCompaction,
 		},
 	}
 
@@ -88,7 +88,29 @@ func TestCompactionQueue(t *testing.T) {
 		assert.Equal(t, datapb.CompactionType_MixCompaction, task.GetType())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_MajorCompaction, task.GetType())
+		assert.Equal(t, datapb.CompactionType_ClusteringCompaction, task.GetType())
+	})
+
+	t.Run("mix first prioritizer", func(t *testing.T) {
+		cq := NewCompactionQueue(3, MixFirstPrioritizer)
+		err := cq.Enqueue(t1)
+		assert.NoError(t, err)
+		err = cq.Enqueue(t2)
+		assert.NoError(t, err)
+		err = cq.Enqueue(t3)
+		assert.NoError(t, err)
+		err = cq.Enqueue(&mixCompactionTask{})
+		assert.Error(t, err)
+
+		task, err := cq.Dequeue()
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.CompactionType_MixCompaction, task.GetType())
+		task, err = cq.Dequeue()
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetType())
+		task, err = cq.Dequeue()
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.CompactionType_ClusteringCompaction, task.GetType())
 	})
 
 	t.Run("update prioritizer", func(t *testing.T) {

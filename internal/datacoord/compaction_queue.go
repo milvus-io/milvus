@@ -168,11 +168,22 @@ var (
 			return 10
 		case datapb.CompactionType_ClusteringCompaction:
 			return 100
-		case datapb.CompactionType_MinorCompaction:
-		case datapb.CompactionType_MajorCompaction:
+		default:
 			return 1000
 		}
-		return 0xffff
+	}
+
+	MixFirstPrioritizer Prioritizer = func(task CompactionTask) int {
+		switch task.GetType() {
+		case datapb.CompactionType_Level0DeleteCompaction:
+			return 10
+		case datapb.CompactionType_MixCompaction:
+			return 1
+		case datapb.CompactionType_ClusteringCompaction:
+			return 100
+		default:
+			return 1000
+		}
 	}
 )
 
@@ -181,6 +192,8 @@ func getPrioritizer() Prioritizer {
 	switch p {
 	case "level":
 		return LevelPrioritizer
+	case "mix":
+		return MixFirstPrioritizer
 	default:
 		return DefaultPrioritizer
 	}
