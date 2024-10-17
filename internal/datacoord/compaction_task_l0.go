@@ -23,9 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -40,25 +38,25 @@ import (
 var _ CompactionTask = (*l0CompactionTask)(nil)
 
 type l0CompactionTask struct {
-	*datapb.CompactionTask
+	compactionTaskBase
 	plan   *datapb.CompactionPlan
 	result *datapb.CompactionPlanResult
 
-	span      trace.Span
 	allocator allocator.Allocator
 	sessions  session.DataNodeManager
 	meta      CompactionMeta
-
-	slotUsage int64
 }
 
 func newL0CompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, session session.DataNodeManager) *l0CompactionTask {
 	return &l0CompactionTask{
-		CompactionTask: t,
-		allocator:      allocator,
-		meta:           meta,
-		sessions:       session,
-		slotUsage:      paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64(),
+		compactionTaskBase: compactionTaskBase{
+			CompactionTask: t,
+			meta:           meta,
+			slotUsage:      paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64(),
+		},
+		allocator: allocator,
+		meta:      meta,
+		sessions:  session,
 	}
 }
 
@@ -101,7 +99,7 @@ func (t *l0CompactionTask) processPipelining() bool {
 		return t.processFailed()
 	}
 
-	err = t.sessions.Compaction(context.TODO(), t.GetNodeID(), t.GetPlan())
+	err = t.sessions.Compaction(context.TODO(), t.GetNodeID(), t.plan)
 	if err != nil {
 		log.Warn("l0CompactionTask failed to notify compaction tasks to DataNode", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
 		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
@@ -211,48 +209,6 @@ func (t *l0CompactionTask) processFailed() bool {
 	return true
 }
 
-func (t *l0CompactionTask) GetResult() *datapb.CompactionPlanResult {
-	return t.result
-}
-
-func (t *l0CompactionTask) SetResult(result *datapb.CompactionPlanResult) {
-	t.result = result
-}
-
-func (t *l0CompactionTask) SetTask(task *datapb.CompactionTask) {
-	t.CompactionTask = task
-}
-
-func (t *l0CompactionTask) GetSpan() trace.Span {
-	return t.span
-}
-
-func (t *l0CompactionTask) SetSpan(span trace.Span) {
-	t.span = span
-}
-
-func (t *l0CompactionTask) EndSpan() {
-	if t.span != nil {
-		t.span.End()
-	}
-}
-
-func (t *l0CompactionTask) SetPlan(plan *datapb.CompactionPlan) {
-	t.plan = plan
-}
-
-func (t *l0CompactionTask) GetPlan() *datapb.CompactionPlan {
-	return t.plan
-}
-
-func (t *l0CompactionTask) SetStartTime(startTime int64) {
-	t.StartTime = startTime
-}
-
-func (t *l0CompactionTask) GetLabel() string {
-	return fmt.Sprintf("%d-%s", t.PartitionID, t.GetChannel())
-}
-
 func (t *l0CompactionTask) NeedReAssignNodeID() bool {
 	return t.GetState() == datapb.CompactionTaskState_pipelining && (!t.hasAssignedWorker())
 }
@@ -275,14 +231,6 @@ func (t *l0CompactionTask) CleanLogPath() {
 			segment.Field2StatslogPaths = nil
 		}
 	}
-}
-
-func (t *l0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask {
-	taskClone := proto.Clone(t).(*datapb.CompactionTask)
-	for _, opt := range opts {
-		opt(taskClone)
-	}
-	return taskClone
 }
 
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
@@ -390,28 +338,6 @@ func (t *l0CompactionTask) checkTimeout() bool {
 	return false
 }
 
-func (t *l0CompactionTask) SetNodeID(id UniqueID) error {
-	return t.updateAndSaveTaskMeta(setNodeID(id))
-}
-
-func (t *l0CompactionTask) SaveTaskMeta() error {
-	return t.saveTaskMeta(t.CompactionTask)
-}
-
-func (t *l0CompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
-	task := t.ShadowClone(opts...)
-	err := t.saveTaskMeta(task)
-	if err != nil {
-		return err
-	}
-	t.CompactionTask = task
-	return nil
-}
-
-func (t *l0CompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
-	return t.meta.SaveCompactionTask(task)
-}
-
 func (t *l0CompactionTask) saveSegmentMeta() error {
 	result := t.result
 	var operators []UpdateOperator
@@ -428,8 +354,4 @@ func (t *l0CompactionTask) saveSegmentMeta() error {
 	)
 
 	return t.meta.UpdateSegmentsInfo(operators...)
-}
-
-func (t *l0CompactionTask) GetSlotUsage() int64 {
-	return t.slotUsage
 }
