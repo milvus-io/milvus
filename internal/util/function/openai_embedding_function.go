@@ -24,42 +24,40 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/models"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"	
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-
 const (
-	TextEmbeddingAda002  string = "text-embedding-ada-002"
+	TextEmbeddingAda002 string = "text-embedding-ada-002"
 	TextEmbedding3Small string = "text-embedding-3-small"
 	TextEmbedding3Large string = "text-embedding-3-large"
 )
 
 const (
-	maxBatch = 128
+	maxBatch   = 128
 	timeoutSec = 30
 )
 
 const (
-	ModelNameParamKey string = "model_name"
-	DimParamKey string = "dim"
-	UserParamKey string = "user"
+	ModelNameParamKey          string = "model_name"
+	DimParamKey                string = "dim"
+	UserParamKey               string = "user"
 	OpenaiEmbeddingUrlParamKey string = "embedding_url"
-	OpenaiApiKeyParamKey string = "api_key"
+	OpenaiApiKeyParamKey       string = "api_key"
 )
-
 
 type OpenAIEmbeddingFunction struct {
 	FunctionBase
 	fieldDim int64
-	
-	client *models.OpenAIEmbeddingClient
-	modelName string
+
+	client        *models.OpenAIEmbeddingClient
+	modelName     string
 	embedDimParam int64
-	user string
+	user          string
 }
 
 func createOpenAIEmbeddingClient(apiKey string, url string) (*models.OpenAIEmbeddingClient, error) {
@@ -125,18 +123,18 @@ func NewOpenAIEmbeddingFunction(coll *schemapb.CollectionSchema, schema *schemap
 		default:
 		}
 	}
-	
+
 	c, err := createOpenAIEmbeddingClient(apiKey, url)
 	if err != nil {
 		return nil, err
 	}
 
 	runner := OpenAIEmbeddingFunction{
-		FunctionBase: *base,
-		client: c,
-		fieldDim: fieldDim,
-		modelName: modelName,
-		user: user,
+		FunctionBase:  *base,
+		client:        c,
+		fieldDim:      fieldDim,
+		modelName:     modelName,
+		user:          user,
 		embedDimParam: dim,
 	}
 
@@ -147,18 +145,17 @@ func NewOpenAIEmbeddingFunction(coll *schemapb.CollectionSchema, schema *schemap
 	return &runner, nil
 }
 
-func (runner *OpenAIEmbeddingFunction)MaxBatch() int {
-	return 	5 * maxBatch
+func (runner *OpenAIEmbeddingFunction) MaxBatch() int {
+	return 5 * maxBatch
 }
 
-
-func (runner *OpenAIEmbeddingFunction)callEmbedding(texts []string) ([][]float32, error) {
+func (runner *OpenAIEmbeddingFunction) callEmbedding(texts []string) ([][]float32, error) {
 	numRows := len(texts)
 	if numRows > runner.MaxBatch() {
 		return nil, fmt.Errorf("OpenAI embedding supports up to [%d] pieces of data at a time, got [%d]", runner.MaxBatch(), numRows)
 	}
-	
-	data := make([][]float32, numRows)
+
+	data := make([][]float32, 0, numRows)
 	for i := 0; i < numRows; i += maxBatch {
 		end := i + maxBatch
 		if end > numRows {
@@ -168,8 +165,8 @@ func (runner *OpenAIEmbeddingFunction)callEmbedding(texts []string) ([][]float32
 		if err != nil {
 			return nil, err
 		}
-		if end - i != len(resp.Data) {
-			return nil, fmt.Errorf("The texts number is [%d], but got embedding number [%d]", end - i, len(resp.Data))
+		if end-i != len(resp.Data) {
+			return nil, fmt.Errorf("The texts number is [%d], but got embedding number [%d]", end-i, len(resp.Data))
 		}
 		for _, item := range resp.Data {
 			if len(item.Embedding) != int(runner.fieldDim) {
@@ -200,7 +197,7 @@ func (runner *OpenAIEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldDat
 	if err != nil {
 		return nil, err
 	}
-	data := make([]float32, 0, len(texts) * int(runner.fieldDim))
+	data := make([]float32, 0, len(texts)*int(runner.fieldDim))
 	for _, emb := range embds {
 		data = append(data, emb...)
 	}
@@ -223,10 +220,10 @@ func (runner *OpenAIEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldDat
 	return []*schemapb.FieldData{&outputField}, nil
 }
 
-func (runner *OpenAIEmbeddingFunction)ProcessSearch(placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error){
+func (runner *OpenAIEmbeddingFunction) ProcessSearch(placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error) {
 	texts := funcutil.GetVarCharFromPlaceholder(placeholderGroup.Placeholders[0]) // Already checked externally
 	embds, err := runner.callEmbedding(texts)
-	if err == nil {
+	if err != nil {
 		return nil, err
 	}
 	return funcutil.Float32VectorsToPlaceholderGroup(embds), nil
