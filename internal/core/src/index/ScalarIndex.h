@@ -133,6 +133,12 @@ class ScalarIndex : public IndexBase {
         PanicInfo(Unsupported, "pattern match is not supported");
     }
 
+    virtual bool
+    IsMmapSupported() const {
+        return index_type_ == milvus::index::BITMAP_INDEX_TYPE ||
+               index_type_ == milvus::index::HYBRID_INDEX_TYPE;
+    }
+
     virtual int64_t
     Size() = 0;
 

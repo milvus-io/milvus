@@ -22,6 +22,7 @@
 #include "common/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
+#include "knowhere/index/index_factory.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "index/Meta.h"
@@ -62,23 +63,8 @@ class IndexBase {
     virtual const bool
     HasRawData() const = 0;
 
-    bool
-    IsMmapSupported() const {
-        return index_type_ == knowhere::IndexEnum::INDEX_HNSW ||
-               index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
-               index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC ||
-               index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFPQ ||
-               index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
-               index_type_ == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT ||
-               index_type_ == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
-               index_type_ == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP ||
-               index_type_ ==
-                   knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
-               index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND ||
-               // support mmap for bitmap/hybrid index
-               index_type_ == milvus::index::BITMAP_INDEX_TYPE ||
-               index_type_ == milvus::index::HYBRID_INDEX_TYPE;
-    }
+    virtual bool
+    IsMmapSupported() const = 0;
 
     const IndexType&
     Type() const {

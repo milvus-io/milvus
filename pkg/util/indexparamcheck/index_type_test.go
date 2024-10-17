@@ -34,7 +34,7 @@ func TestIsScalarMmapIndex(t *testing.T) {
 
 func TestIsVectorMmapIndex(t *testing.T) {
 	t.Run("vector index", func(t *testing.T) {
-		assert.True(t, IsVectorMmapIndex(IndexFaissIDMap))
+		assert.True(t, IsVectorMmapIndex("FLAT"))
 		assert.False(t, IsVectorMmapIndex(IndexINVERTED))
 	})
 }
@@ -60,7 +60,7 @@ func TestValidateMmapTypeParams(t *testing.T) {
 	})
 
 	t.Run("invalid mmap enable type", func(t *testing.T) {
-		err := ValidateMmapIndexParams(IndexGpuBF, map[string]string{
+		err := ValidateMmapIndexParams("GPU_BRUTE_FORCE", map[string]string{
 			common.MmapEnabledKey: "true",
 		})
 		assert.Error(t, err)

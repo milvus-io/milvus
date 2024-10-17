@@ -33,10 +33,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -210,7 +210,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		zap.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()))
 
 	indexType := it.newIndexParams[common.IndexTypeKey]
-	if indexType == indexparamcheck.IndexDISKANN {
+	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 		// check index node support disk index
 		if !Params.IndexNodeCfg.EnableDisk.GetAsBool() {
 			log.Warn("IndexNode don't support build disk index",
