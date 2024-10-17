@@ -10,8 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-// Generated File
-// DO NOT EDIT
 #include "common/Json.h"
 #include "query/PlanImpl.h"
 #include "segcore/SegmentGrowing.h"
