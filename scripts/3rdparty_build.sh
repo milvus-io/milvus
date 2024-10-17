@@ -58,7 +58,8 @@ fi
 unameOut="$(uname -s)"
 case "${unameOut}" in
   Darwin*)
-    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
+    CLANG_VERSION=`/Library/Developer/CommandLineTools/usr/bin/clang -dumpversion`
+    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=apple-clang -s compiler.version=${CLANG_VERSION:0:2} -s compiler.libcxx=libc++ -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
     echo "Running on ${OS_NAME}"
