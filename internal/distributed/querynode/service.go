@@ -383,3 +383,7 @@ func (s *Server) SyncDistribution(ctx context.Context, req *querypb.SyncDistribu
 func (s *Server) Delete(ctx context.Context, req *querypb.DeleteRequest) (*commonpb.Status, error) {
 	return s.querynode.Delete(ctx, req)
 }
+
+func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return s.querynode.CheckHealth(ctx, req)
+}

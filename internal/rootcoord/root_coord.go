@@ -30,7 +30,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -47,7 +46,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -126,6 +127,7 @@ type Core struct {
 
 	enableActiveStandBy bool
 	activateFunc        func() error
+	healthChecker       *healthcheck.Checker
 }
 
 // --------------------- function --------------------------
@@ -480,6 +482,8 @@ func (c *Core) initInternal() error {
 		return err
 	}
 
+	interval := Params.CommonCfg.HealthCheckInterval.GetAsDuration(time.Second)
+	c.healthChecker = healthcheck.NewChecker(interval, c.healthCheckFn)
 	log.Info("init rootcoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", c.address))
 	return nil
 }
@@ -766,6 +770,10 @@ func (c *Core) revokeSession() {
 // Stop stops rootCoord.
 func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
+	if c.healthChecker != nil {
+		c.healthChecker.Close()
+	}
+
 	c.stopExecutor()
 	c.stopScheduler()
 	if c.proxyWatcher != nil {
@@ -2857,51 +2865,42 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 		}, nil
 	}
 
-	group, ctx := errgroup.WithContext(ctx)
-	errs := typeutil.NewConcurrentSet[error]()
+	latestCheckResult := c.healthChecker.GetLatestCheckResult()
+	if !latestCheckResult.IsHealthy() {
+		return healthcheck.GetCheckHealthResponseFrom(&latestCheckResult), nil
+	}
+	return componentutil.CheckHealthRespWithErr(nil), nil
+}
+
+func (c *Core) healthCheckFn() healthcheck.Result {
+	timeout := Params.CommonCfg.HealthCheckRPCTimeout.GetAsDuration(time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, timeout)
+	defer cancel()
 
 	proxyClients := c.proxyClientManager.GetProxyClients()
+
+	wg := sync.WaitGroup{}
+	lock := sync.Mutex{}
+	result := healthcheck.NewResult()
+	role := "Proxy"
+
 	proxyClients.Range(func(key int64, value types.ProxyClient) bool {
 		nodeID := key
 		proxyClient := value
-		group.Go(func() error {
-			sta, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+			err = merr.AnalyzeComponentStateResp(role, nodeID, resp, err)
 			if err != nil {
-				errs.Insert(err)
-				return err
+				lock.Lock()
+				result.AppendUnhealthyNodeMsg(healthcheck.UnhealthyNodeMsg{Role: role, NodeID: nodeID, UnhealthyMsg: err.Error()})
+				lock.Unlock()
 			}
-
-			err = merr.AnalyzeState("Proxy", nodeID, sta)
-			if err != nil {
-				errs.Insert(err)
-			}
-
-			return err
-		})
+		}()
 		return true
 	})
 
-	maxDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
-	if maxDelay > 0 {
-		group.Go(func() error {
-			err := CheckTimeTickLagExceeded(ctx, c.queryCoord, c.dataCoord, maxDelay)
-			if err != nil {
-				errs.Insert(err)
-			}
-			return err
-		})
-	}
-
-	err := group.Wait()
-	if err != nil {
-		return &milvuspb.CheckHealthResponse{
-			Status:    merr.Success(),
-			IsHealthy: false,
-			Reasons: lo.Map(errs.Collect(), func(e error, i int) string {
-				return err.Error()
-			}),
-		}, nil
-	}
-
-	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}, nil
+	wg.Wait()
+	return result
 }

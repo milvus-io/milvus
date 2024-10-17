@@ -41,7 +41,7 @@ type ControllerImpl struct {
 	client      session.Cluster
 	nodeManager *session.NodeManager
 	dist        *meta.DistributionManager
-	targetMgr   *meta.TargetManager
+	targetMgr   meta.TargetManagerInterface
 	scheduler   task.Scheduler
 }
 
@@ -98,7 +98,7 @@ func NewDistController(
 	client session.Cluster,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	scheduler task.Scheduler,
 ) *ControllerImpl {
 	return &ControllerImpl{
