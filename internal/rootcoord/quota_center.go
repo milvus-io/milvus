@@ -1027,16 +1027,22 @@ func (q *QuotaCenter) getL0SegmentsSizeFactor() map[int64]float64 {
 		return nil
 	}
 
-	l0segmentSizeLowWaterLevel := Params.QuotaConfig.L0SegmentRowCountLowWaterLevel.GetAsInt64()
-	l0SegmentSizeHighWaterLevel := Params.QuotaConfig.L0SegmentRowCountHighWaterLevel.GetAsInt64()
+	L0DeleteCountLowWaterLevel := Params.QuotaConfig.L0SegmentRowCountLowWaterLevel.GetAsInt64()
+	L0DeleteCountHighWaterLevel := Params.QuotaConfig.L0SegmentRowCountHighWaterLevel.GetAsInt64()
 
 	collectionFactor := make(map[int64]float64)
-	for collectionID, l0RowCount := range q.dataCoordMetrics.CollectionL0RowCount {
-		if l0RowCount < l0segmentSizeLowWaterLevel {
+	for collectionID, l0DeleteCount := range q.dataCoordMetrics.CollectionL0RowCount {
+		if l0DeleteCount < L0DeleteCountLowWaterLevel {
 			continue
 		}
-		factor := float64(l0SegmentSizeHighWaterLevel-l0RowCount) / float64(l0SegmentSizeHighWaterLevel-l0segmentSizeLowWaterLevel)
+		factor := float64(L0DeleteCountHighWaterLevel-l0DeleteCount) / float64(L0DeleteCountHighWaterLevel-L0DeleteCountLowWaterLevel)
 		collectionFactor[collectionID] = factor
+		log.RatedWarn(10, "QuotaCenter: DataCoord L0 segments deleted entries number exceeds watermark, limit writing rate",
+			zap.Int64("collection", collectionID),
+			zap.Int64("L0 delete count", l0DeleteCount),
+			zap.Int64("lowWatermark", L0DeleteCountLowWaterLevel),
+			zap.Int64("highWatermark", L0DeleteCountHighWaterLevel),
+			zap.Float64("factor", factor))
 	}
 	return collectionFactor
 }
@@ -1066,6 +1072,12 @@ func (q *QuotaCenter) getDeleteBufferRowCountFactor() map[int64]float64 {
 		}
 		factor := float64(deleteBufferRowCountHighWaterLevel-rowCount) / float64(deleteBufferRowCountHighWaterLevel-deleteBufferRowCountLowWaterLevel)
 		collectionFactor[collID] = factor
+		log.RatedWarn(10, "QuotaCenter: QueryNode deleteBuffer entries number exceeds watermark, limit writing rate",
+			zap.Int64("collection", collID),
+			zap.Int64("deletebuffer entriesNum", rowCount),
+			zap.Int64("lowWatermark", deleteBufferRowCountLowWaterLevel),
+			zap.Int64("highWatermark", deleteBufferRowCountHighWaterLevel),
+			zap.Float64("factor", factor))
 	}
 	return collectionFactor
 }
@@ -1075,8 +1087,8 @@ func (q *QuotaCenter) getDeleteBufferSizeFactor() map[int64]float64 {
 		return nil
 	}
 
-	deleteBufferRowCountLowWaterLevel := Params.QuotaConfig.DeleteBufferSizeLowWaterLevel.GetAsInt64()
-	deleteBufferRowCountHighWaterLevel := Params.QuotaConfig.DeleteBufferSizeHighWaterLevel.GetAsInt64()
+	deleteBufferSizeLowWaterLevel := Params.QuotaConfig.DeleteBufferSizeLowWaterLevel.GetAsInt64()
+	deleteBufferSizeHighWaterLevel := Params.QuotaConfig.DeleteBufferSizeHighWaterLevel.GetAsInt64()
 
 	deleteBufferSize := make(map[int64]int64)
 	for _, queryNodeMetrics := range q.queryNodeMetrics {
@@ -1086,12 +1098,18 @@ func (q *QuotaCenter) getDeleteBufferSizeFactor() map[int64]float64 {
 	}
 
 	collectionFactor := make(map[int64]float64)
-	for collID, rowCount := range deleteBufferSize {
-		if rowCount < deleteBufferRowCountLowWaterLevel {
+	for collID, bufferSize := range deleteBufferSize {
+		if bufferSize < deleteBufferSizeLowWaterLevel {
 			continue
 		}
-		factor := float64(deleteBufferRowCountHighWaterLevel-rowCount) / float64(deleteBufferRowCountHighWaterLevel-deleteBufferRowCountLowWaterLevel)
+		factor := float64(deleteBufferSizeHighWaterLevel-bufferSize) / float64(deleteBufferSizeHighWaterLevel-deleteBufferSizeLowWaterLevel)
 		collectionFactor[collID] = factor
+		log.RatedWarn(10, "QuotaCenter: QueryNode deleteBuffer size exceeds watermark, limit writing rate",
+			zap.Int64("collection", collID),
+			zap.Int64("deletebuffer size", bufferSize),
+			zap.Int64("lowWatermark", deleteBufferSizeLowWaterLevel),
+			zap.Int64("highWatermark", deleteBufferSizeHighWaterLevel),
+			zap.Float64("factor", factor))
 	}
 	return collectionFactor
 }
