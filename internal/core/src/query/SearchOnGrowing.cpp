@@ -94,6 +94,13 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         FloatSegmentIndexSearch(
             segment, info, query_data, num_queries, bitset, search_result);
     } else {
+        std::shared_lock<std::shared_mutex> read_chunk_mutex(
+            segment.get_chunk_mutex());
+        // check SyncDataWithIndex() again, in case the vector chunks has been removed.
+        if (segment.get_indexing_record().SyncDataWithIndex(field.get_id())) {
+            return FloatSegmentIndexSearch(
+                segment, info, query_data, num_queries, bitset, search_result);
+        }
         SubSearchResult final_qr(num_queries, topk, metric_type, round_decimal);
         // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
         auto dim = field.get_data_type() == DataType::VECTOR_SPARSE_FLOAT
@@ -101,8 +108,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                        : field.get_dim();
         dataset::SearchDataset search_dataset{
             metric_type, num_queries, topk, round_decimal, dim, query_data};
-        std::shared_lock<std::shared_mutex> read_chunk_mutex(
-            segment.get_chunk_mutex());
         int32_t current_chunk_id = 0;
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_data_base(vecfield_id);
