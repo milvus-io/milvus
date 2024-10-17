@@ -60,42 +60,6 @@ func (s *WriteBufferSuite) SetupTest() {
 	s.Require().NoError(err)
 }
 
-func (s *WriteBufferSuite) TestDefaultOption() {
-	s.Run("default BFPkOracle", func() {
-		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key, "false")
-		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key)
-		wb, err := NewWriteBuffer(s.channelName, s.metacache, s.syncMgr)
-		s.NoError(err)
-		_, ok := wb.(*bfWriteBuffer)
-		s.True(ok)
-	})
-
-	s.Run("default L0Delta policy", func() {
-		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key, "true")
-		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key)
-		wb, err := NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithIDAllocator(allocator.NewMockGIDAllocator()))
-		s.NoError(err)
-		_, ok := wb.(*l0WriteBuffer)
-		s.True(ok)
-	})
-}
-
-func (s *WriteBufferSuite) TestWriteBufferType() {
-	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
-	s.NoError(err)
-
-	_, ok := wb.(*bfWriteBuffer)
-	s.True(ok)
-
-	wb, err = NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithDeletePolicy(DeletePolicyL0Delta), WithIDAllocator(allocator.NewMockGIDAllocator()))
-	s.NoError(err)
-	_, ok = wb.(*l0WriteBuffer)
-	s.True(ok)
-
-	_, err = NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithDeletePolicy(""))
-	s.Error(err)
-}
-
 func (s *WriteBufferSuite) TestHasSegment() {
 	segmentID := int64(1001)
 
@@ -111,8 +75,7 @@ func (s *WriteBufferSuite) TestFlushSegments() {
 
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything, mock.Anything, mock.Anything).Return(nil, true)
-
-	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
+	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithIDAllocator(allocator.NewMockAllocator(s.T())))
 	s.NoError(err)
 
 	err = wb.SealSegments(context.Background(), []int64{segmentID})

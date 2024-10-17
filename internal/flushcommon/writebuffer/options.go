@@ -9,20 +9,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-const (
-	// DeletePolicyBFPKOracle is the const config value for using bf pk oracle as delete policy
-	DeletePolicyBFPkOracle = `bloom_filter_pkoracle`
-
-	// DeletePolicyL0Delta is the const config value for using L0 delta as deleta policy.
-	DeletePolicyL0Delta = `l0_delta`
-)
-
 type WriteBufferOption func(opt *writeBufferOption)
 
 type TaskObserverCallback func(t syncmgr.Task, err error)
 
 type writeBufferOption struct {
-	deletePolicy string
 	idAllocator  allocator.Interface
 	syncPolicies []SyncPolicy
 
@@ -33,13 +24,7 @@ type writeBufferOption struct {
 }
 
 func defaultWBOption(metacache metacache.MetaCache) *writeBufferOption {
-	deletePolicy := DeletePolicyBFPkOracle
-	if paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.GetAsBool() {
-		deletePolicy = DeletePolicyL0Delta
-	}
-
 	return &writeBufferOption{
-		deletePolicy: deletePolicy,
 		syncPolicies: []SyncPolicy{
 			GetFullBufferPolicy(),
 			GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
@@ -50,12 +35,6 @@ func defaultWBOption(metacache metacache.MetaCache) *writeBufferOption {
 		errorHandler: func(err error) {
 			panic(err)
 		},
-	}
-}
-
-func WithDeletePolicy(policy string) WriteBufferOption {
-	return func(opt *writeBufferOption) {
-		opt.deletePolicy = policy
 	}
 }
 
