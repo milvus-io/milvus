@@ -45,6 +45,9 @@ const (
 	// Sparse Index Param
 	SparseDropRatioBuild = "drop_ratio_build"
 
+	BM25K1 = "bm25_k1"
+	BM25B  = "bm25_b"
+
 	MaxBitmapCardinalityLimit = 1000
 )
 

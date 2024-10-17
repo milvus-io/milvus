@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -283,6 +284,135 @@ func (s *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 
 	_, err = reader.Read()
 	s.Error(err)
+}
+
+func (s *ReaderSuite) runWithDefaultValue(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool, nullPercent int) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     s.pkDataType,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_length",
+						Value: "256",
+					},
+				},
+			},
+			{
+				FieldID:  101,
+				Name:     "vec",
+				DataType: s.vecDataType,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "8",
+					},
+				},
+			},
+		},
+	}
+	// here always set nullable==true just for test, insertData will store validData only nullable==true
+	// if expectInsertData is nulls and set default value
+	// actualData will be default_value
+	fieldSchema, err := testutil.CreateFieldWithDefaultValue(dataType, 102, true)
+	s.NoError(err)
+	schema.Fields = append(schema.Fields, fieldSchema)
+
+	filePath := fmt.Sprintf("/tmp/test_%d_reader.parquet", rand.Int())
+	defer os.Remove(filePath)
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	assert.NoError(s.T(), err)
+	insertData, err := writeParquet(wf, schema, s.numRows, nullPercent)
+	assert.NoError(s.T(), err)
+
+	ctx := context.Background()
+	f := storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus_test/test_parquet_reader/"))
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
+	assert.NoError(s.T(), err)
+	schema.Fields[2].Nullable = nullable
+	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+	s.NoError(err)
+
+	checkFn := func(actualInsertData *storage.InsertData, offsetBegin, expectRows int) {
+		expectInsertData := insertData
+		for fieldID, data := range actualInsertData.Data {
+			s.Equal(expectRows, data.RowNum())
+			for i := 0; i < expectRows; i++ {
+				expect := expectInsertData.Data[fieldID].GetRow(i + offsetBegin)
+				actual := data.GetRow(i)
+				if expect == nil {
+					expect, err = nullutil.GetDefaultValue(fieldSchema)
+					s.NoError(err)
+				}
+				s.Equal(expect, actual)
+			}
+		}
+	}
+
+	res, err := reader.Read()
+	s.NoError(err)
+	checkFn(res, 0, s.numRows)
+}
+
+func (s *ReaderSuite) TestReadScalarFieldsWithDefaultValue() {
+	s.runWithDefaultValue(schemapb.DataType_Bool, schemapb.DataType_None, true, 0)
+	s.runWithDefaultValue(schemapb.DataType_Int8, schemapb.DataType_None, true, 0)
+	s.runWithDefaultValue(schemapb.DataType_Int16, schemapb.DataType_None, true, 0)
+	s.runWithDefaultValue(schemapb.DataType_Int32, schemapb.DataType_None, true, 0)
+	s.runWithDefaultValue(schemapb.DataType_Int64, schemapb.DataType_None, true, 0)
+	s.runWithDefaultValue(schemapb.DataType_Float, schemapb.DataType_None, true, 0)
+	s.runWithDefaultValue(schemapb.DataType_Double, schemapb.DataType_None, true, 0)
+	s.runWithDefaultValue(schemapb.DataType_String, schemapb.DataType_None, true, 0)
+	s.runWithDefaultValue(schemapb.DataType_VarChar, schemapb.DataType_None, true, 0)
+
+	s.runWithDefaultValue(schemapb.DataType_Bool, schemapb.DataType_None, true, 50)
+	s.runWithDefaultValue(schemapb.DataType_Int8, schemapb.DataType_None, true, 50)
+	s.runWithDefaultValue(schemapb.DataType_Int16, schemapb.DataType_None, true, 50)
+	s.runWithDefaultValue(schemapb.DataType_Int32, schemapb.DataType_None, true, 50)
+	s.runWithDefaultValue(schemapb.DataType_Int64, schemapb.DataType_None, true, 50)
+	s.runWithDefaultValue(schemapb.DataType_Float, schemapb.DataType_None, true, 50)
+	s.runWithDefaultValue(schemapb.DataType_String, schemapb.DataType_None, true, 50)
+	s.runWithDefaultValue(schemapb.DataType_VarChar, schemapb.DataType_None, true, 50)
+
+	s.runWithDefaultValue(schemapb.DataType_Bool, schemapb.DataType_None, true, 100)
+	s.runWithDefaultValue(schemapb.DataType_Int8, schemapb.DataType_None, true, 100)
+	s.runWithDefaultValue(schemapb.DataType_Int16, schemapb.DataType_None, true, 100)
+	s.runWithDefaultValue(schemapb.DataType_Int32, schemapb.DataType_None, true, 100)
+	s.runWithDefaultValue(schemapb.DataType_Int64, schemapb.DataType_None, true, 100)
+	s.runWithDefaultValue(schemapb.DataType_Float, schemapb.DataType_None, true, 100)
+	s.runWithDefaultValue(schemapb.DataType_String, schemapb.DataType_None, true, 100)
+	s.runWithDefaultValue(schemapb.DataType_VarChar, schemapb.DataType_None, true, 100)
+
+	s.runWithDefaultValue(schemapb.DataType_Bool, schemapb.DataType_None, false, 0)
+	s.runWithDefaultValue(schemapb.DataType_Int8, schemapb.DataType_None, false, 0)
+	s.runWithDefaultValue(schemapb.DataType_Int16, schemapb.DataType_None, false, 0)
+	s.runWithDefaultValue(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
+	s.runWithDefaultValue(schemapb.DataType_Int64, schemapb.DataType_None, false, 0)
+	s.runWithDefaultValue(schemapb.DataType_Float, schemapb.DataType_None, false, 0)
+	s.runWithDefaultValue(schemapb.DataType_Double, schemapb.DataType_None, false, 0)
+	s.runWithDefaultValue(schemapb.DataType_String, schemapb.DataType_None, false, 0)
+	s.runWithDefaultValue(schemapb.DataType_VarChar, schemapb.DataType_None, false, 0)
+
+	s.runWithDefaultValue(schemapb.DataType_Bool, schemapb.DataType_None, false, 50)
+	s.runWithDefaultValue(schemapb.DataType_Int8, schemapb.DataType_None, false, 50)
+	s.runWithDefaultValue(schemapb.DataType_Int16, schemapb.DataType_None, false, 50)
+	s.runWithDefaultValue(schemapb.DataType_Int32, schemapb.DataType_None, false, 50)
+	s.runWithDefaultValue(schemapb.DataType_Int64, schemapb.DataType_None, false, 50)
+	s.runWithDefaultValue(schemapb.DataType_Float, schemapb.DataType_None, false, 50)
+	s.runWithDefaultValue(schemapb.DataType_String, schemapb.DataType_None, false, 50)
+	s.runWithDefaultValue(schemapb.DataType_VarChar, schemapb.DataType_None, false, 50)
+
+	s.runWithDefaultValue(schemapb.DataType_Bool, schemapb.DataType_None, false, 100)
+	s.runWithDefaultValue(schemapb.DataType_Int8, schemapb.DataType_None, false, 100)
+	s.runWithDefaultValue(schemapb.DataType_Int16, schemapb.DataType_None, false, 100)
+	s.runWithDefaultValue(schemapb.DataType_Int32, schemapb.DataType_None, false, 100)
+	s.runWithDefaultValue(schemapb.DataType_Int64, schemapb.DataType_None, false, 100)
+	s.runWithDefaultValue(schemapb.DataType_Float, schemapb.DataType_None, false, 100)
+	s.runWithDefaultValue(schemapb.DataType_String, schemapb.DataType_None, false, 100)
+	s.runWithDefaultValue(schemapb.DataType_VarChar, schemapb.DataType_None, false, 100)
 }
 
 func (s *ReaderSuite) TestReadScalarFields() {

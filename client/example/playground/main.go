@@ -116,7 +116,7 @@ func Count() {
 		log.Println("flush done, elapsed", time.Since(start))
 
 		result, err := c.Query(ctx, milvusclient.NewQueryOption(collectionName).
-			WithOutputFields([]string{"count(*)"}).
+			WithOutputFields("count(*)").
 			WithConsistencyLevel(entity.ClStrong))
 		if err != nil {
 			log.Fatal("failed to connect to milvus, err: ", err.Error())
@@ -125,7 +125,7 @@ func Count() {
 			log.Println(rs)
 		}
 		result, err = c.Query(ctx, milvusclient.NewQueryOption(collectionName).
-			WithOutputFields([]string{"count(*)"}).
+			WithOutputFields("count(*)").
 			WithFilter("id > 0").
 			WithConsistencyLevel(entity.ClStrong))
 		if err != nil {
@@ -136,10 +136,10 @@ func Count() {
 		}
 	}
 
-	// err = c.DropCollection(ctx, milvusclient.NewDropCollectionOption(collectionName))
-	// if err != nil {
-	// 	log.Fatal("=== Failed to drop collection", err.Error())
-	// }
+	err = c.DropCollection(ctx, milvusclient.NewDropCollectionOption(collectionName))
+	if err != nil {
+		log.Fatal("=== Failed to drop collection", err.Error())
+	}
 }
 
 func HelloMilvus() {

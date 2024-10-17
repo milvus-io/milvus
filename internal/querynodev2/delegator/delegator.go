@@ -263,8 +263,13 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		}()
 	}
 
-	// build idf for bm25 search
-	if req.GetReq().GetMetricType() == metric.BM25 || (req.GetReq().GetMetricType() == metric.EMPTY && sd.isBM25Field[req.GetReq().GetFieldId()]) {
+	searchAgainstBM25Field := sd.isBM25Field[req.GetReq().GetFieldId()]
+
+	if searchAgainstBM25Field {
+		if req.GetReq().GetMetricType() != metric.BM25 && req.GetReq().GetMetricType() != metric.EMPTY {
+			return nil, merr.WrapErrParameterInvalid("BM25", req.GetReq().GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
+		}
+		// build idf for bm25 search
 		avgdl, err := sd.buildBM25IDF(req.GetReq())
 		if err != nil {
 			return nil, err
@@ -439,7 +444,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+	tSafe, err := sd.waitTSafe(ctx, req.Req.GetGuaranteeTimestamp())
 	if err != nil {
 		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
 		return err
@@ -512,7 +517,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+	tSafe, err := sd.waitTSafe(ctx, req.Req.GetGuaranteeTimestamp())
 	if err != nil {
 		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
 		return nil, err

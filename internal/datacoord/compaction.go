@@ -242,8 +242,7 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 
 		switch t.GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
-			if l0ChannelExcludes.Contain(t.GetChannel()) ||
-				mixChannelExcludes.Contain(t.GetChannel()) {
+			if mixChannelExcludes.Contain(t.GetChannel()) {
 				excluded = append(excluded, t)
 				continue
 			}

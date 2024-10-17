@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -1824,7 +1825,8 @@ func TestOptions(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
 		sessionManager := session.NewDataNodeManagerImpl()
-		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, allocator.NewMockAllocator(t))
+		mockAlloc := globalIDAllocator.NewMockGlobalIDAllocator(t)
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, mockAlloc)
 		assert.NoError(t, err)
 
 		cluster := NewClusterImpl(sessionManager, channelManager)
@@ -1863,9 +1865,9 @@ func TestHandleSessionEvent(t *testing.T) {
 	}()
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
-	alloc := allocator.NewMockAllocator(t)
 
 	sessionManager := session.NewDataNodeManagerImpl()
+	alloc := globalIDAllocator.NewMockGlobalIDAllocator(t)
 	channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, alloc)
 	assert.NoError(t, err)
 
