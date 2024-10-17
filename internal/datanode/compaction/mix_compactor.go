@@ -143,7 +143,7 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter := NewMultiSegmentWriter(t.binlogIO, compAlloc, t.plan, t.maxRows, t.partitionID, t.collectionID, t.bm25FieldIDs)
+	mWriter := NewMultiSegmentWriter(t.binlogIO, compAlloc, t.plan.GetSchema(), t.plan.GetChannel(), t.plan.GetMaxSize(), t.maxRows, t.partitionID, t.collectionID, t.bm25FieldIDs, false)
 
 	deletedRowCount := int64(0)
 	expiredRowCount := int64(0)
