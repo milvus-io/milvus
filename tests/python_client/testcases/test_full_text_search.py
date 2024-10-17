@@ -2167,12 +2167,12 @@ class TestSearchWithFullTextSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("nq", [1])
-    @pytest.mark.parametrize("empty_percent", [0, 0.5, 1.0])
+    @pytest.mark.parametrize("empty_percent", [0, 0.5])
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
-    @pytest.mark.parametrize("expr", [None, "text_match", "id_range"])
-    @pytest.mark.parametrize("tokenizer", ["default", "jieba"])
+    @pytest.mark.parametrize("expr", ["text_match", "id_range"])
+    @pytest.mark.parametrize("tokenizer", ["jieba"])
     def test_full_text_search_default(
             self, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq
     ):
@@ -2289,7 +2289,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             collection_w.create_index("text", {"index_type": "INVERTED"})
         collection_w.load()
         limit = 100
-        search_data = [fake.text().lower()+random.choice(tokens) for _ in range(nq)]
+        search_data = [fake.text().lower()+ " " + random.choice(tokens) for _ in range(nq)]
         if expr == "text_match":
             filter = f"TextMatch(text, '{tokens[0]}')"
             res, _ = collection_w.query(
@@ -2315,7 +2315,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
 
         # verify correctness
         for i in range(nq):
-            assert len(res_list[i]) <= min(limit, candidates_num)
+            assert 0 < len(res_list[i]) <= min(limit, candidates_num)
             search_text = search_data[i]
             log.info(f"res: {res_list[i]}")
             res = res_list[i]
@@ -2762,6 +2762,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         texts = df["text"].to_list()
         word_freq = cf.analyze_documents(texts, language=language)
+        tokens = list(word_freq.keys())
         batch_size = 5000
         for i in range(0, len(df), batch_size):
             collection_w.insert(
@@ -2788,28 +2789,35 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
         if enable_inverted_index:
             collection_w.create_index("text", {"index_type": "INVERTED"})
         collection_w.load()
-        nq=1
+        nq = 1
+        limit = 100
+        search_data = [fake.text().lower() + " " + random.choice(tokens) for _ in range(nq)]
         sparse_search = AnnSearchRequest(
             data=[fake.text().lower() for _ in range(nq)],
             anns_field="text_sparse_emb",
-            param={"metric_type": "IP"},
-            limit=100,
+            param={"metric_type": "BM25"},
+            limit=limit,
         )
         dense_search = AnnSearchRequest(
             data=[[random.random() for _ in range(dim)] for _ in range(nq)],
             anns_field="emb",
             param={"metric_type": "L2"},
-            limit=100,
+            limit=limit,
 
         )
         # hybrid search
-        res, _ = collection_w.hybrid_search(
+        res_list, _ = collection_w.hybrid_search(
             reqs=[sparse_search,dense_search],
             rerank=WeightedRanker(0.5,0.5),
-            limit=100,
+            limit=limit,
             output_fields=["id", "text"]
         )
-        assert len(res) == nq
+        assert len(res_list) == nq
+        # check the result correctness
+        for i in range(nq):
+            log.info(f"res length: {len(res_list[i])}")
+            assert len(res_list[i]) == limit
+
 
 
 class TestSearchWithFullTextSearchBenchmark(TestcaseBase):

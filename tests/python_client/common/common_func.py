@@ -264,7 +264,7 @@ def get_bm25_ground_truth(corpus, queries, top_k=100, language="en"):
     def remove_punctuation(text):
         text = text.strip()
         text = text.replace("\n", " ")
-        return re.sub(r'[^\w\s]', '', text)
+        return re.sub(r'[^\w\s]', ' ', text)
 
     # Tokenize the corpus
     def jieba_split(text):
@@ -294,7 +294,7 @@ def analyze_documents(texts, language="en"):
     def remove_punctuation(text):
         text = text.strip()
         text = text.replace("\n", " ")
-        return re.sub(r'[^\w\s]', '', text)
+        return re.sub(r'[^\w\s]', ' ', text)
 
     # Tokenize the corpus
     def jieba_split(text):
