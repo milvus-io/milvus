@@ -1683,7 +1683,7 @@ func TestGetCompactionState(t *testing.T) {
 				{State: datapb.CompactionTaskState_timeout},
 				{State: datapb.CompactionTaskState_timeout},
 			})
-		mockHandler := newCompactionPlanHandler(nil, nil, nil, mockMeta, nil, nil, nil)
+		mockHandler := newCompactionPlanHandler(nil, nil, nil, mockMeta, nil, nil, nil, nil)
 		svr.compactionHandler = mockHandler
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 1})
 		assert.NoError(t, err)
