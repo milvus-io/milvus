@@ -111,6 +111,7 @@ type ImmutableNodeInfo struct {
 	Address  string
 	Hostname string
 	Version  semver.Version
+	Label    string
 }
 
 const (
@@ -145,6 +146,10 @@ func (n *NodeInfo) Addr() string {
 
 func (n *NodeInfo) Hostname() string {
 	return n.immutableInfo.Hostname
+}
+
+func (n *NodeInfo) Label() string {
+	return n.immutableInfo.Label
 }
 
 func (n *NodeInfo) SegmentCnt() int {
