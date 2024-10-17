@@ -486,14 +486,16 @@ AddFieldDataInfoForSealed(CSegmentInterface c_segment,
 }
 
 CStatus
-WarmupChunkCache(CSegmentInterface c_segment, int64_t field_id) {
+WarmupChunkCache(CSegmentInterface c_segment,
+                 int64_t field_id,
+                 bool mmap_enabled) {
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         auto segment =
             dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
-        segment->WarmupChunkCache(milvus::FieldId(field_id));
+        segment->WarmupChunkCache(milvus::FieldId(field_id), mmap_enabled);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());

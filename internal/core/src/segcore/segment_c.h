@@ -137,7 +137,9 @@ AddFieldDataInfoForSealed(CSegmentInterface c_segment,
                           CLoadFieldDataInfo c_load_field_data_info);
 
 CStatus
-WarmupChunkCache(CSegmentInterface c_segment, int64_t field_id);
+WarmupChunkCache(CSegmentInterface c_segment,
+                 int64_t field_id,
+                 bool mmap_enabled);
 
 //////////////////////////////    interfaces for SegmentInterface    //////////////////////////////
 CStatus
