@@ -2709,10 +2709,6 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
 However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.`,
 		Export: true,
-		Formatter: func(v string) string {
-			mmapEnabled := p.MmapEnabled.GetAsBool()
-			return strconv.FormatBool(mmapEnabled && getAsBool(v))
-		},
 	}
 	p.GrowingMmapEnabled.Init(base.mgr)
 
