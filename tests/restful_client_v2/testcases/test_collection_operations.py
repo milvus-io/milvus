@@ -250,11 +250,11 @@ class TestCreateCollection(TestBase):
         assert len(fields) == len(payload['schema']['fields'])
         for field in fields:
             if field['name'] == primary_key_field:
-                assert field['isPrimaryKey'] is True
+                assert field['primaryKey'] is True
             if field['name'] == partition_key_field:
-                assert field['isPartitionKey'] is True
+                assert field['partitionKey'] is True
             if field['name'] == clustering_key_field:
-                assert field['isClusteringKey'] is True
+                assert field['clusteringKey'] is True
 
         # check index
         index_info = [index.to_dict() for index in c.indexes]
