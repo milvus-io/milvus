@@ -91,7 +91,7 @@ type SegmentEntry struct {
 }
 
 // NewDistribution creates a new distribution instance with all field initialized.
-func NewDistribution(idfOracle IDFOracle) *distribution {
+func NewDistribution() *distribution {
 	dist := &distribution{
 		serviceable:     atomic.NewBool(false),
 		growingSegments: make(map[UniqueID]SegmentEntry),
@@ -100,11 +100,16 @@ func NewDistribution(idfOracle IDFOracle) *distribution {
 		current:         atomic.NewPointer[snapshot](nil),
 		offlines:        typeutil.NewSet[int64](),
 		targetVersion:   atomic.NewInt64(initialTargetVersion),
-		idfOracle:       idfOracle,
 	}
 
 	dist.genSnapshot()
 	return dist
+}
+
+func (d *distribution) SetIDFOracle(idfOracle IDFOracle) {
+	d.mut.Lock()
+	defer d.mut.Unlock()
+	d.idfOracle = idfOracle
 }
 
 func (d *distribution) PinReadableSegments(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, version int64, err error) {
