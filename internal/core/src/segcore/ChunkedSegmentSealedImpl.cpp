@@ -196,8 +196,9 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                 if (!is_sorted_by_pk_ && insert_record_.empty_pks() &&
                     int64_index->HasRawData()) {
                     for (int i = 0; i < row_count; ++i) {
-                        insert_record_.insert_pk(int64_index->Reverse_Lookup(i),
-                                                 i);
+                        auto raw = int64_index->Reverse_Lookup(i);
+                        AssertInfo(raw.has_value(), "pk not found");
+                        insert_record_.insert_pk(raw.value(), i);
                     }
                     insert_record_.seal_pks();
                 }
@@ -210,8 +211,9 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                 if (!is_sorted_by_pk_ && insert_record_.empty_pks() &&
                     string_index->HasRawData()) {
                     for (int i = 0; i < row_count; ++i) {
-                        insert_record_.insert_pk(
-                            string_index->Reverse_Lookup(i), i);
+                        auto raw = string_index->Reverse_Lookup(i);
+                        AssertInfo(raw.has_value(), "pk not found");
+                        insert_record_.insert_pk(raw.value(), i);
                     }
                     insert_record_.seal_pks();
                 }
@@ -1630,7 +1632,11 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
                        "converted to string index");
             auto n = impl->Size();
             for (size_t i = 0; i < n; i++) {
-                index->AddText(impl->Reverse_Lookup(i), i);
+                auto raw = impl->Reverse_Lookup(i);
+                if (!raw.has_value()) {
+                    continue;
+                }
+                index->AddText(raw.value(), i);
             }
         }
     }

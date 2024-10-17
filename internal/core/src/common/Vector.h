@@ -19,6 +19,8 @@
 #include <memory>
 #include <string>
 
+#include "EasyAssert.h"
+#include "Types.h"
 #include "common/FieldData.h"
 
 namespace milvus {
@@ -50,6 +52,7 @@ class BaseVector {
  protected:
     DataType type_kind_;
     size_t length_;
+    // todo: use null_count to skip some bitset operate
     std::optional<size_t> null_count_;
 };
 
@@ -65,8 +68,8 @@ class ColumnVector final : public BaseVector {
                  size_t length,
                  std::optional<size_t> null_count = std::nullopt)
         : BaseVector(data_type, length, null_count) {
-        //todo: support null expr
         values_ = InitScalarFieldData(data_type, false, length);
+        valid_values_ = InitScalarFieldData(data_type, false, length);
     }
 
     //    ColumnVector(FixedVector<bool>&& data)
@@ -75,20 +78,35 @@ class ColumnVector final : public BaseVector {
     //            std::make_shared<FieldData<bool>>(DataType::BOOL, std::move(data));
     //    }
 
+    // // the size is the number of bits
+    // ColumnVector(TargetBitmap&& bitmap)
+    //     : BaseVector(DataType::INT8, bitmap.size()) {
+    //     values_ = std::make_shared<FieldDataImpl<uint8_t, false>>(
+    //         bitmap.size(), DataType::INT8, false, std::move(bitmap).into());
+    // }
+
     // the size is the number of bits
-    ColumnVector(TargetBitmap&& bitmap)
+    ColumnVector(TargetBitmap&& bitmap, TargetBitmap&& valid_bitmap)
         : BaseVector(DataType::INT8, bitmap.size()) {
         values_ = std::make_shared<FieldBitsetImpl<uint8_t>>(DataType::INT8,
                                                              std::move(bitmap));
+        valid_values_ = std::make_shared<FieldBitsetImpl<uint8_t>>(
+            DataType::INT8, std::move(valid_bitmap));
     }
 
     virtual ~ColumnVector() override {
         values_.reset();
+        valid_values_.reset();
     }
 
     void*
     GetRawData() {
         return values_->Data();
+    }
+
+    void*
+    GetValidRawData() {
+        return valid_values_->Data();
     }
 
     template <typename As>
@@ -99,6 +117,7 @@ class ColumnVector final : public BaseVector {
 
  private:
     FieldDataPtr values_;
+    FieldDataPtr valid_values_;
 };
 
 using ColumnVectorPtr = std::shared_ptr<ColumnVector>;
