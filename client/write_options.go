@@ -34,6 +34,7 @@ import (
 type InsertOption interface {
 	InsertRequest(coll *entity.Collection) (*milvuspb.InsertRequest, error)
 	CollectionName() string
+	WriteBackPKs(schema *entity.Schema, pks column.Column) error
 }
 
 type UpsertOption interface {
@@ -50,6 +51,11 @@ type columnBasedDataOption struct {
 	collName      string
 	partitionName string
 	columns       []column.Column
+}
+
+func (opt *columnBasedDataOption) WriteBackPKs(_ *entity.Schema, _ column.Column) error {
+	// column based data option need not write back pk
+	return nil
 }
 
 func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema, columns ...column.Column) ([]*schemapb.FieldData, int, error) {
@@ -294,6 +300,28 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
 	}, nil
+}
+
+func (opt *rowBasedDataOption) WriteBackPKs(sch *entity.Schema, pks column.Column) error {
+	pkField := sch.PKField()
+	// not auto id, return
+	if pkField == nil || !pkField.AutoID {
+		return nil
+	}
+	if len(opt.rows) != pks.Len() {
+		return errors.New("input row count is not equal to result pk length")
+	}
+
+	for i, r := range opt.rows {
+		// index range checked
+		v, _ := pks.Get(i)
+		err := row.SetField(r, pkField.Name, v)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 type DeleteOption interface {
