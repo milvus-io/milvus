@@ -26,7 +26,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/kv"
@@ -69,7 +69,7 @@ type ChannelManagerImpl struct {
 	h          Handler
 	store      RWChannelStore
 	subCluster SubCluster // sessionManager
-	allocator  allocator.Allocator
+	allocator  allocator.GlobalIDAllocatorInterface
 
 	factory       ChannelPolicyFactory
 	balancePolicy BalanceChannelPolicy
@@ -100,7 +100,7 @@ func NewChannelManager(
 	kv kv.TxnKV,
 	h Handler,
 	subCluster SubCluster, // sessionManager
-	alloc allocator.Allocator,
+	alloc allocator.GlobalIDAllocatorInterface,
 	options ...ChannelmanagerOpt,
 ) (*ChannelManagerImpl, error) {
 	m := &ChannelManagerImpl{
@@ -702,7 +702,7 @@ func (m *ChannelManagerImpl) fillChannelWatchInfo(op *ChannelOp) error {
 	startTs := time.Now().Unix()
 	for _, ch := range op.Channels {
 		vcInfo := m.h.GetDataVChanPositions(ch, allPartitionID)
-		opID, err := m.allocator.AllocID(context.Background())
+		opID, err := m.allocator.AllocOne()
 		if err != nil {
 			return err
 		}
