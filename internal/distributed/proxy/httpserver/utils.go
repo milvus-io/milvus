@@ -166,11 +166,12 @@ func printFieldsV2(fields []*schemapb.FieldSchema) []gin.H {
 
 func printFieldDetail(field *schemapb.FieldSchema, oldVersion bool) gin.H {
 	fieldDetail := gin.H{
-		HTTPReturnFieldName:         field.Name,
-		HTTPReturnFieldPrimaryKey:   field.IsPrimaryKey,
-		HTTPReturnFieldPartitionKey: field.IsPartitionKey,
-		HTTPReturnFieldAutoID:       field.AutoID,
-		HTTPReturnDescription:       field.Description,
+		HTTPReturnFieldName:          field.Name,
+		HTTPReturnFieldPrimaryKey:    field.IsPrimaryKey,
+		HTTPReturnFieldPartitionKey:  field.IsPartitionKey,
+		HTTPReturnFieldClusteringKey: field.IsClusteringKey,
+		HTTPReturnFieldAutoID:        field.AutoID,
+		HTTPReturnDescription:        field.Description,
 	}
 	if field.GetIsFunctionOutput() {
 		fieldDetail[HTTPReturnFieldIsFunctionOutput] = true

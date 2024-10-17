@@ -1254,12 +1254,13 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			}
 			dataType := schemapb.DataType(fieldDataType)
 			fieldSchema := schemapb.FieldSchema{
-				Name:           field.FieldName,
-				IsPrimaryKey:   field.IsPrimary,
-				IsPartitionKey: field.IsPartitionKey,
-				DataType:       dataType,
-				TypeParams:     []*commonpb.KeyValuePair{},
-				Nullable:       field.Nullable,
+				Name:            field.FieldName,
+				IsPrimaryKey:    field.IsPrimary,
+				IsPartitionKey:  field.IsPartitionKey,
+				IsClusteringKey: field.IsClusteringKey,
+				DataType:        dataType,
+				TypeParams:      []*commonpb.KeyValuePair{},
+				Nullable:        field.Nullable,
 			}
 
 			fieldSchema.DefaultValue, err = convertDefaultValue(field.DefaultValue, dataType)
