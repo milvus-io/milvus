@@ -346,36 +346,45 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 		}, []UniqueID{10, 13}},
 		{"with multiple L0 tasks same channel", []CompactionTask{
 			&l0CompactionTask{
-				CompactionTask: &datapb.CompactionTask{
-					PlanID:  10,
-					Type:    datapb.CompactionType_Level0DeleteCompaction,
-					State:   datapb.CompactionTaskState_pipelining,
-					Channel: "ch-11",
-					NodeID:  102,
+				compactionTaskBase: compactionTaskBase{
+					CompactionTask: &datapb.CompactionTask{
+						PlanID:  10,
+						Type:    datapb.CompactionType_Level0DeleteCompaction,
+						State:   datapb.CompactionTaskState_pipelining,
+						Channel: "ch-11",
+						NodeID:  102,
+					},
+					meta: s.mockMeta,
 				},
 				plan:     &datapb.CompactionPlan{PlanID: 10, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction},
 				sessions: s.mockSessMgr,
 				meta:     s.mockMeta,
 			},
 			&l0CompactionTask{
-				CompactionTask: &datapb.CompactionTask{
-					PlanID:  11,
-					Type:    datapb.CompactionType_Level0DeleteCompaction,
-					State:   datapb.CompactionTaskState_pipelining,
-					Channel: "ch-11",
-					NodeID:  102,
+				compactionTaskBase: compactionTaskBase{
+					CompactionTask: &datapb.CompactionTask{
+						PlanID:  11,
+						Type:    datapb.CompactionType_Level0DeleteCompaction,
+						State:   datapb.CompactionTaskState_pipelining,
+						Channel: "ch-11",
+						NodeID:  102,
+					},
+					meta: s.mockMeta,
 				},
 				plan:     &datapb.CompactionPlan{PlanID: 11, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction},
 				sessions: s.mockSessMgr,
 				meta:     s.mockMeta,
 			},
 			&l0CompactionTask{
-				CompactionTask: &datapb.CompactionTask{
-					PlanID:  12,
-					Type:    datapb.CompactionType_Level0DeleteCompaction,
-					State:   datapb.CompactionTaskState_pipelining,
-					Channel: "ch-11",
-					NodeID:  102,
+				compactionTaskBase: compactionTaskBase{
+					CompactionTask: &datapb.CompactionTask{
+						PlanID:  12,
+						Type:    datapb.CompactionType_Level0DeleteCompaction,
+						State:   datapb.CompactionTaskState_pipelining,
+						Channel: "ch-11",
+						NodeID:  102,
+					},
+					meta: s.mockMeta,
 				},
 				plan:     &datapb.CompactionPlan{PlanID: 12, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction},
 				sessions: s.mockSessMgr,

@@ -104,17 +104,20 @@ func (s *CompactionTaskSuite) TestCompactionTimeout() {
 	alloc := allocator.NewMockAllocator(s.T())
 	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	task := &mixCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
-			PlanID:           1,
-			TriggerID:        19530,
-			CollectionID:     1,
-			PartitionID:      10,
-			Type:             datapb.CompactionType_MixCompaction,
-			NodeID:           1,
-			State:            datapb.CompactionTaskState_executing,
-			InputSegments:    []int64{200, 201},
-			ResultSegments:   []int64{100, 200},
-			TimeoutInSeconds: 1,
+		compactionTaskBase: compactionTaskBase{
+			CompactionTask: &datapb.CompactionTask{
+				PlanID:           1,
+				TriggerID:        19530,
+				CollectionID:     1,
+				PartitionID:      10,
+				Type:             datapb.CompactionType_MixCompaction,
+				NodeID:           1,
+				State:            datapb.CompactionTaskState_executing,
+				InputSegments:    []int64{200, 201},
+				ResultSegments:   []int64{100, 200},
+				TimeoutInSeconds: 1,
+			},
+			meta: s.mockMeta,
 		},
 		meta:      s.mockMeta,
 		sessions:  s.mockSessMgr,
