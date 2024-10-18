@@ -163,6 +163,8 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListVShardInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListReVShardTasks(mock.Anything).Return(nil, nil)
 
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
@@ -247,6 +249,8 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListVShardInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListReVShardTasks(mock.Anything).Return(nil, nil)
 
 	imeta, err := NewImportMeta(catalog)
 	assert.NoError(t, err)
@@ -433,6 +437,8 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListVShardInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListReVShardTasks(mock.Anything).Return(nil, nil)
 
 	imeta, err := NewImportMeta(catalog)
 	assert.NoError(t, err)
