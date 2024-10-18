@@ -27,9 +27,13 @@ namespace bitset {
 namespace detail {
 
 // The default reference vectorizer.
-// Its every function returns a boolean value whether a vectorized implementation
+// Functions return a boolean value whether a vectorized implementation
 //   exists and was invoked. If not, then the caller code will use a default
 //   non-vectorized implementation.
+// Certain functions just forward the parameters to the platform code. Basically,
+//   sometimes compiler can do a good job on its own, we just need to make sure
+//   that it uses available appropriate hardware instructions. No specialized
+//   implementation is used under the hood.
 // The default vectorizer provides no vectorized implementation, forcing the
 //   caller to use a defaut non-vectorized implementation every time.
 struct VectorizedRef {
@@ -86,6 +90,72 @@ struct VectorizedRef {
                      const ArithHighPrecisionType<T>& right_operand,
                      const ArithHighPrecisionType<T>& value,
                      const size_t size) {
+        return false;
+    }
+
+    // The following functions just forward parameters to the reference code,
+    //   generated for a particular platform.
+    // The reference 'platform' is just a default platform.
+
+    template <typename ElementT>
+    static inline bool
+    forward_op_and(ElementT* const left,
+                   const ElementT* const right,
+                   const size_t start_left,
+                   const size_t start_right,
+                   const size_t size) {
+        return false;
+    }
+
+    template <typename ElementT>
+    static inline bool
+    forward_op_and_multiple(ElementT* const left,
+                            const ElementT* const* const rights,
+                            const size_t start_left,
+                            const size_t* const __restrict start_rights,
+                            const size_t n_rights,
+                            const size_t size) {
+        return false;
+    }
+
+    template <typename ElementT>
+    static inline bool
+    forward_op_or(ElementT* const left,
+                  const ElementT* const right,
+                  const size_t start_left,
+                  const size_t start_right,
+                  const size_t size) {
+        return false;
+    }
+
+    template <typename ElementT>
+    static inline bool
+    forward_op_or_multiple(ElementT* const left,
+                           const ElementT* const* const rights,
+                           const size_t start_left,
+                           const size_t* const __restrict start_rights,
+                           const size_t n_rights,
+                           const size_t size) {
+        return false;
+    }
+
+    template <typename ElementT>
+    static inline bool
+    forward_op_xor(ElementT* const left,
+                   const ElementT* const right,
+                   const size_t start_left,
+                   const size_t start_right,
+                   const size_t size) {
+        return false;
+    }
+
+    template <typename ElementT>
+    static inline bool
+    forward_op_sub(ElementT* const left,
+                   const ElementT* const right,
+                   const size_t start_left,
+                   const size_t start_right,
+                   const size_t size) {
         return false;
     }
 };
