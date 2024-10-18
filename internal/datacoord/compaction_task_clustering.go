@@ -25,7 +25,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -47,11 +46,10 @@ import (
 var _ CompactionTask = (*clusteringCompactionTask)(nil)
 
 type clusteringCompactionTask struct {
-	*datapb.CompactionTask
+	compactionTaskBase
 	plan   *datapb.CompactionPlan
 	result *datapb.CompactionPlanResult
 
-	span             trace.Span
 	allocator        allocator.Allocator
 	meta             CompactionMeta
 	sessions         session.DataNodeManager
@@ -59,19 +57,21 @@ type clusteringCompactionTask struct {
 	analyzeScheduler *taskScheduler
 
 	maxRetryTimes int32
-	slotUsage     int64
 }
 
 func newClusteringCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, session session.DataNodeManager, handler Handler, analyzeScheduler *taskScheduler) *clusteringCompactionTask {
 	return &clusteringCompactionTask{
-		CompactionTask:   t,
+		compactionTaskBase: compactionTaskBase{
+			CompactionTask: t,
+			meta:           meta,
+			slotUsage:      paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64(),
+		},
 		allocator:        allocator,
 		meta:             meta,
 		sessions:         session,
 		handler:          handler,
 		analyzeScheduler: analyzeScheduler,
 		maxRetryTimes:    3,
-		slotUsage:        paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64(),
 	}
 }
 
@@ -208,7 +208,6 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 }
 
 func (t *clusteringCompactionTask) processPipelining() error {
-	log := log.With(zap.Int64("triggerID", t.TriggerID), zap.Int64("collectionID", t.GetCollectionID()), zap.Int64("planID", t.GetPlanID()))
 	if t.NeedReAssignNodeID() {
 		log.Debug("wait for the node to be assigned before proceeding with the subsequent steps")
 		return nil
@@ -578,7 +577,7 @@ func (t *clusteringCompactionTask) doCompact() error {
 		log.Warn("Failed to BuildCompactionRequest", zap.Error(err))
 		return err
 	}
-	err = t.sessions.Compaction(context.Background(), t.GetNodeID(), t.GetPlan())
+	err = t.sessions.Compaction(context.Background(), t.GetNodeID(), t.plan)
 	if err != nil {
 		if errors.Is(err, merr.ErrDataNodeSlotExhausted) {
 			log.Warn("fail to notify compaction tasks to DataNode because the node slots exhausted")
@@ -598,17 +597,6 @@ func (t *clusteringCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datap
 	return taskClone
 }
 
-func (t *clusteringCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
-	task := t.ShadowClone(opts...)
-	err := t.saveTaskMeta(task)
-	if err != nil {
-		log.Warn("Failed to saveTaskMeta", zap.Error(err))
-		return merr.WrapErrClusteringCompactionMetaError("updateAndSaveTaskMeta", err) // retryable
-	}
-	t.CompactionTask = task
-	return nil
-}
-
 func (t *clusteringCompactionTask) checkTimeout() bool {
 	if t.GetTimeoutInSeconds() > 0 {
 		diff := time.Since(time.Unix(t.GetStartTime(), 0)).Seconds()
@@ -623,62 +611,8 @@ func (t *clusteringCompactionTask) checkTimeout() bool {
 	return false
 }
 
-func (t *clusteringCompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
-	return t.meta.SaveCompactionTask(task)
-}
-
-func (t *clusteringCompactionTask) SaveTaskMeta() error {
-	return t.saveTaskMeta(t.CompactionTask)
-}
-
-func (t *clusteringCompactionTask) GetPlan() *datapb.CompactionPlan {
-	return t.plan
-}
-
-func (t *clusteringCompactionTask) GetResult() *datapb.CompactionPlanResult {
-	return t.result
-}
-
-func (t *clusteringCompactionTask) GetSpan() trace.Span {
-	return t.span
-}
-
-func (t *clusteringCompactionTask) EndSpan() {
-	if t.span != nil {
-		t.span.End()
-	}
-}
-
-func (t *clusteringCompactionTask) SetResult(result *datapb.CompactionPlanResult) {
-	t.result = result
-}
-
-func (t *clusteringCompactionTask) SetSpan(span trace.Span) {
-	t.span = span
-}
-
-func (t *clusteringCompactionTask) SetPlan(plan *datapb.CompactionPlan) {
-	t.plan = plan
-}
-
-func (t *clusteringCompactionTask) SetTask(ct *datapb.CompactionTask) {
-	t.CompactionTask = ct
-}
-
-func (t *clusteringCompactionTask) SetNodeID(id UniqueID) error {
-	return t.updateAndSaveTaskMeta(setNodeID(id))
-}
-
-func (t *clusteringCompactionTask) GetLabel() string {
-	return fmt.Sprintf("%d-%s", t.PartitionID, t.GetChannel())
-}
-
 func (t *clusteringCompactionTask) NeedReAssignNodeID() bool {
 	return t.GetState() == datapb.CompactionTaskState_pipelining && (t.GetNodeID() == 0 || t.GetNodeID() == NullNodeID)
-}
-
-func (t *clusteringCompactionTask) GetSlotUsage() int64 {
-	return t.slotUsage
 }
 
 func (t *clusteringCompactionTask) CleanLogPath() {

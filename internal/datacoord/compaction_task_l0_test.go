@@ -90,15 +90,18 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
 		}}
 	}).Times(2)
 	task := &l0CompactionTask{
-		CompactionTask: &datapb.CompactionTask{
-			PlanID:        1,
-			TriggerID:     19530,
-			CollectionID:  1,
-			PartitionID:   10,
-			Type:          datapb.CompactionType_Level0DeleteCompaction,
-			NodeID:        1,
-			State:         datapb.CompactionTaskState_executing,
-			InputSegments: []int64{100, 101},
+		compactionTaskBase: compactionTaskBase{
+			CompactionTask: &datapb.CompactionTask{
+				PlanID:        1,
+				TriggerID:     19530,
+				CollectionID:  1,
+				PartitionID:   10,
+				Type:          datapb.CompactionType_Level0DeleteCompaction,
+				NodeID:        1,
+				State:         datapb.CompactionTaskState_executing,
+				InputSegments: []int64{100, 101},
+			},
+			meta: s.mockMeta,
 		},
 		meta: s.mockMeta,
 	}
@@ -122,19 +125,23 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SegmentNotFoundL0() {
 		return nil
 	}).Once()
 	task := &l0CompactionTask{
-		CompactionTask: &datapb.CompactionTask{
-			InputSegments: []int64{102},
-			PlanID:        1,
-			TriggerID:     19530,
-			CollectionID:  1,
-			PartitionID:   10,
-			Channel:       channel,
-			Type:          datapb.CompactionType_Level0DeleteCompaction,
-			NodeID:        1,
-			State:         datapb.CompactionTaskState_executing,
+		compactionTaskBase: compactionTaskBase{
+			CompactionTask: &datapb.CompactionTask{
+				InputSegments: []int64{102},
+				PlanID:        1,
+				TriggerID:     19530,
+				CollectionID:  1,
+				PartitionID:   10,
+				Channel:       channel,
+				Type:          datapb.CompactionType_Level0DeleteCompaction,
+				NodeID:        1,
+				State:         datapb.CompactionTaskState_executing,
+			},
+			meta: s.mockMeta,
 		},
 		meta: s.mockMeta,
 	}
+
 	alloc := allocator.NewMockAllocator(s.T())
 	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	task.allocator = alloc
@@ -159,15 +166,18 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything).Return(nil).Once()
 
 	task := &l0CompactionTask{
-		CompactionTask: &datapb.CompactionTask{
-			PlanID:        1,
-			TriggerID:     19530,
-			CollectionID:  1,
-			PartitionID:   10,
-			Type:          datapb.CompactionType_Level0DeleteCompaction,
-			NodeID:        1,
-			State:         datapb.CompactionTaskState_executing,
-			InputSegments: []int64{100, 101},
+		compactionTaskBase: compactionTaskBase{
+			CompactionTask: &datapb.CompactionTask{
+				PlanID:        1,
+				TriggerID:     19530,
+				CollectionID:  1,
+				PartitionID:   10,
+				Type:          datapb.CompactionType_Level0DeleteCompaction,
+				NodeID:        1,
+				State:         datapb.CompactionTaskState_executing,
+				InputSegments: []int64{100, 101},
+			},
+			meta: s.mockMeta,
 		},
 		meta: s.mockMeta,
 	}
@@ -207,16 +217,19 @@ func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
 
 func (s *L0CompactionTaskSuite) generateTestL0Task(state datapb.CompactionTaskState) *l0CompactionTask {
 	return &l0CompactionTask{
-		CompactionTask: &datapb.CompactionTask{
-			PlanID:        1,
-			TriggerID:     19530,
-			CollectionID:  1,
-			PartitionID:   10,
-			Type:          datapb.CompactionType_Level0DeleteCompaction,
-			NodeID:        NullNodeID,
-			State:         state,
-			Channel:       "ch-1",
-			InputSegments: []int64{100, 101},
+		compactionTaskBase: compactionTaskBase{
+			CompactionTask: &datapb.CompactionTask{
+				PlanID:        1,
+				TriggerID:     19530,
+				CollectionID:  1,
+				PartitionID:   10,
+				Type:          datapb.CompactionType_Level0DeleteCompaction,
+				NodeID:        NullNodeID,
+				State:         state,
+				Channel:       "ch-1",
+				InputSegments: []int64{100, 101},
+			},
+			meta: s.mockMeta,
 		},
 		meta:      s.mockMeta,
 		sessions:  s.mockSessMgr,
@@ -673,10 +686,10 @@ func (s *L0CompactionTaskSuite) TestSetterGetter() {
 	t.SetSpan(trace.SpanFromContext(context.TODO()))
 	s.NotPanics(t.EndSpan)
 
-	rst := t.GetResult()
+	rst := t.result
 	s.Nil(rst)
-	t.SetResult(&datapb.CompactionPlanResult{PlanID: 19530})
-	s.NotNil(t.GetResult())
+	t.result = &datapb.CompactionPlanResult{PlanID: 19530}
+	s.NotNil(t.result)
 
 	label := t.GetLabel()
 	s.Equal("10-ch-1", label)
@@ -685,8 +698,8 @@ func (s *L0CompactionTaskSuite) TestSetterGetter() {
 	s.EqualValues(100, t.GetStartTime())
 
 	t.SetTask(nil)
-	t.SetPlan(&datapb.CompactionPlan{PlanID: 19530})
-	s.NotNil(t.GetPlan())
+	t.plan = &datapb.CompactionPlan{PlanID: 19530}
+	s.NotNil(t.plan)
 
 	s.Run("set NodeID", func() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
@@ -705,7 +718,7 @@ func (s *L0CompactionTaskSuite) TestCleanLogPath() {
 
 	s.Run("clear path", func() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
-		t.SetPlan(&datapb.CompactionPlan{
+		t.plan = &datapb.CompactionPlan{
 			Channel: "ch-1",
 			Type:    datapb.CompactionType_MixCompaction,
 			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
@@ -717,9 +730,9 @@ func (s *L0CompactionTaskSuite) TestCleanLogPath() {
 				},
 			},
 			PlanID: 19530,
-		})
+		}
 
-		t.SetResult(&datapb.CompactionPlanResult{
+		t.result = &datapb.CompactionPlanResult{
 			Segments: []*datapb.CompactionSegment{
 				{
 					SegmentID:           100,
@@ -729,16 +742,16 @@ func (s *L0CompactionTaskSuite) TestCleanLogPath() {
 				},
 			},
 			PlanID: 19530,
-		})
+		}
 
 		t.CleanLogPath()
 
-		s.Empty(t.GetPlan().GetSegmentBinlogs()[0].GetFieldBinlogs())
-		s.Empty(t.GetPlan().GetSegmentBinlogs()[0].GetField2StatslogPaths())
-		s.Empty(t.GetPlan().GetSegmentBinlogs()[0].GetDeltalogs())
+		s.Empty(t.plan.GetSegmentBinlogs()[0].GetFieldBinlogs())
+		s.Empty(t.plan.GetSegmentBinlogs()[0].GetField2StatslogPaths())
+		s.Empty(t.plan.GetSegmentBinlogs()[0].GetDeltalogs())
 
-		s.Empty(t.GetResult().GetSegments()[0].GetInsertLogs())
-		s.Empty(t.GetResult().GetSegments()[0].GetField2StatslogPaths())
-		s.Empty(t.GetResult().GetSegments()[0].GetDeltalogs())
+		s.Empty(t.result.GetSegments()[0].GetInsertLogs())
+		s.Empty(t.result.GetSegments()[0].GetField2StatslogPaths())
+		s.Empty(t.result.GetSegments()[0].GetDeltalogs())
 	})
 }
