@@ -209,6 +209,7 @@ func (w *remoteWorker) Stop() {
 		for _, client := range w.clients {
 			client.Close()
 		}
+		return
 	}
 	if err := w.client.Close(); err != nil {
 		log.Warn("failed to call Close via grpc worker", zap.Error(err))
