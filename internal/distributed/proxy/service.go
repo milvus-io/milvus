@@ -404,7 +404,7 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 	}
 
 	opts := tracer.GetInterceptorOpts()
-	s.grpcInternalServer = grpc.NewServer(
+	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
@@ -428,7 +428,10 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 				}
 				return s.serverID.Load()
 			}),
-		)))
+		))}
+
+	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("Proxy"))
+	s.grpcInternalServer = grpc.NewServer(grpcOpts...)
 	proxypb.RegisterProxyServer(s.grpcInternalServer, s)
 	grpc_health_v1.RegisterHealthServer(s.grpcInternalServer, s)
 	errChan <- nil
