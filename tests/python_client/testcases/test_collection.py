@@ -4392,7 +4392,6 @@ class TestCollectionMultipleVectorInvalid(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="issue #29796")
     def test_create_collection_multiple_vectors_invalid_dim(self, get_invalid_dim):
         """
         target: test create collection with multiple vector fields
@@ -4410,7 +4409,7 @@ class TestCollectionMultipleVectorInvalid(TestcaseBase):
         # add other vector fields to maximum fields num
         int_fields.append(cf.gen_int64_field(is_primary=True))
         schema = cf.gen_collection_schema(fields=int_fields)
-        error = {ct.err_code: 65535, ct.err_msg: "Invalid dim"}
+        error = {ct.err_code: 65535, ct.err_msg: "invalid dimension"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
 
