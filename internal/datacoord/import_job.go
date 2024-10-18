@@ -50,6 +50,17 @@ func WithJobStates(states ...internalpb.ImportJobState) ImportJobFilter {
 	}
 }
 
+func WithoutJobStates(states ...internalpb.ImportJobState) ImportJobFilter {
+	return func(job ImportJob) bool {
+		for _, state := range states {
+			if job.GetState() == state {
+				return false
+			}
+		}
+		return true
+	}
+}
+
 type UpdateJobAction func(job ImportJob)
 
 func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {

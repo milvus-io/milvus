@@ -1716,11 +1716,12 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 	// Check if the number of jobs exceeds the limit.
 	maxNum := paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt()
-	jobs := s.importMeta.GetJobBy(WithJobStates(internalpb.ImportJobState_Pending, internalpb.ImportJobState_PreImporting,
-		internalpb.ImportJobState_Importing, internalpb.ImportJobState_IndexBuilding, internalpb.ImportJobState_Stats))
-	if len(jobs) >= maxNum {
+	executingNum := s.importMeta.CountJobBy(WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
+	if executingNum >= maxNum {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(
-			fmt.Sprintf("The number of jobs has reached the limit, please try again later.")))
+			fmt.Sprintf("The number of jobs has reached the limit, please try again later. " +
+				"If your request is set to only import a single file, " +
+				"please consider importing multiple files in one request for better efficiency.")))
 		return resp, nil
 	}
 
