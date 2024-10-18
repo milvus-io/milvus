@@ -65,7 +65,6 @@ ml-dtypes==0.2.0
 # for full text search
 bm25s==0.2.0
 jieba==0.42.1
-beir==2.0.0
 
 
 # for perf test

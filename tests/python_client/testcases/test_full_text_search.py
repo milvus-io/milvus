@@ -11,8 +11,8 @@ import random
 import pytest
 import pandas as pd
 from faker import Faker
-import beir.util
-from beir.datasets.data_loader import GenericDataLoader
+# import beir.util
+# from beir.datasets.data_loader import GenericDataLoader
 
 Faker.seed(19530)
 fake_en = Faker("en_US")
@@ -3082,32 +3082,3 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
             log.info(f"res length: {len(res_list[i])}")
             assert len(res_list[i]) == limit
 
-
-@pytest.mark.skip("skip")
-class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
-    """
-    target: test full text search
-    method: 1. enable full text search and insert data with varchar
-            2. search with text
-            3. verify the result
-    expected: full text search successfully and result is correct
-    """
-
-    @pytest.mark.tags(CaseLabel.L0)
-    # @pytest.mark.parametrize("dataset", ["nfcorpus", "nq", "fiqa", "scifact"])
-    @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
-    @pytest.mark.parametrize("dataset", ["fiqa"])
-    def test_search_with_full_text_search(self, dataset, index_type):
-        self._connect()
-        BASE_URL = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{}.zip"
-        data_path = beir.util.download_and_unzip(BASE_URL.format(dataset), out_dir="./tmp/dataset")
-        split = "test" if dataset != "msmarco" else "dev"
-        corpus, queries, qrels = GenericDataLoader(data_folder=data_path).load(split=split)
-        collection_name = cf.gen_unique_str(prefix)
-        top_k = 1000
-        milvus_full_text_search_result = cf.milvus_full_text_search(collection_name, corpus, queries, qrels,
-                                                                    top_k=top_k, index_type=index_type)
-        lucene_full_text_search_result = cf.Lucene_full_text_search(corpus, queries, qrels, top_k=top_k)
-        log.info(f"result for dataset {dataset}")
-        log.info(f"milvus full text search result {milvus_full_text_search_result}")
-        log.info(f"lucene full text search result {lucene_full_text_search_result}")
