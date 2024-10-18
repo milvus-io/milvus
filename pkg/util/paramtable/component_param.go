@@ -2682,10 +2682,6 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
 However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.`,
 		Export: true,
-		Formatter: func(v string) string {
-			mmapEnabled := p.MmapEnabled.GetAsBool()
-			return strconv.FormatBool(mmapEnabled && getAsBool(v))
-		},
 	}
 	p.GrowingMmapEnabled.Init(base.mgr)
 
@@ -3142,9 +3138,10 @@ type dataCoordConfig struct {
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 
 	// compaction
-	EnableCompaction     ParamItem `refreshable:"false"`
-	EnableAutoCompaction ParamItem `refreshable:"true"`
-	IndexBasedCompaction ParamItem `refreshable:"true"`
+	EnableCompaction          ParamItem `refreshable:"false"`
+	EnableAutoCompaction      ParamItem `refreshable:"true"`
+	IndexBasedCompaction      ParamItem `refreshable:"true"`
+	CompactionTaskPrioritizer ParamItem `refreshable:"true"`
 
 	CompactionRPCTimeout              ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks        ParamItem `refreshable:"true"`
@@ -3415,6 +3412,18 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 		Export:       true,
 	}
 	p.IndexBasedCompaction.Init(base.mgr)
+
+	p.CompactionTaskPrioritizer = ParamItem{
+		Key:          "dataCoord.compaction.taskPrioritizer",
+		Version:      "2.5.0",
+		DefaultValue: "default",
+		Doc: `compaction task prioritizer, options: [default, level, mix]. 
+default is FIFO.
+level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
+mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.`,
+		Export: true,
+	}
+	p.CompactionTaskPrioritizer.Init(base.mgr)
 
 	p.CompactionRPCTimeout = ParamItem{
 		Key:          "dataCoord.compaction.rpcTimeout",
