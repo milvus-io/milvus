@@ -2695,7 +2695,6 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	dbName := request.DbName
 	nodeID := paramtable.GetStringNodeID()
-	metrics.ProxyDeleteVectors.WithLabelValues(nodeID, dbName).Add(float64(successCnt))
 
 	username := GetCurUserFromContextOrDefault(ctx)
 	collectionName := request.CollectionName
