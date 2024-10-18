@@ -20,6 +20,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -43,21 +44,33 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
 			if i%4 == 0 {
-				log.Warn("retry func failed", zap.Uint("retried", i), zap.Error(err))
+				log.Warn("retry func failed",
+					zap.Uint("retried", i),
+					zap.Error(err),
+					logutil.StackTrace(1))
 			}
 
 			if !IsRecoverable(err) {
+				log.Error("non-recoverable error occurred",
+					zap.Error(err),
+					logutil.StackTrace(1))
 				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) && lastErr != nil {
 					return lastErr
 				}
 				return err
 			}
 			if c.isRetryErr != nil && !c.isRetryErr(err) {
+				log.Error("non-retryable error occurred",
+					zap.Error(err),
+					logutil.StackTrace(1))
 				return err
 			}
 
 			deadline, ok := ctx.Deadline()
 			if ok && time.Until(deadline) < c.sleep {
+				log.Error("context deadline exceeded",
+					zap.Error(lastErr),
+					logutil.StackTrace(1))
 				// to avoid sleep until ctx done
 				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) && lastErr != nil {
 					return lastErr
@@ -70,6 +83,9 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
+				log.Error("context done before retry",
+					zap.Error(lastErr),
+					logutil.StackTrace(1))
 				return lastErr
 			}
 
@@ -81,6 +97,10 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 			return nil
 		}
 	}
+
+	log.Error("max retries reached",
+		zap.Error(lastErr),
+		logutil.StackTrace(1))
 	return lastErr
 }
 
