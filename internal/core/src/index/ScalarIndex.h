@@ -80,7 +80,7 @@ class ScalarIndex : public IndexBase {
     GetIndexType() const = 0;
 
     virtual void
-    Build(size_t n, const T* values) = 0;
+    Build(size_t n, const T* values, const bool* valid_data = nullptr) = 0;
 
     virtual const TargetBitmap
     In(size_t n, const T* values) = 0;
@@ -117,7 +117,7 @@ class ScalarIndex : public IndexBase {
           T upper_bound_value,
           bool ub_inclusive) = 0;
 
-    virtual T
+    virtual std::optional<T>
     Reverse_Lookup(size_t offset) const = 0;
 
     virtual const TargetBitmap
@@ -131,6 +131,12 @@ class ScalarIndex : public IndexBase {
     virtual const TargetBitmap
     PatternMatch(const std::string& pattern) {
         PanicInfo(Unsupported, "pattern match is not supported");
+    }
+
+    virtual bool
+    IsMmapSupported() const {
+        return index_type_ == milvus::index::BITMAP_INDEX_TYPE ||
+               index_type_ == milvus::index::HYBRID_INDEX_TYPE;
     }
 
     virtual int64_t

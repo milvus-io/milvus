@@ -1434,6 +1434,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			return nil, err
 		}
 		binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
+		isVectorType := typeutil.IsVectorType(fieldSchema.DataType)
 		shouldCalculateDataSize := false
 
 		if fieldIndexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
@@ -1452,8 +1453,16 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 
 			indexMemorySize += estimateResult.MaxMemoryCost
 			segmentDiskSize += estimateResult.MaxDiskCost
-			if !estimateResult.HasRawData {
+			if !estimateResult.HasRawData && !isVectorType {
 				shouldCalculateDataSize = true
+			}
+			if !estimateResult.HasRawData && isVectorType {
+				mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
+				if mmapChunkCache {
+					segmentDiskSize += binlogSize
+				} else {
+					segmentMemorySize += binlogSize
+				}
 			}
 		} else {
 			shouldCalculateDataSize = true
