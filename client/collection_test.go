@@ -248,6 +248,32 @@ func (s *CollectionSuite) TestDropCollection() {
 	})
 }
 
+func (s *CollectionSuite) TestRenameCollection() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	oldName := fmt.Sprintf("test_collection_%s", s.randString(6))
+	newName := fmt.Sprintf("%s_new", oldName)
+
+	s.Run("success", func() {
+		s.mock.EXPECT().RenameCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, rcr *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+			s.Equal(oldName, rcr.GetOldName())
+			s.Equal(newName, rcr.GetNewName())
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.RenameCollection(ctx, NewRenameCollectionOption(oldName, newName))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		s.mock.EXPECT().RenameCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.RenameCollection(ctx, NewRenameCollectionOption(oldName, newName))
+		s.Error(err)
+	})
+}
+
 func TestCollection(t *testing.T) {
 	suite.Run(t, new(CollectionSuite))
 }

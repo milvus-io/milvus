@@ -240,3 +240,26 @@ func NewDropCollectionOption(name string) *dropCollectionOption {
 		name: name,
 	}
 }
+
+type RenameCollectionOption interface {
+	Request() *milvuspb.RenameCollectionRequest
+}
+
+type renameCollectionOption struct {
+	oldCollectionName string
+	newCollectionName string
+}
+
+func (opt *renameCollectionOption) Request() *milvuspb.RenameCollectionRequest {
+	return &milvuspb.RenameCollectionRequest{
+		OldName: opt.oldCollectionName,
+		NewName: opt.newCollectionName,
+	}
+}
+
+func NewRenameCollectionOption(oldName, newName string) *renameCollectionOption {
+	return &renameCollectionOption{
+		oldCollectionName: oldName,
+		newCollectionName: newName,
+	}
+}
