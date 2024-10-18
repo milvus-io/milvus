@@ -142,7 +142,7 @@ class TestMilvusClientPartitionInvalid(TestcaseBase):
         partition_names = [cf.gen_unique_str(partition_prefix), cf.gen_unique_str(partition_prefix)]
         # 2. create partition
         client_w.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 1, ct.err_msg: f"`partition_name` value {partition_names} is illegal"}
+        error = {ct.err_code: 999, ct.err_msg: f"`partition_name` value {partition_names} is illegal"}
         client_w.create_partition(client, collection_name, partition_names,
                                   check_task=CheckTasks.err_res, check_items=error)
 
@@ -316,7 +316,7 @@ class TestMilvusClientPartitionValid(TestcaseBase):
         client_w.create_partition(client, collection_name, partition_name)
         client_w.create_collection(client, another_collection_name, default_dim)
         result = client_w.has_partition(client, another_collection_name, partition_name)[0]
-        assert result == False
+        assert result is False
 
 
 class TestMilvusClientDropPartitionInvalid(TestcaseBase):
@@ -382,7 +382,7 @@ class TestMilvusClientDropPartitionInvalid(TestcaseBase):
         error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default]"
                                                f"[collection={collection_name}]"}
         client_w.drop_partition(client, collection_name, partition_name,
-                                  check_task=CheckTasks.err_res, check_items=error)
+                                check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
@@ -435,7 +435,7 @@ class TestMilvusClientReleasePartitionInvalid(TestcaseBase):
     ******************************************************************
     """
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("collection_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
     def test_milvus_client_release_partition_invalid_collection_name(self, collection_name):
         """
@@ -446,12 +446,12 @@ class TestMilvusClientReleasePartitionInvalid(TestcaseBase):
         client = self._connect(enable_milvus_client_api=True)
         partition_name = cf.gen_unique_str(partition_prefix)
         # 2. create partition
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {collection_name}. the first character of a "
+        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {collection_name}. the first character of a "
                                                 f"collection name must be an underscore or letter: invalid parameter"}
         client_w.release_partitions(client, collection_name, partition_name,
                                     check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_release_partition_collection_name_over_max_length(self):
         """
         target: test fast create collection normal case
@@ -462,12 +462,12 @@ class TestMilvusClientReleasePartitionInvalid(TestcaseBase):
         collection_name = "a".join("a" for i in range(256))
         partition_name = cf.gen_unique_str(partition_prefix)
         # 2. create partition
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {collection_name}. the length of a collection name "
+        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {collection_name}. the length of a collection name "
                                                 f"must be less than 255 characters: invalid parameter"}
         client_w.release_partitions(client, collection_name, partition_name,
                                     check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_release_partition_not_exist_collection_name(self):
         """
         target: test release partition -- not exist collection name
@@ -478,7 +478,7 @@ class TestMilvusClientReleasePartitionInvalid(TestcaseBase):
         collection_name = cf.gen_unique_str("partition_not_exist")
         partition_name = cf.gen_unique_str(partition_prefix)
         # 2. create partition
-        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default]"
+        error = {ct.err_code: 999, ct.err_msg: f"collection not found[database=default]"
                                                f"[collection={collection_name}]"}
         client_w.release_partitions(client, collection_name, partition_name,
                                     check_task=CheckTasks.err_res, check_items=error)
@@ -499,7 +499,7 @@ class TestMilvusClientReleasePartitionInvalid(TestcaseBase):
         error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}. The first character of a "
                                                  f"partition name must be an underscore or letter.]"}
         client_w.release_partitions(client, collection_name, partition_name,
-                                   check_task=CheckTasks.err_res, check_items=error)
+                                    check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="pymilvus issue 1896")
@@ -517,10 +517,9 @@ class TestMilvusClientReleasePartitionInvalid(TestcaseBase):
         error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}. The first character of a "
                                                  f"partition name must be an underscore or letter.]"}
         client_w.release_partitions(client, collection_name, partition_name,
-                                   check_task=CheckTasks.err_res, check_items=error)
+                                    check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1897")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_release_partition_name_lists_empty(self):
         """
         target: test fast release partition -- invalid partition name type
@@ -529,15 +528,14 @@ class TestMilvusClientReleasePartitionInvalid(TestcaseBase):
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
-        not_exist_partition = cf.gen_unique_str("partition_not_exist")
         partition_names = []
         # 2. create partition
         client_w.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid parameter[expected=any partition][actual=empty partition list"}
+        error = {ct.err_code: 999, ct.err_msg: f"invalid parameter[expected=any partition][actual=empty partition list"}
         client_w.release_partitions(client, collection_name, partition_names,
-                                   check_task=CheckTasks.err_res, check_items=error)
+                                    check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_release_partition_name_lists_not_all_exists(self):
         """
         target: test fast release partition -- invalid partition name type
@@ -550,11 +548,11 @@ class TestMilvusClientReleasePartitionInvalid(TestcaseBase):
         partition_names = ["_default", not_exist_partition]
         # 2. create partition
         client_w.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 1, ct.err_msg: f"partition not found[partition={not_exist_partition}]"}
+        error = {ct.err_code: 999, ct.err_msg: f"partition not found[partition={not_exist_partition}]"}
         client_w.release_partitions(client, collection_name, partition_names,
-                                   check_task=CheckTasks.err_res, check_items=error)
+                                    check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_release_not_exist_partition_name(self):
         """
         target: test fast release partition -- invalid partition name type

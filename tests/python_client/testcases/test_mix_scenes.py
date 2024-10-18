@@ -2061,7 +2061,6 @@ class TestGroupSearch(TestCaseClassBase):
                 assert len(set(group_values)) == limit
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail()
     def test_hybrid_search_group_size(self):
         """
         hybrid search group by on 4 different float vector fields with group by varchar field with group size
