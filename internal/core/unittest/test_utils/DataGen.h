@@ -667,8 +667,14 @@ DataGenForJsonArray(SchemaPtr schema,
     auto insert_data = std::make_unique<InsertRecordProto>();
     auto insert_cols = [&insert_data](
                            auto& data, int64_t count, auto& field_meta) {
+        FixedVector<bool> valid_data(count);
+        if (field_meta.is_nullable()) {
+            for (int i = 0; i < count; ++i) {
+                valid_data[i] = i % 2 == 0 ? true : false;
+            }
+        }
         auto array = milvus::segcore::CreateDataArrayFrom(
-            data.data(), nullptr, count, field_meta);
+            data.data(), valid_data.data(), count, field_meta);
         insert_data->mutable_fields_data()->AddAllocated(array.release());
     };
     for (auto field_id : schema->get_field_ids()) {

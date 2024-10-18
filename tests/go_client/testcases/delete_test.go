@@ -158,7 +158,7 @@ func TestDeleteComplexExprWithoutLoad(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	res, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s >= 0 ", common.DefaultInt64FieldName)).
-		WithOutputFields([]string{common.QueryCountFieldName}).WithConsistencyLevel(entity.ClStrong))
+		WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ := res.Fields[0].GetAsInt64(0)
 	require.Equal(t, int64(common.DefaultNb-5), count)
@@ -324,7 +324,7 @@ func TestDeleteDefaultPartitionName(t *testing.T) {
 	common.CheckErr(t, errQuery, true)
 	require.Zero(t, queryRes.ResultCount)
 
-	queryRes, errQuery = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithPartitions([]string{common.DefaultPartition, parName}).
+	queryRes, errQuery = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithPartitions(common.DefaultPartition, parName).
 		WithConsistencyLevel(entity.ClStrong).WithFilter(expr))
 	common.CheckErr(t, errQuery, true)
 	require.Zero(t, queryRes.ResultCount)
@@ -362,7 +362,7 @@ func TestDeleteEmptyPartitionName(t *testing.T) {
 	common.CheckErr(t, errQuery, true)
 	require.Zero(t, queryRes.ResultCount)
 
-	queryRes, errQuery = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithPartitions([]string{common.DefaultPartition, parName}).
+	queryRes, errQuery = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithPartitions(common.DefaultPartition, parName).
 		WithConsistencyLevel(entity.ClStrong).WithFilter(expr))
 	common.CheckErr(t, errQuery, true)
 	require.Zero(t, queryRes.ResultCount)
@@ -406,7 +406,7 @@ func TestDeletePartitionName(t *testing.T) {
 	require.Equal(t, int64(0), del2.DeleteCount)
 
 	// query and verify
-	resQuery, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithOutputFields([]string{common.QueryCountFieldName}).
+	resQuery, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithOutputFields(common.QueryCountFieldName).
 		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ := resQuery.Fields[0].GetAsInt64(0)
@@ -427,7 +427,7 @@ func TestDeletePartitionName(t *testing.T) {
 	require.Equal(t, common.DefaultNb*2-200-1500, queryRes.ResultCount)
 
 	queryRes, errQuery = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithConsistencyLevel(entity.ClStrong).
-		WithPartitions([]string{common.DefaultPartition, parName}))
+		WithPartitions(common.DefaultPartition, parName))
 	common.CheckErr(t, errQuery, true)
 	require.Equal(t, common.DefaultNb*2-200-1500, queryRes.ResultCount)
 }

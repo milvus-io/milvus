@@ -263,8 +263,13 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		}()
 	}
 
-	// build idf for bm25 search
-	if req.GetReq().GetMetricType() == metric.BM25 || (req.GetReq().GetMetricType() == metric.EMPTY && sd.isBM25Field[req.GetReq().GetFieldId()]) {
+	searchAgainstBM25Field := sd.isBM25Field[req.GetReq().GetFieldId()]
+
+	if searchAgainstBM25Field {
+		if req.GetReq().GetMetricType() != metric.BM25 && req.GetReq().GetMetricType() != metric.EMPTY {
+			return nil, merr.WrapErrParameterInvalid("BM25", req.GetReq().GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
+		}
+		// build idf for bm25 search
 		avgdl, err := sd.buildBM25IDF(req.GetReq())
 		if err != nil {
 			return nil, err
@@ -439,7 +444,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+	tSafe, err := sd.waitTSafe(ctx, req.Req.GetGuaranteeTimestamp())
 	if err != nil {
 		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
 		return err
@@ -512,7 +517,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+	tSafe, err := sd.waitTSafe(ctx, req.Req.GetGuaranteeTimestamp())
 	if err != nil {
 		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
 		return nil, err
@@ -908,10 +913,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	excludedSegments := NewExcludedSegments(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.GetAsDuration(time.Second))
 
-	var idfOracle IDFOracle
-	if len(collection.Schema().GetFunctions()) > 0 {
-		idfOracle = NewIDFOracle(collection.Schema().GetFunctions())
-	}
 	sd := &shardDelegator{
 		collectionID:     collectionID,
 		replicaID:        replicaID,
@@ -921,7 +922,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		segmentManager:   manager.Segment,
 		workerManager:    workerManager,
 		lifetime:         lifetime.NewLifetime(lifetime.Initializing),
-		distribution:     NewDistribution(idfOracle),
+		distribution:     NewDistribution(),
 		deleteBuffer:     deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock),
 		pkOracle:         pkoracle.NewPkOracle(),
 		tsafeManager:     tsafeManager,
@@ -930,7 +931,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		factory:          factory,
 		queryHook:        queryHook,
 		chunkManager:     chunkManager,
-		idfOracle:        idfOracle,
 		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
 		excludedSegments: excludedSegments,
 		functionRunners:  make(map[int64]function.FunctionRunner),
@@ -948,6 +948,11 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 				sd.isBM25Field[tf.OutputFieldIds[0]] = true
 			}
 		}
+	}
+
+	if len(sd.isBM25Field) > 0 {
+		sd.idfOracle = NewIDFOracle(collection.Schema().GetFunctions())
+		sd.distribution.SetIDFOracle(sd.idfOracle)
 	}
 
 	m := sync.Mutex{}

@@ -119,14 +119,7 @@ func NewWriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syncm
 		opt(option)
 	}
 
-	switch option.deletePolicy {
-	case DeletePolicyBFPkOracle:
-		return NewBFWriteBuffer(channel, metacache, syncMgr, option)
-	case DeletePolicyL0Delta:
-		return NewL0WriteBuffer(channel, metacache, syncMgr, option)
-	default:
-		return nil, merr.WrapErrParameterInvalid("valid delete policy config", option.deletePolicy)
-	}
+	return NewL0WriteBuffer(channel, metacache, syncMgr, option)
 }
 
 // writeBufferBase is the common component for buffering data

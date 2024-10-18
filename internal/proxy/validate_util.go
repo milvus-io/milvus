@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -296,7 +297,7 @@ func (v *validateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeuti
 }
 
 func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
-	err := checkValidData(field, fieldSchema, numRows)
+	err := nullutil.CheckValidData(field.GetValidData(), fieldSchema, numRows)
 	if err != nil {
 		return err
 	}
@@ -491,24 +492,11 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 		}
 	}
 
-	err = checkValidData(field, fieldSchema, numRows)
+	err = nullutil.CheckValidData(field.GetValidData(), fieldSchema, numRows)
 	if err != nil {
 		return err
 	}
 
-	return nil
-}
-
-func checkValidData(data *schemapb.FieldData, schema *schemapb.FieldSchema, numRows int) error {
-	expectedNum := 0
-	// if nullable, the length of ValidData is numRows
-	if schema.GetNullable() {
-		expectedNum = numRows
-	}
-	if len(data.GetValidData()) != expectedNum {
-		msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", data.GetFieldName())
-		return merr.WrapErrParameterInvalid(expectedNum, len(data.GetValidData()), msg)
-	}
 	return nil
 }
 

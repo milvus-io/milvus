@@ -121,7 +121,7 @@ func (opt *searchOption) WithOffset(offset int) *searchOption {
 	return opt
 }
 
-func (opt *searchOption) WithOutputFields(fieldNames []string) *searchOption {
+func (opt *searchOption) WithOutputFields(fieldNames ...string) *searchOption {
 	opt.outputFields = fieldNames
 	return opt
 }
@@ -137,7 +137,7 @@ func (opt *searchOption) WithANNSField(annsField string) *searchOption {
 	return opt
 }
 
-func (opt *searchOption) WithPartitions(partitionNames []string) *searchOption {
+func (opt *searchOption) WithPartitions(partitionNames ...string) *searchOption {
 	opt.partitionNames = partitionNames
 	return opt
 }
@@ -240,7 +240,7 @@ func (opt *queryOption) WithLimit(limit int) *queryOption {
 	return opt
 }
 
-func (opt *queryOption) WithOutputFields(fieldNames []string) *queryOption {
+func (opt *queryOption) WithOutputFields(fieldNames ...string) *queryOption {
 	opt.outputFields = fieldNames
 	return opt
 }
@@ -251,7 +251,7 @@ func (opt *queryOption) WithConsistencyLevel(consistencyLevel entity.Consistency
 	return opt
 }
 
-func (opt *queryOption) WithPartitions(partitionNames []string) *queryOption {
+func (opt *queryOption) WithPartitions(partitionNames ...string) *queryOption {
 	opt.partitionNames = partitionNames
 	return opt
 }

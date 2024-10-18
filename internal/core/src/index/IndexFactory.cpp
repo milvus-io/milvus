@@ -173,11 +173,9 @@ IndexFactory::VecIndexLoadResource(
                     index_type, index_version, config);
             break;
         default:
-            PanicInfo(
-                milvus::DataTypeInvalid,
-                fmt::format(
-                    "invalid data type to estimate index load resource: {}",
-                    field_type));
+            LOG_ERROR("invalid data type to estimate index load resource: {}",
+                      field_type);
+            return LoadResourceRequest{0, 0, 0, 0, true};
     }
 
     LoadResourceRequest request{};
@@ -274,10 +272,10 @@ IndexFactory::ScalarIndexLoadResource(
         request.max_disk_cost = index_size_gb;
         request.has_raw_data = false;
     } else {
-        PanicInfo(milvus::UnexpectedError,
-                  fmt::format("invalid index type to estimate scalar index "
-                              "load resource: {}",
-                              index_type));
+        LOG_ERROR(
+            "invalid index type to estimate scalar index load resource: {}",
+            index_type);
+        return LoadResourceRequest{0, 0, 0, 0, true};
     }
     return request;
 }

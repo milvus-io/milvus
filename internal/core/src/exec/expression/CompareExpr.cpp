@@ -16,6 +16,7 @@
 
 #include "CompareExpr.h"
 #include "common/type_c.h"
+#include <optional>
 #include "query/Relational.h"
 
 namespace milvus {
@@ -58,12 +59,19 @@ PhyCompareFilterExpr::GetChunkData(FieldId field_id,
                         segment_->chunk_scalar_index<T>(field_id,
                                                         current_chunk_id));
                 }
-                return indexing.Reverse_Lookup(current_chunk_pos++);
+                auto raw = indexing.Reverse_Lookup(current_chunk_pos);
+                current_chunk_pos++;
+                if (!raw.has_value()) {
+                    return std::nullopt;
+                }
+                return raw.value();
             };
         }
     }
     auto chunk_data =
         segment_->chunk_data<T>(field_id, current_chunk_id).data();
+    auto chunk_valid_data =
+        segment_->chunk_data<T>(field_id, current_chunk_id).valid_data();
     auto current_chunk_size = segment_->chunk_size(field_id, current_chunk_id);
     return
         [=, &current_chunk_id, &current_chunk_pos]() mutable -> const number {
@@ -72,10 +80,16 @@ PhyCompareFilterExpr::GetChunkData(FieldId field_id,
                 current_chunk_pos = 0;
                 chunk_data =
                     segment_->chunk_data<T>(field_id, current_chunk_id).data();
+                chunk_valid_data =
+                    segment_->chunk_data<T>(field_id, current_chunk_id)
+                        .valid_data();
                 current_chunk_size =
                     segment_->chunk_size(field_id, current_chunk_id);
             }
-
+            if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
+                current_chunk_pos++;
+                return std::nullopt;
+            }
             return chunk_data[current_chunk_pos++];
         };
 }
@@ -103,7 +117,12 @@ PhyCompareFilterExpr::GetChunkData<std::string>(FieldId field_id,
                         segment_->chunk_scalar_index<std::string>(
                             field_id, current_chunk_id));
                 }
-                return indexing.Reverse_Lookup(current_chunk_pos++);
+                auto raw = indexing.Reverse_Lookup(current_chunk_pos);
+                current_chunk_pos++;
+                if (!raw.has_value()) {
+                    return std::nullopt;
+                }
+                return raw.value();
             };
         }
     }
@@ -114,6 +133,9 @@ PhyCompareFilterExpr::GetChunkData<std::string>(FieldId field_id,
         auto chunk_data =
             segment_->chunk_data<std::string>(field_id, current_chunk_id)
                 .data();
+        auto chunk_valid_data =
+            segment_->chunk_data<std::string>(field_id, current_chunk_id)
+                .valid_data();
         auto current_chunk_size =
             segment_->chunk_size(field_id, current_chunk_id);
         return [=,
@@ -126,16 +148,26 @@ PhyCompareFilterExpr::GetChunkData<std::string>(FieldId field_id,
                     segment_
                         ->chunk_data<std::string>(field_id, current_chunk_id)
                         .data();
+                chunk_valid_data =
+                    segment_
+                        ->chunk_data<std::string>(field_id, current_chunk_id)
+                        .valid_data();
                 current_chunk_size =
                     segment_->chunk_size(field_id, current_chunk_id);
             }
-
+            if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
+                current_chunk_pos++;
+                return std::nullopt;
+            }
             return chunk_data[current_chunk_pos++];
         };
     } else {
         auto chunk_data =
             segment_->chunk_view<std::string_view>(field_id, current_chunk_id)
                 .first.data();
+        auto chunk_valid_data =
+            segment_->chunk_data<std::string_view>(field_id, current_chunk_id)
+                .valid_data();
         auto current_chunk_size =
             segment_->chunk_size(field_id, current_chunk_id);
         return [=,
@@ -148,8 +180,16 @@ PhyCompareFilterExpr::GetChunkData<std::string>(FieldId field_id,
                                  ->chunk_view<std::string_view>(
                                      field_id, current_chunk_id)
                                  .first.data();
+                chunk_valid_data = segment_
+                                       ->chunk_data<std::string_view>(
+                                           field_id, current_chunk_id)
+                                       .valid_data();
                 current_chunk_size =
                     segment_->chunk_size(field_id, current_chunk_id);
+            }
+            if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
+                current_chunk_pos++;
+                return std::nullopt;
             }
 
             return std::string(chunk_data[current_chunk_pos++]);
@@ -203,9 +243,11 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
             return nullptr;
         }
 
-        auto res_vec =
-            std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+        auto res_vec = std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
         TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+        valid_res.set();
 
         auto left = GetChunkData(expr_->left_data_type_,
                                  expr_->left_field_id_,
@@ -218,8 +260,15 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
                                   right_current_chunk_id_,
                                   right_current_chunk_pos_);
         for (int i = 0; i < real_batch_size; ++i) {
-            res[i] = boost::apply_visitor(
-                milvus::query::Relational<decltype(op)>{}, left(), right());
+            if (!left().has_value() || !right().has_value()) {
+                res[i] = false;
+                valid_res[i] = false;
+                continue;
+            }
+            res[i] =
+                boost::apply_visitor(milvus::query::Relational<decltype(op)>{},
+                                     left().value(),
+                                     right().value());
         }
         return res_vec;
     } else {
@@ -228,9 +277,11 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
             return nullptr;
         }
 
-        auto res_vec =
-            std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+        auto res_vec = std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
         TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+        valid_res.set();
 
         auto left_data_barrier =
             segment_->num_chunk_data(expr_->left_field_id_);
@@ -255,10 +306,16 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
             for (int i = chunk_id == current_chunk_id_ ? current_chunk_pos_ : 0;
                  i < chunk_size;
                  ++i) {
-                res[processed_rows++] = boost::apply_visitor(
-                    milvus::query::Relational<decltype(op)>{},
-                    left(i),
-                    right(i));
+                if (!left(i).has_value() || !right(i).has_value()) {
+                    res[processed_rows] = false;
+                    valid_res[processed_rows] = false;
+                } else {
+                    res[processed_rows] = boost::apply_visitor(
+                        milvus::query::Relational<decltype(op)>{},
+                        left(i).value(),
+                        right(i).value());
+                }
+                processed_rows++;
 
                 if (processed_rows >= batch_size_) {
                     current_chunk_id_ = chunk_id;
@@ -280,12 +337,23 @@ PhyCompareFilterExpr::GetChunkData(FieldId field_id,
         auto& indexing = segment_->chunk_scalar_index<T>(field_id, chunk_id);
         if (indexing.HasRawData()) {
             return [&indexing](int i) -> const number {
-                return indexing.Reverse_Lookup(i);
+                auto raw = indexing.Reverse_Lookup(i);
+                if (!raw.has_value()) {
+                    return std::nullopt;
+                }
+                return raw.value();
             };
         }
     }
     auto chunk_data = segment_->chunk_data<T>(field_id, chunk_id).data();
-    return [chunk_data](int i) -> const number { return chunk_data[i]; };
+    auto chunk_valid_data =
+        segment_->chunk_data<T>(field_id, chunk_id).valid_data();
+    return [chunk_data, chunk_valid_data](int i) -> const number {
+        if (chunk_valid_data && !chunk_valid_data[i]) {
+            return std::nullopt;
+        }
+        return chunk_data[i];
+    };
 }
 
 template <>
@@ -297,8 +365,12 @@ PhyCompareFilterExpr::GetChunkData<std::string>(FieldId field_id,
         auto& indexing =
             segment_->chunk_scalar_index<std::string>(field_id, chunk_id);
         if (indexing.HasRawData()) {
-            return [&indexing](int i) -> const std::string {
-                return indexing.Reverse_Lookup(i);
+            return [&indexing](int i) -> const number {
+                auto raw = indexing.Reverse_Lookup(i);
+                if (!raw.has_value()) {
+                    return std::nullopt;
+                }
+                return raw.value();
             };
         }
     }
@@ -308,12 +380,23 @@ PhyCompareFilterExpr::GetChunkData<std::string>(FieldId field_id,
              .growing_enable_mmap) {
         auto chunk_data =
             segment_->chunk_data<std::string>(field_id, chunk_id).data();
-        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+        auto chunk_valid_data =
+            segment_->chunk_data<std::string>(field_id, chunk_id).valid_data();
+        return [chunk_data, chunk_valid_data](int i) -> const number {
+            if (chunk_valid_data && !chunk_valid_data[i]) {
+                return std::nullopt;
+            }
+            return chunk_data[i];
+        };
     } else {
-        auto chunk_data =
-            segment_->chunk_view<std::string_view>(field_id, chunk_id)
-                .first.data();
-        return [chunk_data](int i) -> const number {
+        auto chunk_info =
+            segment_->chunk_view<std::string_view>(field_id, chunk_id);
+        auto chunk_data = chunk_info.first.data();
+        auto chunk_valid_data = chunk_info.second.data();
+        return [chunk_data, chunk_valid_data](int i) -> const number {
+            if (chunk_valid_data && !chunk_valid_data[i]) {
+                return std::nullopt;
+            }
             return std::string(chunk_data[i]);
         };
     }
@@ -450,9 +533,11 @@ PhyCompareFilterExpr::ExecCompareRightType() {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     auto expr_type = expr_->op_type_;
     auto execute_sub_batch = [expr_type](const T* left,
@@ -491,15 +576,14 @@ PhyCompareFilterExpr::ExecCompareRightType() {
                 break;
             }
             default:
-                PanicInfo(
-                    OpTypeInvalid,
-                    fmt::format(
-                        "unsupported operator type for compare column expr: {}",
-                        expr_type));
+                PanicInfo(OpTypeInvalid,
+                          fmt::format("unsupported operator type for "
+                                      "compare column expr: {}",
+                                      expr_type));
         }
     };
     int64_t processed_size =
-        ProcessBothDataChunks<T, U>(execute_sub_batch, res);
+        ProcessBothDataChunks<T, U>(execute_sub_batch, res, valid_res);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",

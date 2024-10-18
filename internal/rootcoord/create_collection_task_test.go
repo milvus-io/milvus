@@ -408,11 +408,27 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 				CollectionName: collectionName,
 			},
 		}
-		schema1 := &schemapb.CollectionSchema{
+		schema := &schemapb.CollectionSchema{
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
 					DataType: schemapb.DataType_BinaryVector,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_BoolData{
+							BoolData: false,
+						},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(schema)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		schema1 := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_Int16,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_BoolData{
 							BoolData: false,
@@ -428,7 +444,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_IntData{
 							IntData: 1,
@@ -444,7 +460,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_LongData{
 							LongData: 1,
@@ -460,7 +476,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_FloatData{
 							FloatData: 1,
@@ -476,7 +492,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_DoubleData{
 							DoubleData: 1,
@@ -492,7 +508,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_StringData{
 							StringData: "a",

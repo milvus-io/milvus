@@ -29,6 +29,22 @@ func (c sparseFloatVectorBaseChecker) CheckTrain(params map[string]string) error
 		}
 	}
 
+	bm25K1Str, exist := params[BM25K1]
+	if exist {
+		bm25K1, err := strconv.ParseFloat(bm25K1Str, 64)
+		if err != nil || bm25K1 < 0 || bm25K1 > 3 {
+			return fmt.Errorf("invalid bm25_k1: %s, must be in range [0, 3]", bm25K1Str)
+		}
+	}
+
+	bm25BStr, exist := params[BM25B]
+	if exist {
+		bm25B, err := strconv.ParseFloat(bm25BStr, 64)
+		if err != nil || bm25B < 0 || bm25B > 1 {
+			return fmt.Errorf("invalid bm25_b: %s, must be in range [0, 1]", bm25BStr)
+		}
+	}
+
 	return nil
 }
 

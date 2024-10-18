@@ -152,7 +152,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	t.processStatsBlob()
 	t.processDeltaBlob()
 
-	if len(t.bm25Binlogs) > 0 || len(t.mergedBm25Blob) > 0 {
+	if len(t.bm25Blobs) > 0 || len(t.mergedBm25Blob) > 0 {
 		t.processBM25StastBlob()
 	}
 

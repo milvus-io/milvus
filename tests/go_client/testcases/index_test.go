@@ -274,7 +274,7 @@ func TestCreateAutoIndexAllFields(t *testing.T) {
 	// load -> search and output all vector fields
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields([]string{"*"}))
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields("*"))
 	common.CheckErr(t, err, true)
 	common.CheckOutputFields(t, expFields, searchRes[0].Fields)
 }
@@ -483,7 +483,7 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 	expr := fmt.Sprintf("%s > 10", common.DefaultInt64FieldName)
-	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithFilter(expr).WithOutputFields([]string{"*"}))
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithFilter(expr).WithOutputFields("*"))
 	common.CheckErr(t, err, true)
 	expFields := make([]string, 0, len(schema.Fields))
 	for _, field := range schema.Fields {
@@ -526,7 +526,7 @@ func TestCreateInvertedScalarIndex(t *testing.T) {
 
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 	expr := fmt.Sprintf("%s > 10", common.DefaultInt64FieldName)
-	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithFilter(expr).WithOutputFields([]string{"*"}))
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithFilter(expr).WithOutputFields("*"))
 	common.CheckErr(t, err, true)
 	expFields := make([]string, 0, len(schema.Fields))
 	for _, field := range schema.Fields {
@@ -691,7 +691,7 @@ func TestCreateInvertedIndexArrayField(t *testing.T) {
 	// load -> search and output all fields
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-	searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{"*"}))
+	searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).WithOutputFields("*"))
 	common.CheckErr(t, errSearch, true)
 	var expFields []string
 	for _, field := range schema.Fields {

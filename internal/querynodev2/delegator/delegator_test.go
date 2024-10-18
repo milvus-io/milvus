@@ -1267,3 +1267,23 @@ func TestDelegatorTSafeListenerClosed(t *testing.T) {
 	assert.Equal(t, sd.Serviceable(), false)
 	assert.Equal(t, sd.Stopped(), true)
 }
+
+func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
+	paramtable.Init()
+	searchReq := &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			Base: commonpbutil.NewMsgBase(),
+		},
+	}
+
+	searchReq.Req.FieldId = 101
+	searchReq.Req.MetricType = metric.IP
+
+	sd := &shardDelegator{
+		isBM25Field: map[int64]bool{101: true},
+	}
+
+	_, err := sd.search(context.Background(), searchReq, []SnapshotItem{}, []SegmentEntry{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must use BM25 metric type when searching against BM25 Function output field")
+}

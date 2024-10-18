@@ -45,6 +45,7 @@
 #include "exec/expression/Expr.h"
 #include "segcore/load_index_c.h"
 #include "test_utils/c_api_test_utils.h"
+#include "segcore/vector_index_c.h"
 
 namespace chrono = std::chrono;
 
@@ -710,6 +711,22 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
 
     DeleteCollection(collection);
     DeleteSegment(segment);
+}
+
+TEST(CApiTest, GetIndexListSizeAndFeatures) {
+    int size = GetIndexListSize();
+    ASSERT_GT(size, 0);
+
+    std::vector<const char*> index_keys(size);
+    std::vector<uint64_t> index_features(size);
+
+    GetIndexFeatures(index_keys.data(), index_features.data());
+
+    for (int i = 0; i < size; i++) {
+        ASSERT_NE(index_keys[i], nullptr);
+        ASSERT_GT(strlen(index_keys[i]), 0);
+        ASSERT_GT(index_features[i], 0);
+    }
 }
 
 TEST(CApiTest, MultiDeleteSealedSegment) {
