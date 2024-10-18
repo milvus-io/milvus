@@ -88,6 +88,11 @@ using namespace milvus::bitset::detail::arm;
     FUNC(__VA_ARGS__, Mod, LT);      \
     FUNC(__VA_ARGS__, Mod, NE);
 
+// a facility to run through all possible forward ElementT
+#define ALL_FORWARD_OPS(FUNC) \
+    FUNC(uint8_t);            \
+    FUNC(uint64_t);
+
 //
 namespace milvus {
 namespace bitset {
@@ -235,6 +240,7 @@ ALL_RANGE_OPS(DISPATCH_OP_WITHIN_RANGE_COLUMN_IMPL, float)
 ALL_RANGE_OPS(DISPATCH_OP_WITHIN_RANGE_COLUMN_IMPL, double)
 
 #undef DISPATCH_OP_WITHIN_RANGE_COLUMN_IMPL
+
 }  // namespace dynamic
 
 /////////////////////////////////////////////////////////////////////////////
@@ -281,6 +287,8 @@ ALL_RANGE_OPS(DISPATCH_OP_WITHIN_RANGE_VAL_IMPL, int32_t)
 ALL_RANGE_OPS(DISPATCH_OP_WITHIN_RANGE_VAL_IMPL, int64_t)
 ALL_RANGE_OPS(DISPATCH_OP_WITHIN_RANGE_VAL_IMPL, float)
 ALL_RANGE_OPS(DISPATCH_OP_WITHIN_RANGE_VAL_IMPL, double)
+
+#undef DISPATCH_OP_WITHIN_RANGE_VAL_IMPL
 
 }  // namespace dynamic
 
@@ -331,6 +339,108 @@ ALL_ARITH_CMP_OPS(DISPATCH_OP_ARITH_COMPARE, int32_t)
 ALL_ARITH_CMP_OPS(DISPATCH_OP_ARITH_COMPARE, int64_t)
 ALL_ARITH_CMP_OPS(DISPATCH_OP_ARITH_COMPARE, float)
 ALL_ARITH_CMP_OPS(DISPATCH_OP_ARITH_COMPARE, double)
+
+#undef DISPATCH_OP_ARITH_COMPARE
+
+}  // namespace dynamic
+
+/////////////////////////////////////////////////////////////////////////////
+// forward_ops
+
+template <typename ElementT>
+using ForwardOpsOp2 = bool (*)(ElementT* const left,
+                               const ElementT* const right,
+                               const size_t start_left,
+                               const size_t start_right,
+                               const size_t size);
+
+template <typename ElementT>
+using ForwardOpsOpMultiple2 =
+    bool (*)(ElementT* const left,
+             const ElementT* const* const rights,
+             const size_t start_left,
+             const size_t* const __restrict start_rights,
+             const size_t n_rights,
+             const size_t size);
+
+#define DECLARE_FORWARD_OPS_OP2(ELEMENTTYPE)                                   \
+    ForwardOpsOp2<ELEMENTTYPE> forward_op_and_##ELEMENTTYPE =                  \
+        VectorizedRef::template forward_op_and<ELEMENTTYPE>;                   \
+    ForwardOpsOpMultiple2<ELEMENTTYPE> forward_op_and_multiple_##ELEMENTTYPE = \
+        VectorizedRef::template forward_op_and_multiple<ELEMENTTYPE>;          \
+    ForwardOpsOp2<ELEMENTTYPE> forward_op_or_##ELEMENTTYPE =                   \
+        VectorizedRef::template forward_op_or<ELEMENTTYPE>;                    \
+    ForwardOpsOpMultiple2<ELEMENTTYPE> forward_op_or_multiple_##ELEMENTTYPE =  \
+        VectorizedRef::template forward_op_or_multiple<ELEMENTTYPE>;           \
+    ForwardOpsOp2<ELEMENTTYPE> forward_op_xor_##ELEMENTTYPE =                  \
+        VectorizedRef::template forward_op_xor<ELEMENTTYPE>;                   \
+    ForwardOpsOp2<ELEMENTTYPE> forward_op_sub_##ELEMENTTYPE =                  \
+        VectorizedRef::template forward_op_sub<ELEMENTTYPE>;
+
+ALL_FORWARD_OPS(DECLARE_FORWARD_OPS_OP2)
+
+#undef DECLARE_FORWARD_OPS_OP2
+
+//
+namespace dynamic {
+
+#define DISPATCH_FORWARD_OPS_OP_AND(ELEMENTTYPE)                             \
+    bool ForwardOpsImpl<ELEMENTTYPE>::op_and(ELEMENTTYPE* const left,        \
+                                             const ELEMENTTYPE* const right, \
+                                             const size_t start_left,        \
+                                             const size_t start_right,       \
+                                             const size_t size) {            \
+        return forward_op_and_##ELEMENTTYPE(                                 \
+            left, right, start_left, start_right, size);                     \
+    }                                                                        \
+    bool ForwardOpsImpl<ELEMENTTYPE>::op_and_multiple(                       \
+        ELEMENTTYPE* const left,                                             \
+        const ELEMENTTYPE* const* const rights,                              \
+        const size_t start_left,                                             \
+        const size_t* const __restrict start_rights,                         \
+        const size_t n_rights,                                               \
+        const size_t size) {                                                 \
+        return forward_op_and_multiple_##ELEMENTTYPE(                        \
+            left, rights, start_left, start_rights, n_rights, size);         \
+    }                                                                        \
+    bool ForwardOpsImpl<ELEMENTTYPE>::op_or(ELEMENTTYPE* const left,         \
+                                            const ELEMENTTYPE* const right,  \
+                                            const size_t start_left,         \
+                                            const size_t start_right,        \
+                                            const size_t size) {             \
+        return forward_op_or_##ELEMENTTYPE(                                  \
+            left, right, start_left, start_right, size);                     \
+    }                                                                        \
+    bool ForwardOpsImpl<ELEMENTTYPE>::op_or_multiple(                        \
+        ELEMENTTYPE* const left,                                             \
+        const ELEMENTTYPE* const* const rights,                              \
+        const size_t start_left,                                             \
+        const size_t* const __restrict start_rights,                         \
+        const size_t n_rights,                                               \
+        const size_t size) {                                                 \
+        return forward_op_or_multiple_##ELEMENTTYPE(                         \
+            left, rights, start_left, start_rights, n_rights, size);         \
+    }                                                                        \
+    bool ForwardOpsImpl<ELEMENTTYPE>::op_xor(ELEMENTTYPE* const left,        \
+                                             const ELEMENTTYPE* const right, \
+                                             const size_t start_left,        \
+                                             const size_t start_right,       \
+                                             const size_t size) {            \
+        return forward_op_xor_##ELEMENTTYPE(                                 \
+            left, right, start_left, start_right, size);                     \
+    }                                                                        \
+    bool ForwardOpsImpl<ELEMENTTYPE>::op_sub(ELEMENTTYPE* const left,        \
+                                             const ELEMENTTYPE* const right, \
+                                             const size_t start_left,        \
+                                             const size_t start_right,       \
+                                             const size_t size) {            \
+        return forward_op_sub_##ELEMENTTYPE(                                 \
+            left, right, start_left, start_right, size);                     \
+    }
+
+ALL_FORWARD_OPS(DISPATCH_FORWARD_OPS_OP_AND)
+
+#undef DISPATCH_FORWARD_OPS_OP_AND
 
 }  // namespace dynamic
 
@@ -402,11 +512,28 @@ init_dynamic_hook() {
         ALL_ARITH_CMP_OPS(SET_ARITH_COMPARE_AVX512, float)
         ALL_ARITH_CMP_OPS(SET_ARITH_COMPARE_AVX512, double)
 
+#define SET_FORWARD_OPS_AVX512(ELEMENTTYPE)                              \
+    forward_op_and_##ELEMENTTYPE =                                       \
+        VectorizedAvx512::template forward_op_and<ELEMENTTYPE>;          \
+    forward_op_and_multiple_##ELEMENTTYPE =                              \
+        VectorizedAvx512::template forward_op_and_multiple<ELEMENTTYPE>; \
+    forward_op_or_##ELEMENTTYPE =                                        \
+        VectorizedAvx512::template forward_op_or<ELEMENTTYPE>;           \
+    forward_op_or_multiple_##ELEMENTTYPE =                               \
+        VectorizedAvx512::template forward_op_or_multiple<ELEMENTTYPE>;  \
+    forward_op_xor_##ELEMENTTYPE =                                       \
+        VectorizedAvx512::template forward_op_xor<ELEMENTTYPE>;          \
+    forward_op_sub_##ELEMENTTYPE =                                       \
+        VectorizedAvx512::template forward_op_sub<ELEMENTTYPE>;
+
+        ALL_FORWARD_OPS(SET_FORWARD_OPS_AVX512)
+
 #undef SET_OP_COMPARE_COLUMN_AVX512
 #undef SET_OP_COMPARE_VAL_AVX512
 #undef SET_OP_WITHIN_RANGE_COLUMN_AVX512
 #undef SET_OP_WITHIN_RANGE_VAL_AVX512
 #undef SET_ARITH_COMPARE_AVX512
+#undef SET_FORWARD_OPS_AVX512
 
         return;
     }
@@ -467,11 +594,28 @@ init_dynamic_hook() {
         ALL_ARITH_CMP_OPS(SET_ARITH_COMPARE_AVX2, float)
         ALL_ARITH_CMP_OPS(SET_ARITH_COMPARE_AVX2, double)
 
+#define SET_FORWARD_OPS_AVX2(ELEMENTTYPE)                              \
+    forward_op_and_##ELEMENTTYPE =                                     \
+        VectorizedAvx2::template forward_op_and<ELEMENTTYPE>;          \
+    forward_op_and_multiple_##ELEMENTTYPE =                            \
+        VectorizedAvx2::template forward_op_and_multiple<ELEMENTTYPE>; \
+    forward_op_or_##ELEMENTTYPE =                                      \
+        VectorizedAvx2::template forward_op_or<ELEMENTTYPE>;           \
+    forward_op_or_multiple_##ELEMENTTYPE =                             \
+        VectorizedAvx2::template forward_op_or_multiple<ELEMENTTYPE>;  \
+    forward_op_xor_##ELEMENTTYPE =                                     \
+        VectorizedAvx2::template forward_op_xor<ELEMENTTYPE>;          \
+    forward_op_sub_##ELEMENTTYPE =                                     \
+        VectorizedAvx2::template forward_op_sub<ELEMENTTYPE>;
+
+        ALL_FORWARD_OPS(SET_FORWARD_OPS_AVX2)
+
 #undef SET_OP_COMPARE_COLUMN_AVX2
 #undef SET_OP_COMPARE_VAL_AVX2
 #undef SET_OP_WITHIN_RANGE_COLUMN_AVX2
 #undef SET_OP_WITHIN_RANGE_VAL_AVX2
 #undef SET_ARITH_COMPARE_AVX2
+#undef SET_FORWARD_OPS_AVX2
 
         return;
     }
@@ -535,15 +679,33 @@ init_dynamic_hook() {
         ALL_ARITH_CMP_OPS(SET_ARITH_COMPARE_SVE, float)
         ALL_ARITH_CMP_OPS(SET_ARITH_COMPARE_SVE, double)
 
+#define SET_FORWARD_OPS_SVE(ELEMENTTYPE)                              \
+    forward_op_and_##ELEMENTTYPE =                                    \
+        VectorizedSve::template forward_op_and<ELEMENTTYPE>;          \
+    forward_op_and_multiple_##ELEMENTTYPE =                           \
+        VectorizedSve::template forward_op_and_multiple<ELEMENTTYPE>; \
+    forward_op_or_##ELEMENTTYPE =                                     \
+        VectorizedSve::template forward_op_or<ELEMENTTYPE>;           \
+    forward_op_or_multiple_##ELEMENTTYPE =                            \
+        VectorizedSve::template forward_op_or_multiple<ELEMENTTYPE>;  \
+    forward_op_xor_##ELEMENTTYPE =                                    \
+        VectorizedSve::template forward_op_xor<ELEMENTTYPE>;          \
+    forward_op_sub_##ELEMENTTYPE =                                    \
+        VectorizedSve::template forward_op_sub<ELEMENTTYPE>;
+
+        ALL_FORWARD_OPS(SET_FORWARD_OPS_SVE)
+
 #undef SET_OP_COMPARE_COLUMN_SVE
 #undef SET_OP_COMPARE_VAL_SVE
 #undef SET_OP_WITHIN_RANGE_COLUMN_SVE
 #undef SET_OP_WITHIN_RANGE_VAL_SVE
 #undef SET_ARITH_COMPARE_SVE
+#undef SET_FORWARD_OPS_SVE
 
         return;
     }
 #endif
+
     // neon ?
     {
 #define SET_OP_COMPARE_COLUMN_NEON(TTYPE, UTYPE, OP)              \
@@ -600,11 +762,28 @@ init_dynamic_hook() {
         ALL_ARITH_CMP_OPS(SET_ARITH_COMPARE_NEON, float)
         ALL_ARITH_CMP_OPS(SET_ARITH_COMPARE_NEON, double)
 
+#define SET_FORWARD_OPS_NEON(ELEMENTTYPE)                              \
+    forward_op_and_##ELEMENTTYPE =                                     \
+        VectorizedNeon::template forward_op_and<ELEMENTTYPE>;          \
+    forward_op_and_multiple_##ELEMENTTYPE =                            \
+        VectorizedNeon::template forward_op_and_multiple<ELEMENTTYPE>; \
+    forward_op_or_##ELEMENTTYPE =                                      \
+        VectorizedNeon::template forward_op_or<ELEMENTTYPE>;           \
+    forward_op_or_multiple_##ELEMENTTYPE =                             \
+        VectorizedNeon::template forward_op_or_multiple<ELEMENTTYPE>;  \
+    forward_op_xor_##ELEMENTTYPE =                                     \
+        VectorizedNeon::template forward_op_xor<ELEMENTTYPE>;          \
+    forward_op_sub_##ELEMENTTYPE =                                     \
+        VectorizedNeon::template forward_op_sub<ELEMENTTYPE>;
+
+        ALL_FORWARD_OPS(SET_FORWARD_OPS_NEON)
+
 #undef SET_OP_COMPARE_COLUMN_NEON
 #undef SET_OP_COMPARE_VAL_NEON
 #undef SET_OP_WITHIN_RANGE_COLUMN_NEON
 #undef SET_OP_WITHIN_RANGE_VAL_NEON
 #undef SET_ARITH_COMPARE_NEON
+#undef SET_FORWARD_OPS_NEON
 
         return;
     }
@@ -616,6 +795,7 @@ init_dynamic_hook() {
 #undef ALL_COMPARE_OPS
 #undef ALL_RANGE_OPS
 #undef ALL_ARITH_CMP_OPS
+#undef ALL_FORWARD_OPS
 
 //
 static int init_dynamic_ = []() {
