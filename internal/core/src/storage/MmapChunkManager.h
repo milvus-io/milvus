@@ -27,7 +27,7 @@
 #include "log/Log.h"
 #include <optional>
 #include "common/type_c.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/local/LocalChunkManagerSingleton.h"
 namespace milvus::storage {
 // use segment id and segment type to descripe a segment in mmap chunk manager, segment only in two type (growing or sealed) in mmap chunk manager
 struct MmapChunkDescriptor {
