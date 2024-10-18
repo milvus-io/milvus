@@ -74,17 +74,8 @@ func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerCo
 	return &kafkaClient{basicConfig: config, consumerConfig: extraConsumerConfig, producerConfig: extraProducerConfig}
 }
 
-func NewKafkaClientInstanceWithConfig(ctx context.Context, config *paramtable.KafkaConfig) (*kafkaClient, error) {
+func GetBasicConfig(config *paramtable.KafkaConfig) kafka.ConfigMap {
 	kafkaConfig := getBasicConfig(config.Address.GetValue())
-
-	// connection setup timeout, default as 30000ms, available range is [1000, 2147483647]
-	if deadline, ok := ctx.Deadline(); ok {
-		if deadline.Before(time.Now()) {
-			return nil, errors.New("context timeout when new kafka client")
-		}
-		// timeout := time.Until(deadline).Milliseconds()
-		// kafkaConfig.SetKey("socket.connection.setup.timeout.ms", strconv.FormatInt(timeout, 10))
-	}
 
 	if (config.SaslUsername.GetValue() == "" && config.SaslPassword.GetValue() != "") ||
 		(config.SaslUsername.GetValue() != "" && config.SaslPassword.GetValue() == "") {
@@ -110,6 +101,20 @@ func NewKafkaClientInstanceWithConfig(ctx context.Context, config *paramtable.Ka
 		}
 	}
 
+	return kafkaConfig
+}
+
+func NewKafkaClientInstanceWithConfig(ctx context.Context, config *paramtable.KafkaConfig) (*kafkaClient, error) {
+	// connection setup timeout, default as 30000ms, available range is [1000, 2147483647]
+	if deadline, ok := ctx.Deadline(); ok {
+		if deadline.Before(time.Now()) {
+			return nil, errors.New("context timeout when new kafka client")
+		}
+		// timeout := time.Until(deadline).Milliseconds()
+		// kafkaConfig.SetKey("socket.connection.setup.timeout.ms", strconv.FormatInt(timeout, 10))
+	}
+
+	kafkaConfig := GetBasicConfig(config)
 	specExtraConfig := func(config map[string]string) kafka.ConfigMap {
 		kafkaConfigMap := make(kafka.ConfigMap, len(config))
 		for k, v := range config {
