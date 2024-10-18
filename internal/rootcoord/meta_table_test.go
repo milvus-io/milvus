@@ -1605,8 +1605,8 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 				},
 			},
 		}
-		meta.names.insert(util.DefaultDBName, "new", 1)
-		meta.aliases.insert(util.DefaultDBName, "alias", 1)
+		meta.names.insert(util.DefaultDBName, "old", 1)
+		meta.aliases.insert(util.DefaultDBName, "new", 1)
 
 		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "db1", "new", 1000)
 		assert.Error(t, err)
