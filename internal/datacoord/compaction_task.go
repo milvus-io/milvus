@@ -212,14 +212,14 @@ func (t *compactionTaskBase) ShadowClone(opts ...compactionTaskOpt) *datapb.Comp
 
 func (t *compactionTaskBase) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
 	task := t.ShadowClone(opts...)
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	t.CompactionTask = task
 	err := t.SaveTaskMeta()
 	if err != nil {
 		log.Warn("Failed to saveTaskMeta", zap.Error(err))
 		return merr.WrapErrClusteringCompactionMetaError("updateAndSaveTaskMeta", err) // retryable
 	}
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	t.CompactionTask = task
 	return nil
 }
 
