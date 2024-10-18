@@ -157,11 +157,11 @@ func (q *CompactionQueue) Len() int {
 
 var (
 	DefaultPrioritizer Prioritizer = func(task CompactionTask) int {
-		return int(task.GetPlanID())
+		return int(task.GetTaskProto().GetPlanID())
 	}
 
 	LevelPrioritizer Prioritizer = func(task CompactionTask) int {
-		switch task.GetType() {
+		switch task.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 1
 		case datapb.CompactionType_MixCompaction:
@@ -174,7 +174,7 @@ var (
 	}
 
 	MixFirstPrioritizer Prioritizer = func(task CompactionTask) int {
-		switch task.GetType() {
+		switch task.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 10
 		case datapb.CompactionType_MixCompaction:
