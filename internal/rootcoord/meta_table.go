@@ -788,7 +788,7 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	_, ok = mt.aliases.get(newDBName, newName)
 	if ok {
 		log.Warn("cannot rename collection to an existing alias")
-		return merr.WrapErrParameterInvalidMsg("cannot rename collection to an existing alias: %s", newName)
+		return fmt.Errorf("cannot rename collection to an existing alias: %s", newName)
 	}
 
 	// check new collection already exists
