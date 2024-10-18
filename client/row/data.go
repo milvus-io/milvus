@@ -269,6 +269,25 @@ func NewArrayColumn(f *entity.Field) column.Column {
 	}
 }
 
+func SetField(receiver any, fieldName string, value any) error {
+	candidates, err := reflectValueCandi(reflect.ValueOf(receiver))
+	if err != nil {
+		return err
+	}
+
+	candidate, ok := candidates[fieldName]
+	// if field not found, just return
+	if !ok {
+		return nil
+	}
+
+	if candidate.v.CanSet() {
+		candidate.v.Set(reflect.ValueOf(value))
+	}
+
+	return nil
+}
+
 type fieldCandi struct {
 	name    string
 	v       reflect.Value
