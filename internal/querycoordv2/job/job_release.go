@@ -91,7 +91,7 @@ func (job *ReleaseCollectionJob) Execute() error {
 
 	job.targetObserver.ReleaseCollection(req.GetCollectionID())
 	waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
-	tryReleaseCollection(job.ctx, job.meta, job.cluster, req.GetCollectionID())
+	cleanQueryNodesCollectionMetaCache(job.ctx, job.meta, job.cluster, req.GetCollectionID())
 	err = job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
 	if err != nil {
 		msg := "failed to remove replicas"

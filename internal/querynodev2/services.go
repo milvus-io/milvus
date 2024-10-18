@@ -238,6 +238,11 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 
 	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
+	defer func() {
+		if !merr.Ok(status) {
+			node.manager.Collection.Release(req.GetCollectionID())
+		}
+	}()
 
 	delegator, err := delegator.NewShardDelegator(
 		ctx,
@@ -392,7 +397,7 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 }
 
 // LoadSegments load historical data into query node, historical data can be vector data or index
-func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
+func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (status *commonpb.Status, e error) {
 	defer node.updateDistributionModifyTS()
 	segment := req.GetInfos()[0]
 
@@ -460,6 +465,11 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+	defer func() {
+		if !merr.Ok(status) {
+			node.manager.Collection.Release(req.GetCollectionID())
+		}
+	}()
 
 	if req.GetLoadScope() == querypb.LoadScope_Delta {
 		return node.loadDeltaLogs(ctx, req), nil

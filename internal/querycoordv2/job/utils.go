@@ -148,7 +148,7 @@ func releasePartitions(ctx context.Context,
 	}
 }
 
-func tryReleaseCollection(ctx context.Context,
+func cleanQueryNodesCollectionMetaCache(ctx context.Context,
 	meta *meta.Meta,
 	cluster session.Cluster,
 	collection int64,
