@@ -61,6 +61,12 @@ func WithoutJobStates(states ...internalpb.ImportJobState) ImportJobFilter {
 	}
 }
 
+func WithDbID(DbID int64) ImportJobFilter {
+	return func(job ImportJob) bool {
+		return job.GetDbID() == DbID
+	}
+}
+
 type UpdateJobAction func(job ImportJob)
 
 func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
@@ -100,6 +106,7 @@ func UpdateJobCompleteTime(completeTime string) UpdateJobAction {
 
 type ImportJob interface {
 	GetJobID() int64
+	GetDbID() int64
 	GetCollectionID() int64
 	GetCollectionName() string
 	GetPartitionIDs() []int64
