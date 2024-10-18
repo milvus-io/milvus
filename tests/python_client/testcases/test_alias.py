@@ -309,9 +309,6 @@ class TestAliasOperationInvalid(TestcaseBase):
         self.utility_wrap.create_alias(collection_2.name, alias_a_name,
                                        check_task=CheckTasks.err_res,
                                        check_items=error)
-        # collection_2.create_alias(alias_a_name,
-        #                           check_task=CheckTasks.err_res,
-        #                           check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_alter_not_exist_alias(self):
@@ -330,7 +327,6 @@ class TestAliasOperationInvalid(TestcaseBase):
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         alias_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_w.name, alias_name)
-        # collection_w.create_alias(alias_name)
 
         alias_not_exist_name = cf.gen_unique_str(prefix)
         error = {ct.err_code: 1600,
@@ -338,9 +334,6 @@ class TestAliasOperationInvalid(TestcaseBase):
         self.utility_wrap.alter_alias(collection_w.name, alias_not_exist_name,
                                       check_task=CheckTasks.err_res,
                                       check_items=error)
-        # collection_w.alter_alias(alias_not_exist_name,
-        #                          check_task=CheckTasks.err_res,
-        #                          check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_alias_drop_not_exist_alias(self):
@@ -349,7 +342,7 @@ class TestAliasOperationInvalid(TestcaseBase):
         method: 
                 1.create a collection with alias
                 2.collection drop alias which is not exist
-        expected: drop alias failed
+        expected: drop alias succ
         """
         self._connect()
         c_name = cf.gen_unique_str("collection")
@@ -358,23 +351,10 @@ class TestAliasOperationInvalid(TestcaseBase):
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         alias_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_w.name, alias_name)
-        # collection_w.create_alias(alias_name)
-
         alias_not_exist_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1,
-                 ct.err_msg: "Drop alias failed: alias does not exist"}
-        # self.utility_wrap.drop_alias(alias_not_exist_name,
-        #                              check_task=CheckTasks.err_res,
-        #                              check_items=error)
-        # @longjiquan: dropping alias should be idempotent.
         self.utility_wrap.drop_alias(alias_not_exist_name)
 
-        #
-        # collection_w.drop_alias(alias_not_exist_name,
-        #                         check_task=CheckTasks.err_res,
-        #                         check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_alias_drop_same_alias_twice(self):
         """
         target: test collection dropping same alias twice
@@ -382,7 +362,7 @@ class TestAliasOperationInvalid(TestcaseBase):
                 1.create a collection with alias
                 2.collection drop alias
                 3.collection drop alias again
-        expected: drop alias failed
+        expected: drop alias succ
         """
         self._connect()
         c_name = cf.gen_unique_str("collection")
@@ -392,20 +372,8 @@ class TestAliasOperationInvalid(TestcaseBase):
         alias_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_w.name, alias_name)
         self.utility_wrap.drop_alias(alias_name)
-        # collection_w.create_alias(alias_name)
-        # collection_w.drop_alias(alias_name)
-
         # @longjiquan: dropping alias should be idempotent.
         self.utility_wrap.drop_alias(alias_name)
-
-        # error = {ct.err_code: 1, ct.err_msg: "Drop alias failed: alias does not exist"}
-        # self.utility_wrap.drop_alias(alias_name,
-        #                              check_task=CheckTasks.err_res,
-        #                              check_items=error)
-
-        # collection_w.drop_alias(alias_name,
-        #                         check_task=CheckTasks.err_res,
-        #                         check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_alias_create_dup_name_collection(self):
@@ -442,16 +410,84 @@ class TestAliasOperationInvalid(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str("collection")
+        schema = cf.gen_default_collection_schema(description="this is for alias decsription")
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: c_name, exp_schema: schema})
+        alias_name = cf.gen_unique_str(prefix)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
+        # collection_w.create_alias(alias_name)
+        collection_alias = self.init_collection_wrap(name=alias_name, schema=schema,
+                                                     check_task=CheckTasks.check_collection_property,
+                                                     check_items={exp_name: alias_name,
+                                                                  exp_schema: schema})
+
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"cannot drop the collection via alias = {alias_name}"}
+        collection_alias.drop(check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #36963")
+    def test_alias_reuse_alias_name_from_dropped_collection(self):
+        """
+        target: test dropping a collection which has a alias
+        method:
+                1.create a collection
+                2.create an alias for the collection
+                3.drop the collection
+                4.create a new collection
+                5.create an alias with the same alias name for the new collection
+            expected: in step 5, create alias with the same name for the new collection succ
+        """
+        self._connect()
+        c_name = cf.gen_unique_str("collection")
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         alias_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_w.name, alias_name)
-        # collection_w.create_alias(alias_name)
-        collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
-                                                                   check_task=CheckTasks.check_collection_property,
-                                                                   check_items={exp_name: alias_name,
-                                                                                exp_schema: default_schema})
+        res = self.utility_wrap.list_aliases(c_name)[0]
+        assert len(res) == 1
 
-        with pytest.raises(Exception):
-            collection_alias.drop()
+        # dropping collection that has an alias shall drop the alias as well
+        collection_w.drop()
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: c_name, exp_schema: default_schema})
+        res2 = self.utility_wrap.list_aliases(c_name)[0]
+        assert len(res2) == 0
+        # the same alias name can be reused for another collection
+        self.utility_wrap.create_alias(c_name, alias_name)
+        res2 = self.utility_wrap.list_aliases(c_name)[0]
+        assert len(res2) == 1
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #36963")
+    def test_alias_rename_collection_to_alias_name(self):
+        """
+        target: test renaming a collection to a alias name
+        method:
+                1.create a collection
+                2.create an alias for the collection
+                3.rename the collection to the alias name
+        """
+        self._connect()
+        c_name = cf.gen_unique_str("collection")
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: c_name, exp_schema: default_schema})
+        alias_name = cf.gen_unique_str(prefix)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"duplicated new collection name default:{alias_name} with other collection name or alias"}
+        self.utility_wrap.rename_collection(collection_w.name, alias_name,
+                                            check_task=CheckTasks.err_res, check_items=error)
+
+        collection_w.drop()
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: c_name, exp_schema: default_schema})
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"this is not expected, any collection name or alias name shall be unique"}
+        self.utility_wrap.rename_collection(collection_w.name, alias_name,
+                                            check_task=CheckTasks.err_res, check_items=error)
