@@ -427,7 +427,7 @@ class TestAliasOperationInvalid(TestcaseBase):
         collection_alias.drop(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.xfail(reason="issue #36963")
+    @pytest.mark.xfail(reason="issue #36963")
     def test_alias_reuse_alias_name_from_dropped_collection(self):
         """
         target: test dropping a collection which has a alias
@@ -462,7 +462,7 @@ class TestAliasOperationInvalid(TestcaseBase):
         assert len(res2) == 1
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.xfail(reason="issue #36963")
+    @pytest.mark.xfail(reason="issue #36963")
     def test_alias_rename_collection_to_alias_name(self):
         """
         target: test renaming a collection to a alias name
