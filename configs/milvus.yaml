@@ -554,7 +554,11 @@ dataCoord:
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true
     indexBasedCompaction: true
-    taskPrioritizer: default # compaction task prioritizer, options: [default, level]. Default is FIFO, level is prioritized by level: L0 compactions first, then mix compactions, then major compactions.
+    # compaction task prioritizer, options: [default, level, mix]. 
+    # default is FIFO.
+    # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
+    # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
+    taskPrioritizer: default
     rpcTimeout: 10
     maxParallelTaskNum: 10
     workerMaxParallelTaskNum: 2
