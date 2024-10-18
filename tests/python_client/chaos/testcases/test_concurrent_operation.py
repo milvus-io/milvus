@@ -8,6 +8,7 @@ from chaos.checker import (InsertChecker,
                            FlushChecker,
                            SearchChecker,
                            HybridSearchChecker,
+                           FullTextSearchChecker,
                            QueryChecker,
                            DeleteChecker,
                            Op,
@@ -66,7 +67,7 @@ class TestOperations(TestBase):
         self.password = password
         self.milvus_sys = MilvusSys(alias='default')
         self.milvus_ns = milvus_ns
-        self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
+        # self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
 
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
@@ -75,6 +76,7 @@ class TestOperations(TestBase):
             Op.upsert: UpsertChecker(collection_name=c_name),
             Op.flush: FlushChecker(collection_name=c_name),
             Op.search: SearchChecker(collection_name=c_name),
+            Op.full_text_search: FullTextSearchChecker(collection_name=c_name),
             Op.hybrid_search: HybridSearchChecker(collection_name=c_name),
             Op.query: QueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
@@ -109,7 +111,8 @@ class TestOperations(TestBase):
             for k, v in self.health_checkers.items():
                 v.check_result()
                 # log.info(v.check_result())
-        wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
+
+        # add a check healthy function
         time.sleep(60)
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
