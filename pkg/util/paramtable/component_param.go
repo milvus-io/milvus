@@ -3420,8 +3420,11 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 		Key:          "dataCoord.compaction.taskPrioritizer",
 		Version:      "2.5.0",
 		DefaultValue: "default",
-		Doc:          "compaction task prioritizer, options: [default, level]. Default is FIFO, level is prioritized by level: L0 compactions first, then mix compactions, then major compactions.",
-		Export:       true,
+		Doc: `compaction task prioritizer, options: [default, level, mix]. 
+default is FIFO.
+level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
+mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.`,
+		Export: true,
 	}
 	p.CompactionTaskPrioritizer.Init(base.mgr)
 
