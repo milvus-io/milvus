@@ -913,10 +913,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	excludedSegments := NewExcludedSegments(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.GetAsDuration(time.Second))
 
-	var idfOracle IDFOracle
-	if len(collection.Schema().GetFunctions()) > 0 {
-		idfOracle = NewIDFOracle(collection.Schema().GetFunctions())
-	}
 	sd := &shardDelegator{
 		collectionID:     collectionID,
 		replicaID:        replicaID,
@@ -926,7 +922,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		segmentManager:   manager.Segment,
 		workerManager:    workerManager,
 		lifetime:         lifetime.NewLifetime(lifetime.Initializing),
-		distribution:     NewDistribution(idfOracle),
+		distribution:     NewDistribution(),
 		deleteBuffer:     deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock),
 		pkOracle:         pkoracle.NewPkOracle(),
 		tsafeManager:     tsafeManager,
@@ -935,7 +931,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		factory:          factory,
 		queryHook:        queryHook,
 		chunkManager:     chunkManager,
-		idfOracle:        idfOracle,
 		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
 		excludedSegments: excludedSegments,
 		functionRunners:  make(map[int64]function.FunctionRunner),
@@ -953,6 +948,11 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 				sd.isBM25Field[tf.OutputFieldIds[0]] = true
 			}
 		}
+	}
+
+	if len(sd.isBM25Field) > 0 {
+		sd.idfOracle = NewIDFOracle(collection.Schema().GetFunctions())
+		sd.distribution.SetIDFOracle(sd.idfOracle)
 	}
 
 	m := sync.Mutex{}
