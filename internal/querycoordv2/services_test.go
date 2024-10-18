@@ -215,6 +215,7 @@ func (suite *ServiceSuite) SetupTest() {
 		ctx:                 context.Background(),
 	}
 
+	suite.server.registerMetricsRequest()
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
@@ -1356,8 +1357,8 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 			suite.Len(actions, 2)
 			growAction := actions[0].(*task.SegmentAction)
 			reduceAction := actions[1].(*task.SegmentAction)
-			suite.True(lo.Contains(segmentOnCollection[collection], growAction.SegmentID()))
-			suite.True(lo.Contains(segmentOnCollection[collection], reduceAction.SegmentID()))
+			suite.True(lo.Contains(segmentOnCollection[collection], growAction.GetSegmentID()))
+			suite.True(lo.Contains(segmentOnCollection[collection], reduceAction.GetSegmentID()))
 			suite.Equal(dstNode, growAction.Node())
 			suite.Equal(srcNode, reduceAction.Node())
 			t.Cancel(nil)
@@ -1511,7 +1512,7 @@ func (suite *ServiceSuite) TestGetMetrics() {
 		suite.cluster.EXPECT().GetMetrics(ctx, node, mock.Anything).Return(&milvuspb.GetMetricsResponse{
 			Status:        merr.Success(),
 			ComponentName: "QueryNode",
-		}, nil)
+		}, nil).Maybe()
 	}
 
 	metricReq := make(map[string]string)

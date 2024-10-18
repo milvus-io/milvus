@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestValidateMQType(t *testing.T) {
@@ -32,4 +34,31 @@ func TestSelectMQType(t *testing.T) {
 	assert.Panics(t, func() { mustSelectMQType(false, mqTypeNatsmq, mqEnable{true, true, true, true}) })
 	assert.Equal(t, mustSelectMQType(false, mqTypePulsar, mqEnable{true, true, true, true}), mqTypePulsar)
 	assert.Equal(t, mustSelectMQType(false, mqTypeKafka, mqEnable{true, true, true, true}), mqTypeKafka)
+}
+
+func TestHealthCheck(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().PulsarCfg.WebAddress.Key, "")
+	paramtable.Get().Reset(paramtable.Get().PulsarCfg.WebAddress.Key)
+	paramtable.Get().Save(paramtable.Get().KafkaCfg.Address.Key, "")
+	paramtable.Get().Reset(paramtable.Get().KafkaCfg.Address.Key)
+
+	testCases := []struct {
+		mqType string
+		health bool
+	}{
+		{mqTypeNatsmq, true},
+		{mqTypeRocksmq, true},
+		{mqTypePulsar, false},
+		{mqTypeKafka, false},
+		{"invalidType", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.mqType, func(t *testing.T) {
+			status := HealthCheck(tc.mqType)
+			assert.Equal(t, tc.mqType, status.MqType)
+			assert.Equal(t, tc.health, status.Health)
+		})
+	}
 }

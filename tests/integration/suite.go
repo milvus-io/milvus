@@ -19,6 +19,7 @@ package integration
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -81,6 +82,7 @@ func (s *MiniClusterSuite) SetupSuite() {
 }
 
 func (s *MiniClusterSuite) TearDownSuite() {
+	fmt.Println("=============TearDownSuite=========== ")
 	s.TearDownEmbedEtcd()
 }
 

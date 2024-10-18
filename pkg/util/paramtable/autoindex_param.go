@@ -266,6 +266,9 @@ func (p *autoIndexConfig) panicIfNotValidAndSetDefaultMetricTypeHelper(key strin
 }
 
 func (p *autoIndexConfig) reset(key string, m map[string]string, mgr *config.Manager) {
-	j := funcutil.MapToJSON(m)
-	mgr.SetConfig(key, string(j))
+	ret, err := funcutil.MapToJSON(m)
+	if err != nil {
+		panic(fmt.Sprintf("%s: convert to json failed, parameters invalid, error: %s", key, err.Error()))
+	}
+	mgr.SetConfig(key, ret)
 }
