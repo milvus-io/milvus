@@ -741,7 +741,7 @@ CreateChunkManager(const StorageConfig& storage_config) {
         default: {
             PanicInfo(ConfigInvalid,
                       "unsupported storage_config.storage_type {}",
-                      fmt::underlying(storage_type));
+                      storage_type);
         }
     }
 }
