@@ -27,8 +27,8 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.5.0rc95
-pymilvus[bulk_writer]==2.5.0rc95
+git+https://github.com/zhengbuqian/pymilvus.git@ci-simplify-insert-field-check#egg=pymilvus
+# git+https://github.com/zhengbuqian/pymilvus.git@your_branch_name#egg=pymilvus[bulk_writer]
 
 # for customize config test
 python-benedict==0.24.3
