@@ -59,7 +59,7 @@ type SessionManager interface {
 	Flush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest)
 	FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error
 	Compaction(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error
-	SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error
+	SyncSegments(ctx context.Context, nodeID int64, req *datapb.SyncSegmentsRequest) error
 	GetCompactionPlanResult(nodeID int64, planID int64) (*datapb.CompactionPlanResult, error)
 	GetCompactionPlansResults() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error)
 	NotifyChannelOperation(ctx context.Context, nodeID int64, req *datapb.ChannelOperationsRequest) error
@@ -224,7 +224,7 @@ func (c *SessionManagerImpl) Compaction(ctx context.Context, nodeID int64, plan 
 }
 
 // SyncSegments is a grpc interface. It will send request to DataNode with provided `nodeID` synchronously.
-func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error {
+func (c *SessionManagerImpl) SyncSegments(ctx context.Context, nodeID int64, req *datapb.SyncSegmentsRequest) error {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("planID", req.GetPlanID()),
@@ -238,9 +238,9 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 		return err
 	}
 
-	err = retry.Do(context.Background(), func() error {
+	err = retry.Do(ctx, func() error {
 		// doesn't set timeout
-		resp, err := cli.SyncSegments(context.Background(), req)
+		resp, err := cli.SyncSegments(ctx, req)
 		if err := VerifyResponse(resp, err); err != nil {
 			log.Warn("failed to sync segments", zap.Error(err))
 			return err
