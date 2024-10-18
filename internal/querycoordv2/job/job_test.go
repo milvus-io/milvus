@@ -835,9 +835,6 @@ func (suite *JobSuite) TestReleaseCollection() {
 
 	// Test release collection and partition
 	for _, collection := range suite.collections {
-		//_, err := utils.SpawnReplicasWithRG(suite.meta, collection, nil,
-		//	1, suite.channels[collection])
-		//suite.NoError(err)
 		req := &querypb.ReleaseCollectionRequest{
 			CollectionID: collection,
 		}
@@ -860,9 +857,6 @@ func (suite *JobSuite) TestReleaseCollection() {
 
 	// Test release again
 	for _, collection := range suite.collections {
-		//_, err := utils.SpawnReplicasWithRG(suite.meta, collection, nil,
-		//	1, suite.channels[collection])
-		//suite.NoError(err)
 		req := &querypb.ReleaseCollectionRequest{
 			CollectionID: collection,
 		}

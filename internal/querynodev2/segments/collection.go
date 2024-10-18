@@ -45,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-//go:generate mockery --name=CollectionManager --dir=/home/sheep/workspace/milvus/internal/querynodev2/segments --structname=MockCollectionManager  --output=/home/sheep/workspace/milvus/internal/querynodev2/segments  --filename=mock_collection_manager.go --with-expecter --inpackage --log-level=debug
 type CollectionManager interface {
 	List() []int64
 	Get(collectionID int64) *Collection
