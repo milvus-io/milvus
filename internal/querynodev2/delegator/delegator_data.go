@@ -878,6 +878,9 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	case querypb.DataScope_Historical:
 		sealed = lo.Map(req.GetSegmentIDs(), convertSealed)
 	}
+	signal := sd.distribution.RemoveDistributions(sealed, growing)
+	// wait cleared signal
+	<-signal
 
 	if len(growing) > 0 {
 		sd.growingSegmentLock.Lock()
@@ -893,9 +896,6 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	})
 	sd.AddExcludedSegments(droppedInfos)
 
-	signal := sd.distribution.RemoveDistributions(sealed, growing)
-	// wait cleared signal
-	<-signal
 	if len(sealed) > 0 {
 		sd.pkOracle.Remove(
 			pkoracle.WithSegmentIDs(lo.Map(sealed, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })...),
