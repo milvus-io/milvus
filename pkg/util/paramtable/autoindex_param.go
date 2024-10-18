@@ -24,12 +24,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // /////////////////////////////////////////////////////////////////////////////
 // --- common ---
-type autoIndexConfig struct {
+type AutoIndexConfig struct {
 	Enable         ParamItem `refreshable:"true"`
 	EnableOptimize ParamItem `refreshable:"true"`
 
@@ -59,7 +60,7 @@ const (
 	DefaultBitmapCardinalityLimit = 100
 )
 
-func (p *autoIndexConfig) init(base *BaseTable) {
+func (p *AutoIndexConfig) init(base *BaseTable) {
 	p.Enable = ParamItem{
 		Key:          "autoIndex.enable",
 		Version:      "2.2.0",
@@ -148,7 +149,7 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 	}
 	p.AutoIndexTuningConfig.Init(base.mgr)
 
-	p.panicIfNotValidAndSetDefaultMetricType(base.mgr)
+	p.SetDefaultMetricType(base.mgr)
 
 	p.ScalarAutoIndexEnable = ParamItem{
 		Key:          "scalarAutoIndex.enable",
@@ -235,37 +236,47 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 	p.ScalarBoolIndexType.Init(base.mgr)
 }
 
-func (p *autoIndexConfig) panicIfNotValidAndSetDefaultMetricType(mgr *config.Manager) {
-	p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
-	p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.BinaryIndexParams.Key, p.BinaryIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector, mgr)
-	p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.SparseIndexParams.Key, p.SparseIndexParams.GetAsJSONMap(), schemapb.DataType_SparseFloatVector, mgr)
+// SetDefaultMetricType The config check logic has been moved to internal package; only set defulat metric here
+func (p *AutoIndexConfig) SetDefaultMetricType(mgr *config.Manager) {
+	p.SetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
+	p.SetDefaultMetricTypeHelper(p.BinaryIndexParams.Key, p.BinaryIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector, mgr)
+	p.SetDefaultMetricTypeHelper(p.SparseIndexParams.Key, p.SparseIndexParams.GetAsJSONMap(), schemapb.DataType_SparseFloatVector, mgr)
 }
 
-func (p *autoIndexConfig) panicIfNotValidAndSetDefaultMetricTypeHelper(key string, m map[string]string, dtype schemapb.DataType, mgr *config.Manager) {
+func setDefaultIfNotExist(params map[string]string, key string, defaultValue string) {
+	_, exist := params[key]
+	if !exist {
+		params[key] = defaultValue
+	}
+}
+
+const (
+	FloatVectorDefaultMetricType       = metric.COSINE
+	SparseFloatVectorDefaultMetricType = metric.IP
+	BinaryVectorDefaultMetricType      = metric.HAMMING
+)
+
+func SetDefaultMetricTypeIfNotExist(dType schemapb.DataType, params map[string]string) {
+	if typeutil.IsDenseFloatVectorType(dType) {
+		setDefaultIfNotExist(params, common.MetricTypeKey, FloatVectorDefaultMetricType)
+	} else if typeutil.IsSparseFloatVectorType(dType) {
+		setDefaultIfNotExist(params, common.MetricTypeKey, SparseFloatVectorDefaultMetricType)
+	} else if typeutil.IsBinaryVectorType(dType) {
+		setDefaultIfNotExist(params, common.MetricTypeKey, BinaryVectorDefaultMetricType)
+	}
+}
+
+func (p *AutoIndexConfig) SetDefaultMetricTypeHelper(key string, m map[string]string, dtype schemapb.DataType, mgr *config.Manager) {
 	if m == nil {
 		panic(fmt.Sprintf("%s invalid, should be json format", key))
 	}
 
-	indexType, ok := m[common.IndexTypeKey]
-	if !ok {
-		panic(fmt.Sprintf("%s invalid, index type not found", key))
-	}
-
-	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
-	if err != nil {
-		panic(fmt.Sprintf("%s invalid, unsupported index type: %s", key, indexType))
-	}
-
-	checker.SetDefaultMetricTypeIfNotExist(m, dtype)
-
-	if err := checker.StaticCheck(m); err != nil {
-		panic(fmt.Sprintf("%s invalid, parameters invalid, error: %s", key, err.Error()))
-	}
+	SetDefaultMetricTypeIfNotExist(dtype, m)
 
 	p.reset(key, m, mgr)
 }
 
-func (p *autoIndexConfig) reset(key string, m map[string]string, mgr *config.Manager) {
+func (p *AutoIndexConfig) reset(key string, m map[string]string, mgr *config.Manager) {
 	j := funcutil.MapToJSON(m)
 	mgr.SetConfig(key, string(j))
 }

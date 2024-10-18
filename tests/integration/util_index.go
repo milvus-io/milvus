@@ -26,23 +26,22 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 )
 
 const (
-	IndexRaftIvfFlat         = indexparamcheck.IndexRaftIvfFlat
-	IndexRaftIvfPQ           = indexparamcheck.IndexRaftIvfPQ
-	IndexFaissIDMap          = indexparamcheck.IndexFaissIDMap
-	IndexFaissIvfFlat        = indexparamcheck.IndexFaissIvfFlat
-	IndexFaissIvfPQ          = indexparamcheck.IndexFaissIvfPQ
-	IndexScaNN               = indexparamcheck.IndexScaNN
-	IndexFaissIvfSQ8         = indexparamcheck.IndexFaissIvfSQ8
-	IndexFaissBinIDMap       = indexparamcheck.IndexFaissBinIDMap
-	IndexFaissBinIvfFlat     = indexparamcheck.IndexFaissBinIvfFlat
-	IndexHNSW                = indexparamcheck.IndexHNSW
-	IndexDISKANN             = indexparamcheck.IndexDISKANN
-	IndexSparseInvertedIndex = indexparamcheck.IndexSparseInverted
-	IndexSparseWand          = indexparamcheck.IndexSparseWand
+	IndexRaftIvfFlat         = "GPU_IVF_FLAT"
+	IndexRaftIvfPQ           = "GPU_IVF_PQ"
+	IndexFaissIDMap          = "FLAT"
+	IndexFaissIvfFlat        = "IVF_FLAT"
+	IndexFaissIvfPQ          = "IVF_PQ"
+	IndexScaNN               = "SCANN"
+	IndexFaissIvfSQ8         = "IVF_SQ8"
+	IndexFaissBinIDMap       = "BIN_FLAT"
+	IndexFaissBinIvfFlat     = "BIN_IVF_FLAT"
+	IndexHNSW                = "HNSW"
+	IndexDISKANN             = "DISKANN"
+	IndexSparseInvertedIndex = "SPARSE_INVERTED_INDEX"
+	IndexSparseWand          = "SPARSE_WAND"
 )
 
 func (s *MiniClusterSuite) WaitForIndexBuiltWithDB(ctx context.Context, dbName, collection, field string) {
