@@ -65,7 +65,7 @@ type ComponentParam struct {
 
 	CommonCfg       commonConfig
 	QuotaConfig     quotaConfig
-	AutoIndexConfig autoIndexConfig
+	AutoIndexConfig AutoIndexConfig
 	GpuConfig       gpuConfig
 	TraceCfg        traceConfig
 
