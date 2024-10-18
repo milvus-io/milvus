@@ -33,6 +33,7 @@ func NewFlatIndex(metricType MetricType) Index {
 	return flatIndex{
 		baseIndex: baseIndex{
 			metricType: metricType,
+			indexType:  Flat,
 		},
 	}
 }
@@ -54,6 +55,7 @@ func NewBinFlatIndex(metricType MetricType) Index {
 	return binFlatIndex{
 		baseIndex: baseIndex{
 			metricType: metricType,
+			indexType:  BinFlat,
 		},
 	}
 }
