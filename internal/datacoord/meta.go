@@ -704,7 +704,7 @@ func (p *updateSegmentPack) Get(segmentID int64) *SegmentInfo {
 	}
 
 	segment := p.meta.segments.GetSegment(segmentID)
-	if segment == nil || !isSegmentHealthy(segment) {
+	if segment == nil {
 		log.Warn("meta update: get segment failed - segment not found",
 			zap.Int64("segmentID", segmentID),
 			zap.Bool("segment nil", segment == nil),
@@ -791,6 +791,19 @@ func UpdateCompactedOperator(segmentID int64) UpdateOperator {
 	}
 }
 
+func UpdateSegmentVisible(segmentID int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update segment visible fail - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		segment.IsInvisible = false
+		return true
+	}
+}
+
 func UpdateSegmentLevelOperator(segmentID int64, level datapb.SegmentLevel) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
@@ -832,9 +845,13 @@ func RevertSegmentLevelOperator(segmentID int64) UpdateOperator {
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
-		segment.Level = segment.LastLevel
-		log.Debug("revert segment level", zap.Int64("segmentID", segmentID), zap.String("LastLevel", segment.LastLevel.String()))
-		return true
+		// just for compatibility,
+		if segment.GetLevel() != segment.GetLastLevel() && segment.GetLastLevel() != datapb.SegmentLevel_Legacy {
+			segment.Level = segment.LastLevel
+			log.Debug("revert segment level", zap.Int64("segmentID", segmentID), zap.String("LastLevel", segment.LastLevel.String()))
+			return true
+		}
+		return false
 	}
 }
 
@@ -1417,14 +1434,9 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		}
 
 		cloned := segment.Clone()
-		cloned.DroppedAt = uint64(time.Now().UnixNano())
-		cloned.Compacted = true
 
 		compactFromSegInfos = append(compactFromSegInfos, cloned)
 		compactFromSegIDs = append(compactFromSegIDs, cloned.GetID())
-
-		// metrics mutation for compaction from segments
-		updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 	}
 
 	for _, seg := range result.GetSegments() {
@@ -1448,6 +1460,8 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 				return info.GetDmlPosition()
 			})),
+			// visible after stats and index
+			IsInvisible: true,
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -1458,10 +1472,6 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 	log = log.With(zap.Int64s("compact from", compactFromSegIDs), zap.Int64s("compact to", compactToSegIDs))
 	log.Debug("meta update: prepare for meta mutation - complete")
 
-	compactFromInfos := lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
-		return info.SegmentInfo
-	})
-
 	compactToInfos := lo.Map(compactToSegInfos, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
 		return info.SegmentInfo
 	})
@@ -1470,18 +1480,11 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 	for _, seg := range compactToInfos {
 		binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
 	}
-	// alter compactTo before compactFrom segments to avoid data lost if service crash during AlterSegments
+	// only add new segments
 	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
 		log.Warn("fail to alter compactTo segments", zap.Error(err))
 		return nil, nil, err
 	}
-	if err := m.catalog.AlterSegments(m.ctx, compactFromInfos); err != nil {
-		log.Warn("fail to alter compactFrom segments", zap.Error(err))
-		return nil, nil, err
-	}
-	lo.ForEach(compactFromSegInfos, func(info *SegmentInfo, _ int) {
-		m.segments.SetSegment(info.GetID(), info)
-	})
 	lo.ForEach(compactToSegInfos, func(info *SegmentInfo, _ int) {
 		m.segments.SetSegment(info.GetID(), info)
 	})
@@ -1977,35 +1980,41 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 	updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 
 	segmentInfo := &datapb.SegmentInfo{
-		ID:                  result.GetSegmentID(),
-		CollectionID:        result.GetCollectionID(),
-		PartitionID:         result.GetPartitionID(),
-		InsertChannel:       result.GetChannel(),
-		NumOfRows:           result.GetNumRows(),
-		State:               commonpb.SegmentState_Flushed,
-		MaxRowNum:           cloned.GetMaxRowNum(),
-		Binlogs:             result.GetInsertLogs(),
-		Statslogs:           result.GetStatsLogs(),
-		Bm25Statslogs:       result.GetBm25Logs(),
-		TextStatsLogs:       result.GetTextStatsLogs(),
-		CreatedByCompaction: true,
-		CompactionFrom:      []int64{oldSegmentID},
-		LastExpireTime:      cloned.GetLastExpireTime(),
-		Level:               datapb.SegmentLevel_L1,
-		StartPosition:       cloned.GetStartPosition(),
-		DmlPosition:         cloned.GetDmlPosition(),
-		IsSorted:            true,
-		IsImporting:         cloned.GetIsImporting(),
+		CollectionID:              oldSegment.GetCollectionID(),
+		PartitionID:               oldSegment.GetPartitionID(),
+		InsertChannel:             oldSegment.GetInsertChannel(),
+		MaxRowNum:                 oldSegment.GetMaxRowNum(),
+		LastExpireTime:            oldSegment.GetLastExpireTime(),
+		StartPosition:             oldSegment.GetStartPosition(),
+		DmlPosition:               oldSegment.GetDmlPosition(),
+		IsImporting:               oldSegment.GetIsImporting(),
+		StorageVersion:            oldSegment.GetStorageVersion(),
+		State:                     oldSegment.GetState(),
+		Level:                     oldSegment.GetLevel(),
+		LastLevel:                 oldSegment.GetLastLevel(),
+		PartitionStatsVersion:     oldSegment.GetPartitionStatsVersion(),
+		LastPartitionStatsVersion: oldSegment.GetLastPartitionStatsVersion(),
+		IsInvisible:               oldSegment.GetIsInvisible(),
+		ID:                        result.GetSegmentID(),
+		NumOfRows:                 result.GetNumRows(),
+		Binlogs:                   result.GetInsertLogs(),
+		Statslogs:                 result.GetStatsLogs(),
+		TextStatsLogs:             result.GetTextStatsLogs(),
+		Bm25Statslogs:             result.GetBm25Logs(),
+		Deltalogs:                 nil,
+		CreatedByCompaction:       true,
+		CompactionFrom:            []int64{oldSegmentID},
+		IsSorted:                  true,
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	if segment.GetNumOfRows() > 0 {
 		metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetIsSorted(), segment.GetNumOfRows())
 	} else {
 		segment.State = commonpb.SegmentState_Dropped
+		segment.DroppedAt = uint64(time.Now().UnixNano())
 	}
 
 	log.Info("meta update: prepare for complete stats mutation - complete", zap.Int64("num rows", result.GetNumRows()))
-
 	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo, segment.SegmentInfo}, metastore.BinlogsIncrement{Segment: segment.SegmentInfo}); err != nil {
 		log.Warn("fail to alter segments and new segment", zap.Error(err))
 		return nil, err

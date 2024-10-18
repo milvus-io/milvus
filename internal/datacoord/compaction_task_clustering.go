@@ -213,15 +213,7 @@ func (t *clusteringCompactionTask) processPipelining() error {
 		log.Debug("wait for the node to be assigned before proceeding with the subsequent steps")
 		return nil
 	}
-	var operators []UpdateOperator
-	for _, segID := range t.InputSegments {
-		operators = append(operators, UpdateSegmentLevelOperator(segID, datapb.SegmentLevel_L2))
-	}
-	err := t.meta.UpdateSegmentsInfo(operators...)
-	if err != nil {
-		log.Warn("fail to set segment level to L2", zap.Error(err))
-		return merr.WrapErrClusteringCompactionMetaError("UpdateSegmentsInfo before compaction executing", err)
-	}
+	// don't mark segment level to L2 before clustering compaction after v2.5.0
 
 	if typeutil.IsVectorType(t.GetClusteringKeyField().DataType) {
 		err := t.doAnalyze()
@@ -297,6 +289,12 @@ func (t *clusteringCompactionTask) processMetaSaved() error {
 		PlanID: t.GetPlanID(),
 	}); err != nil {
 		log.Warn("clusteringCompactionTask processFailedOrTimeout unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+	}
+	// to ensure compatibility, if a task upgraded from version 2.4 has a status of MetaSave,
+	// its TmpSegments will be empty, so skip the stats task, to build index.
+	if len(t.GetTmpSegments()) == 0 {
+		log.Info("tmp segments is nil, skip stats task", zap.Int64("planID", t.GetPlanID()))
+		return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing))
 	}
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_statistic))
 }
@@ -418,34 +416,63 @@ func (t *clusteringCompactionTask) processIndexing() error {
 	return nil
 }
 
+func (t *clusteringCompactionTask) markResultSegmentsVisible() error {
+	var operators []UpdateOperator
+	for _, segID := range t.GetResultSegments() {
+		operators = append(operators, UpdateSegmentVisible(segID))
+		operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(segID, t.GetPlanID()))
+	}
+
+	err := t.meta.UpdateSegmentsInfo(operators...)
+	if err != nil {
+		log.Warn("markResultSegmentVisible UpdateSegmentsInfo fail", zap.Error(err))
+		return merr.WrapErrClusteringCompactionMetaError("markResultSegmentVisible UpdateSegmentsInfo", err)
+	}
+	return nil
+}
+
+func (t *clusteringCompactionTask) markInputSegmentsDropped() error {
+	var operators []UpdateOperator
+	// mark
+	for _, segID := range t.GetInputSegments() {
+		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
+	}
+	err := t.meta.UpdateSegmentsInfo(operators...)
+	if err != nil {
+		log.Warn("markInputSegmentsDropped UpdateSegmentsInfo fail", zap.Error(err))
+		return merr.WrapErrClusteringCompactionMetaError("markInputSegmentsDropped UpdateSegmentsInfo", err)
+	}
+	return nil
+}
+
 // indexed is the final state of a clustering compaction task
 // one task should only run this once
 func (t *clusteringCompactionTask) completeTask() error {
-	err := t.meta.GetPartitionStatsMeta().SavePartitionStatsInfo(&datapb.PartitionStatsInfo{
+	var err error
+	// first mark result segments visible
+	if err = t.markResultSegmentsVisible(); err != nil {
+		return err
+	}
+
+	// update current partition stats version
+	// at this point, the segment view includes both the input segments and the result segments.
+	if err = t.meta.GetPartitionStatsMeta().SavePartitionStatsInfo(&datapb.PartitionStatsInfo{
 		CollectionID: t.GetCollectionID(),
 		PartitionID:  t.GetPartitionID(),
 		VChannel:     t.GetChannel(),
 		Version:      t.GetPlanID(),
 		SegmentIDs:   t.GetResultSegments(),
 		CommitTime:   time.Now().Unix(),
-	})
-	if err != nil {
+	}); err != nil {
 		return merr.WrapErrClusteringCompactionMetaError("SavePartitionStatsInfo", err)
 	}
 
-	var operators []UpdateOperator
-	for _, segID := range t.GetResultSegments() {
-		operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(segID, t.GetPlanID()))
-	}
-	err = t.meta.UpdateSegmentsInfo(operators...)
-	if err != nil {
-		return merr.WrapErrClusteringCompactionMetaError("UpdateSegmentPartitionStatsVersion", err)
+	// mark input segments as dropped
+	// now, the segment view only includes the result segments.
+	if err = t.markInputSegmentsDropped(); err != nil {
+		return err
 	}
 
-	err = t.meta.GetPartitionStatsMeta().SaveCurrentPartitionStatsVersion(t.GetCollectionID(), t.GetPartitionID(), t.GetChannel(), t.GetPlanID())
-	if err != nil {
-		return merr.WrapErrClusteringCompactionMetaError("SaveCurrentPartitionStatsVersion", err)
-	}
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
 }
 
@@ -479,31 +506,65 @@ func (t *clusteringCompactionTask) resetSegmentCompacting() {
 
 func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 	log.Info("clean task", zap.Int64("triggerID", t.GetTriggerID()), zap.Int64("planID", t.GetPlanID()), zap.String("state", t.GetState().String()))
-
 	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
 		PlanID: t.GetPlanID(),
 	}); err != nil {
 		log.Warn("clusteringCompactionTask processFailedOrTimeout unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
 	}
+	isInputDropped := false
+	for _, segID := range t.GetInputSegments() {
+		if t.meta.GetHealthySegment(segID) == nil {
+			isInputDropped = true
+			break
+		}
+	}
+	if isInputDropped {
+		log.Info("input segments dropped, doing for compatibility",
+			zap.Int64("triggerID", t.GetTriggerID()), zap.Int64("planID", t.GetPlanID()))
+		// this task must be generated by v2.4, just for compatibility
+		// revert segments meta
+		var operators []UpdateOperator
+		// revert level of input segments
+		// L1 : L1 ->(processPipelining)-> L2 ->(processFailedOrTimeout)-> L1
+		// L2 : L2 ->(processPipelining)-> L2 ->(processFailedOrTimeout)-> L2
+		for _, segID := range t.GetInputSegments() {
+			operators = append(operators, RevertSegmentLevelOperator(segID))
+		}
+		// if result segments are generated but task fail in the other steps, mark them as L1 segments without partitions stats
+		for _, segID := range t.GetResultSegments() {
+			operators = append(operators, UpdateSegmentLevelOperator(segID, datapb.SegmentLevel_L1))
+			operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(segID, 0))
+		}
+		for _, segID := range t.GetTmpSegments() {
+			// maybe no necessary, there will be no `TmpSegments` that task was generated by v2.4
+			operators = append(operators, UpdateSegmentLevelOperator(segID, datapb.SegmentLevel_L1))
+			operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(segID, 0))
+		}
+		err := t.meta.UpdateSegmentsInfo(operators...)
+		if err != nil {
+			log.Warn("UpdateSegmentsInfo fail", zap.Error(err))
+			return merr.WrapErrClusteringCompactionMetaError("UpdateSegmentsInfo", err)
+		}
+	} else {
+		// after v2.5.0, mark the results segment as dropped
+		var operators []UpdateOperator
+		for _, segID := range t.GetResultSegments() {
+			// Don't worry about them being loaded; they are all invisible.
+			operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
+		}
+		for _, segID := range t.GetTmpSegments() {
+			// Don't worry about them being loaded; they are all invisible.
+			// tmpSegment is always invisible
+			operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
+		}
 
-	// revert segments meta
-	var operators []UpdateOperator
-	// revert level of input segments
-	// L1 : L1 ->(processPipelining)-> L2 ->(processFailedOrTimeout)-> L1
-	// L2 : L2 ->(processPipelining)-> L2 ->(processFailedOrTimeout)-> L2
-	for _, segID := range t.InputSegments {
-		operators = append(operators, RevertSegmentLevelOperator(segID))
+		err := t.meta.UpdateSegmentsInfo(operators...)
+		if err != nil {
+			log.Warn("UpdateSegmentsInfo fail", zap.Error(err))
+			return merr.WrapErrClusteringCompactionMetaError("UpdateSegmentsInfo", err)
+		}
 	}
-	// if result segments are generated but task fail in the other steps, mark them as L1 segments without partitions stats
-	for _, segID := range t.ResultSegments {
-		operators = append(operators, UpdateSegmentLevelOperator(segID, datapb.SegmentLevel_L1))
-		operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(segID, 0))
-	}
-	err := t.meta.UpdateSegmentsInfo(operators...)
-	if err != nil {
-		log.Warn("UpdateSegmentsInfo fail", zap.Error(err))
-		return merr.WrapErrClusteringCompactionMetaError("UpdateSegmentsInfo", err)
-	}
+
 	t.resetSegmentCompacting()
 
 	// drop partition stats if uploaded
@@ -514,7 +575,7 @@ func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 		Version:      t.GetPlanID(),
 		SegmentIDs:   t.GetResultSegments(),
 	}
-	err = t.meta.CleanPartitionStatsInfo(partitionStatsInfo)
+	err := t.meta.CleanPartitionStatsInfo(partitionStatsInfo)
 	if err != nil {
 		log.Warn("gcPartitionStatsInfo fail", zap.Error(err))
 	}

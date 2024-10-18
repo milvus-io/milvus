@@ -107,53 +107,181 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 		},
 	})
 	s.mockSessionMgr.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	s.mockSessionMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
-
 	task := s.generateBasicTask(false)
 
 	task.processPipelining()
 
 	seg11 := s.meta.GetSegment(101)
-	s.Equal(datapb.SegmentLevel_L2, seg11.Level)
+	s.Equal(datapb.SegmentLevel_L1, seg11.Level)
 	seg21 := s.meta.GetSegment(102)
 	s.Equal(datapb.SegmentLevel_L2, seg21.Level)
 	s.Equal(int64(10000), seg21.PartitionStatsVersion)
 
-	task.ResultSegments = []int64{103, 104}
-	// fake some compaction result segment
-	s.meta.AddSegment(context.TODO(), &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:                    103,
-			State:                 commonpb.SegmentState_Flushed,
-			Level:                 datapb.SegmentLevel_L2,
-			CreatedByCompaction:   true,
-			PartitionStatsVersion: 10001,
-		},
+	s.Run("v2.4.x", func() {
+		// fake some compaction result segment
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:        101,
+				State:     commonpb.SegmentState_Dropped,
+				LastLevel: datapb.SegmentLevel_L1,
+				Level:     datapb.SegmentLevel_L2,
+			},
+		})
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    102,
+				State:                 commonpb.SegmentState_Dropped,
+				LastLevel:             datapb.SegmentLevel_L2,
+				Level:                 datapb.SegmentLevel_L2,
+				PartitionStatsVersion: 10000,
+			},
+		})
+
+		// fake some compaction result segment
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    103,
+				State:                 commonpb.SegmentState_Flushed,
+				Level:                 datapb.SegmentLevel_L2,
+				CreatedByCompaction:   true,
+				PartitionStatsVersion: 10001,
+			},
+		})
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    104,
+				State:                 commonpb.SegmentState_Flushed,
+				Level:                 datapb.SegmentLevel_L2,
+				CreatedByCompaction:   true,
+				PartitionStatsVersion: 10001,
+			},
+		})
+
+		task := s.generateBasicTask(false)
+		task.sessions = s.mockSessionMgr
+		s.mockSessionMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+		task.InputSegments = []int64{101, 102}
+		task.ResultSegments = []int64{103, 104}
+
+		task.processFailedOrTimeout()
+
+		seg12 := s.meta.GetSegment(101)
+		s.Equal(datapb.SegmentLevel_L1, seg12.Level)
+		s.Equal(commonpb.SegmentState_Dropped, seg12.State)
+
+		seg22 := s.meta.GetSegment(102)
+		s.Equal(datapb.SegmentLevel_L2, seg22.Level)
+		s.Equal(int64(10000), seg22.PartitionStatsVersion)
+		s.Equal(commonpb.SegmentState_Dropped, seg22.State)
+
+		seg32 := s.meta.GetSegment(103)
+		s.Equal(datapb.SegmentLevel_L1, seg32.Level)
+		s.Equal(int64(0), seg32.PartitionStatsVersion)
+		s.Equal(commonpb.SegmentState_Flushed, seg32.State)
+
+		seg42 := s.meta.GetSegment(104)
+		s.Equal(datapb.SegmentLevel_L1, seg42.Level)
+		s.Equal(int64(0), seg42.PartitionStatsVersion)
+		s.Equal(commonpb.SegmentState_Flushed, seg42.State)
 	})
-	s.meta.AddSegment(context.TODO(), &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:                    104,
-			State:                 commonpb.SegmentState_Flushed,
-			Level:                 datapb.SegmentLevel_L2,
-			CreatedByCompaction:   true,
-			PartitionStatsVersion: 10001,
-		},
+
+	s.Run("v2.5.0", func() {
+		// fake some compaction result segment
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:    101,
+				State: commonpb.SegmentState_Flushed,
+				Level: datapb.SegmentLevel_L1,
+			},
+		})
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    102,
+				State:                 commonpb.SegmentState_Flushed,
+				Level:                 datapb.SegmentLevel_L2,
+				PartitionStatsVersion: 10000,
+			},
+		})
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    103,
+				State:                 commonpb.SegmentState_Dropped,
+				Level:                 datapb.SegmentLevel_L2,
+				CreatedByCompaction:   true,
+				PartitionStatsVersion: 10001,
+				IsInvisible:           true,
+			},
+		})
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    104,
+				State:                 commonpb.SegmentState_Dropped,
+				Level:                 datapb.SegmentLevel_L2,
+				CreatedByCompaction:   true,
+				PartitionStatsVersion: 10001,
+				IsInvisible:           true,
+			},
+		})
+
+		// fake some compaction result segment
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    105,
+				State:                 commonpb.SegmentState_Flushed,
+				Level:                 datapb.SegmentLevel_L2,
+				CreatedByCompaction:   true,
+				PartitionStatsVersion: 10001,
+				IsInvisible:           true,
+			},
+		})
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    106,
+				State:                 commonpb.SegmentState_Flushed,
+				Level:                 datapb.SegmentLevel_L2,
+				CreatedByCompaction:   true,
+				PartitionStatsVersion: 10001,
+				IsInvisible:           true,
+			},
+		})
+
+		task := s.generateBasicTask(false)
+		task.sessions = s.mockSessionMgr
+		s.mockSessionMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+		task.InputSegments = []int64{101, 102}
+		task.TmpSegments = []int64{103, 104}
+		task.ResultSegments = []int64{105, 106}
+
+		task.processFailedOrTimeout()
+
+		seg12 := s.meta.GetSegment(101)
+		s.Equal(datapb.SegmentLevel_L1, seg12.Level)
+		seg22 := s.meta.GetSegment(102)
+		s.Equal(datapb.SegmentLevel_L2, seg22.Level)
+		s.Equal(int64(10000), seg22.PartitionStatsVersion)
+
+		seg32 := s.meta.GetSegment(103)
+		s.Equal(datapb.SegmentLevel_L2, seg32.Level)
+		s.Equal(commonpb.SegmentState_Dropped, seg32.State)
+		s.True(seg32.IsInvisible)
+
+		seg42 := s.meta.GetSegment(104)
+		s.Equal(datapb.SegmentLevel_L2, seg42.Level)
+		s.Equal(commonpb.SegmentState_Dropped, seg42.State)
+		s.True(seg42.IsInvisible)
+
+		seg52 := s.meta.GetSegment(105)
+		s.Equal(datapb.SegmentLevel_L2, seg52.Level)
+		s.Equal(int64(10001), seg52.PartitionStatsVersion)
+		s.Equal(commonpb.SegmentState_Dropped, seg52.State)
+		s.True(seg52.IsInvisible)
+
+		seg62 := s.meta.GetSegment(106)
+		s.Equal(datapb.SegmentLevel_L2, seg62.Level)
+		s.Equal(int64(10001), seg62.PartitionStatsVersion)
+		s.Equal(commonpb.SegmentState_Dropped, seg62.State)
+		s.True(seg62.IsInvisible)
 	})
-
-	task.processFailedOrTimeout()
-
-	seg12 := s.meta.GetSegment(101)
-	s.Equal(datapb.SegmentLevel_L1, seg12.Level)
-	seg22 := s.meta.GetSegment(102)
-	s.Equal(datapb.SegmentLevel_L2, seg22.Level)
-	s.Equal(int64(10000), seg22.PartitionStatsVersion)
-
-	seg32 := s.meta.GetSegment(103)
-	s.Equal(datapb.SegmentLevel_L1, seg32.Level)
-	s.Equal(int64(0), seg32.PartitionStatsVersion)
-	seg42 := s.meta.GetSegment(104)
-	s.Equal(datapb.SegmentLevel_L1, seg42.Level)
-	s.Equal(int64(0), seg42.PartitionStatsVersion)
 }
 
 func (s *ClusteringCompactionTaskSuite) generateBasicTask(vectorClusteringKey bool) *clusteringCompactionTask {

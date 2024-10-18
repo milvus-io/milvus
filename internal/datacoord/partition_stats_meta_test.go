@@ -75,7 +75,7 @@ func (s *PartitionStatsMetaSuite) TestGetPartitionStats() {
 	s.NotNil(ps)
 
 	currentVersion := partitionStatsMeta.GetCurrentPartitionStatsVersion(1, 2, "ch-1")
-	s.Equal(emptyPartitionStatsVersion, currentVersion)
+	s.Equal(int64(100), currentVersion)
 
 	currentVersion2 := partitionStatsMeta.GetCurrentPartitionStatsVersion(1, 2, "ch-2")
 	s.Equal(emptyPartitionStatsVersion, currentVersion2)
