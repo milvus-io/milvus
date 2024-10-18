@@ -68,6 +68,16 @@ func CheckLeaderAvailable(nodeMgr *session.NodeManager, targetMgr meta.TargetMan
 			return err
 		}
 	}
+
+	// if target version hasn't been synced, delegator will get empty readable segment list
+	// so shard leader should be unserviceable until target version is synced
+	currentTargetVersion := targetMgr.GetCollectionTargetVersion(leader.CollectionID, meta.CurrentTarget)
+	if leader.TargetVersion <= 0 {
+		return merr.WrapErrServiceInternal(
+			fmt.Sprintf("target version mismatch, collection: %d, current target version: %v, leader version: %v",
+				leader.CollectionID, currentTargetVersion, leader.TargetVersion))
+	}
+
 	segmentDist := targetMgr.GetSealedSegmentsByChannel(leader.CollectionID, leader.Channel, meta.CurrentTarget)
 	// Check whether segments are fully loaded
 	for segmentID, info := range segmentDist {
