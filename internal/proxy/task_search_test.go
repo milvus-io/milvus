@@ -17,13 +17,18 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -35,11 +40,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/models"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -350,6 +357,245 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		st.PostExecute(context.TODO())
 		assert.Equal(t, st.result.GetSessionTs(), enqueueTs)
 	})
+}
+
+func TestSearchTask_WithFunctions(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req models.EmbeddingRequest
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		json.Unmarshal(body, &req)
+
+		var res models.EmbeddingResponse
+		res.Object = "list"
+		res.Model = "text-embedding-3-small"
+		for i := 0; i < len(req.Input); i++ {
+			res.Data = append(res.Data, models.EmbeddingData{
+				Object:    "embedding",
+				Embedding: make([]float32, req.Dimensions),
+				Index:     i,
+			})
+		}
+
+		res.Usage = models.Usage{
+			PromptTokens: 1,
+			TotalTokens:  100,
+		}
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+	defer ts.Close()
+
+	collectionName := "TestInsertTask_function"
+	schema := &schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "TestInsertTask_function",
+		AutoID:      true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "200"},
+				}},
+			{FieldID: 102, Name: "vector1", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				}},
+			{FieldID: 103, Name: "vector2", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				}},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:           "func1",
+				Type:           schemapb.FunctionType_OpenAIEmbedding,
+				InputFieldIds:  []int64{101},
+				OutputFieldIds: []int64{102},
+				Params: []*commonpb.KeyValuePair{
+					{Key: function.ModelNameParamKey, Value: "text-embedding-ada-002"},
+					{Key: function.OpenaiApiKeyParamKey, Value: "mock"},
+					{Key: function.OpenaiEmbeddingUrlParamKey, Value: ts.URL},
+					{Key: function.DimParamKey, Value: "4"},
+				},
+			},
+			{
+				Name:           "func2",
+				Type:           schemapb.FunctionType_OpenAIEmbedding,
+				InputFieldIds:  []int64{101},
+				OutputFieldIds: []int64{103},
+				Params: []*commonpb.KeyValuePair{
+					{Key: function.ModelNameParamKey, Value: "text-embedding-ada-002"},
+					{Key: function.OpenaiApiKeyParamKey, Value: "mock"},
+					{Key: function.OpenaiEmbeddingUrlParamKey, Value: ts.URL},
+					{Key: function.DimParamKey, Value: "4"},
+				},
+			},
+		},
+	}
+
+	var err error
+	var (
+		rc  = NewRootCoordMock()
+		qc  = mocks.NewMockQueryCoordClient(t)
+		ctx = context.TODO()
+	)
+
+	defer rc.Close()
+	require.NoError(t, err)
+	mgr := newShardClientMgr()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	err = InitMetaCache(ctx, rc, qc, mgr)
+	require.NoError(t, err)
+
+	getSearchTask := func(t *testing.T, collName string, data []string) *searchTask {
+		placeholderValue := &commonpb.PlaceholderValue{
+			Tag:    "$0",
+			Type:   commonpb.PlaceholderType_VarChar,
+			Values: lo.Map(data, func(str string, _ int) []byte { return []byte(str) }),
+		}
+		holder := &commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{placeholderValue},
+		}
+		holderByte, _ := proto.Marshal(holder)
+		task := &searchTask{
+			ctx:            ctx,
+			collectionName: collectionName,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Search,
+					Timestamp: uint64(time.Now().UnixNano()),
+				},
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: collectionName,
+				Nq:             int64(len(data)),
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: AnnsFieldKey, Value: "vector1"},
+					{Key: TopKKey, Value: "10"},
+				},
+				PlaceholderGroup: holderByte,
+			},
+			qc: qc,
+			tr: timerecord.NewTimeRecorder("test-search"),
+		}
+		require.NoError(t, task.OnEnqueue())
+		return task
+	}
+
+	collectionID := UniqueID(1000)
+	cache := NewMockCache(t)
+	info := newSchemaInfo(schema)
+	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
+	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(info, nil).Maybe()
+	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionBasicInfo{}, nil).Maybe()
+	cache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[string][]nodeInfo{}, nil).Maybe()
+	cache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
+	globalMetaCache = cache
+
+	{
+		task := getSearchTask(t, collectionName, []string{"sentence"})
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		pb := &commonpb.PlaceholderGroup{}
+		proto.Unmarshal(task.SearchRequest.PlaceholderGroup, pb)
+		assert.Equal(t, len(pb.Placeholders), 1)
+		assert.Equal(t, len(pb.Placeholders[0].Values), 1)
+		assert.Equal(t, pb.Placeholders[0].Type, commonpb.PlaceholderType_FloatVector)
+	}
+
+	{
+		task := getSearchTask(t, collectionName, []string{"sentence 1", "sentence 2"})
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		pb := &commonpb.PlaceholderGroup{}
+		proto.Unmarshal(task.SearchRequest.PlaceholderGroup, pb)
+		assert.Equal(t, len(pb.Placeholders), 1)
+		assert.Equal(t, len(pb.Placeholders[0].Values), 2)
+		assert.Equal(t, pb.Placeholders[0].Type, commonpb.PlaceholderType_FloatVector)
+	}
+
+	getHybridSearchTask := func(t *testing.T, collName string, data [][]string) *searchTask {
+		subReqs := []*milvuspb.SubSearchRequest{}
+		for _, item := range data {
+			placeholderValue := &commonpb.PlaceholderValue{
+				Tag:    "$0",
+				Type:   commonpb.PlaceholderType_VarChar,
+				Values: lo.Map(item, func(str string, _ int) []byte { return []byte(str) }),
+			}
+			holder := &commonpb.PlaceholderGroup{
+				Placeholders: []*commonpb.PlaceholderValue{placeholderValue},
+			}
+			holderByte, _ := proto.Marshal(holder)
+			subReq := &milvuspb.SubSearchRequest{
+				PlaceholderGroup: holderByte,
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: AnnsFieldKey, Value: "vector1"},
+					{Key: TopKKey, Value: "10"},
+				},
+				Nq: int64(len(item)),
+			}
+			subReqs = append(subReqs, subReq)
+		}
+		task := &searchTask{
+			ctx:            ctx,
+			collectionName: collectionName,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Search,
+					Timestamp: uint64(time.Now().UnixNano()),
+				},
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: collectionName,
+				SubReqs:        subReqs,
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: LimitKey, Value: "10"},
+				},
+			},
+			qc: qc,
+			tr: timerecord.NewTimeRecorder("test-search"),
+		}
+		require.NoError(t, task.OnEnqueue())
+		return task
+	}
+
+	{
+		task := getHybridSearchTask(t, collectionName, [][]string{
+			{"sentence1"},
+			{"sentence2"},
+		})
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, len(task.SearchRequest.SubReqs), 2)
+		for _, sub := range task.SearchRequest.SubReqs {
+			pb := &commonpb.PlaceholderGroup{}
+			proto.Unmarshal(sub.PlaceholderGroup, pb)
+			assert.Equal(t, len(pb.Placeholders), 1)
+			assert.Equal(t, len(pb.Placeholders[0].Values), 1)
+			assert.Equal(t, pb.Placeholders[0].Type, commonpb.PlaceholderType_FloatVector)
+		}
+	}
+
+	{
+		task := getHybridSearchTask(t, collectionName, [][]string{
+			{"sentence1", "sentence1"},
+			{"sentence2", "sentence2"},
+			{"sentence3", "sentence3"},
+		})
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, len(task.SearchRequest.SubReqs), 3)
+		for _, sub := range task.SearchRequest.SubReqs {
+			pb := &commonpb.PlaceholderGroup{}
+			proto.Unmarshal(sub.PlaceholderGroup, pb)
+			assert.Equal(t, len(pb.Placeholders), 1)
+			assert.Equal(t, len(pb.Placeholders[0].Values), 2)
+			assert.Equal(t, pb.Placeholders[0].Type, commonpb.PlaceholderType_FloatVector)
+		}
+	}
 }
 
 func getQueryCoord() *mocks.MockQueryCoord {
