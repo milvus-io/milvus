@@ -27,6 +27,7 @@ type ImportMeta interface {
 	UpdateJob(jobID int64, actions ...UpdateJobAction) error
 	GetJob(jobID int64) ImportJob
 	GetJobBy(filters ...ImportJobFilter) []ImportJob
+	CountJobBy(filters ...ImportJobFilter) int
 	RemoveJob(jobID int64) error
 
 	AddTask(task ImportTask) error
@@ -124,6 +125,10 @@ func (m *importMeta) GetJob(jobID int64) ImportJob {
 func (m *importMeta) GetJobBy(filters ...ImportJobFilter) []ImportJob {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return m.getJobBy(filters...)
+}
+
+func (m *importMeta) getJobBy(filters ...ImportJobFilter) []ImportJob {
 	ret := make([]ImportJob, 0)
 OUTER:
 	for _, job := range m.jobs {
@@ -135,6 +140,12 @@ OUTER:
 		ret = append(ret, job)
 	}
 	return ret
+}
+
+func (m *importMeta) CountJobBy(filters ...ImportJobFilter) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.getJobBy(filters...))
 }
 
 func (m *importMeta) RemoveJob(jobID int64) error {

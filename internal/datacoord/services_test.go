@@ -1319,6 +1319,12 @@ func TestImportV2(t *testing.T) {
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
 
 		// alloc failed
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListImportJobs().Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
+		catalog.EXPECT().ListImportTasks().Return(nil, nil)
+		s.importMeta, err = NewImportMeta(catalog)
+		assert.NoError(t, err)
 		alloc := allocator.NewMockAllocator(t)
 		alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, mockErr)
 		s.allocator = alloc
@@ -1330,7 +1336,7 @@ func TestImportV2(t *testing.T) {
 		s.allocator = alloc
 
 		// add job failed
-		catalog := mocks.NewDataCoordCatalog(t)
+		catalog = mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListImportJobs().Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
 		catalog.EXPECT().ListImportTasks().Return(nil, nil)
@@ -1367,6 +1373,13 @@ func TestImportV2(t *testing.T) {
 		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
 		jobs = s.importMeta.GetJobBy()
 		assert.Equal(t, 1, len(jobs))
+
+		// number of jobs reached the limit
+		Params.Save(paramtable.Get().DataCoordCfg.MaxImportJobNum.Key, "1")
+		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{})
+		assert.NoError(t, err)
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+		Params.Reset(paramtable.Get().DataCoordCfg.MaxImportJobNum.Key)
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {
