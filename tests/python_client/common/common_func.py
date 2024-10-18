@@ -165,7 +165,7 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
     }
     start_time = time.time()
     result_list = []
-    q_batch_size = 1
+    q_batch_size = 1000
     for i in range(0, len(texts_to_search), q_batch_size):
         log.info(f"Searching {i} to {i + q_batch_size}")
         t0 = time.time()
@@ -876,10 +876,15 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
 
 def gen_all_datatype_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                        auto_id=False, dim=ct.default_dim, enable_dynamic_field=True, **kwargs):
+    tokenizer_params = {
+        "tokenizer": "default",
+    }
     fields = [
         gen_int64_field(),
         gen_float_field(),
         gen_string_field(),
+        gen_string_field(name="text", max_length=2000, enable_tokenizer=True, enable_match=True,
+                         tokenizer_params=tokenizer_params),
         gen_json_field(),
         gen_array_field(name="array_int", element_type=DataType.INT64),
         gen_array_field(name="array_float", element_type=DataType.FLOAT),
@@ -888,11 +893,20 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         gen_float_vec_field(dim=dim),
         gen_float_vec_field(name="image_emb", dim=dim),
         gen_float_vec_field(name="text_emb", dim=dim),
-        gen_float_vec_field(name="voice_emb", dim=dim),
+        gen_sparse_vec_field(name="text_sparse_emb"),
     ]
+    bm25_function = Function(
+        name="text_bm25_emb",
+        function_type=FunctionType.BM25,
+        input_field_names=["text"],
+        output_field_names=["text_sparse_emb"],
+        params={},
+    )
+
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
                                                                     enable_dynamic_field=enable_dynamic_field, **kwargs)
+    schema.add_function(bm25_function)
     return schema
 
 
@@ -1801,13 +1815,24 @@ def prepare_bulk_insert_data(schema=None,
 def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False, start=None):
     if schema is None:
         schema = gen_default_collection_schema()
+    # ignore auto id field and the fields in function output
+    func_output_fields = []
+    if hasattr(schema, "functions"):
+        functions = schema.functions
+        for func in functions:
+            output_field_names = func.output_field_names
+            func_output_fields.extend(output_field_names)
+    func_output_fields = list(set(func_output_fields))
     fields = schema.fields
-    fields_not_auto_id = []
+    fields_needs_data = []
     for field in fields:
-        if not field.auto_id:
-            fields_not_auto_id.append(field)
+        if field.auto_id:
+            continue
+        if field.name in func_output_fields:
+            continue
+        fields_needs_data.append(field)
     data = []
-    for field in fields_not_auto_id:
+    for field in fields_needs_data:
         if field.dtype == DataType.FLOAT_VECTOR and skip_vectors is True:
             tmp = []
         else:
@@ -1819,15 +1844,26 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
 def gen_row_data_by_schema(nb=ct.default_nb, schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
+    # ignore auto id field and the fields in function output
+    func_output_fields = []
+    if hasattr(schema, "functions"):
+        functions = schema.functions
+        for func in functions:
+            output_field_names = func.output_field_names
+            func_output_fields.extend(output_field_names)
+    func_output_fields = list(set(func_output_fields))
     fields = schema.fields
-    fields_not_auto_id = []
+    fields_needs_data = []
     for field in fields:
-        if not field.auto_id:
-            fields_not_auto_id.append(field)
+        if field.auto_id:
+            continue
+        if field.name in func_output_fields:
+            continue
+        fields_needs_data.append(field)
     data = []
     for i in range(nb):
         tmp = {}
-        for field in fields_not_auto_id:
+        for field in fields_needs_data:
             tmp[field.name] = gen_data_by_collection_field(field)
         data.append(tmp)
     return data
@@ -1917,6 +1953,20 @@ def get_binary_vec_field_name_list(schema=None):
     return vec_fields
 
 
+def get_bm25_vec_field_name_list(schema=None):
+    if not hasattr(schema, "functions"):
+        return []
+    functions = schema.functions
+    bm25_func = [func for func in functions if func.type == FunctionType.BM25]
+    bm25_outputs = []
+    for func in bm25_func:
+        bm25_outputs.extend(func.output_field_names)
+    bm25_outputs = list(set(bm25_outputs))
+
+    return bm25_outputs
+
+
+
 def get_dim_by_schema(schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
@@ -1928,13 +1978,19 @@ def get_dim_by_schema(schema=None):
     return None
 
 
-def gen_varchar_data(length: int, nb: int):
-    return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
+def gen_varchar_data(length: int, nb: int, text_mode=False):
+    if text_mode:
+        return [fake.text() for _ in range(nb)]
+    else:
+        return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
 
 
 def gen_data_by_collection_field(field, nb=None, start=None):
     # if nb is None, return one data, else return a list of data
     data_type = field.dtype
+    # if enable tokenization, the data type is VARCHAR, the data should be like text datatype
+    enable_tokenizer = field.params.get("enable_tokenizer", False)
+
     if data_type == DataType.BOOL:
         if nb is None:
             return random.choice([True, False])
@@ -1970,8 +2026,8 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         max_length = min(20, max_length-1)
         length = random.randint(0, max_length)
         if nb is None:
-            return gen_varchar_data(length=length, nb=1)[0]
-        return gen_varchar_data(length=length, nb=nb)
+            return gen_varchar_data(length=length, nb=1, text_mode=enable_tokenizer)[0]
+        return gen_varchar_data(length=length, nb=nb, text_mode=enable_tokenizer)
     if data_type == DataType.JSON:
         if nb is None:
             return {"name": fake.name(), "address": fake.address()}

@@ -222,6 +222,7 @@ class Op(Enum):
     release_collection = 'release_collection'
     release_partition = 'release_partition'
     search = 'search'
+    full_text_search = 'full_text_search'
     hybrid_search = 'hybrid_search'
     query = 'query'
     delete = 'delete'
@@ -345,7 +346,7 @@ class Checker:
         p_name = partition_name if partition_name is not None else "_default"
         self.p_name = p_name
         self.p_names = [self.p_name] if partition_name is not None else None
-        schema = cf.gen_all_datatype_collection_schema(dim=dim) if schema is None else schema
+        schema = cf.gen_all_datatype_collection_schema(dim=dim, enable_dynamic_field=False) if schema is None else schema
         self.schema = schema
         self.dim = cf.get_dim_by_schema(schema=schema)
         self.int64_field_name = cf.get_int64_field_name(schema=schema)
@@ -358,6 +359,7 @@ class Checker:
         self.scalar_field_names = cf.get_scalar_field_name_list(schema=schema)
         self.float_vector_field_names = cf.get_float_vec_field_name_list(schema=schema)
         self.binary_vector_field_names = cf.get_binary_vec_field_name_list(schema=schema)
+        self.bm25_vector_field_names = cf.get_bm25_vec_field_name_list(schema=schema)
         # get index of collection
         indexes = [index.to_dict() for index in self.c_wrap.indexes]
         indexed_fields = [index['field'] for index in indexes]
@@ -379,6 +381,15 @@ class Checker:
                                      timeout=timeout,
                                      enable_traceback=enable_traceback,
                                      check_task=CheckTasks.check_nothing)
+        # create index for bm25 sparse vector fields
+        for f in self.bm25_vector_field_names:
+            if f in indexed_fields:
+                continue
+            self.c_wrap.create_index(f,
+                                     constants.DEFAULT_BM25_INDEX_PARAM,
+                                     timeout=timeout,
+                                     enable_traceback=enable_traceback,
+                                     check_task=CheckTasks.check_nothing)
         # create index for binary vector fields
         for f in self.binary_vector_field_names:
             if f in indexed_fields:
@@ -392,28 +403,27 @@ class Checker:
         self.c_wrap.load(replica_number=self.replica_number)
 
         self.p_wrap.init_partition(self.c_name, self.p_name)
+        self.scale = 100000  # timestamp scale to make time.time() as int64
         if insert_data:
             log.info(f"collection {c_name} created, start to insert data")
             t0 = time.perf_counter()
-            self.c_wrap.insert(
-                data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=schema),
-                partition_name=self.p_name,
-                timeout=timeout,
-                enable_traceback=enable_traceback)
+            self.insert_data(nb=constants.ENTITIES_FOR_SEARCH, partition_name=self.p_name)
             log.info(f"insert data for collection {c_name} cost {time.perf_counter() - t0}s")
 
         self.initial_entities = self.c_wrap.num_entities  # do as a flush
-        self.scale = 100000  # timestamp scale to make time.time() as int64
+
 
     def insert_data(self, nb=constants.DELTA_PER_INS, partition_name=None):
         partition_name = self.p_name if partition_name is None else partition_name
-        data = cf.get_column_data_by_schema(nb=nb, schema=self.schema)
+        data = cf.gen_row_data_by_schema(nb=nb, schema=self.schema)
         ts_data = []
         for i in range(nb):
             time.sleep(0.001)
             offset_ts = int(time.time() * self.scale)
             ts_data.append(offset_ts)
-        data[0] = ts_data  # set timestamp (ms) as int64
+        for i in range(nb):
+            data[i][self.int64_field_name] = ts_data[i]
+
         res, result = self.c_wrap.insert(data=data,
                                          partition_name=partition_name,
                                          timeout=timeout,
@@ -649,6 +659,39 @@ class SearchChecker(Checker):
             self.run_task()
             sleep(constants.WAIT_PER_OP / 10)
 
+class FullTextSearchChecker(Checker):
+    """check full text search operations in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("FullTextSearchChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        self.insert_data()
+
+    @trace()
+    def full_text_search(self):
+        res, result = self.c_wrap.search(
+            data=cf.gen_vectors(5, self.dim, vector_data_type="TEXT_SPARSE_VECTOR"),
+            anns_field=self.float_vector_field_name,
+            param=constants.DEFAULT_BM25_SEARCH_PARAM,
+            limit=1,
+            partition_names=self.p_names,
+            timeout=search_timeout,
+            check_task=CheckTasks.check_nothing
+        )
+        return res, result
+
+    @exception_handler()
+    def run_task(self):
+        res, result = self.full_text_search()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
+
+
 
 class HybridSearchChecker(Checker):
     """check hybrid search operations in a dependent thread"""
@@ -764,7 +807,7 @@ class FlushChecker(Checker):
     @exception_handler()
     def run_task(self):
         _, result = self.c_wrap.insert(
-            data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
+            data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
             timeout=timeout,
             enable_traceback=enable_traceback,
             check_task=CheckTasks.check_nothing)
@@ -794,20 +837,7 @@ class InsertChecker(Checker):
 
     @trace()
     def insert_entities(self):
-        data = cf.get_column_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.schema)
-        ts_data = []
-        for i in range(constants.DELTA_PER_INS):
-            time.sleep(0.001)
-            offset_ts = int(time.time() * self.scale)
-            ts_data.append(offset_ts)
-
-        data[0] = ts_data  # set timestamp (ms) as int64
-        log.debug(f"insert data: {len(ts_data)}")
-        res, result = self.c_wrap.insert(data=data,
-                                         partition_names=self.p_names,
-                                         timeout=timeout,
-                                         enable_traceback=enable_traceback,
-                                         check_task=CheckTasks.check_nothing)
+        res, result = self.insert_data()
         return res, result
 
     @exception_handler()
@@ -915,7 +945,7 @@ class UpsertChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("UpsertChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        self.data = cf.get_column_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.schema)
+        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.schema)
 
     @trace()
     def upsert_entities(self):
@@ -929,12 +959,13 @@ class UpsertChecker(Checker):
     @exception_handler()
     def run_task(self):
         # half of the data is upsert, the other half is insert
-        rows = len(self.data[0])
-        pk_old = self.data[0][:rows // 2]
-        self.data = cf.get_column_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.schema)
-        pk_new = self.data[0][rows // 2:]
+        rows = len(self.data)
+        pk_old = [d[self.int64_field_name] for d in self.data[:rows // 2]]
+        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.schema)
+        pk_new = [d[self.int64_field_name] for d in self.data[rows // 2:]]
         pk_update = pk_old + pk_new
-        self.data[0] = pk_update
+        for i in range(rows):
+            self.data[i][self.int64_field_name] = pk_update[i]
         res, result = self.upsert_entities()
         return res, result
 
