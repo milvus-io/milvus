@@ -19,12 +19,19 @@
 package expr
 
 import (
+	"context"
+	"fmt"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
+
+type FooID = int64
 
 func TestExec(t *testing.T) {
 	paramtable.Init()
@@ -34,6 +41,13 @@ func TestExec(t *testing.T) {
 	})
 	Init()
 	Register("foo", "hello")
+	Register("FuncWithContext", func(ctx context.Context, i FooID) int {
+		return int(100 + i)
+	})
+	mockMessage := &milvuspb.UserEntity{Name: "foo"}
+	Register("GetMockMessage", func() proto.Message {
+		return mockMessage
+	})
 
 	t.Run("empty code", func(t *testing.T) {
 		_, err := Exec("", "by-dev")
@@ -59,5 +73,31 @@ func TestExec(t *testing.T) {
 		out, err := Exec("foo", "by-dev")
 		assert.NoError(t, err)
 		assert.Equal(t, "hello", out)
+	})
+
+	t.Run("context function", func(t *testing.T) {
+		out, err := Exec("FuncWithContext(100)", "by-dev")
+		assert.NoError(t, err)
+		assert.Equal(t, "200", out)
+	})
+
+	innerSize := func(p any) int {
+		message, ok := p.(proto.Message)
+		if !ok {
+			return int(unsafe.Sizeof(p))
+		}
+		return proto.Size(message)
+	}
+
+	t.Run("size", func(t *testing.T) {
+		out, err := Exec("objSize(1)", "by-dev")
+		assert.NoError(t, err)
+		assert.Equal(t, fmt.Sprintf("%d", innerSize(1)), out)
+	})
+
+	t.Run("proto size", func(t *testing.T) {
+		out, err := Exec("objSize(GetMockMessage())", "by-dev")
+		assert.NoError(t, err)
+		assert.Equal(t, fmt.Sprintf("%d", innerSize(mockMessage)), out)
 	})
 }

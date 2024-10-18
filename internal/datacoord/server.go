@@ -34,6 +34,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
@@ -105,14 +106,16 @@ type Server struct {
 	stateCode        atomic.Value
 	helper           ServerHelper
 
-	etcdCli          *clientv3.Client
-	tikvCli          *txnkv.Client
-	address          string
-	watchClient      kv.WatchKV
-	kv               kv.MetaKv
-	meta             *meta
-	segmentManager   Manager
-	allocator        allocator
+	etcdCli        *clientv3.Client
+	tikvCli        *txnkv.Client
+	address        string
+	watchClient    kv.WatchKV
+	kv             kv.MetaKv
+	meta           *meta
+	segmentManager Manager
+	allocator      allocator
+	// self host id allocator, to avoid get unique id from rootcoord
+	idAllocator      *globalIDAllocator.GlobalIDAllocator
 	cluster          Cluster
 	sessionManager   SessionManager
 	channelManager   ChannelManager
@@ -357,6 +360,14 @@ func (s *Server) initDataCoord() error {
 		return err
 	}
 
+	// init id allocator after init meta
+	s.idAllocator = globalIDAllocator.NewGlobalIDAllocator("idTimestamp", s.kv)
+	err = s.idAllocator.Initialize()
+	if err != nil {
+		log.Error("data coordinator id allocator initialize failed", zap.Error(err))
+		return err
+	}
+
 	s.handler = newServerHandler(s)
 
 	// check whether old node exist, if yes suspend auto balance until all old nodes down
@@ -479,7 +490,7 @@ func (s *Server) initCluster() error {
 
 	var err error
 	if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
-		s.channelManager, err = NewChannelManagerV2(s.watchClient, s.handler, s.sessionManager, s.allocator, withCheckerV2())
+		s.channelManager, err = NewChannelManagerV2(s.watchClient, s.handler, s.sessionManager, s.idAllocator, withCheckerV2())
 		if err != nil {
 			return err
 		}

@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -68,7 +69,7 @@ type ChannelManagerImplV2 struct {
 	h          Handler
 	store      RWChannelStore
 	subCluster SubCluster // sessionManager
-	allocator  allocator
+	allocator  globalIDAllocator.GlobalIDAllocatorInterface
 
 	factory       ChannelPolicyFactory
 	balancePolicy BalanceChannelPolicy
@@ -98,7 +99,7 @@ func NewChannelManagerV2(
 	kv kv.TxnKV,
 	h Handler,
 	subCluster SubCluster, // sessionManager
-	alloc allocator,
+	alloc globalIDAllocator.GlobalIDAllocatorInterface,
 	options ...ChannelmanagerOptV2,
 ) (*ChannelManagerImplV2, error) {
 	m := &ChannelManagerImplV2{
@@ -693,7 +694,7 @@ func (m *ChannelManagerImplV2) fillChannelWatchInfo(op *ChannelOp) error {
 	startTs := time.Now().Unix()
 	for _, ch := range op.Channels {
 		vcInfo := m.h.GetDataVChanPositions(ch, allPartitionID)
-		opID, err := m.allocator.allocID(context.Background())
+		opID, err := m.allocator.AllocOne()
 		if err != nil {
 			return err
 		}
