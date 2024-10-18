@@ -374,6 +374,7 @@ func newMockProxy() *mockProxy {
 
 func newTestCore(opts ...Opt) *Core {
 	c := &Core{
+		ctx:     context.TODO(),
 		session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}},
 	}
 	executor := newMockStepExecutor()
