@@ -533,44 +533,49 @@ func (rm *ResourceManager) AutoRecoverResourceGroup(rgName string) error {
 		return nil
 	}
 
-	err := rm.recoverMissingNodeRG(rgName)
-	if err != nil {
-		return err
+	// try to move out all dirty nodes before recover rg
+	if len(rg.DirtyNodes(rm.nodeMgr)) > 0 {
+		err := rm.recoverDirtyNodeRG(rgName)
+		if err != nil {
+			return err
+		}
+	}
+
+	if rg.MissingNumOfNodes() > 0 {
+		return rm.recoverMissingNodeRG(rgName)
 	}
 
 	// DefaultResourceGroup is the backup resource group of redundant recovery,
 	// So after all other resource group is reach the `limits`, rest redundant node will be transfer to DefaultResourceGroup.
-	err = rm.recoverRedundantNodeRG(rgName)
-	if err != nil {
-		return err
+	if rg.RedundantNumOfNodes() > 0 {
+		return rm.recoverRedundantNodeRG(rgName)
 	}
-
 	return nil
 }
 
 // recoverMissingNodeRG recover resource group by transfer node from other resource group.
 func (rm *ResourceManager) recoverMissingNodeRG(rgName string) error {
-	preferNodeFilter := func(nodeID int64) bool {
-		nodeInfo := rm.nodeMgr.Get(nodeID)
-		if nodeInfo == nil {
-			return false
+	rgFilter := func(sourceRG *ResourceGroup) bool {
+		nodeFilter := func(nodeID int64) bool {
+			nodeInfo := rm.nodeMgr.Get(nodeID)
+			if nodeInfo == nil {
+				return false
+			}
+			return rm.groups[rgName].AcceptNode(nodeInfo)
 		}
-		return rm.groups[rgName].PreferAcceptNode(nodeInfo)
-	}
 
-	preferRGFilter := func(sourceRG *ResourceGroup) bool {
-		return len(sourceRG.GetNodesByFilter(preferNodeFilter)) > 0
+		return len(sourceRG.GetNodesByFilter(nodeFilter)) > 0
 	}
 
 	for rm.groups[rgName].MissingNumOfNodes() > 0 {
 		targetRG := rm.groups[rgName]
-		sourceRG := rm.selectMissingRecoverSourceRG(targetRG, preferRGFilter)
+		sourceRG := rm.selectMissingRecoverSourceRG(targetRG, rgFilter)
 		if sourceRG == nil {
 			log.Warn("fail to select source resource group", zap.String("rgName", targetRG.GetName()))
 			return ErrNodeNotEnough
 		}
 
-		nodeID, err := rm.transferOneNodeFromRGToRG(sourceRG, targetRG, preferNodeFilter)
+		nodeID, err := rm.transferOneNodeFromRGToRG(sourceRG, targetRG)
 		if err != nil {
 			log.Warn("failed to recover missing node by transfer node from other resource group",
 				zap.String("sourceRG", sourceRG.GetName()),
@@ -584,47 +589,17 @@ func (rm *ResourceManager) recoverMissingNodeRG(rgName string) error {
 			zap.Int64("nodeID", nodeID),
 		)
 	}
-
-	for rm.groups[rgName].MissingNumOfPreferNodes(rm.nodeMgr) > 0 {
-		targetRG := rm.groups[rgName]
-		sourceRG := rm.selectMissingRecoverSourceRG(targetRG, preferRGFilter)
-		if sourceRG == nil {
-			log.Warn("fail to select source resource group", zap.String("rgName", targetRG.GetName()))
-			return ErrNodeNotEnough
-		}
-
-		if !preferRGFilter(sourceRG) {
-			break
-		}
-
-		nodeID, err := rm.transferOneNodeFromRGToRG(sourceRG, targetRG, preferNodeFilter)
-		if err != nil {
-			log.Warn("failed to recover missing node by transfer node from other resource group",
-				zap.String("sourceRG", sourceRG.GetName()),
-				zap.String("targetRG", targetRG.GetName()),
-				zap.Error(err))
-			return err
-		}
-		log.Info("recover missing prefer node by transfer node from other resource group",
-			zap.String("sourceRG", sourceRG.GetName()),
-			zap.String("targetRG", targetRG.GetName()),
-			zap.Int64("nodeID", nodeID),
-		)
-	}
 	return nil
 }
 
 // selectMissingRecoverSourceRG select source resource group for recover missing resource group.
-func (rm *ResourceManager) selectMissingRecoverSourceRG(rg *ResourceGroup, preferRGFilter func(rg *ResourceGroup) bool) *ResourceGroup {
+func (rm *ResourceManager) selectMissingRecoverSourceRG(rg *ResourceGroup, rgFilter func(rg *ResourceGroup) bool) *ResourceGroup {
 	// First, Transfer node from most redundant resource group first. `len(nodes) > limits`
 	if redundantRG := rm.findMaxRGWithGivenFilter(
 		func(sourceRG *ResourceGroup) bool {
-			return rg.GetName() != sourceRG.GetName() && sourceRG.RedundantNumOfNodes() > 0
+			return rg.GetName() != sourceRG.GetName() && sourceRG.RedundantNumOfNodes() > 0 && rgFilter(sourceRG)
 		},
 		func(sourceRG *ResourceGroup) int {
-			if preferRGFilter(sourceRG) {
-				return sourceRG.RedundantNumOfNodes() * preferNodeTransferBoost
-			}
 			return sourceRG.RedundantNumOfNodes()
 		},
 	); redundantRG != nil {
@@ -635,13 +610,9 @@ func (rm *ResourceManager) selectMissingRecoverSourceRG(rg *ResourceGroup, prefe
 	// `TransferFrom` configured resource group at high priority.
 	return rm.findMaxRGWithGivenFilter(
 		func(sourceRG *ResourceGroup) bool {
-			return rg.GetName() != sourceRG.GetName() && sourceRG.OversizedNumOfNodes() > 0
+			return rg.GetName() != sourceRG.GetName() && sourceRG.OversizedNumOfNodes() > 0 && rgFilter(sourceRG)
 		},
 		func(sourceRG *ResourceGroup) int {
-			if preferRGFilter(sourceRG) {
-				return sourceRG.OversizedNumOfNodes() * preferNodeTransferBoost
-			}
-
 			if rg.HasFrom(sourceRG.GetName()) {
 				// give a boost if sourceRG is configured as `TransferFrom` to set as high priority to select.
 				return sourceRG.OversizedNumOfNodes() * resourceGroupTransferBoost
@@ -652,11 +623,11 @@ func (rm *ResourceManager) selectMissingRecoverSourceRG(rg *ResourceGroup, prefe
 
 // recoverRedundantNodeRG recover resource group by transfer node to other resource group.
 func (rm *ResourceManager) recoverRedundantNodeRG(rgName string) error {
-	preferRGFilter := func(targetRG *ResourceGroup) bool {
+	rgFilter := func(targetRG *ResourceGroup) bool {
 		sourceRG := rm.groups[rgName]
 		for _, node := range sourceRG.GetNodes() {
 			nodeInfo := rm.nodeMgr.Get(node)
-			if nodeInfo != nil && !sourceRG.PreferAcceptNode(nodeInfo) && targetRG.PreferAcceptNode(nodeInfo) {
+			if nodeInfo != nil && targetRG.AcceptNode(nodeInfo) {
 				return true
 			}
 		}
@@ -665,22 +636,14 @@ func (rm *ResourceManager) recoverRedundantNodeRG(rgName string) error {
 
 	for rm.groups[rgName].RedundantNumOfNodes() > 0 {
 		sourceRG := rm.groups[rgName]
-		targetRG := rm.selectRedundantRecoverTargetRG(sourceRG, preferRGFilter)
+		targetRG := rm.selectRedundantRecoverTargetRG(sourceRG, rgFilter)
 		if targetRG == nil {
 			log.Info("failed to select redundant recover target resource group, please check resource group configuration if as expected.",
 				zap.String("rgName", sourceRG.GetName()))
 			return errors.New("all resource group reach limits")
 		}
 
-		preferNodeFilter := func(nodeID int64) bool {
-			nodeInfo := rm.nodeMgr.Get(nodeID)
-			if nodeInfo == nil {
-				return false
-			}
-			return !sourceRG.PreferAcceptNode(nodeInfo)
-		}
-
-		nodeID, err := rm.transferOneNodeFromRGToRG(sourceRG, targetRG, preferNodeFilter)
+		nodeID, err := rm.transferOneNodeFromRGToRG(sourceRG, targetRG)
 		if err != nil {
 			log.Warn("failed to recover redundant node by transfer node to other resource group",
 				zap.String("sourceRG", sourceRG.GetName()),
@@ -697,17 +660,53 @@ func (rm *ResourceManager) recoverRedundantNodeRG(rgName string) error {
 	return nil
 }
 
+// recoverDirtyNodeRG recover resource group by move out all node which doesn't meet node label requirement.
+func (rm *ResourceManager) recoverDirtyNodeRG(rgName string) error {
+	rgFilter := func(targetRG *ResourceGroup) bool {
+		sourceRG := rm.groups[rgName]
+		for _, node := range sourceRG.GetNodes() {
+			nodeInfo := rm.nodeMgr.Get(node)
+			if nodeInfo != nil && targetRG.AcceptNode(nodeInfo) {
+				return true
+			}
+		}
+		return false
+	}
+
+	for len(rm.groups[rgName].DirtyNodes(rm.nodeMgr)) > 0 {
+		sourceRG := rm.groups[rgName]
+		targetRG := rm.selectRedundantRecoverTargetRG(sourceRG, rgFilter)
+		if targetRG == nil {
+			log.Info("failed to select redundant recover target resource group, please check resource group configuration if as expected.",
+				zap.String("rgName", sourceRG.GetName()))
+			return errors.New("all resource group reach limits")
+		}
+
+		nodeID, err := rm.transferOneNodeFromRGToRG(sourceRG, targetRG)
+		if err != nil {
+			log.Warn("failed to recover redundant node by transfer node to other resource group",
+				zap.String("sourceRG", sourceRG.GetName()),
+				zap.String("targetRG", targetRG.GetName()),
+				zap.Error(err))
+			return err
+		}
+		log.Info("recover dirty node by transfer node to other resource group",
+			zap.String("sourceRG", sourceRG.GetName()),
+			zap.String("targetRG", targetRG.GetName()),
+			zap.Int64("nodeID", nodeID),
+		)
+	}
+	return nil
+}
+
 // selectRedundantRecoverTargetRG select target resource group for recover redundant resource group.
-func (rm *ResourceManager) selectRedundantRecoverTargetRG(rg *ResourceGroup, preferRGFilter func(rg *ResourceGroup) bool) *ResourceGroup {
+func (rm *ResourceManager) selectRedundantRecoverTargetRG(rg *ResourceGroup, rgFilter func(rg *ResourceGroup) bool) *ResourceGroup {
 	// First, Transfer node to most missing resource group first.
 	if missingRG := rm.findMaxRGWithGivenFilter(
 		func(targetRG *ResourceGroup) bool {
-			return rg.GetName() != targetRG.GetName() && targetRG.MissingNumOfNodes() > 0
+			return rg.GetName() != targetRG.GetName() && targetRG.MissingNumOfNodes() > 0 && rgFilter(targetRG)
 		},
 		func(targetRG *ResourceGroup) int {
-			if preferRGFilter(targetRG) {
-				return targetRG.MissingNumOfNodes() * preferNodeTransferBoost
-			}
 			return targetRG.MissingNumOfNodes()
 		},
 	); missingRG != nil {
@@ -718,12 +717,9 @@ func (rm *ResourceManager) selectRedundantRecoverTargetRG(rg *ResourceGroup, pre
 	// `TransferTo` configured resource group at high priority.
 	if selectRG := rm.findMaxRGWithGivenFilter(
 		func(targetRG *ResourceGroup) bool {
-			return rg.GetName() != targetRG.GetName() && targetRG.ReachLimitNumOfNodes() > 0
+			return rg.GetName() != targetRG.GetName() && targetRG.ReachLimitNumOfNodes() > 0 && rgFilter(targetRG)
 		},
 		func(targetRG *ResourceGroup) int {
-			if preferRGFilter(targetRG) {
-				return targetRG.ReachLimitNumOfNodes() * preferNodeTransferBoost
-			}
 			if rg.HasTo(targetRG.GetName()) {
 				// give a boost if targetRG is configured as `TransferTo` to set as high priority to select.
 				return targetRG.ReachLimitNumOfNodes() * resourceGroupTransferBoost
@@ -742,19 +738,13 @@ func (rm *ResourceManager) selectRedundantRecoverTargetRG(rg *ResourceGroup, pre
 }
 
 // transferOneNodeFromRGToRG transfer one node from source resource group to target resource group.
-func (rm *ResourceManager) transferOneNodeFromRGToRG(sourceRG *ResourceGroup, targetRG *ResourceGroup, preferNodeFilter func(nodeID int64) bool) (int64, error) {
+func (rm *ResourceManager) transferOneNodeFromRGToRG(sourceRG *ResourceGroup, targetRG *ResourceGroup) (int64, error) {
 	if sourceRG.NodeNum() == 0 {
 		return -1, ErrNodeNotEnough
 	}
 
-	// prefer to select node which match the preferNodeFilter
-	nodes := sourceRG.GetNodesByFilter(preferNodeFilter)
-	if len(nodes) == 0 {
-		nodes = sourceRG.GetNodes()
-	}
-
 	// TODO: select node by some load strategy, such as segment loaded.
-	node := nodes[0]
+	node := sourceRG.GetNodes()[0]
 	if err := rm.transferNode(targetRG.GetName(), node); err != nil {
 		return -1, err
 	}
@@ -798,12 +788,12 @@ func (rm *ResourceManager) assignIncomingNode(node int64) (string, error) {
 	if nodeInfo == nil {
 		return "", merr.WrapErrNodeNotAvailable(node)
 	}
-	preferRGFilter := func(rg *ResourceGroup) bool {
-		return rg.PreferAcceptNode(nodeInfo)
+	rgFilter := func(rg *ResourceGroup) bool {
+		return rg.AcceptNode(nodeInfo)
 	}
 
 	// select a resource group to assign incoming node.
-	rg = rm.mustSelectAssignIncomingNodeTargetRG(preferRGFilter)
+	rg = rm.mustSelectAssignIncomingNodeTargetRG(rgFilter)
 	if err := rm.transferNode(rg.GetName(), node); err != nil {
 		return "", errors.Wrap(err, "at finally assign to default resource group")
 	}
@@ -811,17 +801,13 @@ func (rm *ResourceManager) assignIncomingNode(node int64) (string, error) {
 }
 
 // mustSelectAssignIncomingNodeTargetRG select resource group for assign incoming node.
-func (rm *ResourceManager) mustSelectAssignIncomingNodeTargetRG(preferRGFilter func(rg *ResourceGroup) bool) *ResourceGroup {
+func (rm *ResourceManager) mustSelectAssignIncomingNodeTargetRG(rgFilter func(rg *ResourceGroup) bool) *ResourceGroup {
 	// First, Assign it to rg with the most missing nodes at high priority.
 	if rg := rm.findMaxRGWithGivenFilter(
 		func(rg *ResourceGroup) bool {
-			return rg.MissingNumOfNodes() > 0
+			return rg.MissingNumOfNodes() > 0 && rgFilter(rg)
 		},
 		func(rg *ResourceGroup) int {
-			// give the rg which match preferRGFilter a boost to select.
-			if preferRGFilter(rg) {
-				return rg.MissingNumOfNodes() * preferNodeTransferBoost
-			}
 			return rg.MissingNumOfNodes()
 		},
 	); rg != nil {
@@ -831,13 +817,9 @@ func (rm *ResourceManager) mustSelectAssignIncomingNodeTargetRG(preferRGFilter f
 	// Second, assign it to rg do not reach limit.
 	if rg := rm.findMaxRGWithGivenFilter(
 		func(rg *ResourceGroup) bool {
-			return rg.ReachLimitNumOfNodes() > 0
+			return rg.ReachLimitNumOfNodes() > 0 && rgFilter(rg)
 		},
 		func(rg *ResourceGroup) int {
-			// give the rg which match preferRGFilter a boost to select.
-			if preferRGFilter(rg) {
-				return rg.ReachLimitNumOfNodes() * preferNodeTransferBoost
-			}
 			return rg.ReachLimitNumOfNodes()
 		},
 	); rg != nil {
