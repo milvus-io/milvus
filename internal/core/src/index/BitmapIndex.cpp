@@ -445,6 +445,9 @@ BitmapIndex<T>::DeserializeIndexDataForMmap(const char* data_ptr,
         bitmap_info_map_[key] = {static_cast<size_t>(data_ptr - mmap_data_),
                                  size};
         data_ptr += size;
+        for (const auto& v : value) {
+            valid_bitset_.set(v);
+        }
     }
 }
 
@@ -467,6 +470,9 @@ BitmapIndex<std::string>::DeserializeIndexDataForMmap(const char* data_ptr,
         bitmap_info_map_[key] = {static_cast<size_t>(data_ptr - mmap_data_),
                                  size};
         data_ptr += size;
+        for (const auto& v : value) {
+            valid_bitset_.set(v);
+        }
     }
 }
 
@@ -633,6 +639,8 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
                 }
             }
         }
+        // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
+        res &= valid_bitset_;
         return res;
     }
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
