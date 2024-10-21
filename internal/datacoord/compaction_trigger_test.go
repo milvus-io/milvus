@@ -64,10 +64,7 @@ func (h *spyCompactionHandler) removeTasksByChannel(channel string) {}
 
 // enqueueCompaction start to execute plan and return immediately
 func (h *spyCompactionHandler) enqueueCompaction(task *datapb.CompactionTask) error {
-	t := &mixCompactionTask{
-		CompactionTask: task,
-		meta:           h.meta,
-	}
+	t := newMixCompactionTask(task, nil, h.meta, nil)
 	alloc := newMock0Allocator(h.t)
 	t.allocator = alloc
 	plan, err := t.BuildCompactionRequest()
@@ -587,6 +584,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 					Schema:                 schema,
 					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 101, End: 200},
 					MaxSize:                1342177280,
+					SlotUsage:              paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 				},
 			},
 		},
