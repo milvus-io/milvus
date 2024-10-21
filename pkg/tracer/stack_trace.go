@@ -33,6 +33,7 @@ func StackTraceMsg(numFuncs uint) string {
 	n := runtime.Callers(frameNumToSkip, pc)
 	frames := runtime.CallersFrames(pc[:n])
 
+
 	ret := ""
 
 	for {
