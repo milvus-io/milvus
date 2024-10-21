@@ -32,172 +32,12 @@ int64_t
 PhyCompareFilterExpr::GetNextBatchSize() {
     auto current_rows = GetCurrentRows();
 
-    return current_rows + batch_size_ >= active_count_
-               ? active_count_ - current_rows
+    return current_rows + batch_size_ >= segment_chunk_reader_.active_count_
+               ? segment_chunk_reader_.active_count_ - current_rows
                : batch_size_;
 }
 
-template <typename T>
-MultipleChunkDataAccessor
-PhyCompareFilterExpr::GetChunkData(FieldId field_id,
-                                   bool index,
-                                   int64_t& current_chunk_id,
-                                   int64_t& current_chunk_pos) {
-    if (index) {
-        auto& indexing = const_cast<index::ScalarIndex<T>&>(
-            segment_->chunk_scalar_index<T>(field_id, current_chunk_id));
-        auto current_chunk_size = segment_->type() == SegmentType::Growing
-                                      ? size_per_chunk_
-                                      : active_count_;
-
-        if (indexing.HasRawData()) {
-            return [&, current_chunk_size]() -> const number {
-                if (current_chunk_pos >= current_chunk_size) {
-                    current_chunk_id++;
-                    current_chunk_pos = 0;
-                    indexing = const_cast<index::ScalarIndex<T>&>(
-                        segment_->chunk_scalar_index<T>(field_id,
-                                                        current_chunk_id));
-                }
-                auto raw = indexing.Reverse_Lookup(current_chunk_pos);
-                current_chunk_pos++;
-                if (!raw.has_value()) {
-                    return std::nullopt;
-                }
-                return raw.value();
-            };
-        }
-    }
-    auto chunk_data =
-        segment_->chunk_data<T>(field_id, current_chunk_id).data();
-    auto chunk_valid_data =
-        segment_->chunk_data<T>(field_id, current_chunk_id).valid_data();
-    auto current_chunk_size = segment_->chunk_size(field_id, current_chunk_id);
-    return
-        [=, &current_chunk_id, &current_chunk_pos]() mutable -> const number {
-            if (current_chunk_pos >= current_chunk_size) {
-                current_chunk_id++;
-                current_chunk_pos = 0;
-                chunk_data =
-                    segment_->chunk_data<T>(field_id, current_chunk_id).data();
-                chunk_valid_data =
-                    segment_->chunk_data<T>(field_id, current_chunk_id)
-                        .valid_data();
-                current_chunk_size =
-                    segment_->chunk_size(field_id, current_chunk_id);
-            }
-            if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
-                current_chunk_pos++;
-                return std::nullopt;
-            }
-            return chunk_data[current_chunk_pos++];
-        };
-}
-
-template <>
-MultipleChunkDataAccessor
-PhyCompareFilterExpr::GetChunkData<std::string>(FieldId field_id,
-                                                bool index,
-                                                int64_t& current_chunk_id,
-                                                int64_t& current_chunk_pos) {
-    if (index) {
-        auto& indexing = const_cast<index::ScalarIndex<std::string>&>(
-            segment_->chunk_scalar_index<std::string>(field_id,
-                                                      current_chunk_id));
-        auto current_chunk_size = segment_->type() == SegmentType::Growing
-                                      ? size_per_chunk_
-                                      : active_count_;
-
-        if (indexing.HasRawData()) {
-            return [&, current_chunk_size]() mutable -> const number {
-                if (current_chunk_pos >= current_chunk_size) {
-                    current_chunk_id++;
-                    current_chunk_pos = 0;
-                    indexing = const_cast<index::ScalarIndex<std::string>&>(
-                        segment_->chunk_scalar_index<std::string>(
-                            field_id, current_chunk_id));
-                }
-                auto raw = indexing.Reverse_Lookup(current_chunk_pos);
-                current_chunk_pos++;
-                if (!raw.has_value()) {
-                    return std::nullopt;
-                }
-                return raw.value();
-            };
-        }
-    }
-    if (segment_->type() == SegmentType::Growing &&
-        !storage::MmapManager::GetInstance()
-             .GetMmapConfig()
-             .growing_enable_mmap) {
-        auto chunk_data =
-            segment_->chunk_data<std::string>(field_id, current_chunk_id)
-                .data();
-        auto chunk_valid_data =
-            segment_->chunk_data<std::string>(field_id, current_chunk_id)
-                .valid_data();
-        auto current_chunk_size =
-            segment_->chunk_size(field_id, current_chunk_id);
-        return [=,
-                &current_chunk_id,
-                &current_chunk_pos]() mutable -> const number {
-            if (current_chunk_pos >= current_chunk_size) {
-                current_chunk_id++;
-                current_chunk_pos = 0;
-                chunk_data =
-                    segment_
-                        ->chunk_data<std::string>(field_id, current_chunk_id)
-                        .data();
-                chunk_valid_data =
-                    segment_
-                        ->chunk_data<std::string>(field_id, current_chunk_id)
-                        .valid_data();
-                current_chunk_size =
-                    segment_->chunk_size(field_id, current_chunk_id);
-            }
-            if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
-                current_chunk_pos++;
-                return std::nullopt;
-            }
-            return chunk_data[current_chunk_pos++];
-        };
-    } else {
-        auto chunk_data =
-            segment_->chunk_view<std::string_view>(field_id, current_chunk_id)
-                .first.data();
-        auto chunk_valid_data =
-            segment_->chunk_data<std::string_view>(field_id, current_chunk_id)
-                .valid_data();
-        auto current_chunk_size =
-            segment_->chunk_size(field_id, current_chunk_id);
-        return [=,
-                &current_chunk_id,
-                &current_chunk_pos]() mutable -> const number {
-            if (current_chunk_pos >= current_chunk_size) {
-                current_chunk_id++;
-                current_chunk_pos = 0;
-                chunk_data = segment_
-                                 ->chunk_view<std::string_view>(
-                                     field_id, current_chunk_id)
-                                 .first.data();
-                chunk_valid_data = segment_
-                                       ->chunk_data<std::string_view>(
-                                           field_id, current_chunk_id)
-                                       .valid_data();
-                current_chunk_size =
-                    segment_->chunk_size(field_id, current_chunk_id);
-            }
-            if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
-                current_chunk_pos++;
-                return std::nullopt;
-            }
-
-            return std::string(chunk_data[current_chunk_pos++]);
-        };
-    }
-}
-
-MultipleChunkDataAccessor
+segcore::MultipleChunkDataAccessor
 PhyCompareFilterExpr::GetChunkData(DataType data_type,
                                    FieldId field_id,
                                    bool index,
@@ -205,28 +45,28 @@ PhyCompareFilterExpr::GetChunkData(DataType data_type,
                                    int64_t& current_chunk_pos) {
     switch (data_type) {
         case DataType::BOOL:
-            return GetChunkData<bool>(
+            return segment_chunk_reader_.GetChunkData<bool>(
                 field_id, index, current_chunk_id, current_chunk_pos);
         case DataType::INT8:
-            return GetChunkData<int8_t>(
+            return segment_chunk_reader_.GetChunkData<int8_t>(
                 field_id, index, current_chunk_id, current_chunk_pos);
         case DataType::INT16:
-            return GetChunkData<int16_t>(
+            return segment_chunk_reader_.GetChunkData<int16_t>(
                 field_id, index, current_chunk_id, current_chunk_pos);
         case DataType::INT32:
-            return GetChunkData<int32_t>(
+            return segment_chunk_reader_.GetChunkData<int32_t>(
                 field_id, index, current_chunk_id, current_chunk_pos);
         case DataType::INT64:
-            return GetChunkData<int64_t>(
+            return segment_chunk_reader_.GetChunkData<int64_t>(
                 field_id, index, current_chunk_id, current_chunk_pos);
         case DataType::FLOAT:
-            return GetChunkData<float>(
+            return segment_chunk_reader_.GetChunkData<float>(
                 field_id, index, current_chunk_id, current_chunk_pos);
         case DataType::DOUBLE:
-            return GetChunkData<double>(
+            return segment_chunk_reader_.GetChunkData<double>(
                 field_id, index, current_chunk_id, current_chunk_pos);
         case DataType::VARCHAR: {
-            return GetChunkData<std::string>(
+            return segment_chunk_reader_.GetChunkData<std::string>(
                 field_id, index, current_chunk_id, current_chunk_pos);
         }
         default:
@@ -237,7 +77,7 @@ PhyCompareFilterExpr::GetChunkData(DataType data_type,
 template <typename OpType>
 VectorPtr
 PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
-    if (segment_->is_chunked()) {
+    if (segment_chunk_reader_.segment_->is_chunked()) {
         auto real_batch_size = GetNextBatchSize();
         if (real_batch_size == 0) {
             return nullptr;
@@ -283,17 +123,20 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
 
-        auto left_data_barrier =
-            segment_->num_chunk_data(expr_->left_field_id_);
+        auto left_data_barrier = segment_chunk_reader_.segment_->num_chunk_data(
+            expr_->left_field_id_);
         auto right_data_barrier =
-            segment_->num_chunk_data(expr_->right_field_id_);
+            segment_chunk_reader_.segment_->num_chunk_data(
+                expr_->right_field_id_);
 
         int64_t processed_rows = 0;
         for (int64_t chunk_id = current_chunk_id_; chunk_id < num_chunk_;
              ++chunk_id) {
-            auto chunk_size = chunk_id == num_chunk_ - 1
-                                  ? active_count_ - chunk_id * size_per_chunk_
-                                  : size_per_chunk_;
+            auto chunk_size =
+                chunk_id == num_chunk_ - 1
+                    ? segment_chunk_reader_.active_count_ -
+                          chunk_id * segment_chunk_reader_.SizePerChunk()
+                    : segment_chunk_reader_.SizePerChunk();
             auto left = GetChunkData(expr_->left_data_type_,
                                      expr_->left_field_id_,
                                      chunk_id,
@@ -328,102 +171,36 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
     }
 }
 
-template <typename T>
-ChunkDataAccessor
-PhyCompareFilterExpr::GetChunkData(FieldId field_id,
-                                   int chunk_id,
-                                   int data_barrier) {
-    if (chunk_id >= data_barrier) {
-        auto& indexing = segment_->chunk_scalar_index<T>(field_id, chunk_id);
-        if (indexing.HasRawData()) {
-            return [&indexing](int i) -> const number {
-                auto raw = indexing.Reverse_Lookup(i);
-                if (!raw.has_value()) {
-                    return std::nullopt;
-                }
-                return raw.value();
-            };
-        }
-    }
-    auto chunk_data = segment_->chunk_data<T>(field_id, chunk_id).data();
-    auto chunk_valid_data =
-        segment_->chunk_data<T>(field_id, chunk_id).valid_data();
-    return [chunk_data, chunk_valid_data](int i) -> const number {
-        if (chunk_valid_data && !chunk_valid_data[i]) {
-            return std::nullopt;
-        }
-        return chunk_data[i];
-    };
-}
-
-template <>
-ChunkDataAccessor
-PhyCompareFilterExpr::GetChunkData<std::string>(FieldId field_id,
-                                                int chunk_id,
-                                                int data_barrier) {
-    if (chunk_id >= data_barrier) {
-        auto& indexing =
-            segment_->chunk_scalar_index<std::string>(field_id, chunk_id);
-        if (indexing.HasRawData()) {
-            return [&indexing](int i) -> const number {
-                auto raw = indexing.Reverse_Lookup(i);
-                if (!raw.has_value()) {
-                    return std::nullopt;
-                }
-                return raw.value();
-            };
-        }
-    }
-    if (segment_->type() == SegmentType::Growing &&
-        !storage::MmapManager::GetInstance()
-             .GetMmapConfig()
-             .growing_enable_mmap) {
-        auto chunk_data =
-            segment_->chunk_data<std::string>(field_id, chunk_id).data();
-        auto chunk_valid_data =
-            segment_->chunk_data<std::string>(field_id, chunk_id).valid_data();
-        return [chunk_data, chunk_valid_data](int i) -> const number {
-            if (chunk_valid_data && !chunk_valid_data[i]) {
-                return std::nullopt;
-            }
-            return chunk_data[i];
-        };
-    } else {
-        auto chunk_info =
-            segment_->chunk_view<std::string_view>(field_id, chunk_id);
-        auto chunk_data = chunk_info.first.data();
-        auto chunk_valid_data = chunk_info.second.data();
-        return [chunk_data, chunk_valid_data](int i) -> const number {
-            if (chunk_valid_data && !chunk_valid_data[i]) {
-                return std::nullopt;
-            }
-            return std::string(chunk_data[i]);
-        };
-    }
-}
-
-ChunkDataAccessor
+segcore::ChunkDataAccessor
 PhyCompareFilterExpr::GetChunkData(DataType data_type,
                                    FieldId field_id,
                                    int chunk_id,
                                    int data_barrier) {
     switch (data_type) {
         case DataType::BOOL:
-            return GetChunkData<bool>(field_id, chunk_id, data_barrier);
+            return segment_chunk_reader_.GetChunkData<bool>(
+                field_id, chunk_id, data_barrier);
         case DataType::INT8:
-            return GetChunkData<int8_t>(field_id, chunk_id, data_barrier);
+            return segment_chunk_reader_.GetChunkData<int8_t>(
+                field_id, chunk_id, data_barrier);
         case DataType::INT16:
-            return GetChunkData<int16_t>(field_id, chunk_id, data_barrier);
+            return segment_chunk_reader_.GetChunkData<int16_t>(
+                field_id, chunk_id, data_barrier);
         case DataType::INT32:
-            return GetChunkData<int32_t>(field_id, chunk_id, data_barrier);
+            return segment_chunk_reader_.GetChunkData<int32_t>(
+                field_id, chunk_id, data_barrier);
         case DataType::INT64:
-            return GetChunkData<int64_t>(field_id, chunk_id, data_barrier);
+            return segment_chunk_reader_.GetChunkData<int64_t>(
+                field_id, chunk_id, data_barrier);
         case DataType::FLOAT:
-            return GetChunkData<float>(field_id, chunk_id, data_barrier);
+            return segment_chunk_reader_.GetChunkData<float>(
+                field_id, chunk_id, data_barrier);
         case DataType::DOUBLE:
-            return GetChunkData<double>(field_id, chunk_id, data_barrier);
+            return segment_chunk_reader_.GetChunkData<double>(
+                field_id, chunk_id, data_barrier);
         case DataType::VARCHAR: {
-            return GetChunkData<std::string>(field_id, chunk_id, data_barrier);
+            return segment_chunk_reader_.GetChunkData<std::string>(
+                field_id, chunk_id, data_barrier);
         }
         default:
             PanicInfo(DataTypeInvalid, "unsupported data type: {}", data_type);

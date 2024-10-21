@@ -23,6 +23,7 @@ package querynodev2
 #include "segcore/segment_c.h"
 #include "segcore/segcore_init_c.h"
 #include "common/init_c.h"
+#include "exec/expression/function/init_c.h"
 
 */
 import "C"
@@ -355,6 +356,8 @@ func (node *QueryNode) Init() error {
 			initError = err
 			return
 		}
+
+		C.InitExecExpressionFunctionFactory()
 
 		log.Info("query node init successfully",
 			zap.Int64("queryNodeID", node.GetNodeID()),
