@@ -357,6 +357,9 @@ message SegmentInfo {
   // textStatsLogs is used to record tokenization index for fields.
   map<int64, TextIndexStats> textStatsLogs = 26;
   repeated FieldBinlog bm25statslogs = 27;
+
+  // jsonKeyStats is used to record json key index for fields.
+  map<int64, JsonKeyStats> jsonKeyStats = 28;
 }
 
 message SegmentStartPosition {
@@ -436,6 +439,15 @@ message FieldBinlog{
 }
 
 message TextIndexStats {
+  int64 fieldID = 1;
+  int64 version = 2;
+  repeated string files = 3;
+  int64 log_size = 4;
+  int64 memory_size = 5;
+  int64 buildID = 6;
+}
+
+message JsonKeyStats {
   int64 fieldID = 1;
   int64 version = 2;
   repeated string files = 3;
