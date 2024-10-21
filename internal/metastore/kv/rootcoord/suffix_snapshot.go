@@ -643,7 +643,7 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(keyGroup []string, originalKey s
 	// to protect txn finished with ascend order, reverse the latest kv with tombstone to tail of array
 	sort.Strings(keyGroup)
 	removeFn := func(partialKeys []string) error {
-		return ss.MetaKv.MultiRemove(keyGroup)
+		return ss.MetaKv.MultiRemove(partialKeys)
 	}
 	return etcd.RemoveByBatchWithLimit(keyGroup, util.MaxEtcdTxnNum, removeFn)
 }
