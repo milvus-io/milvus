@@ -84,7 +84,7 @@ func (s *Server) getCollectionMetrics(ctx context.Context) *metricsinfo.DataCoor
 func (s *Server) getSystemInfoMetrics(
 	ctx context.Context,
 	req *milvuspb.GetMetricsRequest,
-) (*milvuspb.GetMetricsResponse, error) {
+) (string, error) {
 	// TODO(dragondriver): add more detail metrics
 
 	// get datacoord info
@@ -125,18 +125,11 @@ func (s *Server) getSystemInfoMetrics(
 		},
 	}
 
-	resp := &milvuspb.GetMetricsResponse{
-		Status:        merr.Success(),
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),
-	}
-	var err error
-	resp.Response, err = metricsinfo.MarshalTopology(coordTopology)
+	ret, err := metricsinfo.MarshalTopology(coordTopology)
 	if err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
+		return "", err
 	}
-
-	return resp, nil
+	return ret, nil
 }
 
 // getDataCoordMetrics composes datacoord infos

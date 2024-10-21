@@ -340,19 +340,30 @@ func (cluster *MiniClusterV2) Start() error {
 	runComponent(cluster.RootCoord)
 	runComponent(cluster.DataCoord)
 	runComponent(cluster.QueryCoord)
-	runComponent(cluster.Proxy)
 	runComponent(cluster.DataNode)
 	runComponent(cluster.QueryNode)
 	runComponent(cluster.IndexNode)
+	runComponent(cluster.Proxy)
 
 	ctx2, cancel := context.WithTimeout(context.Background(), time.Second*120)
 	defer cancel()
 	healthy := false
-	for !healthy {
+	upNodesCnt := math.MaxInt
+	for !healthy && upNodesCnt != 7 {
 		checkHealthResp, _ := cluster.Proxy.CheckHealth(ctx2, &milvuspb.CheckHealthRequest{})
 		healthy = checkHealthResp.IsHealthy
-		time.Sleep(time.Second * 1)
+
+		s, err := cluster.MetaWatcher.ShowSessions()
+		if err == nil {
+			upNodesCnt = len(s)
+		}
+		for _, session := range s {
+			log.Info("ShowSessions result", zap.Any("session", session))
+		}
+
+		time.Sleep(time.Second * 3)
 	}
+
 	if !healthy {
 		return errors.New("minicluster is not healthy after 120s")
 	}

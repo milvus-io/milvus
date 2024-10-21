@@ -804,14 +804,11 @@ func TestServer_getSystemInfoMetrics(t *testing.T) {
 
 	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	assert.NoError(t, err)
-	resp, err := svr.getSystemInfoMetrics(svr.ctx, req)
+	ret, err := svr.getSystemInfoMetrics(svr.ctx, req)
 	assert.NoError(t, err)
-	log.Info("TestServer_getSystemInfoMetrics",
-		zap.String("name", resp.ComponentName),
-		zap.String("response", resp.Response))
 
 	var coordTopology metricsinfo.DataCoordTopology
-	err = metricsinfo.UnmarshalTopology(resp.Response, &coordTopology)
+	err = metricsinfo.UnmarshalTopology(ret, &coordTopology)
 	assert.NoError(t, err)
 	assert.Equal(t, len(svr.cluster.GetSessions()), len(coordTopology.Cluster.ConnectedDataNodes))
 	for _, nodeMetrics := range coordTopology.Cluster.ConnectedDataNodes {

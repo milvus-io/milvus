@@ -169,7 +169,7 @@ func (s *storageV1Serializer) setTaskMeta(task *SyncTask, pack *SyncPack) {
 		WithPartitionID(pack.partitionID).
 		WithChannelName(pack.channelName).
 		WithSegmentID(pack.segmentID).
-		WithBatchSize(pack.batchSize).
+		WithBatchRows(pack.batchRows).
 		WithSchema(s.metacache.Schema()).
 		WithStartPosition(pack.startPosition).
 		WithCheckpoint(pack.checkpoint).
@@ -235,7 +235,7 @@ func (s *storageV1Serializer) serializeStatslog(pack *SyncPack) (*storage.Primar
 		stats.UpdateByMsgs(chunkPkData)
 	}
 
-	blob, err := s.inCodec.SerializePkStats(stats, pack.batchSize)
+	blob, err := s.inCodec.SerializePkStats(stats, pack.batchRows)
 	if err != nil {
 		return nil, nil, err
 	}

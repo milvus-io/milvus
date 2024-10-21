@@ -60,7 +60,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 	}
 	checkPoints = append(checkPoints, &datapb.CheckPoint{
 		SegmentID: pack.segmentID,
-		NumOfRows: segment.FlushedRows() + pack.batchSize,
+		NumOfRows: segment.FlushedRows() + pack.batchRows,
 		Position:  pack.checkpoint,
 	})
 

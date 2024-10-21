@@ -604,7 +604,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithLevel(segmentInfo.Level()).
 		WithDataSource(metrics.StreamingDataSourceLabel).
 		WithCheckpoint(wb.checkpoint).
-		WithBatchSize(batchSize).
+		WithBatchRows(batchSize).
 		WithErrorHandler(wb.errHandler)
 
 	if len(bm25) != 0 {

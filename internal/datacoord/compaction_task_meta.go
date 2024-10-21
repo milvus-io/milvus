@@ -18,8 +18,11 @@ package datacoord
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
+	"time"
 
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -29,12 +32,41 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
+type compactionTaskStats struct {
+	PlanID         int64   `json:"plan_id,omitempty"`
+	CollectionID   int64   `json:"collection_id,omitempty"`
+	Type           string  `json:"type,omitempty"`
+	State          string  `json:"state,omitempty"`
+	FailReason     string  `json:"fail_reason,omitempty"`
+	StartTime      int64   `json:"start_time,omitempty"`
+	EndTime        int64   `json:"end_time,omitempty"`
+	TotalRows      int64   `json:"total_rows,omitempty"`
+	InputSegments  []int64 `json:"inputSegments,omitempty"`
+	ResultSegments []int64 `json:"resultSegments,omitempty"`
+}
+
+func newCompactionTaskStats(task *datapb.CompactionTask) *compactionTaskStats {
+	return &compactionTaskStats{
+		PlanID:         task.PlanID,
+		CollectionID:   task.CollectionID,
+		Type:           task.Type.String(),
+		State:          task.State.String(),
+		FailReason:     task.FailReason,
+		StartTime:      task.StartTime,
+		EndTime:        task.EndTime,
+		TotalRows:      task.TotalRows,
+		InputSegments:  task.InputSegments,
+		ResultSegments: task.ResultSegments,
+	}
+}
+
 type compactionTaskMeta struct {
 	sync.RWMutex
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
 	// currently only clustering compaction task is stored in persist meta
 	compactionTasks map[int64]map[int64]*datapb.CompactionTask // triggerID -> planID
+	taskStats       *expirable.LRU[UniqueID, *compactionTaskStats]
 }
 
 func newCompactionTaskMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*compactionTaskMeta, error) {
@@ -43,6 +75,7 @@ func newCompactionTaskMeta(ctx context.Context, catalog metastore.DataCoordCatal
 		ctx:             ctx,
 		catalog:         catalog,
 		compactionTasks: make(map[int64]map[int64]*datapb.CompactionTask, 0),
+		taskStats:       expirable.NewLRU[UniqueID, *compactionTaskStats](1024, nil, time.Minute*60),
 	}
 	if err := csm.reloadFromKV(); err != nil {
 		return nil, err
@@ -134,6 +167,7 @@ func (csm *compactionTaskMeta) saveCompactionTaskMemory(task *datapb.CompactionT
 		csm.compactionTasks[task.TriggerID] = make(map[int64]*datapb.CompactionTask, 0)
 	}
 	csm.compactionTasks[task.TriggerID][task.PlanID] = task
+	csm.taskStats.Add(task.PlanID, newCompactionTaskStats(task))
 	return nil
 }
 
@@ -152,4 +186,17 @@ func (csm *compactionTaskMeta) DropCompactionTask(task *datapb.CompactionTask) e
 		delete(csm.compactionTasks, task.TriggerID)
 	}
 	return nil
+}
+
+func (csm *compactionTaskMeta) TaskStatsJSON() string {
+	tasks := csm.taskStats.Values()
+	if len(tasks) == 0 {
+		return ""
+	}
+
+	ret, err := json.Marshal(tasks)
+	if err != nil {
+		return ""
+	}
+	return string(ret)
 }

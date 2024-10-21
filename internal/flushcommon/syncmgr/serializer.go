@@ -48,7 +48,7 @@ type SyncPack struct {
 	tsTo          typeutil.Timestamp
 	startPosition *msgpb.MsgPosition
 	checkpoint    *msgpb.MsgPosition
-	batchSize     int64 // batchSize is the row number of this sync task,not the total num of rows of segemnt
+	batchRows     int64 // batchRows is the row number of this sync task,not the total num of rows of segment
 	dataSource    string
 	isFlush       bool
 	isDrop        bool
@@ -124,8 +124,8 @@ func (p *SyncPack) WithDrop() *SyncPack {
 	return p
 }
 
-func (p *SyncPack) WithBatchSize(batchSize int64) *SyncPack {
-	p.batchSize = batchSize
+func (p *SyncPack) WithBatchRows(batchRows int64) *SyncPack {
+	p.batchRows = batchRows
 	return p
 }
 

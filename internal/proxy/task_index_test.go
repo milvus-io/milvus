@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
@@ -45,6 +46,7 @@ import (
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
+	gin.SetMode(gin.TestMode)
 	code := m.Run()
 	os.Exit(code)
 }
