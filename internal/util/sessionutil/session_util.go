@@ -100,8 +100,9 @@ type SessionRaw struct {
 	IndexEngineVersion IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
 	LeaseID            *clientv3.LeaseID  `json:"LeaseID,omitempty"`
 
-	HostName   string `json:"HostName,omitempty"`
-	EnableDisk bool   `json:"EnableDisk,omitempty"`
+	HostName     string            `json:"HostName,omitempty"`
+	EnableDisk   bool              `json:"EnableDisk,omitempty"`
+	ServerLabels map[string]string `json:"ServerLabels,omitempty"`
 }
 
 func (s *SessionRaw) GetAddress() string {
@@ -110,6 +111,10 @@ func (s *SessionRaw) GetAddress() string {
 
 func (s *SessionRaw) GetServerID() int64 {
 	return s.ServerID
+}
+
+func (s *SessionRaw) GetServerLabel() map[string]string {
+	return s.ServerLabels
 }
 
 func (s *SessionRaw) IsTriggerKill() bool {
@@ -286,7 +291,8 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 		panic(err)
 	}
 	s.ServerID = serverID
-	log.Info("start server", zap.String("name", serverName), zap.String("address", address), zap.Int64("id", s.ServerID))
+	s.ServerLabels = s.getServerLabelsFromEnv(serverName)
+	log.Info("start server", zap.String("name", serverName), zap.String("address", address), zap.Int64("id", s.ServerID), zap.Any("server_labels", s.ServerLabels))
 }
 
 // String makes Session struct able to be logged by zap
@@ -327,6 +333,21 @@ func (s *Session) getServerID() (int64, error) {
 		paramtable.SetNodeID(nodeID)
 	}
 	return nodeID, nil
+}
+
+func (s *Session) getServerLabelsFromEnv(role string) map[string]string {
+	ret := make(map[string]string)
+	switch role {
+	case "querynode":
+		supportedLabels := paramtable.Get().QueryNodeCfg.LabelAwareQueryNodeBalance.GetAsStrings()
+		for _, label := range supportedLabels {
+			value := os.Getenv(label)
+			if len(value) > 0 {
+				ret[label] = value
+			}
+		}
+	}
+	return ret
 }
 
 func (s *Session) checkIDExist() {

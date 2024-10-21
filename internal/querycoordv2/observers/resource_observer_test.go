@@ -170,7 +170,7 @@ func (suite *ResourceObserverSuite) TestSchedule() {
 		suite.Eventually(func() bool {
 			rgs := suite.meta.ResourceManager.ListResourceGroups()
 			for _, rg := range rgs {
-				if err := suite.meta.ResourceManager.GetResourceGroup(rg).MeetRequirement(); err != nil {
+				if err := suite.meta.ResourceManager.GetResourceGroup(rg).MeetRequirement(suite.nodeMgr); err != nil {
 					return false
 				}
 			}
