@@ -146,6 +146,7 @@ class TestcaseBase(Base):
                 uri = cf.param_info.param_uri
             else:
                 uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+            self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING,uri=uri,token=cf.param_info.param_token)
             res, is_succ = self.connection_wrap.MilvusClient(uri=uri,
                                                              token=cf.param_info.param_token)
         else:
