@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -347,7 +348,12 @@ func TestRGNodeFilter(t *testing.T) {
 			NodeNum: 3,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []string{"label1"},
+			PreferNodeLabels: []*commonpb.KeyValuePair{
+				{
+					Key:   "dc_name",
+					Value: "dc1",
+				},
+			},
 		},
 	})
 
@@ -355,15 +361,21 @@ func TestRGNodeFilter(t *testing.T) {
 
 	nodeInfo1 := session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID: 1,
-		Label:  "label1",
+		Labels: map[string]string{
+			"dc_name": "dc1",
+		},
 	})
 	nodeInfo2 := session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID: 2,
-		Label:  "label1",
+		Labels: map[string]string{
+			"dc_name": "dc1",
+		},
 	})
 	nodeInfo3 := session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID: 3,
-		Label:  "label2",
+		Labels: map[string]string{
+			"dc_name": "dc2",
+		},
 	})
 
 	nodeMgr := session.NewNodeManager()
@@ -381,7 +393,7 @@ func TestRGNodeFilter(t *testing.T) {
 		if nodeInfo == nil {
 			return false
 		}
-		return nodeInfo.Label() == "label1"
+		return rg.PreferAcceptNode(nodeInfo)
 	}
 	assert.Len(t, rg.GetNodesByFilter(nodeFilter), 2)
 }

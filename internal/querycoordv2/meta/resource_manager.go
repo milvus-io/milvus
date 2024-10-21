@@ -917,17 +917,10 @@ func (rm *ResourceManager) transferNode(rgName string, node int64) error {
 	}
 	rm.nodeIDMap[node] = rgName
 
-	nodeLabel := "Unknown"
-	nodeInfo := rm.nodeMgr.Get(node)
-	if nodeInfo != nil {
-		nodeLabel = nodeInfo.Label()
-	}
-
 	log.Info("transfer node to resource group",
 		zap.String("rgName", rgName),
 		zap.String("originalRG", originalRG),
 		zap.Int64("node", node),
-		zap.String("label", nodeLabel),
 	)
 
 	// notify that node distribution has been changed.

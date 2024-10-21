@@ -2428,6 +2428,9 @@ type queryNodeConfig struct {
 
 	// worker
 	WorkerPoolingSize ParamItem `refreshable:"false"`
+
+	// supported query node labels
+	SupportedQueryNodeLabels ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -3155,6 +3158,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.WorkerPoolingSize.Init(base.mgr)
+
+	p.SupportedQueryNodeLabels = ParamItem{
+		Key:          "queryNode.supportedQueryNodeLabels",
+		Version:      "2.4.14",
+		DefaultValue: "QUERYNODE_LOCATION",
+		Doc:          "the labels of querynode which can be used for node assignment in resource group",
+		Export:       true,
+	}
+	p.SupportedQueryNodeLabels.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
