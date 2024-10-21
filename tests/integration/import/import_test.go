@@ -33,10 +33,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
@@ -66,7 +66,7 @@ func (s *BulkInsertSuite) SetupTest() {
 	s.autoID = false
 
 	s.vecType = schemapb.DataType_FloatVector
-	s.indexType = indexparamcheck.IndexHNSW
+	s.indexType = "HNSW"
 	s.metricType = metric.L2
 }
 
@@ -225,29 +225,29 @@ func (s *BulkInsertSuite) TestMultiFileTypes() {
 		s.fileType = fileType
 
 		s.vecType = schemapb.DataType_BinaryVector
-		s.indexType = indexparamcheck.IndexFaissBinIvfFlat
+		s.indexType = "BIN_IVF_FLAT"
 		s.metricType = metric.HAMMING
 		s.run()
 
 		s.vecType = schemapb.DataType_FloatVector
-		s.indexType = indexparamcheck.IndexHNSW
+		s.indexType = "HNSW"
 		s.metricType = metric.L2
 		s.run()
 
 		s.vecType = schemapb.DataType_Float16Vector
-		s.indexType = indexparamcheck.IndexHNSW
+		s.indexType = "HNSW"
 		s.metricType = metric.L2
 		s.run()
 
 		s.vecType = schemapb.DataType_BFloat16Vector
-		s.indexType = indexparamcheck.IndexHNSW
+		s.indexType = "HNSW"
 		s.metricType = metric.L2
 		s.run()
 
 		// TODO: not support numpy for SparseFloatVector by now
 		if fileType != importutilv2.Numpy {
 			s.vecType = schemapb.DataType_SparseFloatVector
-			s.indexType = indexparamcheck.IndexSparseWand
+			s.indexType = "SPARSE_WAND"
 			s.metricType = metric.IP
 			s.run()
 		}
