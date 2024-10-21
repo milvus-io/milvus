@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -1055,6 +1056,43 @@ func Test_parseIndexParams(t *testing.T) {
 		}
 
 		err := cit.parseIndexParams()
+		assert.Error(t, err)
+	})
+
+	t.Run("verify merge params with yaml", func(t *testing.T) {
+		paramtable.Init()
+		Params.Save("knowhere.HNSW.build.M", "3000")
+		Params.Save("knowhere.HNSW.build.efConstruction", "120")
+		defer Params.Reset("knowhere.HNSW.build.M")
+		defer Params.Reset("knowhere.HNSW.build.efConstruction")
+
+		cit := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "HNSW",
+					},
+					{
+						Key:   common.MetricTypeKey,
+						Value: metric.L2,
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldVector",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "768"},
+				},
+			},
+		}
+		err := cit.parseIndexParams()
+		// Out of range in json: param 'M' (3000) should be in range [2, 2048]
 		assert.Error(t, err)
 	})
 }
