@@ -1596,8 +1596,17 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
-		// no such collection
+		// no such database
 		mc := NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, mockErr)
+		globalMetaCache = mc
+		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
+		// no such collection
+		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, mockErr)
 		globalMetaCache = mc
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
@@ -1606,6 +1615,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// get schema failed
 		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
 		globalMetaCache = mc
@@ -1615,6 +1625,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// get channel failed
 		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
@@ -1639,6 +1650,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// get partitions failed
 		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
@@ -1653,6 +1665,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// get partitionID failed
 		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{},
@@ -1665,6 +1678,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// no file
 		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{},
@@ -1711,7 +1725,18 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
+		// no such database
+		mc := NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, mockErr)
+		globalMetaCache = mc
+		rsp, err = node.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
 		// normal case
+		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
+		globalMetaCache = mc
 		dataCoord := mocks.NewMockDataCoordClient(t)
 		dataCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(nil, nil)
 		node.dataCoord = dataCoord
@@ -1729,8 +1754,19 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
-		// normal case
+		// no such database
 		mc := NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, mockErr)
+		globalMetaCache = mc
+		rsp, err = node.ListImports(ctx, &internalpb.ListImportsRequest{
+			CollectionName: "col",
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
+		// normal case
+		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		globalMetaCache = mc
 		dataCoord := mocks.NewMockDataCoordClient(t)
