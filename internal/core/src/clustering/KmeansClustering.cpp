@@ -25,7 +25,7 @@
 #include "knowhere/comp/time_recorder.h"
 #include "clustering/KmeansClustering.h"
 #include "segcore/SegcoreConfig.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/local/LocalChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "common/Consts.h"
 #include "common/RangeSearchHelper.h"

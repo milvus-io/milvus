@@ -12,7 +12,7 @@
 #include "tantivy-binding.h"
 #include "common/Slice.h"
 #include "common/RegexQuery.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/local/LocalChunkManagerSingleton.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/InvertedIndexUtil.h"
 #include "log/Log.h"

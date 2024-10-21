@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/local/LocalChunkManagerSingleton.h"
 
 using namespace std;
 using namespace milvus;
