@@ -2216,7 +2216,8 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         texts = df["text"].to_list()
         word_freq = cf.analyze_documents(texts, language=language)
-        tokens = list(word_freq.keys())
+        most_freq_word = word_freq.most_common(10)
+        tokens = [item[0] for item in most_freq_word]
         if len(tokens) == 0:
             log.info(f"empty tokens, add a dummy token")
             tokens = ["dummy"]
