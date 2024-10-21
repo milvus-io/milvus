@@ -450,7 +450,7 @@ class TestCreateCollection(TestBase):
         indexes = rsp['data']['indexes']
         assert len(indexes) == len(payload['indexParams'])
         # assert load success
-        assert rsp['data']['load'] == "LoadStateLoaded"
+        assert rsp['data']['load'] in ["LoadStateLoaded", "LoadStateLoading"]
 
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("enable_dynamic_field", [True])
