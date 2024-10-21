@@ -20,7 +20,6 @@ extern "C" {
 #include <stdint.h>
 
 #include "common/type_c.h"
-#include "arrow/c/abi.h"
 #include "futures/future_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/load_index_c.h"
