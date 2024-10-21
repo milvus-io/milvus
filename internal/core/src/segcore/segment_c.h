@@ -158,6 +158,12 @@ Delete(CSegmentInterface c_segment,
        const uint64_t ids_size,
        const uint64_t* timestamps);
 
+CStatus
+DeleteArray(CSegmentInterface c_segment,
+            CArrowArray pk_array,
+            CArrowSchema pk_schema,
+            const uint64_t* timestamps);
+
 void
 RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id);
 

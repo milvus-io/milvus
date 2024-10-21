@@ -33,6 +33,10 @@ import (
 	"strings"
 	"unsafe"
 
+	"github.com/apache/arrow/go/v12/arrow"
+	"github.com/apache/arrow/go/v12/arrow/array"
+	"github.com/apache/arrow/go/v12/arrow/cdata"
+	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -785,48 +789,43 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 	}
 	defer s.ptrLock.RUnlock()
 
-	cOffset := C.int64_t(0) // depre
-	cSize := C.int64_t(len(primaryKeys))
 	cTimestampsPtr := (*C.uint64_t)(&(timestamps)[0])
 
-	ids := &schemapb.IDs{}
+	var pkArr arrow.Array
+
 	pkType := primaryKeys[0].Type()
 	switch pkType {
 	case schemapb.DataType_Int64:
-		int64Pks := make([]int64, len(primaryKeys))
-		for index, pk := range primaryKeys {
-			int64Pks[index] = pk.(*storage.Int64PrimaryKey).Value
+		bldr := array.NewInt64Builder(memory.DefaultAllocator)
+		defer bldr.Release()
+		bldr.Reserve(len(primaryKeys))
+		for _, pk := range primaryKeys {
+			bldr.Append(pk.(*storage.Int64PrimaryKey).Value)
 		}
-		ids.IdField = &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{
-				Data: int64Pks,
-			},
-		}
+		pkArr = bldr.NewArray()
 	case schemapb.DataType_VarChar:
-		varCharPks := make([]string, len(primaryKeys))
-		for index, entity := range primaryKeys {
-			varCharPks[index] = entity.(*storage.VarCharPrimaryKey).Value
+		bldr := array.NewStringBuilder(memory.DefaultAllocator)
+		defer bldr.Release()
+		bldr.Reserve(len(primaryKeys))
+		for _, pk := range primaryKeys {
+			bldr.Append(pk.(*storage.VarCharPrimaryKey).Value)
 		}
-		ids.IdField = &schemapb.IDs_StrId{
-			StrId: &schemapb.StringArray{
-				Data: varCharPks,
-			},
-		}
+		pkArr = bldr.NewArray()
 	default:
 		return fmt.Errorf("invalid data type of primary keys")
 	}
 
-	dataBlob, err := proto.Marshal(ids)
-	if err != nil {
-		return fmt.Errorf("failed to marshal ids: %s", err)
-	}
+	defer pkArr.Release()
+
+	var cschema cdata.CArrowSchema
+	var carr cdata.CArrowArray
+	cdata.ExportArrowArray(pkArr, &carr, &cschema)
+
 	var status C.CStatus
 	GetDynamicPool().Submit(func() (any, error) {
-		status = C.Delete(s.ptr,
-			cOffset,
-			cSize,
-			(*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
-			(C.uint64_t)(len(dataBlob)),
+		status = C.DeleteArray(s.ptr,
+			(C.CArrowArray)(unsafe.Pointer(&carr)),
+			(C.CArrowSchema)(unsafe.Pointer(&cschema)),
 			cTimestampsPtr,
 		)
 		return nil, nil
