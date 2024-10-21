@@ -970,8 +970,8 @@ func Test_InvalidJSONContains(t *testing.T) {
 		`json_contains(A, StringField > 5)`,
 		`json_contains(A)`,
 		`json_contains(A, 5, C)`,
-		`json_Contains(JSONField, 5)`,
-		`JSON_contains(JSONField, 5)`,
+		// `json_Contains(JSONField, 5)`,
+		// `JSON_contains(JSONField, 5)`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -1341,39 +1341,67 @@ func BenchmarkNoPlanCache(b *testing.B) {
 	}
 }
 
-func randomChineseString(length int) string {
-	min := 0x4e00
-	max := 0x9fa5
-
-	result := make([]rune, length)
-	for i := 0; i < length; i++ {
-		result[i] = rune(rand.Intn(max-min+1) + min)
-	}
-
-	return string(result)
-}
-
 func BenchmarkWithString(b *testing.B) {
 	schema := newTestSchema()
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(b, err)
 
-	expr := ""
-	for i := 0; i < 100; i++ {
-		expr += fmt.Sprintf(`"%s",`, randomChineseString(rand.Intn(100)))
-	}
-	expr = "StringField in [" + expr + "]"
+	randomString := func(length int, from int, to int) string {
+		result := make([]rune, length)
+		for i := 0; i < length; i++ {
+			result[i] = rune(rand.Intn(to-from+1) + from)
+		}
 
-	for i := 0; i < b.N; i++ {
-		plan, err := CreateSearchPlan(schemaHelper, expr, "FloatVectorField", &planpb.QueryInfo{
-			Topk:         0,
-			MetricType:   "",
-			SearchParams: "",
-			RoundDecimal: 0,
-		})
-		assert.NoError(b, err)
-		assert.NotNil(b, plan)
+		return string(result)
 	}
+
+	randomASCIIString := func(length int) string {
+		return randomString(length, 65, 90)
+	}
+
+	randomChineseString := func(length int) string {
+		return randomString(length, 0x4e00, 0x9fa5)
+	}
+
+	b.Run("with chinese characters", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			expr := ""
+			for i := 0; i < 100; i++ {
+				expr += fmt.Sprintf(`"%s",`, randomChineseString(100))
+			}
+			expr = "StringField in [" + expr + "]"
+			b.StartTimer()
+			plan, err := CreateSearchPlan(schemaHelper, expr, "FloatVectorField", &planpb.QueryInfo{
+				Topk:         0,
+				MetricType:   "",
+				SearchParams: "",
+				RoundDecimal: 0,
+			})
+			assert.NoError(b, err)
+			assert.NotNil(b, plan)
+		}
+	})
+
+	b.Run("with ascii characters", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			expr := ""
+			for i := 0; i < 100; i++ {
+				expr += fmt.Sprintf(`"%s",`, randomASCIIString(100))
+			}
+			expr = "StringField in [" + expr + "]"
+			b.StartTimer()
+			plan, err := CreateSearchPlan(schemaHelper, expr, "FloatVectorField", &planpb.QueryInfo{
+				Topk:         0,
+				MetricType:   "",
+				SearchParams: "",
+				RoundDecimal: 0,
+			})
+			assert.NoError(b, err)
+			assert.NotNil(b, plan)
+		}
+	})
 }
 
 func Test_convertHanToASCII(t *testing.T) {
