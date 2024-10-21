@@ -17,14 +17,16 @@
 package config
 
 import (
+	"bytes"
+	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"github.com/spf13/cast"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -115,7 +117,6 @@ func (fs *FileSource) UpdateOptions(opts Options) {
 }
 
 func (fs *FileSource) loadFromFile() error {
-	yamlReader := viper.New()
 	newConfig := make(map[string]string)
 	var configFiles []string
 
@@ -128,37 +129,35 @@ func (fs *FileSource) loadFromFile() error {
 			continue
 		}
 
-		yamlReader.SetConfigFile(configFile)
-		if err := yamlReader.ReadInConfig(); err != nil {
+		ext := filepath.Ext(configFile)
+		if len(ext) == 0 || ext[1:] != "yaml" {
+			return fmt.Errorf("Unsupported Config Type: " + ext)
+		}
+
+		data, err := os.ReadFile(configFile)
+		if err != nil {
 			return errors.Wrap(err, "Read config failed: "+configFile)
 		}
 
-		for _, key := range yamlReader.AllKeys() {
-			val := yamlReader.Get(key)
-			str, err := cast.ToStringE(val)
-			if err != nil {
-				switch val := val.(type) {
-				case []any:
-					str = str[:0]
-					for _, v := range val {
-						ss, err := cast.ToStringE(v)
-						if err != nil {
-							log.Warn("cast to string failed", zap.Any("value", v))
-						}
-						if str == "" {
-							str = ss
-						} else {
-							str = str + "," + ss
-						}
-					}
+		// handle empty file
+		if len(data) == 0 {
+			continue
+		}
 
-				default:
-					log.Warn("val is not a slice", zap.Any("value", val))
-					continue
-				}
-			}
-			newConfig[key] = str
-			newConfig[formatKey(key)] = str
+		var node yaml.Node
+		decoder := yaml.NewDecoder(bytes.NewReader(data))
+		if err := decoder.Decode(&node); err != nil {
+			return errors.Wrap(err, "YAML unmarshal failed: "+configFile)
+		}
+
+		if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+			// Get the content of the Document Node
+			contentNode := node.Content[0]
+
+			// Recursively process the content of the Document Node
+			flattenNode(contentNode, "", newConfig)
+		} else if node.Kind == yaml.MappingNode {
+			flattenNode(&node, "", newConfig)
 		}
 	}
 
