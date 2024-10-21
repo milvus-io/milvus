@@ -1066,3 +1066,15 @@ streaming:
     backoffMultiplier: 2 # The multiplier of balance task trigger backoff, 2 by default
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
+
+# Any configuration related to the knowhere vector search engine
+knowhere:
+  enable: true # When enable this configuration, the index parameters defined following will be automatically populated as index parameters, without requiring user input.
+  DISKANN: # Index parameters for diskann
+    build: # Diskann build params
+      max_degree: 56 # Maximum degree of the Vamana graph
+      search_list_size: 100 # Size of the candidate list during building graph
+      pq_code_budget_gb_ratio: 0.125 # Size limit on the PQ code (compared with raw data)
+      search_cache_budget_gb_ratio: 0.1 # Ratio of cached node numbers to raw data
+    search: # Diskann search params
+      beam_width_ratio: 4.0 # Ratio between the maximum number of IO requests per search iteration and CPU number.
