@@ -36,6 +36,13 @@ unameOut="$(uname -s)"
 
 case "${unameOut}" in
     Linux*)
+      # check if use asan.
+      MILVUS_ENABLE_ASAN_LIB=$(ldd $ROOT_DIR/internal/core/output/lib/libmilvus_core.so | grep asan | awk '{print $3}')
+      if [ -n "$MILVUS_ENABLE_ASAN_LIB" ]; then
+          echo "Enable ASAN With ${MILVUS_ENABLE_ASAN_LIB}"
+          export MILVUS_ENABLE_ASAN_LIB="$MILVUS_ENABLE_ASAN_LIB"
+      fi
+
       LIBJEMALLOC=$PWD/internal/core/output/lib/libjemalloc.so
       if test -f "$LIBJEMALLOC"; then
         export LD_PRELOAD="$LIBJEMALLOC"

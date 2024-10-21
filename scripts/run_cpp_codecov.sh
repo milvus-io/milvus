@@ -21,11 +21,11 @@ set -e
 
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
-  DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
-  SOURCE="$(readlink "$SOURCE")"
-  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
 done
-ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
+ROOT_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
 source ${ROOT_DIR}/scripts/setenv.sh
 
 MILVUS_CORE_DIR="${ROOT_DIR}/internal/core"
@@ -59,13 +59,18 @@ if [ $? -ne 0 ]; then
     exit -1
 fi
 # starting the timer
-beginTime=`date +%s`
+beginTime=$(date +%s)
 
 # run unittest
-for test in `ls ${MILVUS_CORE_UNITTEST_DIR}`; do
+for test in $(ls ${MILVUS_CORE_UNITTEST_DIR}); do
     echo "Running cpp unittest: ${MILVUS_CORE_UNITTEST_DIR}/$test"
     # run unittest
-    ${MILVUS_CORE_UNITTEST_DIR}/${test}
+    if [ -n "$MILVUS_ENABLE_ASAN_LIB" ]; then
+        echo "ASAN is enabled with env MILVUS_ENABLE_ASAN_LIB, set {$MILVUS_ENABLE_ASAN_LIB} at the front of LD_PRELOAD"
+        LD_PRELOAD="$MILVUS_ENABLE_ASAN_LIB:$LD_PRELOAD" ${MILVUS_CORE_UNITTEST_DIR}/${test}
+    else
+        ${MILVUS_CORE_UNITTEST_DIR}/${test}
+    fi
     if [ $? -ne 0 ]; then
         echo ${args}
         echo "${MILVUS_CORE_UNITTEST_DIR}/${test} run failed"
@@ -94,7 +99,6 @@ ${LCOV_CMD} -r "${FILE_INFO_COMBINE}" -o "${FILE_INFO_OUTPUT}" \
 ${LCOV_GEN_CMD} ${FILE_INFO_OUTPUT} --output-directory ${DIR_LCOV_OUTPUT}/
 echo "Generate cpp code coverage report to ${DIR_LCOV_OUTPUT}"
 
+endTime=$(date +%s)
 
-endTime=`date +%s`
-
-echo "Total time for cpp unittest:" $(($endTime-$beginTime)) "s"
+echo "Total time for cpp unittest:" $(($endTime - $beginTime)) "s"
