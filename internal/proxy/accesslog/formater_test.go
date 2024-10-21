@@ -101,7 +101,7 @@ func (s *LogFormatterSuite) SetupSuite() {
 
 func (s *LogFormatterSuite) TestFormatNames() {
 	fmt := "{$database_name}: $collection_name: $partition_name"
-	formatter := NewFormatter(fmt)
+	formatter := NewFormatter(fmt, false)
 
 	for _, req := range s.reqs {
 		i := info.NewGrpcAccessInfo(s.ctx, s.serverinfo, req)
@@ -116,7 +116,7 @@ func (s *LogFormatterSuite) TestFormatNames() {
 
 func (s *LogFormatterSuite) TestFormatTime() {
 	fmt := "$time_now: $time_start: $time_end: $time_cost: $time_now"
-	formatter := NewFormatter(fmt)
+	formatter := NewFormatter(fmt, false)
 
 	for id, req := range s.reqs {
 		i := info.NewGrpcAccessInfo(s.ctx, s.serverinfo, req)
@@ -131,7 +131,7 @@ func (s *LogFormatterSuite) TestFormatTime() {
 
 func (s *LogFormatterSuite) TestFormatUserInfo() {
 	fmt := "$user_name: $user_addr"
-	formatter := NewFormatter(fmt)
+	formatter := NewFormatter(fmt, false)
 
 	for _, req := range s.reqs {
 		i := info.NewGrpcAccessInfo(s.ctx, s.serverinfo, req)
@@ -147,7 +147,7 @@ func (s *LogFormatterSuite) TestFormatUserInfo() {
 
 func (s *LogFormatterSuite) TestFormatMethodInfo() {
 	fmt := "$method_name: $method_status $trace_id"
-	formatter := NewFormatter(fmt)
+	formatter := NewFormatter(fmt, false)
 
 	metaContext := metadata.AppendToOutgoingContext(s.ctx, info.ClientRequestIDKey, s.traceID)
 	for _, req := range s.reqs {
@@ -168,7 +168,7 @@ func (s *LogFormatterSuite) TestFormatMethodInfo() {
 
 func (s *LogFormatterSuite) TestFormatMethodResult() {
 	fmt := "$method_name: $method_status $response_size $error_code $error_msg"
-	formatter := NewFormatter(fmt)
+	formatter := NewFormatter(fmt, false)
 
 	for id, req := range s.reqs {
 		i := info.NewGrpcAccessInfo(s.ctx, s.serverinfo, req)
