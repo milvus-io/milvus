@@ -220,6 +220,15 @@ func (ob *TargetObserver) Check(ctx context.Context, collectionID int64, partiti
 	return result
 }
 
+// TriggerCollectionCheck triggers a check for all provided collectionIDs.
+// Notice: the most important thing is that this function is to trigger sync target version to delegator
+func (ob *TargetObserver) TriggerCollectionCheck(collectionIDs ...int64) {
+	log.Info("trigger collection check", zap.Int64s("collectionIDs", collectionIDs))
+	for _, collectionID := range collectionIDs {
+		ob.dispatcher.AddTask(collectionID)
+	}
+}
+
 func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 	ob.keylocks.Lock(collectionID)
 	defer ob.keylocks.Unlock(collectionID)
@@ -403,10 +412,18 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 				continue
 			}
 			updateVersionAction := ob.checkNeedUpdateTargetVersion(ctx, leaderView)
-			if updateVersionAction != nil {
-				actions = append(actions, updateVersionAction)
+			if updateVersionAction == nil {
+				continue
 			}
-			if !ob.sync(ctx, replica, leaderView, actions) {
+
+			actions = append(actions, updateVersionAction)
+			log.RatedInfo(10, "try to sync target version to delegator",
+				zap.Int64("collectionID", leaderView.CollectionID),
+				zap.String("channelName", leaderView.Channel),
+				zap.Int64("leaderID", leaderView.ID),
+				zap.Int64("targetVersion", leaderView.TargetVersion),
+			)
+			if !ob.sync(ctx, replica, leaderView, actions) || leaderView.TargetVersion <= 0 {
 				return false
 			}
 		}
