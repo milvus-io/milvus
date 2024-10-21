@@ -55,6 +55,30 @@ struct VectorizedSve {
     template <typename T, ArithOpType AOp, CompareOpType CmpOp>
     static constexpr inline auto op_arith_compare =
         sve::OpArithCompareImpl<T, AOp, CmpOp>::op_arith_compare;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_and =
+        sve::ForwardOpsImpl<ElementT>::op_and;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_and_multiple =
+        sve::ForwardOpsImpl<ElementT>::op_and_multiple;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_or =
+        sve::ForwardOpsImpl<ElementT>::op_or;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_or_multiple =
+        sve::ForwardOpsImpl<ElementT>::op_or_multiple;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_xor =
+        sve::ForwardOpsImpl<ElementT>::op_xor;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_sub =
+        sve::ForwardOpsImpl<ElementT>::op_sub;
 };
 
 }  // namespace arm
