@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
@@ -630,7 +631,12 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 			NodeNum: 10,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []string{"label1"},
+			PreferNodeLabels: []*commonpb.KeyValuePair{
+				{
+					Key:   "dc_name",
+					Value: "label1",
+				},
+			},
 		},
 	})
 
@@ -642,7 +648,12 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 			NodeNum: 10,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []string{"label2"},
+			PreferNodeLabels: []*commonpb.KeyValuePair{
+				{
+					Key:   "dc_name",
+					Value: "label2",
+				},
+			},
 		},
 	})
 
@@ -654,7 +665,12 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 			NodeNum: 10,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []string{"label3"},
+			PreferNodeLabels: []*commonpb.KeyValuePair{
+				{
+					Key:   "dc_name",
+					Value: "label3",
+				},
+			},
 		},
 	})
 
@@ -664,7 +680,9 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 			NodeID:   int64(i),
 			Address:  "localhost",
 			Hostname: "localhost",
-			Label:    "label1",
+			Labels: map[string]string{
+				"dc_name": "label1",
+			},
 		}))
 		suite.manager.HandleNodeUp(int64(i))
 	}
@@ -679,7 +697,9 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 			NodeID:   int64(i),
 			Address:  "localhost",
 			Hostname: "localhost",
-			Label:    "label2",
+			Labels: map[string]string{
+				"dc_name": "label2",
+			},
 		}))
 		suite.manager.HandleNodeUp(int64(i))
 	}
@@ -689,7 +709,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 	suite.Equal(10, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 	nodesInRG, _ := suite.manager.GetNodes("rg2")
 	for _, node := range nodesInRG {
-		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Label())
+		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
 	}
 
 	suite.manager.AutoRecoverResourceGroup("rg1")
@@ -702,7 +722,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 	suite.Equal(10, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 	nodesInRG, _ = suite.manager.GetNodes("rg2")
 	for _, node := range nodesInRG {
-		suite.Equal("label2", suite.manager.nodeMgr.Get(node).Label())
+		suite.Equal("label2", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
 	}
 
 	// test new querynode with label3
@@ -711,7 +731,9 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 			NodeID:   int64(i),
 			Address:  "localhost",
 			Hostname: "localhost",
-			Label:    "label3",
+			Labels: map[string]string{
+				"dc_name": "label3",
+			},
 		}))
 		suite.manager.HandleNodeUp(int64(i))
 	}
@@ -721,7 +743,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 	suite.Equal(20, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 	nodesInRG, _ = suite.manager.GetNodes("rg3")
 	for _, node := range nodesInRG {
-		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Label())
+		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
 	}
 
 	suite.manager.AutoRecoverResourceGroup("rg1")
@@ -734,7 +756,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 	suite.Equal(20, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 	nodesInRG, _ = suite.manager.GetNodes("rg3")
 	for _, node := range nodesInRG {
-		suite.Equal("label3", suite.manager.nodeMgr.Get(node).Label())
+		suite.Equal("label3", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
 	}
 
 	// test swap rg's label
@@ -747,7 +769,12 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 				NodeNum: 10,
 			},
 			NodeFilter: &rgpb.ResourceGroupNodeFilter{
-				PreferNodeLabels: []string{"label2"},
+				PreferNodeLabels: []*commonpb.KeyValuePair{
+					{
+						Key:   "dc_name",
+						Value: "label2",
+					},
+				},
 			},
 		},
 		"rg2": {
@@ -758,7 +785,12 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 				NodeNum: 10,
 			},
 			NodeFilter: &rgpb.ResourceGroupNodeFilter{
-				PreferNodeLabels: []string{"label3"},
+				PreferNodeLabels: []*commonpb.KeyValuePair{
+					{
+						Key:   "dc_name",
+						Value: "label3",
+					},
+				},
 			},
 		},
 		"rg3": {
@@ -769,7 +801,12 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 				NodeNum: 10,
 			},
 			NodeFilter: &rgpb.ResourceGroupNodeFilter{
-				PreferNodeLabels: []string{"label1"},
+				PreferNodeLabels: []*commonpb.KeyValuePair{
+					{
+						Key:   "dc_name",
+						Value: "label1",
+					},
+				},
 			},
 		},
 	})
@@ -787,17 +824,17 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 	suite.Equal(20, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 	nodesInRG, _ = suite.manager.GetNodes("rg1")
 	for _, node := range nodesInRG {
-		suite.Equal("label2", suite.manager.nodeMgr.Get(node).Label())
+		suite.Equal("label2", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
 	}
 
 	nodesInRG, _ = suite.manager.GetNodes("rg2")
 	for _, node := range nodesInRG {
-		suite.Equal("label3", suite.manager.nodeMgr.Get(node).Label())
+		suite.Equal("label3", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
 	}
 
 	nodesInRG, _ = suite.manager.GetNodes("rg3")
 	for _, node := range nodesInRG {
-		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Label())
+		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
 	}
 }
 
@@ -810,7 +847,12 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 			NodeNum: 10,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []string{"label1"},
+			PreferNodeLabels: []*commonpb.KeyValuePair{
+				{
+					Key:   "dc_name",
+					Value: "label1",
+				},
+			},
 		},
 	})
 
@@ -822,7 +864,12 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 			NodeNum: 10,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []string{"label2"},
+			PreferNodeLabels: []*commonpb.KeyValuePair{
+				{
+					Key:   "dc_name",
+					Value: "label2",
+				},
+			},
 		},
 	})
 
@@ -834,7 +881,12 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 			NodeNum: 10,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []string{"label3"},
+			PreferNodeLabels: []*commonpb.KeyValuePair{
+				{
+					Key:   "dc_name",
+					Value: "label3",
+				},
+			},
 		},
 	})
 
@@ -844,7 +896,9 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 			NodeID:   int64(i),
 			Address:  "localhost",
 			Hostname: "localhost",
-			Label:    "label1",
+			Labels: map[string]string{
+				"dc_name": "label1",
+			},
 		}))
 		suite.manager.HandleNodeUp(int64(i))
 	}
@@ -855,7 +909,9 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 			NodeID:   int64(i),
 			Address:  "localhost",
 			Hostname: "localhost",
-			Label:    "label2",
+			Labels: map[string]string{
+				"dc_name": "label2",
+			},
 		}))
 		suite.manager.HandleNodeUp(int64(i))
 	}
@@ -865,7 +921,9 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 			NodeID:   int64(i),
 			Address:  "localhost",
 			Hostname: "localhost",
-			Label:    "label3",
+			Labels: map[string]string{
+				"dc_name": "label3",
+			},
 		}))
 		suite.manager.HandleNodeUp(int64(i))
 	}
@@ -885,7 +943,9 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 		NodeID:   int64(101),
 		Address:  "localhost",
 		Hostname: "localhost",
-		Label:    "label2",
+		Labels: map[string]string{
+			"dc_name": "label2",
+		},
 	}))
 	suite.manager.HandleNodeUp(int64(101))
 	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
@@ -897,7 +957,9 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 		NodeID:   int64(102),
 		Address:  "localhost",
 		Hostname: "localhost",
-		Label:    "label1",
+		Labels: map[string]string{
+			"dc_name": "label1",
+		},
 	}))
 	suite.manager.HandleNodeUp(int64(102))
 	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
@@ -906,7 +968,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 	suite.Equal(1, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 	nodesInRG, _ := suite.manager.GetNodes(DefaultResourceGroupName)
 	for _, node := range nodesInRG {
-		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Label())
+		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
 	}
 
 	suite.manager.AutoRecoverResourceGroup("rg1")
@@ -915,6 +977,6 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
 	nodesInRG, _ = suite.manager.GetNodes(DefaultResourceGroupName)
 	for _, node := range nodesInRG {
-		suite.Equal("label2", suite.manager.nodeMgr.Get(node).Label())
+		suite.Equal("label2", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
 	}
 }

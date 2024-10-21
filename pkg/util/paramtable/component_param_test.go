@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func shouldPanic(t *testing.T, name string, f func()) {
@@ -459,6 +460,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 
 		assert.Equal(t, true, Params.MmapChunkCache.GetAsBool())
+
+		assert.Equal(t, "QUERYNODE_LOCATIION", paramtable.Get().QueryNodeCfg.SupportedQueryNodeLabels.GetAsString())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {

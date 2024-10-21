@@ -907,8 +907,8 @@ github.com/valyala/fastjson v1.6.4/go.mod h1:CLCAqky6SMuOcxStkYQvblddUtoRxhYMGLr
 github.com/valyala/fasttemplate v1.0.1/go.mod h1:UQGH1tvbgY+Nz5t2n7tXsz52dQxojPUpymEIMZ47gx8=
 github.com/valyala/fasttemplate v1.2.1/go.mod h1:KHLXt3tVN2HBp8eijSv/kGJopbvo7S+qRAEEKiv+SiQ=
 github.com/valyala/tcplisten v0.0.0-20161114210144-ceec8f93295a/go.mod h1:v3UYOV9WzVtRmSR+PDvWpU/qWl4Wa5LApYYX4ZtKbio=
-github.com/weiliu1031/milvus-proto/go-api/v2 v2.0.0-20241016084656-8c1489c1fa53 h1:wOASeBu3Vn+PZhybTQ3X4wRPx0pO2322arXh/U4nSXg=
-github.com/weiliu1031/milvus-proto/go-api/v2 v2.0.0-20241016084656-8c1489c1fa53/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
+github.com/weiliu1031/milvus-proto/go-api/v2 v2.0.0-20241021030130-6ef46f943d19 h1:Rsk8HBYftRrmeG+55tdfRipjc9V6UtyN2kcX4mBzcbc=
+github.com/weiliu1031/milvus-proto/go-api/v2 v2.0.0-20241021030130-6ef46f943d19/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 github.com/xeipuuv/gojsonpointer v0.0.0-20180127040702-4e3ac2762d5f/go.mod h1:N2zxlSyiKSe5eX1tZViRH5QA0qijqEDrYZiPEAiq3wU=

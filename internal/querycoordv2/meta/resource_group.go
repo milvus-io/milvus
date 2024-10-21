@@ -180,17 +180,21 @@ func (rg *ResourceGroup) PreferAcceptNode(nodeInfo *session.NodeInfo) bool {
 		return false
 	}
 
-	if len(nodeInfo.Label()) == 0 || len(rg.GetConfig().GetNodeFilter().GetPreferNodeLabels()) == 0 {
+	rgPreferLabels := rg.GetConfig().GetNodeFilter().GetPreferNodeLabels()
+	nodeLabels := nodeInfo.Labels()
+
+	if len(nodeLabels) == 0 || len(rgPreferLabels) == 0 {
 		return false
 	}
 
-	for _, label := range rg.GetConfig().GetNodeFilter().GetPreferNodeLabels() {
-		if label == nodeInfo.Label() {
-			return true
+	for _, labelPair := range rgPreferLabels {
+		valueInNode, ok := nodeLabels[labelPair.Key]
+		if !ok || valueInNode != labelPair.Value {
+			return false
 		}
 	}
 
-	return false
+	return true
 }
 
 // HasFrom return whether given resource group is in `from` of rg.
@@ -255,21 +259,12 @@ func (rg *ResourceGroup) MeetRequirement(nodeMgr *session.NodeManager) error {
 
 	// check rg node filter
 	if rg.cfg.NodeFilter != nil {
-		nodeLabelSet := typeutil.NewSet(rg.GetConfig().GetNodeFilter().GetPreferNodeLabels()...)
-		nodeFilter := func(nodeID int64) bool {
-			nodeInfo := nodeMgr.Get(nodeID)
-			if nodeInfo == nil {
-				return false
-			}
-			return nodeLabelSet.Contain(nodeInfo.Label())
-		}
-
 		// filter out nodes that do not meet the node filter
 		dirtyNodes := make([]int64, 0)
 		rg.nodes.Range(func(nodeID int64) bool {
-			if !nodeFilter(nodeID) {
+			nodeInfo := nodeMgr.Get(nodeID)
+			if nodeInfo == nil || !rg.PreferAcceptNode(nodeInfo) {
 				dirtyNodes = append(dirtyNodes, nodeID)
-				return false
 			}
 			return true
 		})
