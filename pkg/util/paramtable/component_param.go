@@ -2353,6 +2353,7 @@ type queryNodeConfig struct {
 	MmapVectorIndex                     ParamItem `refreshable:"false"`
 	MmapScalarField                     ParamItem `refreshable:"false"`
 	MmapScalarIndex                     ParamItem `refreshable:"false"`
+	MmapChunkCache                      ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
@@ -2673,6 +2674,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	}
 	p.MmapScalarIndex.Init(base.mgr)
 
+	p.MmapChunkCache = ParamItem{
+		Key:          "queryNode.mmap.chunkCache",
+		Version:      "2.4.12",
+		DefaultValue: "true",
+		Doc:          "Enable mmap for chunk cache (raw vector retrieving).",
+		Export:       true,
+	}
+	p.MmapChunkCache.Init(base.mgr)
+
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",
 		Version:      "2.4.6",
@@ -2682,10 +2692,6 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
 However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.`,
 		Export: true,
-		Formatter: func(v string) string {
-			mmapEnabled := p.MmapEnabled.GetAsBool()
-			return strconv.FormatBool(mmapEnabled && getAsBool(v))
-		},
 	}
 	p.GrowingMmapEnabled.Init(base.mgr)
 
@@ -3142,9 +3148,10 @@ type dataCoordConfig struct {
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 
 	// compaction
-	EnableCompaction     ParamItem `refreshable:"false"`
-	EnableAutoCompaction ParamItem `refreshable:"true"`
-	IndexBasedCompaction ParamItem `refreshable:"true"`
+	EnableCompaction          ParamItem `refreshable:"false"`
+	EnableAutoCompaction      ParamItem `refreshable:"true"`
+	IndexBasedCompaction      ParamItem `refreshable:"true"`
+	CompactionTaskPrioritizer ParamItem `refreshable:"true"`
 
 	CompactionRPCTimeout              ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks        ParamItem `refreshable:"true"`
@@ -3220,6 +3227,7 @@ type dataCoordConfig struct {
 	ImportCheckIntervalHigh  ParamItem `refreshable:"true"`
 	ImportCheckIntervalLow   ParamItem `refreshable:"true"`
 	MaxFilesPerImportReq     ParamItem `refreshable:"true"`
+	MaxImportJobNum          ParamItem `refreshable:"true"`
 	WaitForIndex             ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
@@ -3414,6 +3422,18 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 		Export:       true,
 	}
 	p.IndexBasedCompaction.Init(base.mgr)
+
+	p.CompactionTaskPrioritizer = ParamItem{
+		Key:          "dataCoord.compaction.taskPrioritizer",
+		Version:      "2.5.0",
+		DefaultValue: "default",
+		Doc: `compaction task prioritizer, options: [default, level, mix]. 
+default is FIFO.
+level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
+mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.`,
+		Export: true,
+	}
+	p.CompactionTaskPrioritizer.Init(base.mgr)
 
 	p.CompactionRPCTimeout = ParamItem{
 		Key:          "dataCoord.compaction.rpcTimeout",
@@ -3970,6 +3990,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.MaxFilesPerImportReq.Init(base.mgr)
+
+	p.MaxImportJobNum = ParamItem{
+		Key:          "dataCoord.import.maxImportJobNum",
+		Version:      "2.4.14",
+		Doc:          "Maximum number of import jobs that are executing or pending.",
+		DefaultValue: "1024",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxImportJobNum.Init(base.mgr)
 
 	p.WaitForIndex = ParamItem{
 		Key:          "dataCoord.import.waitForIndex",

@@ -1663,14 +1663,16 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 
 			if !mmapEnabled || common.IsSystemField(fieldSchema.GetFieldID()) {
 				segmentMemorySize += binlogSize
-				if multiplyFactor.enableTempSegmentIndex && SupportInterimIndexDataType(fieldSchema.GetDataType()) {
-					segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
-				}
 				if DoubleMemorySystemField(fieldSchema.GetFieldID()) || DoubleMemoryDataType(fieldSchema.GetDataType()) {
 					segmentMemorySize += binlogSize
 				}
 			} else {
 				segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
+			}
+			// querynode will generate a (memory type) intermin index for vector type
+			interimIndexEnable := multiplyFactor.enableTempSegmentIndex && !isGrowingMmapEnable() && SupportInterimIndexDataType(fieldSchema.GetDataType())
+			if interimIndexEnable {
+				segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
 			}
 		}
 

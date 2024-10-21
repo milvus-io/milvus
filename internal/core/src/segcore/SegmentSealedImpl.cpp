@@ -129,7 +129,7 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
 }
 
 void
-SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
+SegmentSealedImpl::WarmupChunkCache(const FieldId field_id, bool mmap_enabled) {
     auto& field_meta = schema_->operator[](field_id);
     AssertInfo(field_meta.is_vector(), "vector field is not vector type");
 
@@ -155,7 +155,11 @@ SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     const bool mmap_rss_not_need = true;
     for (const auto& data_path : field_info.insert_files) {
-        auto column = cc->Read(data_path, mmap_descriptor_, mmap_rss_not_need);
+        auto column = cc->Read(data_path,
+                               mmap_descriptor_,
+                               field_meta,
+                               mmap_enabled,
+                               mmap_rss_not_need);
     }
 }
 
@@ -602,6 +606,11 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
         mmap_fields_.insert(field_id);
     }
 
+    {
+        std::unique_lock lck(mutex_);
+        update_row_count(num_rows);
+    }
+
     auto ok = unlink(filepath.c_str());
     AssertInfo(ok == 0,
                fmt::format("failed to unlink mmap data file {}, err: {}",
@@ -616,8 +625,19 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
         insert_record_.seal_pks();
     }
 
-    std::unique_lock lck(mutex_);
-    set_bit(field_data_ready_bitset_, field_id, true);
+    bool use_interim_index = false;
+    if (generate_interim_index(field_id)) {
+        std::unique_lock lck(mutex_);
+        // mmap_fields is useless, no change
+        fields_.erase(field_id);
+        set_bit(field_data_ready_bitset_, field_id, false);
+        use_interim_index = true;
+    }
+
+    if (!use_interim_index) {
+        std::unique_lock lck(mutex_);
+        set_bit(field_data_ready_bitset_, field_id, true);
+    }
 }
 
 void
@@ -893,7 +913,10 @@ std::tuple<std::string, std::shared_ptr<ColumnBase>> static ReadFromChunkCache(
     const storage::ChunkCachePtr& cc,
     const std::string& data_path,
     const storage::MmapChunkDescriptorPtr& descriptor) {
-    auto column = cc->Read(data_path, descriptor);
+    // For mmap mode, field_meta is unused, so just construct a fake field meta.
+    auto fm = FieldMeta(FieldName(""), FieldId(0), milvus::DataType::NONE);
+    // TODO: add Load() interface for chunk cache when support retrieve_enable, make Read() raise error if cache miss
+    auto column = cc->Read(data_path, descriptor, fm, true);
     cc->Prefetch(data_path);
     return {data_path, column};
 }
@@ -1695,9 +1718,14 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
     bool is_sparse =
         field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT;
 
+    bool enable_growing_mmap = storage::MmapManager::GetInstance()
+                                   .GetMmapConfig()
+                                   .GetEnableGrowingMmap();
+
     auto enable_binlog_index = [&]() {
-        // checkout config
-        if (!segcore_config_.get_enable_interim_segment_index()) {
+        // check milvus config
+        if (!segcore_config_.get_enable_interim_segment_index() ||
+            enable_growing_mmap) {
             return false;
         }
         // check data type

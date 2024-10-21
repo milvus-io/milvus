@@ -519,6 +519,7 @@ generate-mockery-utils: getdeps
 	# proxy_client_manager.go
 	$(INSTALL_PATH)/mockery --name=ProxyClientManagerInterface --dir=$(PWD)/internal/util/proxyutil --output=$(PWD)/internal/util/proxyutil --filename=mock_proxy_client_manager.go --with-expecter --structname=MockProxyClientManager --inpackage
 	$(INSTALL_PATH)/mockery --name=ProxyWatcherInterface --dir=$(PWD)/internal/util/proxyutil --output=$(PWD)/internal/util/proxyutil --filename=mock_proxy_watcher.go --with-expecter --structname=MockProxyWatcher --inpackage
+	$(INSTALL_PATH)/mockery --name=GlobalIDAllocatorInterface --dir=internal/allocator --output=internal/allocator --filename=mock_global_id_allocator.go --with-expecter --structname=MockGlobalIDAllocator --inpackage
 
 generate-mockery-kv: getdeps
 	$(INSTALL_PATH)/mockery --name=TxnKV --dir=$(PWD)/internal/kv --output=$(PWD)/internal/kv/mocks --filename=txn_kv.go --with-expecter

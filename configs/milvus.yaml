@@ -64,6 +64,9 @@ etcd:
 
 metastore:
   type: etcd # Default value: etcd, Valid values: [etcd, tikv] 
+  snapshot:
+    ttl: 86400 # snapshot ttl in seconds
+    reserveTime: 3600 # snapshot reserve time in seconds
 
 # Related configuration of tikv, used to store Milvus metadata.
 # Notice that when TiKV is enabled for metastore, you still need to have etcd for service discovery.
@@ -413,6 +416,7 @@ queryNode:
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
+    chunkCache: true # Enable mmap for chunk cache (raw vector retrieving).
     # Enable memory mapping (mmap) to optimize the handling of growing raw data. 
     # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
@@ -541,6 +545,11 @@ dataCoord:
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true
     indexBasedCompaction: true
+    # compaction task prioritizer, options: [default, level, mix]. 
+    # default is FIFO.
+    # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
+    # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
+    taskPrioritizer: default
     rpcTimeout: 10
     maxParallelTaskNum: 10
     workerMaxParallelTaskNum: 2
@@ -585,6 +594,7 @@ dataCoord:
     checkIntervalHigh: 2 # The interval for checking import, measured in seconds, is set to a high frequency for the import checker.
     checkIntervalLow: 120 # The interval for checking import, measured in seconds, is set to a low frequency for the import checker.
     maxImportFileNumPerReq: 1024 # The maximum number of files allowed per single import request.
+    maxImportJobNum: 1024 # Maximum number of import jobs that are executing or pending.
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:

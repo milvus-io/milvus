@@ -452,6 +452,8 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
+
+		assert.Equal(t, true, Params.MmapChunkCache.GetAsBool())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -472,6 +474,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2*time.Second, Params.ImportCheckIntervalHigh.GetAsDuration(time.Second))
 		assert.Equal(t, 120*time.Second, Params.ImportCheckIntervalLow.GetAsDuration(time.Second))
 		assert.Equal(t, 1024, Params.MaxFilesPerImportReq.GetAsInt())
+		assert.Equal(t, 1024, Params.MaxImportJobNum.GetAsInt())
 		assert.Equal(t, true, Params.WaitForIndex.GetAsBool())
 
 		params.Save("datacoord.gracefulStopTimeout", "100")
