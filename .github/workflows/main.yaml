@@ -112,6 +112,8 @@ jobs:
           kind: 'cpp'
 
   UT-Cpp:
+    # skip the UT-Cpp job in github workflow, it run in jenkins now see: UT-CPP.groovy
+    if: false 
     name: UT for Cpp
     needs: Build
     runs-on: ubuntu-latest
