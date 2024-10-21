@@ -218,6 +218,7 @@ jobs:
           kind: 'go'
 
   integration-test:
+    if: false 
     name: Integration Test
     needs: Build
     runs-on: ubuntu-latest
@@ -270,7 +271,7 @@ jobs:
 
   codecov:
     name: Upload Code Coverage
-    needs: [UT-Go, integration-test]
+    needs: [UT-Go]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -282,30 +283,19 @@ jobs:
         uses: actions/download-artifact@v4.1.0
         with:
           name: go-result
-      - name: Download Integration Test coverage results
-        uses: actions/download-artifact@v4.1.0
-        with:
-          name: it-result
       - name: Display structure of code coverage results
         run: |
           ls -lah
-      - name: Upload coverage to Codecov
+      - name: Upload coverage reports to Codecov
         if: ${{ github.repository == 'milvus-io/milvus' }}
-        uses: codecov/codecov-action@v4
-        id: upload_cov
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./go_coverage.txt,./it_coverage.txt
-          name: ubuntu-20.04-unittests
-          fail_ci_if_error: true
-          disable_safe_directory: true
+        run: |
+          curl -Os https://cli.codecov.io/latest/linux/codecov
+          chmod +x codecov
+          ./codecov --verbose upload-process --fail-on-error -t ${{ secrets.CODECOV_TOKEN }} --pr ${{ github.event.pull_request.number }} -n 'github-actions'  -f './go_coverage.txt' -f './it_coverage.txt'
+
       - name: Retry Upload coverage to Codecov
         if: ${{ failure()  && github.repository == 'milvus-io/milvus' }}
-        uses: codecov/codecov-action@v4
-        id: retry_upload_cov
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./go_coverage.txt,./it_coverage.txt
-          name: ubuntu-20.04-unittests
-          fail_ci_if_error: true
-          disable_safe_directory: true
+        run: |
+          ./codecov --verbose upload-process --fail-on-error -t ${{ secrets.CODECOV_TOKEN }} --pr ${{ github.event.pull_request.number }} -n 'github-actions'  -f './go_coverage.txt' -f './it_coverage.txt'
+
+

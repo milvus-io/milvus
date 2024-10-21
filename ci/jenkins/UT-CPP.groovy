@@ -40,7 +40,7 @@ pipeline {
                                               pullRequestNumber: "$env.CHANGE_ID",
                                               make_cmd: "make clean && make USE_ASAN=ON build-cpp-with-coverage",
                                               test_entrypoint: "./scripts/run_cpp_codecov.sh",
-                                              codecov_files: "./lcov_output.info,./it_coverage.txt"
+                                              codecov_files: "./lcov_output.info"
                     }
                 }
             }
