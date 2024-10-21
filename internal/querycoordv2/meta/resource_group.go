@@ -126,25 +126,6 @@ func (rg *ResourceGroup) MissingNumOfNodes() int {
 	return missing
 }
 
-func (rg *ResourceGroup) MissingNumOfPreferNodes(nodeMgr *session.NodeManager) int {
-	if len(rg.GetConfig().GetNodeFilter().GetPreferNodeLabels()) == 0 {
-		return rg.MissingNumOfNodes()
-	}
-
-	preferNodesNum := rg.GetNodesByFilter(func(nodeID int64) bool {
-		if nodeMgr.Get(nodeID) == nil {
-			return false
-		}
-		return rg.PreferAcceptNode(nodeMgr.Get(nodeID))
-	})
-
-	missing := int(rg.cfg.Requests.NodeNum) - len(preferNodesNum)
-	if missing < 0 {
-		return 0
-	}
-	return missing
-}
-
 // ReachLimitNumOfNodes return reach limit nodes count. `limits - len(node)`
 func (rg *ResourceGroup) ReachLimitNumOfNodes() int {
 	reachLimit := int(rg.cfg.Limits.NodeNum) - len(rg.nodes)
@@ -163,6 +144,20 @@ func (rg *ResourceGroup) RedundantNumOfNodes() int {
 	return redundant
 }
 
+func (rg *ResourceGroup) DirtyNodes(nodeMgr *session.NodeManager) []int64 {
+	// filter out nodes that do not meet the node filter
+	dirtyNodes := make([]int64, 0)
+	rg.nodes.Range(func(nodeID int64) bool {
+		nodeInfo := nodeMgr.Get(nodeID)
+		if nodeInfo == nil || !rg.AcceptNode(nodeInfo) {
+			dirtyNodes = append(dirtyNodes, nodeID)
+		}
+		return true
+	})
+
+	return dirtyNodes
+}
+
 func (rg *ResourceGroup) GetNodesByFilter(f func(nodeID int64) bool) []int64 {
 	ret := make([]int64, 0)
 	rg.nodes.Range(func(nodeID int64) bool {
@@ -175,19 +170,22 @@ func (rg *ResourceGroup) GetNodesByFilter(f func(nodeID int64) bool) []int64 {
 	return ret
 }
 
-func (rg *ResourceGroup) PreferAcceptNode(nodeInfo *session.NodeInfo) bool {
+func (rg *ResourceGroup) AcceptNode(nodeInfo *session.NodeInfo) bool {
 	if nodeInfo == nil {
 		return false
 	}
 
-	rgPreferLabels := rg.GetConfig().GetNodeFilter().GetPreferNodeLabels()
-	nodeLabels := nodeInfo.Labels()
+	requiredNodeLabels := rg.GetConfig().GetNodeFilter().GetNodeLabels()
+	if len(requiredNodeLabels) == 0 {
+		return true
+	}
 
-	if len(nodeLabels) == 0 || len(rgPreferLabels) == 0 {
+	nodeLabels := nodeInfo.Labels()
+	if len(nodeLabels) == 0 {
 		return false
 	}
 
-	for _, labelPair := range rgPreferLabels {
+	for _, labelPair := range requiredNodeLabels {
 		valueInNode, ok := nodeLabels[labelPair.Key]
 		if !ok || valueInNode != labelPair.Value {
 			return false
@@ -259,16 +257,7 @@ func (rg *ResourceGroup) MeetRequirement(nodeMgr *session.NodeManager) error {
 
 	// check rg node filter
 	if rg.cfg.NodeFilter != nil {
-		// filter out nodes that do not meet the node filter
-		dirtyNodes := make([]int64, 0)
-		rg.nodes.Range(func(nodeID int64) bool {
-			nodeInfo := nodeMgr.Get(nodeID)
-			if nodeInfo == nil || !rg.PreferAcceptNode(nodeInfo) {
-				dirtyNodes = append(dirtyNodes, nodeID)
-			}
-			return true
-		})
-
+		dirtyNodes := rg.DirtyNodes(nodeMgr)
 		if len(dirtyNodes) > 0 {
 			return errors.Errorf(
 				"has dirty nodes[%v], not meet node filter",

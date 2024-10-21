@@ -622,7 +622,7 @@ func (suite *ResourceManagerSuite) TestUnassignFail() {
 	})
 }
 
-func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
+func (suite *ResourceManagerSuite) TestNodeLabels_NodeAssign() {
 	suite.manager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{
 			NodeNum: 10,
@@ -631,7 +631,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 			NodeNum: 10,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []*commonpb.KeyValuePair{
+			NodeLabels: []*commonpb.KeyValuePair{
 				{
 					Key:   "dc_name",
 					Value: "label1",
@@ -648,7 +648,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 			NodeNum: 10,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []*commonpb.KeyValuePair{
+			NodeLabels: []*commonpb.KeyValuePair{
 				{
 					Key:   "dc_name",
 					Value: "label2",
@@ -665,7 +665,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 			NodeNum: 10,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []*commonpb.KeyValuePair{
+			NodeLabels: []*commonpb.KeyValuePair{
 				{
 					Key:   "dc_name",
 					Value: "label3",
@@ -687,9 +687,9 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 		suite.manager.HandleNodeUp(int64(i))
 	}
 	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
-	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
-	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
-	suite.Equal(0, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(20, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
 	// test new querynode with label2
 	for i := 31; i <= 40; i++ {
@@ -705,22 +705,9 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 	}
 	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
 	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
-	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
-	suite.Equal(10, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(20, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 	nodesInRG, _ := suite.manager.GetNodes("rg2")
-	for _, node := range nodesInRG {
-		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
-	}
-
-	suite.manager.AutoRecoverResourceGroup("rg1")
-	suite.manager.AutoRecoverResourceGroup("rg2")
-	suite.manager.AutoRecoverResourceGroup("rg3")
-	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
-	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
-	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
-	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
-	suite.Equal(10, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
-	nodesInRG, _ = suite.manager.GetNodes("rg2")
 	for _, node := range nodesInRG {
 		suite.Equal("label2", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
 	}
@@ -743,19 +730,6 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 	suite.Equal(20, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 	nodesInRG, _ = suite.manager.GetNodes("rg3")
 	for _, node := range nodesInRG {
-		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
-	}
-
-	suite.manager.AutoRecoverResourceGroup("rg1")
-	suite.manager.AutoRecoverResourceGroup("rg2")
-	suite.manager.AutoRecoverResourceGroup("rg3")
-	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
-	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
-	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
-	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
-	suite.Equal(20, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
-	nodesInRG, _ = suite.manager.GetNodes("rg3")
-	for _, node := range nodesInRG {
 		suite.Equal("label3", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
 	}
 
@@ -769,7 +743,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 				NodeNum: 10,
 			},
 			NodeFilter: &rgpb.ResourceGroupNodeFilter{
-				PreferNodeLabels: []*commonpb.KeyValuePair{
+				NodeLabels: []*commonpb.KeyValuePair{
 					{
 						Key:   "dc_name",
 						Value: "label2",
@@ -785,7 +759,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 				NodeNum: 10,
 			},
 			NodeFilter: &rgpb.ResourceGroupNodeFilter{
-				PreferNodeLabels: []*commonpb.KeyValuePair{
+				NodeLabels: []*commonpb.KeyValuePair{
 					{
 						Key:   "dc_name",
 						Value: "label3",
@@ -801,7 +775,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 				NodeNum: 10,
 			},
 			NodeFilter: &rgpb.ResourceGroupNodeFilter{
-				PreferNodeLabels: []*commonpb.KeyValuePair{
+				NodeLabels: []*commonpb.KeyValuePair{
 					{
 						Key:   "dc_name",
 						Value: "label1",
@@ -838,7 +812,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeAssign() {
 	}
 }
 
-func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
+func (suite *ResourceManagerSuite) TestNodeLabels_NodeDown() {
 	suite.manager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{
 			NodeNum: 10,
@@ -847,7 +821,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 			NodeNum: 10,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []*commonpb.KeyValuePair{
+			NodeLabels: []*commonpb.KeyValuePair{
 				{
 					Key:   "dc_name",
 					Value: "label1",
@@ -864,7 +838,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 			NodeNum: 10,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []*commonpb.KeyValuePair{
+			NodeLabels: []*commonpb.KeyValuePair{
 				{
 					Key:   "dc_name",
 					Value: "label2",
@@ -881,7 +855,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 			NodeNum: 10,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []*commonpb.KeyValuePair{
+			NodeLabels: []*commonpb.KeyValuePair{
 				{
 					Key:   "dc_name",
 					Value: "label3",
@@ -948,9 +922,10 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 		},
 	}))
 	suite.manager.HandleNodeUp(int64(101))
-	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(9, suite.manager.GetResourceGroup("rg1").NodeNum())
 	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
 	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(1, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
 	// test node up with label1
 	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
@@ -966,7 +941,7 @@ func (suite *ResourceManagerSuite) TestPreferNodeLabels_NodeDown() {
 	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
 	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
 	suite.Equal(1, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
-	nodesInRG, _ := suite.manager.GetNodes(DefaultResourceGroupName)
+	nodesInRG, _ := suite.manager.GetNodes("rg1")
 	for _, node := range nodesInRG {
 		suite.Equal("label1", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
 	}

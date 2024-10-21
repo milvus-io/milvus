@@ -348,7 +348,7 @@ func TestRGNodeFilter(t *testing.T) {
 			NodeNum: 3,
 		},
 		NodeFilter: &rgpb.ResourceGroupNodeFilter{
-			PreferNodeLabels: []*commonpb.KeyValuePair{
+			NodeLabels: []*commonpb.KeyValuePair{
 				{
 					Key:   "dc_name",
 					Value: "dc1",
@@ -383,9 +383,9 @@ func TestRGNodeFilter(t *testing.T) {
 	nodeMgr.Add(nodeInfo2)
 	nodeMgr.Add(nodeInfo3)
 
-	assert.True(t, rg.PreferAcceptNode(nodeInfo1))
-	assert.True(t, rg.PreferAcceptNode(nodeInfo2))
-	assert.False(t, rg.PreferAcceptNode(nodeInfo3))
+	assert.True(t, rg.AcceptNode(nodeInfo1))
+	assert.True(t, rg.AcceptNode(nodeInfo2))
+	assert.False(t, rg.AcceptNode(nodeInfo3))
 	assert.Error(t, rg.MeetRequirement(nodeMgr))
 
 	nodeFilter := func(nodeID int64) bool {
@@ -393,7 +393,7 @@ func TestRGNodeFilter(t *testing.T) {
 		if nodeInfo == nil {
 			return false
 		}
-		return rg.PreferAcceptNode(nodeInfo)
+		return rg.AcceptNode(nodeInfo)
 	}
 	assert.Len(t, rg.GetNodesByFilter(nodeFilter), 2)
 }

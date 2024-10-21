@@ -460,7 +460,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, true, Params.MmapChunkCache.GetAsBool())
 
-		assert.Equal(t, "QUERYNODE_LOCATIION", Params.LabelAwareQueryNodeBalance.GetValue())
+		assert.Equal(t, "QUERYNODE_LOCATION", Params.LabelAwareQueryNodeBalance.GetValue())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
