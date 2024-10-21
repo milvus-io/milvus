@@ -350,7 +350,6 @@ func newDataSyncService(initCtx context.Context, node *DataNode, info *datapb.Ch
 	// recover segment checkpoints
 	var (
 		err                   error
-		metaCache             metacache.MetaCache
 		unflushedSegmentInfos []*datapb.SegmentInfo
 		flushedSegmentInfos   []*datapb.SegmentInfo
 	)
@@ -375,8 +374,10 @@ func newDataSyncService(initCtx context.Context, node *DataNode, info *datapb.Ch
 		}
 	}
 	// init metaCache meta
-	if metaCache, err = getMetaCacheWithTickler(initCtx, node, info, tickler, unflushedSegmentInfos, flushedSegmentInfos, nil); err != nil {
+	metaCache, err := getMetaCacheWithTickler(initCtx, node, info, tickler, unflushedSegmentInfos, flushedSegmentInfos, storageCache)
+	if err != nil {
 		return nil, err
 	}
+
 	return getServiceWithChannel(initCtx, node, info, metaCache, storageCache, unflushedSegmentInfos, flushedSegmentInfos)
 }
