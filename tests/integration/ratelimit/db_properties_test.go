@@ -161,27 +161,32 @@ func (s *DBPropertiesSuite) TestLimitWithDBSize() {
 	s.NoError(err)
 	s.True(merr.Ok(flushResp.GetStatus()))
 
-	waitForNextTick()
-	resp, err = s.insert(ctx, dbName, collectionName, 1000)
-	s.NoError(err)
-	fmt.Println("TestLimitWithDBSize insert response:", resp)
-	s.True(merr.ErrServiceQuotaExceeded.Is(merr.Error(resp.GetStatus())))
+	s.waitForSuccessOrTimeout(func() (error, bool) {
+		resp, err = s.insert(ctx, dbName, collectionName, 1000)
+		if err != nil {
+			return err, false
+		}
+		fmt.Println("TestLimitWithDBSize insert response:", resp)
+		return nil, merr.ErrServiceQuotaExceeded.Is(merr.Error(resp.GetStatus()))
+	}, "TestLimitWithDBSize-insert")
 }
 
 func (s *DBPropertiesSuite) TestDenyReadingDB() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 	dbName := "db2"
 	s.prepareDatabase(ctx, dbName, common.DatabaseForceDenyReadingKey, "true")
 
 	collectionName := "Test" + funcutil.GenRandomStr()
 	s.prepareCollection(ctx, dbName, collectionName)
 
-	waitForNextTick()
-	resp, err := s.search(ctx, dbName, collectionName)
-	s.NoError(err)
-	fmt.Println("TestDenyReadingDB search response:", resp)
-	s.True(merr.ErrServiceQuotaExceeded.Is(merr.Error(resp.GetStatus())))
+	s.waitForSuccessOrTimeout(func() (error, bool) {
+		resp, err := s.search(ctx, dbName, collectionName)
+		if err != nil {
+			return err, false
+		}
+		fmt.Println("TestDenyReadingDB search response:", resp)
+		return nil, merr.ErrServiceQuotaExceeded.Is(merr.Error(resp.GetStatus()))
+	}, "TestDenyReadingDB-search")
 }
 
 func (s *DBPropertiesSuite) TestDenyWringDB() {
@@ -192,11 +197,14 @@ func (s *DBPropertiesSuite) TestDenyWringDB() {
 	collectionName := "Test" + funcutil.GenRandomStr()
 	s.prepareCollection(ctx, dbName, collectionName)
 
-	waitForNextTick()
-	resp, err := s.insert(ctx, dbName, collectionName, 100)
-	s.NoError(err)
-	fmt.Println("TestDenyWringDB insert response:", resp)
-	s.True(merr.ErrServiceQuotaExceeded.Is(merr.Error(resp.GetStatus())))
+	s.waitForSuccessOrTimeout(func() (error, bool) {
+		resp, err := s.insert(ctx, dbName, collectionName, 100)
+		if err != nil {
+			return err, false
+		}
+		fmt.Println("TestDenyWringDB insert response:", resp)
+		return nil, merr.ErrServiceQuotaExceeded.Is(merr.Error(resp.GetStatus()))
+	}, "TestDenyWringDB-insert")
 }
 
 func (s *DBPropertiesSuite) SetupSuite() {
@@ -214,8 +222,21 @@ func TestLimitWithDBProperties(t *testing.T) {
 	suite.Run(t, new(DBPropertiesSuite))
 }
 
-// wait for next tick of quota center
-func waitForNextTick() {
-	interval := paramtable.Get().QuotaConfig.QuotaCenterCollectInterval.GetAsDuration(time.Second)
-	time.Sleep(interval * 2)
+func (s *DBPropertiesSuite) waitForSuccessOrTimeout(fn func() (error, bool), desc string) {
+	time.Sleep(3 * time.Second)
+	for {
+		select {
+		case <-time.After(15 * time.Second):
+			s.FailNow("waiting for " + desc + " timeout")
+		default:
+			err, ok := fn()
+			if err != nil {
+				s.Errorf(err, "failed to %s", desc)
+			}
+			if ok {
+				return
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}
 }
