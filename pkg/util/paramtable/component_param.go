@@ -275,6 +275,9 @@ type commonConfig struct {
 	ReadOnlyPrivileges                  ParamItem `refreshable:"false"`
 	ReadWritePrivileges                 ParamItem `refreshable:"false"`
 	AdminPrivileges                     ParamItem `refreshable:"false"`
+
+	HealthCheckInterval   ParamItem `refreshable:"true"`
+	HealthCheckRPCTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -916,6 +919,22 @@ This helps Milvus-CDC synchronize incremental data`,
 		Doc:     `use to override the default value of admin privileges,  example: "PrivilegeCreateOwnership,PrivilegeDropOwnership"`,
 	}
 	p.AdminPrivileges.Init(base.mgr)
+
+	p.HealthCheckInterval = ParamItem{
+		Key:          "common.healthcheck.interval.seconds",
+		Version:      "2.4.8",
+		DefaultValue: "30",
+		Doc:          `health check interval in seconds, default 30s`,
+	}
+	p.HealthCheckInterval.Init(base.mgr)
+
+	p.HealthCheckRPCTimeout = ParamItem{
+		Key:          "common.healthcheck.timeout.seconds",
+		Version:      "2.4.8",
+		DefaultValue: "5",
+		Doc:          `RPC timeout for health check request`,
+	}
+	p.HealthCheckRPCTimeout.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -2160,10 +2179,18 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.UpdateCollectionLoadStatusInterval = ParamItem{
 		Key:          "queryCoord.updateCollectionLoadStatusInterval",
 		Version:      "2.4.7",
-		DefaultValue: "5",
 		PanicIfEmpty: true,
-		Doc:          "5m, max interval of updating collection loaded status for check health",
-		Export:       true,
+		Doc: "300s, max interval of updating collection loaded status for check health, " +
+			"It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration",
+		DefaultValue: "300s",
+		Formatter: func(v string) string {
+			num, err := strconv.Atoi(v)
+			if err == nil && num > 0 {
+				// convert to minutes if the value lacks a unit for backward compatibility.
+				return fmt.Sprintf("%dm", num)
+			}
+			return v
+		}, Export: true,
 	}
 
 	p.UpdateCollectionLoadStatusInterval.Init(base.mgr)
@@ -2173,7 +2200,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Version:      "2.2.7",
 		DefaultValue: "2000",
 		PanicIfEmpty: true,
-		Doc:          "100ms, the timeout of check health rpc to query node",
+		Doc:          "2000ms, the timeout of check health rpc to query node",
 		Export:       true,
 	}
 	p.CheckHealthRPCTimeout.Init(base.mgr)

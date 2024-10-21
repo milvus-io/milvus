@@ -148,6 +148,10 @@ func (qn *qnServerWrapper) Delete(ctx context.Context, in *querypb.DeleteRequest
 	return qn.QueryNode.Delete(ctx, in)
 }
 
+func (qn *qnServerWrapper) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
+	return qn.QueryNode.CheckHealth(ctx, req)
+}
+
 func WrapQueryNodeServerAsClient(qn types.QueryNode) types.QueryNodeClient {
 	return &qnServerWrapper{
 		QueryNode: qn,
