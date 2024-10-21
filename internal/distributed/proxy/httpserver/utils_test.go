@@ -343,57 +343,63 @@ func TestPrintCollectionDetails(t *testing.T) {
 	indexes := generateIndexes()
 	assert.Equal(t, []gin.H{
 		{
-			HTTPReturnFieldName:         FieldBookID,
-			HTTPReturnFieldType:         "Int64",
-			HTTPReturnFieldPartitionKey: false,
-			HTTPReturnFieldPrimaryKey:   true,
-			HTTPReturnFieldAutoID:       false,
-			HTTPReturnDescription:       "",
+			HTTPReturnFieldName:          FieldBookID,
+			HTTPReturnFieldType:          "Int64",
+			HTTPReturnFieldPartitionKey:  false,
+			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldPrimaryKey:    true,
+			HTTPReturnFieldAutoID:        false,
+			HTTPReturnDescription:        "",
 		},
 		{
-			HTTPReturnFieldName:         FieldWordCount,
-			HTTPReturnFieldType:         "Int64",
-			HTTPReturnFieldPartitionKey: false,
-			HTTPReturnFieldPrimaryKey:   false,
-			HTTPReturnFieldAutoID:       false,
-			HTTPReturnDescription:       "",
+			HTTPReturnFieldName:          FieldWordCount,
+			HTTPReturnFieldType:          "Int64",
+			HTTPReturnFieldPartitionKey:  false,
+			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldPrimaryKey:    false,
+			HTTPReturnFieldAutoID:        false,
+			HTTPReturnDescription:        "",
 		},
 		{
-			HTTPReturnFieldName:         FieldBookIntro,
-			HTTPReturnFieldType:         "FloatVector(2)",
-			HTTPReturnFieldPartitionKey: false,
-			HTTPReturnFieldPrimaryKey:   false,
-			HTTPReturnFieldAutoID:       false,
-			HTTPReturnDescription:       "",
+			HTTPReturnFieldName:          FieldBookIntro,
+			HTTPReturnFieldType:          "FloatVector(2)",
+			HTTPReturnFieldPartitionKey:  false,
+			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldPrimaryKey:    false,
+			HTTPReturnFieldAutoID:        false,
+			HTTPReturnDescription:        "",
 		},
 	}, printFields(coll.Fields))
 	assert.Equal(t, []gin.H{
 		{
-			HTTPReturnFieldName:         FieldBookID,
-			HTTPReturnFieldType:         "Int64",
-			HTTPReturnFieldPartitionKey: false,
-			HTTPReturnFieldPrimaryKey:   true,
-			HTTPReturnFieldAutoID:       false,
-			HTTPReturnDescription:       "",
-			HTTPReturnFieldID:           int64(100),
+			HTTPReturnFieldName:          FieldBookID,
+			HTTPReturnFieldType:          "Int64",
+			HTTPReturnFieldPartitionKey:  false,
+			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldPrimaryKey:    true,
+			HTTPReturnFieldAutoID:        false,
+			HTTPReturnDescription:        "",
+			HTTPReturnFieldID:            int64(100),
 		},
 		{
-			HTTPReturnFieldName:         FieldWordCount,
-			HTTPReturnFieldType:         "Int64",
-			HTTPReturnFieldPartitionKey: false,
-			HTTPReturnFieldPrimaryKey:   false,
-			HTTPReturnFieldAutoID:       false,
-			HTTPReturnDescription:       "",
-			HTTPReturnFieldID:           int64(101),
+			HTTPReturnFieldName:          FieldWordCount,
+			HTTPReturnFieldType:          "Int64",
+			HTTPReturnFieldPartitionKey:  false,
+			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldPrimaryKey:    false,
+			HTTPReturnFieldAutoID:        false,
+			HTTPReturnDescription:        "",
+			HTTPReturnFieldID:            int64(101),
 		},
 		{
-			HTTPReturnFieldName:         FieldBookIntro,
-			HTTPReturnFieldType:         "FloatVector",
-			HTTPReturnFieldPartitionKey: false,
-			HTTPReturnFieldPrimaryKey:   false,
-			HTTPReturnFieldAutoID:       false,
-			HTTPReturnDescription:       "",
-			HTTPReturnFieldID:           int64(201),
+			HTTPReturnFieldName:          FieldBookIntro,
+			HTTPReturnFieldType:          "FloatVector",
+			HTTPReturnFieldPartitionKey:  false,
+			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldPrimaryKey:    false,
+			HTTPReturnFieldAutoID:        false,
+			HTTPReturnDescription:        "",
+			HTTPReturnFieldID:            int64(201),
 			Params: []*commonpb.KeyValuePair{
 				{Key: Dim, Value: "2"},
 			},
@@ -418,44 +424,48 @@ func TestPrintCollectionDetails(t *testing.T) {
 	}
 	assert.Equal(t, []gin.H{
 		{
-			HTTPReturnFieldName:         "field-varchar",
-			HTTPReturnFieldType:         "VarChar(10)",
-			HTTPReturnFieldPartitionKey: false,
-			HTTPReturnFieldPrimaryKey:   false,
-			HTTPReturnFieldAutoID:       false,
-			HTTPReturnDescription:       "",
+			HTTPReturnFieldName:          "field-varchar",
+			HTTPReturnFieldType:          "VarChar(10)",
+			HTTPReturnFieldPartitionKey:  false,
+			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldPrimaryKey:    false,
+			HTTPReturnFieldAutoID:        false,
+			HTTPReturnDescription:        "",
 		},
 		{
-			HTTPReturnFieldName:         "field-array",
-			HTTPReturnFieldType:         "Array",
-			HTTPReturnFieldPartitionKey: false,
-			HTTPReturnFieldPrimaryKey:   false,
-			HTTPReturnFieldAutoID:       false,
-			HTTPReturnDescription:       "",
+			HTTPReturnFieldName:          "field-array",
+			HTTPReturnFieldType:          "Array",
+			HTTPReturnFieldPartitionKey:  false,
+			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldPrimaryKey:    false,
+			HTTPReturnFieldAutoID:        false,
+			HTTPReturnDescription:        "",
 		},
 	}, printFields(fields))
 	assert.Equal(t, []gin.H{
 		{
-			HTTPReturnFieldName:         "field-varchar",
-			HTTPReturnFieldType:         "VarChar",
-			HTTPReturnFieldPartitionKey: false,
-			HTTPReturnFieldPrimaryKey:   false,
-			HTTPReturnFieldAutoID:       false,
-			HTTPReturnDescription:       "",
-			HTTPReturnFieldID:           int64(0),
+			HTTPReturnFieldName:          "field-varchar",
+			HTTPReturnFieldType:          "VarChar",
+			HTTPReturnFieldPartitionKey:  false,
+			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldPrimaryKey:    false,
+			HTTPReturnFieldAutoID:        false,
+			HTTPReturnDescription:        "",
+			HTTPReturnFieldID:            int64(0),
 			Params: []*commonpb.KeyValuePair{
 				{Key: common.MaxLengthKey, Value: "10"},
 			},
 		},
 		{
-			HTTPReturnFieldName:         "field-array",
-			HTTPReturnFieldType:         "Array",
-			HTTPReturnFieldPartitionKey: false,
-			HTTPReturnFieldPrimaryKey:   false,
-			HTTPReturnFieldAutoID:       false,
-			HTTPReturnDescription:       "",
-			HTTPReturnFieldID:           int64(0),
-			HTTPReturnFieldElementType:  "Bool",
+			HTTPReturnFieldName:          "field-array",
+			HTTPReturnFieldType:          "Array",
+			HTTPReturnFieldPartitionKey:  false,
+			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldPrimaryKey:    false,
+			HTTPReturnFieldAutoID:        false,
+			HTTPReturnDescription:        "",
+			HTTPReturnFieldID:            int64(0),
+			HTTPReturnFieldElementType:   "Bool",
 		},
 	}, printFieldsV2(fields))
 }
@@ -1371,4 +1381,28 @@ func TestBuildQueryResps(t *testing.T) {
 	// len(rows) != len(scores), didn't show distance
 	_, err = buildQueryResp(int64(0), outputFields, newFieldData(generateFieldData(), schemapb.DataType_None), generateIDs(schemapb.DataType_Int64, 3), []float32{0.01, 0.04}, true)
 	assert.Equal(t, nil, err)
+}
+
+func TestConvertToExtraParams(t *testing.T) {
+	indexParams := IndexParam{
+		MetricType: "L2",
+		IndexType:  "IVF_FLAT",
+		Params: map[string]interface{}{
+			"nlist": 128,
+		},
+	}
+	params, err := convertToExtraParams(indexParams)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, 3, len(params))
+	for _, pair := range params {
+		if pair.Key == common.MetricTypeKey {
+			assert.Equal(t, "L2", pair.Value)
+		}
+		if pair.Key == common.IndexTypeKey {
+			assert.Equal(t, "IVF_FLAT", pair.Value)
+		}
+		if pair.Key == common.IndexParamsKey {
+			assert.Equal(t, string("{\"nlist\":128}"), pair.Value)
+		}
+	}
 }
