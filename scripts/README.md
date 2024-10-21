@@ -26,7 +26,7 @@ Install OpenBlas library
 install using apt
 
 ```shell
-sudo apt install -y libopenblas-dev
+sudo apt install -y libopenblas-openmp-dev
 ```
 
 or build from source code
