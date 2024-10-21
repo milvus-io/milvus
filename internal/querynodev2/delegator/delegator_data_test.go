@@ -103,7 +103,7 @@ func (s *DelegatorDataSuite) TearDownSuite() {
 }
 
 func (s *DelegatorDataSuite) genNormalCollection() {
-	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+	s.manager.Collection.Put(s.collectionID, &schemapb.CollectionSchema{
 		Name: "TestCollection",
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -158,7 +158,7 @@ func (s *DelegatorDataSuite) genNormalCollection() {
 }
 
 func (s *DelegatorDataSuite) genCollectionWithFunction() {
-	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+	s.manager.Collection.Put(s.collectionID, &schemapb.CollectionSchema{
 		Name: "TestCollection",
 		Fields: []*schemapb.FieldSchema{
 			{

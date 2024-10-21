@@ -626,7 +626,7 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 		PartitionIDs: suite.partitionIDs,
 	}
 	suite.node.manager.Collection = segments.NewCollectionManager()
-	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, loadMeta)
+	suite.node.manager.Collection.Put(suite.collectionID, schema, nil, loadMeta)
 
 	infos := suite.genSegmentLoadInfos(schema, nil)
 	for _, info := range infos {
@@ -1262,7 +1262,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 		PartitionIDs: suite.partitionIDs,
 	}
 	indexMeta := suite.node.composeIndexMeta(segments.GenTestIndexInfoList(suite.collectionID, schema), schema)
-	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, indexMeta, LoadMeta)
+	suite.node.manager.Collection.Put(suite.collectionID, schema, indexMeta, LoadMeta)
 
 	// Delegator not found
 	resp, err = suite.node.Search(ctx, req)
