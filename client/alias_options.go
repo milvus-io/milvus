@@ -25,20 +25,20 @@ type CreateAliasOption interface {
 
 type createAliasOption struct {
 	collectionName string
-	aliasName      string
+	alias          string
 }
 
 func (opt *createAliasOption) Request() *milvuspb.CreateAliasRequest {
 	return &milvuspb.CreateAliasRequest{
 		CollectionName: opt.collectionName,
-		Alias:          opt.aliasName,
+		Alias:          opt.alias,
 	}
 }
 
-func NewCreateAliasOption(collectionName, aliasName string) *createAliasOption {
+func NewCreateAliasOption(collectionName, alias string) *createAliasOption {
 	return &createAliasOption{
 		collectionName: collectionName,
-		aliasName:      aliasName,
+		alias:          alias,
 	}
 }
 
@@ -101,10 +101,10 @@ func (opt *alterAliasOption) Request() *milvuspb.AlterAliasRequest {
 	}
 }
 
-func NewAlterAliasOption(alias, collection string) *alterAliasOption {
+func NewAlterAliasOption(alias, collectionName string) *alterAliasOption {
 	return &alterAliasOption{
 		aliasName:      alias,
-		collectionName: collection,
+		collectionName: collectionName,
 	}
 }
 
@@ -123,8 +123,8 @@ func (opt *listAliasesOption) Request() *milvuspb.ListAliasesRequest {
 	}
 }
 
-func NewListAliasesOption(collection string) *listAliasesOption {
+func NewListAliasesOption(collectionName string) *listAliasesOption {
 	return &listAliasesOption{
-		collectionName: collection,
+		collectionName: collectionName,
 	}
 }
