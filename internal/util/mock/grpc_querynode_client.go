@@ -130,6 +130,10 @@ func (m *GrpcQueryNodeClient) Delete(ctx context.Context, in *querypb.DeleteRequ
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcQueryNodeClient) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
+	return &milvuspb.CheckHealthResponse{}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) Close() error {
 	return m.Err
 }
