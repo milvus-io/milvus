@@ -1680,7 +1680,6 @@ class TestCreateIndexWithFullTextSearch(TestcaseBase):
                 break
 
 
-# @pytest.mark.skip("skip")
 class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
     """
     ******************************************************************
