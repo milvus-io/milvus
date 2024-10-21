@@ -79,6 +79,7 @@ type queryParams struct {
 	limit      int64
 	offset     int64
 	reduceType reduce.IReduceType
+	isIterator bool
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
@@ -178,7 +179,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 	limitStr, err := funcutil.GetAttrByKeyFromRepeatedKV(LimitKey, queryParamsPair)
 	// if limit is not provided
 	if err != nil {
-		return &queryParams{limit: typeutil.Unlimited, reduceType: reduceType}, nil
+		return &queryParams{limit: typeutil.Unlimited, reduceType: reduceType, isIterator: isIterator}, nil
 	}
 	limit, err = strconv.ParseInt(limitStr, 0, 64)
 	if err != nil {
@@ -203,6 +204,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		limit:      limit,
 		offset:     offset,
 		reduceType: reduceType,
+		isIterator: isIterator,
 	}, nil
 }
 
@@ -461,6 +463,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		}
 	}
 	t.GuaranteeTimestamp = guaranteeTs
+	// need modify mvccTs and guaranteeTs for iterator specially
+	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
+		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
+		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
+	}
 
 	deadline, ok := t.TraceCtx().Deadline()
 	if ok {
@@ -542,6 +549,10 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	t.result.OutputFields = t.userOutputFields
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
+	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
+		// first page for iteration, need to set up sessionTs for iterator
+		t.result.SessionTs = t.BeginTs()
+	}
 	log.Debug("Query PostExecute done")
 	return nil
 }

@@ -1396,7 +1396,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit})
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_normal_without_specify_anns_field(self):
         """
         target: test search normal case
@@ -10069,7 +10069,7 @@ class TestCollectionSearchJSON(TestcaseBase):
 class TestSearchIterator(TestcaseBase):
     """ Test case of search iterator """
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("vector_data_type", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
     def test_search_iterator_normal(self, vector_data_type):
         """
@@ -13019,7 +13019,6 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.tags(CaseLabel.GPU)
-    @pytest.mark.skip(reason="issue #36184")
     def test_search_after_different_index_with_params_none_default_data(self, varchar_scalar_index, numeric_scalar_index,
                                                                         null_data_percent, _async):
         """

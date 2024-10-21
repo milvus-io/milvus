@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -195,6 +196,9 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]any, row Row) err
 }
 
 func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
+	if r.id2Field[fieldID].GetDefaultValue() != nil && obj == nil {
+		return nullutil.GetDefaultValue(r.id2Field[fieldID])
+	}
 	if r.id2Field[fieldID].GetNullable() {
 		return r.parseNullableEntity(fieldID, obj)
 	}

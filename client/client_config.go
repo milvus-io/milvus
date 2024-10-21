@@ -43,6 +43,9 @@ var DefaultGrpcOpts = []grpc.DialOption{
 		},
 		MinConnectTimeout: 3 * time.Second,
 	}),
+	grpc.WithDefaultCallOptions(
+		grpc.MaxCallRecvMsgSize(math.MaxInt32), // math.MaxInt32 = 2147483647, 2GB - 1
+	),
 }
 
 // ClientConfig for milvus client.

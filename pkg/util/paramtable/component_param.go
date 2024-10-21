@@ -2709,10 +2709,6 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
 However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.`,
 		Export: true,
-		Formatter: func(v string) string {
-			mmapEnabled := p.MmapEnabled.GetAsBool()
-			return strconv.FormatBool(mmapEnabled && getAsBool(v))
-		},
 	}
 	p.GrowingMmapEnabled.Init(base.mgr)
 
@@ -3231,7 +3227,6 @@ type dataCoordConfig struct {
 	ClusteringCompactionMaxClusterSize         ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
-	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
 	LevelZeroCompactionTriggerMinSize        ParamItem `refreshable:"true"`
 	LevelZeroCompactionTriggerMaxSize        ParamItem `refreshable:"true"`
 	LevelZeroCompactionTriggerDeltalogMinNum ParamItem `refreshable:"true"`
@@ -3470,8 +3465,11 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 		Key:          "dataCoord.compaction.taskPrioritizer",
 		Version:      "2.5.0",
 		DefaultValue: "default",
-		Doc:          "compaction task prioritizer, options: [default, level]. Default is FIFO, level is prioritized by level: L0 compactions first, then mix compactions, then major compactions.",
-		Export:       true,
+		Doc: `compaction task prioritizer, options: [default, level, mix]. 
+default is FIFO.
+level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
+mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.`,
+		Export: true,
 	}
 	p.CompactionTaskPrioritizer.Init(base.mgr)
 
@@ -3626,15 +3624,6 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.SyncSegmentsInterval.Init(base.mgr)
-
-	// LevelZeroCompaction
-	p.EnableLevelZeroSegment = ParamItem{
-		Key:          "dataCoord.segment.enableLevelZero",
-		Version:      "2.4.0",
-		Doc:          "Whether to enable LevelZeroCompaction",
-		DefaultValue: "true",
-	}
-	p.EnableLevelZeroSegment.Init(base.mgr)
 
 	p.LevelZeroCompactionTriggerMinSize = ParamItem{
 		Key:          "dataCoord.compaction.levelzero.forceTrigger.minSize",

@@ -1434,6 +1434,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			return nil, err
 		}
 		binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
+		isVectorType := typeutil.IsVectorType(fieldSchema.DataType)
 		shouldCalculateDataSize := false
 
 		if fieldIndexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
@@ -1452,8 +1453,16 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 
 			indexMemorySize += estimateResult.MaxMemoryCost
 			segmentDiskSize += estimateResult.MaxDiskCost
-			if !estimateResult.HasRawData {
+			if !estimateResult.HasRawData && !isVectorType {
 				shouldCalculateDataSize = true
+			}
+			if !estimateResult.HasRawData && isVectorType {
+				mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
+				if mmapChunkCache {
+					segmentDiskSize += binlogSize
+				} else {
+					segmentMemorySize += binlogSize
+				}
 			}
 		} else {
 			shouldCalculateDataSize = true
@@ -1465,14 +1474,16 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 
 			if !mmapEnabled || common.IsSystemField(fieldSchema.GetFieldID()) {
 				segmentMemorySize += binlogSize
-				if multiplyFactor.enableTempSegmentIndex && SupportInterimIndexDataType(fieldSchema.GetDataType()) {
-					segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
-				}
 				if DoubleMemorySystemField(fieldSchema.GetFieldID()) || DoubleMemoryDataType(fieldSchema.GetDataType()) {
 					segmentMemorySize += binlogSize
 				}
 			} else {
 				segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
+			}
+			// querynode will generate a (memory type) intermin index for vector type
+			interimIndexEnable := multiplyFactor.enableTempSegmentIndex && !isGrowingMmapEnable() && SupportInterimIndexDataType(fieldSchema.GetDataType())
+			if interimIndexEnable {
+				segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
 			}
 		}
 

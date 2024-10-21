@@ -910,7 +910,6 @@ class TestUtilityBase(TestcaseBase):
         assert exp_res == res
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 19754")
     def test_loading_progress_after_release(self):
         """
         target: test loading progress after release
@@ -919,10 +918,9 @@ class TestUtilityBase(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, insert_data=True, nb=100)[0]
         collection_w.release()
-        res = self.utility_wrap.loading_progress(collection_w.name)[0]
-        exp_res = {loading_progress: '0%', num_loaded_partitions: 0, not_loaded_partitions: ['_default']}
-
-        assert exp_res == res
+        error = {ct.err_code: 999, ct.err_msg: "collection not loaded"}
+        self.utility_wrap.loading_progress(collection_w.name,
+                                           check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_loading_progress_with_release_partition(self):

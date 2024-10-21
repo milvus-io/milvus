@@ -37,6 +37,7 @@ class Base:
 
 class TestBase(Base):
     req = None
+
     def teardown_method(self):
         self.collection_client.api_key = self.api_key
         all_collections = self.collection_client.collection_list()['data']
@@ -49,10 +50,6 @@ class TestBase(Base):
                 rsp = self.collection_client.collection_drop(payload)
             except Exception as e:
                 logger.error(e)
-
-    # def setup_method(self):
-    #     self.req = Requests()
-    #     self.req.uuid = str(uuid.uuid1())
 
     @pytest.fixture(scope="function", autouse=True)
     def init_client(self, endpoint, token, minio_host, bucket_name, root_path):
@@ -162,3 +159,6 @@ class TestBase(Base):
         self.collection_client.db_name = db_name
         self.vector_client.db_name = db_name
         self.import_job_client.db_name = db_name
+
+
+

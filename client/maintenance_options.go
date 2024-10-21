@@ -116,7 +116,7 @@ func (opt *loadPartitionsOption) WithSkipLoadDynamicField(skipFlag bool) *loadPa
 	return opt
 }
 
-func NewLoadPartitionsOption(collectionName string, partitionsNames []string) *loadPartitionsOption {
+func NewLoadPartitionsOption(collectionName string, partitionsNames ...string) *loadPartitionsOption {
 	return &loadPartitionsOption{
 		collectionName: collectionName,
 		partitionNames: partitionsNames,

@@ -487,7 +487,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		})
 
 		var bm25Stats *typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats]
-		if len(sd.isBM25Field) > 0 {
+		if sd.idfOracle != nil {
 			bm25Stats, err = sd.loader.LoadBM25Stats(ctx, req.GetCollectionID(), infos...)
 			if err != nil {
 				log.Warn("failed to load bm25 stats for segment", zap.Error(err))
@@ -690,8 +690,11 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		sd.pkOracle.Register(candidate, targetNodeID)
 	}
 
-	if sd.idfOracle != nil {
+	if sd.idfOracle != nil && bm25Stats != nil {
 		bm25Stats.Range(func(segmentID int64, stats map[int64]*storage.BM25Stats) bool {
+			log.Info("register sealed segment bm25 stats into idforacle",
+				zap.Int64("segmentID", segmentID),
+			)
 			sd.idfOracle.Register(segmentID, stats, segments.SegmentTypeSealed)
 			return false
 		})

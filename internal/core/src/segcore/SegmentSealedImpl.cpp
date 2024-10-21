@@ -198,8 +198,9 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                 if (!is_sorted_by_pk_ && insert_record_.empty_pks() &&
                     int64_index->HasRawData()) {
                     for (int i = 0; i < row_count; ++i) {
-                        insert_record_.insert_pk(int64_index->Reverse_Lookup(i),
-                                                 i);
+                        auto raw = int64_index->Reverse_Lookup(i);
+                        AssertInfo(raw.has_value(), "Primary key not found");
+                        insert_record_.insert_pk(raw.value(), i);
                     }
                     insert_record_.seal_pks();
                 }
@@ -212,8 +213,9 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                 if (!is_sorted_by_pk_ && insert_record_.empty_pks() &&
                     string_index->HasRawData()) {
                     for (int i = 0; i < row_count; ++i) {
-                        insert_record_.insert_pk(
-                            string_index->Reverse_Lookup(i), i);
+                        auto raw = string_index->Reverse_Lookup(i);
+                        AssertInfo(raw.has_value(), "Primary key not found");
+                        insert_record_.insert_pk(raw.value(), i);
                     }
                     insert_record_.seal_pks();
                 }
@@ -577,6 +579,11 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
         mmap_fields_.insert(field_id);
     }
 
+    {
+        std::unique_lock lck(mutex_);
+        update_row_count(num_rows);
+    }
+
     auto ok = unlink(filepath.c_str());
     AssertInfo(ok == 0,
                fmt::format("failed to unlink mmap data file {}, err: {}",
@@ -592,8 +599,19 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
         insert_record_.seal_pks();
     }
 
-    std::unique_lock lck(mutex_);
-    set_bit(field_data_ready_bitset_, field_id, true);
+    bool use_interim_index = false;
+    if (generate_interim_index(field_id)) {
+        std::unique_lock lck(mutex_);
+        // mmap_fields is useless, no change
+        fields_.erase(field_id);
+        set_bit(field_data_ready_bitset_, field_id, false);
+        use_interim_index = true;
+    }
+
+    if (!use_interim_index) {
+        std::unique_lock lck(mutex_);
+        set_bit(field_data_ready_bitset_, field_id, true);
+    }
 }
 
 void
@@ -1932,9 +1950,14 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
     bool is_sparse =
         field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT;
 
+    bool enable_growing_mmap = storage::MmapManager::GetInstance()
+                                   .GetMmapConfig()
+                                   .GetEnableGrowingMmap();
+
     auto enable_binlog_index = [&]() {
-        // checkout config
-        if (!segcore_config_.get_enable_interim_segment_index()) {
+        // check milvus config
+        if (!segcore_config_.get_enable_interim_segment_index() ||
+            enable_growing_mmap) {
             return false;
         }
         // check data type
@@ -2087,7 +2110,11 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
                        "converted to string index");
             auto n = impl->Size();
             for (size_t i = 0; i < n; i++) {
-                index->AddText(impl->Reverse_Lookup(i), i);
+                auto raw = impl->Reverse_Lookup(i);
+                if (!raw.has_value()) {
+                    continue;
+                }
+                index->AddText(raw.value(), i);
             }
         }
     }

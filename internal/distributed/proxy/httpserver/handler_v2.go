@@ -964,9 +964,13 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	searchParams := generateSearchParams(ctx, c, httpReq.SearchParams)
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupSize, Value: strconv.FormatInt(int64(httpReq.GroupSize), 10)})
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupStrictSize, Value: strconv.FormatBool(httpReq.GroupStrictSize)})
+	if httpReq.GroupByField != "" {
+		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
+	}
+	if httpReq.GroupByField != "" && httpReq.GroupSize > 0 {
+		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupSize, Value: strconv.FormatInt(int64(httpReq.GroupSize), 10)})
+		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupStrictSize, Value: strconv.FormatBool(httpReq.GroupStrictSize)})
+	}
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: httpReq.AnnsField})
 	body, _ := c.Get(gin.BodyBytesKey)
 	placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField)
@@ -1064,9 +1068,13 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		{Key: proxy.RankParamsKey, Value: string(bs)},
 		{Key: ParamLimit, Value: strconv.FormatInt(int64(httpReq.Limit), 10)},
 		{Key: ParamRoundDecimal, Value: "-1"},
-		{Key: ParamGroupByField, Value: httpReq.GroupByField},
-		{Key: ParamGroupSize, Value: strconv.FormatInt(int64(httpReq.GroupSize), 10)},
-		{Key: ParamGroupStrictSize, Value: strconv.FormatBool(httpReq.GroupStrictSize)},
+	}
+	if httpReq.GroupByField != "" {
+		req.RankParams = append(req.RankParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
+	}
+	if httpReq.GroupByField != "" && httpReq.GroupSize > 0 {
+		req.RankParams = append(req.RankParams, &commonpb.KeyValuePair{Key: ParamGroupSize, Value: strconv.FormatInt(int64(httpReq.GroupSize), 10)})
+		req.RankParams = append(req.RankParams, &commonpb.KeyValuePair{Key: ParamGroupStrictSize, Value: strconv.FormatBool(httpReq.GroupStrictSize)})
 	}
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/HybridSearch", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.HybridSearch(reqCtx, req.(*milvuspb.HybridSearchRequest))
@@ -1246,12 +1254,13 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			}
 			dataType := schemapb.DataType(fieldDataType)
 			fieldSchema := schemapb.FieldSchema{
-				Name:           field.FieldName,
-				IsPrimaryKey:   field.IsPrimary,
-				IsPartitionKey: field.IsPartitionKey,
-				DataType:       dataType,
-				TypeParams:     []*commonpb.KeyValuePair{},
-				Nullable:       field.Nullable,
+				Name:            field.FieldName,
+				IsPrimaryKey:    field.IsPrimary,
+				IsPartitionKey:  field.IsPartitionKey,
+				IsClusteringKey: field.IsClusteringKey,
+				DataType:        dataType,
+				TypeParams:      []*commonpb.KeyValuePair{},
+				Nullable:        field.Nullable,
 			}
 
 			fieldSchema.DefaultValue, err = convertDefaultValue(field.DefaultValue, dataType)
