@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -185,6 +186,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 }
 
 func (dt *deleteTask) PostExecute(ctx context.Context) error {
+	metrics.ProxyDeleteVectors.WithLabelValues(paramtable.GetStringNodeID(), dt.req.GetDbName()).Add(float64(dt.count))
 	return nil
 }
 
