@@ -339,7 +339,7 @@ func (s *Session) getServerLabelsFromEnv(role string) map[string]string {
 	ret := make(map[string]string)
 	switch role {
 	case "querynode":
-		supportedLabels := paramtable.Get().QueryNodeCfg.SupportedQueryNodeLabels.GetAsStrings()
+		supportedLabels := paramtable.Get().QueryNodeCfg.LabelAwareQueryNodeBalance.GetAsStrings()
 		for _, label := range supportedLabels {
 			value := os.Getenv(label)
 			if len(value) > 0 {
