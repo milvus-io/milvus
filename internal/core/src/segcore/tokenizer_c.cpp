@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/tokenizer_c.h"
+#include <memory>
 #include "common/FieldMeta.h"
 #include "common/protobuf_utils.h"
 #include "pb/schema.pb.h"
@@ -24,6 +25,17 @@ create_tokenizer(CMap m, CTokenizer* tokenizer) {
         auto mm = reinterpret_cast<Map*>(m);
         auto impl = std::make_unique<milvus::tantivy::Tokenizer>(*mm);
         *tokenizer = impl.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+clone_tokenizer(CTokenizer* tokenizer, CTokenizer* rst) {
+    try {
+        auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(*tokenizer);
+        *rst = impl->Clone().release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

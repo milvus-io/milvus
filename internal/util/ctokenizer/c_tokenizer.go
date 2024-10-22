@@ -33,6 +33,15 @@ func (impl *CTokenizer) NewTokenStream(text string) tokenizerapi.TokenStream {
 	return NewCTokenStream(ptr)
 }
 
+func (impl *CTokenizer) Clone() (tokenizerapi.Tokenizer, error) {
+	var newptr C.CTokenizer
+	status := C.clone_tokenizer(&impl.ptr, &newptr)
+	if err := HandleCStatus(&status, "failed to clone tokenizer"); err != nil {
+		return nil, err
+	}
+	return NewCTokenizer(newptr), nil
+}
+
 func (impl *CTokenizer) Destroy() {
 	C.free_tokenizer(impl.ptr)
 }

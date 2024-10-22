@@ -2317,7 +2317,6 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("expr", ["text_match"])
     @pytest.mark.parametrize("offset", [10])
     @pytest.mark.parametrize("tokenizer", ["jieba"])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/36751")
     def test_full_text_search_with_jieba_tokenizer(
             self, offset, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq
     ):
@@ -2329,7 +2328,9 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         expected: full text search successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{
+                "tokenizer": tokenizer,
+            }
         }
         dim = 128
         fields = [

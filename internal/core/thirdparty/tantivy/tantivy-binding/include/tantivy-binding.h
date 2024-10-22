@@ -159,6 +159,8 @@ const char *tantivy_token_stream_get_token(void *token_stream);
 
 void *tantivy_create_tokenizer(void *tokenizer_params);
 
+void *tantivy_clone_tokenizer(void *ptr);
+
 void tantivy_free_tokenizer(void *tokenizer);
 
 bool tantivy_index_exist(const char *path);

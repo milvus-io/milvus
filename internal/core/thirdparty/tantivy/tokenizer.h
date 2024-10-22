@@ -20,6 +20,9 @@ struct Tokenizer {
         }
     }
 
+    explicit Tokenizer(void* _ptr) : ptr_(_ptr) {
+    }
+
     ~Tokenizer() {
         if (ptr_ != nullptr) {
             tantivy_free_tokenizer(ptr_);
@@ -32,6 +35,12 @@ struct Tokenizer {
         auto token_stream =
             tantivy_create_token_stream(ptr_, shared_text->c_str());
         return std::make_unique<TokenStream>(token_stream, shared_text);
+    }
+
+    std::unique_ptr<Tokenizer>
+    Clone() {
+        auto newptr = tantivy_clone_tokenizer(ptr_);
+        return std::make_unique<milvus::tantivy::Tokenizer>(newptr);
     }
 
     // CreateTokenStreamCopyText will copy the text and then create token stream based on the text.

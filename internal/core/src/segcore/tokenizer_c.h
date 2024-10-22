@@ -26,6 +26,9 @@ typedef void* CTokenizer;
 CStatus
 create_tokenizer(CMap m, CTokenizer* tokenizer);
 
+CStatus
+clone_tokenizer(CTokenizer* tokenizer, CTokenizer* rst);
+
 void
 free_tokenizer(CTokenizer tokenizer);
 
