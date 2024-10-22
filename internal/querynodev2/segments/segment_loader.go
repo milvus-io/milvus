@@ -1395,8 +1395,9 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 					return nil, err
 				}
 				blob := &storage.Blob{
-					Key:   bLog.GetLogPath(),
-					Value: value,
+					Key:    bLog.GetLogPath(),
+					Value:  value,
+					RowNum: bLog.EntriesNum,
 				}
 				return blob, nil
 			})
