@@ -119,7 +119,8 @@ def get_bm25_ground_truth(corpus, queries, top_k=100, language="en"):
 
 
 
-def analyze_documents(texts, language="en"):
+
+def custom_tokenizer(language="en"):
     def remove_punctuation(text):
         text = text.strip()
         text = text.replace("\n", " ")
@@ -146,6 +147,12 @@ def analyze_documents(texts, language="en"):
         tokenizer = Tokenizer(
             stemmer=stemmer, splitter= splitter, stopwords=stopwords
         )
+    return tokenizer
+
+
+def analyze_documents(texts, language="en"):
+
+    tokenizer = custom_tokenizer(language)
     # Start timing
     t0 = time.time()
 
@@ -179,22 +186,14 @@ def check_token_overlap(text_a, text_b, language="en"):
 
 def split_dataframes(df, fields, language="en"):
     df_copy = df.copy()
-    if language in ["zh", "cn", "chinese"]:
-        for col in fields:
-            new_texts = []
-            for doc in df[col]:
-                seg_list = jieba.cut(doc, cut_all=True)
-                new_texts.append(list(seg_list))
-            df_copy[col] = new_texts
-        return df_copy
+    tokenizer = custom_tokenizer(language)
     for col in fields:
         texts = df[col].to_list()
-        tokenized = bm25s.tokenize(texts, lower=True, stopwords="en")
+        tokenized = tokenizer.tokenize(texts, return_as="tuple")
         new_texts = []
         id_vocab_map = {id: word for word, id in tokenized.vocab.items()}
         for doc_ids in tokenized.ids:
             new_texts.append([id_vocab_map[token_id] for token_id in doc_ids])
-
         df_copy[col] = new_texts
     return df_copy
 
