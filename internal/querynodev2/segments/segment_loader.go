@@ -1183,8 +1183,9 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 					return nil, err
 				}
 				blob := &storage.Blob{
-					Key:   bLog.GetLogPath(),
-					Value: value,
+					Key:    bLog.GetLogPath(),
+					Value:  value,
+					RowNum: bLog.EntriesNum,
 				}
 				return blob, nil
 			})
@@ -1203,7 +1204,14 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		return nil
 	}
 
-	deltaData := &storage.DeleteData{}
+	rowNums := lo.SumBy(blobs, func(blob *storage.Blob) int64 {
+		return blob.RowNum
+	})
+	deltaData := &storage.DeleteData{
+		Pks: make([]storage.PrimaryKey, 0, rowNums),
+		Tss: make([]uint64, 0, rowNums),
+	}
+
 	reader, err := storage.CreateDeltalogReader(blobs)
 	if err != nil {
 		return err
