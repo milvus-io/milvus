@@ -94,14 +94,15 @@ const (
 
 	HTTPReturnHas = "has"
 
-	HTTPReturnFieldName         = "name"
-	HTTPReturnFieldID           = "id"
-	HTTPReturnFieldType         = "type"
-	HTTPReturnFieldPrimaryKey   = "primaryKey"
-	HTTPReturnFieldPartitionKey = "partitionKey"
-	HTTPReturnFieldAutoID       = "autoId"
-	HTTPReturnFieldElementType  = "elementType"
-	HTTPReturnDescription       = "description"
+	HTTPReturnFieldName          = "name"
+	HTTPReturnFieldID            = "id"
+	HTTPReturnFieldType          = "type"
+	HTTPReturnFieldPrimaryKey    = "primaryKey"
+	HTTPReturnFieldPartitionKey  = "partitionKey"
+	HTTPReturnFieldClusteringKey = "clusteringKey"
+	HTTPReturnFieldAutoID        = "autoId"
+	HTTPReturnFieldElementType   = "elementType"
+	HTTPReturnDescription        = "description"
 
 	HTTPReturnIndexMetricType  = "metricType"
 	HTTPReturnIndexType        = "indexType"
