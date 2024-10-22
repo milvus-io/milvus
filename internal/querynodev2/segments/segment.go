@@ -820,6 +820,8 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 	var cschema cdata.CArrowSchema
 	var carr cdata.CArrowArray
 	cdata.ExportArrowArray(pkArr, &carr, &cschema)
+	defer runtime.KeepAlive(&cschema)
+	defer runtime.KeepAlive(&carr)
 
 	var status C.CStatus
 	GetDynamicPool().Submit(func() (any, error) {
