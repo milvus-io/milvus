@@ -368,10 +368,10 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 
 		node.pipelineManager.Remove(req.GetChannelName())
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
-		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
+		_, sealed := node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
 		node.tSafeManager.Remove(ctx, req.GetChannelName())
 
-		node.manager.Collection.Unref(req.GetCollectionID(), 1)
+		node.manager.Collection.Unref(req.GetCollectionID(), uint32(1+sealed))
 	}
 	log.Info("unsubscribed channel")
 
