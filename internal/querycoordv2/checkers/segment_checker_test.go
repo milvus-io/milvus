@@ -317,6 +317,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseL0Segments() {
 		channels, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -532,6 +533,7 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {
 		channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(collectionID)
 	checker.targetMgr.UpdateCollectionCurrentTarget(collectionID)
+	checker.targetMgr.UpdateCollectionNextTarget(collectionID)
 	readableVersion := checker.targetMgr.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)
 
 	// test less target version exist on leader,meet segment doesn't exit in target, segment should be released
@@ -602,6 +604,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 		channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	growingSegments := make(map[int64]*meta.Segment)
 	growingSegments[2] = utils.CreateTestSegment(1, 1, 2, 2, 0, "test-insert-channel")
@@ -661,6 +664,7 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 		channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	growingSegments := make(map[int64]*meta.Segment)
 	growingSegments[2] = utils.CreateTestSegment(1, 1, 2, 2, 0, "test-insert-channel")
