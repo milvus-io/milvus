@@ -12786,7 +12786,6 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                                            default_float_field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #36184")
     def test_search_after_none_data_all_field_datatype(self, varchar_scalar_index, numeric_scalar_index,
                                                        null_data_percent, _async):
         """
