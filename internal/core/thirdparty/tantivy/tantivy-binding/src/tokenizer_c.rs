@@ -21,6 +21,13 @@ pub extern "C" fn tantivy_create_tokenizer(tokenizer_params: *mut c_void) -> *mu
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_clone_tokenizer(ptr: *mut c_void) -> *mut c_void {
+    let analyzer=ptr as *mut TextAnalyzer;
+    let clone = unsafe {(*analyzer).clone()};
+    create_binding(clone)
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_free_tokenizer(tokenizer: *mut c_void) {
     free_binding::<TextAnalyzer>(tokenizer);
 }

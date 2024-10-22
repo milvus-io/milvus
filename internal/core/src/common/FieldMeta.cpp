@@ -16,6 +16,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "Consts.h"
+#include "log/Log.h"
 
 namespace milvus {
 TokenizerParams

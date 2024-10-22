@@ -19,6 +19,7 @@
 package function
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -40,6 +41,28 @@ type BM25FunctionRunner struct {
 	concurrency int
 }
 
+// TODO Use json string instead map[string]string as tokenizer params
+func getTokenizerParams(field *schemapb.FieldSchema) (map[string]string, error) {
+	result := map[string]string{}
+	for _, param := range field.GetTypeParams() {
+		if param.Key == "tokenizer_params" {
+			params := map[string]interface{}{}
+			err := json.Unmarshal([]byte(param.GetValue()), &params)
+			if err != nil {
+				return nil, err
+			}
+			for key, param := range params {
+				bytes, err := json.Marshal(param)
+				if err != nil {
+					return nil, err
+				}
+				result[key] = string(bytes)
+			}
+		}
+	}
+	return result, nil
+}
+
 func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (*BM25FunctionRunner, error) {
 	if len(schema.GetOutputFieldIds()) != 1 {
 		return nil, fmt.Errorf("bm25 function should only have one output field, but now %d", len(schema.GetOutputFieldIds()))
@@ -49,17 +72,26 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 		schema:      schema,
 		concurrency: 8,
 	}
+	var params map[string]string
 	for _, field := range coll.GetFields() {
 		if field.GetFieldID() == schema.GetOutputFieldIds()[0] {
 			runner.outputField = field
 			break
+		}
+
+		if field.GetFieldID() == schema.GetInputFieldIds()[0] {
+			var err error
+			params, err = getTokenizerParams(field)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	if runner.outputField == nil {
 		return nil, fmt.Errorf("no output field")
 	}
-	tokenizer, err := ctokenizer.NewTokenizer(map[string]string{})
+	tokenizer, err := ctokenizer.NewTokenizer(params)
 	if err != nil {
 		return nil, err
 	}
@@ -69,8 +101,7 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 }
 
 func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error {
-	// TODO AOIASD Support single Tokenizer concurrency
-	tokenizer, err := ctokenizer.NewTokenizer(map[string]string{})
+	tokenizer, err := v.tokenizer.Clone()
 	if err != nil {
 		return err
 	}
