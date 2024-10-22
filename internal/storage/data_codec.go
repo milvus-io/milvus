@@ -23,6 +23,8 @@ import (
 	"math"
 	"sort"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -868,7 +870,13 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 	}
 
 	var pid, sid UniqueID
-	result := &DeleteData{}
+	rowNums := lo.SumBy(blobs, func(blob *Blob) int64 {
+		return blob.RowNum
+	})
+	result := &DeleteData{
+		Pks: make([]PrimaryKey, 0, rowNums),
+		Tss: make([]uint64, 0, rowNums),
+	}
 
 	deserializeBlob := func(blob *Blob) error {
 		binlogReader, err := NewBinlogReader(blob.Value)
