@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -153,9 +154,13 @@ func (s *MiniClusterSuite) TearDownTest() {
 	if err == nil {
 		for idx, collectionName := range resp.GetCollectionNames() {
 			if resp.GetInMemoryPercentages()[idx] == 100 || resp.GetQueryServiceAvailable()[idx] {
-				s.Cluster.Proxy.ReleaseCollection(context.Background(), &milvuspb.ReleaseCollectionRequest{
+				status, err := s.Cluster.Proxy.ReleaseCollection(context.Background(), &milvuspb.ReleaseCollectionRequest{
 					CollectionName: collectionName,
 				})
+				err = merr.CheckRPCCall(status, err)
+				s.NoError(err)
+				collectionID := resp.GetCollectionIds()[idx]
+				s.CheckCollectionCacheReleased(collectionID)
 			}
 		}
 	}
