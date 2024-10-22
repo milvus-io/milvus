@@ -23,14 +23,13 @@ namespace detail {
 template <typename PolicyT>
 struct ConstProxy {
     using policy_type = PolicyT;
-    using size_type = typename policy_type::size_type;
     using data_type = typename policy_type::data_type;
     using self_type = ConstProxy;
 
     const data_type& element;
     data_type mask;
 
-    inline ConstProxy(const data_type& _element, const size_type _shift)
+    inline ConstProxy(const data_type& _element, const size_t _shift)
         : element{_element} {
         mask = (data_type(1) << _shift);
     }
@@ -47,15 +46,13 @@ struct ConstProxy {
 template <typename PolicyT>
 struct Proxy {
     using policy_type = PolicyT;
-    using size_type = typename policy_type::size_type;
     using data_type = typename policy_type::data_type;
     using self_type = Proxy;
 
     data_type& element;
     data_type mask;
 
-    inline Proxy(data_type& _element, const size_type _shift)
-        : element{_element} {
+    inline Proxy(data_type& _element, const size_t _shift) : element{_element} {
         mask = (data_type(1) << _shift);
     }
 

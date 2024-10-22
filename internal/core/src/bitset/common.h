@@ -27,6 +27,19 @@ namespace bitset {
 // this option is only somewhat supported
 // #define BITSET_HEADER_ONLY
 
+// `always inline` hint.
+// It is introduced to deal with clang's behavior to reuse
+//   once generated code. But if it is needed to generate
+//   different machine code for multiple platforms based on
+//   a single template, then such a behavior is undesired.
+// `always inline` is applied for PolicyT methods. It is fine,
+//   because they are not used directly and are wrapped
+//   in BitsetBase methods. So, a compiler may decide whether
+//   to really inline them, but it forces a compiler to
+//   generate specialized code for every hardward platform.
+// todo: MSVC has its own way to define `always inline`.
+#define BITSET_ALWAYS_INLINE __attribute__((always_inline))
+
 // a supporting utility
 template <class>
 inline constexpr bool always_false_v = false;

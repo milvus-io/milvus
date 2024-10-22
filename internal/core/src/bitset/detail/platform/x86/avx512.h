@@ -55,6 +55,30 @@ struct VectorizedAvx512 {
     template <typename T, ArithOpType AOp, CompareOpType CmpOp>
     static constexpr inline auto op_arith_compare =
         avx512::OpArithCompareImpl<T, AOp, CmpOp>::op_arith_compare;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_and =
+        avx512::ForwardOpsImpl<ElementT>::op_and;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_and_multiple =
+        avx512::ForwardOpsImpl<ElementT>::op_and_multiple;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_or =
+        avx512::ForwardOpsImpl<ElementT>::op_or;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_or_multiple =
+        avx512::ForwardOpsImpl<ElementT>::op_or_multiple;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_xor =
+        avx512::ForwardOpsImpl<ElementT>::op_xor;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_sub =
+        avx512::ForwardOpsImpl<ElementT>::op_sub;
 };
 
 }  // namespace x86
