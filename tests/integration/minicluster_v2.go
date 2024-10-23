@@ -56,7 +56,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -340,10 +339,10 @@ func (cluster *MiniClusterV2) Start() error {
 	runComponent(cluster.RootCoord)
 	runComponent(cluster.DataCoord)
 	runComponent(cluster.QueryCoord)
-	runComponent(cluster.Proxy)
 	runComponent(cluster.DataNode)
 	runComponent(cluster.QueryNode)
 	runComponent(cluster.IndexNode)
+	runComponent(cluster.Proxy)
 
 	ctx2, cancel := context.WithTimeout(context.Background(), time.Second*120)
 	defer cancel()
@@ -489,8 +488,6 @@ func (cluster *MiniClusterV2) Stop() error {
 		}
 	}
 	cluster.ChunkManager.RemoveWithPrefix(cluster.ctx, cluster.ChunkManager.RootPath())
-
-	kvfactory.CloseEtcdClient()
 	return nil
 }
 

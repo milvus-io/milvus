@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -52,7 +53,8 @@ func Test_ParseMetricType(t *testing.T) {
 	}
 
 	for _, test := range cases {
-		got, err := ParseMetricType(test.s)
+		ret := gjson.Parse(test.s)
+		got, err := ParseMetricRequestType(ret)
 		assert.Equal(t, test.errIsNil, err == nil)
 		if test.errIsNil && test.want != got {
 			t.Errorf("ParseMetricType(%s) = %s, but got: %s", test.s, test.want, got)
