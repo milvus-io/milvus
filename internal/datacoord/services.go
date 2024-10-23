@@ -1638,7 +1638,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		zap.Strings("channels", in.GetChannelNames()))
 	log.Info("receive import request", zap.Any("files", in.GetFiles()), zap.Any("options", in.GetOptions()))
 
-	timeoutTs, err := importutilv2.GetTimeout(in.GetOptions())
+	timeoutTs, err := importutilv2.GetTimeoutTs(in.GetOptions())
 	if err != nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(err.Error()))
 		return resp, nil
