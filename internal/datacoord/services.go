@@ -1679,19 +1679,12 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	log := log.With(zap.Int64("collection", in.GetCollectionID()),
 		zap.Int64s("partitions", in.GetPartitionIDs()),
 		zap.Strings("channels", in.GetChannelNames()))
-	log.Info("receive import request", zap.Any("files", in.GetFiles()))
+	log.Info("receive import request", zap.Any("files", in.GetFiles()), zap.Any("options", in.GetOptions()))
 
-	var timeoutTs uint64 = math.MaxUint64
-	timeoutStr, err := funcutil.GetAttrByKeyFromRepeatedKV("timeout", in.GetOptions())
-	if err == nil {
-		// Specifies the timeout duration for import, such as "300s", "1.5h" or "1h45m".
-		dur, err := time.ParseDuration(timeoutStr)
-		if err != nil {
-			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse import timeout failed, err=%w", err)))
-			return resp, nil
-		}
-		curTs := tsoutil.GetCurrentTime()
-		timeoutTs = tsoutil.AddPhysicalDurationOnTs(curTs, dur)
+	timeoutTs, err := importutilv2.GetTimeout(in.GetOptions())
+	if err != nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(err.Error()))
+		return resp, nil
 	}
 
 	files := in.GetFiles()

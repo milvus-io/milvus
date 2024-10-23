@@ -6,6 +6,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/util/parameterutil"
+
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -224,6 +227,13 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		if nullable && obj == r.nullkey {
 			return nil, nil
 		}
+		maxLength, err := parameterutil.GetMaxLength(field)
+		if err != nil {
+			return nil, err
+		}
+		if err = common.CheckVarcharLength(obj, maxLength); err != nil {
+			return nil, err
+		}
 		return obj, nil
 	case schemapb.DataType_BinaryVector:
 		if nullable && obj == r.nullkey {
@@ -322,6 +332,13 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		err := desc.Decode(&vec)
 		if err != nil {
 			return nil, r.wrapTypeError(obj, field)
+		}
+		maxCapacity, err := parameterutil.GetMaxCapacity(field)
+		if err != nil {
+			return nil, err
+		}
+		if err = common.CheckArrayCapacity(len(vec), maxCapacity); err != nil {
+			return nil, err
 		}
 		// elements in array not support null value
 		scalarFieldData, err := r.arrayToFieldData(vec, field.GetElementType())
