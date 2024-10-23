@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -417,6 +418,17 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
 	}
 
+	var err error
+	if function.HasFunctions(t.schema.CollectionSchema.Functions, []int64{}) {
+		exec, err := function.NewFunctionExecutor(t.schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
+		if err := exec.ProcessSearch(t.SearchRequest); err != nil {
+			return err
+		}
+	}
+
 	t.SearchRequest.GroupByFieldId = t.rankParams.GetGroupByFieldId()
 	t.SearchRequest.GroupSize = t.rankParams.GetGroupSize()
 
@@ -424,7 +436,6 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	if t.partitionKeyMode {
 		t.SearchRequest.PartitionIDs = t.partitionIDsSet.Collect()
 	}
-	var err error
 	t.reScorers, err = NewReScorers(len(t.request.GetSubReqs()), t.request.GetSearchParams())
 	if err != nil {
 		log.Info("generate reScorer failed", zap.Any("params", t.request.GetSearchParams()), zap.Error(err))
@@ -487,6 +498,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
 	t.SearchRequest.Topk = queryInfo.GetTopk()
 	t.SearchRequest.MetricType = queryInfo.GetMetricType()
@@ -494,6 +506,16 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.SearchRequest.DslType = commonpb.DslType_BoolExprV1
 	t.SearchRequest.GroupByFieldId = queryInfo.GroupByFieldId
 	t.SearchRequest.GroupSize = queryInfo.GroupSize
+
+	if function.HasFunctions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
+		exec, err := function.NewFunctionExecutor(t.schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
+		if err := exec.ProcessSearch(t.SearchRequest); err != nil {
+			return err
+		}
+	}
 	log.Debug("proxy init search request",
 		zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 		zap.Stringer("plan", plan)) // may be very large if large term passed.
