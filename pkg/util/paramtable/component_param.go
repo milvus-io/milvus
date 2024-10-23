@@ -3417,8 +3417,8 @@ The max idle time of segment in seconds, 10*60.`,
 		Key:          "dataCoord.segment.maxBinlogFileNumber",
 		Version:      "2.2.0",
 		DefaultValue: "32",
-		Doc: `The max number of binlog file for one segment, the segment will be sealed if
-the number of binlog file reaches to max value.`,
+		Doc: `The max number of binlog (which is equal to the binlog file num of primary key) for one segment, 
+the segment will be sealed if the number of binlog file reaches to max value.`,
 		Export: true,
 	}
 	p.SegmentMaxBinlogFileNumber.Init(base.mgr)
