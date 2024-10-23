@@ -153,9 +153,12 @@ def analyze_documents(texts, language="en"):
     tokenizer = custom_tokenizer(language)
     # Start timing
     t0 = time.time()
-
+    new_texts = []
+    for text in texts:
+        if isinstance(text, str):
+            new_texts.append(text)
     # Tokenize the corpus
-    tokenized = tokenizer.tokenize(texts, return_as="tuple")
+    tokenized = tokenizer.tokenize(new_texts, return_as="tuple")
     # log.info(f"Tokenized: {tokenized}")
     # Create a frequency counter
     freq = Counter()
