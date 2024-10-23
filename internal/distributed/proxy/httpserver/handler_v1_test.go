@@ -57,7 +57,7 @@ var DefaultShowCollectionsResp = milvuspb.ShowCollectionsResponse{
 
 var DefaultDescCollectionResp = milvuspb.DescribeCollectionResponse{
 	CollectionName: DefaultCollectionName,
-	Schema:         generateCollectionSchema(schemapb.DataType_Int64),
+	Schema:         generateCollectionSchema(schemapb.DataType_Int64, false),
 	ShardsNum:      ShardNumDefault,
 	Status:         &StatusSuccess,
 }
@@ -767,9 +767,9 @@ func TestInsertForDataType(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
 	schemas := map[string]*schemapb.CollectionSchema{
-		"[success]kinds of data type": newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64)),
-		"[success]with dynamic field": withDynamicField(newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64))),
-		"[success]with array fields":  withArrayField(newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64))),
+		"[success]kinds of data type": newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, false)),
+		"[success]with dynamic field": withDynamicField(newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, false))),
+		"[success]with array fields":  withArrayField(newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, false))),
 	}
 	for name, schema := range schemas {
 		t.Run(name, func(t *testing.T) {
@@ -840,7 +840,7 @@ func TestReturnInt64(t *testing.T) {
 	}
 	for _, dataType := range schemas {
 		t.Run("[insert]httpCfg.allow: false", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType))
+			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -871,7 +871,7 @@ func TestReturnInt64(t *testing.T) {
 
 	for _, dataType := range schemas {
 		t.Run("[upsert]httpCfg.allow: false", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType))
+			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -902,7 +902,7 @@ func TestReturnInt64(t *testing.T) {
 
 	for _, dataType := range schemas {
 		t.Run("[insert]httpCfg.allow: false, Accept-Type-Allow-Int64: true", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType))
+			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -934,7 +934,7 @@ func TestReturnInt64(t *testing.T) {
 
 	for _, dataType := range schemas {
 		t.Run("[upsert]httpCfg.allow: false, Accept-Type-Allow-Int64: true", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType))
+			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -967,7 +967,7 @@ func TestReturnInt64(t *testing.T) {
 	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
 	for _, dataType := range schemas {
 		t.Run("[insert]httpCfg.allow: true", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType))
+			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -998,7 +998,7 @@ func TestReturnInt64(t *testing.T) {
 
 	for _, dataType := range schemas {
 		t.Run("[upsert]httpCfg.allow: true", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType))
+			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -1029,7 +1029,7 @@ func TestReturnInt64(t *testing.T) {
 
 	for _, dataType := range schemas {
 		t.Run("[insert]httpCfg.allow: true, Accept-Type-Allow-Int64: false", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType))
+			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -1061,7 +1061,7 @@ func TestReturnInt64(t *testing.T) {
 
 	for _, dataType := range schemas {
 		t.Run("[upsert]httpCfg.allow: true, Accept-Type-Allow-Int64: false", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType))
+			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
