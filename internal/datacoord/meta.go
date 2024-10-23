@@ -1631,8 +1631,7 @@ func isSegmentHealthy(segment *SegmentInfo) bool {
 	return segment != nil &&
 		segment.GetState() != commonpb.SegmentState_SegmentStateNone &&
 		segment.GetState() != commonpb.SegmentState_NotExist &&
-		segment.GetState() != commonpb.SegmentState_Dropped &&
-		!segment.GetIsInvisible()
+		segment.GetState() != commonpb.SegmentState_Dropped
 }
 
 func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
