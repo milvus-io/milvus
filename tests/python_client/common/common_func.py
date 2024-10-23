@@ -108,7 +108,7 @@ def analyze_documents(texts, language="en"):
 
     # End timing
     tt = time.time() - t0
-    log.info(f"Analyze document cost time: {tt}")
+    log.debug(f"Analyze document cost time: {tt}")
 
     return word_freq
 
@@ -638,10 +638,15 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
 
 def gen_all_datatype_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                        auto_id=False, dim=ct.default_dim, enable_dynamic_field=True, **kwargs):
+    tokenizer_params = {
+        "tokenizer": "default",
+    }
     fields = [
         gen_int64_field(),
         gen_float_field(),
         gen_string_field(),
+        gen_string_field(name="text", max_length=2000, enable_tokenizer=True, enable_match=True,
+                         tokenizer_params=tokenizer_params),
         gen_json_field(),
         gen_array_field(name="array_int", element_type=DataType.INT64),
         gen_array_field(name="array_float", element_type=DataType.FLOAT),
@@ -1580,15 +1585,26 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
 def gen_row_data_by_schema(nb=ct.default_nb, schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
+    # ignore auto id field and the fields in function output
+    func_output_fields = []
+    if hasattr(schema, "functions"):
+        functions = schema.functions
+        for func in functions:
+            output_field_names = func.output_field_names
+            func_output_fields.extend(output_field_names)
+    func_output_fields = list(set(func_output_fields))
     fields = schema.fields
-    fields_not_auto_id = []
+    fields_needs_data = []
     for field in fields:
-        if not field.auto_id:
-            fields_not_auto_id.append(field)
+        if field.auto_id:
+            continue
+        if field.name in func_output_fields:
+            continue
+        fields_needs_data.append(field)
     data = []
     for i in range(nb):
         tmp = {}
-        for field in fields_not_auto_id:
+        for field in fields_needs_data:
             tmp[field.name] = gen_data_by_collection_field(field)
         data.append(tmp)
     return data
@@ -1613,6 +1629,15 @@ def get_int64_field_name(schema=None):
             return field.name
     return None
 
+
+def get_text_field_name(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.VARCHAR and field.params.get("enable_tokenizer", False):
+            return field.name
+    return None
 
 def get_float_field_name(schema=None):
     if schema is None:
@@ -1689,13 +1714,17 @@ def get_dim_by_schema(schema=None):
     return None
 
 
-def gen_varchar_data(length: int, nb: int):
-    return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
+def gen_varchar_data(length: int, nb: int, text_mode=False):
+    if text_mode:
+        return [fake.text() for _ in range(nb)]
+    else:
+        return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
 
 
 def gen_data_by_collection_field(field, nb=None, start=None):
     # if nb is None, return one data, else return a list of data
     data_type = field.dtype
+    enable_tokenizer = field.params.get("enable_tokenizer", False)
     if data_type == DataType.BOOL:
         if nb is None:
             return random.choice([True, False])
@@ -1731,8 +1760,8 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         max_length = min(20, max_length-1)
         length = random.randint(0, max_length)
         if nb is None:
-            return gen_varchar_data(length=length, nb=1)[0]
-        return gen_varchar_data(length=length, nb=nb)
+            return gen_varchar_data(length=length, nb=1, text_mode=enable_tokenizer)[0]
+        return gen_varchar_data(length=length, nb=nb, text_mode=enable_tokenizer)
     if data_type == DataType.JSON:
         if nb is None:
             return {"name": fake.name(), "address": fake.address()}
