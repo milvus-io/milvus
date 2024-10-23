@@ -112,6 +112,8 @@ jobs:
           kind: 'cpp'
 
   UT-Cpp:
+    # skip the UT-Cpp job in github workflow, it run in jenkins now see: UT-CPP.groovy
+    if: false 
     name: UT for Cpp
     needs: Build
     runs-on: ubuntu-latest
@@ -268,7 +270,7 @@ jobs:
 
   codecov:
     name: Upload Code Coverage
-    needs: [UT-Cpp, UT-Go, integration-test]
+    needs: [UT-Go, integration-test]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -276,10 +278,6 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-      - name: Download Cpp code coverage results
-        uses: actions/download-artifact@v4.1.0
-        with:
-          name: cpp-result
       - name: Download Go code coverage results
         uses: actions/download-artifact@v4.1.0
         with:
@@ -297,7 +295,7 @@ jobs:
         id: upload_cov
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
+          files: ./go_coverage.txt,./it_coverage.txt
           name: ubuntu-20.04-unittests
           fail_ci_if_error: true
           disable_safe_directory: true
@@ -307,7 +305,7 @@ jobs:
         id: retry_upload_cov
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
+          files: ./go_coverage.txt,./it_coverage.txt
           name: ubuntu-20.04-unittests
           fail_ci_if_error: true
           disable_safe_directory: true

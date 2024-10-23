@@ -38,21 +38,24 @@ get_azure_storage_config() {
         "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/"
         "K1SZFPTOtr/KBHBeksoGMGw==";
 
-    return CStorageConfig{endpoint,
-                          bucketName.c_str(),
-                          accessKey,
-                          accessValue,
-                          rootPath.c_str(),
-                          "remote",
-                          "azure",
-                          "",
-                          "error",
-                          "",
-                          false,
-                          "",
-                          false,
-                          false,
-                          30000};
+    return CStorageConfig{
+        endpoint,
+        bucketName.c_str(),
+        accessKey,
+        accessValue,
+        rootPath.c_str(),
+        "remote",
+        "azure",
+        "",
+        "error",
+        "",
+        false,
+        "",
+        false,
+        false,
+        30000,
+        "",
+    };
 }
 
 class StorageTest : public testing::Test {
@@ -93,7 +96,9 @@ TEST_F(StorageTest, GetLocalUsedSize) {
 
 TEST_F(StorageTest, InitRemoteChunkManagerSingleton) {
     CStorageConfig storageConfig = get_azure_storage_config();
-    InitRemoteChunkManagerSingleton(storageConfig);
+    auto status = InitRemoteChunkManagerSingleton(storageConfig);
+    EXPECT_STREQ(status.error_msg, "");
+    EXPECT_EQ(status.error_code, Success);
     auto rcm =
         RemoteChunkManagerSingleton::GetInstance().GetRemoteChunkManager();
     EXPECT_EQ(rcm->GetRootPath(), "/tmp/milvus/remote_data");

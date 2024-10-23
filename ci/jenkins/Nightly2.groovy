@@ -145,4 +145,13 @@ pipeline {
             }
         }
     }
+    post {
+        unsuccessful {
+            container('jnlp') {
+                script {
+                    sendEmail.toQA()
+                }
+            }
+        }
+    }
 }

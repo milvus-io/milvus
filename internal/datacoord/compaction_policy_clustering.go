@@ -126,7 +126,8 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 			isFlush(segment) &&
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
-			segment.GetLevel() != datapb.SegmentLevel_L0 // ignore level zero segments
+			segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
+			!segment.GetIsInvisible()
 	})
 
 	views := make([]CompactionView, 0)
