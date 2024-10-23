@@ -1064,6 +1064,21 @@ func (s *SessionSuite) TestSafeCloseLiveCh() {
 	})
 }
 
+func (s *SessionSuite) TestGetSessions() {
+	os.Setenv("MILVUS_SERVER_LABEL_key1", "value1")
+	os.Setenv("MILVUS_SERVER_LABEL_key2", "value2")
+	os.Setenv("key3", "value3")
+
+	defer os.Unsetenv("MILVUS_SERVER_LABEL_key1")
+	defer os.Unsetenv("MILVUS_SERVER_LABEL_key2")
+	defer os.Unsetenv("key3")
+
+	ret := GetServerLabelsFromEnv("querynode")
+	assert.Equal(s.T(), 2, len(ret))
+	assert.Equal(s.T(), "value1", ret["key1"])
+	assert.Equal(s.T(), "value2", ret["key2"])
+}
+
 func TestSessionSuite(t *testing.T) {
 	suite.Run(t, new(SessionSuite))
 }

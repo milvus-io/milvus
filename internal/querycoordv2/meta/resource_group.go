@@ -14,7 +14,6 @@ var (
 	DefaultResourceGroupName           = "__default_resource_group"
 	defaultResourceGroupCapacity int32 = 1000000
 	resourceGroupTransferBoost         = 10000
-	preferNodeTransferBoost            = 20000
 )
 
 // newResourceGroupConfig create a new resource group config.

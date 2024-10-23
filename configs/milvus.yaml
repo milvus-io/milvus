@@ -477,7 +477,7 @@ queryNode:
   bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool
-  labelAwareQueryNodeBalance: QUERYNODE_LOCATION # the labels of querynode which can be used for node assignment in resource group
+  milvusServerLabelPrefix: MILVUS_SERVER_LABEL_ # the label prefix of querynode which can be used for node assignment in resource group
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:

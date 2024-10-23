@@ -291,7 +291,7 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 		panic(err)
 	}
 	s.ServerID = serverID
-	s.ServerLabels = s.getServerLabelsFromEnv(serverName)
+	s.ServerLabels = GetServerLabelsFromEnv(serverName)
 	log.Info("start server", zap.String("name", serverName), zap.String("address", address), zap.Int64("id", s.ServerID), zap.Any("server_labels", s.ServerLabels))
 }
 
@@ -335,14 +335,20 @@ func (s *Session) getServerID() (int64, error) {
 	return nodeID, nil
 }
 
-func (s *Session) getServerLabelsFromEnv(role string) map[string]string {
+func GetServerLabelsFromEnv(role string) map[string]string {
 	ret := make(map[string]string)
 	switch role {
 	case "querynode":
-		supportedLabels := paramtable.Get().QueryNodeCfg.LabelAwareQueryNodeBalance.GetAsStrings()
-		for _, label := range supportedLabels {
-			value := os.Getenv(label)
-			if len(value) > 0 {
+		supportedLabelPrefix := paramtable.Get().QueryNodeCfg.MilvusServerLabelPrefix.GetValue()
+
+		for _, value := range os.Environ() {
+			rs := []rune(value)
+			in := strings.Index(value, "=")
+			key := string(rs[0:in])
+			value := string(rs[in+1:])
+
+			if strings.HasPrefix(key, supportedLabelPrefix) {
+				label := strings.TrimPrefix(key, supportedLabelPrefix)
 				ret[label] = value
 			}
 		}

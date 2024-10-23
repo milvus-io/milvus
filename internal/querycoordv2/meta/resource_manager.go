@@ -541,7 +541,8 @@ func (rm *ResourceManager) AutoRecoverResourceGroup(rgName string) error {
 		}
 	}
 
-	if rg.MissingNumOfNodes() > 0 {
+	// if rg contains dirty node, skip to recover missing node
+	if (len(rg.DirtyNodes(rm.nodeMgr)) == 0 || rgName == DefaultResourceGroupName) && rg.MissingNumOfNodes() > 0 {
 		return rm.recoverMissingNodeRG(rgName)
 	}
 
@@ -555,15 +556,14 @@ func (rm *ResourceManager) AutoRecoverResourceGroup(rgName string) error {
 
 // recoverMissingNodeRG recover resource group by transfer node from other resource group.
 func (rm *ResourceManager) recoverMissingNodeRG(rgName string) error {
-	rgFilter := func(sourceRG *ResourceGroup) bool {
-		nodeFilter := func(nodeID int64) bool {
-			nodeInfo := rm.nodeMgr.Get(nodeID)
-			if nodeInfo == nil {
-				return false
-			}
-			return rm.groups[rgName].AcceptNode(nodeInfo)
+	nodeFilter := func(nodeID int64) bool {
+		nodeInfo := rm.nodeMgr.Get(nodeID)
+		if nodeInfo == nil {
+			return false
 		}
-
+		return rm.groups[rgName].AcceptNode(nodeInfo) || rgName == DefaultResourceGroupName
+	}
+	rgFilter := func(sourceRG *ResourceGroup) bool {
 		return len(sourceRG.GetNodesByFilter(nodeFilter)) > 0
 	}
 
@@ -575,7 +575,7 @@ func (rm *ResourceManager) recoverMissingNodeRG(rgName string) error {
 			return ErrNodeNotEnough
 		}
 
-		nodeID, err := rm.transferOneNodeFromRGToRG(sourceRG, targetRG)
+		nodeID, err := rm.transferOneNodeFromRGToRG(sourceRG, targetRG, nodeFilter)
 		if err != nil {
 			log.Warn("failed to recover missing node by transfer node from other resource group",
 				zap.String("sourceRG", sourceRG.GetName()),
@@ -643,7 +643,15 @@ func (rm *ResourceManager) recoverRedundantNodeRG(rgName string) error {
 			return errors.New("all resource group reach limits")
 		}
 
-		nodeID, err := rm.transferOneNodeFromRGToRG(sourceRG, targetRG)
+		nodeFilter := func(nodeID int64) bool {
+			nodeInfo := rm.nodeMgr.Get(nodeID)
+			if nodeInfo == nil {
+				return false
+			}
+			return targetRG.AcceptNode(nodeInfo) || rgName == DefaultResourceGroupName
+		}
+
+		nodeID, err := rm.transferOneNodeFromRGToRG(sourceRG, targetRG, nodeFilter)
 		if err != nil {
 			log.Warn("failed to recover redundant node by transfer node to other resource group",
 				zap.String("sourceRG", sourceRG.GetName()),
@@ -682,7 +690,16 @@ func (rm *ResourceManager) recoverDirtyNodeRG(rgName string) error {
 			return errors.New("all resource group reach limits")
 		}
 
-		nodeID, err := rm.transferOneNodeFromRGToRG(sourceRG, targetRG)
+		nodeFilter := func(nodeID int64) bool {
+			nodeInfo := rm.nodeMgr.Get(nodeID)
+			if nodeInfo == nil {
+				return false
+			}
+
+			return targetRG.AcceptNode(nodeInfo) || targetRG.GetName() == DefaultResourceGroupName
+		}
+
+		nodeID, err := rm.transferOneNodeFromRGToRG(sourceRG, targetRG, nodeFilter)
 		if err != nil {
 			log.Warn("failed to recover redundant node by transfer node to other resource group",
 				zap.String("sourceRG", sourceRG.GetName()),
@@ -738,13 +755,18 @@ func (rm *ResourceManager) selectRedundantRecoverTargetRG(rg *ResourceGroup, rgF
 }
 
 // transferOneNodeFromRGToRG transfer one node from source resource group to target resource group.
-func (rm *ResourceManager) transferOneNodeFromRGToRG(sourceRG *ResourceGroup, targetRG *ResourceGroup) (int64, error) {
+func (rm *ResourceManager) transferOneNodeFromRGToRG(sourceRG *ResourceGroup, targetRG *ResourceGroup, nodeFilter func(nodeID int64) bool) (int64, error) {
 	if sourceRG.NodeNum() == 0 {
 		return -1, ErrNodeNotEnough
 	}
 
+	nodes := sourceRG.GetNodesByFilter(nodeFilter)
+	if len(nodes) == 0 {
+		return -1, ErrNodeNotEnough
+	}
+
 	// TODO: select node by some load strategy, such as segment loaded.
-	node := sourceRG.GetNodes()[0]
+	node := nodes[0]
 	if err := rm.transferNode(targetRG.GetName(), node); err != nil {
 		return -1, err
 	}
@@ -789,7 +811,7 @@ func (rm *ResourceManager) assignIncomingNode(node int64) (string, error) {
 		return "", merr.WrapErrNodeNotAvailable(node)
 	}
 	rgFilter := func(rg *ResourceGroup) bool {
-		return rg.AcceptNode(nodeInfo)
+		return rg.AcceptNode(nodeInfo) && len(rg.DirtyNodes(rm.nodeMgr)) == 0
 	}
 
 	// select a resource group to assign incoming node.
