@@ -23,7 +23,7 @@ func GetSegmentAsyncSealPolicy() []SegmentAsyncSealPolicy {
 	// TODO: dynamic policy can be applied here in future.
 	return []SegmentAsyncSealPolicy{
 		&sealByCapacity{},
-		&sealByBinlogFileNumber{},
+		&sealByBinlogNumber{},
 		&sealByLifetime{},
 		&sealByIdleTime{},
 	}
@@ -57,23 +57,23 @@ func (p *sealByCapacity) ShouldBeSealed(stats *stats.SegmentStats) SealPolicyRes
 	}
 }
 
-// sealByBinlogFileNumberExtraInfo is the extra info of the seal by binlog file number policy.
-type sealByBinlogFileNumberExtraInfo struct {
-	BinLogFileNumberLimit int
+// sealByBinlogFileExtraInfo is the extra info of the seal by binlog file number policy.
+type sealByBinlogFileExtraInfo struct {
+	BinLogNumberLimit int
 }
 
-// sealByBinlogFileNumber is a policy to seal the segment by the binlog file number.
-type sealByBinlogFileNumber struct{}
+// sealByBinlogNumber is a policy to seal the segment by the binlog file number.
+type sealByBinlogNumber struct{}
 
 // ShouldBeSealed checks if the segment should be sealed, and return the reason string.
-func (p *sealByBinlogFileNumber) ShouldBeSealed(stats *stats.SegmentStats) SealPolicyResult {
+func (p *sealByBinlogNumber) ShouldBeSealed(stats *stats.SegmentStats) SealPolicyResult {
 	limit := paramtable.Get().DataCoordCfg.SegmentMaxBinlogFileNumber.GetAsInt()
 	shouldBeSealed := stats.BinLogCounter >= uint64(limit)
 	return SealPolicyResult{
-		PolicyName:     "binlog_file_number",
+		PolicyName:     "binlog_number",
 		ShouldBeSealed: shouldBeSealed,
-		ExtraInfo: &sealByBinlogFileNumberExtraInfo{
-			BinLogFileNumberLimit: limit,
+		ExtraInfo: &sealByBinlogFileExtraInfo{
+			BinLogNumberLimit: limit,
 		},
 	}
 }

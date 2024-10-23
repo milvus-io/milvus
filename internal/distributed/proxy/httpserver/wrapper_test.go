@@ -28,7 +28,7 @@ func TestWrapHandler(t *testing.T) {
 	testEngine.GET("/test/:case", wrappedHandler)
 
 	t.Run("status ok", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/test/0", nil)
+		req := httptest.NewRequest(http.MethodGet, "/test/0?verbose=false", nil)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)

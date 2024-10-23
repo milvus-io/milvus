@@ -39,6 +39,11 @@ namespace avx2 {
     FUNC(float);              \
     FUNC(double);
 
+// a facility to run through all acceptable forward types
+#define ALL_FORWARD_TYPES_1(FUNC) \
+    FUNC(uint8_t);                \
+    FUNC(uint64_t);
+
 ///////////////////////////////////////////////////////////////////////////
 
 // the default implementation does nothing
@@ -192,7 +197,122 @@ ALL_DATATYPES_1(DECLARE_PARTIAL_OP_ARITH_COMPARE)
 
 ///////////////////////////////////////////////////////////////////////////
 
+// forward ops
+template <typename ElementT>
+struct ForwardOpsImpl {
+    static inline bool
+    op_and(ElementT* const left,
+           const ElementT* const right,
+           const size_t start_left,
+           const size_t start_right,
+           const size_t size) {
+        return false;
+    }
+
+    static inline bool
+    op_and_multiple(ElementT* const left,
+                    const ElementT* const* const rights,
+                    const size_t start_left,
+                    const size_t* const __restrict start_rights,
+                    const size_t n_rights,
+                    const size_t size) {
+        return false;
+    }
+
+    static inline bool
+    op_or(ElementT* const left,
+          const ElementT* const right,
+          const size_t start_left,
+          const size_t start_right,
+          const size_t size) {
+        return false;
+    }
+
+    static inline bool
+    op_or_multiple(ElementT* const left,
+                   const ElementT* const* const rights,
+                   const size_t start_left,
+                   const size_t* const __restrict start_rights,
+                   const size_t n_rights,
+                   const size_t size) {
+        return false;
+    }
+
+    static inline bool
+    op_xor(ElementT* const left,
+           const ElementT* const right,
+           const size_t start_left,
+           const size_t start_right,
+           const size_t size) {
+        return false;
+    }
+
+    static inline bool
+    op_sub(ElementT* const left,
+           const ElementT* const right,
+           const size_t start_left,
+           const size_t start_right,
+           const size_t size) {
+        return false;
+    }
+};
+
+#define DECLARE_PARTIAL_FORWARD_OPS(ELEMENTTYPE)                     \
+    template <>                                                      \
+    struct ForwardOpsImpl<ELEMENTTYPE> {                             \
+        static bool                                                  \
+        op_and(ELEMENTTYPE* const left,                              \
+               const ELEMENTTYPE* const right,                       \
+               const size_t start_left,                              \
+               const size_t start_right,                             \
+               const size_t size);                                   \
+                                                                     \
+        static bool                                                  \
+        op_and_multiple(ELEMENTTYPE* const left,                     \
+                        const ELEMENTTYPE* const* const rights,      \
+                        const size_t start_left,                     \
+                        const size_t* const __restrict start_rights, \
+                        const size_t n_rights,                       \
+                        const size_t size);                          \
+                                                                     \
+        static bool                                                  \
+        op_or(ELEMENTTYPE* const left,                               \
+              const ELEMENTTYPE* const right,                        \
+              const size_t start_left,                               \
+              const size_t start_right,                              \
+              const size_t size);                                    \
+                                                                     \
+        static bool                                                  \
+        op_or_multiple(ELEMENTTYPE* const left,                      \
+                       const ELEMENTTYPE* const* const rights,       \
+                       const size_t start_left,                      \
+                       const size_t* const __restrict start_rights,  \
+                       const size_t n_rights,                        \
+                       const size_t size);                           \
+                                                                     \
+        static bool                                                  \
+        op_sub(ELEMENTTYPE* const left,                              \
+               const ELEMENTTYPE* const right,                       \
+               const size_t start_left,                              \
+               const size_t start_right,                             \
+               const size_t size);                                   \
+                                                                     \
+        static bool                                                  \
+        op_xor(ELEMENTTYPE* const left,                              \
+               const ELEMENTTYPE* const right,                       \
+               const size_t start_left,                              \
+               const size_t start_right,                             \
+               const size_t size);                                   \
+    };
+
+ALL_FORWARD_TYPES_1(DECLARE_PARTIAL_FORWARD_OPS)
+
+#undef DECLARE_PARTIAL_FORWARD_OPS
+
+///////////////////////////////////////////////////////////////////////////
+
 #undef ALL_DATATYPES_1
+#undef ALL_FORWARD_TYPES_1
 
 }  // namespace avx2
 }  // namespace x86

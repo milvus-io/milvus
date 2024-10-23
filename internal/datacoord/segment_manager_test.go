@@ -626,7 +626,7 @@ func TestTryToSealSegment(t *testing.T) {
 			segments := segmentManager.meta.segments.segments
 			assert.Equal(t, 1, len(segments))
 			for _, seg := range segments {
-				seg.Statslogs = []*datapb.FieldBinlog{
+				seg.Binlogs = []*datapb.FieldBinlog{
 					{
 						FieldID: 1,
 						Binlogs: []*datapb.Binlog{

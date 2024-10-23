@@ -25,6 +25,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -1077,7 +1078,8 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		}, nil
 	}
 
-	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	ret := gjson.Parse(req.GetRequest())
+	metricType, err := metricsinfo.ParseMetricRequestType(ret)
 	if err != nil {
 		log.Warn("DataCoord.GetMetrics failed to parse metric type",
 			zap.Int64("nodeID", paramtable.GetNodeID()),
@@ -1710,12 +1712,24 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			return len(file.GetPaths()) > 0
 		})
 		if len(files) == 0 {
-			resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg(fmt.Sprintf("no binlog to import, input=%s", in.GetFiles())))
+			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("no binlog to import, input=%s", in.GetFiles())))
 			return resp, nil
 		}
 		log.Info("list binlogs prefixes for import", zap.Any("binlog_prefixes", files))
 	}
 
+	// Check if the number of jobs exceeds the limit.
+	maxNum := paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt()
+	executingNum := s.importMeta.CountJobBy(WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
+	if executingNum >= maxNum {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(
+			fmt.Sprintf("The number of jobs has reached the limit, please try again later. " +
+				"If your request is set to only import a single file, " +
+				"please consider importing multiple files in one request for better efficiency.")))
+		return resp, nil
+	}
+
+	// Allocate file ids.
 	idStart, _, err := s.allocator.AllocN(int64(len(files)) + 1)
 	if err != nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc id failed, err=%w", err)))

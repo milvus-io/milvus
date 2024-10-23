@@ -3263,6 +3263,7 @@ type dataCoordConfig struct {
 	ImportCheckIntervalHigh  ParamItem `refreshable:"true"`
 	ImportCheckIntervalLow   ParamItem `refreshable:"true"`
 	MaxFilesPerImportReq     ParamItem `refreshable:"true"`
+	MaxImportJobNum          ParamItem `refreshable:"true"`
 	WaitForIndex             ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
@@ -3417,8 +3418,8 @@ The max idle time of segment in seconds, 10*60.`,
 		Key:          "dataCoord.segment.maxBinlogFileNumber",
 		Version:      "2.2.0",
 		DefaultValue: "32",
-		Doc: `The max number of binlog file for one segment, the segment will be sealed if
-the number of binlog file reaches to max value.`,
+		Doc: `The max number of binlog (which is equal to the binlog file num of primary key) for one segment, 
+the segment will be sealed if the number of binlog file reaches to max value.`,
 		Export: true,
 	}
 	p.SegmentMaxBinlogFileNumber.Init(base.mgr)
@@ -4030,6 +4031,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.MaxFilesPerImportReq.Init(base.mgr)
+
+	p.MaxImportJobNum = ParamItem{
+		Key:          "dataCoord.import.maxImportJobNum",
+		Version:      "2.4.14",
+		Doc:          "Maximum number of import jobs that are executing or pending.",
+		DefaultValue: "1024",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxImportJobNum.Init(base.mgr)
 
 	p.WaitForIndex = ParamItem{
 		Key:          "dataCoord.import.waitForIndex",
