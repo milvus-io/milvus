@@ -193,6 +193,70 @@ func (s *RemoteWorkerSuite) TestDelete() {
 	})
 }
 
+func (s *RemoteWorkerSuite) TestDeleteBatch() {
+	s.Run("normal_run", func() {
+		defer func() { s.mockClient.ExpectedCalls = nil }()
+
+		s.mockClient.EXPECT().DeleteBatch(mock.Anything, mock.AnythingOfType("*querypb.DeleteBatchRequest")).
+			Return(&querypb.DeleteBatchResponse{Status: merr.Success()}, nil).Once()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		resp, err := s.worker.DeleteBatch(ctx, &querypb.DeleteBatchRequest{
+			SegmentIds: []int64{100, 200},
+		})
+		s.NoError(merr.CheckRPCCall(resp, err))
+	})
+
+	s.Run("client_return_error", func() {
+		defer func() { s.mockClient.ExpectedCalls = nil }()
+
+		s.mockClient.EXPECT().DeleteBatch(mock.Anything, mock.AnythingOfType("*querypb.DeleteBatchRequest")).
+			Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		resp, err := s.worker.DeleteBatch(ctx, &querypb.DeleteBatchRequest{
+			SegmentIds: []int64{100, 200},
+		})
+
+		s.Error(merr.CheckRPCCall(resp, err))
+	})
+
+	s.Run("client_return_fail_status", func() {
+		defer func() { s.mockClient.ExpectedCalls = nil }()
+
+		s.mockClient.EXPECT().DeleteBatch(mock.Anything, mock.AnythingOfType("*querypb.DeleteBatchRequest")).
+			Return(&querypb.DeleteBatchResponse{
+				Status: merr.Status(merr.WrapErrServiceUnavailable("mocked")),
+			}, nil).Once()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		resp, err := s.worker.DeleteBatch(ctx, &querypb.DeleteBatchRequest{
+			SegmentIds: []int64{100, 200},
+		})
+
+		s.Error(merr.CheckRPCCall(resp, err))
+	})
+
+	s.Run("batch_delete_unimplemented", func() {
+		defer func() { s.mockClient.ExpectedCalls = nil }()
+
+		s.mockClient.EXPECT().DeleteBatch(mock.Anything, mock.AnythingOfType("*querypb.DeleteBatchRequest")).
+			Return(nil, merr.WrapErrServiceUnimplemented(status.Errorf(codes.Unimplemented, "mocked grpc unimplemented")))
+		s.mockClient.EXPECT().Delete(mock.Anything, mock.Anything).Return(merr.Success(), nil).Times(2)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		resp, err := s.worker.DeleteBatch(ctx, &querypb.DeleteBatchRequest{
+			SegmentIds: []int64{100, 200},
+		})
+
+		s.NoError(merr.CheckRPCCall(resp, err))
+	})
+}
+
 func (s *RemoteWorkerSuite) TestSearch() {
 	s.Run("normal_run", func() {
 		defer func() { s.mockClient.ExpectedCalls = nil }()
