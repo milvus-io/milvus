@@ -86,6 +86,11 @@ type RootCoordCatalog interface {
 	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)
 	RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error
 
+	GetPrivilegeGroup(ctx context.Context, groupName string) ([]*milvuspb.PrivilegeEntity, error)
+	DropPrivilegeGroup(ctx context.Context, groupName string) error
+	AlterPrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity) error
+	ListPrivilegeGroups(ctx context.Context) ([]string, error)
+
 	Close()
 }
 

@@ -1439,6 +1439,85 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 	return err
 }
 
+func (kc *Catalog) GetPrivilegeGroup(ctx context.Context, groupName string) ([]*milvuspb.PrivilegeEntity, error) {
+	k := BuildPrivilegeGroupkey(groupName)
+	data, err := kc.Txn.Load(k)
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, fmt.Errorf("privilege group [%s] does not exist", groupName)
+		}
+		log.Error("failed to load privilege group", zap.String("group", groupName), zap.Error(err))
+		return nil, err
+	}
+	var privilegeNames []string
+	err = json.Unmarshal([]byte(data), &privilegeNames)
+	if err != nil {
+		log.Error("failed to unmarshal privilege group data", zap.String("group", groupName), zap.Error(err))
+		return nil, err
+	}
+
+	var privileges []*milvuspb.PrivilegeEntity
+	for _, name := range privilegeNames {
+		privileges = append(privileges, &milvuspb.PrivilegeEntity{Name: name})
+	}
+	return privileges, nil
+}
+
+func (kc *Catalog) DropPrivilegeGroup(ctx context.Context, groupName string) error {
+	k := BuildPrivilegeGroupkey(groupName)
+	err := kc.Txn.Remove(k)
+	if err != nil {
+		log.Warn("fail to drop privilege group", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) AlterPrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity) error {
+	var privilegeNames []string
+	for _, privilege := range privileges {
+		privilegeNames = append(privilegeNames, privilege.Name)
+	}
+
+	privilegeData, err := json.Marshal(privilegeNames)
+	if err != nil {
+		log.Error("failed to marshal privileges", zap.String("group", groupName), zap.Error(err))
+		return err
+	}
+	k := BuildPrivilegeGroupkey(groupName)
+	hasKey, err := kc.Txn.Has(k)
+	if hasKey {
+		err = kc.Txn.Remove(k)
+	}
+	err = kc.Txn.Save(k, string(privilegeData))
+	if err != nil {
+		log.Warn("fail to put privilege group", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) ListPrivilegeGroups(ctx context.Context) ([]string, error) {
+	var privilegeGroups []string
+
+	keys, _, err := kc.Txn.LoadWithPrefix(PrivilegeGroupPrefix)
+	if err != nil {
+		log.Error("failed to list privilege groups", zap.String("prefix", PrivilegeGroupPrefix), zap.Error(err))
+		return nil, err
+	}
+
+	for _, key := range keys {
+		groupName := typeutil.AfterN(key, PrivilegeGroupPrefix+"/", "/")
+		if len(groupName) != 1 {
+			log.Warn("invalid privilege group key", zap.String("string", key), zap.String("sub_string", PrivilegeGroupPrefix))
+			continue
+		}
+
+		privilegeGroups = append(privilegeGroups, groupName[0])
+	}
+	return privilegeGroups, nil
+}
+
 func (kc *Catalog) Close() {
 	// do nothing
 }
