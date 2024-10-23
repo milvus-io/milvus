@@ -62,7 +62,7 @@ const (
 
 type Options []*commonpb.KeyValuePair
 
-func GetTimeout(options Options) (uint64, error) {
+func GetTimeoutTs(options Options) (uint64, error) {
 	var timeoutTs uint64 = math.MaxUint64
 	timeoutStr, err := funcutil.GetAttrByKeyFromRepeatedKV(Timeout, options)
 	if err == nil {
