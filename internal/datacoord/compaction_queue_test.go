@@ -26,26 +26,23 @@ import (
 )
 
 func TestCompactionQueue(t *testing.T) {
-	t1 := &mixCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
-			PlanID: 3,
-			Type:   datapb.CompactionType_MixCompaction,
-		},
-	}
+	t1 := &mixCompactionTask{}
+	t1.SetTask(&datapb.CompactionTask{
+		PlanID: 3,
+		Type:   datapb.CompactionType_MixCompaction,
+	})
 
-	t2 := &l0CompactionTask{
-		CompactionTask: &datapb.CompactionTask{
-			PlanID: 1,
-			Type:   datapb.CompactionType_Level0DeleteCompaction,
-		},
-	}
+	t2 := &l0CompactionTask{}
+	t2.SetTask(&datapb.CompactionTask{
+		PlanID: 1,
+		Type:   datapb.CompactionType_Level0DeleteCompaction,
+	})
 
-	t3 := &clusteringCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
-			PlanID: 2,
-			Type:   datapb.CompactionType_ClusteringCompaction,
-		},
-	}
+	t3 := &clusteringCompactionTask{}
+	t3.SetTask(&datapb.CompactionTask{
+		PlanID: 2,
+		Type:   datapb.CompactionType_ClusteringCompaction,
+	})
 
 	t.Run("default prioritizer", func(t *testing.T) {
 		cq := NewCompactionQueue(3, DefaultPrioritizer)
@@ -60,13 +57,13 @@ func TestCompactionQueue(t *testing.T) {
 
 		task, err := cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, int64(1), task.GetPlanID())
+		assert.Equal(t, int64(1), task.GetTaskProto().GetPlanID())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, int64(2), task.GetPlanID())
+		assert.Equal(t, int64(2), task.GetTaskProto().GetPlanID())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, int64(3), task.GetPlanID())
+		assert.Equal(t, int64(3), task.GetTaskProto().GetPlanID())
 	})
 
 	t.Run("level prioritizer", func(t *testing.T) {
@@ -82,13 +79,13 @@ func TestCompactionQueue(t *testing.T) {
 
 		task, err := cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetType())
+		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetTaskProto().GetType())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_MixCompaction, task.GetType())
+		assert.Equal(t, datapb.CompactionType_MixCompaction, task.GetTaskProto().GetType())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_ClusteringCompaction, task.GetType())
+		assert.Equal(t, datapb.CompactionType_ClusteringCompaction, task.GetTaskProto().GetType())
 	})
 
 	t.Run("mix first prioritizer", func(t *testing.T) {
@@ -104,13 +101,13 @@ func TestCompactionQueue(t *testing.T) {
 
 		task, err := cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_MixCompaction, task.GetType())
+		assert.Equal(t, datapb.CompactionType_MixCompaction, task.GetTaskProto().GetType())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetType())
+		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetTaskProto().GetType())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_ClusteringCompaction, task.GetType())
+		assert.Equal(t, datapb.CompactionType_ClusteringCompaction, task.GetTaskProto().GetType())
 	})
 
 	t.Run("update prioritizer", func(t *testing.T) {
@@ -126,15 +123,15 @@ func TestCompactionQueue(t *testing.T) {
 
 		task, err := cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetType())
+		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetTaskProto().GetType())
 
 		cq.UpdatePrioritizer(DefaultPrioritizer)
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, int64(2), task.GetPlanID())
+		assert.Equal(t, int64(2), task.GetTaskProto().GetPlanID())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, int64(3), task.GetPlanID())
+		assert.Equal(t, int64(3), task.GetTaskProto().GetPlanID())
 	})
 }
 
@@ -146,12 +143,11 @@ func TestConcurrency(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(c)
 	for i := 0; i < c; i++ {
-		t1 := &mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
-				PlanID: int64(i),
-				Type:   datapb.CompactionType_MixCompaction,
-			},
-		}
+		t1 := &mixCompactionTask{}
+		t1.SetTask(&datapb.CompactionTask{
+			PlanID: int64(i),
+			Type:   datapb.CompactionType_MixCompaction,
+		})
 		go func() {
 			err := cq.Enqueue(t1)
 			assert.NoError(t, err)
