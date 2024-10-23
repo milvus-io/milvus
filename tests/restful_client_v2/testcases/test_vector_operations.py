@@ -1881,7 +1881,7 @@ class TestSearchVector(TestBase):
             assert len(res) == limit
 
 
-    @pytest.mark.parametrize("tokenizer", ["jieba", "default"])
+    @pytest.mark.parametrize("tokenizer", ["jieba", "standard"])
     def test_search_vector_with_text_match_filter(self, tokenizer):
         """
         Query a vector with a simple payload
@@ -1894,7 +1894,7 @@ class TestSearchVector(TestBase):
         # create a collection
         dim = 128
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         name = gen_collection_name()
         fields = [
@@ -2718,7 +2718,7 @@ class TestQueryVector(TestBase):
             if "like" in filter_expr:
                 assert name.startswith(prefix)
 
-    @pytest.mark.parametrize("tokenizer", ["jieba", "default"])
+    @pytest.mark.parametrize("tokenizer", ["jieba", "standard"])
     def test_query_vector_with_text_match_filter(self, tokenizer):
         """
         Query a vector with a simple payload
@@ -2731,7 +2731,7 @@ class TestQueryVector(TestBase):
         # create a collection
         dim = 128
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         name = gen_collection_name()
         fields = [

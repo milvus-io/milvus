@@ -13290,7 +13290,7 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_search_with_text_match_filter_normal_en(
         self, tokenizer, enable_inverted_index, enable_partition_key
     ):
@@ -13302,7 +13302,7 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
         expected: text match successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [

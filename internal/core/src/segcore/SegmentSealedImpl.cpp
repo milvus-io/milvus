@@ -2043,13 +2043,13 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
         index = std::make_unique<index::TextMatchIndex>(
             std::numeric_limits<int64_t>::max(),
             "milvus_tokenizer",
-            field_meta.get_tokenizer_params());
+            field_meta.get_tokenizer_params().c_str());
     } else {
         // build text index using mmap.
         index = std::make_unique<index::TextMatchIndex>(
             cfg.GetMmapPath(),
             "milvus_tokenizer",
-            field_meta.get_tokenizer_params());
+            field_meta.get_tokenizer_params().c_str());
     }
 
     {
@@ -2098,7 +2098,7 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     index->Reload();
 
     index->RegisterTokenizer("milvus_tokenizer",
-                             field_meta.get_tokenizer_params());
+                             field_meta.get_tokenizer_params().c_str());
 
     text_indexes_[field_id] = std::move(index);
 }
@@ -2109,7 +2109,7 @@ SegmentSealedImpl::LoadTextIndex(FieldId field_id,
     std::unique_lock lck(mutex_);
     const auto& field_meta = schema_->operator[](field_id);
     index->RegisterTokenizer("milvus_tokenizer",
-                             field_meta.get_tokenizer_params());
+                             field_meta.get_tokenizer_params().c_str());
     text_indexes_[field_id] = std::move(index);
 }
 

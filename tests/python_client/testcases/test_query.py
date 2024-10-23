@@ -4441,7 +4441,7 @@ class TestQueryTextMatch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_query_text_match_en_normal(
         self, tokenizer, enable_inverted_index, enable_partition_key
     ):
@@ -4453,7 +4453,7 @@ class TestQueryTextMatch(TestcaseBase):
         expected: text match successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -4724,24 +4724,21 @@ class TestQueryTextMatch(TestcaseBase):
         expected: get the correct token, text match successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": "standard",
-            "alpha_num_only": True,
-            "ascii_folding": True,
-            "lower_case": True,
-            "max_token_length": 40,
-            "split_compound_words": [
-                "dampf",
-                "schiff",
-                "fahrt",
-                "brot",
-                "backen",
-                "automat",
-            ],
-            "stemmer": "English",
-            "stop": {
-                "language": "English",
-                "words": ["an", "the"],
+            "analyzer": {
+                "tokenizer": "standard",
+                # "lowercase", "asciifolding", "alphanumonly" was system filter
+                "filter":["lowercase", "asciifolding", "alphanumonly", "my_stop_filter", "my_stemmer"],
             },
+            "filter": {
+                "my_stop_filter":{
+                    "type": "stop",
+                    "stop_words": ["in", "of"],
+                },
+                "my_stemmer":{
+                    "type": "stemmer",
+                    "language": "english",
+                }
+            }
         }
         dim = 128
         fields = [
@@ -4852,7 +4849,7 @@ class TestQueryTextMatch(TestcaseBase):
         expected: query successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": "default",
+            "analyzer":{"tokenizer": "standard"},
         }
         # 1. initialize with data
         dim = 128
@@ -4966,7 +4963,7 @@ class TestQueryTextMatch(TestcaseBase):
         expected: query successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": "default",
+            "analyzer":{"tokenizer": "standard"},
         }
         # 1. initialize with data
         dim = 128
@@ -5109,7 +5106,7 @@ class TestQueryTextMatch(TestcaseBase):
 
         # 1. initialize with data
         tokenizer_params = {
-            "tokenizer": "default",
+            "analyzer":{"tokenizer": "standard"},
         }
         # 1. initialize with data
         dim = 128
@@ -5254,7 +5251,7 @@ class TestQueryTextMatch(TestcaseBase):
         # 1. initialize with data
         fake_en = Faker("en_US")
         tokenizer_params = {
-            "tokenizer": "default",
+            "analyzer":{"tokenizer": "standard"},
         }
         dim = 128
         default_fields = [
@@ -5481,7 +5478,7 @@ class TestQueryTextMatch(TestcaseBase):
         """
         # 1. initialize with data
         tokenizer_params = {
-            "tokenizer": "default",
+            "analyzer":{"tokenizer": "standard"},
         }
         # 1. initialize with data
         dim = 128
@@ -5740,7 +5737,7 @@ class TestQueryTextMatchNegative(TestcaseBase):
         expected: create collection failed and return error
         """
         tokenizer_params = {
-            "tokenizer": "Unsupported",
+            "analyzer":{"tokenizer": "Unsupported"},
         }
         dim = 128
         default_fields = [

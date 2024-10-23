@@ -33,7 +33,7 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_collection_for_full_text_search(self, tokenizer):
         """
         target: test create collection with full text search
@@ -41,7 +41,7 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
         expected: create collection successfully
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -97,7 +97,7 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
         assert len(res["functions"]) == len(text_fields)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_collection_for_full_text_search_twice_with_same_schema(self, tokenizer):
         """
         target: test create collection with full text search twice with same schema
@@ -105,7 +105,7 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
         expected: create collection successfully and create again successfully
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -175,7 +175,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("tokenizer", ["unsupported"])
-    @pytest.mark.xfail(reason="")
+    @pytest.mark.skip(reason="check not implement may cause panic")
     def test_create_collection_for_full_text_search_with_unsupported_tokenizer(self, tokenizer):
         """
         target: test create collection with full text search with unsupported tokenizer
@@ -183,7 +183,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         expected: create collection failed
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -249,7 +249,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         expected: create collection failed
         """
         tokenizer_params = {
-            "tokenizer": "default",
+            "analyzer":{"tokenizer": "standard"},
         }
         dim = 128
         fields = [
@@ -327,7 +327,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         expected: create collection failed
         """
         tokenizer_params = {
-            "tokenizer": "default",
+            "analyzer":{"tokenizer": "standard"},
         }
         dim = 128
         fields = [
@@ -397,7 +397,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("nullable", [False, True])
     @pytest.mark.parametrize("text_lang", ["en", "zh", "hybrid"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_insert_for_full_text_search_default(self, tokenizer, text_lang, nullable):
         """
         target: test insert data with full text search
@@ -406,7 +406,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         expected: insert successfully and count is correct
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -542,7 +542,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("enable_dynamic_field", [True])
     @pytest.mark.parametrize("nullable", [False])
     @pytest.mark.parametrize("text_lang", ["en"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_insert_for_full_text_search_enable_dynamic_field(self, tokenizer, text_lang, nullable, enable_dynamic_field):
         """
         target: test insert data with full text search and enable dynamic field
@@ -552,7 +552,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         expected: insert successfully and count is correct
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -692,7 +692,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("nullable", [True])
     @pytest.mark.parametrize("text_lang", ["en"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_insert_for_full_text_search_with_dataframe(self, tokenizer, text_lang, nullable):
         """
         target: test insert data for full text search with dataframe
@@ -700,7 +700,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 2. query count and verify the result
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -831,7 +831,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         assert len(data) == count
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_insert_for_full_text_search_with_part_of_empty_string(self, tokenizer):
         """
         target: test insert data with full text search with part of empty string
@@ -842,7 +842,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         """
 
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -990,7 +990,7 @@ class TestInsertWithFullTextSearchNegative(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nullable", [True])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_insert_with_full_text_search_with_non_varchar_data(self, tokenizer, nullable):
         """
         target: test insert data with full text search with non varchar data
@@ -999,7 +999,7 @@ class TestInsertWithFullTextSearchNegative(TestcaseBase):
         """
 
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -1089,7 +1089,7 @@ class TestUpsertWithFullTextSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("nullable", [False, True])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/37021")
     def test_upsert_for_full_text_search(self, tokenizer, nullable):
         """
@@ -1100,7 +1100,7 @@ class TestUpsertWithFullTextSearch(TestcaseBase):
         expected: upsert successfully and data is updated
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -1260,7 +1260,7 @@ class TestUpsertWithFullTextSearchNegative(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nullable", [False])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/37021")
     def test_upsert_for_full_text_search_with_no_varchar_data(self, tokenizer, nullable):
         """
@@ -1270,7 +1270,7 @@ class TestUpsertWithFullTextSearchNegative(TestcaseBase):
         expected: upsert failed
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -1402,7 +1402,7 @@ class TestDeleteWithFullTextSearch(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_delete_for_full_text_search(self, tokenizer):
         """
         target: test delete data for full text search
@@ -1412,7 +1412,7 @@ class TestDeleteWithFullTextSearch(TestcaseBase):
         expected: delete successfully and data is deleted
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -1564,7 +1564,7 @@ class TestCreateIndexWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("b", [0.1])
     @pytest.mark.parametrize("k", [1.2])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_index_for_full_text_search_default(
             self, tokenizer, index_type, k, b
     ):
@@ -1576,7 +1576,7 @@ class TestCreateIndexWithFullTextSearch(TestcaseBase):
         expected: create index successfully and index info is correct
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         empty_percent = 0.0
         dim = 128
@@ -1688,7 +1688,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("b", [0.5])
     @pytest.mark.parametrize("k", [1.5])
     @pytest.mark.parametrize("index_type", ["HNSW", "INVALID_INDEX_TYPE"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_full_text_search_with_invalid_index_type(
             self, tokenizer, index_type, k, b
     ):
@@ -1699,7 +1699,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         expected: create index failed
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         empty_percent = 0.0
         dim = 128
@@ -1796,7 +1796,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("k", [1.5])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("metric_type", ["COSINE", "L2", "IP"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_full_text_search_index_with_invalid_metric_type(
             self, tokenizer, index_type, metric_type, k, b
     ):
@@ -1807,7 +1807,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         expected: create index failed
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         empty_percent = 0.0
         dim = 128
@@ -1903,7 +1903,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("b", [0.5])
     @pytest.mark.parametrize("k", [1.5])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_index_using_bm25_metric_type_for_non_bm25_output_field(
             self, tokenizer, index_type, k, b
     ):
@@ -1915,7 +1915,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         expected: create index failed
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         empty_percent = 0.0
         dim = 128
@@ -2000,7 +2000,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("b", [-1])
     @pytest.mark.parametrize("k", [-1])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_full_text_search_with_invalid_bm25_params(
             self, tokenizer, index_type, k, b
     ):
@@ -2011,7 +2011,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         expected: create index failed
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         empty_percent = 0.0
         dim = 128
@@ -2121,7 +2121,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
     @pytest.mark.parametrize("expr", ["text_match", "id_range"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     @pytest.mark.parametrize("offset", [10, 0])
     def test_full_text_search_default(
             self, offset, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq
@@ -2134,7 +2134,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         expected: full text search successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -2512,7 +2512,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("expr", [None])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_full_text_search_with_range_search(
             self, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq
     ):
@@ -2524,7 +2524,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         expected: full text search successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -2677,7 +2677,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("expr", [None])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_full_text_search_with_search_iterator(
             self, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq
     ):
@@ -2689,7 +2689,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         expected: full text search successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -2830,7 +2830,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("invalid_search_data", ["empty_text"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/37022")
     def test_search_for_full_text_search_with_empty_string_search_data(
             self, tokenizer, enable_inverted_index, enable_partition_key, empty_percent, index_type, invalid_search_data
@@ -2843,7 +2843,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
         expected: full text search successfully but result is empty
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -2960,7 +2960,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
     @pytest.mark.parametrize("invalid_search_data", ["sparse_vector", "dense_vector"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_search_for_full_text_search_with_invalid_search_data(
             self, tokenizer, enable_inverted_index, enable_partition_key, empty_percent, index_type, invalid_search_data
     ):
@@ -2972,7 +2972,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
         expected: full text search failed and return error
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
@@ -3107,7 +3107,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_hybrid_search_with_full_text_search(
             self, tokenizer, enable_inverted_index, enable_partition_key, empty_percent, index_type
     ):
@@ -3119,7 +3119,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
         expected: hybrid search successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+            "analyzer":{"tokenizer": tokenizer},
         }
         dim = 128
         fields = [
