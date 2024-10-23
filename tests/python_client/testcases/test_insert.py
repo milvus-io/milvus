@@ -931,6 +931,67 @@ class TestInsertOperation(TestcaseBase):
         collection_w.insert(data=data)
         assert collection_w.num_entities == ct.default_nb
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_partition_key", [True, False])
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_insert_multi_fields_by_rows_using_default(self, enable_partition_key, nullable):
+        """
+        target: test insert multi fields by rows with default value
+        method: 1. create a collection with one field using default value
+                2. insert using default value to replace the field value
+        expected: insert successfully
+        """
+        # 1. initialize with data
+        if enable_partition_key is True and nullable is True:
+            pytest.skip("partition key field not support nullable")
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(default_value=np.float32(3.14), nullable=nullable),
+                  cf.gen_string_field(default_value="abc", is_partition_key=enable_partition_key, nullable=nullable),
+                  cf.gen_json_field(), cf.gen_float_vec_field()]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+        collection_w.load()
+
+        # 2. insert data
+        array = cf.gen_default_rows_data()
+        for i in range(0, ct.default_nb, 2):
+            array[i][ct.default_string_field_name] = None
+        collection_w.insert(array)
+
+        exp = f"{ct.default_string_field_name} == 'abc'"
+        res = collection_w.query(exp, output_fields=[ct.default_float_field_name, ct.default_string_field_name])[0]
+        assert len(res) == ct.default_nb/2
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_multi_fields_by_rows_using_none(self):
+        """
+        target: test insert multi fields by rows with none value
+        method: 1. create a collection with one field using none value
+                2. insert using none to replace the field value
+        expected: insert successfully
+        """
+        # 1. initialize with data
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(nullable=True),
+                  cf.gen_string_field(default_value="abc", nullable=True), cf.gen_json_field(), cf.gen_float_vec_field()]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+        collection_w.load()
+
+        # 2. insert data
+        array = cf.gen_default_rows_data()
+        for i in range(0, ct.default_nb, 2):
+            array[i][ct.default_float_field_name] = None
+            array[i][ct.default_string_field_name] = None
+        collection_w.insert(array)
+
+        exp = f"{ct.default_string_field_name} == 'abc'"
+        res = collection_w.query(exp, output_fields=[ct.default_float_field_name, ct.default_string_field_name])[0]
+        assert len(res) == ct.default_nb/2
+        assert res[0][ct.default_float_field_name] is None
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("nullable", [True, False])
@@ -972,13 +1033,14 @@ class TestInsertOperation(TestcaseBase):
         vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
 
         df = pd.DataFrame({
-            "int64": pd.Series(data=[i for i in range(0, ct.default_nb)]),
-            "float_vector": vectors,
+            "int64": pd.Series(data=[i for i in range(ct.default_nb)]),
             "float": pd.Series(data=[float(i) for i in range(ct.default_nb)], dtype="float32"),
-            "varchar": pd.Series(data=[None for _ in range(ct.default_nb)])
+            "varchar": pd.Series(data=[None for _ in range(ct.default_nb)]),
+            "float_vector": vectors
         })
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
+
 
 
 class TestInsertAsync(TestcaseBase):
@@ -1308,10 +1370,10 @@ class TestInsertInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("default_value", [[], 123])
-    def test_insert_array_using_default_value(self, default_value):
+    def test_insert_rows_using_default_value(self, default_value):
         """
-        target: test insert with array
-        method: insert with invalid array
+        target: test insert with rows
+        method: insert with invalid rows
         expected: raise exception
         """
         fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
@@ -1321,7 +1383,7 @@ class TestInsertInvalid(TestcaseBase):
         vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
         data = [{"int64": 1, "float_vector": vectors[1],
                  "varchar": default_value, "float": np.float32(1.0)}]
-        error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
         collection_w.upsert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1340,7 +1402,7 @@ class TestInsertInvalid(TestcaseBase):
         int_values = [i for i in range(0, ct.default_nb)]
         string_values = ["abc" for i in range(ct.default_nb)]
         data = (int_values, vectors, string_values, default_value)
-        error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+        error = {ct.err_code: 999, ct.err_msg: "The type of data should be List, pd.DataFrame or Dict"}
         collection_w.upsert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1949,15 +2011,86 @@ class TestUpsertValid(TestcaseBase):
             default_value,
             [[np.int32(j) for j in range(10)] for _ in range(ct.default_nb)],
             [[np.float32(j) for j in range(10)] for _ in range(ct.default_nb)],
-            [[str(j) for j in range(10)] for _ in range(ct.default_nb)],
+            default_value,
             default_value,
             cf.gen_vectors(ct.default_nb, ct.default_dim)
         ]
         collection_w.upsert(data=data)
-        exp = f"{ct.default_float_field_name} == {np.float32(1.0)} and {ct.default_string_field_name} == 'abc'"
-        res = collection_w.query(exp, output_fields=[default_float_name, json_embedded_object])[0]
+        exp = f"{ct.default_float_field_name} == {np.float32(1.0)}"
+        res = collection_w.query(exp, output_fields=[default_float_name, json_embedded_object,
+                                                     ct.default_string_array_field_name])[0]
         assert len(res) == ct.default_nb
         assert res[0][json_embedded_object] is None
+        assert res[0][ct.default_string_array_field_name] is None
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_partition_key", [True, False])
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_upsert_multi_fields_by_rows_using_default(self, enable_partition_key, nullable):
+        """
+        target: test upsert multi fields by rows with default value
+        method: 1. create a collection with one field using default value
+                2. upsert using default value to replace the field value
+        expected: upsert successfully
+        """
+        # 1. initialize with data
+        if enable_partition_key is True and nullable is True:
+            pytest.skip("partition key field not support nullable")
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(default_value=np.float32(3.14), nullable=nullable),
+                  cf.gen_string_field(default_value="abc", is_partition_key=enable_partition_key, nullable=nullable),
+                  cf.gen_json_field(), cf.gen_float_vec_field()]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+        collection_w.load()
+
+        # 2. upsert data
+        array = cf.gen_default_rows_data()
+        for i in range(0, ct.default_nb, 2):
+            array[i][ct.default_float_field_name] = None
+            array[i][ct.default_string_field_name] = None
+        collection_w.upsert(array)
+
+        exp = f"{ct.default_float_field_name} == {np.float32(3.14)} and {ct.default_string_field_name} == 'abc'"
+        res = collection_w.query(exp, output_fields=[ct.default_float_field_name, ct.default_string_field_name])[0]
+        assert len(res) == ct.default_nb/2
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_partition_key", [True, False])
+    def test_upsert_multi_fields_by_rows_using_none(self,enable_partition_key):
+        """
+        target: test insert/upsert multi fields by rows with none value
+        method: 1. create a collection with one field using none value
+                2. insert/upsert using none to replace the field value
+        expected: insert/upsert successfully
+        """
+        # 1. initialize with data
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(nullable=True),
+                  cf.gen_string_field(default_value="abc", nullable=True, enable_partition_key=enable_partition_key),
+                  cf.gen_json_field(), cf.gen_float_vec_field()]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+        collection_w.load()
+
+        # 2. insert data
+        array = cf.gen_default_rows_data()
+        for i in range(1, ct.default_nb, 2):
+            array[i][ct.default_float_field_name] = None
+            array[i][ct.default_string_field_name] = None
+        collection_w.insert(array)
+
+        for i in range(0, ct.default_nb, 2):
+            array[i][ct.default_float_field_name] = None
+            array[i][ct.default_string_field_name] = None
+        collection_w.upsert(array)
+
+        exp = f"{ct.default_int64_field_name} >= 0"
+        res = collection_w.query(exp, output_fields=[ct.default_float_field_name, ct.default_string_field_name])[0]
+        assert len(res) == ct.default_nb
+        assert res[0][ct.default_float_field_name] is None
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
@@ -2013,9 +2146,10 @@ class TestUpsertValid(TestcaseBase):
             "float_vector": vectors
         })
         collection_w.upsert(df)
-        exp = f"{ct.default_string_field_name} == ''"
+        exp = f"{ct.default_int64_field_name} >= 0"
         res = collection_w.query(exp, output_fields=[ct.default_string_field_name])[0]
         assert len(res) == ct.default_nb
+        assert res[0][ct.default_string_field_name] is None
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
@@ -2210,10 +2344,10 @@ class TestUpsertInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("default_value", [[], 123])
-    def test_upsert_array_using_default_value(self, default_value):
+    def test_upsert_rows_using_default_value(self, default_value):
         """
-        target: test upsert with array
-        method: upsert with invalid array
+        target: test upsert with rows
+        method: upsert with invalid rows
         expected: raise exception
         """
         fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
@@ -2223,7 +2357,7 @@ class TestUpsertInvalid(TestcaseBase):
         vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
         data = [{"int64": 1, "float_vector": vectors[1],
                  "varchar": default_value, "float": np.float32(1.0)}]
-        error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
         collection_w.upsert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2242,7 +2376,7 @@ class TestUpsertInvalid(TestcaseBase):
         int_values = [i for i in range(0, ct.default_nb)]
         string_values = ["abc" for i in range(ct.default_nb)]
         data = (int_values, default_value, string_values, vectors)
-        error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+        error = {ct.err_code: 999, ct.err_msg: "The type of data should be List, pd.DataFrame or Dict"}
         collection_w.upsert(data, check_task=CheckTasks.err_res, check_items=error)
 
 
