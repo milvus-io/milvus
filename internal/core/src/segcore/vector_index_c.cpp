@@ -27,7 +27,7 @@ GetIndexListSize() {
 
 void
 GetIndexFeatures(void* index_key_list, uint64_t* index_feature_list) {
-    auto features = knowhere::IndexFactory::Instance().GetIndexFeatures();
+    auto& features = knowhere::IndexFactory::Instance().GetIndexFeatures();
     int idx = 0;
 
     const char** index_keys = (const char**)index_key_list;
