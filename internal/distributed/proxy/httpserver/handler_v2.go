@@ -840,11 +840,6 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err != nil {
 		return nil, err
 	}
-	if collSchema.AutoID {
-		err := merr.WrapErrParameterInvalid("autoID: false", "autoID: true", "cannot upsert an autoID collection")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
-	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	err, httpReq.Data = checkAndSetData(string(body.([]byte)), collSchema)
 	if err != nil {
