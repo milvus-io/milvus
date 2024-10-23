@@ -244,10 +244,6 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	// otherwise use all fields for backward compatibility
 	if len(loadMetaInfo.GetLoadFields()) > 0 {
 		loadFieldIDs = typeutil.NewSet(loadMetaInfo.GetLoadFields()...)
-		loadSchema.Fields = lo.Filter(loadSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
-			// system field shall always be loaded for now
-			return loadFieldIDs.Contain(field.GetFieldID()) || common.IsSystemField(field.GetFieldID())
-		})
 	} else {
 		loadFieldIDs = typeutil.NewSet(lo.Map(loadSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })...)
 	}
