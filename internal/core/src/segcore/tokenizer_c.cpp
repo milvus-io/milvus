@@ -20,10 +20,9 @@
 using Map = std::map<std::string, std::string>;
 
 CStatus
-create_tokenizer(CMap m, CTokenizer* tokenizer) {
+create_tokenizer(const char* params, CTokenizer* tokenizer) {
     try {
-        auto mm = reinterpret_cast<Map*>(m);
-        auto impl = std::make_unique<milvus::tantivy::Tokenizer>(*mm);
+        auto impl = std::make_unique<milvus::tantivy::Tokenizer>(params);
         *tokenizer = impl.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

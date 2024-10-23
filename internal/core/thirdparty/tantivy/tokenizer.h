@@ -11,10 +11,9 @@ struct Tokenizer {
  public:
     NO_COPY_OR_ASSIGN(Tokenizer);
 
-    explicit Tokenizer(const std::map<std::string, std::string>& params) {
-        RustHashMap m;
-        m.from(params);
-        ptr_ = tantivy_create_tokenizer(m.get_pointer());
+    explicit Tokenizer(std::string&& params) {
+        auto shared_params = std::make_shared<std::string>(std::move(params));
+        ptr_ = tantivy_create_tokenizer(shared_params->c_str());
         if (ptr_ == nullptr) {
             throw std::invalid_argument("invalid tokenizer parameters");
         }

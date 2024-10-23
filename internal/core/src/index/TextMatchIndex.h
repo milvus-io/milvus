@@ -25,17 +25,17 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     explicit TextMatchIndex(
         int64_t commit_interval_in_ms,
         const char* tokenizer_name,
-        const std::map<std::string, std::string>& tokenizer_params);
+        const char* tokenizer_params);
     // for sealed segment.
     explicit TextMatchIndex(
         const std::string& path,
         const char* tokenizer_name,
-        const std::map<std::string, std::string>& tokenizer_params);
+        const char* tokenizer_params);
     // for building index.
     explicit TextMatchIndex(
         const storage::FileManagerContext& ctx,
         const char* tokenizer_name,
-        const std::map<std::string, std::string>& tokenizer_params);
+        const char* tokenizer_params);
     // for loading index
     explicit TextMatchIndex(const storage::FileManagerContext& ctx);
 
@@ -69,7 +69,7 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     void
     RegisterTokenizer(
         const char* tokenizer_name,
-        const std::map<std::string, std::string>& tokenizer_params);
+        const char* tokenizer_params);
 
     TargetBitmap
     MatchQuery(const std::string& query);

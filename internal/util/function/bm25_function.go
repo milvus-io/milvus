@@ -19,7 +19,6 @@
 package function
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -41,26 +40,13 @@ type BM25FunctionRunner struct {
 	concurrency int
 }
 
-// TODO Use json string instead map[string]string as tokenizer params
-func getTokenizerParams(field *schemapb.FieldSchema) (map[string]string, error) {
-	result := map[string]string{}
+func getTokenizerParams(field *schemapb.FieldSchema) string {
 	for _, param := range field.GetTypeParams() {
 		if param.Key == "tokenizer_params" {
-			params := map[string]interface{}{}
-			err := json.Unmarshal([]byte(param.GetValue()), &params)
-			if err != nil {
-				return nil, err
-			}
-			for key, param := range params {
-				bytes, err := json.Marshal(param)
-				if err != nil {
-					return nil, err
-				}
-				result[key] = string(bytes)
-			}
+			return param.Value
 		}
 	}
-	return result, nil
+	return "{}"
 }
 
 func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (*BM25FunctionRunner, error) {
@@ -72,7 +58,7 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 		schema:      schema,
 		concurrency: 8,
 	}
-	var params map[string]string
+	var params string
 	for _, field := range coll.GetFields() {
 		if field.GetFieldID() == schema.GetOutputFieldIds()[0] {
 			runner.outputField = field
@@ -80,11 +66,7 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 		}
 
 		if field.GetFieldID() == schema.GetInputFieldIds()[0] {
-			var err error
-			params, err = getTokenizerParams(field)
-			if err != nil {
-				return nil, err
-			}
+			params = getTokenizerParams(field)
 		}
 	}
 

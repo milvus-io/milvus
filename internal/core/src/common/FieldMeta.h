@@ -25,7 +25,7 @@
 
 namespace milvus {
 using TypeParams = std::map<std::string, std::string>;
-using TokenizerParams = std::map<std::string, std::string>;
+using TokenizerParams = const char*;
 
 TokenizerParams
 ParseTokenizerParams(const TypeParams& params);

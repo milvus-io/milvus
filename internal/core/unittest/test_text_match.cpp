@@ -80,23 +80,20 @@ TEST(ParseJson, Naive) {
 TEST(ParseTokenizerParams, NoTokenizerParams) {
     TypeParams params{{"k", "v"}};
     auto p = ParseTokenizerParams(params);
-    ASSERT_EQ(0, p.size());
+    ASSERT_EQ("{}", p);
 }
 
 TEST(ParseTokenizerParams, Default) {
     TypeParams params{{"tokenizer_params", R"({"tokenizer": "default"})"}};
     auto p = ParseTokenizerParams(params);
-    ASSERT_EQ(1, p.size());
-    auto iter = p.find("tokenizer");
-    ASSERT_NE(p.end(), iter);
-    ASSERT_EQ("default", iter->second);
+    ASSERT_EQ(params.at("tokenizer_params"), p);
 }
 
 TEST(TextMatch, Index) {
     using Index = index::TextMatchIndex;
     auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
                                          "milvus_tokenizer",
-                                         std::map<std::string, std::string>{});
+                                         "{}");
     index->CreateReader();
     index->AddText("football, basketball, pingpang", 0);
     index->AddText("swimming, football", 1);
