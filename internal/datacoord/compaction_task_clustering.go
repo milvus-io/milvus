@@ -597,6 +597,14 @@ func (t *clusteringCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datap
 	return taskClone
 }
 
+func (t *clusteringCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
+	err := t.compactionTaskBase.updateAndSaveTaskMeta(opts...)
+	if err != nil {
+		return merr.WrapErrClusteringCompactionMetaError("updateAndSaveTaskMeta", err) // retryable
+	}
+	return nil
+}
+
 func (t *clusteringCompactionTask) checkTimeout() bool {
 	if t.GetTimeoutInSeconds() > 0 {
 		diff := time.Since(time.Unix(t.GetStartTime(), 0)).Seconds()

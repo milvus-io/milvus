@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type CompactionTask interface {
@@ -218,9 +217,9 @@ func (t *compactionTaskBase) updateAndSaveTaskMeta(opts ...compactionTaskOpt) er
 	t.CompactionTask = task
 	err := t.SaveTaskMeta()
 	if err != nil {
-		log.Warn("Failed to saveTaskMeta", zap.Error(err))
+		log.Warn("failed to save task meta", zap.Error(err))
 		t.CompactionTask = oldTask
-		return merr.WrapErrClusteringCompactionMetaError("updateAndSaveTaskMeta", err) // retryable
+		return err
 	}
 	return nil
 }
