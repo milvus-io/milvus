@@ -30,8 +30,9 @@ import (
 // /////////////////////////////////////////////////////////////////////////////
 // --- common ---
 type autoIndexConfig struct {
-	Enable         ParamItem `refreshable:"true"`
-	EnableOptimize ParamItem `refreshable:"true"`
+	Enable                 ParamItem `refreshable:"true"`
+	EnableOptimize         ParamItem `refreshable:"true"`
+	EnableResultLimitCheck ParamItem `refreshable:"true"`
 
 	IndexParams           ParamItem  `refreshable:"true"`
 	SparseIndexParams     ParamItem  `refreshable:"true"`
@@ -75,6 +76,14 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.EnableOptimize.Init(base.mgr)
+
+	p.EnableResultLimitCheck = ParamItem{
+		Key:          "autoIndex.resultLimitCheck",
+		Version:      "2.5.0",
+		DefaultValue: "true",
+		PanicIfEmpty: true,
+	}
+	p.EnableResultLimitCheck.Init(base.mgr)
 
 	p.IndexParams = ParamItem{
 		Key:          "autoIndex.params.build",
@@ -266,6 +275,9 @@ func (p *autoIndexConfig) panicIfNotValidAndSetDefaultMetricTypeHelper(key strin
 }
 
 func (p *autoIndexConfig) reset(key string, m map[string]string, mgr *config.Manager) {
-	j := funcutil.MapToJSON(m)
-	mgr.SetConfig(key, string(j))
+	ret, err := funcutil.MapToJSON(m)
+	if err != nil {
+		panic(fmt.Sprintf("%s: convert to json failed, parameters invalid, error: %s", key, err.Error()))
+	}
+	mgr.SetConfig(key, ret)
 }

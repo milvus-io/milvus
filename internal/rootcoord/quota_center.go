@@ -1060,9 +1060,6 @@ func (q *QuotaCenter) getDeleteBufferRowCountFactor() map[int64]float64 {
 		for collectionID, num := range queryNodeMetrics.DeleteBufferInfo.CollectionDeleteBufferNum {
 			deleteBufferNum[collectionID] += num
 		}
-		for collectionID, size := range queryNodeMetrics.DeleteBufferInfo.CollectionDeleteBufferSize {
-			deleteBufferNum[collectionID] += size
-		}
 	}
 
 	collectionFactor := make(map[int64]float64)

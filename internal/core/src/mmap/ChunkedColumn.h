@@ -68,7 +68,7 @@ class ChunkedColumnBase : public ColumnBase {
 
     virtual const char*
     Data(int chunk_id) const override {
-        chunks_[chunk_id]->Data();
+        return chunks_[chunk_id]->Data();
     }
 
     virtual const char*

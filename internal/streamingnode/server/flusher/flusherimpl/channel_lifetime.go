@@ -124,9 +124,10 @@ func (c *channelLifetime) Run() error {
 			}
 			if tt, ok := t.(*syncmgr.SyncTask); ok {
 				insertLogs, _, _ := tt.Binlogs()
-				resource.Resource().SegmentAssignStatsManager().UpdateOnSync(tt.SegmentID(),
-					stats.SyncOperationMetrics{BinLogCounterIncr: uint64(len(insertLogs))},
-				)
+				resource.Resource().SegmentAssignStatsManager().UpdateOnSync(tt.SegmentID(), stats.SyncOperationMetrics{
+					BinLogCounterIncr:     1,
+					BinLogFileCounterIncr: uint64(len(insertLogs)),
+				})
 			}
 		})
 	if err != nil {

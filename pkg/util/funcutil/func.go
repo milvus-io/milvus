@@ -106,10 +106,13 @@ func JSONToMap(mStr string) (map[string]string, error) {
 	return ret, nil
 }
 
-func MapToJSON(m map[string]string) []byte {
+func MapToJSON(m map[string]string) (string, error) {
 	// error won't happen here.
-	bs, _ := json.Marshal(m)
-	return bs
+	bs, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	return string(bs), nil
 }
 
 func JSONToRoleDetails(mStr string) (map[string](map[string]([](map[string]string))), error) {

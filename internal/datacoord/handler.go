@@ -76,6 +76,10 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 			// Skip bulk insert segments.
 			continue
 		}
+		if s.GetIsInvisible() {
+			// skip invisible segments
+			continue
+		}
 
 		if s.GetState() == commonpb.SegmentState_Dropped {
 			droppedIDs.Insert(s.GetID())
@@ -119,10 +123,11 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	}
 
 	var (
-		flushedIDs   = make(typeutil.UniqueSet)
-		droppedIDs   = make(typeutil.UniqueSet)
-		growingIDs   = make(typeutil.UniqueSet)
-		levelZeroIDs = make(typeutil.UniqueSet)
+		flushedIDs    = make(typeutil.UniqueSet)
+		droppedIDs    = make(typeutil.UniqueSet)
+		growingIDs    = make(typeutil.UniqueSet)
+		levelZeroIDs  = make(typeutil.UniqueSet)
+		newFlushedIDs = make(typeutil.UniqueSet)
 	)
 
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
@@ -132,7 +137,6 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	indexedSegments := FilterInIndexedSegments(h, h.s.meta, false, segments...)
 	indexed := typeutil.NewUniqueSet(lo.Map(indexedSegments, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })...)
 
-	unIndexedIDs := make(typeutil.UniqueSet)
 	for _, s := range segments {
 		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil {
 			continue
@@ -141,37 +145,22 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 			// Skip bulk insert segments.
 			continue
 		}
-
-		currentPartitionStatsVersion := h.s.meta.partitionStatsMeta.GetCurrentPartitionStatsVersion(channel.GetCollectionID(), s.GetPartitionID(), channel.GetName())
-		if s.GetLevel() == datapb.SegmentLevel_L2 && s.GetPartitionStatsVersion() != currentPartitionStatsVersion {
-			// in the process of L2 compaction, newly generated segment may be visible before the whole L2 compaction Plan
-			// is finished, we have to skip these fast-finished segment because all segments in one L2 Batch must be
-			// seen atomically, otherwise users will see intermediate result
+		if s.GetIsInvisible() {
+			// skip invisible segments
 			continue
 		}
 
 		validSegmentInfos[s.GetID()] = s
 		switch {
 		case s.GetState() == commonpb.SegmentState_Dropped:
-			if s.GetLevel() == datapb.SegmentLevel_L2 && s.GetPartitionStatsVersion() == currentPartitionStatsVersion {
-				// if segment.partStatsVersion is equal to currentPartitionStatsVersion,
-				// it must have been indexed, this is guaranteed by clustering compaction process
-				// this is to ensure that the current valid L2 compaction produce is available to search/query
-				// to avoid insufficient data
-				flushedIDs.Insert(s.GetID())
-				continue
-			}
 			droppedIDs.Insert(s.GetID())
 		case !isFlushState(s.GetState()):
 			growingIDs.Insert(s.GetID())
 		case s.GetLevel() == datapb.SegmentLevel_L0:
 			levelZeroIDs.Insert(s.GetID())
-		case indexed.Contain(s.GetID()) || s.GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64():
-			// fill in indexed segments into flushed directly
-			flushedIDs.Insert(s.GetID())
+
 		default:
-			// unIndexed segments will be checked if it's parents are all indexed
-			unIndexedIDs.Insert(s.GetID())
+			flushedIDs.Insert(s.GetID())
 		}
 	}
 
@@ -203,36 +192,55 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		return true
 	}
 
-	retrieveUnIndexed := func() bool {
+	var compactionFromExist func(segID UniqueID) bool
+
+	compactionFromExist = func(segID UniqueID) bool {
+		compactionFrom := validSegmentInfos[segID].GetCompactionFrom()
+		if len(compactionFrom) == 0 || !isValid(compactionFrom...) {
+			return false
+		}
+		for _, fromID := range compactionFrom {
+			if flushedIDs.Contain(fromID) || newFlushedIDs.Contain(fromID) {
+				return true
+			}
+			if compactionFromExist(fromID) {
+				return true
+			}
+		}
+		return false
+	}
+
+	segmentIndexed := func(segID UniqueID) bool {
+		return indexed.Contain(segID) || validSegmentInfos[segID].GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64()
+	}
+
+	retrieve := func() bool {
 		continueRetrieve := false
-		for id := range unIndexedIDs {
+		for id := range flushedIDs {
 			compactionFrom := validSegmentInfos[id].GetCompactionFrom()
-			compactTos := []UniqueID{} // neighbors and itself
-			if len(compactionFrom) > 0 && isValid(compactionFrom...) {
+			if len(compactionFrom) == 0 || !isValid(compactionFrom...) {
+				newFlushedIDs.Insert(id)
+				continue
+			}
+			if segmentIndexed(id) && !compactionFromExist(id) {
+				newFlushedIDs.Insert(id)
+			} else {
 				for _, fromID := range compactionFrom {
-					if len(compactTos) == 0 {
-						compactToInfo, _ := h.s.meta.GetCompactionTo(fromID)
-						compactTos = lo.Map(compactToInfo, func(s *SegmentInfo, _ int) UniqueID { return s.GetID() })
-					}
-					if indexed.Contain(fromID) {
-						flushedIDs.Insert(fromID)
-					} else {
-						unIndexedIDs.Insert(fromID)
-						continueRetrieve = true
-					}
+					newFlushedIDs.Insert(fromID)
+					continueRetrieve = true
+					droppedIDs.Remove(fromID)
 				}
-				unIndexedIDs.Remove(compactTos...)
-				flushedIDs.Remove(compactTos...)
-				droppedIDs.Remove(compactionFrom...)
 			}
 		}
 		return continueRetrieve
 	}
-	for retrieveUnIndexed() {
+
+	for retrieve() {
+		flushedIDs = newFlushedIDs
+		newFlushedIDs = make(typeutil.UniqueSet)
 	}
 
-	// unindexed is flushed segments as well
-	flushedIDs.Insert(unIndexedIDs.Collect()...)
+	flushedIDs = newFlushedIDs
 
 	log.Info("GetQueryVChanPositions",
 		zap.Int64("collectionID", channel.GetCollectionID()),

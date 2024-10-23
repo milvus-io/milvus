@@ -26,6 +26,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
@@ -1704,7 +1705,8 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 		}, nil
 	}
 
-	metricType, err := metricsinfo.ParseMetricType(in.Request)
+	ret := gjson.Parse(in.GetRequest())
+	metricType, err := metricsinfo.ParseMetricRequestType(ret)
 	if err != nil {
 		log.Warn("ParseMetricType failed", zap.String("role", typeutil.RootCoordRole),
 			zap.Int64("nodeID", c.session.ServerID), zap.String("req", in.Request), zap.Error(err))

@@ -9,7 +9,16 @@ misc:
       - &failed_on_ubuntu_22 'check-failure=Build and test AMD64 Ubuntu 22.04'
   - when_go_sdk_status_success: &WHEN_GO_SDK_STATUS_SUCCESS
       - 'status-success=go-sdk'
-      - 'status-success=milvus-sdk-go '
+      - 'status-success=milvus-sdk-go'
+  - when_cpp_unit_test_success: &WHEN_CPP_UNIT_TEST_SUCCESS
+      - 'status-success=cpp-unit-test'
+      - 'status-success=UT for Cpp'
+  - when_go_unit_test_success: &WHEN_GO_UNIT_TEST_SUCCESS
+      - 'status-success=go-unit-test'
+      - 'status-success=UT for Go'
+  - when_integration_unit_test_success: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+      - 'status-success=integration-test'
+      - 'status-success=Integration Test'
   - branch: &BRANCHES
       #  In this pull request, the changes are based on the master branch
       - &MASTER_BRANCH base=master
@@ -49,9 +58,9 @@ pull_request_rules:
       - *MASTER_BRANCH
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - or: *WHEN_GO_SDK_STATUS_SUCCESS
-      - 'status-success=UT for Cpp'
-      - 'status-success=UT for Go'
-      - 'status-success=Integration Test'
+      - or: *WHEN_CPP_UNIT_TEST_SUCCESS
+      - or: *WHEN_GO_UNIT_TEST_SUCCESS
+      - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - 'status-success=Code Checker MacOS 12'
       # - 'status-success=Code Checker Amazonlinux 2023'
@@ -67,9 +76,9 @@ pull_request_rules:
       - *2X_BRANCH
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
-      - 'status-success=UT for Cpp'
-      - 'status-success=UT for Go'
-      - 'status-success=Integration Test'
+      - or: *WHEN_CPP_UNIT_TEST_SUCCESS
+      - or: *WHEN_GO_UNIT_TEST_SUCCESS
+      - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - 'status-success=Code Checker MacOS 12'
       # - 'status-success=Code Checker CentOS 7'
       - 'status-success=cpu-e2e'
@@ -120,7 +129,7 @@ pull_request_rules:
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - 'status-success=Code Checker MacOS 12'
       # - 'status-success=Code Checker Amazonlinux 2023'
-      - 'status-success=UT for Go'
+      - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or:
           - -files~=^(?!pkg\/.*_test\.go).*$
           - -files~=^(?!internal\/.*_test\.go).*$
@@ -249,10 +258,10 @@ pull_request_rules:
       - or: *BRANCHES
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - title~=\[skip e2e\]
+      - or: *WHEN_CPP_UNIT_TEST_SUCCESS
+      - or: *WHEN_GO_UNIT_TEST_SUCCESS
+      - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=UT for Cpp'
-      - 'status-success=UT for Go'
-      - 'status-success=Integration Test'
       - 'status-success=Code Checker MacOS 12'
       # - 'status-success=Code Checker Amazonlinux 2023'
       - *source_code_files
@@ -266,10 +275,9 @@ pull_request_rules:
       - *2X_BRANCH
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - title~=\[skip e2e\]
-      # - 'status-success=Code Checker AMD64 Ubuntu 20.04'
-      - 'status-success=UT for Cpp'
-      - 'status-success=UT for Go'
-      - 'status-success=Integration Test'
+      - or: *WHEN_CPP_UNIT_TEST_SUCCESS
+      - or: *WHEN_GO_UNIT_TEST_SUCCESS
+      - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - 'status-success=Code Checker MacOS 12'
       - *source_code_files
     actions:
@@ -351,6 +359,7 @@ pull_request_rules:
         message: |
           @{{author}} E2e jenkins job failed, comment `/run-cpu-e2e` can trigger the job again.
 
+# when go-sdk check failed, prompt user to rerun go-sdk job
   - name: Add comment when go-sdk check failed
     conditions:
       # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
@@ -360,6 +369,39 @@ pull_request_rules:
       comment:
         message: |
           @{{author}} go-sdk check failed, comment `rerun go-sdk` can trigger the job again.
+
+# when cpp-unit-test check failed, prompt user to rerun cpp-unit-test job
+  - name: Add comment when cpp-unit-test check failed
+    conditions:
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
+      - 'check-failure=cpp-unit-test'
+    actions:
+      comment:
+        message: |
+          @{{author}} cpp-unit-test check failed, comment `rerun cpp-unit-test` can trigger the job again.
+
+# when go-unit-test check failed, prompt user to rerun go-unit-test job
+  - name: Add comment when go-unit-test check failed
+    conditions:
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
+      - 'check-failure=go-unit-test'
+    actions:
+      comment:
+        message: |
+          @{{author}} go-unit-test check failed, comment `rerun go-unit-test` can trigger the job again.
+
+# when integration-test check failed, prompt user to rerun integration-test job
+  - name: Add comment when integration-test check failed
+    conditions:
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
+      - 'check-failure=integration-test'
+    actions:
+      comment:
+        message: |
+          @{{author}} integration-test check failed, comment `rerun integration-test` can trigger the job again.
 
   - name: Add comment when code checker or ut failed -master
     conditions:

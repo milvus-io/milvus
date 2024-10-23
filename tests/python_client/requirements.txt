@@ -62,9 +62,10 @@ fastparquet==2023.7.0
 # for bf16 datatype
 ml-dtypes==0.2.0
 
-# for text match
+# for full text search
 bm25s==0.2.0
 jieba==0.42.1
+
 
 # for perf test
 locust==2.25.0
