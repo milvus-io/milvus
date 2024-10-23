@@ -24,8 +24,6 @@ cp $PWD"/internal/core/output/lib/"*.dylib* "$LIBRARY_PATH" 2>/dev/null || true
 cp $PWD"/internal/core/output/lib/"*.so* "$LIBRARY_PATH" || true
 cp $PWD"/internal/core/output/lib64/"*.so* "$LIBRARY_PATH" 2>/dev/null || true
 
-if [ "$USE_ASAN" == "ON" ]; then
-    for LIB_PATH in $(ldconfig -p | grep -E '(asan|atomic)' | awk '{print $NF}'); do
-        cp "$LIB_PATH" "$LIBRARY_PATH" 2>/dev/null
-    done
-fi
+for LIB_PATH in $(ldd ./bin/milvus | grep -E '(asan|atomic)' | awk '{print $3}'); do
+    cp "$LIB_PATH" "$LIBRARY_PATH" 2>/dev/null
+done
