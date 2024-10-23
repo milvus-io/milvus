@@ -14,7 +14,6 @@ from npy_append_array import NpyAppendArray
 from faker import Faker
 from pathlib import Path
 from minio import Minio
-from pymilvus import DataType, CollectionSchema
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
 from common.common_params import ExprCheckParams
@@ -24,6 +23,12 @@ import pickle
 from collections import Counter
 import bm25s
 import jieba
+import re
+
+from pymilvus import CollectionSchema, DataType
+
+from bm25s.tokenization import Tokenizer
+
 fake = Faker()
 
 
@@ -76,23 +81,83 @@ class ParamInfo:
 param_info = ParamInfo()
 
 
-def analyze_documents(texts, language="en"):
-    stopwords = "en"
-    if language in ["en", "english"]:
-        stopwords = "en"
+def get_bm25_ground_truth(corpus, queries, top_k=100, language="en"):
+    """
+    Get the ground truth for BM25 search.
+    :param corpus: The corpus of documents
+    :param queries: The query string or list of query strings
+    :return: The ground truth for BM25 search
+    """
+
+    def remove_punctuation(text):
+        text = text.strip()
+        text = text.replace("\n", " ")
+        return re.sub(r'[^\w\s]', ' ', text)
+
+    # Tokenize the corpus
+    def jieba_split(text):
+        text_without_punctuation = remove_punctuation(text)
+        return jieba.lcut(text_without_punctuation)
+
+    stopwords = "english" if language in ["en", "english"] else [" "]
+    stemmer = None
     if language in ["zh", "cn", "chinese"]:
-        stopword = " "
-        new_texts = []
-        for doc in texts:
-            seg_list = jieba.cut(doc, cut_all=True)
-            new_texts.append(" ".join(seg_list))
-        texts = new_texts
-        stopwords = [stopword]
+        splitter = jieba_split
+        tokenizer = Tokenizer(
+            stemmer=stemmer, splitter=splitter, stopwords=stopwords
+        )
+    else:
+        tokenizer = Tokenizer(
+            stemmer=stemmer, stopwords=stopwords
+        )
+    corpus_tokens = tokenizer.tokenize(corpus, return_as="tuple")
+    retriever = bm25s.BM25()
+    retriever.index(corpus_tokens)
+    query_tokens = tokenizer.tokenize(queries,return_as="tuple")
+    results, scores = retriever.retrieve(query_tokens, corpus=corpus, k=top_k)
+    return results, scores
+
+
+
+
+def custom_tokenizer(language="en"):
+    def remove_punctuation(text):
+        text = text.strip()
+        text = text.replace("\n", " ")
+        return re.sub(r'[^\w\s]', ' ', text)
+
+    # Tokenize the corpus
+    def jieba_split(text):
+        text_without_punctuation = remove_punctuation(text)
+        return jieba.lcut(text_without_punctuation)
+
+    def blank_space_split(text):
+        text_without_punctuation = remove_punctuation(text)
+        return text_without_punctuation.split()
+
+    stopwords = [" "]
+    stemmer = None
+    if language in ["zh", "cn", "chinese"]:
+        splitter = jieba_split
+        tokenizer = Tokenizer(
+            stemmer=stemmer, splitter=splitter, stopwords=stopwords
+        )
+    else:
+        splitter = blank_space_split
+        tokenizer = Tokenizer(
+            stemmer=stemmer, splitter= splitter, stopwords=stopwords
+        )
+    return tokenizer
+
+
+def analyze_documents(texts, language="en"):
+
+    tokenizer = custom_tokenizer(language)
     # Start timing
     t0 = time.time()
 
     # Tokenize the corpus
-    tokenized = bm25s.tokenize(texts, lower=True, stopwords=stopwords)
+    tokenized = tokenizer.tokenize(texts, return_as="tuple")
     # log.info(f"Tokenized: {tokenized}")
     # Create a frequency counter
     freq = Counter()
@@ -112,25 +177,23 @@ def analyze_documents(texts, language="en"):
 
     return word_freq
 
+def check_token_overlap(text_a, text_b, language="en"):
+    word_freq_a = analyze_documents([text_a], language)
+    word_freq_b = analyze_documents([text_b], language)
+    overlap = set(word_freq_a.keys()).intersection(set(word_freq_b.keys()))
+    return overlap, word_freq_a, word_freq_b
+
 
 def split_dataframes(df, fields, language="en"):
     df_copy = df.copy()
-    if language in ["zh", "cn", "chinese"]:
-        for col in fields:
-            new_texts = []
-            for doc in df[col]:
-                seg_list = jieba.cut(doc, cut_all=True)
-                new_texts.append(list(seg_list))
-            df_copy[col] = new_texts
-        return df_copy
+    tokenizer = custom_tokenizer(language)
     for col in fields:
         texts = df[col].to_list()
-        tokenized = bm25s.tokenize(texts, lower=True, stopwords="en")
+        tokenized = tokenizer.tokenize(texts, return_as="tuple")
         new_texts = []
         id_vocab_map = {id: word for word, id in tokenized.vocab.items()}
         for doc_ids in tokenized.ids:
             new_texts.append([id_vocab_map[token_id] for token_id in doc_ids])
-
         df_copy[col] = new_texts
     return df_copy
 
