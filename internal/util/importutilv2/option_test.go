@@ -20,10 +20,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 func TestOption_GetTimeout(t *testing.T) {
