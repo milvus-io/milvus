@@ -88,7 +88,9 @@ RustArray tantivy_regex_query(void *ptr, const char *pattern);
 
 RustArray tantivy_match_query(void *ptr, const char *query);
 
-void tantivy_register_tokenizer(void *ptr, const char *tokenizer_name, void *tokenizer_params);
+void tantivy_register_tokenizer(void *ptr,
+                                const char *tokenizer_name,
+                                const char *tokenizer_params);
 
 void *tantivy_create_index(const char *field_name,
                            TantivyDataType data_type,
@@ -142,7 +144,7 @@ void tantivy_index_add_multi_keywords(void *ptr,
 void *tantivy_create_text_writer(const char *field_name,
                                  const char *path,
                                  const char *tokenizer_name,
-                                 void *tokenizer_params,
+                                 const char *tokenizer_params,
                                  uintptr_t num_threads,
                                  uintptr_t overall_memory_budget_in_bytes,
                                  bool in_ram);
@@ -157,7 +159,7 @@ bool tantivy_token_stream_advance(void *token_stream);
 
 const char *tantivy_token_stream_get_token(void *token_stream);
 
-void *tantivy_create_tokenizer(void *tokenizer_params);
+void *tantivy_create_tokenizer(const char *tokenizer_params);
 
 void *tantivy_clone_tokenizer(void *ptr);
 

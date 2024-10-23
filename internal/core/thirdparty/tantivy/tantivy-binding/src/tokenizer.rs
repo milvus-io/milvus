@@ -7,12 +7,8 @@ use serde_json as json;
 use crate::tokenizer_filter::*;
 use crate::log::init_log;
 
-lazy_static! {
-    static ref DEFAULT_TOKENIZER_MANAGER: TokenizerManager = TokenizerManager::default();
-}
-
-pub(crate) fn default_tokenizer() -> TextAnalyzer {
-    DEFAULT_TOKENIZER_MANAGER.get("default").unwrap()
+pub(crate) fn standard_tokenizer() -> TextAnalyzer {
+    TextAnalyzer::builder(SimpleTokenizer::default()).build()
 }
 
 struct TantivyBuilder<'a>{
@@ -89,6 +85,7 @@ impl TantivyBuilder<'_>{
                     }
                     Some(builder.build())
                 }
+            // TODO support jieba filter and use same builder with standard.
             "jieba" => {
                 Some(tantivy_jieba::JiebaTokenizer {}.into())
             }
@@ -100,58 +97,57 @@ impl TantivyBuilder<'_>{
     }
 }
 
-pub(crate) fn create_tokenizer(params: &HashMap<String, String>) -> Option<TextAnalyzer> {
+pub(crate) fn create_tokenizer(params: &String) -> Option<TextAnalyzer> {
     init_log();
 
-    let analyzer_json_value = match params.get("analyzer"){
-        Some(value) => {
-            let json_analyzer = json::from_str::<json::Value>(value);
-            if json_analyzer.is_err() {
+    match json::from_str::<json::Value>(&params){
+        Ok(value) =>{
+            if value.is_null(){
+                return Some(standard_tokenizer());
+            }
+            if !value.is_object(){
                 return None;
             }
-            let json_value = json_analyzer.unwrap();
-            if !json_value.is_object(){
-                return None
+            let json_params = value.as_object().unwrap();
+            // create builder
+            let analyzer_params=json_params.get("analyzer");
+            if analyzer_params.is_none(){
+                return Some(standard_tokenizer());
             }
-            json_value
-        }
-        None => json::Value::Object(json::Map::<String, json::Value>::new()),
-    };
+            if !analyzer_params.unwrap().is_object(){
+                return None;
+            }
+            let mut builder = TantivyBuilder::new(analyzer_params.unwrap().as_object().unwrap());
 
-    let analyzer_params= analyzer_json_value.as_object().unwrap();
-    let mut builder = TantivyBuilder::new(analyzer_params);
-    let str_filter=params.get("filter");
-    if !str_filter.is_none(){
-        let json_filter = json::from_str::<json::Value>(str_filter.unwrap());
-        if json_filter.is_err(){
-            return None
-        }
+            // build custom filter
+            let filter_params=json_params.get("filter");
+            if !filter_params.is_none() && filter_params.unwrap().is_object(){
+                builder.add_costom_filters(filter_params.unwrap().as_object().unwrap());
+            }
 
-        let filter_params = json_filter.unwrap();
-        if !filter_params.is_object(){
-            return None
-        }
-
-        builder.add_costom_filters(filter_params.as_object().unwrap());
+            // build analyzer
+            builder.build()
+        },
+        Err(_e) => None,
     }
-    builder.build()
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use crate::tokenizer::create_tokenizer;
 
     #[test]
     fn test_create_tokenizer() {
-        let mut params : HashMap<String, String> = HashMap::new();
-        let analyzer_params = r#"
+        let params = r#"
         {
-            "tokenizer": "jieba"
+            "analyzer": 
+            {
+                "tokenizer": "standard",
+                "filter": [""],
+            },
         }"#;
 
-        params.insert("analyzer".to_string(), analyzer_params.to_string());
-        let tokenizer = create_tokenizer(&params);
+        let tokenizer = create_tokenizer(&params.to_string());
         assert!(tokenizer.is_some());
     }
 }
