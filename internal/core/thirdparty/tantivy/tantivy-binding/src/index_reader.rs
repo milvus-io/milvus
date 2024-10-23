@@ -65,7 +65,7 @@ impl IndexReaderWrapper {
         sum
     }
 
-    pub(crate) fn search(&self, q: &dyn Query) -> Vec<u32> {
+    pub(crate) fn search(&self, q: &dyn Query) -> Vec<i64> {
         let searcher = self.reader.searcher();
         match self.id_field {
             Some(_) => {
@@ -79,7 +79,7 @@ impl IndexReaderWrapper {
         }
     }
 
-    pub fn term_query_i64(&self, term: i64) -> Vec<u32> {
+    pub fn term_query_i64(&self, term: i64) -> Vec<i64> {
         let q = TermQuery::new(
             Term::from_field_i64(self.field, term),
             IndexRecordOption::Basic,
@@ -87,7 +87,7 @@ impl IndexReaderWrapper {
         self.search(&q)
     }
 
-    pub fn lower_bound_range_query_i64(&self, lower_bound: i64, inclusive: bool) -> Vec<u32> {
+    pub fn lower_bound_range_query_i64(&self, lower_bound: i64, inclusive: bool) -> Vec<i64> {
         let q = RangeQuery::new_i64_bounds(
             self.field_name.to_string(),
             make_bounds(lower_bound, inclusive),
@@ -96,7 +96,7 @@ impl IndexReaderWrapper {
         self.search(&q)
     }
 
-    pub fn upper_bound_range_query_i64(&self, upper_bound: i64, inclusive: bool) -> Vec<u32> {
+    pub fn upper_bound_range_query_i64(&self, upper_bound: i64, inclusive: bool) -> Vec<i64> {
         let q = RangeQuery::new_i64_bounds(
             self.field_name.to_string(),
             Bound::Unbounded,
@@ -111,14 +111,14 @@ impl IndexReaderWrapper {
         upper_bound: i64,
         lb_inclusive: bool,
         ub_inclusive: bool,
-    ) -> Vec<u32> {
+    ) -> Vec<i64> {
         let lb = make_bounds(lower_bound, lb_inclusive);
         let ub = make_bounds(upper_bound, ub_inclusive);
         let q = RangeQuery::new_i64_bounds(self.field_name.to_string(), lb, ub);
         self.search(&q)
     }
 
-    pub fn term_query_f64(&self, term: f64) -> Vec<u32> {
+    pub fn term_query_f64(&self, term: f64) -> Vec<i64> {
         let q = TermQuery::new(
             Term::from_field_f64(self.field, term),
             IndexRecordOption::Basic,
@@ -126,7 +126,7 @@ impl IndexReaderWrapper {
         self.search(&q)
     }
 
-    pub fn lower_bound_range_query_f64(&self, lower_bound: f64, inclusive: bool) -> Vec<u32> {
+    pub fn lower_bound_range_query_f64(&self, lower_bound: f64, inclusive: bool) -> Vec<i64> {
         let q = RangeQuery::new_f64_bounds(
             self.field_name.to_string(),
             make_bounds(lower_bound, inclusive),
@@ -135,7 +135,7 @@ impl IndexReaderWrapper {
         self.search(&q)
     }
 
-    pub fn upper_bound_range_query_f64(&self, upper_bound: f64, inclusive: bool) -> Vec<u32> {
+    pub fn upper_bound_range_query_f64(&self, upper_bound: f64, inclusive: bool) -> Vec<i64> {
         let q = RangeQuery::new_f64_bounds(
             self.field_name.to_string(),
             Bound::Unbounded,
@@ -150,14 +150,14 @@ impl IndexReaderWrapper {
         upper_bound: f64,
         lb_inclusive: bool,
         ub_inclusive: bool,
-    ) -> Vec<u32> {
+    ) -> Vec<i64> {
         let lb = make_bounds(lower_bound, lb_inclusive);
         let ub = make_bounds(upper_bound, ub_inclusive);
         let q = RangeQuery::new_f64_bounds(self.field_name.to_string(), lb, ub);
         self.search(&q)
     }
 
-    pub fn term_query_bool(&self, term: bool) -> Vec<u32> {
+    pub fn term_query_bool(&self, term: bool) -> Vec<i64> {
         let q = TermQuery::new(
             Term::from_field_bool(self.field, term),
             IndexRecordOption::Basic,
@@ -165,7 +165,7 @@ impl IndexReaderWrapper {
         self.search(&q)
     }
 
-    pub fn term_query_keyword(&self, term: &str) -> Vec<u32> {
+    pub fn term_query_keyword(&self, term: &str) -> Vec<i64> {
         let q = TermQuery::new(
             Term::from_field_text(self.field, term),
             IndexRecordOption::Basic,
@@ -173,7 +173,7 @@ impl IndexReaderWrapper {
         self.search(&q)
     }
 
-    pub fn lower_bound_range_query_keyword(&self, lower_bound: &str, inclusive: bool) -> Vec<u32> {
+    pub fn lower_bound_range_query_keyword(&self, lower_bound: &str, inclusive: bool) -> Vec<i64> {
         let q = RangeQuery::new_str_bounds(
             self.field_name.to_string(),
             make_bounds(lower_bound, inclusive),
@@ -182,7 +182,7 @@ impl IndexReaderWrapper {
         self.search(&q)
     }
 
-    pub fn upper_bound_range_query_keyword(&self, upper_bound: &str, inclusive: bool) -> Vec<u32> {
+    pub fn upper_bound_range_query_keyword(&self, upper_bound: &str, inclusive: bool) -> Vec<i64> {
         let q = RangeQuery::new_str_bounds(
             self.field_name.to_string(),
             Bound::Unbounded,
@@ -197,19 +197,19 @@ impl IndexReaderWrapper {
         upper_bound: &str,
         lb_inclusive: bool,
         ub_inclusive: bool,
-    ) -> Vec<u32> {
+    ) -> Vec<i64> {
         let lb = make_bounds(lower_bound, lb_inclusive);
         let ub = make_bounds(upper_bound, ub_inclusive);
         let q = RangeQuery::new_str_bounds(self.field_name.to_string(), lb, ub);
         self.search(&q)
     }
 
-    pub fn prefix_query_keyword(&self, prefix: &str) -> Vec<u32> {
+    pub fn prefix_query_keyword(&self, prefix: &str) -> Vec<i64> {
         let pattern = format!("{}(.|\n)*", prefix);
         self.regex_query(&pattern)
     }
 
-    pub fn regex_query(&self, pattern: &str) -> Vec<u32> {
+    pub fn regex_query(&self, pattern: &str) -> Vec<i64> {
         let q = RegexQuery::from_pattern(&pattern, self.field).unwrap();
         self.search(&q)
     }

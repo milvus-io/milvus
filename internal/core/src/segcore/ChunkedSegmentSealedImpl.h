@@ -97,6 +97,22 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadTextIndex(FieldId field_id,
                   std::unique_ptr<index::TextMatchIndex> index) override;
+    void
+    LoadJsonKeyIndex(
+        FieldId field_id,
+        std::unique_ptr<index::JsonKeyInvertedIndex> index) override {
+        PanicInfo(ErrorCode::NotImplemented, "not supported");
+    }
+
+    index::JsonKeyInvertedIndex*
+    GetJsonKeyIndex(FieldId field_id) const override {
+        PanicInfo(ErrorCode::NotImplemented, "not supported");
+    }
+
+    std::pair<std::string_view, bool>
+    GetJsonData(FieldId field_id, size_t offset) const override {
+        PanicInfo(ErrorCode::NotImplemented, "not supported");
+    }
 
  public:
     size_t

@@ -15,7 +15,7 @@ enum class TantivyDataType : uint8_t {
 };
 
 struct RustArray {
-  uint32_t *array;
+  int64_t *array;
   size_t len;
   size_t cap;
 };
