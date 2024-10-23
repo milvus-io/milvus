@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::ffi::c_char;
 use std::ffi::c_void;
 use std::ffi::CStr;
@@ -7,6 +6,7 @@ use crate::index_writer::IndexWriterWrapper;
 use crate::tokenizer::create_tokenizer;
 use crate::util::create_binding;
 use crate::string_c::c_str_to_str;
+use crate::log::init_log;
 
 #[no_mangle]
 pub extern "C" fn tantivy_create_text_writer(
@@ -18,6 +18,7 @@ pub extern "C" fn tantivy_create_text_writer(
     overall_memory_budget_in_bytes: usize,
     in_ram: bool,
 ) -> *mut c_void {
+    init_log();
     let field_name_str = unsafe { CStr::from_ptr(field_name).to_str().unwrap() };
     let path_str = unsafe { CStr::from_ptr(path).to_str().unwrap() };
     let tokenizer_name_str = unsafe { CStr::from_ptr(tokenizer_name).to_str().unwrap() };
@@ -26,7 +27,7 @@ pub extern "C" fn tantivy_create_text_writer(
         create_tokenizer(&params)
     };
     match analyzer {
-        Some(text_analyzer) => {
+        Ok(text_analyzer) => {
             let wrapper = IndexWriterWrapper::create_text_writer(
                 String::from(field_name_str),
                 String::from(path_str),
@@ -38,8 +39,9 @@ pub extern "C" fn tantivy_create_text_writer(
             );
             create_binding(wrapper)
         }
-        None => {
+        Err(err) => {
+            log::warn!("create tokenizer failed with error: {} param: {}", err.to_string(), unsafe{c_str_to_str(tokenizer_params).to_string()});
             std::ptr::null_mut()
-        }
+        },
     }
 }

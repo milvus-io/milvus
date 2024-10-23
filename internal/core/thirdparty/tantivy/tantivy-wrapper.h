@@ -101,8 +101,7 @@ struct TantivyIndexWrapper {
                         bool in_ram,
                         const char* path,
                         const char* tokenizer_name = DEFAULT_TOKENIZER_NAME,
-                        const char*
-                            tokenizer_params = DEFAULT_TOKENIZER_PARAMS,
+                        const char* tokenizer_params = DEFAULT_TOKENIZER_PARAMS,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
@@ -132,9 +131,8 @@ struct TantivyIndexWrapper {
     }
 
     void
-    register_tokenizer(
-        const char* tokenizer_name,
-        const char* tokenizer_params) {
+    register_tokenizer(const char* tokenizer_name,
+                       const char* tokenizer_params) {
         if (reader_ != nullptr) {
             tantivy_register_tokenizer(
                 reader_, tokenizer_name, tokenizer_params);

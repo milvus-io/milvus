@@ -24,7 +24,7 @@ ParseTokenizerParams(const TypeParams& params) {
     if (iter == params.end()) {
         return "{}";
     }
-    return iter ->second.c_str();
+    return iter->second;
 }
 
 bool

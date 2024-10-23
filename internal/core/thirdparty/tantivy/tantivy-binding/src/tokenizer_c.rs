@@ -5,17 +5,22 @@ use crate::{
     string_c::c_str_to_str,
     tokenizer::create_tokenizer,
     util::{create_binding, free_binding},
+    log::init_log,
 };
 
 #[no_mangle]
 pub extern "C" fn tantivy_create_tokenizer(tokenizer_params: *const c_char) -> *mut c_void {
+    init_log();
     let analyzer = unsafe {
         let params = c_str_to_str(tokenizer_params).to_string();
         create_tokenizer(&params)
     };
     match analyzer {
-        Some(text_analyzer) => create_binding(text_analyzer),
-        None => std::ptr::null_mut(),
+        Ok(text_analyzer) => create_binding(text_analyzer),
+        Err(err) => {
+            log::warn!("create tokenizer failed with error: {}", err.to_string());
+            std::ptr::null_mut()
+        },
     }
 }
 

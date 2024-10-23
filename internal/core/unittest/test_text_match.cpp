@@ -10,9 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <string>
 
 #include "common/Schema.h"
-#include "segcore/segment_c.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
@@ -80,20 +80,20 @@ TEST(ParseJson, Naive) {
 TEST(ParseTokenizerParams, NoTokenizerParams) {
     TypeParams params{{"k", "v"}};
     auto p = ParseTokenizerParams(params);
-    ASSERT_EQ("{}", p);
+    ASSERT_EQ("{}", std::string(p));
 }
 
 TEST(ParseTokenizerParams, Default) {
-    TypeParams params{{"tokenizer_params", R"({"tokenizer": "default"})"}};
+    TypeParams params{
+        {"tokenizer_params", R"({"analyzer":{"tokenizer": "standard"}})"}};
     auto p = ParseTokenizerParams(params);
     ASSERT_EQ(params.at("tokenizer_params"), p);
 }
 
 TEST(TextMatch, Index) {
     using Index = index::TextMatchIndex;
-    auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
-                                         "milvus_tokenizer",
-                                         "{}");
+    auto index = std::make_unique<Index>(
+        std::numeric_limits<int64_t>::max(), "milvus_tokenizer", "{}");
     index->CreateReader();
     index->AddText("football, basketball, pingpang", 0);
     index->AddText("swimming, football", 1);

@@ -1,6 +1,8 @@
 use tantivy::tokenizer::*;
 use serde_json as json;
 
+use crate::error::TantivyError;
+
 pub(crate) enum SystemFilter{
     Invalid,
     LowerCase(LowerCaser),
@@ -33,19 +35,19 @@ impl SystemFilter{
 //     "max": 10, // length
 // }
 // TODO support min length
-fn get_length_filter(params: &json::Map<String, json::Value>) -> Result<SystemFilter, ()>{
+fn get_length_filter(params: &json::Map<String, json::Value>) -> Result<SystemFilter, TantivyError>{
     let limit_str = params.get("max");
     if limit_str.is_none() || !limit_str.unwrap().is_u64(){
-        return Err(())
+        return Err("lenth max param was none or not uint".into())
     }
     let limit = limit_str.unwrap().as_u64().unwrap() as usize;
     Ok(SystemFilter::Length(RemoveLongFilter::limit(limit)))
 }
 
-fn get_stop_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, ()>{
+fn get_stop_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, TantivyError>{
     let value = params.get("stop_words");
     if value.is_none() || !value.unwrap().is_array(){
-        return Err(())
+        return Err("stop_words should be array".into())
     }
 
     let stop_words= value.unwrap().as_array().unwrap();
@@ -53,16 +55,16 @@ fn get_stop_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilte
     for element in stop_words{
         match element.as_str(){
             Some(word) => str_list.push(word.to_string()),
-            None => return Err(())
+            None => return Err("stop words item should be string".into())
         }
     };
     Ok(SystemFilter::Stop(StopWordFilter::remove(str_list)))
 }
 
-fn get_decompounder_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, ()>{
+fn get_decompounder_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, TantivyError>{
     let value = params.get("word_list");
     if value.is_none() || !value.unwrap().is_array(){
-        return Err(())
+        return Err("decompounder word list should be array".into())
     }
 
     let stop_words= value.unwrap().as_array().unwrap();
@@ -70,25 +72,25 @@ fn get_decompounder_filter(params: &json::Map<String, json::Value>)-> Result<Sys
     for element in stop_words{
         match element.as_str(){
             Some(word) => str_list.push(word.to_string()),
-            None => return Err(())
+            None => return Err("decompounder word list item should be string".into())
         }
     };
 
     match SplitCompoundWords::from_dictionary(str_list){
         Ok(f) => Ok(SystemFilter::Decompounder(f)),
-        Err(_e) => Err(())
+        Err(e) => Err(format!("create decompounder failed: {}", e.to_string()).into())
     }
 }
 
-fn get_stemmer_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, ()>{
+fn get_stemmer_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, TantivyError>{
     let value = params.get("language");
     if value.is_none() || !value.unwrap().is_string(){
-        return Err(())
+        return Err("stemmer language field should be string".into())
     }
 
     match value.unwrap().as_str().unwrap().into_language(){
         Ok(language) => Ok(SystemFilter::Stemmer(Stemmer::new(language))),
-        Err(_e) => Err(()),
+        Err(e) => Err(format!("create stemmer failed : {}", e.to_string()).into()),
     }
 }
 
@@ -98,9 +100,9 @@ trait LanguageParser {
 }
 
 impl LanguageParser for &str {   
-    type Error = ();
+    type Error = TantivyError;
     fn into_language(self) -> Result<Language, Self::Error> {
-        match self {
+        match self.to_lowercase().as_str() {
             "arabig" => Ok(Language::Arabic),
             "danish" => Ok(Language::Danish),
             "dutch" => Ok(Language::Dutch),
@@ -119,7 +121,7 @@ impl LanguageParser for &str {
             "swedish" => Ok(Language::Swedish),
             "tamil" => Ok(Language::Tamil),
             "turkish" => Ok(Language::Turkish),
-            _ => Err(()),
+            other => Err(format!("unsupport language: {}", other).into()),
         }
     }
 }
@@ -136,13 +138,13 @@ impl From<&str> for SystemFilter{
 }
 
 impl TryFrom<&json::Map<String, json::Value>> for SystemFilter {
-    type Error = ();
+    type Error = TantivyError;
 
     fn try_from(params: &json::Map<String, json::Value>) -> Result<Self, Self::Error> {
         match params.get(&"type".to_string()){
             Some(value) =>{
                 if !value.is_string(){
-                    return Err(());
+                    return Err("filter type should be string".into());
                 };
 
                 match value.as_str().unwrap(){
@@ -150,10 +152,10 @@ impl TryFrom<&json::Map<String, json::Value>> for SystemFilter {
                     "stop" => get_stop_filter(params),
                     "decompounder" => get_decompounder_filter(params),
                     "stemmer" => get_stemmer_filter(params),
-                    _other=>Err(()),
+                    other=> Err(format!("unsupport filter type: {}", other).into()),
                 }
             }
-            None => Err(()),
+            None => Err("no type field in filter params".into()),
         }
     }
 }

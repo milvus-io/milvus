@@ -19,10 +19,9 @@
 namespace milvus::index {
 constexpr const char* TMP_TEXT_LOG_PREFIX = "/tmp/milvus/text-log/";
 
-TextMatchIndex::TextMatchIndex(
-    int64_t commit_interval_in_ms,
-    const char* tokenizer_name,
-    const char* tokenizer_params)
+TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
+                               const char* tokenizer_name,
+                               const char* tokenizer_params)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Text;
@@ -31,10 +30,9 @@ TextMatchIndex::TextMatchIndex(
         field_name.c_str(), true, "", tokenizer_name, tokenizer_params);
 }
 
-TextMatchIndex::TextMatchIndex(
-    const std::string& path,
-    const char* tokenizer_name,
-    const char* tokenizer_params)
+TextMatchIndex::TextMatchIndex(const std::string& path,
+                               const char* tokenizer_name,
+                               const char* tokenizer_params)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     path_ = path;
@@ -47,10 +45,9 @@ TextMatchIndex::TextMatchIndex(
                                                      tokenizer_params);
 }
 
-TextMatchIndex::TextMatchIndex(
-    const storage::FileManagerContext& ctx,
-    const char* tokenizer_name,
-    const char* tokenizer_params)
+TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
+                               const char* tokenizer_name,
+                               const char* tokenizer_params)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     schema_ = ctx.fieldDataMeta.field_schema;
@@ -174,9 +171,8 @@ TextMatchIndex::CreateReader() {
 }
 
 void
-TextMatchIndex::RegisterTokenizer(
-    const char* tokenizer_name,
-    const char* tokenizer_params) {
+TextMatchIndex::RegisterTokenizer(const char* tokenizer_name,
+                                  const char* tokenizer_params) {
     wrapper_->register_tokenizer(tokenizer_name, tokenizer_params);
 }
 

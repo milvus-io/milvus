@@ -18,6 +18,7 @@ mod tokenizer;
 mod tokenizer_filter;
 mod tokenizer_c;
 mod util;
+mod error;
 mod util_c;
 mod vec_collector;
 

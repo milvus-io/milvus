@@ -4,7 +4,7 @@ use tantivy::{
     Term,
 };
 
-use crate::{index_reader::IndexReaderWrapper, tokenizer::standard_tokenizer};
+use crate::{index_reader::IndexReaderWrapper, tokenizer::standard_analyzer};
 
 impl IndexReaderWrapper {
     // split the query string into multiple tokens using index's default tokenizer,
@@ -14,7 +14,7 @@ impl IndexReaderWrapper {
         let mut tokenizer = self
             .index
             .tokenizer_for_field(self.field)
-            .unwrap_or(standard_tokenizer())
+            .unwrap_or(standard_analyzer())
             .clone();
         let mut token_stream = tokenizer.token_stream(q);
         let mut terms: Vec<Term> = Vec::new();
