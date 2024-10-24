@@ -24,7 +24,10 @@ extern "C" {
 typedef void* CTokenizer;
 
 CStatus
-create_tokenizer(CMap m, CTokenizer* tokenizer);
+create_tokenizer(const char* params, CTokenizer* tokenizer);
+
+CStatus
+clone_tokenizer(CTokenizer* tokenizer, CTokenizer* rst);
 
 void
 free_tokenizer(CTokenizer tokenizer);

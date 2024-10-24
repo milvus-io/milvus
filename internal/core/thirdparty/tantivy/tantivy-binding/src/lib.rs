@@ -15,8 +15,10 @@ mod log;
 mod string_c;
 mod token_stream_c;
 mod tokenizer;
+mod tokenizer_filter;
 mod tokenizer_c;
 mod util;
+mod error;
 mod util_c;
 mod vec_collector;
 
