@@ -206,7 +206,7 @@ func (c *Collection) GetLoadType() querypb.LoadType {
 
 func (c *Collection) Ref(count uint32) uint32 {
 	refCount := c.refCount.Add(count)
-	log.Debug("collection ref increment",
+	log.Info("collection ref increment",
 		zap.Int64("collectionID", c.ID()),
 		zap.Uint32("refCount", refCount),
 	)
@@ -215,7 +215,7 @@ func (c *Collection) Ref(count uint32) uint32 {
 
 func (c *Collection) Unref(count uint32) uint32 {
 	refCount := c.refCount.Sub(count)
-	log.Debug("collection ref decrement",
+	log.Info("collection ref decrement",
 		zap.Int64("collectionID", c.ID()),
 		zap.Uint32("refCount", refCount),
 	)
