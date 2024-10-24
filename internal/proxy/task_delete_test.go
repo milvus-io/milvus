@@ -297,6 +297,45 @@ func TestDeleteRunner_Init(t *testing.T) {
 		assert.Error(t, dr.Init(context.Background()))
 	})
 
+	t.Run("fail to get collection info", func(t *testing.T) {
+		dr := deleteRunner{req: &milvuspb.DeleteRequest{
+			CollectionName: collectionName,
+			DbName:         dbName,
+		}}
+		cache := NewMockCache(t)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(collectionID, nil)
+		cache.On("GetCollectionInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil,
+			errors.New("mock get collection info"))
+
+		globalMetaCache = cache
+		assert.Error(t, dr.Init(context.Background()))
+	})
+
+	t.Run("deny delete in the replicate mode", func(t *testing.T) {
+		dr := deleteRunner{req: &milvuspb.DeleteRequest{
+			CollectionName: collectionName,
+			DbName:         dbName,
+		}}
+		cache := NewMockCache(t)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(collectionID, nil)
+		cache.On("GetCollectionInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionBasicInfo{
+			replicateMode: true,
+		}, nil)
+
+		globalMetaCache = cache
+		assert.Error(t, dr.Init(context.Background()))
+	})
+
 	t.Run("fail get collection schema", func(t *testing.T) {
 		dr := deleteRunner{req: &milvuspb.DeleteRequest{
 			CollectionName: collectionName,
@@ -309,6 +348,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(collectionID, nil)
+		cache.On("GetCollectionInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionBasicInfo{}, nil)
 		cache.On("GetCollectionSchema",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
@@ -332,6 +372,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(collectionID, nil)
+		cache.On("GetCollectionInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionBasicInfo{}, nil)
 		cache.On("GetCollectionSchema",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
@@ -376,6 +417,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(schema, nil)
+		cache.On("GetCollectionInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionBasicInfo{}, nil)
 
 		globalMetaCache = cache
 		assert.Error(t, dr.Init(context.Background()))
@@ -402,6 +444,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(schema, nil)
+		cache.On("GetCollectionInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionBasicInfo{}, nil)
 		cache.On("GetPartitionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
@@ -431,6 +474,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(collectionID, nil)
+		cache.On("GetCollectionInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionBasicInfo{}, nil)
 		cache.On("GetCollectionSchema",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),

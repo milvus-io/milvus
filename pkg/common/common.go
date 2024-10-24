@@ -183,6 +183,7 @@ const (
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
 	IndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
+	ReplicateEnableKey         = "replicate.enable"
 )
 
 const (
@@ -386,4 +387,14 @@ func ShouldFieldBeLoaded(kvs []*commonpb.KeyValuePair) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+func IsReplicateEnabled(kvs []*commonpb.KeyValuePair) (bool, bool) {
+	for _, kv := range kvs {
+		if kv.GetKey() == ReplicateEnableKey {
+			val, _ := strconv.ParseBool(kv.GetValue())
+			return val, true
+		}
+	}
+	return false, false
 }

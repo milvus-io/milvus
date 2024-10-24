@@ -124,6 +124,8 @@ type Proxy struct {
 	// resource manager
 	resourceManager        resource.Manager
 	replicateStreamManager *ReplicateStreamManager
+	replicateTargetTSMap   *typeutil.ConcurrentMap[string, uint64]
+	replicateCurrentTSMap  *typeutil.ConcurrentMap[string, uint64]
 
 	// materialized view
 	enableMaterializedView bool
@@ -152,6 +154,8 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		lbPolicy:               lbPolicy,
 		resourceManager:        resourceManager,
 		replicateStreamManager: replicateStreamManager,
+		replicateTargetTSMap:   typeutil.NewConcurrentMap[string, uint64](),
+		replicateCurrentTSMap:  typeutil.NewConcurrentMap[string, uint64](),
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	expr.Register("proxy", node)

@@ -1238,6 +1238,8 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		AlterCollectionRequest: request,
+		replicateTargetTSMap:   node.replicateTargetTSMap,
+		replicateCurrentTSMap:  node.replicateCurrentTSMap,
 		rootCoord:              node.rootCoord,
 		queryCoord:             node.queryCoord,
 		dataCoord:              node.dataCoord,
@@ -6088,16 +6090,37 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 	}, nil
 }
 
+func (node *Proxy) storeCurrentReplicateTS(channelName string, ts uint64) {
+	current, ok := node.replicateCurrentTSMap.Get(channelName)
+	if !ok || ts > current {
+		node.replicateCurrentTSMap.Insert(channelName, ts)
+	}
+}
+
 func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
 	}
 
-	if paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool() {
+	collectionReplicateEnable := paramtable.Get().CommonCfg.CollectionReplicateEnable.GetAsBool()
+	ttMsgEnabled := paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool()
+
+	// replicate message can be use in two ways, otherwise return error
+	// 1. collectionReplicateEnable is false and ttMsgEnabled is false, active/standby mode
+	// 2. collectionReplicateEnable is true and ttMsgEnabled is true, data migration mode
+	if (!collectionReplicateEnable && ttMsgEnabled) || (collectionReplicateEnable && !ttMsgEnabled) {
 		return &milvuspb.ReplicateMessageResponse{
 			Status: merr.Status(merr.ErrDenyReplicateMessage),
 		}, nil
 	}
+
+	if _, ok := node.replicateTargetTSMap.Get(req.GetChannelName()); ok {
+		log.Ctx(ctx).Warn("the related collection is altering properties, deny to replicate message")
+		return &milvuspb.ReplicateMessageResponse{
+			Status: merr.Status(merr.ErrDenyReplicateMessage),
+		}, nil
+	}
+
 	var err error
 
 	if req.GetChannelName() == "" {
@@ -6137,6 +6160,18 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 		StartPositions: req.StartPositions,
 		EndPositions:   req.EndPositions,
 	}
+	checkCollectionReplicateProperty := func(dbName, collectionName string) bool {
+		if !collectionReplicateEnable {
+			return true
+		}
+		info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collectionName, 0)
+		if err != nil {
+			log.Warn("get collection info failed", zap.String("collectionName", collectionName), zap.Error(err))
+			return false
+		}
+		return info.replicateMode
+	}
+
 	// getTsMsgFromConsumerMsg
 	for i, msgBytes := range req.Msgs {
 		header := commonpb.MsgHeader{}
@@ -6154,8 +6189,12 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 			log.Ctx(ctx).Warn("failed to unmarshal msg", zap.Int("index", i), zap.Error(err))
 			return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.ErrInvalidMsgBytes)}, nil
 		}
+		node.storeCurrentReplicateTS(req.GetChannelName(), tsMsg.EndTs())
 		switch realMsg := tsMsg.(type) {
 		case *msgstream.InsertMsg:
+			if !checkCollectionReplicateProperty(realMsg.GetDbName(), realMsg.GetCollectionName()) {
+				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.WrapErrCollectionReplicateMode("replicate"))}, nil
+			}
 			assignedSegmentInfos, err := node.segAssigner.GetSegmentID(realMsg.GetCollectionID(), realMsg.GetPartitionID(),
 				realMsg.GetShardName(), uint32(realMsg.NumRows), req.EndTs)
 			if err != nil {
@@ -6169,6 +6208,10 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 			for assignSegmentID := range assignedSegmentInfos {
 				realMsg.SegmentID = assignSegmentID
 				break
+			}
+		case *msgstream.DeleteMsg:
+			if !checkCollectionReplicateProperty(realMsg.GetDbName(), realMsg.GetCollectionName()) {
+				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.WrapErrCollectionReplicateMode("replicate"))}, nil
 			}
 		}
 		msgPack.Msgs = append(msgPack.Msgs, tsMsg)
