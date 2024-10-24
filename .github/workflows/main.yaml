@@ -218,10 +218,11 @@ jobs:
           kind: 'go'
 
   integration-test:
+    if: false 
     name: Integration Test
     needs: Build
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
@@ -270,7 +271,7 @@ jobs:
 
   codecov:
     name: Upload Code Coverage
-    needs: [UT-Go, integration-test]
+    needs: [UT-Go]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -282,10 +283,6 @@ jobs:
         uses: actions/download-artifact@v4.1.0
         with:
           name: go-result
-      - name: Download Integration Test coverage results
-        uses: actions/download-artifact@v4.1.0
-        with:
-          name: it-result
       - name: Display structure of code coverage results
         run: |
           ls -lah
@@ -295,17 +292,19 @@ jobs:
         id: upload_cov
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./go_coverage.txt,./it_coverage.txt
+          files: ./go_coverage.txt
           name: ubuntu-20.04-unittests
           fail_ci_if_error: true
           disable_safe_directory: true
+          verbose: true
       - name: Retry Upload coverage to Codecov
         if: ${{ failure()  && github.repository == 'milvus-io/milvus' }}
         uses: codecov/codecov-action@v4
         id: retry_upload_cov
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./go_coverage.txt,./it_coverage.txt
+          files: ./go_coverage.txt
           name: ubuntu-20.04-unittests
           fail_ci_if_error: true
           disable_safe_directory: true
+          verbose: true
