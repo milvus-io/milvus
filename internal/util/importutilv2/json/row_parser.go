@@ -399,16 +399,15 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 		}
 	case schemapb.DataType_Array:
 		arr, ok := obj.([]interface{})
-
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
 		maxCapacity, err := parameterutil.GetMaxCapacity(r.id2Field[fieldID])
 		if err != nil {
 			return nil, err
 		}
 		if err = common.CheckArrayCapacity(len(arr), maxCapacity); err != nil {
 			return nil, err
-		}
-		if !ok {
-			return nil, r.wrapTypeError(obj, fieldID)
 		}
 		scalarFieldData, err := r.arrayToFieldData(arr, r.id2Field[fieldID].GetElementType())
 		if err != nil {
