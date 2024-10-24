@@ -20,13 +20,16 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/pkg/metrics"
 )
 
-func NewListDeleteBuffer[T timed](startTs uint64, sizePerBlock int64) DeleteBuffer[T] {
+func NewListDeleteBuffer[T timed](startTs uint64, sizePerBlock int64, labels []string) DeleteBuffer[T] {
 	return &listDeleteBuffer[T]{
 		safeTs:       startTs,
 		sizePerBlock: sizePerBlock,
 		list:         []*cacheBlock[T]{newCacheBlock[T](startTs, sizePerBlock)},
+		labels:       labels,
 	}
 }
 
@@ -40,6 +43,18 @@ type listDeleteBuffer[T timed] struct {
 
 	safeTs       uint64
 	sizePerBlock int64
+
+	// cached metrics
+	rowNum int64
+	size   int64
+
+	// metrics labels
+	labels []string
+}
+
+func (b *listDeleteBuffer[T]) updateMetrics() {
+	metrics.QueryNodeDeleteBufferRowNum.WithLabelValues(b.labels...).Set(float64(b.rowNum))
+	metrics.QueryNodeDeleteBufferSize.WithLabelValues(b.labels...).Set(float64(b.size))
 }
 
 func (b *listDeleteBuffer[T]) Put(entry T) {
@@ -51,6 +66,11 @@ func (b *listDeleteBuffer[T]) Put(entry T) {
 	if errors.Is(err, errBufferFull) {
 		b.list = append(b.list, newCacheBlock[T](entry.Timestamp(), b.sizePerBlock, entry))
 	}
+
+	// update metrics
+	b.rowNum += entry.EntryNum()
+	b.size += entry.Size()
+	b.updateMetrics()
 }
 
 func (b *listDeleteBuffer[T]) ListAfter(ts uint64) []T {
@@ -87,9 +107,13 @@ func (b *listDeleteBuffer[T]) TryDiscard(ts uint64) {
 
 	if nextHead > 0 {
 		for idx := 0; idx < nextHead; idx++ {
+			rowNum, memSize := b.list[idx].Size()
+			b.rowNum -= rowNum
+			b.size -= memSize
 			b.list[idx] = nil
 		}
 		b.list = b.list[nextHead:]
+		b.updateMetrics()
 	}
 }
 
@@ -97,10 +121,5 @@ func (b *listDeleteBuffer[T]) Size() (entryNum, memorySize int64) {
 	b.mut.RLock()
 	defer b.mut.RUnlock()
 
-	for _, block := range b.list {
-		blockNum, blockSize := block.Size()
-		entryNum += blockNum
-		memorySize += blockSize
-	}
-	return entryNum, memorySize
+	return b.rowNum, b.size
 }
