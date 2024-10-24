@@ -12,7 +12,6 @@
 #include "common/ChunkWriter.h"
 #include <cstdint>
 #include <memory>
-#include <string_view>
 #include <vector>
 #include "arrow/array/array_binary.h"
 #include "arrow/array/array_primitive.h"
@@ -29,14 +28,14 @@ namespace milvus {
 void
 StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     auto size = 0;
-    std::vector<std::string_view> strs;
+    std::vector<std::string> strs;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
     for (auto batch : *data) {
         auto data = batch.ValueOrDie()->column(0);
         auto array = std::dynamic_pointer_cast<arrow::StringArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
-            strs.push_back(str);
+            strs.push_back(std::string(str));
             size += str.size();
         }
         auto null_bitmap_n = (data->length() + 7) / 8;
@@ -250,14 +249,14 @@ void
 SparseFloatVectorChunkWriter::write(
     std::shared_ptr<arrow::RecordBatchReader> data) {
     auto size = 0;
-    std::vector<std::string_view> strs;
+    std::vector<std::string> strs;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
     for (auto batch : *data) {
         auto data = batch.ValueOrDie()->column(0);
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
-            strs.push_back(str);
+            strs.push_back(std::string(str));
             size += str.size();
         }
         auto null_bitmap_n = (data->length() + 7) / 8;
