@@ -77,6 +77,7 @@ class Expr {
     DataType type_;
     const std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
+    // NOTE: unused
     std::shared_ptr<VectorFunction> vector_func_;
 };
 
@@ -84,6 +85,9 @@ using ExprPtr = std::shared_ptr<milvus::exec::Expr>;
 
 using SkipFunc = bool (*)(const milvus::SkipIndex&, FieldId, int);
 
+/*
+ * The expr has only one column.
+ */
 class SegmentExpr : public Expr {
  public:
     SegmentExpr(const std::vector<ExprPtr>&& input,
@@ -772,7 +776,8 @@ CompileExpression(const expr::TypedExprPtr& expr,
 class ExprSet {
  public:
     explicit ExprSet(const std::vector<expr::TypedExprPtr>& logical_exprs,
-                     ExecContext* exec_ctx) {
+                     ExecContext* exec_ctx)
+        : exec_ctx_(exec_ctx) {
         exprs_ = CompileExpressions(logical_exprs, exec_ctx);
     }
 
