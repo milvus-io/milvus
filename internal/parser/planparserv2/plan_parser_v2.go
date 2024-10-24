@@ -29,14 +29,17 @@ type exprParseKey struct {
 var exprCache = expirable.NewLRU[exprParseKey, any](256, nil, time.Minute*10)
 
 func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
-	parseKey := exprParseKey{collectionName: schema.GetCollectionName(), expr: exprStr}
-	val, ok := exprCache.Get(parseKey)
-	if !ok {
-		exprStr = convertHanToASCII(exprStr)
-		val = handleExprWithErrorListener(schema, exprStr, &errorListenerImpl{})
-		// Note that the errors will be cached, too.
-		exprCache.Add(parseKey, val)
-	}
+	//parseKey := exprParseKey{collectionName: schema.GetCollectionName(), expr: exprStr}
+	//val, ok := exprCache.Get(parseKey)
+	//if !ok {
+	//	exprStr = convertHanToASCII(exprStr)
+	//	val = handleExprWithErrorListener(schema, exprStr, &errorListenerImpl{})
+	//	// Note that the errors will be cached, too.
+	//	exprCache.Add(parseKey, val)
+	//}
+
+	exprStr = convertHanToASCII(exprStr)
+	val := handleExprWithErrorListener(schema, exprStr, &errorListenerImpl{})
 
 	return val
 }
@@ -78,7 +81,7 @@ func handleExprWithErrorListener(schema *typeutil.SchemaHelper, exprStr string, 
 	return ast.Accept(visitor)
 }
 
-func ParseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, error) {
+func ParseExpr(schema *typeutil.SchemaHelper, exprStr string, data ...*schemapb.FieldData) (*planpb.Expr, error) {
 	ret := handleExpr(schema, exprStr)
 
 	if err := getError(ret); err != nil {
@@ -91,6 +94,15 @@ func ParseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, err
 	}
 	if !canBeExecuted(predicate) {
 		return nil, fmt.Errorf("predicate is not a boolean expression: %s, data type: %s", exprStr, predicate.dataType)
+	}
+
+	valueMap, err := UnmarshalExpressionValues(data...)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := FillExpressionValue(predicate.expr, valueMap); err != nil {
+		return nil, err
 	}
 
 	return predicate.expr, nil
@@ -114,8 +126,8 @@ func ParseIdentifier(schema *typeutil.SchemaHelper, identifier string, checkFunc
 	return checkFunc(predicate.expr)
 }
 
-func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string) (*planpb.PlanNode, error) {
-	expr, err := ParseExpr(schema, exprStr)
+func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string, data ...*schemapb.FieldData) (*planpb.PlanNode, error) {
+	expr, err := ParseExpr(schema, exprStr, data...)
 	if err != nil {
 		return nil, err
 	}
@@ -160,12 +172,12 @@ func convertHanToASCII(s string) string {
 	return builder.String()
 }
 
-func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) (*planpb.PlanNode, error) {
+func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, data ...*schemapb.FieldData) (*planpb.PlanNode, error) {
 	parse := func() (*planpb.Expr, error) {
 		if len(exprStr) <= 0 {
 			return nil, nil
 		}
-		return ParseExpr(schema, exprStr)
+		return ParseExpr(schema, exprStr, data...)
 	}
 
 	expr, err := parse()

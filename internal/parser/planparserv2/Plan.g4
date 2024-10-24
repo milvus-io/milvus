@@ -7,6 +7,7 @@ expr:
 	| StringLiteral											                     # String
 	| Identifier											                     # Identifier
 	| JSONIdentifier                                                             # JSONIdentifier
+	| LBRACE Identifier RBRACE                                                   # Placeholder
 	| '(' expr ')'											                     # Parens
 	| '[' expr (',' expr)* ','? ']'                                              # Array
 	| EmptyArray                                                                 # EmptyArray
@@ -44,6 +45,8 @@ expr:
 // INT64: 'int64';
 // FLOAT: 'float';
 // DOUBLE: 'double';
+LBRACE: '{';
+RBRACE: '}';
 
 LT: '<';
 LE: '<=';
