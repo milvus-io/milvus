@@ -17,6 +17,12 @@ extern "C" {
 #include <stdbool.h>
 #include "common/type_c.h"
 
+CStatus
+ValidateIndexParams(const char* index_type,
+                    enum CDataType data_type,
+                    const uint8_t* index_params,
+                    const uint64_t length);
+
 int
 GetIndexListSize();
 
