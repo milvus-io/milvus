@@ -3274,6 +3274,11 @@ type dataCoordConfig struct {
 
 	EnableStatsTask   ParamItem `refreshable:"true"`
 	TaskCheckInterval ParamItem `refreshable:"true"`
+
+	VShardEnable         ParamItem `refreshable:"true"`
+	VshardSplitThreshold ParamItem `refreshable:"true"`
+	VshardCheckInterval  ParamItem `refreshable:"true"`
+	VshardCleanInterval  ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4110,6 +4115,44 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.TaskCheckInterval.Init(base.mgr)
+
+	p.VShardEnable = ParamItem{
+		Key:          "dataCoord.vshard.enable",
+		Version:      "2.5.0",
+		DefaultValue: "true",
+		PanicIfEmpty: true,
+		Doc:          "Enable vshard",
+		Export:       true,
+	}
+	p.VShardEnable.Init(base.mgr)
+
+	p.VshardSplitThreshold = ParamItem{
+		Key:          "dataCoord.vshard.splitThreshold",
+		Version:      "2.5.0",
+		Doc:          "splitThreshold for a vshard.",
+		DefaultValue: "100gb",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.VshardSplitThreshold.Init(base.mgr)
+
+	p.VshardCheckInterval = ParamItem{
+		Key:          "dataCoord.vshard.checkIntervalSeconds",
+		Version:      "2.5.0",
+		DefaultValue: "30",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.VshardCheckInterval.Init(base.mgr)
+
+	p.VshardCleanInterval = ParamItem{
+		Key:          "dataCoord.vshard.cleanIntervalSeconds",
+		Version:      "2.5.0",
+		DefaultValue: "600",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.VshardCleanInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

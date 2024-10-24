@@ -612,6 +612,11 @@ dataCoord:
     clusteringCompactionUsage: 16 # slot usage of clustering compaction job.
     mixCompactionUsage: 8 # slot usage of mix compaction job.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction job.
+  vshard:
+    enable: true # Enable vshard
+    splitThreshold: 100gb # splitThreshold for a vshard.
+    checkIntervalSeconds: 30
+    cleanIntervalSeconds: 600
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:

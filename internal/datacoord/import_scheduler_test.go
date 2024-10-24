@@ -64,6 +64,8 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListVShardInfos(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListVShardTasks(mock.Anything).Return(nil, nil)
 
 	s.cluster = NewMockCluster(s.T())
 	s.alloc = allocator.NewMockAllocator(s.T())

@@ -39,6 +39,7 @@ const (
 	TriggerTypeSegmentSizeViewChange
 	TriggerTypeClustering
 	TriggerTypeSingle
+	TriggerTypeVshard
 )
 
 type TriggerManager interface {
@@ -72,12 +73,13 @@ type CompactionTriggerManager struct {
 	l0Policy         *l0CompactionPolicy
 	clusteringPolicy *clusteringCompactionPolicy
 	singlePolicy     *singleCompactionPolicy
+	vshardPolicy     *vshardCompactionPolicy
 
 	closeSig chan struct{}
 	closeWg  sync.WaitGroup
 }
 
-func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, compactionHandler compactionPlanContext, meta *meta) *CompactionTriggerManager {
+func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, compactionHandler compactionPlanContext, meta *meta, vshardManager VshardManager) *CompactionTriggerManager {
 	m := &CompactionTriggerManager{
 		allocator:         alloc,
 		handler:           handler,
@@ -91,6 +93,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, com
 	m.l0Policy = newL0CompactionPolicy(meta)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
 	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
+	m.vshardPolicy = newVshardCompactionPolicy(meta, m.allocator, m.handler, vshardManager)
 	return m
 }
 
@@ -114,6 +117,10 @@ func (m *CompactionTriggerManager) startLoop() {
 	defer clusteringTicker.Stop()
 	singleTicker := time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
 	defer singleTicker.Stop()
+	vshardAllocTicker := time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
+	defer vshardAllocTicker.Stop()
+	vshardMoveTicker := time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
+	defer vshardMoveTicker.Stop()
 	log.Info("Compaction trigger manager start")
 	for {
 		select {
@@ -169,6 +176,25 @@ func (m *CompactionTriggerManager) startLoop() {
 			events, err := m.singlePolicy.Trigger()
 			if err != nil {
 				log.Warn("Fail to trigger single policy", zap.Error(err))
+				continue
+			}
+			ctx := context.Background()
+			if len(events) > 0 {
+				for triggerType, views := range events {
+					m.notify(ctx, triggerType, views)
+				}
+			}
+		case <-vshardAllocTicker.C:
+			if !m.vshardPolicy.Enable() {
+				continue
+			}
+			if m.compactionHandler.isFull() {
+				log.RatedInfo(10, "Skip trigger vshard compaction since compactionHandler is full")
+				continue
+			}
+			events, err := m.vshardPolicy.Trigger()
+			if err != nil {
+				log.Warn("Fail to trigger vshard policy", zap.Error(err))
 				continue
 			}
 			ctx := context.Background()
@@ -240,6 +266,15 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 					zap.String("reason", reason),
 					zap.String("output view", outView.String()))
 				m.SubmitSingleViewToScheduler(ctx, outView)
+			}
+		case TriggerTypeVshard:
+			log.Debug("Start to trigger a vshard compaction")
+			outView, reason := view.Trigger()
+			if outView != nil {
+				log.Info("Success to trigger a vshard compaction output view, try to submit",
+					zap.String("reason", reason),
+					zap.String("output view", outView.String()))
+				m.SubmitVshardViewToScheduler(ctx, outView)
 			}
 		}
 	}
@@ -388,7 +423,6 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		State:              datapb.CompactionTaskState_pipelining,
 		StartTime:          time.Now().Unix(),
 		CollectionTtl:      view.(*MixSegmentView).collectionTTL.Nanoseconds(),
-		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
 		Type:               datapb.CompactionType_MixCompaction, // todo: use SingleCompaction
 		CollectionID:       view.GetGroupLabel().CollectionID,
 		PartitionID:        view.GetGroupLabel().PartitionID,
@@ -419,6 +453,60 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 	)
 }
 
+func (m *CompactionTriggerManager) SubmitVshardViewToScheduler(ctx context.Context, view CompactionView) {
+	startID, endID, err := m.allocator.AllocN(1 + int64(len(view.GetSegmentsView())*len(view.(*VshardSegmentView).toVshards)))
+	if err != nil {
+		log.Warn("fFailed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
+		return
+	}
+
+	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
+	if err != nil {
+		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.Error(err))
+		return
+	}
+	var totalRows int64 = 0
+	for _, s := range view.GetSegmentsView() {
+		totalRows += s.NumOfRows
+	}
+
+	expectedSize := getExpectedSegmentSize(m.meta, collection)
+	task := &datapb.CompactionTask{
+		PlanID:             startID,
+		TriggerID:          view.(*VshardSegmentView).triggerID,
+		State:              datapb.CompactionTaskState_pipelining,
+		StartTime:          time.Now().Unix(),
+		CollectionTtl:      view.(*VshardSegmentView).collectionTTL.Nanoseconds(),
+		TimeoutInSeconds:   Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
+		Type:               datapb.CompactionType_VShardSplitCompaction,
+		CollectionID:       view.GetGroupLabel().CollectionID,
+		PartitionID:        view.GetGroupLabel().PartitionID,
+		Channel:            view.GetGroupLabel().Channel,
+		Schema:             collection.Schema,
+		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
+		ResultSegments:     []int64{startID + 1, endID},
+		TotalRows:          totalRows,
+		LastStateStartTime: time.Now().Unix(),
+		MaxSize:            getExpandedSize(expectedSize),
+		FromVshards:        view.(*VshardSegmentView).fromVshards,
+		ToVshards:          view.(*VshardSegmentView).toVshards,
+		VshardTaskId:       view.(*VshardSegmentView).vshardTaskId,
+	}
+	err = m.compactionHandler.enqueueCompaction(task)
+	if err != nil {
+		log.Warn("Failed to execute compaction task",
+			zap.Int64("triggerID", task.GetTriggerID()),
+			zap.Int64("planID", task.GetPlanID()),
+			zap.Int64s("segmentIDs", task.GetInputSegments()),
+			zap.Error(err))
+	}
+	log.Info("Finish to submit a vshard compaction task",
+		zap.Int64("triggerID", task.GetTriggerID()),
+		zap.Int64("planID", task.GetPlanID()),
+		zap.String("type", task.GetType().String()),
+	)
+}
+
 func getExpectedSegmentSize(meta *meta, collInfo *collectionInfo) int64 {
 	allDiskIndex := meta.indexMeta.AreAllDiskIndex(collInfo.ID, collInfo.Schema)
 	if allDiskIndex {
@@ -434,5 +522,14 @@ type chanPartSegments struct {
 	collectionID UniqueID
 	partitionID  UniqueID
 	channelName  string
+	segments     []*SegmentInfo
+}
+
+// chanPartVshardSegments is an internal result struct, which is aggregates of SegmentInfos with same collectionID, partitionID, channelName and vshard
+type chanPartVshardSegments struct {
+	collectionID UniqueID
+	partitionID  UniqueID
+	channelName  string
+	vshard       *datapb.VShardDesc
 	segments     []*SegmentInfo
 }
