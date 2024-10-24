@@ -16,6 +16,10 @@
 
 package info
 
+import (
+	"strconv"
+)
+
 const (
 	Unknown            = "Unknown"
 	timeFormat         = "2006/01/02 15:04:05.000 -07:00"
@@ -49,6 +53,11 @@ var MetricFuncMap = map[string]getMetricFunc{
 	"$consistency_level": getConsistencyLevel,
 }
 
+var QuoteableMap = map[string]bool{
+	"$error_msg":   true,
+	"$method_expr": true,
+}
+
 type AccessInfo interface {
 	TimeCost() string
 	TimeNow() string
@@ -72,14 +81,15 @@ type AccessInfo interface {
 	ConsistencyLevel() string
 }
 
-func Get(i AccessInfo, keys ...string) []any {
+func Get(i AccessInfo, quote bool, keys ...string) []any {
 	result := []any{}
-	metricMap := map[string]string{}
 	for _, key := range keys {
-		if value, ok := metricMap[key]; ok {
-			result = append(result, value)
-		} else if getFunc, ok := MetricFuncMap[key]; ok {
-			result = append(result, getFunc(i))
+		if getFunc, ok := MetricFuncMap[key]; ok {
+			if quote && QuoteableMap[key] {
+				result = append(result, strconv.Quote(getFunc(i)))
+			} else {
+				result = append(result, getFunc(i))
+			}
 		}
 	}
 	return result

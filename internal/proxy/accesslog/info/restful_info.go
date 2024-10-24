@@ -19,7 +19,6 @@ package info
 import (
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -139,7 +138,7 @@ func (i *RestfulInfo) ErrorMsg() string {
 	if !ok {
 		return ""
 	}
-	return strings.ReplaceAll(message.(string), "\n", "\\n")
+	return message.(string)
 }
 
 func (i *RestfulInfo) ErrorType() string {
