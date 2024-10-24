@@ -276,7 +276,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            executor(i);
+            res[i] = executor(i);
         }
     };
 
