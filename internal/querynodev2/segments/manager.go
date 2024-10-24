@@ -87,6 +87,22 @@ func (f SegmentIDFilter) SegmentIDs() ([]int64, bool) {
 	return []int64{int64(f)}, true
 }
 
+type SegmentIDsFilter struct {
+	segmentIDs typeutil.Set[int64]
+}
+
+func (f SegmentIDsFilter) Filter(segment Segment) bool {
+	return f.segmentIDs.Contain(segment.ID())
+}
+
+func (f SegmentIDsFilter) SegmentType() (SegmentType, bool) {
+	return commonpb.SegmentState_SegmentStateNone, false
+}
+
+func (f SegmentIDsFilter) SegmentIDs() ([]int64, bool) {
+	return f.segmentIDs.Collect(), true
+}
+
 type SegmentTypeFilter SegmentType
 
 func (f SegmentTypeFilter) Filter(segment Segment) bool {
@@ -131,6 +147,12 @@ func WithType(typ SegmentType) SegmentFilter {
 
 func WithID(id int64) SegmentFilter {
 	return SegmentIDFilter(id)
+}
+
+func WithIDs(ids ...int64) SegmentFilter {
+	return SegmentIDsFilter{
+		segmentIDs: typeutil.NewSet(ids...),
+	}
 }
 
 func WithLevel(level datapb.SegmentLevel) SegmentFilter {

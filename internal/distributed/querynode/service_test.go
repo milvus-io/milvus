@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -268,6 +269,15 @@ func Test_NewServer(t *testing.T) {
 		resp, err := server.ShowConfigurations(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("DeleteBatch", func(t *testing.T) {
+		mockQN.EXPECT().DeleteBatch(mock.Anything, mock.Anything).Return(&querypb.DeleteBatchResponse{
+			Status: merr.Success(),
+		}, nil)
+
+		resp, err := server.DeleteBatch(ctx, &querypb.DeleteBatchRequest{})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 
 	err = server.Stop()
