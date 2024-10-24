@@ -101,6 +101,46 @@ TEST(chunk, test_variable_field) {
     }
 }
 
+TEST(chunk, test_null_field) {
+    FixedVector<int64_t> data = {1, 2, 3, 4, 5};
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::INT64, true);
+    uint8_t* valid_data_ = new uint8_t[1]{0x13};
+    field_data->FillFieldData(data.data(), valid_data_, data.size());
+    storage::InsertEventData event_data;
+    event_data.field_data = field_data;
+    auto ser_data = event_data.Serialize();
+    auto buffer = std::make_shared<arrow::io::BufferReader>(
+        ser_data.data() + 2 * sizeof(milvus::Timestamp),
+        ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    auto s = reader_builder.Open(buffer);
+    EXPECT_TRUE(s.ok());
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    s = reader_builder.Build(&arrow_reader);
+    EXPECT_TRUE(s.ok());
+
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    s = arrow_reader->GetRecordBatchReader(&rb_reader);
+    EXPECT_TRUE(s.ok());
+
+    FieldMeta field_meta(
+        FieldName("a"), milvus::FieldId(1), DataType::INT64, true);
+    auto chunk = create_chunk(field_meta, 1, rb_reader);
+    auto span = std::dynamic_pointer_cast<FixedWidthChunk>(chunk)->Span();
+    EXPECT_EQ(span.row_count(), data.size());
+    data = {1, 2, 0, 0, 5};
+    FixedVector<bool> valid_data = {true, true, false, false, true};
+    for (size_t i = 0; i < data.size(); ++i) {
+        auto n = *(int64_t*)((char*)span.data() + i * span.element_sizeof());
+        EXPECT_EQ(n, data[i]);
+        auto v = *(bool*)((char*)span.valid_data() + i);
+        EXPECT_EQ(v, valid_data[i]);
+    }
+    delete[] valid_data_;
+}
+
 TEST(chunk, test_array) {
     milvus::proto::schema::ScalarField field_string_data;
     field_string_data.mutable_string_data()->add_data("test_array1");
