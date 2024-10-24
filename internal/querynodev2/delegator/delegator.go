@@ -134,6 +134,9 @@ type shardDelegator struct {
 	// in order to make add/remove growing be atomic, need lock before modify these meta info
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
+
+	// current forward policy
+	l0ForwardPolicy string
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -866,6 +869,9 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	excludedSegments := NewExcludedSegments(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.GetAsDuration(time.Second))
 
+	policy := paramtable.Get().QueryNodeCfg.LevelZeroForwardPolicy.GetValue()
+	log.Info("shard delegator setup l0 forward policy", zap.String("policy", policy))
+
 	sd := &shardDelegator{
 		collectionID:   collectionID,
 		replicaID:      replicaID,
@@ -887,6 +893,8 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		chunkManager:     chunkManager,
 		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
 		excludedSegments: excludedSegments,
+
+		l0ForwardPolicy: policy,
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
