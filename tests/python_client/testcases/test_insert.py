@@ -2150,6 +2150,9 @@ class TestUpsertValid(TestcaseBase):
         res = collection_w.query(exp, output_fields=[ct.default_string_field_name])[0]
         assert len(res) == ct.default_nb
         assert res[0][ct.default_string_field_name] is None
+        exp = f"{ct.default_string_field_name} == ''"
+        res = collection_w.query(exp, output_fields=[ct.default_string_field_name])[0]
+        assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
