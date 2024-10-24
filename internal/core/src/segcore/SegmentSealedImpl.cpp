@@ -383,16 +383,16 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     break;
                 }
                 case milvus::DataType::GEOSPATIAL: {
-                    auto var_column =
-                        std::make_shared<VariableColumn<std::string>>(
-                            num_rows, field_meta, get_block_size());
+                    auto var_column = std::make_shared<
+                        SingleChunkVariableColumn<std::string>>(
+                        num_rows, field_meta, get_block_size());
                     FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
                         var_column->Append(std::move(field_data));
                     }
                     var_column->Seal();
-                    stats_.mem_size += var_column->ByteSize();
-                    field_data_size = var_column->ByteSize();
+                    stats_.mem_size += var_column->MemoryUsageBytes();
+                    field_data_size = var_column->DataByteSize();
                     column = std::move(var_column);
                     break;
                 }
@@ -562,11 +562,12 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
                 break;
             }
             case milvus::DataType::GEOSPATIAL: {
-                auto var_column = std::make_shared<VariableColumn<std::string>>(
-                    file,
-                    total_written,
-                    field_meta,
-                    DEFAULT_MMAP_VRCOL_BLOCK_SIZE);
+                auto var_column =
+                    std::make_shared<SingleChunkVariableColumn<std::string>>(
+                        file,
+                        total_written,
+                        field_meta,
+                        DEFAULT_MMAP_VRCOL_BLOCK_SIZE);
                 var_column->Seal(std::move(indices));
                 column = std::move(var_column);
                 break;

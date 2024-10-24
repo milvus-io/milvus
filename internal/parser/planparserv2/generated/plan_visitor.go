@@ -115,6 +115,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#BitAnd.
 	VisitBitAnd(ctx *BitAndContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#GeospatialOverlaps.
+	VisitGeospatialOverlaps(ctx *GeospatialOverlapsContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Power.
 	VisitPower(ctx *PowerContext) interface{}
 }

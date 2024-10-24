@@ -151,6 +151,10 @@ func (v *BasePlanVisitor) VisitBitAnd(ctx *BitAndContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitGeospatialOverlaps(ctx *GeospatialOverlapsContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitPower(ctx *PowerContext) interface{} {
 	return v.VisitChildren(ctx)
 }

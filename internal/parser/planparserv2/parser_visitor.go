@@ -1360,7 +1360,7 @@ func (v *ParserVisitor) VisitGeospatialEuqals(ctx *parser.GeospatialEuqalsContex
 			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
-	log.Warn(element)
+	// log.Warn(element)
 	if err := getError(element); err != nil {
 		return err
 	}
@@ -1390,7 +1390,7 @@ func (v *ParserVisitor) VisitGeospatialTouches(ctx *parser.GeospatialTouchesCont
 			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
-	log.Warn(element)
+	// log.Warn(element)
 	if err := getError(element); err != nil {
 		return err
 	}
@@ -1420,7 +1420,7 @@ func (v *ParserVisitor) VisitGeospatialOverlaps(ctx *parser.GeospatialOverlapsCo
 			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
-	log.Warn(element)
+	// log.Warn(element)
 	if err := getError(element); err != nil {
 		return err
 	}
@@ -1450,7 +1450,7 @@ func (v *ParserVisitor) VisitGeospatialCrosses(ctx *parser.GeospatialCrossesCont
 			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
-	log.Warn(element)
+	// log.Warn(element)
 	if err := getError(element); err != nil {
 		return err
 	}
@@ -1480,7 +1480,7 @@ func (v *ParserVisitor) VisitGeospatialContains(ctx *parser.GeospatialContainsCo
 			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
-	log.Warn(element)
+	// log.Warn(element)
 	if err := getError(element); err != nil {
 		return err
 	}
@@ -1510,7 +1510,7 @@ func (v *ParserVisitor) VisitGeospatialIntersects(ctx *parser.GeospatialIntersec
 			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
-	log.Warn(element)
+	// log.Warn(element)
 	if err := getError(element); err != nil {
 		return err
 	}
@@ -1540,7 +1540,7 @@ func (v *ParserVisitor) VisitGeospatialWithin(ctx *parser.GeospatialWithinContex
 			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
-	log.Warn(element)
+	// log.Warn(element)
 	if err := getError(element); err != nil {
 		return err
 	}

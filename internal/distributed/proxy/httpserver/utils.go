@@ -503,19 +503,19 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 					WktString, err := base64.StdEncoding.DecodeString(dataString)
 					if err != nil {
 						log.Warn("proxy can not decode datastring with base64", zap.String("WktString:", dataString))
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					fmt.Println("before unmarshal wkt:", string(WktString))
 					geomT, err := wkt.Unmarshal(string(WktString))
 					if err != nil {
 						log.Warn("proxy change wkt to geomtyr failed!!", zap.String("WktString:", dataString))
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					// translate the wkt bytes to wkb bytes ,store the bytes in LittleEndian which cpp core used as well
 					dataWkbBytes, err := wkb.Marshal(geomT, wkb.NDR)
 					if err != nil {
 						log.Warn("proxy change geomtry to wkb failed!!", zap.String("WktString:", dataString))
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = dataWkbBytes
 				case schemapb.DataType_Float:

@@ -49,13 +49,7 @@ services:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
     command: minio server /minio_data --console-address ":9001"
     healthcheck:
-      test:
-        [
-          "CMD",
-          "curl",
-          "-f",
-          "http://localhost:9000/minio/health/live"
-        ]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -101,12 +95,11 @@ services:
       - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
     depends_on:
       - zookeeper
-
-  gcpnative:
-    image: fsouza/fake-gcs-server
-    command: -scheme http -public-host storage.gcs.127.0.0.1.nip.io:4443
-    ports:
-      - "4443:4443"
+  # gcpnative:
+  #   image: fsouza/fake-gcs-server
+  #   command: -scheme http -public-host storage.gcs.127.0.0.1.nip.io:4443
+  #   ports:
+  #     - "4443:4443"
 
 networks:
   default:
