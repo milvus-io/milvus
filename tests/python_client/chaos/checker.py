@@ -223,6 +223,7 @@ class Op(Enum):
     release_collection = 'release_collection'
     release_partition = 'release_partition'
     search = 'search'
+    full_text_search = 'full_text_search'
     hybrid_search = 'hybrid_search'
     query = 'query'
     text_match = 'text_match'
@@ -363,6 +364,7 @@ class Checker:
         self.scalar_field_names = cf.get_scalar_field_name_list(schema=schema)
         self.float_vector_field_names = cf.get_float_vec_field_name_list(schema=schema)
         self.binary_vector_field_names = cf.get_binary_vec_field_name_list(schema=schema)
+        self.bm25_sparse_field_names = cf.get_bm25_vec_field_name_list(schema=schema)
         # get index of collection
         indexes = [index.to_dict() for index in self.c_wrap.indexes]
         indexed_fields = [index['field'] for index in indexes]
@@ -390,6 +392,15 @@ class Checker:
                 continue
             self.c_wrap.create_index(f,
                                      constants.DEFAULT_BINARY_INDEX_PARAM,
+                                     timeout=timeout,
+                                     enable_traceback=enable_traceback,
+                                     check_task=CheckTasks.check_nothing)
+
+        for f in self.bm25_sparse_field_names:
+            if f in indexed_fields:
+                continue
+            self.c_wrap.create_index(f,
+                                     constants.DEFAULT_BM25_INDEX_PARAM,
                                      timeout=timeout,
                                      enable_traceback=enable_traceback,
                                      check_task=CheckTasks.check_nothing)
@@ -650,6 +661,41 @@ class SearchChecker(Checker):
     @exception_handler()
     def run_task(self):
         res, result = self.search()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
+
+
+class FullTextSearchChecker(Checker):
+    """check full text search operations in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("FullTextSearchChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        self.insert_data()
+
+    @trace()
+    def full_text_search(self):
+
+        bm25_anns_field = random.choice(self.bm25_sparse_field_names)
+        res, result = self.c_wrap.search(
+            data=cf.gen_vectors(5, self.dim, vector_data_type="TEXT_SPARSE_VECTOR"),
+            anns_field=bm25_anns_field,
+            param=constants.DEFAULT_BM25_SEARCH_PARAM,
+            limit=1,
+            partition_names=self.p_names,
+            timeout=search_timeout,
+            check_task=CheckTasks.check_nothing
+        )
+        return res, result
+
+    @exception_handler()
+    def run_task(self):
+        res, result = self.full_text_search()
         return res, result
 
     def keep_running(self):
