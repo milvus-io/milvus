@@ -94,11 +94,14 @@ func (req *ImportReq) GetOptions() map[string]string {
 	return req.Options
 }
 
-type JobIDReq struct {
-	JobID string `json:"jobId" binding:"required"`
+type GetImportReq struct {
+	DbName string `json:"dbName"`
+	JobID  string `json:"jobId" binding:"required"`
 }
 
-func (req *JobIDReq) GetJobID() string { return req.JobID }
+func (req *GetImportReq) GetJobID() string { return req.JobID }
+
+func (req *GetImportReq) GetDbName() string { return req.DbName }
 
 type QueryReqV2 struct {
 	DbName         string   `json:"dbName"`

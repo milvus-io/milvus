@@ -1676,7 +1676,9 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		Status: merr.Success(),
 	}
 
-	log := log.With(zap.Int64("collection", in.GetCollectionID()),
+	log := log.With(
+		zap.Int64("dbID", in.GetDbID()),
+		zap.Int64("collection", in.GetCollectionID()),
 		zap.Int64s("partitions", in.GetPartitionIDs()),
 		zap.Strings("channels", in.GetChannelNames()))
 	log.Info("receive import request", zap.Any("files", in.GetFiles()))
@@ -1742,6 +1744,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
 			JobID:          idStart,
+			DbID:           in.GetDbID(),
 			CollectionID:   in.GetCollectionID(),
 			CollectionName: in.GetCollectionName(),
 			PartitionIDs:   in.GetPartitionIDs(),
@@ -1768,7 +1771,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 }
 
 func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
-	log := log.With(zap.String("jobID", in.GetJobID()))
+	log := log.With(zap.String("jobID", in.GetJobID()), zap.Int64("dbID", in.GetDbID()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.GetImportProgressResponse{
 			Status: merr.Status(err),
@@ -1786,6 +1789,10 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	job := s.importMeta.GetJob(jobID)
 	if job == nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
+		return resp, nil
+	}
+	if job.GetDbID() != 0 && job.GetDbID() != in.GetDbID() {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d, dbID=%d", jobID, in.GetDbID())))
 		return resp, nil
 	}
 	progress, state, importedRows, totalRows, reason := GetJobProgress(jobID, s.importMeta, s.meta, s.jobManager)
@@ -1818,11 +1825,14 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 	}
 
 	var jobs []ImportJob
-	if req.GetCollectionID() != 0 {
-		jobs = s.importMeta.GetJobBy(WithCollectionID(req.GetCollectionID()))
-	} else {
-		jobs = s.importMeta.GetJobBy()
+	filters := make([]ImportJobFilter, 0)
+	if req.GetDbID() != 0 {
+		filters = append(filters, WithDbID(req.GetDbID()))
 	}
+	if req.GetCollectionID() != 0 {
+		filters = append(filters, WithCollectionID(req.GetCollectionID()))
+	}
+	jobs = s.importMeta.GetJobBy(filters...)
 
 	for _, job := range jobs {
 		progress, state, _, _, reason := GetJobProgress(job.GetJobID(), s.importMeta, s.meta, s.jobManager)
@@ -1832,5 +1842,7 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 		resp.Progresses = append(resp.Progresses, progress)
 		resp.CollectionNames = append(resp.CollectionNames, job.GetCollectionName())
 	}
+	log.Info("ListImports done", zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64("dbID", req.GetDbID()), zap.Any("resp", resp))
 	return resp, nil
 }

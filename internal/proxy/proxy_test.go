@@ -4570,6 +4570,7 @@ func TestProxy_Import(t *testing.T) {
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		mc := NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{},
@@ -4610,6 +4611,10 @@ func TestProxy_Import(t *testing.T) {
 		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
+		mc := NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
+		globalMetaCache = mc
+
 		dataCoord := mocks.NewMockDataCoordClient(t)
 		dataCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
 			Status: merr.Success(),
@@ -4634,6 +4639,10 @@ func TestProxy_Import(t *testing.T) {
 	t.Run("ListImportTasks", func(t *testing.T) {
 		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		mc := NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
+		globalMetaCache = mc
 
 		dataCoord := mocks.NewMockDataCoordClient(t)
 		dataCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(&internalpb.ListImportsResponse{
