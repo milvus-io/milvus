@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -243,12 +244,11 @@ func (s *StreamingForwardSuite) TestDirectStreamingForward() {
 	deletedSegment := typeutil.NewConcurrentSet[int64]()
 	mockWorker := cluster.NewMockWorker(s.T())
 	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(mockWorker, nil)
-	mockWorker.EXPECT().Delete(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dr *querypb.DeleteRequest) error {
-		s.T().Log(dr.GetSegmentId())
-		deletedSegment.Insert(dr.SegmentId)
+	mockWorker.EXPECT().DeleteBatch(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dr *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error) {
+		deletedSegment.Upsert(dr.GetSegmentIds()...)
 		s.ElementsMatch([]int64{10}, dr.GetPrimaryKeys().GetIntId().GetData())
 		s.ElementsMatch([]uint64{10}, dr.GetTimestamps())
-		return nil
+		return &querypb.DeleteBatchResponse{Status: merr.Success()}, nil
 	})
 
 	delegator.ProcessDelete([]*DeleteData{
