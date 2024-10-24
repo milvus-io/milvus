@@ -3144,7 +3144,6 @@ class TestDescribeCollection(TestcaseBase):
         assert description == res
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="issue #36596")
     def test_collection_describe_nullable_default_value(self):
         """
         target: test describe collection with nullable and default_value fields
@@ -3163,7 +3162,7 @@ class TestDescribeCollection(TestcaseBase):
                     log.error("there is no default_value key in the result of describe collection, please file a bug")
                     assert False
                 else:
-                    assert field["default_value"] == "1"
+                    assert field["default_value"].string_data == "1"
 
 
 class TestReleaseAdvanced(TestcaseBase):
@@ -4584,6 +4583,24 @@ class TestCollectionNullInvalid(TestcaseBase):
         int_fields.append(cf.gen_float_vec_field(vector_data_type=vector_type, nullable=True))
         schema = cf.gen_collection_schema(fields=int_fields)
         error = {ct.err_code: 1100, ct.err_msg: "vector type not support null"}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_collection_set_nullable_on_partition_key_field(self):
+        """
+        target: test create collection with set nullable=True on partition key field
+        method: set nullable=True and is_partition_key=True on one field
+        expected: raise exception
+        """
+        self._connect()
+        int_fields = []
+        c_name = cf.gen_unique_str(prefix)
+        # add other vector fields to maximum fields num
+        int_fields.append(cf.gen_int64_field(is_primary=True))
+        int_fields.append(cf.gen_string_field(is_partition_key=True, nullable=True))
+        int_fields.append(cf.gen_float_vec_field())
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 1100, ct.err_msg: "partition key field not support nullable: invalid parameter"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
 

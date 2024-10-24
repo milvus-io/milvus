@@ -738,7 +738,7 @@ def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.de
             log.error("Primary key only support int or varchar")
             assert False
     else:
-        fields = [gen_int64_field(), gen_float_vec_field(dim=dim), gen_json_field(),
+        fields = [gen_int64_field(), gen_float_vec_field(dim=dim), gen_json_field(nullable=True),
                   gen_array_field(name=ct.default_int32_array_field_name, element_type=DataType.INT32,
                                   max_capacity=max_capacity),
                   gen_array_field(name=ct.default_float_array_field_name, element_type=DataType.FLOAT,
@@ -746,7 +746,7 @@ def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.de
                   gen_array_field(name=ct.default_string_array_field_name, element_type=DataType.VARCHAR,
                                   max_capacity=max_capacity, max_length=max_length, nullable=True)]
         if with_json is False:
-            fields.remove(gen_json_field())
+            fields.remove(gen_json_field(nullable=True))
 
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
@@ -1411,7 +1411,7 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
         null_number = int(nb * nullable_fields[ct.default_bool_field_name])
         null_data = [None for _ in range(null_number)]
         bool_data = bool_data[:nb - null_number] + null_data
-        bool_values = pd.Series(data=bool_data, dtype=object)
+        bool_values = pd.Series(data=bool_data, dtype="bool")
 
     float_data = [np.float32(i) for i in range(start, start + nb)]
     float_values = pd.Series(data=float_data, dtype="float32")
