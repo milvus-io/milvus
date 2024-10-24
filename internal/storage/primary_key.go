@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type PrimaryKey interface {
@@ -37,6 +38,7 @@ type PrimaryKey interface {
 	GetValue() interface{}
 	Type() schemapb.DataType
 	Size() int64
+	Hash() (uint32, error)
 }
 
 type Int64PrimaryKey struct {
@@ -158,6 +160,10 @@ func (ip *Int64PrimaryKey) Size() int64 {
 	return 16
 }
 
+func (ip *Int64PrimaryKey) Hash() (uint32, error) {
+	return typeutil.Hash32Int64(ip.Value)
+}
+
 type VarCharPrimaryKey struct {
 	Value string
 }
@@ -256,6 +262,10 @@ func (vcp *VarCharPrimaryKey) Type() schemapb.DataType {
 
 func (vcp *VarCharPrimaryKey) Size() int64 {
 	return int64(8*len(vcp.Value) + 8)
+}
+
+func (ip *VarCharPrimaryKey) Hash() (uint32, error) {
+	return typeutil.HashString2Uint32(ip.Value), nil
 }
 
 func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (PrimaryKey, error) {
