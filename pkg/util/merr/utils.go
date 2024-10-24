@@ -299,6 +299,13 @@ func IsHealthyOrStopping(stateCode commonpb.StateCode) error {
 	return CheckHealthy(stateCode)
 }
 
+func AnalyzeComponentStateResp(role string, nodeID int64, resp *milvuspb.ComponentStates, err error) error {
+	if err != nil {
+		return errors.Wrap(err, "service is unhealthy")
+	}
+	return AnalyzeState(role, nodeID, resp)
+}
+
 func AnalyzeState(role string, nodeID int64, state *milvuspb.ComponentStates) error {
 	if err := Error(state.GetStatus()); err != nil {
 		return errors.Wrapf(err, "%s=%d not healthy", role, nodeID)
