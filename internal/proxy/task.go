@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -881,6 +882,10 @@ type alterCollectionTask struct {
 	result     *commonpb.Status
 	queryCoord types.QueryCoordClient
 	dataCoord  types.DataCoordClient
+
+	pchannels             []string
+	replicateTargetTSMap  *typeutil.ConcurrentMap[string, uint64]
+	replicateCurrentTSMap *typeutil.ConcurrentMap[string, uint64]
 }
 
 func (t *alterCollectionTask) TraceCtx() context.Context {
@@ -1041,6 +1046,80 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	newReplicateMode := common.IsReplicateEnabled(t.Properties)
+	if newReplicateMode {
+		return merr.WrapErrParameterInvalidMsg("can not enable replicate mode in alter collection")
+	}
+	if !newReplicateMode && collBasicInfo.replicateMode {
+		t.pchannels = collBasicInfo.pchannels
+		allocResp, err := t.rootCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
+			Count: 1,
+		})
+		if err = merr.CheckRPCCall(allocResp, err); err != nil {
+			return merr.WrapErrServiceInternal("alloc timestamp failed", err.Error())
+		}
+		for _, pchannel := range collBasicInfo.pchannels {
+			t.replicateTargetTSMap.Insert(pchannel, allocResp.GetTimestamp())
+		}
+		err = t.waitReplicateTs(ctx, collBasicInfo.pchannels)
+		if err != nil {
+			for _, pchannel := range collBasicInfo.pchannels {
+				t.replicateTargetTSMap.Remove(pchannel)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (t *alterCollectionTask) waitReplicateTs(ctx context.Context, pchannels []string) error {
+	// wait the current replicate is stable
+	cnt := 0
+	currentReplicateTS := make(map[string]uint64)
+	for {
+		// t.replicateCurrentTSMap.Len() == 0: force to alter collection because the milvus is just started
+		// cnt > 3: force to alter collection because the current ts is stable
+		if t.replicateCurrentTSMap.Len() == 0 || cnt > 3 {
+			break
+		}
+		sameCnt := 0
+		for _, pchannel := range pchannels {
+			ts, ok := t.replicateCurrentTSMap.Get(pchannel)
+			if !ok {
+				continue
+			}
+			if currentReplicateTS[pchannel] == ts {
+				sameCnt++
+			} else {
+				currentReplicateTS[pchannel] = ts
+			}
+		}
+		if sameCnt == len(pchannels) {
+			cnt++
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// make sure the allocate ts is larger than the current ts
+	for {
+		allocResp, err := t.rootCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
+			Count: 1,
+		})
+		if err = merr.CheckRPCCall(allocResp, err); err != nil {
+			return merr.WrapErrServiceInternal("alloc timestamp failed", err.Error())
+		}
+		allocTS := allocResp.GetTimestamp()
+		needWait := false
+		for _, replicateTS := range currentReplicateTS {
+			if allocTS <= replicateTS {
+				needWait = true
+				break
+			}
+		}
+		if !needWait {
+			break
+		}
+	}
 	return nil
 }
 
@@ -1051,6 +1130,9 @@ func (t *alterCollectionTask) Execute(ctx context.Context) error {
 }
 
 func (t *alterCollectionTask) PostExecute(ctx context.Context) error {
+	for _, pchannel := range t.pchannels {
+		t.replicateTargetTSMap.Remove(pchannel)
+	}
 	return nil
 }
 

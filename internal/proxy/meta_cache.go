@@ -98,6 +98,8 @@ type collectionBasicInfo struct {
 	createdUtcTimestamp   uint64
 	consistencyLevel      commonpb.ConsistencyLevel
 	partitionKeyIsolation bool
+	replicateMode         bool
+	pchannels             []string
 }
 
 type collectionInfo struct {
@@ -108,6 +110,8 @@ type collectionInfo struct {
 	createdUtcTimestamp   uint64
 	consistencyLevel      commonpb.ConsistencyLevel
 	partitionKeyIsolation bool
+	replicateMode         bool
+	pchannels             []string
 }
 
 type databaseInfo struct {
@@ -277,6 +281,8 @@ func (info *collectionInfo) getBasicInfo() *collectionBasicInfo {
 		createdUtcTimestamp:   info.createdUtcTimestamp,
 		consistencyLevel:      info.consistencyLevel,
 		partitionKeyIsolation: info.partitionKeyIsolation,
+		replicateMode:         info.replicateMode,
+		pchannels:             info.pchannels,
 	}
 
 	return basicInfo
@@ -493,6 +499,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		createdUtcTimestamp:   collection.CreatedUtcTimestamp,
 		consistencyLevel:      collection.ConsistencyLevel,
 		partitionKeyIsolation: isolation,
+		replicateMode:         common.IsReplicateEnabled(collection.Properties),
+		pchannels:             collection.PhysicalChannelNames,
 	}
 
 	log.Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName), zap.Int64("collectionID", collection.CollectionID))
@@ -570,7 +578,8 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, coll
 	method := "GetCollectionInfo"
 	// if collInfo.collID != collectionID, means that the cache is not trustable
 	// try to get collection according to collectionID
-	if !ok || collInfo.collID != collectionID {
+	// Why use collectionID? Because the collectionID is not always provided in the proxy.
+	if !ok || (collectionID != 0 && collInfo.collID != collectionID) {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
 

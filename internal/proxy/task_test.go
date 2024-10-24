@@ -3899,8 +3899,10 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 				CollectionName: colName,
 				Properties:     []*commonpb.KeyValuePair{{Key: common.PartitionKeyIsolationKey, Value: isoStr}},
 			},
-			queryCoord: qc,
-			dataCoord:  dc,
+			queryCoord:            qc,
+			dataCoord:             dc,
+			replicateTargetTSMap:  typeutil.NewConcurrentMap[string, uint64](),
+			replicateCurrentTSMap: typeutil.NewConcurrentMap[string, uint64](),
 		}
 	}
 
