@@ -108,6 +108,9 @@ func Test_NewClient(t *testing.T) {
 		r20, err := client.SearchSegments(ctx, nil)
 		retCheck(retNotNil, r20, err)
 
+		r21, err := client.DeleteBatch(ctx, nil)
+		retCheck(retNotNil, r21, err)
+
 		// stream rpc
 		client, err := client.QueryStream(ctx, nil)
 		retCheck(retNotNil, client, err)

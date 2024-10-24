@@ -246,6 +246,17 @@ func (s *QnWrapperSuite) TestDelete() {
 	s.NoError(err)
 }
 
+func (s *QnWrapperSuite) TestDeleteBatch() {
+	s.qn.EXPECT().DeleteBatch(mock.Anything, mock.Anything).
+		Return(&querypb.DeleteBatchResponse{
+			Status: merr.Status(nil),
+		}, nil)
+
+	resp, err := s.client.DeleteBatch(context.Background(), &querypb.DeleteBatchRequest{})
+	err = merr.CheckRPCCall(resp, err)
+	s.NoError(err)
+}
+
 // Race caused by mock parameter check on once
 /*
 func (s *QnWrapperSuite) TestQueryStream() {

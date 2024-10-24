@@ -383,3 +383,9 @@ func (s *Server) SyncDistribution(ctx context.Context, req *querypb.SyncDistribu
 func (s *Server) Delete(ctx context.Context, req *querypb.DeleteRequest) (*commonpb.Status, error) {
 	return s.querynode.Delete(ctx, req)
 }
+
+// DeleteBatch is the API to apply same delete data into multiple segments.
+// it's basically same as `Delete` but cost less memory pressure.
+func (s *Server) DeleteBatch(ctx context.Context, req *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error) {
+	return s.querynode.DeleteBatch(ctx, req)
+}

@@ -53,6 +53,10 @@ func (w *LocalWorker) Delete(ctx context.Context, req *querypb.DeleteRequest) er
 	return merr.CheckRPCCall(status, err)
 }
 
+func (w *LocalWorker) DeleteBatch(ctx context.Context, req *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error) {
+	return w.node.DeleteBatch(ctx, req)
+}
+
 func (w *LocalWorker) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
 	return w.node.SearchSegments(ctx, req)
 }
