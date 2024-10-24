@@ -146,7 +146,7 @@ if ( APPLE )
             FLAGS
             "-fPIC"
             "-DELPP_THREAD_SAFE"
-            "-fopenmp"
+            "-lomp"
             "-pedantic"
             "-Wno-all"
             "-DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1"
