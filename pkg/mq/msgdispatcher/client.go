@@ -36,8 +36,23 @@ type (
 	SubPos  = common.SubscriptionInitialPosition
 )
 
+type StreamConfig struct {
+	VChannel        string
+	Pos             *Pos
+	SubPos          SubPos
+	ReplicateConfig *msgstream.ReplicateConfig
+}
+
+func NewStreamConfig(vchannel string, pos *Pos, subPos SubPos) *StreamConfig {
+	return &StreamConfig{
+		VChannel: vchannel,
+		Pos:      pos,
+		SubPos:   subPos,
+	}
+}
+
 type Client interface {
-	Register(ctx context.Context, vchannel string, pos *Pos, subPos SubPos) (<-chan *MsgPack, error)
+	Register(ctx context.Context, streamConfig *StreamConfig) (<-chan *MsgPack, error)
 	Deregister(vchannel string)
 	Close()
 }
@@ -62,7 +77,8 @@ func NewClient(factory msgstream.Factory, role string, nodeID int64) Client {
 	}
 }
 
-func (c *client) Register(ctx context.Context, vchannel string, pos *Pos, subPos SubPos) (<-chan *MsgPack, error) {
+func (c *client) Register(ctx context.Context, streamConfig *StreamConfig) (<-chan *MsgPack, error) {
+	vchannel := streamConfig.VChannel
 	log := log.With(zap.String("role", c.role),
 		zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
@@ -75,7 +91,7 @@ func (c *client) Register(ctx context.Context, vchannel string, pos *Pos, subPos
 		c.managers.Insert(pchannel, manager)
 		go manager.Run()
 	}
-	ch, err := manager.Add(ctx, vchannel, pos, subPos)
+	ch, err := manager.Add(ctx, streamConfig)
 	if err != nil {
 		if manager.Num() == 0 {
 			manager.Close()

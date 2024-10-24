@@ -107,7 +107,7 @@ func (suite *PipelineTestSuite) TestBasic() {
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 
 	//  mock mq factory
-	suite.msgDispatcher.EXPECT().Register(mock.Anything, suite.channel, mock.Anything, common.SubscriptionPositionUnknown).Return(suite.msgChan, nil)
+	suite.msgDispatcher.EXPECT().Register(mock.Anything, mock.Anything).Return(suite.msgChan, nil)
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)
 
 	//	mock delegator
@@ -136,7 +136,7 @@ func (suite *PipelineTestSuite) TestBasic() {
 		Collection: suite.collectionManager,
 		Segment:    suite.segmentManager,
 	}
-	pipeline, err := NewPipeLine(suite.collectionID, suite.channel, manager, suite.msgDispatcher, suite.delegator)
+	pipeline, err := NewPipeLine(collection, suite.channel, manager, suite.msgDispatcher, suite.delegator)
 	suite.NoError(err)
 
 	// Init Consumer

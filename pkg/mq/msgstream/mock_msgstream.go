@@ -558,6 +558,39 @@ func (_c *MockMsgStream_SetRepackFunc_Call) RunAndReturn(run func(RepackFunc)) *
 	return _c
 }
 
+// SetReplicate provides a mock function with given fields: config
+func (_m *MockMsgStream) SetReplicate(config *ReplicateConfig) {
+	_m.Called(config)
+}
+
+// MockMsgStream_SetReplicate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetReplicate'
+type MockMsgStream_SetReplicate_Call struct {
+	*mock.Call
+}
+
+// SetReplicate is a helper method to define mock.On call
+//   - config *ReplicateConfig
+func (_e *MockMsgStream_Expecter) SetReplicate(config interface{}) *MockMsgStream_SetReplicate_Call {
+	return &MockMsgStream_SetReplicate_Call{Call: _e.mock.On("SetReplicate", config)}
+}
+
+func (_c *MockMsgStream_SetReplicate_Call) Run(run func(config *ReplicateConfig)) *MockMsgStream_SetReplicate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*ReplicateConfig))
+	})
+	return _c
+}
+
+func (_c *MockMsgStream_SetReplicate_Call) Return() *MockMsgStream_SetReplicate_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockMsgStream_SetReplicate_Call) RunAndReturn(run func(*ReplicateConfig)) *MockMsgStream_SetReplicate_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockMsgStream creates a new instance of MockMsgStream. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockMsgStream(t interface {

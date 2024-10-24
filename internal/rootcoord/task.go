@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -173,7 +174,6 @@ func NewCollectionLockerKey(collection string, rw bool) LockerKey {
 }
 
 func NewLockerKeyChain(lockerKeys ...LockerKey) LockerKey {
-	log.Info("NewLockerKeyChain", zap.Any("lockerKeys", len(lockerKeys)))
 	if len(lockerKeys) == 0 {
 		return nil
 	}
@@ -190,4 +190,17 @@ func NewLockerKeyChain(lockerKeys ...LockerKey) LockerKey {
 		lockerKeys[i].(*taskLockerKey).next = lockerKeys[i+1]
 	}
 	return lockerKeys[0]
+}
+
+func GetLockerKeyString(k LockerKey) string {
+	if k == nil {
+		return "nil"
+	}
+	key := k.LockKey()
+	level := k.Level()
+	wLock := k.IsWLock()
+	if k.Next() == nil {
+		return fmt.Sprintf("%s-%d-%t", key, level, wLock)
+	}
+	return fmt.Sprintf("%s-%d-%t|%s", key, level, wLock, GetLockerKeyString(k.Next()))
 }

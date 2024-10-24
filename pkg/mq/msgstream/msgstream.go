@@ -19,7 +19,10 @@ package msgstream
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -71,6 +74,38 @@ type MsgStream interface {
 	CheckTopicValid(channel string) error
 
 	ForceEnableProduce(can bool)
+	SetReplicate(config *ReplicateConfig)
+}
+
+type ReplicateConfig struct {
+	ReplicateID string
+	CheckFunc   CheckReplicateMsgFunc
+}
+
+type CheckReplicateMsgFunc func(*ReplicateMsg) bool
+
+func GetReplicateConfig(replicateID, dbName, colName string) *ReplicateConfig {
+	if replicateID == "" {
+		return nil
+	}
+	replicateConfig := &ReplicateConfig{
+		ReplicateID: replicateID,
+		CheckFunc: func(msg *ReplicateMsg) bool {
+			log.Info("check replicate msg",
+				zap.String("replicateID", replicateID),
+				zap.String("dbName", dbName),
+				zap.String("colName", colName),
+				zap.Any("msg", msg))
+			if !msg.IsEnd {
+				return false
+			}
+			if msg.IsCluster {
+				return true
+			}
+			return msg.Database == dbName && (msg.GetCollection() == colName || msg.GetCollection() == "")
+		},
+	}
+	return replicateConfig
 }
 
 type Factory interface {

@@ -72,6 +72,9 @@ type mqMsgStream struct {
 	ttMsgEnable        atomic.Value
 	forceEnableProduce atomic.Value
 	configEvent        config.EventHandler
+
+	replicateID string
+	checkFunc   CheckReplicateMsgFunc
 }
 
 // NewMqMsgStream is used to generate a new mqMsgStream object
@@ -272,8 +275,48 @@ func (ms *mqMsgStream) ForceEnableProduce(can bool) {
 	ms.forceEnableProduce.Store(can)
 }
 
+// SetReplicate not safe, please call it only onece before produce or consume
+func (ms *mqMsgStream) SetReplicate(config *ReplicateConfig) {
+	if config == nil {
+		return
+	}
+	ms.replicateID = config.ReplicateID
+	ms.checkFunc = config.CheckFunc
+}
+
 func (ms *mqMsgStream) isEnabledProduce() bool {
 	return ms.forceEnableProduce.Load().(bool) || ms.ttMsgEnable.Load().(bool)
+}
+
+func (ms *mqMsgStream) isSkipSystemTT() bool {
+	return ms.replicateID != ""
+}
+
+func (ms *mqMsgStream) checkReplicateEndMsg(msg TsMsg) bool {
+	if !ms.isSkipSystemTT() ||
+		msg.Type() != commonpb.MsgType_Replicate ||
+		ms.checkFunc == nil {
+		return false
+	}
+	replicateMsg := msg.(*ReplicateMsg)
+	check := ms.checkFunc(replicateMsg)
+	if check {
+		ms.replicateID = ""
+	}
+	return check
+}
+
+// checkReplicateID check the replicate id of the message, return values: isMatch, isReplicate
+func (ms *mqMsgStream) checkReplicateID(msg TsMsg) (bool, bool) {
+	if !ms.isSkipSystemTT() {
+		return true, false
+	}
+	msgBase, ok := msg.(interface{ GetBase() *commonpb.MsgBase })
+	if !ok {
+		log.Warn("fail to get msg base, please check it", zap.Any("type", msg.Type()))
+		return false, false
+	}
+	return msgBase.GetBase().GetReplicateInfo().GetReplicateID() == ms.replicateID, true
 }
 
 func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
@@ -449,6 +492,10 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 			tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
 			if err != nil {
 				log.Ctx(ms.ctx).Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
+				continue
+			}
+			isMatch, _ := ms.checkReplicateID(tsMsg)
+			if !isMatch {
 				continue
 			}
 			pos := tsMsg.Position()
@@ -688,9 +735,9 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			startBufTime := time.Now()
 			var endTs uint64
 			var size uint64
-			var containsDropCollectionMsg bool
+			var containsEndBufferMsg bool
 
-			for ms.continueBuffering(endTs, size, startBufTime) && !containsDropCollectionMsg {
+			for ms.continueBuffering(endTs, size, startBufTime) && !containsEndBufferMsg {
 				ms.consumerLock.Lock()
 				// wait all channels get ttMsg
 				for _, consumer := range ms.consumers {
@@ -726,6 +773,10 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 							timeTickMsg = v
 							continue
 						}
+						if v.Type() == commonpb.MsgType_Replicate {
+							containsEndBufferMsg = true
+							continue
+						}
 						if v.EndTs() <= currTs {
 							size += uint64(v.Size())
 							timeTickBuf = append(timeTickBuf, v)
@@ -734,7 +785,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 						}
 						// when drop collection, force to exit the buffer loop
 						if v.Type() == commonpb.MsgType_DropCollection {
-							containsDropCollectionMsg = true
+							containsEndBufferMsg = true
 						}
 					}
 					ms.chanMsgBuf[consumer] = tempBuffer
@@ -826,6 +877,13 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 				log.Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
 				continue
 			}
+			isMatch, isReplicate := ms.checkReplicateID(tsMsg)
+			if !isMatch {
+				continue
+			}
+			if isReplicate && ms.checkReplicateEndMsg(tsMsg) {
+				log.Info("replicate end message received")
+			}
 
 			ms.chanMsgBufMutex.Lock()
 			ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], tsMsg)
@@ -860,7 +918,7 @@ func (ms *MqTtMsgStream) allChanReachSameTtMsg(chanTtMsgSync map[mqwrapper.Consu
 	}
 	for consumer := range ms.chanTtMsgTime {
 		ms.chanTtMsgTimeMutex.RLock()
-		chanTtMsgSync[consumer] = (ms.chanTtMsgTime[consumer] == maxTime)
+		chanTtMsgSync[consumer] = ms.chanTtMsgTime[consumer] == maxTime
 		ms.chanTtMsgTimeMutex.RUnlock()
 	}
 
@@ -959,6 +1017,13 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 				tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), headerMsg.Base.MsgType)
 				if err != nil {
 					return fmt.Errorf("failed to unmarshal tsMsg, err %s", err.Error())
+				}
+				isMatch, isReplicate := ms.checkReplicateID(tsMsg)
+				if !isMatch {
+					continue
+				}
+				if isReplicate && ms.checkReplicateEndMsg(tsMsg) {
+					log.Info("replicate end msg in the seek loop", zap.String("channel", mp.ChannelName))
 				}
 				if tsMsg.Type() == commonpb.MsgType_TimeTick && tsMsg.BeginTs() >= mp.Timestamp {
 					runLoop = false

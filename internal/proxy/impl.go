@@ -160,7 +160,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			}
 			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
-		case commonpb.MsgType_DropDatabase:
+		case commonpb.MsgType_DropDatabase, commonpb.MsgType_AlterDatabase:
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
 			if request.CollectionID != UniqueID(0) {
@@ -6325,13 +6325,19 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 		return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
 	}
 
-	if paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool() {
+	collectionReplicateEnable := paramtable.Get().CommonCfg.CollectionReplicateEnable.GetAsBool()
+	ttMsgEnabled := paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool()
+
+	// replicate message can be use in two ways, otherwise return error
+	// 1. collectionReplicateEnable is false and ttMsgEnabled is false, active/standby mode
+	// 2. collectionReplicateEnable is true and ttMsgEnabled is true, data migration mode
+	if (!collectionReplicateEnable && ttMsgEnabled) || (collectionReplicateEnable && !ttMsgEnabled) {
 		return &milvuspb.ReplicateMessageResponse{
 			Status: merr.Status(merr.ErrDenyReplicateMessage),
 		}, nil
 	}
-	var err error
 
+	var err error
 	if req.GetChannelName() == "" {
 		log.Ctx(ctx).Warn("channel name is empty")
 		return &milvuspb.ReplicateMessageResponse{
@@ -6369,6 +6375,18 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 		StartPositions: req.StartPositions,
 		EndPositions:   req.EndPositions,
 	}
+	checkCollectionReplicateProperty := func(dbName, collectionName string) bool {
+		if !collectionReplicateEnable {
+			return true
+		}
+		replicateID, err := GetReplicateID(ctx, dbName, collectionName)
+		if err != nil {
+			log.Warn("get replicate id failed", zap.String("collectionName", collectionName), zap.Error(err))
+			return false
+		}
+		return replicateID != ""
+	}
+
 	// getTsMsgFromConsumerMsg
 	for i, msgBytes := range req.Msgs {
 		header := commonpb.MsgHeader{}
@@ -6388,6 +6406,9 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 		}
 		switch realMsg := tsMsg.(type) {
 		case *msgstream.InsertMsg:
+			if !checkCollectionReplicateProperty(realMsg.GetDbName(), realMsg.GetCollectionName()) {
+				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.WrapErrCollectionReplicateMode("replicate"))}, nil
+			}
 			assignedSegmentInfos, err := node.segAssigner.GetSegmentID(realMsg.GetCollectionID(), realMsg.GetPartitionID(),
 				realMsg.GetShardName(), uint32(realMsg.NumRows), req.EndTs)
 			if err != nil {
@@ -6401,6 +6422,10 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 			for assignSegmentID := range assignedSegmentInfos {
 				realMsg.SegmentID = assignSegmentID
 				break
+			}
+		case *msgstream.DeleteMsg:
+			if !checkCollectionReplicateProperty(realMsg.GetDbName(), realMsg.GetCollectionName()) {
+				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.WrapErrCollectionReplicateMode("replicate"))}, nil
 			}
 		}
 		msgPack.Msgs = append(msgPack.Msgs, tsMsg)
