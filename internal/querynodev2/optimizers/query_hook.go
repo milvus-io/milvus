@@ -27,6 +27,7 @@ type QueryHook interface {
 func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int) (*querypb.SearchRequest, error) {
 	// no hook applied or disabled, just return
 	if queryHook == nil || !paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
+		req.Req.IsTopkReduce = false
 		return req, nil
 	}
 
@@ -67,7 +68,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			common.SegmentNumKey:   estSegmentNum,
 			common.WithFilterKey:   withFilter,
 			common.DataTypeKey:     int32(plan.GetVectorAnns().GetVectorType()),
-			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool(),
+			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool() && req.GetReq().GetIsTopkReduce(),
 			common.CollectionKey:   req.GetReq().GetCollectionID(),
 		}
 		if withFilter && channelNum > 1 {
@@ -78,7 +79,9 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			log.Warn("failed to execute queryHook", zap.Error(err))
 			return nil, merr.WrapErrServiceUnavailable(err.Error(), "queryHook execution failed")
 		}
-		queryInfo.Topk = params[common.TopKKey].(int64)
+		finalTopk := params[common.TopKKey].(int64)
+		isTopkReduce := req.GetReq().GetIsTopkReduce() && (finalTopk < queryInfo.GetTopk())
+		queryInfo.Topk = finalTopk
 		queryInfo.SearchParams = params[common.SearchParamKey].(string)
 		serializedExprPlan, err := proto.Marshal(&plan)
 		if err != nil {
@@ -86,6 +89,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			return nil, merr.WrapErrParameterInvalid("marshalable search plan", "plan with marshal error", err.Error())
 		}
 		req.Req.SerializedExprPlan = serializedExprPlan
+		req.Req.IsTopkReduce = isTopkReduce
 		log.Debug("optimized search params done", zap.Any("queryInfo", queryInfo))
 	default:
 		log.Warn("not supported node type", zap.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))

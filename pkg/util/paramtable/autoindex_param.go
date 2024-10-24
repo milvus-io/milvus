@@ -29,8 +29,9 @@ import (
 // /////////////////////////////////////////////////////////////////////////////
 // --- common ---
 type autoIndexConfig struct {
-	Enable         ParamItem `refreshable:"true"`
-	EnableOptimize ParamItem `refreshable:"true"`
+	Enable                 ParamItem `refreshable:"true"`
+	EnableOptimize         ParamItem `refreshable:"true"`
+	EnableResultLimitCheck ParamItem `refreshable:"true"`
 
 	IndexParams           ParamItem  `refreshable:"true"`
 	SparseIndexParams     ParamItem  `refreshable:"true"`
@@ -66,6 +67,14 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.EnableOptimize.Init(base.mgr)
+
+	p.EnableResultLimitCheck = ParamItem{
+		Key:          "autoIndex.resultLimitCheck",
+		Version:      "2.5.0",
+		DefaultValue: "true",
+		PanicIfEmpty: true,
+	}
+	p.EnableResultLimitCheck.Init(base.mgr)
 
 	p.IndexParams = ParamItem{
 		Key:          "autoIndex.params.build",
