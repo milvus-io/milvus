@@ -94,7 +94,8 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 			isFlush(segment) &&
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
-			segment.GetLevel() == datapb.SegmentLevel_L2 // only support L2 for now
+			segment.GetLevel() == datapb.SegmentLevel_L2 && // only support L2 for now
+			!segment.GetIsInvisible()
 	})
 
 	views := make([]CompactionView, 0)

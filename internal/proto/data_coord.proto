@@ -357,6 +357,10 @@ message SegmentInfo {
   // textStatsLogs is used to record tokenization index for fields.
   map<int64, TextIndexStats> textStatsLogs = 26;
   repeated FieldBinlog bm25statslogs = 27;
+
+  // This field is used to indicate that some intermediate state segments should not be loaded.
+  // For example, segments that have been clustered but haven't undergone stats yet.
+  bool is_invisible = 28;
 }
 
 message SegmentStartPosition {

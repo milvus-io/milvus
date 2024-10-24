@@ -19,11 +19,13 @@ package querynodev2
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -47,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -720,6 +723,9 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	resp = task.SearchResult()
 	resp.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	resp.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
+	if req.GetReq().GetIsTopkReduce() {
+		resp.IsTopkReduce = true
+	}
 	return resp, nil
 }
 
@@ -1097,7 +1103,8 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	}
 	defer node.lifetime.Done()
 
-	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	ret := gjson.Parse(req.GetRequest())
+	metricType, err := metricsinfo.ParseMetricRequestType(ret)
 	if err != nil {
 		log.Warn("QueryNode.GetMetrics failed to parse metric type",
 			zap.Int64("nodeId", node.GetNodeID()),
@@ -1397,6 +1404,84 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 	}
 
 	return merr.Success(), nil
+}
+
+// DeleteBatch is the API to apply same delete data into multiple segments.
+// it's basically same as `Delete` but cost less memory pressure.
+func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.String("channel", req.GetVchannelName()),
+		zap.Int64s("segmentIDs", req.GetSegmentIds()),
+		zap.String("scope", req.GetScope().String()),
+	)
+
+	// check node healthy
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return &querypb.DeleteBatchResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	defer node.lifetime.Done()
+
+	// log.Debug("QueryNode received worker delete detail", zap.Stringer("info", &deleteRequestStringer{DeleteRequest: req}))
+
+	filters := []segments.SegmentFilter{
+		segments.WithIDs(req.GetSegmentIds()...),
+	}
+
+	// do not add filter for Unknown & All scope, for backward cap
+	switch req.GetScope() {
+	case querypb.DataScope_Historical:
+		filters = append(filters, segments.WithType(segments.SegmentTypeSealed))
+	case querypb.DataScope_Streaming:
+		filters = append(filters, segments.WithType(segments.SegmentTypeGrowing))
+	}
+
+	segs := node.manager.Segment.GetBy(filters...)
+
+	hitIDs := lo.Map(segs, func(segment segments.Segment, _ int) int64 {
+		return segment.ID()
+	})
+	// calculate missing ids, continue to delete existing ones.
+	missingIDs := typeutil.NewSet(req.GetSegmentIds()...).Complement(typeutil.NewSet(hitIDs...))
+	if missingIDs.Len() > 0 {
+		log.Warn("Delete batch find missing ids", zap.Int64s("missing_ids", missingIDs.Collect()))
+	}
+
+	pks := storage.ParseIDs2PrimaryKeys(req.GetPrimaryKeys())
+
+	// control the execution batch parallel with P number
+	// maybe it shall be lower in case of heavy CPU usage may impacting search/query
+	pool := conc.NewPool[struct{}](runtime.GOMAXPROCS(0))
+	futures := make([]*conc.Future[struct{}], 0, len(segs))
+	errSet := typeutil.NewConcurrentSet[int64]()
+
+	for _, segment := range segs {
+		segment := segment
+		futures = append(futures, pool.Submit(func() (struct{}, error) {
+			// TODO @silverxia, add interface to use same data struct for segment delete
+			// current implementation still copys pks into protobuf(or arrow) struct
+			err := segment.Delete(ctx, pks, req.GetTimestamps())
+			if err != nil {
+				errSet.Insert(segment.ID())
+				log.Warn("segment delete failed",
+					zap.Int64("segmentID", segment.ID()),
+					zap.Error(err))
+				return struct{}{}, err
+			}
+			return struct{}{}, nil
+		}))
+	}
+
+	// ignore error returned, since error segment is recorded into error set
+	_ = conc.AwaitAll(futures...)
+
+	// return merr.Success(), nil
+	return &querypb.DeleteBatchResponse{
+		Status:    merr.Success(),
+		FailedIds: errSet.Collect(),
+	}, nil
 }
 
 type deleteRequestStringer struct {

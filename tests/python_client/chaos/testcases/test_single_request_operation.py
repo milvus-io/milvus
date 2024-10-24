@@ -11,6 +11,7 @@ from chaos.checker import (CollectionCreateChecker,
                            SearchChecker,
                            HybridSearchChecker,
                            QueryChecker,
+                           TextMatchChecker,
                            IndexCreateChecker,
                            DeleteChecker,
                            CollectionDropChecker,
@@ -76,6 +77,7 @@ class TestOperations(TestBase):
             Op.search: SearchChecker(collection_name=c_name),
             Op.hybrid_search: HybridSearchChecker(collection_name=c_name),
             Op.query: QueryChecker(collection_name=c_name),
+            Op.text_match: TextMatchChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
             Op.drop: CollectionDropChecker(collection_name=c_name)
         }

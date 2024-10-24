@@ -126,6 +126,7 @@ message SearchRequest {
   int64 group_by_field_id = 23;
   int64 group_size = 24;
   int64 field_id = 25;
+  bool is_topk_reduce = 26;
 }
 
 message SubSearchResults {
@@ -161,6 +162,7 @@ message SearchResults {
   repeated SubSearchResults sub_results = 15;
   bool is_advanced = 16;
   int64 all_search_count = 17;
+  bool is_topk_reduce = 18;
 }
 
 message CostAggregation {

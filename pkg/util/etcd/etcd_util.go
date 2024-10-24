@@ -17,20 +17,25 @@
 package etcd
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"net/url"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util"
 )
 
 // GetEtcdClient returns etcd client
@@ -227,21 +232,8 @@ func StartTestEmbedEtcdServer() (*embed.Etcd, string, error) {
 		return nil, "", err
 	}
 	config := embed.NewConfig()
-
 	config.Dir = dir
 	config.LogLevel = "warn"
-	config.LogOutputs = []string{"default"}
-	u, err := url.Parse("http://localhost:0")
-	if err != nil {
-		return nil, "", err
-	}
-	config.LCUrls = []url.URL{*u}
-	u, err = url.Parse("http://localhost:0")
-	if err != nil {
-		return nil, "", err
-	}
-	config.LPUrls = []url.URL{*u}
-
 	server, err := embed.StartEtcd(config)
 	return server, dir, err
 }
@@ -253,4 +245,105 @@ func GetEmbedEtcdEndpoints(server *embed.Etcd) []string {
 		addrs = append(addrs, l.Addr().String())
 	}
 	return addrs
+}
+
+func HealthCheck(useEmbedEtcd bool,
+	enableAuth bool,
+	userName,
+	password string,
+	useSSL bool,
+	endpoints []string,
+	certFile string,
+	keyFile string,
+	caCertFile string,
+	minVersion string,
+) common.MetaClusterStatus {
+	var healthList []common.EPHealth
+	clusterStatus := common.MetaClusterStatus{MetaType: util.MetaStoreTypeEtcd}
+
+	client, err := CreateEtcdClient(useEmbedEtcd, enableAuth, userName, password, useSSL, endpoints, certFile, keyFile, caCertFile, minVersion)
+	if err != nil {
+		clusterStatus.Reason = fmt.Sprintf("establish client connection failed, err: %v", err)
+		return clusterStatus
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	defer client.Close()
+	resp, err := client.MemberList(ctx)
+	if err != nil {
+		clusterStatus.Reason = fmt.Sprintf("got member list failed, err: %v", err)
+		return clusterStatus
+	}
+
+	var wg sync.WaitGroup
+	hch := make(chan common.EPHealth, len(resp.Members))
+	for _, member := range resp.Members {
+		wg.Add(1)
+		member := member
+		go func() {
+			defer wg.Done()
+			ep := member.ClientURLs[0]
+			client, err := CreateEtcdClient(useEmbedEtcd, enableAuth, userName, password, useSSL, member.ClientURLs, certFile, keyFile, caCertFile, minVersion)
+			if err != nil {
+				hch <- common.EPHealth{EP: ep, Health: false, Reason: err.Error()}
+				return
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			defer client.Close()
+
+			_, err = client.Get(ctx, "health")
+			eh := common.EPHealth{EP: ep, Health: false}
+
+			// permission denied is OK since proposal goes through consensus to get it
+			if err == nil || errors.Is(err, rpctypes.ErrPermissionDenied) {
+				eh.Health = true
+			} else {
+				eh.Reason = err.Error()
+			}
+
+			if eh.Health {
+				resp, err := client.AlarmList(ctx)
+				if err == nil && len(resp.Alarms) > 0 {
+					eh.Health = false
+					eh.Reason = "Active Alarm(s): "
+					for _, v := range resp.Alarms {
+						switch v.Alarm {
+						case etcdserverpb.AlarmType_NOSPACE:
+							eh.Reason = eh.Reason + "NOSPACE "
+						case etcdserverpb.AlarmType_CORRUPT:
+							eh.Reason = eh.Reason + "CORRUPT "
+						default:
+							eh.Reason = eh.Reason + "UNKNOWN "
+						}
+					}
+				} else if err != nil {
+					eh.Health = false
+					eh.Reason = "Unable to fetch the alarm list"
+				}
+			}
+			hch <- eh
+		}()
+	}
+
+	wg.Wait()
+	close(hch)
+
+	var hasUnhealthyEP bool
+	for h := range hch {
+		healthList = append(healthList, h)
+		if !h.Health {
+			hasUnhealthyEP = true
+		}
+	}
+
+	if hasUnhealthyEP {
+		clusterStatus.Reason = "some members are unavailable"
+	} else {
+		clusterStatus.Health = true
+	}
+	clusterStatus.Members = healthList
+	return clusterStatus
 }

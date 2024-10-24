@@ -36,7 +36,13 @@ func TestProxy_metrics(t *testing.T) {
 	var err error
 
 	ctx := context.Background()
+	req, _ := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+	resp, err := getSystemInfoMetrics(ctx, req, getMockProxyRequestMetrics())
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+}
 
+func getMockProxyRequestMetrics() *Proxy {
 	rc := NewRootCoordMock()
 	defer rc.Close()
 
@@ -194,12 +200,5 @@ func TestProxy_metrics(t *testing.T) {
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, id),
 		}, nil
 	}
-
-	req, _ := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
-	resp, err := getSystemInfoMetrics(ctx, req, proxy)
-	assert.NoError(t, err)
-	assert.NotNil(t, resp)
-
-	rc.getMetricsFunc = nil
-	dc.getMetricsFunc = nil
+	return proxy
 }

@@ -217,13 +217,13 @@ var (
 		Help: "Total of append message to wal",
 	}, WALChannelLabelName, WALMessageTypeLabelName, StatusLabelName)
 
-	WALAppendMessageDurationSeconds = newStreamingNodeHistogramVec(prometheus.HistogramOpts{
+	WALAppendMessageDurationSeconds = newWALHistogramVec(prometheus.HistogramOpts{
 		Name:    "append_message_duration_seconds",
 		Help:    "Duration of wal append message",
 		Buckets: secondsBuckets,
 	}, WALChannelLabelName, StatusLabelName)
 
-	WALImplsAppendMessageDurationSeconds = newStreamingNodeHistogramVec(prometheus.HistogramOpts{
+	WALImplsAppendMessageDurationSeconds = newWALHistogramVec(prometheus.HistogramOpts{
 		Name:    "impls_append_message_duration_seconds",
 		Help:    "Duration of wal impls append message",
 		Buckets: secondsBuckets,

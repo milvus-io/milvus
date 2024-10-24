@@ -27,8 +27,8 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.5.0rc95
-pymilvus[bulk_writer]==2.5.0rc95
+pymilvus==2.5.0rc103
+pymilvus[bulk_writer]==2.5.0rc103
 
 # for customize config test
 python-benedict==0.24.3
@@ -62,9 +62,10 @@ fastparquet==2023.7.0
 # for bf16 datatype
 ml-dtypes==0.2.0
 
-# for text match
+# for full text search
 bm25s==0.2.0
 jieba==0.42.1
+
 
 # for perf test
 locust==2.25.0

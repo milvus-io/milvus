@@ -847,30 +847,13 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 			paramtable.GetNodeID()),
 	}
 
-	metricType, err := metricsinfo.ParseMetricType(req.GetRequest())
+	ret, err := metricsinfo.ExecuteMetricsRequest(ctx, req)
 	if err != nil {
-		msg := "failed to parse metric type"
-		log.Warn(msg, zap.Error(err))
-		resp.Status = merr.Status(errors.Wrap(err, msg))
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	if metricType != metricsinfo.SystemInfoMetrics {
-		msg := "invalid metric type"
-		err := errors.New(metricsinfo.MsgUnimplementedMetric)
-		log.Warn(msg, zap.Error(err))
-		resp.Status = merr.Status(errors.Wrap(err, msg))
-		return resp, nil
-	}
-
-	resp.Response, err = s.getSystemInfoMetrics(ctx, req)
-	if err != nil {
-		msg := "failed to get system info metrics"
-		log.Warn(msg, zap.Error(err))
-		resp.Status = merr.Status(errors.Wrap(err, msg))
-		return resp, nil
-	}
-
+	resp.Response = ret
 	return resp, nil
 }
 

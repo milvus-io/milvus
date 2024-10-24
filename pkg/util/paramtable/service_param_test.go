@@ -170,7 +170,7 @@ func TestServiceParam(t *testing.T) {
 			kc := &KafkaConfig{}
 			base := &BaseTable{mgr: config.NewManager()}
 			kc.Init(base)
-			assert.Empty(t, kc.Address.GetValue())
+			assert.Equal(t, "localhost:9092", kc.Address.GetValue())
 			assert.Empty(t, kc.SaslMechanisms.GetValue())
 			assert.Empty(t, kc.SecurityProtocol.GetValue())
 			assert.Equal(t, kc.ReadTimeout.GetAsDuration(time.Second), 10*time.Second)
