@@ -68,6 +68,7 @@ func (suite *DistHandlerSuite) SetupSuite() {
 	suite.scheduler.EXPECT().GetExecutedFlag(mock.Anything).Return(suite.executedFlagChan).Maybe()
 	suite.target.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetDmChannel(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	suite.target.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything).Return(1011).Maybe()
 }
 
 func (suite *DistHandlerSuite) TestBasic() {
@@ -105,8 +106,9 @@ func (suite *DistHandlerSuite) TestBasic() {
 
 		LeaderViews: []*querypb.LeaderView{
 			{
-				Collection: 1,
-				Channel:    "test-channel-1",
+				Collection:    1,
+				Channel:       "test-channel-1",
+				TargetVersion: 1011,
 			},
 		},
 		LastModifyTs: 1,

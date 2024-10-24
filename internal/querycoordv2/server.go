@@ -439,6 +439,7 @@ func (s *Server) initObserver() {
 		s.proxyClientManager,
 	)
 	s.dist.LeaderViewManager.SetNotifyFunc(s.leaderCacheObserver.RegisterEvent)
+	s.dist.LeaderViewManager.SetNotifyFunc(s.targetObserver.TriggerCollectionCheck)
 }
 
 func (s *Server) afterStart() {}

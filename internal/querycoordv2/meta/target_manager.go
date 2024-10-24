@@ -366,7 +366,7 @@ func (mgr *TargetManager) GetGrowingSegmentsByCollection(collectionID int64,
 			segments.Insert(channel.GetUnflushedSegmentIds()...)
 		}
 
-		if len(segments) > 0 {
+		if len(segments) >= 0 {
 			return segments
 		}
 	}
@@ -390,7 +390,7 @@ func (mgr *TargetManager) GetGrowingSegmentsByChannel(collectionID int64,
 			}
 		}
 
-		if len(segments) > 0 {
+		if len(segments) >= 0 {
 			return segments
 		}
 	}
@@ -429,7 +429,7 @@ func (mgr *TargetManager) GetSealedSegmentsByChannel(collectionID int64,
 			}
 		}
 
-		if len(ret) > 0 {
+		if len(ret) >= 0 {
 			return ret
 		}
 	}
@@ -470,7 +470,7 @@ func (mgr *TargetManager) GetSealedSegmentsByPartition(collectionID int64,
 			}
 		}
 
-		if len(segments) > 0 {
+		if len(segments) >= 0 {
 			return segments
 		}
 	}

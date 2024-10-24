@@ -2008,6 +2008,7 @@ func (suite *ServiceSuite) updateChannelDist(collection int64) {
 						Version: time.Now().Unix(),
 					}
 				}),
+				TargetVersion: 1011,
 			})
 			i++
 			if i >= len(channels) {
