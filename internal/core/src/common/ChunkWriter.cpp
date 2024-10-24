@@ -35,7 +35,7 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
         auto array = std::dynamic_pointer_cast<arrow::StringArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
-            strs.push_back(std::string(str));
+            strs.emplace_back(str);
             size += str.size();
         }
         auto null_bitmap_n = (data->length() + 7) / 8;
@@ -256,7 +256,7 @@ SparseFloatVectorChunkWriter::write(
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
-            strs.push_back(std::string(str));
+            strs.emplace_back(str);
             size += str.size();
         }
         auto null_bitmap_n = (data->length() + 7) / 8;
