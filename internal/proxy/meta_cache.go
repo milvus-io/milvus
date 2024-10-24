@@ -340,18 +340,19 @@ type MetaCache struct {
 	rootCoord  types.RootCoordClient
 	queryCoord types.QueryCoordClient
 
-	dbInfo         map[string]*databaseInfo              // database -> db_info
-	collInfo       map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
-	collLeader     map[string]map[string]*shardLeaders   // database -> collectionName -> collection_leaders
-	credMap        map[string]*internalpb.CredentialInfo // cache for credential, lazy load
-	privilegeInfos map[string]struct{}                   // privileges cache
-	userToRoles    map[string]map[string]struct{}        // user to role cache
-	mu             sync.RWMutex
-	credMut        sync.RWMutex
-	leaderMut      sync.RWMutex
-	shardMgr       shardClientMgr
-	sfGlobal       conc.Singleflight[*collectionInfo]
-	sfDB           conc.Singleflight[*databaseInfo]
+	dbInfo                     map[string]*databaseInfo              // database -> db_info
+	collInfo                   map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
+	collLeader                 map[string]map[string]*shardLeaders   // database -> collectionName -> collection_leaders
+	credMap                    map[string]*internalpb.CredentialInfo // cache for credential, lazy load
+	privilegeInfos             map[string]struct{}                   // privileges cache
+	privilegeGroupToPrivileges map[string][]string                   // privilege group -> privileges
+	userToRoles                map[string]map[string]struct{}        // user to role cache
+	mu                         sync.RWMutex
+	credMut                    sync.RWMutex
+	leaderMut                  sync.RWMutex
+	shardMgr                   shardClientMgr
+	sfGlobal                   conc.Singleflight[*collectionInfo]
+	sfDB                       conc.Singleflight[*databaseInfo]
 
 	IDStart int64
 	IDCount int64
@@ -384,15 +385,16 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 // NewMetaCache creates a MetaCache with provided RootCoord and QueryNode
 func NewMetaCache(rootCoord types.RootCoordClient, queryCoord types.QueryCoordClient, shardMgr shardClientMgr) (*MetaCache, error) {
 	return &MetaCache{
-		rootCoord:      rootCoord,
-		queryCoord:     queryCoord,
-		dbInfo:         map[string]*databaseInfo{},
-		collInfo:       map[string]map[string]*collectionInfo{},
-		collLeader:     map[string]map[string]*shardLeaders{},
-		credMap:        map[string]*internalpb.CredentialInfo{},
-		shardMgr:       shardMgr,
-		privilegeInfos: map[string]struct{}{},
-		userToRoles:    map[string]map[string]struct{}{},
+		rootCoord:                  rootCoord,
+		queryCoord:                 queryCoord,
+		dbInfo:                     map[string]*databaseInfo{},
+		collInfo:                   map[string]map[string]*collectionInfo{},
+		collLeader:                 map[string]map[string]*shardLeaders{},
+		credMap:                    map[string]*internalpb.CredentialInfo{},
+		shardMgr:                   shardMgr,
+		privilegeInfos:             map[string]struct{}{},
+		privilegeGroupToPrivileges: map[string][]string{},
+		userToRoles:                map[string]map[string]struct{}{},
 	}, nil
 }
 

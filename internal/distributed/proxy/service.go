@@ -993,6 +993,26 @@ func (s *Server) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMetaR
 	return s.proxy.RestoreRBAC(ctx, req)
 }
 
+func (s *Server) CreatePrivilegeGroup(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {
+	return s.proxy.CreatePrivilegeGroup(ctx, req)
+}
+
+func (s *Server) DropPrivilegeGroup(ctx context.Context, req *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error) {
+	return s.proxy.DropPrivilegeGroup(ctx, req)
+}
+
+func (s *Server) ListPrivilegeGroups(ctx context.Context, req *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error) {
+	return s.proxy.ListPrivilegeGroups(ctx, req)
+}
+
+func (s *Server) AddPrivilegesToGroup(ctx context.Context, req *milvuspb.AddPrivilegesToGroupRequest) (*commonpb.Status, error) {
+	return s.proxy.AddPrivilegesToGroup(ctx, req)
+}
+
+func (s *Server) DropPrivilegesFromGroup(ctx context.Context, req *milvuspb.DropPrivilegesFromGroupRequest) (*commonpb.Status, error) {
+	return s.proxy.DropPrivilegesFromGroup(ctx, req)
+}
+
 func (s *Server) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
 	return s.proxy.RefreshPolicyInfoCache(ctx, req)
 }

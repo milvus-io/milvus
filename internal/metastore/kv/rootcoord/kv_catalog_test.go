@@ -2848,6 +2848,131 @@ func TestRBAC_Restore(t *testing.T) {
 	assert.Len(t, grants, 1)
 }
 
+func TestRBAC_PrivilegeGroup(t *testing.T) {
+	ctx := context.TODO()
+
+	t.Run("test GetPrivilegeGroup", func(t *testing.T) {
+		var (
+			kvmock = mocks.NewTxnKV(t)
+			c      = &Catalog{Txn: kvmock}
+		)
+		kvmock.EXPECT().Load(BuildPrivilegeGroupkey("group1")).Return("", merr.ErrIoKeyNotFound)
+		kvmock.EXPECT().Load(BuildPrivilegeGroupkey("group2")).Return(`["privilege1", "privilege2"]`, nil)
+
+		tests := []struct {
+			description string
+			expectedErr error
+			groupName   string
+			expectedOut []*milvuspb.PrivilegeEntity
+		}{
+			{"group not found", fmt.Errorf("privilege group [%s] does not exist", "group1"), "group1", nil},
+			{"valid group", nil, "group2", []*milvuspb.PrivilegeEntity{{Name: "privilege1"}, {Name: "privilege2"}}},
+		}
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				privileges, err := c.GetPrivilegeGroup(ctx, test.groupName)
+				if test.expectedErr != nil {
+					assert.Error(t, err, test.expectedErr)
+				} else {
+					assert.NoError(t, err)
+					assert.ElementsMatch(t, test.expectedOut, privileges)
+				}
+			})
+		}
+	})
+
+	t.Run("test DropPrivilegeGroup", func(t *testing.T) {
+		var (
+			kvmock = mocks.NewTxnKV(t)
+			c      = &Catalog{Txn: kvmock}
+			group  = "group1"
+			key    = BuildPrivilegeGroupkey(group)
+			group2 = "group2"
+			key2   = BuildPrivilegeGroupkey(group2)
+		)
+
+		kvmock.EXPECT().Remove(key).Return(nil)
+		kvmock.EXPECT().Remove(key2).Return(errors.New("Mock remove failure"))
+
+		tests := []struct {
+			description string
+			isValid     bool
+			groupName   string
+		}{
+			{"valid group", true, group},
+			{"remove failure", false, group2},
+		}
+
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				err := c.DropPrivilegeGroup(ctx, test.groupName)
+				if test.isValid {
+					assert.NoError(t, err)
+				} else {
+					assert.Error(t, err)
+				}
+			})
+		}
+	})
+
+	t.Run("test AlterPrivilegeGroup", func(t *testing.T) {
+		var (
+			kvmock     = mocks.NewTxnKV(t)
+			c          = &Catalog{Txn: kvmock}
+			group      = "group1"
+			privileges = []*milvuspb.PrivilegeEntity{{Name: "privilege1"}, {Name: "privilege2"}}
+			key        = BuildPrivilegeGroupkey(group)
+		)
+
+		kvmock.EXPECT().Has(key).Return(true, nil)
+		kvmock.EXPECT().Remove(key).Return(nil)
+		kvmock.EXPECT().Save(key, mock.Anything).Return(nil)
+
+		kvmock.EXPECT().Has(key).Return(false, nil)
+		kvmock.EXPECT().Save(key, mock.Anything).Return(nil)
+
+		tests := []struct {
+			description string
+			isValid     bool
+			groupName   string
+			privileges  []*milvuspb.PrivilegeEntity
+		}{
+			{"valid group with existing key", true, group, privileges},
+			{"valid group without existing key", true, group, privileges},
+		}
+
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				err := c.AlterPrivilegeGroup(ctx, test.groupName, test.privileges)
+				if test.isValid {
+					assert.NoError(t, err)
+				} else {
+					assert.Error(t, err)
+				}
+			})
+		}
+	})
+
+	t.Run("test ListPrivilegeGroups", func(t *testing.T) {
+		var (
+			kvmock = mocks.NewTxnKV(t)
+			c      = &Catalog{Txn: kvmock}
+		)
+
+		kvmock.EXPECT().LoadWithPrefix(PrivilegeGroupPrefix).Return(
+			[]string{PrivilegeGroupPrefix + "/group1", PrivilegeGroupPrefix + "/group2"},
+			[]string{
+				`["privilege1", "privilege2"]`,
+				`["privilege3", "privilege4"]`,
+			},
+			nil,
+		)
+		groups, err := c.ListPrivilegeGroups(ctx)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []string{"group1", "group2"}, groups)
+	})
+}
+
 func TestCatalog_AlterDatabase(t *testing.T) {
 	kvmock := mocks.NewSnapShotKV(t)
 	c := &Catalog{Snapshot: kvmock}

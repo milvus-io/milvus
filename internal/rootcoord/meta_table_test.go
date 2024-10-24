@@ -357,7 +357,8 @@ func TestRbacOperatePrivilege(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			err := mt.OperatePrivilege(util.DefaultTenant, test.entity, test.oType)
+			ctx := context.Background()
+			err := mt.OperatePrivilege(ctx, util.DefaultTenant, test.entity, test.oType)
 			assert.Error(t, err)
 		})
 	}
@@ -372,7 +373,8 @@ func TestRbacOperatePrivilege(t *testing.T) {
 		ObjectName: "obj_name",
 	}
 
-	err := mt.OperatePrivilege(util.DefaultTenant, &validEntity, milvuspb.OperatePrivilegeType_Grant)
+	ctx := context.Background()
+	err := mt.OperatePrivilege(ctx, util.DefaultTenant, &validEntity, milvuspb.OperatePrivilegeType_Grant)
 	assert.NoError(t, err)
 }
 

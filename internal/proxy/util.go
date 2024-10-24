@@ -1070,6 +1070,14 @@ func ValidatePrivilege(entity string) error {
 	return validateName(entity, "Privilege")
 }
 
+func ValidatePrivilegeGroupName(entity string) error {
+	return validateName(entity, "PrivilegeGroupName")
+}
+
+func ValidatePrivilegeGroup(entity string) error {
+	return validateName(entity, "PrivilegeGroup")
+}
+
 func GetCurUserFromContext(ctx context.Context) (string, error) {
 	return contextutil.GetCurUserFromContext(ctx)
 }

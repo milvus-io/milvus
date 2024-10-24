@@ -92,13 +92,18 @@ type IMetaTable interface {
 	OperateUserRole(tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error
 	SelectRole(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error)
 	SelectUser(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error)
-	OperatePrivilege(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
+	OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
 	SelectGrant(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
 	DropGrant(tenant string, role *milvuspb.RoleEntity) error
 	ListPolicy(tenant string) ([]string, error)
 	ListUserRole(tenant string) ([]string, error)
 	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)
 	RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error
+	CreatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity) error
+	DropPrivilegeGroup(ctx context.Context, groupName string) error
+	ListPrivilegeGroups(ctx context.Context) ([]string, error)
+	AddPrivilegesToGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity) error
+	DropPrivilegesFromGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity) error
 }
 
 // MetaTable is a persistent meta set of all databases, collections and partitions.
@@ -1365,7 +1370,7 @@ func (mt *MetaTable) SelectUser(tenant string, entity *milvuspb.UserEntity, incl
 }
 
 // OperatePrivilege grant or revoke privilege by setting the operateType param
-func (mt *MetaTable) OperatePrivilege(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+func (mt *MetaTable) OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 	if funcutil.IsEmptyString(entity.ObjectName) {
 		return fmt.Errorf("the object name in the grant entity is empty")
 	}
@@ -1381,6 +1386,10 @@ func (mt *MetaTable) OperatePrivilege(tenant string, entity *milvuspb.GrantEntit
 	if entity.Grantor.Privilege == nil || funcutil.IsEmptyString(entity.Grantor.Privilege.Name) {
 		return fmt.Errorf("the privilege name in the grant entity is empty")
 	}
+	conflict, err := mt.CheckWithPrivilegeGroupNames(ctx, entity.Grantor.Privilege.Name)
+	if err != nil || conflict {
+		return fmt.Errorf("the privilege name in the grant entity is conflict with any of the privilege group names")
+	}
 	if entity.Grantor.User == nil || funcutil.IsEmptyString(entity.Grantor.User.Name) {
 		return fmt.Errorf("the grantor name in the grant entity is empty")
 	}
@@ -1395,6 +1404,23 @@ func (mt *MetaTable) OperatePrivilege(tenant string, entity *milvuspb.GrantEntit
 	defer mt.permissionLock.Unlock()
 
 	return mt.catalog.AlterGrant(mt.ctx, tenant, entity, operateType)
+}
+
+// IsPrivilegeInAnyGroup checks if the given privilege name is conflict with any of the privilege group names.
+func (mt *MetaTable) CheckWithPrivilegeGroupNames(ctx context.Context, privilegeName string) (bool, error) {
+	privilegeGroups, err := mt.catalog.ListPrivilegeGroups(ctx)
+	if err != nil {
+		log.Warn("fail to list privilege groups", zap.Error(err))
+		return false, err
+	}
+
+	privilegeGroupNames := make(map[string]struct{})
+	for _, group := range privilegeGroups {
+		privilegeGroupNames[group] = struct{}{}
+	}
+
+	_, exists := privilegeGroupNames[privilegeName]
+	return exists, nil
 }
 
 // SelectGrant select grant
@@ -1455,4 +1481,90 @@ func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvu
 	defer mt.permissionLock.Unlock()
 
 	return mt.catalog.RestoreRBAC(mt.ctx, tenant, meta)
+}
+
+func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity) error {
+	if funcutil.IsEmptyString(groupName) {
+		return fmt.Errorf("the privilege group name is empty")
+	}
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	results, err := mt.catalog.ListPrivilegeGroups(mt.ctx)
+	if err != nil {
+		log.Warn("fail to list privilege groups", zap.Error(err))
+		return err
+	}
+	for _, result := range results {
+		if result == groupName {
+			log.Warn("privilege group already exists", zap.String("privilege_group", groupName))
+			return merr.WrapErrParameterInvalidMsg("privilege group [%s] already exists", groupName)
+		}
+	}
+
+	return mt.catalog.AlterPrivilegeGroup(mt.ctx, groupName, privileges)
+}
+
+func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	return mt.catalog.DropPrivilegeGroup(mt.ctx, groupName)
+}
+
+func (mt *MetaTable) ListPrivilegeGroups(ctx context.Context) ([]string, error) {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	return mt.catalog.ListPrivilegeGroups(mt.ctx)
+}
+
+func (mt *MetaTable) AddPrivilegesToGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	toMergePrivileges, err := mt.catalog.GetPrivilegeGroup(mt.ctx, groupName)
+	if err != nil {
+		log.Warn("fail to get privilege group", zap.String("privilege_group", groupName), zap.Error(err))
+		return err
+	}
+	privilegeSet := make(map[string]struct{})
+	for _, p := range toMergePrivileges {
+		privilegeSet[p.Name] = struct{}{}
+	}
+	for _, p := range privileges {
+		privilegeSet[p.Name] = struct{}{}
+	}
+	var mergedPrivileges []*milvuspb.PrivilegeEntity
+	for privilegeName := range privilegeSet {
+		mergedPrivileges = append(mergedPrivileges, &milvuspb.PrivilegeEntity{Name: privilegeName})
+	}
+
+	return mt.catalog.AlterPrivilegeGroup(mt.ctx, groupName, mergedPrivileges)
+}
+
+func (mt *MetaTable) DropPrivilegesFromGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	toUpdatePrivileges, err := mt.catalog.GetPrivilegeGroup(mt.ctx, groupName)
+	if err != nil {
+		log.Warn("fail to get privilege group", zap.String("privilege_group", groupName), zap.Error(err))
+		return err
+	}
+
+	privilegesToRemove := make(map[string]struct{})
+	for _, p := range privileges {
+		privilegesToRemove[p.Name] = struct{}{}
+	}
+
+	var updatedPrivileges []*milvuspb.PrivilegeEntity
+	for _, p := range toUpdatePrivileges {
+		// If the privilege is not in the removal set, keep it
+		if _, exists := privilegesToRemove[p.Name]; !exists {
+			updatedPrivileges = append(updatedPrivileges, p)
+		}
+	}
+
+	return mt.catalog.AlterPrivilegeGroup(mt.ctx, groupName, updatedPrivileges)
 }

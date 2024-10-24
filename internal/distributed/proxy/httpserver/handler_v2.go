@@ -123,6 +123,13 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(RoleCategory+GrantPrivilegeAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.addPrivilegeToRole))))
 	router.POST(RoleCategory+RevokePrivilegeAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.removePrivilegeFromRole))))
 
+	// privilege group
+	router.POST(PrivilegeGroupCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.createPrivilegeGroup))))
+	router.POST(PrivilegeGroupCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.dropPrivilegeGroup))))
+	router.POST(PrivilegeGroupCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.listPrivilegeGroups))))
+	router.POST(PrivilegeGroupCategory+AddPrivilegesToGroupAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.addPrivilegesToGroup))))
+	router.POST(PrivilegeGroupCategory+DropPrivilegesFromGroupAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.dropPrivilegesFromGroup))))
+
 	router.POST(IndexCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listIndexes)))))
 	router.POST(IndexCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &IndexReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.describeIndex)))))
 
@@ -1758,6 +1765,80 @@ func (h *HandlersV2) addPrivilegeToRole(ctx context.Context, c *gin.Context, any
 
 func (h *HandlersV2) removePrivilegeFromRole(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	return h.operatePrivilegeToRole(ctx, c, anyReq.(*GrantReq), milvuspb.OperatePrivilegeType_Revoke, dbName)
+}
+
+func (h *HandlersV2) createPrivilegeGroup(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*PrivilegeGroupReq)
+	req := &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName:  httpReq.PrivilegeGroupName,
+		Privileges: httpReq.Privileges,
+	}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreatePrivilegeGroup", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.CreatePrivilegeGroup(reqCtx, req.(*milvuspb.CreatePrivilegeGroupRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) dropPrivilegeGroup(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*PrivilegeGroupReq)
+	req := &milvuspb.DropPrivilegeGroupRequest{
+		GroupName: httpReq.PrivilegeGroupName,
+	}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropPrivilegeGroup", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.DropPrivilegeGroup(reqCtx, req.(*milvuspb.DropPrivilegeGroupRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) listPrivilegeGroups(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	req := &milvuspb.ListPrivilegeGroupsRequest{}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ListPrivilegeGroups", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ListPrivilegeGroups(reqCtx, req.(*milvuspb.ListPrivilegeGroupsRequest))
+	})
+	if err == nil {
+		groupNames := []string{}
+		for _, group := range resp.(*milvuspb.ListPrivilegeGroupsResponse).Groups {
+			groupNames = append(groupNames, group)
+		}
+		HTTPReturn(c, http.StatusOK, wrapperReturnList(groupNames))
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) addPrivilegesToGroup(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*PrivilegeGroupReq)
+	req := &milvuspb.AddPrivilegesToGroupRequest{
+		GroupName:  httpReq.PrivilegeGroupName,
+		Privileges: httpReq.Privileges,
+	}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AddPrivilegesToGroup", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AddPrivilegesToGroup(reqCtx, req.(*milvuspb.AddPrivilegesToGroupRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) dropPrivilegesFromGroup(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*PrivilegeGroupReq)
+	req := &milvuspb.DropPrivilegesFromGroupRequest{
+		GroupName:  httpReq.PrivilegeGroupName,
+		Privileges: httpReq.Privileges,
+	}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropPrivilegesFromGroups", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.DropPrivilegesFromGroup(reqCtx, req.(*milvuspb.DropPrivilegesFromGroupRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
 }
 
 func (h *HandlersV2) listIndexes(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {

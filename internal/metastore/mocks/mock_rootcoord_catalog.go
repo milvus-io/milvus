@@ -1828,3 +1828,203 @@ func NewRootCoordCatalog(t interface {
 
 	return mock
 }
+
+
+// GetPrivilegeGroup provides a mock function with given fields: ctx, groupName, privileges
+func (_m *RootCoordCatalog) GetPrivilegeGroup(ctx context.Context, groupName string) ([]*milvuspb.PrivilegeEntity, error) {
+	ret := _m.Called(ctx, groupName)
+
+	var r0 []*milvuspb.PrivilegeEntity
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*milvuspb.PrivilegeEntity, error)); ok {
+		return rf(ctx, groupName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) []*milvuspb.PrivilegeEntity); ok {
+		r0 = rf(ctx, groupName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*milvuspb.PrivilegeEntity)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, groupName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoordCatalog_GetPrivilegeGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPrivilegeGroup'
+type RootCoordCatalog_GetPrivilegeGroup_Call struct {
+	*mock.Call
+}
+
+// GetPrivilegeGroup is a helper method to define mock.On call
+//   - ctx context.Context
+//   - groupName string
+func (_e *RootCoordCatalog_Expecter) GetPrivilegeGroup(ctx interface{}, groupName interface{}) *RootCoordCatalog_GetPrivilegeGroup_Call {
+	return &RootCoordCatalog_GetPrivilegeGroup_Call{Call: _e.mock.On("GetPrivilegeGroup", ctx, groupName)}
+}
+
+func (_c *RootCoordCatalog_GetPrivilegeGroup_Call) Run(run func(ctx context.Context, groupName string)) *RootCoordCatalog_GetPrivilegeGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_GetPrivilegeGroup_Call) Return(_a0 error) *RootCoordCatalog_GetPrivilegeGroup_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_GetPrivilegeGroup_Call) RunAndReturn(run func(context.Context, string) error) *RootCoordCatalog_GetPrivilegeGroup_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+
+// DropPrivilegeGroup provides a mock function with given fields: ctx, groupName, privileges
+func (_m *RootCoordCatalog) DropPrivilegeGroup(ctx context.Context, groupName string) error {
+	ret := _m.Called(ctx, groupName)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, groupName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_DropPrivilegeGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropPrivilegeGroup'
+type RootCoordCatalog_DropPrivilegeGroup_Call struct {
+	*mock.Call
+}
+
+// AlterPrivilegeGroup is a helper method to define mock.On call
+//   - ctx context.Context
+//   - groupName string
+func (_e *RootCoordCatalog_Expecter) DropPrivilegeGroup(ctx interface{}, groupName interface{}) *RootCoordCatalog_DropPrivilegeGroup_Call {
+	return &RootCoordCatalog_DropPrivilegeGroup_Call{Call: _e.mock.On("DropPrivilegeGroup", ctx, groupName)}
+}
+
+func (_c *RootCoordCatalog_DropPrivilegeGroup_Call) Run(run func(ctx context.Context, groupName string)) *RootCoordCatalog_DropPrivilegeGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_DropPrivilegeGroup_Call) Return(_a0 error) *RootCoordCatalog_DropPrivilegeGroup_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_DropPrivilegeGroup_Call) RunAndReturn(run func(context.Context, string) error) *RootCoordCatalog_DropPrivilegeGroup_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+
+// AlterPrivilegeGroup provides a mock function with given fields: ctx, groupName, privileges
+func (_m *RootCoordCatalog) AlterPrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity) error {
+	ret := _m.Called(ctx, groupName, privileges)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, []*milvuspb.PrivilegeEntity) error); ok {
+		r0 = rf(ctx, groupName, privileges)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_AlterPrivilegeGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterPrivilegeGroup'
+type RootCoordCatalog_AlterPrivilegeGroup_Call struct {
+	*mock.Call
+}
+
+// AlterPrivilegeGroup is a helper method to define mock.On call
+//   - ctx context.Context
+//   - groupName string
+func (_e *RootCoordCatalog_Expecter) AlterPrivilegeGroup(ctx interface{}, groupName interface{}, privileges interface{}) *RootCoordCatalog_AlterPrivilegeGroup_Call {
+	return &RootCoordCatalog_AlterPrivilegeGroup_Call{Call: _e.mock.On("AlterPrivilegeGroup", ctx, groupName, privileges)}
+}
+
+func (_c *RootCoordCatalog_AlterPrivilegeGroup_Call) Run(run func(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity)) *RootCoordCatalog_AlterPrivilegeGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].([]*milvuspb.PrivilegeEntity))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_AlterPrivilegeGroup_Call) Return(_a0 error) *RootCoordCatalog_AlterPrivilegeGroup_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_AlterPrivilegeGroup_Call) RunAndReturn(run func(context.Context, string, []*milvuspb.PrivilegeEntity) error) *RootCoordCatalog_AlterPrivilegeGroup_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+
+
+// ListPrivilegeGroups provides a mock function with given fields: ctx
+func (_m *RootCoordCatalog) ListPrivilegeGroups(ctx context.Context) ([]string, error) {
+	ret := _m.Called(ctx)
+
+	var r0 []string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]string, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []string); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoordCatalog_ListPrivilegeGroups_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListPrivilegeGroups'
+type RootCoordCatalog_ListPrivilegeGroups_Call struct {
+	*mock.Call
+}
+
+// ListPrivilegeGroups is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *RootCoordCatalog_Expecter) ListPrivilegeGroups(ctx interface{}) *RootCoordCatalog_ListPrivilegeGroups_Call {
+	return &RootCoordCatalog_ListPrivilegeGroups_Call{Call: _e.mock.On("ListPrivilegeGroups", ctx)}
+}
+
+func (_c *RootCoordCatalog_ListPrivilegeGroups_Call) Run(run func(ctx context.Context)) *RootCoordCatalog_ListPrivilegeGroups_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_ListPrivilegeGroups_Call) Return(_a0 []string, _a1 error) *RootCoordCatalog_ListPrivilegeGroups_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoordCatalog_ListPrivilegeGroups_Call) RunAndReturn(run func(context.Context) ([]string, error)) *RootCoordCatalog_ListPrivilegeGroups_Call {
+	_c.Call.Return(run)
+	return _c
+}
