@@ -19,11 +19,14 @@ package datacoord
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -52,22 +55,87 @@ type indexMeta struct {
 	// collectionIndexes records which indexes are on the collection
 	// collID -> indexID -> index
 	indexes map[UniqueID]map[UniqueID]*model.Index
-	// buildID2Meta records the meta information of the segment
-	// buildID -> segmentIndex
-	buildID2SegmentIndex map[UniqueID]*model.SegmentIndex
+
+	// buildID2Meta records building index meta information of the segment
+	segmentBuildInfo *segmentBuildInfo
 
 	// segmentID -> indexID -> segmentIndex
 	segmentIndexes map[UniqueID]map[UniqueID]*model.SegmentIndex
 }
 
+type indexTaskStats struct {
+	IndexID      UniqueID `json:"index_id,omitempty"`
+	CollectionID UniqueID `json:"collection_id,omitempty"`
+	SegmentID    UniqueID `json:"segment_id,omitempty"`
+	BuildID      UniqueID `json:"build_id,omitempty"`
+	IndexState   string   `json:"index_state,omitempty"`
+	FailReason   string   `json:"fail_reason,omitempty"`
+	IndexSize    uint64   `json:"index_size,omitempty"`
+	IndexVersion int64    `json:"index_version,omitempty"`
+	CreateTime   uint64   `json:"create_time,omitempty"`
+}
+
+func newIndexTaskStats(s *model.SegmentIndex) *indexTaskStats {
+	return &indexTaskStats{
+		IndexID:      s.IndexID,
+		CollectionID: s.CollectionID,
+		SegmentID:    s.SegmentID,
+		BuildID:      s.BuildID,
+		IndexState:   s.IndexState.String(),
+		FailReason:   s.FailReason,
+		IndexSize:    s.IndexSize,
+		IndexVersion: s.IndexVersion,
+		CreateTime:   s.CreateTime,
+	}
+}
+
+type segmentBuildInfo struct {
+	// buildID2Meta records the meta information of the segment
+	// buildID -> segmentIndex
+	buildID2SegmentIndex map[UniqueID]*model.SegmentIndex
+	// taskStats records the task stats of the segment
+	taskStats *expirable.LRU[UniqueID, *indexTaskStats]
+}
+
+func newSegmentIndexBuildInfo() *segmentBuildInfo {
+	return &segmentBuildInfo{
+		// build ID -> segment index
+		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
+		// build ID -> task stats
+		taskStats: expirable.NewLRU[UniqueID, *indexTaskStats](1024, nil, time.Minute*60),
+	}
+}
+
+func (m *segmentBuildInfo) Add(segIdx *model.SegmentIndex) {
+	m.buildID2SegmentIndex[segIdx.BuildID] = segIdx
+	m.taskStats.Add(segIdx.BuildID, newIndexTaskStats(segIdx))
+}
+
+func (m *segmentBuildInfo) Get(key UniqueID) (*model.SegmentIndex, bool) {
+	value, exists := m.buildID2SegmentIndex[key]
+	return value, exists
+}
+
+func (m *segmentBuildInfo) Remove(key UniqueID) {
+	delete(m.buildID2SegmentIndex, key)
+}
+
+func (m *segmentBuildInfo) List() map[UniqueID]*model.SegmentIndex {
+	return m.buildID2SegmentIndex
+}
+
+func (m *segmentBuildInfo) GetTaskStats() []*indexTaskStats {
+	return m.taskStats.Values()
+}
+
 // NewMeta creates meta from provided `kv.TxnKV`
 func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*indexMeta, error) {
 	mt := &indexMeta{
-		ctx:                  ctx,
-		catalog:              catalog,
-		indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
-		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
-		segmentIndexes:       make(map[UniqueID]map[UniqueID]*model.SegmentIndex),
+		ctx:              ctx,
+		catalog:          catalog,
+		indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
+		segmentIndexes:   make(map[UniqueID]map[UniqueID]*model.SegmentIndex),
 	}
 	err := mt.reloadFromKV()
 	if err != nil {
@@ -116,7 +184,7 @@ func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 		m.segmentIndexes[segIdx.SegmentID] = make(map[UniqueID]*model.SegmentIndex)
 		m.segmentIndexes[segIdx.SegmentID][segIdx.IndexID] = segIdx
 	}
-	m.buildID2SegmentIndex[segIdx.BuildID] = segIdx
+	m.segmentBuildInfo.Add(segIdx)
 }
 
 func (m *indexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
@@ -142,7 +210,7 @@ func (m *indexMeta) updateSegIndexMeta(segIdx *model.SegmentIndex, updateFunc fu
 
 func (m *indexMeta) updateIndexTasksMetrics() {
 	taskMetrics := make(map[UniqueID]map[commonpb.IndexState]int)
-	for _, segIdx := range m.buildID2SegmentIndex {
+	for _, segIdx := range m.segmentBuildInfo.List() {
 		if segIdx.IsDeleted {
 			continue
 		}
@@ -674,7 +742,7 @@ func (m *indexMeta) GetIndexJob(buildID UniqueID) (*model.SegmentIndex, bool) {
 	m.RLock()
 	defer m.RUnlock()
 
-	segIdx, ok := m.buildID2SegmentIndex[buildID]
+	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if ok {
 		return model.CloneSegmentIndex(segIdx), true
 	}
@@ -703,7 +771,7 @@ func (m *indexMeta) UpdateVersion(buildID, nodeID UniqueID) error {
 	defer m.Unlock()
 
 	log.Info("IndexCoord metaTable UpdateVersion receive", zap.Int64("buildID", buildID), zap.Int64("nodeID", nodeID))
-	segIdx, ok := m.buildID2SegmentIndex[buildID]
+	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
 		return fmt.Errorf("there is no index with buildID: %d", buildID)
 	}
@@ -721,7 +789,7 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 	m.Lock()
 	defer m.Unlock()
 
-	segIdx, ok := m.buildID2SegmentIndex[taskInfo.GetBuildID()]
+	segIdx, ok := m.segmentBuildInfo.Get(taskInfo.GetBuildID())
 	if !ok {
 		log.Warn("there is no index with buildID", zap.Int64("buildID", taskInfo.GetBuildID()))
 		return nil
@@ -752,7 +820,7 @@ func (m *indexMeta) DeleteTask(buildID int64) error {
 	m.Lock()
 	defer m.Unlock()
 
-	segIdx, ok := m.buildID2SegmentIndex[buildID]
+	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
 		log.Warn("there is no index with buildID", zap.Int64("buildID", buildID))
 		return nil
@@ -777,7 +845,7 @@ func (m *indexMeta) BuildIndex(buildID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 
-	segIdx, ok := m.buildID2SegmentIndex[buildID]
+	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
 		return fmt.Errorf("there is no index with buildID: %d", buildID)
 	}
@@ -806,8 +874,9 @@ func (m *indexMeta) GetAllSegIndexes() map[int64]*model.SegmentIndex {
 	m.RLock()
 	defer m.RUnlock()
 
-	segIndexes := make(map[int64]*model.SegmentIndex, len(m.buildID2SegmentIndex))
-	for buildID, segIndex := range m.buildID2SegmentIndex {
+	tasks := m.segmentBuildInfo.List()
+	segIndexes := make(map[int64]*model.SegmentIndex, len(tasks))
+	for buildID, segIndex := range tasks {
 		segIndexes[buildID] = model.CloneSegmentIndex(segIndex)
 	}
 	return segIndexes
@@ -821,7 +890,7 @@ func (m *indexMeta) SetStoredIndexFileSizeMetric(collections map[UniqueID]*colle
 	var total uint64
 	metrics.DataCoordStoredIndexFilesSize.Reset()
 
-	for _, segmentIdx := range m.buildID2SegmentIndex {
+	for _, segmentIdx := range m.segmentBuildInfo.List() {
 		coll, ok := collections[segmentIdx.CollectionID]
 		if ok {
 			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName,
@@ -849,7 +918,7 @@ func (m *indexMeta) RemoveSegmentIndex(collID, partID, segID, indexID, buildID U
 		delete(m.segmentIndexes, segID)
 	}
 
-	delete(m.buildID2SegmentIndex, buildID)
+	m.segmentBuildInfo.Remove(buildID)
 	m.updateIndexTasksMetrics()
 	return nil
 }
@@ -896,7 +965,7 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 	m.RLock()
 	defer m.RUnlock()
 
-	if segIndex, ok := m.buildID2SegmentIndex[buildID]; ok {
+	if segIndex, ok := m.segmentBuildInfo.Get(buildID); ok {
 		if segIndex.IndexState == commonpb.IndexState_Finished {
 			return true, model.CloneSegmentIndex(segIndex)
 		}
@@ -910,7 +979,7 @@ func (m *indexMeta) GetMetasByNodeID(nodeID UniqueID) []*model.SegmentIndex {
 	defer m.RUnlock()
 
 	metas := make([]*model.SegmentIndex, 0)
-	for _, segIndex := range m.buildID2SegmentIndex {
+	for _, segIndex := range m.segmentBuildInfo.List() {
 		if segIndex.IsDeleted {
 			continue
 		}
@@ -1002,4 +1071,17 @@ func (m *indexMeta) HasIndex(collectionID int64) bool {
 		}
 	}
 	return false
+}
+
+func (m *indexMeta) TaskStatsJSON() string {
+	tasks := m.segmentBuildInfo.GetTaskStats()
+	if len(tasks) == 0 {
+		return ""
+	}
+
+	ret, err := json.Marshal(tasks)
+	if err != nil {
+		return ""
+	}
+	return string(ret)
 }

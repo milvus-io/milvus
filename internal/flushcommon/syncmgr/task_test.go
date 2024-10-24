@@ -382,6 +382,34 @@ func (s *SyncTaskSuite) TestNextID() {
 	})
 }
 
+func (s *SyncTaskSuite) TestSyncTask_MarshalJSON() {
+	task := &SyncTask{
+		segmentID:     12345,
+		batchRows:     100,
+		level:         datapb.SegmentLevel_L0,
+		tsFrom:        1000,
+		tsTo:          2000,
+		deltaRowCount: 10,
+		flushedSize:   1024,
+		execTime:      2 * time.Second,
+	}
+
+	expectedJSON := `{
+        "segmentID": 12345,
+        "batchRows": 100,
+        "segmentLevel": "L0",
+        "tsFrom": 1000,
+        "tsTo": 2000,
+        "deltaRowCount": 10,
+        "flushSize": 1024,
+        "execTime": 2000000000
+    }`
+
+	data, err := task.MarshalJSON()
+	s.NoError(err)
+	s.JSONEq(expectedJSON, string(data))
+}
+
 func TestSyncTask(t *testing.T) {
 	suite.Run(t, new(SyncTaskSuite))
 }

@@ -145,6 +145,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 
+	metricsRequest = metricsinfo.NewMetricsRequest()
 	suite.store = querycoord.NewCatalog(suite.kv)
 	suite.dist = meta.NewDistributionManager()
 	suite.nodeMgr = session.NewNodeManager()
@@ -1357,8 +1358,8 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 			suite.Len(actions, 2)
 			growAction := actions[0].(*task.SegmentAction)
 			reduceAction := actions[1].(*task.SegmentAction)
-			suite.True(lo.Contains(segmentOnCollection[collection], growAction.SegmentID()))
-			suite.True(lo.Contains(segmentOnCollection[collection], reduceAction.SegmentID()))
+			suite.True(lo.Contains(segmentOnCollection[collection], growAction.GetSegmentID()))
+			suite.True(lo.Contains(segmentOnCollection[collection], reduceAction.GetSegmentID()))
 			suite.Equal(dstNode, growAction.Node())
 			suite.Equal(srcNode, reduceAction.Node())
 			t.Cancel(nil)

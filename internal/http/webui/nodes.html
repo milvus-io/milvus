@@ -11,26 +11,9 @@
     <script src="./static/js/jquery.min.js"></script>
     <script src="./static/js/bootstrap.min.js"></script>
     <script src="./static/js/bootstrap.bundle.min.js"></script>
-    <script src="./static/js/scripts.js"></script>
-    <script>
-        $(document).ready(function(){
-            $('#header').load("header.html");
-            $('#footer').load("footer.html");
-        });
-
-        // load cluster information data
-        document.addEventListener("DOMContentLoaded", function() {
-            fetch(MILVUS_URI  + "/_cluster/info")
-                .then(response => response.json())
-                .then(text => {
-                    data = JSON.parse(text)
-                    renderNodesMetrics(data)
-                })
-                .catch(error => {
-                    handleError(error);
-                });
-        });
-    </script>
+    <script src="./static/js/render.js"></script>
+    <script src="./static/js/common.js"></script>
+    <script src="./static/js/mockdata.js"></script>
 </head>
 <body>
 <div class="container-fluid">
@@ -57,5 +40,23 @@
     <div id="footer"></div>
     </div>
 </div>
+
+<script>
+    $(document).ready(function(){
+        $('#header').load("header.html");
+        $('#footer').load("footer.html");
+    });
+
+    // load nodes information data
+    document.addEventListener("DOMContentLoaded", function() {
+        fetchData(MILVUS_URI + "/_cluster/info", sysmetrics)
+            .then(data => {
+                renderNodesMetrics(data)
+            })
+            .catch(error => {
+                handleError(error);
+            });
+    });
+</script>
 </body>
 </html>

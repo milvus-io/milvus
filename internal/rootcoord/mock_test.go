@@ -387,6 +387,7 @@ func newTestCore(opts ...Opt) *Core {
 	for _, opt := range opts {
 		opt(c)
 	}
+	c.registerMetricsRequest()
 	return c
 }
 

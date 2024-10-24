@@ -2,6 +2,7 @@ package syncmgr
 
 import (
 	"context"
+	"encoding/json"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -269,6 +271,44 @@ func (s *SyncManagerSuite) TestTargetUpdateSameID() {
 	f := manager.SyncData(context.Background(), task)
 	_, err := f.Await()
 	s.Error(err)
+}
+
+func (s *SyncManagerSuite) TestSyncManager_TaskStatsJSON() {
+	manager := NewSyncManager(s.chunkManager)
+	syncMgr, ok := manager.(*syncManager)
+	assert.True(s.T(), ok)
+
+	task1 := &SyncTask{
+		segmentID:    12345,
+		collectionID: 1,
+		partitionID:  1,
+		channelName:  "channel1",
+		schema:       &schemapb.CollectionSchema{},
+		checkpoint:   &msgpb.MsgPosition{},
+		tsFrom:       1000,
+		tsTo:         2000,
+	}
+
+	task2 := &SyncTask{
+		segmentID:    67890,
+		collectionID: 2,
+		partitionID:  2,
+		channelName:  "channel2",
+		schema:       &schemapb.CollectionSchema{},
+		checkpoint:   &msgpb.MsgPosition{},
+		tsFrom:       3000,
+		tsTo:         4000,
+	}
+
+	syncMgr.taskStats.Add("12345-1000", task1)
+	syncMgr.taskStats.Add("67890-3000", task2)
+
+	expectedTasks := []SyncTask{*task1, *task2}
+	expectedJSON, err := json.Marshal(expectedTasks)
+	s.NoError(err)
+
+	actualJSON := syncMgr.TaskStatsJSON()
+	s.JSONEq(string(expectedJSON), actualJSON)
 }
 
 func TestSyncManager(t *testing.T) {

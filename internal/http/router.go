@@ -70,7 +70,14 @@ const (
 	ClusterClientsPath      = "/_cluster/clients"
 	ClusterDependenciesPath = "/_cluster/dependencies"
 	HookConfigsPath         = "/_hook/configs"
-	QcoordSegmentsPath      = "/_qcoord/segments"
-	QcoordChannelsPath      = "/_qcoord/channels"
-	QcoordTasksPath         = "/_qcoord/tasks"
+	QCoordSegmentsPath      = "/_qcoord/segments"
+	QCoordChannelsPath      = "/_qcoord/channels"
+	QCoordAllTasksPath      = "/_qcoord/tasks/all"
+
+	DCoordAllTasksPath        = "/_dcoord/tasks/all"
+	DCoordImportTasksPath     = "/_dcoord/tasks/import"
+	DCoordCompactionTasksPath = "/_dcoord/tasks/compaction"
+	DCoordBuildIndexTasksPath = "/_dcoord/tasks/build_index"
+
+	DNodeSyncTasksPath = "/_dnode/tasks/sync"
 )

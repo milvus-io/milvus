@@ -118,3 +118,36 @@ func TestGetQueryComponentMetrics(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "test_response")
 	})
 }
+
+func TestGetDataComponentMetrics(t *testing.T) {
+	t.Run("get metrics failed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest("GET", "/?key=value", nil)
+		dc := mocks.NewMockDataCoordClient(t)
+		dc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+		proxy := &Proxy{dataCoord: dc}
+		handler := getDataComponentMetrics(proxy, "system_info")
+		handler(c)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "error")
+	})
+
+	t.Run("ok", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest("GET", "/?key=value", nil)
+		dc := mocks.NewMockDataCoordClient(t)
+		dc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+			Status:   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Response: "test_response",
+		}, nil)
+		proxy := &Proxy{dataCoord: dc}
+		handler := getDataComponentMetrics(proxy, "test_metric")
+		handler(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "test_response")
+	})
+}

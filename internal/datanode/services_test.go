@@ -95,6 +95,7 @@ func (s *DataNodeServicesSuite) SetupTest() {
 			return int64(22222 + count)
 		}, nil).Maybe()
 	s.node.allocator = alloc
+	metricsRequest = metricsinfo.NewMetricsRequest()
 
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).

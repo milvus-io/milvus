@@ -8,32 +8,21 @@
     <meta name="description" content="Milvus Management WebUI">
     <link href="./static/css/bootstrap.min.css" rel="stylesheet">
     <link href="./static/css/style.css" rel="stylesheet">
-    <script src="./static/js/jquery.min.js"></script>
-    <script src="./static/js/bootstrap.min.js"></script>
-    <script src="./static/js/bootstrap.bundle.min.js"></script>
-    <script src="./static/js/scripts.js"></script>
+    <script src="./static/js/render.js"></script>
+    <script src="./static/js/common.js"></script>
+    <script src="./static/js/mockdata.js"></script>
     <script>
-        function getQueryParams() {
-            const params = {};
-            const queryString = window.location.search.substring(1);
-            const queryArray = queryString.split('&');
-            queryArray.forEach(param => {
-                const [key, value] = param.split('=');
-                params[decodeURIComponent(key)] = decodeURIComponent(value || '');
-            });
-            return params;
-        }
-
         document.addEventListener("DOMContentLoaded", function() {
             const params = getQueryParams();
             const errorMessage = params.error || 'No error message available.';
-            document.getElementById('error-message').innerText = errorMessage;
+            document.getElementById('error-message').innerText =  "Reason: "+ errorMessage;
         });
     </script>
 </head>
 <body>
-    <h1>Service Unavailable</h1>
-    <p id="error-message"></p>
-    <p>Please try again later.</p>
+    <div class="alert alert-danger" role="alert">
+        <p>Service Unavailable, please try again later.</p>
+        <p id="error-message"></p>
+    </div>
 </body>
 </html>

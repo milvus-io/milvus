@@ -17,10 +17,13 @@
 package datacoord
 
 import (
+	"encoding/json"
+
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -92,8 +95,11 @@ func UpdateReason(reason string) UpdateAction {
 
 func UpdateCompleteTime(completeTime string) UpdateAction {
 	return func(t ImportTask) {
-		if task, ok := t.(*importTask); ok {
-			task.ImportTaskV2.CompleteTime = completeTime
+		switch t.GetType() {
+		case PreImportTaskType:
+			t.(*preImportTask).PreImportTask.CompleteTime = completeTime
+		case ImportTaskType:
+			t.(*importTask).ImportTaskV2.CompleteTime = completeTime
 		}
 	}
 }
@@ -171,6 +177,21 @@ func (p *preImportTask) Clone() ImportTask {
 	}
 }
 
+func (p *preImportTask) MarshalJSON() ([]byte, error) {
+	importTask := metricsinfo.ImportTask{
+		JobID:        p.GetJobID(),
+		TaskID:       p.GetTaskID(),
+		CollectionID: p.GetCollectionID(),
+		NodeID:       p.GetNodeID(),
+		State:        p.GetState().String(),
+		Reason:       p.GetReason(),
+		TaskType:     "PreImportTask",
+		CreatedTime:  p.GetCreatedTime(),
+		CompleteTime: p.GetCompleteTime(),
+	}
+	return json.Marshal(importTask)
+}
+
 type importTask struct {
 	*datapb.ImportTaskV2
 	tr *timerecord.TimeRecorder
@@ -200,4 +221,19 @@ func (t *importTask) Clone() ImportTask {
 		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
 		tr:           t.tr,
 	}
+}
+
+func (t *importTask) MarshalJSON() ([]byte, error) {
+	importTask := metricsinfo.ImportTask{
+		JobID:        t.GetJobID(),
+		TaskID:       t.GetTaskID(),
+		CollectionID: t.GetCollectionID(),
+		NodeID:       t.GetNodeID(),
+		State:        t.GetState().String(),
+		Reason:       t.GetReason(),
+		TaskType:     "ImportTask",
+		CreatedTime:  t.GetCreatedTime(),
+		CompleteTime: t.GetCompleteTime(),
+	}
+	return json.Marshal(importTask)
 }

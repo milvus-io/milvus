@@ -1116,6 +1116,7 @@ func TestRootCoord_GetMetrics(t *testing.T) {
 		})
 		resp, err := c.GetMetrics(ctx, req)
 		assert.NoError(t, err)
+		fmt.Println("==============", resp)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
@@ -1139,9 +1140,9 @@ func TestRootCoord_GetMetrics(t *testing.T) {
 		ctx := context.Background()
 		c := newTestCore(withHealthyCode(),
 			withMetricsCacheManager())
-		resp, err := c.getSystemInfoMetrics(ctx, req)
+		ret, err := c.getSystemInfoMetrics(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.NotEmpty(t, ret)
 	})
 }
 

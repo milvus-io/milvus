@@ -108,8 +108,8 @@ func (t *SyncTask) WithFailureCallback(callback func(error)) *SyncTask {
 	return t
 }
 
-func (t *SyncTask) WithBatchSize(batchSize int64) *SyncTask {
-	t.batchSize = batchSize
+func (t *SyncTask) WithBatchRows(batchRows int64) *SyncTask {
+	t.batchRows = batchRows
 	return t
 }
 

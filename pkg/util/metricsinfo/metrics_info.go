@@ -13,6 +13,9 @@ package metricsinfo
 
 import (
 	"encoding/json"
+	"time"
+
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // ComponentInfos defines the interface of all component infos
@@ -160,6 +163,17 @@ type DataNodeConfiguration struct {
 	FlushInsertBufferSize int64 `json:"flush_insert_buffer_size"`
 }
 
+type SyncTask struct {
+	SegmentID     int64              `json:"segmentID,omitempty"`
+	BatchRows     int64              `json:"batchRows,omitempty"`
+	SegmentLevel  string             `json:"segmentLevel,omitempty"`
+	TsFrom        typeutil.Timestamp `json:"tsFrom,omitempty"`
+	TsTo          typeutil.Timestamp `json:"tsTo,omitempty"`
+	DeltaRowCount int64              `json:"deltaRowCount,omitempty"`
+	FlushSize     int64              `json:"flushSize,omitempty"`
+	ExecTime      time.Duration      `json:"execTime,omitempty"`
+}
+
 // DataNodeInfos implements ComponentInfos
 type DataNodeInfos struct {
 	BaseComponentInfos
@@ -193,6 +207,18 @@ type DataCoordInfos struct {
 	SystemConfigurations DataCoordConfiguration      `json:"system_configurations"`
 	QuotaMetrics         *DataCoordQuotaMetrics      `json:"quota_metrics"`
 	CollectionMetrics    *DataCoordCollectionMetrics `json:"collection_metrics"`
+}
+
+type ImportTask struct {
+	JobID        int64  `json:"jobID,omitempty"`
+	TaskID       int64  `json:"taskID,omitempty"`
+	CollectionID int64  `json:"collectionID,omitempty"`
+	NodeID       int64  `json:"nodeID,omitempty"`
+	State        string `json:"state,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	TaskType     string `json:"taskType,omitempty"`
+	CreatedTime  string `json:"createdTime,omitempty"`
+	CompleteTime string `json:"completeTime,omitempty"`
 }
 
 // RootCoordConfiguration records the configuration of RootCoord.

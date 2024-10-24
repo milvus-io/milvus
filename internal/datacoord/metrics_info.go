@@ -18,9 +18,11 @@ package datacoord
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -80,11 +82,81 @@ func (s *Server) getCollectionMetrics(ctx context.Context) *metricsinfo.DataCoor
 	return ret
 }
 
+// GetSyncTaskMetrics retrieves and aggregates the sync task metrics of the datanode.
+func (s *Server) GetSyncTaskMetrics(
+	ctx context.Context,
+	req *milvuspb.GetMetricsRequest,
+) (string, error) {
+	resp, err := s.requestDataNodeGetMetrics(ctx, req)
+	if err != nil {
+		return "", err
+	}
+
+	tasks := make(map[string][]*metricsinfo.SyncTask, resp.Len())
+	resp.Range(func(key string, value *milvuspb.GetMetricsResponse) bool {
+		if value.Response != "" {
+			var sts []*metricsinfo.SyncTask
+			if err1 := json.Unmarshal([]byte(value.Response), &sts); err1 != nil {
+				log.Warn("failed to unmarshal sync task metrics")
+				err = err1
+				return false
+			}
+			tasks[key] = sts
+		}
+		return true
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	if len(tasks) == 0 {
+		return "", nil
+	}
+
+	bs, err := json.Marshal(tasks)
+	if err != nil {
+		return "", err
+	}
+	return (string)(bs), nil
+}
+
+func (s *Server) requestDataNodeGetMetrics(
+	ctx context.Context,
+	req *milvuspb.GetMetricsRequest,
+) (*typeutil.ConcurrentMap[string, *milvuspb.GetMetricsResponse], error) {
+	nodes := s.cluster.GetSessions()
+
+	rets := typeutil.NewConcurrentMap[string, *milvuspb.GetMetricsResponse]()
+	wg, ctx := errgroup.WithContext(ctx)
+	for _, node := range nodes {
+		wg.Go(func() error {
+			cli, err := node.GetOrCreateClient(ctx)
+			if err != nil {
+				return err
+			}
+			ret, err := cli.GetMetrics(ctx, req)
+			if err != nil {
+				return err
+			}
+			key := metricsinfo.ConstructComponentName(typeutil.DataNodeRole, node.NodeID())
+			rets.Insert(key, ret)
+			return nil
+		})
+	}
+
+	err := wg.Wait()
+	if err != nil {
+		return nil, err
+	}
+	return rets, nil
+}
+
 // getSystemInfoMetrics composes data cluster metrics
 func (s *Server) getSystemInfoMetrics(
 	ctx context.Context,
 	req *milvuspb.GetMetricsRequest,
-) (*milvuspb.GetMetricsResponse, error) {
+) (string, error) {
 	// TODO(dragondriver): add more detail metrics
 
 	// get datacoord info
@@ -125,18 +197,11 @@ func (s *Server) getSystemInfoMetrics(
 		},
 	}
 
-	resp := &milvuspb.GetMetricsResponse{
-		Status:        merr.Success(),
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),
-	}
-	var err error
-	resp.Response, err = metricsinfo.MarshalTopology(coordTopology)
+	ret, err := metricsinfo.MarshalTopology(coordTopology)
 	if err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
+		return "", err
 	}
-
-	return resp, nil
+	return ret, nil
 }
 
 // getDataCoordMetrics composes datacoord infos

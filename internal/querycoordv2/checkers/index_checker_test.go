@@ -142,7 +142,7 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 	suite.Require().True(ok)
 	suite.EqualValues(200, t.ReplicaID())
 	suite.Equal(task.ActionTypeUpdate, action.Type())
-	suite.EqualValues(2, action.SegmentID())
+	suite.EqualValues(2, action.GetSegmentID())
 
 	// test skip load index for read only node
 	suite.nodeMgr.Stopping(1)

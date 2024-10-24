@@ -40,10 +40,12 @@ import (
 	"unsafe"
 
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
@@ -66,6 +68,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -75,6 +78,8 @@ var _ types.QueryNode = (*QueryNode)(nil)
 
 // make sure QueryNode implements types.QueryNodeComponent
 var _ types.QueryNodeComponent = (*QueryNode)(nil)
+
+var metricsRequest = metricsinfo.NewMetricsRequest()
 
 // QueryNode communicates with outside services and union all
 // services in querynode package.
@@ -270,10 +275,19 @@ func (node *QueryNode) CloseSegcore() {
 	initcore.CleanGlogManager()
 }
 
+func (node *QueryNode) registerMetricsRequest() {
+	metricsRequest.RegisterMetricsRequest(metricsinfo.SystemInfoMetrics,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return getSystemInfoMetrics(ctx, req, node)
+		})
+	log.Info("register metrics actions finished")
+}
+
 // Init function init historical and streaming module to manage segments
 func (node *QueryNode) Init() error {
 	var initError error
 	node.initOnce.Do(func() {
+		node.registerMetricsRequest()
 		// ctx := context.Background()
 		log.Info("QueryNode session info", zap.String("metaPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
 		err := node.initSession()

@@ -30,10 +30,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/channel"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
@@ -57,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -69,6 +72,8 @@ const (
 
 // makes sure DataNode implements types.DataNode
 var _ types.DataNode = (*DataNode)(nil)
+
+var metricsRequest = metricsinfo.NewMetricsRequest()
 
 // Params from config.yaml
 var Params *paramtable.ComponentParam = paramtable.Get()
@@ -221,6 +226,7 @@ func (node *DataNode) GetNodeID() int64 {
 func (node *DataNode) Init() error {
 	var initError error
 	node.initOnce.Do(func() {
+		node.registerMetricsRequest()
 		logutil.Logger(node.ctx).Info("DataNode server initializing",
 			zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick.GetValue()),
 		)
@@ -270,6 +276,18 @@ func (node *DataNode) Init() error {
 		log.Info("init datanode done", zap.String("Address", node.address))
 	})
 	return initError
+}
+
+func (node *DataNode) registerMetricsRequest() {
+	metricsRequest.RegisterMetricsRequest(metricsinfo.SystemInfoMetrics,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return node.getSystemInfoMetrics(ctx, req)
+		})
+	metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTasks,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return node.syncMgr.TaskStatsJSON(), nil
+		})
+	log.Info("register metrics actions finished")
 }
 
 // tryToReleaseFlowgraph tries to release a flowgraph

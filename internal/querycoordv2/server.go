@@ -74,6 +74,8 @@ import (
 // Only for re-export
 var Params = params.Params
 
+var metricsRequest = metricsinfo.NewMetricsRequest()
+
 type Server struct {
 	ctx                 context.Context
 	cancel              context.CancelFunc
@@ -191,7 +193,13 @@ func (s *Server) registerMetricsRequest() {
 	getSystemInfoAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 		return s.getSystemInfoMetrics(ctx, req)
 	}
-	metricsinfo.RegisterMetricsRequest(metricsinfo.SystemInfoMetrics, getSystemInfoAction)
+
+	QueryTasksAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+		return s.taskScheduler.GetTasksJSON(), nil
+	}
+
+	metricsRequest.RegisterMetricsRequest(metricsinfo.SystemInfoMetrics, getSystemInfoAction)
+	metricsRequest.RegisterMetricsRequest(metricsinfo.QueryCoordAllTasks, QueryTasksAction)
 	log.Info("register metrics actions finished")
 }
 
