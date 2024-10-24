@@ -25,7 +25,7 @@ import bm25s
 import jieba
 import re
 
-from pymilvus import CollectionSchema, DataType
+from pymilvus import CollectionSchema, DataType, FunctionType, Function
 
 from bm25s.tokenization import Tokenizer
 
@@ -717,12 +717,21 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         gen_array_field(name="array_bool", element_type=DataType.BOOL),
         gen_float_vec_field(dim=dim),
         gen_float_vec_field(name="image_emb", dim=dim),
-        gen_float_vec_field(name="text_emb", dim=dim),
+        gen_float_vec_field(name="text_sparse_emb", vector_data_type="SPARSE_FLOAT_VECTOR"),
         gen_float_vec_field(name="voice_emb", dim=dim),
     ]
+
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
                                                                     enable_dynamic_field=enable_dynamic_field, **kwargs)
+    bm25_function = Function(
+        name=f"text",
+        function_type=FunctionType.BM25,
+        input_field_names=["text"],
+        output_field_names=["text_sparse_emb"],
+        params={},
+    )
+    schema.add_function(bm25_function)
     return schema
 
 
@@ -1018,11 +1027,24 @@ def gen_vectors(nb, dim, vector_data_type="FLOAT_VECTOR"):
         vectors = gen_bf16_vectors(nb, dim)[1]
     elif vector_data_type == "SPARSE_FLOAT_VECTOR":
         vectors = gen_sparse_vectors(nb, dim)
-
+    elif vector_data_type == "TEXT_SPARSE_VECTOR":
+        vectors = gen_text_vectors(nb)
+    else:
+        log.error(f"Invalid vector data type: {vector_data_type}")
+        raise Exception(f"Invalid vector data type: {vector_data_type}")
     if dim > 1:
         if vector_data_type == "FLOAT_VECTOR":
             vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
             vectors = vectors.tolist()
+    return vectors
+
+
+def gen_text_vectors(nb, language="en"):
+
+    fake = Faker("en_US")
+    if language == "zh":
+        fake = Faker("zh_CN")
+    vectors = [" milvus " + fake.text() for _ in range(nb)]
     return vectors
 
 
@@ -1765,6 +1787,18 @@ def get_binary_vec_field_name_list(schema=None):
             vec_fields.append(field.name)
     return vec_fields
 
+
+def get_bm25_vec_field_name_list(schema=None):
+    if not hasattr(schema, "functions"):
+        return []
+    functions = schema.functions
+    bm25_func = [func for func in functions if func.type == FunctionType.BM25]
+    bm25_outputs = []
+    for func in bm25_func:
+        bm25_outputs.extend(func.output_field_names)
+    bm25_outputs = list(set(bm25_outputs))
+
+    return bm25_outputs
 
 def get_dim_by_schema(schema=None):
     if schema is None:
@@ -3042,7 +3076,10 @@ def gen_vectors_based_on_vector_type(num, dim, vector_data_type=ct.float_type):
         vectors = gen_bf16_vectors(num, dim)[1]
     elif vector_data_type == ct.sparse_vector:
         vectors = gen_sparse_vectors(num, dim)
-
+    elif vector_data_type == ct.text_sparse_vector:
+        vectors = gen_text_vectors(num)
+    else:
+        raise Exception("vector_data_type is invalid")
     return vectors
 
 
