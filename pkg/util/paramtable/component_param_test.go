@@ -459,6 +459,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 
 		assert.Equal(t, true, Params.MmapChunkCache.GetAsBool())
+
+		assert.Equal(t, "MILVUS_SERVER_LABEL_", Params.MilvusServerLabelPrefix.GetValue())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {

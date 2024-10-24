@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -142,6 +143,57 @@ func (rg *ResourceGroup) RedundantNumOfNodes() int {
 	return redundant
 }
 
+func (rg *ResourceGroup) DirtyNodes(nodeMgr *session.NodeManager) []int64 {
+	// filter out nodes that do not meet the node filter
+	dirtyNodes := make([]int64, 0)
+	rg.nodes.Range(func(nodeID int64) bool {
+		nodeInfo := nodeMgr.Get(nodeID)
+		if nodeInfo == nil || !rg.AcceptNode(nodeInfo) {
+			dirtyNodes = append(dirtyNodes, nodeID)
+		}
+		return true
+	})
+
+	return dirtyNodes
+}
+
+func (rg *ResourceGroup) GetNodesByFilter(f func(nodeID int64) bool) []int64 {
+	ret := make([]int64, 0)
+	rg.nodes.Range(func(nodeID int64) bool {
+		if f(nodeID) {
+			ret = append(ret, nodeID)
+		}
+		return true
+	})
+
+	return ret
+}
+
+func (rg *ResourceGroup) AcceptNode(nodeInfo *session.NodeInfo) bool {
+	if nodeInfo == nil {
+		return false
+	}
+
+	requiredNodeLabels := rg.GetConfig().GetNodeFilter().GetNodeLabels()
+	if len(requiredNodeLabels) == 0 {
+		return true
+	}
+
+	nodeLabels := nodeInfo.Labels()
+	if len(nodeLabels) == 0 {
+		return false
+	}
+
+	for _, labelPair := range requiredNodeLabels {
+		valueInNode, ok := nodeLabels[labelPair.Key]
+		if !ok || valueInNode != labelPair.Value {
+			return false
+		}
+	}
+
+	return true
+}
+
 // HasFrom return whether given resource group is in `from` of rg.
 func (rg *ResourceGroup) HasFrom(rgName string) bool {
 	for _, from := range rg.cfg.GetTransferFrom() {
@@ -184,7 +236,7 @@ func (rg *ResourceGroup) Snapshot() *ResourceGroup {
 
 // MeetRequirement return whether resource group meet requirement.
 // Return error with reason if not meet requirement.
-func (rg *ResourceGroup) MeetRequirement() error {
+func (rg *ResourceGroup) MeetRequirement(nodeMgr *session.NodeManager) error {
 	// if len(node) is less than requests, new node need to be assigned.
 	if rg.nodes.Len() < int(rg.cfg.Requests.NodeNum) {
 		return errors.Errorf(
@@ -201,6 +253,18 @@ func (rg *ResourceGroup) MeetRequirement() error {
 			rg.cfg.Requests.NodeNum,
 		)
 	}
+
+	// check rg node filter
+	if rg.cfg.NodeFilter != nil {
+		dirtyNodes := rg.DirtyNodes(nodeMgr)
+		if len(dirtyNodes) > 0 {
+			return errors.Errorf(
+				"has dirty nodes[%v], not meet node filter",
+				dirtyNodes,
+			)
+		}
+	}
+
 	return nil
 }
 

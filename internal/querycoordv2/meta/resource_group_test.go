@@ -5,8 +5,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestResourceGroup(t *testing.T) {
@@ -27,6 +30,7 @@ func TestResourceGroup(t *testing.T) {
 	rg := NewResourceGroup("rg1", cfg)
 	cfg2 := rg.GetConfig()
 	assert.Equal(t, cfg.Requests.NodeNum, cfg2.Requests.NodeNum)
+	nodeMgr := session.NewNodeManager()
 
 	assertion := func() {
 		assert.Equal(t, "rg1", rg.GetName())
@@ -41,7 +45,7 @@ func TestResourceGroup(t *testing.T) {
 		assert.True(t, rg.HasTo("rg3"))
 		assert.False(t, rg.HasTo("rg2"))
 		assert.False(t, rg.ContainNode(1))
-		assert.Error(t, rg.MeetRequirement())
+		assert.Error(t, rg.MeetRequirement(nodeMgr))
 	}
 	assertion()
 
@@ -80,7 +84,7 @@ func TestResourceGroup(t *testing.T) {
 		assert.True(t, rg.HasTo("rg2"))
 		assert.False(t, rg.HasTo("rg3"))
 		assert.False(t, rg.ContainNode(1))
-		assert.Error(t, rg.MeetRequirement())
+		assert.Error(t, rg.MeetRequirement(nodeMgr))
 	}
 	assertion()
 
@@ -104,7 +108,7 @@ func TestResourceGroup(t *testing.T) {
 		assert.True(t, rg.HasTo("rg2"))
 		assert.False(t, rg.HasTo("rg3"))
 		assert.True(t, rg.ContainNode(1))
-		assert.Error(t, rg.MeetRequirement())
+		assert.Error(t, rg.MeetRequirement(nodeMgr))
 	}
 	assertion()
 
@@ -128,7 +132,7 @@ func TestResourceGroup(t *testing.T) {
 		assert.False(t, rg.HasTo("rg3"))
 		assert.True(t, rg.ContainNode(1))
 		assert.True(t, rg.ContainNode(2))
-		assert.NoError(t, rg.MeetRequirement())
+		assert.NoError(t, rg.MeetRequirement(nodeMgr))
 	}
 	assertion()
 
@@ -155,7 +159,7 @@ func TestResourceGroup(t *testing.T) {
 		assert.True(t, rg.ContainNode(2))
 		assert.True(t, rg.ContainNode(3))
 		assert.True(t, rg.ContainNode(4))
-		assert.Error(t, rg.MeetRequirement())
+		assert.Error(t, rg.MeetRequirement(nodeMgr))
 	}
 	assertion()
 
@@ -188,7 +192,7 @@ func TestResourceGroup(t *testing.T) {
 		assert.True(t, rg.ContainNode(2))
 		assert.False(t, rg.ContainNode(3))
 		assert.True(t, rg.ContainNode(4))
-		assert.NoError(t, rg.MeetRequirement())
+		assert.NoError(t, rg.MeetRequirement(nodeMgr))
 	}
 	assertion2(rg)
 
@@ -202,6 +206,8 @@ func TestResourceGroup(t *testing.T) {
 }
 
 func TestResourceGroupMeta(t *testing.T) {
+	nodeMgr := session.NewNodeManager()
+
 	rgMeta := &querypb.ResourceGroup{
 		Name:     "rg1",
 		Capacity: 1,
@@ -223,7 +229,7 @@ func TestResourceGroupMeta(t *testing.T) {
 	assert.True(t, rg.ContainNode(2))
 	assert.False(t, rg.ContainNode(3))
 	assert.False(t, rg.ContainNode(4))
-	assert.Error(t, rg.MeetRequirement())
+	assert.Error(t, rg.MeetRequirement(nodeMgr))
 
 	rgMeta = &querypb.ResourceGroup{
 		Name:     "rg1",
@@ -260,7 +266,7 @@ func TestResourceGroupMeta(t *testing.T) {
 	assert.True(t, rg.ContainNode(2))
 	assert.False(t, rg.ContainNode(3))
 	assert.True(t, rg.ContainNode(4))
-	assert.NoError(t, rg.MeetRequirement())
+	assert.NoError(t, rg.MeetRequirement(nodeMgr))
 
 	newMeta := rg.GetMeta()
 	assert.Equal(t, int32(2), newMeta.Capacity)
@@ -287,7 +293,7 @@ func TestResourceGroupMeta(t *testing.T) {
 	assert.True(t, rg.ContainNode(2))
 	assert.False(t, rg.ContainNode(3))
 	assert.False(t, rg.ContainNode(4))
-	assert.NoError(t, rg.MeetRequirement())
+	assert.NoError(t, rg.MeetRequirement(nodeMgr))
 
 	newMeta = rg.GetMeta()
 	assert.Equal(t, defaultResourceGroupCapacity, newMeta.Capacity)
@@ -327,8 +333,67 @@ func TestResourceGroupMeta(t *testing.T) {
 	assert.True(t, rg.ContainNode(2))
 	assert.False(t, rg.ContainNode(3))
 	assert.False(t, rg.ContainNode(4))
-	assert.NoError(t, rg.MeetRequirement())
+	assert.NoError(t, rg.MeetRequirement(nodeMgr))
 
 	newMeta = rg.GetMeta()
 	assert.Equal(t, int32(1000000), newMeta.Capacity)
+}
+
+func TestRGNodeFilter(t *testing.T) {
+	rg := NewResourceGroup("rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 3,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 3,
+		},
+		NodeFilter: &rgpb.ResourceGroupNodeFilter{
+			NodeLabels: []*commonpb.KeyValuePair{
+				{
+					Key:   "dc_name",
+					Value: "dc1",
+				},
+			},
+		},
+	})
+
+	rg.nodes = typeutil.NewSet[int64](1, 2, 3)
+
+	nodeInfo1 := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 1,
+		Labels: map[string]string{
+			"dc_name": "dc1",
+		},
+	})
+	nodeInfo2 := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 2,
+		Labels: map[string]string{
+			"dc_name": "dc1",
+		},
+	})
+	nodeInfo3 := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 3,
+		Labels: map[string]string{
+			"dc_name": "dc2",
+		},
+	})
+
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(nodeInfo1)
+	nodeMgr.Add(nodeInfo2)
+	nodeMgr.Add(nodeInfo3)
+
+	assert.True(t, rg.AcceptNode(nodeInfo1))
+	assert.True(t, rg.AcceptNode(nodeInfo2))
+	assert.False(t, rg.AcceptNode(nodeInfo3))
+	assert.Error(t, rg.MeetRequirement(nodeMgr))
+
+	nodeFilter := func(nodeID int64) bool {
+		nodeInfo := nodeMgr.Get(nodeID)
+		if nodeInfo == nil {
+			return false
+		}
+		return rg.AcceptNode(nodeInfo)
+	}
+	assert.Len(t, rg.GetNodesByFilter(nodeFilter), 2)
 }
