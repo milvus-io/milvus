@@ -3,7 +3,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -112,16 +111,6 @@ func (t *mixCompactionTask) processExecuting() bool {
 		return false
 	}
 	switch result.GetState() {
-	case datapb.CompactionTaskState_executing:
-		if t.checkTimeout() {
-			log.Info("mixCompactionTask timeout", zap.Int32("timeout in seconds", t.GetTaskProto().GetTimeoutInSeconds()), zap.Int64("startTime", t.GetTaskProto().GetStartTime()))
-			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
-			if err != nil {
-				log.Warn("mixCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
-				return false
-			}
-			return t.processTimeout()
-		}
 	case datapb.CompactionTaskState_completed:
 		t.result = result
 		if len(result.GetSegments()) == 0 {
@@ -195,8 +184,6 @@ func (t *mixCompactionTask) Process() bool {
 		processResult = t.processPipelining()
 	case datapb.CompactionTaskState_executing:
 		processResult = t.processExecuting()
-	case datapb.CompactionTaskState_timeout:
-		processResult = t.processTimeout()
 	case datapb.CompactionTaskState_meta_saved:
 		processResult = t.processMetaSaved()
 	case datapb.CompactionTaskState_completed:
@@ -250,16 +237,6 @@ func (t *mixCompactionTask) resetSegmentCompacting() {
 	t.meta.SetSegmentsCompacting(t.taskProto.Load().(*datapb.CompactionTask).GetInputSegments(), false)
 }
 
-func (t *mixCompactionTask) processTimeout() bool {
-	t.resetSegmentCompacting()
-	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
-	if err != nil {
-		log.Warn("mixCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
-		return false
-	}
-	return true
-}
-
 func (t *mixCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask {
 	taskClone := proto.Clone(t.GetTaskProto()).(*datapb.CompactionTask)
 	for _, opt := range opts {
@@ -284,16 +261,6 @@ func (t *mixCompactionTask) processFailed() bool {
 		return false
 	}
 	return true
-}
-
-func (t *mixCompactionTask) checkTimeout() bool {
-	if t.GetTaskProto().GetTimeoutInSeconds() > 0 {
-		diff := time.Since(time.Unix(t.GetTaskProto().GetStartTime(), 0)).Seconds()
-		if diff > float64(t.GetTaskProto().GetTimeoutInSeconds()) {
-			return true
-		}
-	}
-	return false
 }
 
 func (t *mixCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {

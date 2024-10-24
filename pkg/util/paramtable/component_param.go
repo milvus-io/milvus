@@ -3184,10 +3184,11 @@ type dataCoordConfig struct {
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 
 	// compaction
-	EnableCompaction          ParamItem `refreshable:"false"`
-	EnableAutoCompaction      ParamItem `refreshable:"true"`
-	IndexBasedCompaction      ParamItem `refreshable:"true"`
-	CompactionTaskPrioritizer ParamItem `refreshable:"true"`
+	EnableCompaction            ParamItem `refreshable:"false"`
+	EnableAutoCompaction        ParamItem `refreshable:"true"`
+	IndexBasedCompaction        ParamItem `refreshable:"true"`
+	CompactionTaskPrioritizer   ParamItem `refreshable:"true"`
+	CompactionTaskQueueCapacity ParamItem `refreshable:"false"`
 
 	CompactionRPCTimeout              ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks        ParamItem `refreshable:"true"`
@@ -3474,6 +3475,15 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 	}
 	p.CompactionTaskPrioritizer.Init(base.mgr)
 
+	p.CompactionTaskQueueCapacity = ParamItem{
+		Key:          "dataCoord.compaction.taskQueueCapacity",
+		Version:      "2.5.0",
+		DefaultValue: "256",
+		Doc:          `compaction task queue size`,
+		Export:       true,
+	}
+	p.CompactionTaskQueueCapacity.Init(base.mgr)
+
 	p.CompactionRPCTimeout = ParamItem{
 		Key:          "dataCoord.compaction.rpcTimeout",
 		Version:      "2.2.12",
@@ -3489,14 +3499,6 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Export:       true,
 	}
 	p.CompactionMaxParallelTasks.Init(base.mgr)
-
-	p.CompactionWorkerParalleTasks = ParamItem{
-		Key:          "dataCoord.compaction.workerMaxParallelTaskNum",
-		Version:      "2.3.0",
-		DefaultValue: "2",
-		Export:       true,
-	}
-	p.CompactionWorkerParalleTasks.Init(base.mgr)
 
 	p.MinSegmentToMerge = ParamItem{
 		Key:          "dataCoord.compaction.min.segment",

@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -80,8 +79,6 @@ func (t *l0CompactionTask) Process() bool {
 		return t.processPipelining()
 	case datapb.CompactionTaskState_executing:
 		return t.processExecuting()
-	case datapb.CompactionTaskState_timeout:
-		return t.processTimeout()
 	case datapb.CompactionTaskState_meta_saved:
 		return t.processMetaSaved()
 	case datapb.CompactionTaskState_completed:
@@ -133,16 +130,6 @@ func (t *l0CompactionTask) processExecuting() bool {
 		return false
 	}
 	switch result.GetState() {
-	case datapb.CompactionTaskState_executing:
-		// will L0Compaction be timeouted?
-		if t.checkTimeout() {
-			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
-			if err != nil {
-				log.Warn("l0CompactionTask failed to set task timeout state", zap.Error(err))
-				return false
-			}
-			return t.processTimeout()
-		}
 	case datapb.CompactionTaskState_completed:
 		t.result = result
 		if err := t.saveSegmentMeta(); err != nil {
@@ -187,16 +174,6 @@ func (t *l0CompactionTask) processCompleted() bool {
 	t.resetSegmentCompacting()
 	UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
 	log.Info("l0CompactionTask processCompleted done", zap.Int64("planID", t.GetTaskProto().GetPlanID()))
-	return true
-}
-
-func (t *l0CompactionTask) processTimeout() bool {
-	t.resetSegmentCompacting()
-	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
-	if err != nil {
-		log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
-		return false
-	}
 	return true
 }
 
@@ -357,24 +334,6 @@ func (t *l0CompactionTask) resetSegmentCompacting() {
 
 func (t *l0CompactionTask) hasAssignedWorker() bool {
 	return t.GetTaskProto().GetNodeID() != 0 && t.GetTaskProto().GetNodeID() != NullNodeID
-}
-
-func (t *l0CompactionTask) checkTimeout() bool {
-	if t.GetTaskProto().GetTimeoutInSeconds() > 0 {
-		start := time.Unix(t.GetTaskProto().GetStartTime(), 0)
-		diff := time.Since(start).Seconds()
-		if diff > float64(t.GetTaskProto().GetTimeoutInSeconds()) {
-			log.Warn("compaction timeout",
-				zap.Int64("taskID", t.GetTaskProto().GetTriggerID()),
-				zap.Int64("planID", t.GetTaskProto().GetPlanID()),
-				zap.Int64("nodeID", t.GetTaskProto().GetNodeID()),
-				zap.Int32("timeout in seconds", t.GetTaskProto().GetTimeoutInSeconds()),
-				zap.Time("startTime", start),
-			)
-			return true
-		}
-	}
-	return false
 }
 
 func (t *l0CompactionTask) SetNodeID(id UniqueID) error {
