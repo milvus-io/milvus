@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <memory>
 #include <regex>
+#include <string>
 #include <vector>
 #include <chrono>
 #include <roaring/roaring.hh>
@@ -33,6 +34,7 @@
 #include "index/IndexFactory.h"
 #include "exec/expression/Expr.h"
 #include "exec/Task.h"
+#include "exec/expression/function/FunctionFactory.h"
 #include "expr/ITypeExpr.h"
 #include "index/BitmapIndex.h"
 #include "index/InvertedIndexTantivy.h"
@@ -1736,6 +1738,175 @@ TEST_P(ExprTest, TestTermNullable) {
             auto ref = ref_func(val, valid_data_col[i]);
             ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
         }
+    }
+}
+
+TEST_P(ExprTest, TestCall) {
+    milvus::exec::expression::FunctionFactory& factory =
+        milvus::exec::expression::FunctionFactory::Instance();
+    factory.Initialize();
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    auto varchar_fid = schema->AddDebugField("address", DataType::VARCHAR);
+    schema->set_primary_field_id(varchar_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    std::vector<std::string> address_col;
+    int num_iters = 1;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        auto new_address_col = raw_data.get_col<std::string>(varchar_fid);
+        address_col.insert(
+            address_col.end(), new_address_col.begin(), new_address_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+
+    std::tuple<std::string, std::function<bool(std::string&)>> test_cases[] = {
+        {R"(vector_anns: <
+                field_id: 100
+                predicates: <
+                  call_expr: <
+                    function_name: "empty"
+                    function_parameters: <
+                        column_expr: <
+                            info: <
+                                field_id: 101
+                                data_type: VarChar
+                            >
+                        >
+                    >
+                  >
+                >
+                query_info: <
+                  topk: 10
+                  round_decimal: 3
+                  metric_type: "L2"
+                  search_params: "{\"nprobe\": 10}"
+                >
+                placeholder_tag: "$0"
+     >)",
+         [](std::string& v) { return v.empty(); }},
+        {R"(vector_anns: <
+                field_id: 100
+                predicates: <
+                  call_expr: <
+                    function_name: "starts_with"
+                    function_parameters: <
+                        column_expr: <
+                            info: <
+                                field_id: 101
+                                data_type: VarChar
+                            >
+                        >
+                    >
+                    function_parameters: <
+                        column_expr: <
+                            info: <
+                                field_id: 101
+                                data_type: VarChar
+                            >
+                        >
+                    >
+                  >
+                >
+                query_info: <
+                  topk: 10
+                  round_decimal: 3
+                  metric_type: "L2"
+                  search_params: "{\"nprobe\": 10}"
+                >
+                placeholder_tag: "$0"
+     >)",
+         [](std::string&) { return true; }}};
+
+    for (auto& [raw_plan, ref_func] : test_cases) {
+        auto plan_str = translate_text_plan_with_metric_type(raw_plan);
+        auto plan =
+            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        BitsetType final;
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+
+            ASSERT_EQ(ans, ref_func(address_col[i]))
+                << "@" << i << "!!" << address_col[i];
+        }
+    }
+
+    std::string incorrect_test_cases[] = {
+        R"(vector_anns: <
+                field_id: 100
+                predicates: <
+                  call_expr: <
+                    function_name: "empty"
+                    function_parameters: <
+                        column_expr: <
+                            info: <
+                                field_id: 101
+                                data_type: VarChar
+                            >
+                        >
+                    >
+                    function_parameters: <
+                        column_expr: <
+                            info: <
+                                field_id: 101
+                                data_type: VarChar
+                            >
+                        >
+                    >
+                  >
+                >
+                query_info: <
+                  topk: 10
+                  round_decimal: 3
+                  metric_type: "L2"
+                  search_params: "{\"nprobe\": 10}"
+                >
+                placeholder_tag: "$0"
+               >)",
+        R"(vector_anns: <
+                field_id: 100
+                predicates: <
+                  call_expr: <
+                    function_name: "starts_with"
+                    function_parameters: <
+                        column_expr: <
+                            info: <
+                                field_id: 101
+                                data_type: VarChar
+                            >
+                        >
+                    >
+                  >
+                >
+                query_info: <
+                  topk: 10
+                  round_decimal: 3
+                  metric_type: "L2"
+                  search_params: "{\"nprobe\": 10}"
+                >
+                placeholder_tag: "$0"
+               >)"};
+    for (auto& raw_plan : incorrect_test_cases) {
+        auto plan_str = translate_text_plan_with_metric_type(raw_plan);
+        EXPECT_ANY_THROW(
+            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size()));
     }
 }
 

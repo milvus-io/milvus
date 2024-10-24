@@ -5415,3 +5415,59 @@ class TestQueryTextMatchNegative(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+
+
+class TestQueryFunction(TestcaseBase):
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_function_calls(self):
+        """
+        target: test query data
+        method: create collection and insert data
+                query with mix call expr in string field and int field
+        expected: query successfully
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
+                                                             primary_field=ct.default_string_field_name)[0:2]
+        res = vectors[0].iloc[:, 1:3].to_dict('records')
+        output_fields = [default_float_field_name, default_string_field_name]
+        for mixed_call_expr in [
+            "not empty(varchar) && int64 >= 0",
+            # function call is case-insensitive
+            "not EmPty(varchar) && int64 >= 0",
+            "not EMPTY(varchar) && int64 >= 0",
+            "starts_with(varchar, varchar) && int64 >= 0",
+        ]:
+            collection_w.query(
+                mixed_call_expr,
+                output_fields=output_fields,
+                check_task=CheckTasks.check_query_results,
+                check_items={exp_res: res},
+            )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_invalid(self):
+        """
+        target: test query with invalid call expression
+        method: query with invalid call expr
+        expected: raise exception
+        """
+        collection_w, entities = self.init_collection_general(
+            prefix, insert_data=True, nb=10
+        )[0:2]
+        test_cases = [
+            (
+                "A_FUNCTION_THAT_DOES_NOT_EXIST()",
+                "function A_FUNCTION_THAT_DOES_NOT_EXIST() not found",
+            ),
+            # empty
+            ("empty()", "function empty() not found"),
+            (f"empty({default_int_field_name})", "function empty(int64_t) not found"),
+            # starts_with
+            (f"starts_with({default_int_field_name})", "function starts_with(int64_t) not found"),
+            (f"starts_with({default_int_field_name}, {default_int_field_name})", "function starts_with(int64_t, int64_t) not found"),
+        ]
+        for call_expr, err_msg in test_cases:
+            error = {ct.err_code: 65535, ct.err_msg: err_msg}
+            collection_w.query(
+                call_expr, check_task=CheckTasks.err_res, check_items=error
+            )
