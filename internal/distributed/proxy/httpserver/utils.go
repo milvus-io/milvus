@@ -281,9 +281,6 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 				dataString := gjson.Get(data.Raw, fieldName).String()
 
 				if field.IsPrimaryKey && field.AutoID {
-					if dataString != "" {
-						return merr.WrapErrParameterInvalid("", "set primary key but autoID == true"), reallyDataArray, validDataMap
-					}
 					continue
 				}
 

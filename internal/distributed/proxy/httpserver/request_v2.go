@@ -182,7 +182,7 @@ type SubSearchReq struct {
 	MetricType   string        `json:"metricType"`
 	Limit        int32         `json:"limit"`
 	Offset       int32         `json:"offset"`
-	SearchParams searchParams  `json:"searchParams"`
+	SearchParams searchParams  `json:"params"`
 }
 
 type HybridSearchReq struct {
