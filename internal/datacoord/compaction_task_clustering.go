@@ -125,15 +125,22 @@ func (t *clusteringCompactionTask) Process() bool {
 		if err != nil {
 			log.Warn("Failed to updateAndSaveTaskMeta", zap.Error(err))
 		}
+		log.Info("clustering compaction task state changed", zap.String("lastState", lastState), zap.String("currentState", currentState), zap.Int64("elapse seconds", lastStateDuration))
 	}
 	log.Debug("process clustering task", zap.String("lastState", lastState), zap.String("currentState", currentState))
-	return t.GetTaskProto().State == datapb.CompactionTaskState_completed || t.GetTaskProto().State == datapb.CompactionTaskState_cleaned
+	return t.GetTaskProto().State == datapb.CompactionTaskState_completed ||
+		t.GetTaskProto().State == datapb.CompactionTaskState_cleaned ||
+		t.GetTaskProto().State == datapb.CompactionTaskState_failed ||
+		t.GetTaskProto().State == datapb.CompactionTaskState_timeout
 }
 
 // retryableProcess process task's state transfer, return error if not work as expected
 // the outer Process will set state and retry times according to the error type(retryable or not-retryable)
 func (t *clusteringCompactionTask) retryableProcess() error {
-	if t.GetTaskProto().State == datapb.CompactionTaskState_completed || t.GetTaskProto().State == datapb.CompactionTaskState_cleaned {
+	if t.GetTaskProto().State == datapb.CompactionTaskState_completed ||
+		t.GetTaskProto().State == datapb.CompactionTaskState_cleaned ||
+		t.GetTaskProto().State == datapb.CompactionTaskState_failed ||
+		t.GetTaskProto().State == datapb.CompactionTaskState_timeout {
 		return nil
 	}
 
@@ -162,13 +169,23 @@ func (t *clusteringCompactionTask) retryableProcess() error {
 		return t.processIndexing()
 	case datapb.CompactionTaskState_statistic:
 		return t.processStats()
-
-	case datapb.CompactionTaskState_timeout:
-		return t.processFailedOrTimeout()
 	case datapb.CompactionTaskState_failed:
+		return t.processFailedOrTimeout()
+	case datapb.CompactionTaskState_timeout:
 		return t.processFailedOrTimeout()
 	}
 	return nil
+}
+
+func (t *clusteringCompactionTask) Clean() bool {
+	log := log.With(zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("type", t.GetTaskProto().GetType().String()))
+	log.Info("clean task")
+	err := t.doClean()
+	if err != nil {
+		log.Warn("clean task fail", zap.Error(err))
+		return false
+	}
+	return true
 }
 
 func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
@@ -280,12 +297,7 @@ func (t *clusteringCompactionTask) processExecuting() error {
 		return t.processMetaSaved()
 	case datapb.CompactionTaskState_executing:
 		if t.checkTimeout() {
-			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
-			if err == nil {
-				return t.processFailedOrTimeout()
-			} else {
-				return err
-			}
+			return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
 		}
 		return nil
 	case datapb.CompactionTaskState_failed:
@@ -516,13 +528,19 @@ func (t *clusteringCompactionTask) resetSegmentCompacting() {
 	t.meta.SetSegmentsCompacting(t.GetTaskProto().GetInputSegments(), false)
 }
 
+// Backward compatibility
 func (t *clusteringCompactionTask) processFailedOrTimeout() error {
-	log.Info("clean task", zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("state", t.GetTaskProto().GetState().String()))
+	return nil
+}
+
+func (t *clusteringCompactionTask) doClean() error {
+	log := log.With(zap.Int64("planID", t.GetTaskProto().GetPlanID()))
+	log.Info("clean task", zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.String("state", t.GetTaskProto().GetState().String()))
 
 	if err := t.sessions.DropCompactionPlan(t.GetTaskProto().GetNodeID(), &datapb.DropCompactionPlanRequest{
 		PlanID: t.GetTaskProto().GetPlanID(),
 	}); err != nil {
-		log.Warn("clusteringCompactionTask processFailedOrTimeout unable to drop compaction plan", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Error(err))
+		log.Warn("clusteringCompactionTask unable to drop compaction plan", zap.Error(err))
 	}
 	isInputDropped := false
 	for _, segID := range t.GetTaskProto().GetInputSegments() {
@@ -538,8 +556,8 @@ func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 		// revert segments meta
 		var operators []UpdateOperator
 		// revert level of input segments
-		// L1 : L1 ->(processPipelining)-> L2 ->(processFailedOrTimeout)-> L1
-		// L2 : L2 ->(processPipelining)-> L2 ->(processFailedOrTimeout)-> L2
+		// L1 : L1 ->(process)-> L2 ->(clean)-> L1
+		// L2 : L2 ->(process)-> L2 ->(clean)-> L2
 		for _, segID := range t.GetTaskProto().GetInputSegments() {
 			operators = append(operators, RevertSegmentLevelOperator(segID))
 		}
@@ -577,8 +595,6 @@ func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 		}
 	}
 
-	t.resetSegmentCompacting()
-
 	// drop partition stats if uploaded
 	partitionStatsInfo := &datapb.PartitionStatsInfo{
 		CollectionID: t.GetTaskProto().GetCollectionID(),
@@ -590,9 +606,20 @@ func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 	err := t.meta.CleanPartitionStatsInfo(partitionStatsInfo)
 	if err != nil {
 		log.Warn("gcPartitionStatsInfo fail", zap.Error(err))
+		return merr.WrapErrCleanPartitionStatsFail(fmt.Sprintf("%d-%d-%s-%d", t.GetTaskProto().GetCollectionID(), t.GetTaskProto().GetPartitionID(), t.GetTaskProto().GetChannel(), t.GetTaskProto().GetPlanID()))
 	}
 
-	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
+	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
+	if err != nil {
+		log.Warn("clusteringCompactionTask fail to updateAndSaveTaskMeta", zap.Error(err))
+		return err
+	}
+
+	// resetSegmentCompacting must be the last step of Clean, to make sure resetSegmentCompacting only called once
+	// otherwise, it may unlock segments locked by other compaction tasks
+	t.resetSegmentCompacting()
+	log.Info("clusteringCompactionTask clean done")
+	return nil
 }
 
 func (t *clusteringCompactionTask) doAnalyze() error {

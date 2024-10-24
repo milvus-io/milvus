@@ -107,7 +107,6 @@ func (s *MixCompactionTaskSuite) TestCompactionTimeout() {
 		}}
 	}).Times(2)
 	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
-	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything)
 	alloc := allocator.NewMockAllocator(s.T())
 	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	task := newMixCompactionTask(&datapb.CompactionTask{
@@ -132,5 +131,7 @@ func (s *MixCompactionTaskSuite) TestCompactionTimeout() {
 	}, nil)
 	end := task.processExecuting()
 	s.Equal(true, end)
-	s.Equal(datapb.CompactionTaskState_cleaned, task.GetTaskProto().State)
+	s.Equal(datapb.CompactionTaskState_timeout, task.GetTaskProto().State)
+	end = task.processTimeout()
+	s.Equal(true, end)
 }
