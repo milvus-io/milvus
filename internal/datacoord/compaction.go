@@ -163,13 +163,13 @@ func summaryCompactionState(tasks []*datapb.CompactionTask) *compactionInfo {
 func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64) int {
 	cnt := 0
 	c.queueTasks.ForEach(func(ct CompactionTask) {
-		if ct.GetTriggerID() == triggerID {
+		if ct.GetTaskProto().GetTriggerID() == triggerID {
 			cnt += 1
 		}
 	})
 	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
-		if t.GetTriggerID() == triggerID {
+		if t.GetTaskProto().GetTriggerID() == triggerID {
 			cnt += 1
 		}
 	}
@@ -203,14 +203,14 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 
 	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
-		switch t.GetType() {
+		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
-			l0ChannelExcludes.Insert(t.GetChannel())
+			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 		case datapb.CompactionType_MixCompaction:
-			mixChannelExcludes.Insert(t.GetChannel())
+			mixChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			mixLabelExcludes.Insert(t.GetLabel())
 		case datapb.CompactionType_ClusteringCompaction:
-			clusterChannelExcludes.Insert(t.GetChannel())
+			clusterChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			clusterLabelExcludes.Insert(t.GetLabel())
 		}
 	}
@@ -240,39 +240,39 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 			return selected
 		}
 
-		switch t.GetType() {
+		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
-			if mixChannelExcludes.Contain(t.GetChannel()) {
+			if mixChannelExcludes.Contain(t.GetTaskProto().GetChannel()) {
 				excluded = append(excluded, t)
 				continue
 			}
-			l0ChannelExcludes.Insert(t.GetChannel())
+			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			selected = append(selected, t)
 		case datapb.CompactionType_MixCompaction:
-			if l0ChannelExcludes.Contain(t.GetChannel()) {
+			if l0ChannelExcludes.Contain(t.GetTaskProto().GetChannel()) {
 				excluded = append(excluded, t)
 				continue
 			}
-			mixChannelExcludes.Insert(t.GetChannel())
+			mixChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			mixLabelExcludes.Insert(t.GetLabel())
 			selected = append(selected, t)
 		case datapb.CompactionType_ClusteringCompaction:
-			if l0ChannelExcludes.Contain(t.GetChannel()) ||
+			if l0ChannelExcludes.Contain(t.GetTaskProto().GetChannel()) ||
 				mixLabelExcludes.Contain(t.GetLabel()) ||
 				clusterLabelExcludes.Contain(t.GetLabel()) {
 				excluded = append(excluded, t)
 				continue
 			}
-			clusterChannelExcludes.Insert(t.GetChannel())
+			clusterChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			clusterLabelExcludes.Insert(t.GetLabel())
 			selected = append(selected, t)
 		}
 
 		c.executingGuard.Lock()
-		c.executingTasks[t.GetPlanID()] = t
+		c.executingTasks[t.GetTaskProto().GetPlanID()] = t
 		c.executingGuard.Unlock()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Pending).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Executing).Inc()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Dec()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Inc()
 	}
 	return selected
 }
@@ -314,19 +314,19 @@ func (c *compactionPlanHandler) loadMeta() {
 				if t.NeedReAssignNodeID() {
 					c.submitTask(t)
 					log.Info("compactionPlanHandler loadMeta submitTask",
-						zap.Int64("planID", t.GetPlanID()),
-						zap.Int64("triggerID", t.GetTriggerID()),
-						zap.Int64("collectionID", t.GetCollectionID()),
+						zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+						zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
+						zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()),
 						zap.String("type", task.GetType().String()),
-						zap.String("state", t.GetState().String()))
+						zap.String("state", t.GetTaskProto().GetState().String()))
 				} else {
 					c.restoreTask(t)
 					log.Info("compactionPlanHandler loadMeta restoreTask",
-						zap.Int64("planID", t.GetPlanID()),
-						zap.Int64("triggerID", t.GetTriggerID()),
-						zap.Int64("collectionID", t.GetCollectionID()),
+						zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+						zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
+						zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()),
 						zap.String("type", task.GetType().String()),
-						zap.String("state", t.GetState().String()))
+						zap.String("state", t.GetTaskProto().GetState().String()))
 				}
 			}
 		}
@@ -474,13 +474,13 @@ func (c *compactionPlanHandler) stop() {
 func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 	log.Info("removing tasks by channel", zap.String("channel", channel))
 	c.queueTasks.RemoveAll(func(task CompactionTask) bool {
-		if task.GetChannel() == channel {
+		if task.GetTaskProto().GetChannel() == channel {
 			log.Info("Compaction handler removing tasks by channel",
 				zap.String("channel", channel),
-				zap.Int64("planID", task.GetPlanID()),
-				zap.Int64("node", task.GetNodeID()),
+				zap.Int64("planID", task.GetTaskProto().GetPlanID()),
+				zap.Int64("node", task.GetTaskProto().GetNodeID()),
 			)
-			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetNodeID()), task.GetType().String(), metrics.Pending).Dec()
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetTaskProto().GetNodeID()), task.GetTaskProto().GetType().String(), metrics.Pending).Dec()
 			return true
 		}
 		return false
@@ -489,42 +489,42 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 	c.executingGuard.Lock()
 	for id, task := range c.executingTasks {
 		log.Info("Compaction handler removing tasks by channel",
-			zap.String("channel", channel), zap.Int64("planID", id), zap.Any("task_channel", task.GetChannel()))
-		if task.GetChannel() == channel {
+			zap.String("channel", channel), zap.Int64("planID", id), zap.Any("task_channel", task.GetTaskProto().GetChannel()))
+		if task.GetTaskProto().GetChannel() == channel {
 			log.Info("Compaction handler removing tasks by channel",
 				zap.String("channel", channel),
-				zap.Int64("planID", task.GetPlanID()),
-				zap.Int64("node", task.GetNodeID()),
+				zap.Int64("planID", task.GetTaskProto().GetPlanID()),
+				zap.Int64("node", task.GetTaskProto().GetNodeID()),
 			)
 			delete(c.executingTasks, id)
-			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetNodeID()), task.GetType().String(), metrics.Executing).Dec()
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetTaskProto().GetNodeID()), task.GetTaskProto().GetType().String(), metrics.Executing).Dec()
 		}
 	}
 	c.executingGuard.Unlock()
 }
 
 func (c *compactionPlanHandler) submitTask(t CompactionTask) {
-	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", t.GetType()))
+	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", t.GetTaskProto().GetType()))
 	t.SetSpan(span)
 	c.queueTasks.Enqueue(t)
-	metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Pending).Inc()
+	metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
 }
 
 // restoreTask used to restore Task from etcd
 func (c *compactionPlanHandler) restoreTask(t CompactionTask) {
-	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", t.GetType()))
+	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", t.GetTaskProto().GetType()))
 	t.SetSpan(span)
 	c.executingGuard.Lock()
-	c.executingTasks[t.GetPlanID()] = t
+	c.executingTasks[t.GetTaskProto().GetPlanID()] = t
 	c.executingGuard.Unlock()
-	metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetNodeID()), t.GetType().String(), metrics.Executing).Inc()
+	metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Inc()
 }
 
 // getCompactionTask return compaction
 func (c *compactionPlanHandler) getCompactionTask(planID int64) CompactionTask {
 	var t CompactionTask = nil
 	c.queueTasks.ForEach(func(task CompactionTask) {
-		if task.GetPlanID() == planID {
+		if task.GetTaskProto().GetPlanID() == planID {
 			t = task
 		}
 	})
@@ -554,7 +554,7 @@ func (c *compactionPlanHandler) enqueueCompaction(task *datapb.CompactionTask) e
 	t.SetTask(t.ShadowClone(setStartTime(time.Now().Unix())))
 	err = t.SaveTaskMeta()
 	if err != nil {
-		c.meta.SetSegmentsCompacting(t.GetInputSegments(), false)
+		c.meta.SetSegmentsCompacting(t.GetTaskProto().GetInputSegments(), false)
 		log.Warn("Failed to enqueue compaction task, unable to save task meta", zap.Error(err))
 		return err
 	}
@@ -596,20 +596,20 @@ func (c *compactionPlanHandler) assignNodeIDs(tasks []CompactionTask) {
 		nodeID, useSlot := c.pickAnyNode(slots, t)
 		if nodeID == NullNodeID {
 			log.Info("compactionHandler cannot find datanode for compaction task",
-				zap.Int64("planID", t.GetPlanID()), zap.String("type", t.GetType().String()), zap.String("vchannel", t.GetChannel()))
+				zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("type", t.GetTaskProto().GetType().String()), zap.String("vchannel", t.GetTaskProto().GetChannel()))
 			continue
 		}
 		err := t.SetNodeID(nodeID)
 		if err != nil {
 			log.Info("compactionHandler assignNodeID failed",
-				zap.Int64("planID", t.GetPlanID()), zap.String("vchannel", t.GetChannel()), zap.Error(err))
+				zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("vchannel", t.GetTaskProto().GetChannel()), zap.Error(err))
 		} else {
 			// update the input nodeSlots
 			slots[nodeID] = slots[nodeID] - useSlot
 			log.Info("compactionHandler assignNodeID success",
-				zap.Int64("planID", t.GetPlanID()), zap.String("vchannel", t.GetChannel()), zap.Any("nodeID", nodeID))
-			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Executing).Dec()
-			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetNodeID()), t.GetType().String(), metrics.Executing).Inc()
+				zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("vchannel", t.GetTaskProto().GetChannel()), zap.Any("nodeID", nodeID))
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Inc()
 		}
 	}
 }
@@ -644,9 +644,9 @@ func (c *compactionPlanHandler) checkCompaction() error {
 	// delete all finished
 	c.executingGuard.Lock()
 	for _, t := range finishedTasks {
-		delete(c.executingTasks, t.GetPlanID())
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetNodeID()), t.GetType().String(), metrics.Executing).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetNodeID()), t.GetType().String(), metrics.Done).Inc()
+		delete(c.executingTasks, t.GetTaskProto().GetPlanID())
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Done).Inc()
 	}
 	c.executingGuard.Unlock()
 	return nil
@@ -658,7 +658,7 @@ func (c *compactionPlanHandler) pickAnyNode(nodeSlots map[int64]int64, task Comp
 
 	useSlot = task.GetSlotUsage()
 	if useSlot <= 0 {
-		log.Warn("task slot should not be 0", zap.Int64("planID", task.GetPlanID()), zap.String("type", task.GetType().String()))
+		log.Warn("task slot should not be 0", zap.Int64("planID", task.GetTaskProto().GetPlanID()), zap.String("type", task.GetTaskProto().GetType().String()))
 		return NullNodeID, useSlot
 	}
 
@@ -673,9 +673,9 @@ func (c *compactionPlanHandler) pickAnyNode(nodeSlots map[int64]int64, task Comp
 }
 
 func (c *compactionPlanHandler) pickShardNode(nodeSlots map[int64]int64, t CompactionTask) int64 {
-	nodeID, err := c.chManager.FindWatcher(t.GetChannel())
+	nodeID, err := c.chManager.FindWatcher(t.GetTaskProto().GetChannel())
 	if err != nil {
-		log.Info("failed to find watcher", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		log.Info("failed to find watcher", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Error(err))
 		return NullNodeID
 	}
 
@@ -692,16 +692,16 @@ func (c *compactionPlanHandler) isFull() bool {
 
 func (c *compactionPlanHandler) checkDelay(t CompactionTask) {
 	log := log.Ctx(context.TODO()).WithRateGroup("compactionPlanHandler.checkDelay", 1.0, 60.0)
-	maxExecDuration := maxCompactionTaskExecutionDuration[t.GetType()]
-	startTime := time.Unix(t.GetStartTime(), 0)
+	maxExecDuration := maxCompactionTaskExecutionDuration[t.GetTaskProto().GetType()]
+	startTime := time.Unix(t.GetTaskProto().GetStartTime(), 0)
 	execDuration := time.Since(startTime)
 	if execDuration >= maxExecDuration {
 		log.RatedWarn(60, "compaction task is delay",
-			zap.Int64("planID", t.GetPlanID()),
-			zap.String("type", t.GetType().String()),
-			zap.String("state", t.GetState().String()),
-			zap.String("vchannel", t.GetChannel()),
-			zap.Int64("nodeID", t.GetNodeID()),
+			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+			zap.String("type", t.GetTaskProto().GetType().String()),
+			zap.String("state", t.GetTaskProto().GetState().String()),
+			zap.String("vchannel", t.GetTaskProto().GetChannel()),
+			zap.Int64("nodeID", t.GetTaskProto().GetNodeID()),
 			zap.Time("startTime", startTime),
 			zap.Duration("execDuration", execDuration))
 	}
