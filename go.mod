@@ -252,6 +252,7 @@ replace (
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	// github.com/milvus-io/milvus-storage/go => ../milvus-storage/go
 	github.com/ianlancetaylor/cgosymbolizer => github.com/milvus-io/cgosymbolizer v0.0.0-20240722103217-b7dee0e50119
+	github.com/milvus-io/milvus-proto/go-api/v2 => github.com/xiaocai2333/milvus-proto/go-api/v2 v2.0.0-20241023082201-84555c82bbf5
 	github.com/milvus-io/milvus/pkg => ./pkg
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect

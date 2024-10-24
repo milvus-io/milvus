@@ -37,6 +37,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#LogicalAnd.
 	VisitLogicalAnd(ctx *LogicalAndContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#TemplateVariable.
+	VisitTemplateVariable(ctx *TemplateVariableContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Equality.
 	VisitEquality(ctx *EqualityContext) interface{}
 
@@ -51,6 +54,9 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#BitOr.
 	VisitBitOr(ctx *BitOrContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#EmptyArray.
+	VisitEmptyArray(ctx *EmptyArrayContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#AddSub.
 	VisitAddSub(ctx *AddSubContext) interface{}
@@ -90,9 +96,6 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#BitAnd.
 	VisitBitAnd(ctx *BitAndContext) interface{}
-
-	// Visit a parse tree produced by PlanParser#EmptyTerm.
-	VisitEmptyTerm(ctx *EmptyTermContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#Power.
 	VisitPower(ctx *PowerContext) interface{}

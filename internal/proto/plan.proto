@@ -84,12 +84,14 @@ message ExistsExpr {
 
 message ValueExpr {
   GenericValue value = 1;
+  string template_variable_name = 2;
 }
 
 message UnaryRangeExpr {
   ColumnInfo column_info = 1;
   OpType op = 2;
   GenericValue value = 3;
+  string template_variable_name = 4;
 }
 
 message BinaryRangeExpr {
@@ -98,6 +100,8 @@ message BinaryRangeExpr {
   bool upper_inclusive = 3;
   GenericValue lower_value = 4;
   GenericValue upper_value = 5;
+  string lower_template_variable_name = 6;
+  string upper_template_variable_name = 7;
 }
 
 message CompareExpr {
@@ -110,6 +114,7 @@ message TermExpr {
   ColumnInfo column_info = 1;
   repeated GenericValue values = 2;
   bool is_in_field = 3;
+  string template_variable_name = 4;
 }
 
 message JSONContainsExpr {
@@ -127,6 +132,7 @@ message JSONContainsExpr {
   }
   JSONOp op = 3;
   bool elements_same_type = 4;
+  string template_variable_name = 5;
 }
 
 message UnaryExpr {
@@ -167,6 +173,8 @@ message BinaryArithOpEvalRangeExpr {
   GenericValue right_operand = 3;
   OpType op = 4;
   GenericValue value = 5;
+  string operand_template_variable_name = 6;
+  string value_template_variable_name = 7;
 }
 
 message AlwaysTrueExpr {}
@@ -187,6 +195,7 @@ message Expr {
     AlwaysTrueExpr always_true_expr = 12;
     JSONContainsExpr json_contains_expr = 13;
   };
+  bool is_template = 20;
 }
 
 message VectorANNS {
