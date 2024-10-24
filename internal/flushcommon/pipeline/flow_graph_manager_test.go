@@ -65,7 +65,7 @@ func TestFlowGraphManager(t *testing.T) {
 	wbm.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	dispClient := msgdispatcher.NewMockClient(t)
-	dispClient.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(make(chan *msgstream.MsgPack), nil)
+	dispClient.EXPECT().Register(mock.Anything, mock.Anything).Return(make(chan *msgstream.MsgPack), nil)
 	dispClient.EXPECT().Deregister(mock.Anything)
 
 	pipelineParams := &util.PipelineParams{
@@ -151,7 +151,7 @@ func newFlowGraphManager(t *testing.T) (string, FlowgraphManager) {
 	wbm.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	dispClient := msgdispatcher.NewMockClient(t)
-	dispClient.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(make(chan *msgstream.MsgPack), nil)
+	dispClient.EXPECT().Register(mock.Anything, mock.Anything).Return(make(chan *msgstream.MsgPack), nil)
 
 	pipelineParams := &util.PipelineParams{
 		Ctx:                context.TODO(),

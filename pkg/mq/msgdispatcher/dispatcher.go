@@ -87,6 +87,7 @@ func NewDispatcher(ctx context.Context,
 	lagNotifyChan chan struct{},
 	lagTargets *typeutil.ConcurrentMap[string, *target],
 	includeCurrentMsg bool,
+	replicateConfig *msgstream.ReplicateConfig,
 ) (*Dispatcher, error) {
 	log := log.With(zap.String("pchannel", pchannel),
 		zap.String("subName", subName), zap.Bool("isMain", isMain))
@@ -94,6 +95,9 @@ func NewDispatcher(ctx context.Context,
 	stream, err := factory.NewTtMsgStream(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if replicateConfig != nil {
+		log.Info("have replicate config", zap.Any("replicateID", replicateConfig.ReplicateID))
 	}
 	if position != nil && len(position.MsgID) != 0 {
 		position = typeutil.Clone(position)
@@ -103,6 +107,7 @@ func NewDispatcher(ctx context.Context,
 			log.Error("asConsumer failed", zap.Error(err))
 			return nil, err
 		}
+		stream.SetReplicate(replicateConfig)
 
 		err = stream.Seek(ctx, []*Pos{position}, includeCurrentMsg)
 		if err != nil {
@@ -119,6 +124,7 @@ func NewDispatcher(ctx context.Context,
 			log.Error("asConsumer failed", zap.Error(err))
 			return nil, err
 		}
+		stream.SetReplicate(replicateConfig)
 		log.Info("asConsumer successfully")
 	}
 

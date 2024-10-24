@@ -36,7 +36,7 @@ import (
 )
 
 type DispatcherManager interface {
-	Add(ctx context.Context, vchannel string, pos *Pos, subPos SubPos) (<-chan *MsgPack, error)
+	Add(ctx context.Context, streamConfig *StreamConfig) (<-chan *MsgPack, error)
 	Remove(vchannel string)
 	Num() int
 	Run()
@@ -82,7 +82,8 @@ func (c *dispatcherManager) constructSubName(vchannel string, isMain bool) strin
 	return fmt.Sprintf("%s-%d-%s-%t", c.role, c.nodeID, vchannel, isMain)
 }
 
-func (c *dispatcherManager) Add(ctx context.Context, vchannel string, pos *Pos, subPos SubPos) (<-chan *MsgPack, error) {
+func (c *dispatcherManager) Add(ctx context.Context, streamConfig *StreamConfig) (<-chan *MsgPack, error) {
+	vchannel := streamConfig.VChannel
 	log := log.With(zap.String("role", c.role),
 		zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
 
@@ -101,12 +102,12 @@ func (c *dispatcherManager) Add(ctx context.Context, vchannel string, pos *Pos, 
 		}
 	}
 
-	isMain := c.mainDispatcher == nil
-	d, err := NewDispatcher(ctx, c.factory, isMain, c.pchannel, pos, c.constructSubName(vchannel, isMain), subPos, c.lagNotifyChan, c.lagTargets, false)
+	isMain := c.mainDispatcher == nil && streamConfig.ReplicateConfig == nil
+	d, err := NewDispatcher(ctx, c.factory, isMain, c.pchannel, streamConfig.Pos, c.constructSubName(vchannel, isMain), streamConfig.SubPos, c.lagNotifyChan, c.lagTargets, false, streamConfig.ReplicateConfig)
 	if err != nil {
 		return nil, err
 	}
-	t := newTarget(vchannel, pos)
+	t := newTarget(vchannel, streamConfig.Pos)
 	d.AddTarget(t)
 	if isMain {
 		c.mainDispatcher = d
@@ -246,7 +247,7 @@ func (c *dispatcherManager) split(t *target) {
 	var newSolo *Dispatcher
 	err := retry.Do(context.Background(), func() error {
 		var err error
-		newSolo, err = NewDispatcher(context.Background(), c.factory, false, c.pchannel, t.pos, c.constructSubName(t.vchannel, false), common.SubscriptionPositionUnknown, c.lagNotifyChan, c.lagTargets, true)
+		newSolo, err = NewDispatcher(context.Background(), c.factory, false, c.pchannel, t.pos, c.constructSubName(t.vchannel, false), common.SubscriptionPositionUnknown, c.lagNotifyChan, c.lagTargets, true, nil)
 		return err
 	}, retry.Attempts(10))
 	if err != nil {
