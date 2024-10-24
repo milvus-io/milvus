@@ -465,8 +465,10 @@ class ResponseChecker:
                 log.info("search iteration finished, close")
                 query_iterator.close()
                 break
+            pk_name = ct.default_int64_field_name if res[0].get(ct.default_int64_field_name, None) is not None \
+                else ct.default_string_field_name
             for i in range(len(res)):
-                pk_list.append(res[i][ct.default_int64_field_name])
+                pk_list.append(res[i][pk_name])
             if check_items.get("limit", None):
                 assert len(res) <= check_items["limit"]
         assert len(pk_list) == len(set(pk_list))

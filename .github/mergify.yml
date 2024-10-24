@@ -307,7 +307,7 @@ pull_request_rules:
           - *failed_on_ubuntu_20
           - *failed_on_ubuntu_22
           - 'status-success!=Code Checker AMD64 Ubuntu 22.04'
-          - 'status-success!=UT for Cpp'
+          - 'status-success!=cpp-unit-test'
           - 'status-success!=UT for Go'
           - 'status-success!=Integration Test'
           - 'status-success!=Code Checker MacOS 12'
@@ -326,7 +326,7 @@ pull_request_rules:
           - *failed_on_ubuntu_20
           - *failed_on_ubuntu_22
           # - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
-          - 'status-success!=UT for Cpp'
+          - 'status-success!=cpp-unit-test'
           - 'status-success!=UT for Go'
           - 'status-success!=Integration Test'
           - 'status-success!=Code Checker MacOS 12'

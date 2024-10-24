@@ -29,7 +29,7 @@ type ListDeleteBufferSuite struct {
 }
 
 func (s *ListDeleteBufferSuite) TestNewBuffer() {
-	buffer := NewListDeleteBuffer[*Item](10, 1000)
+	buffer := NewListDeleteBuffer[*Item](10, 1000, []string{"1", "dml-1"})
 
 	s.EqualValues(10, buffer.SafeTs())
 
@@ -39,7 +39,7 @@ func (s *ListDeleteBufferSuite) TestNewBuffer() {
 }
 
 func (s *ListDeleteBufferSuite) TestCache() {
-	buffer := NewListDeleteBuffer[*Item](10, 1000)
+	buffer := NewListDeleteBuffer[*Item](10, 1000, []string{"1", "dml-1"})
 	buffer.Put(&Item{
 		Ts: 11,
 		Data: []BufferItem{
@@ -68,7 +68,7 @@ func (s *ListDeleteBufferSuite) TestCache() {
 }
 
 func (s *ListDeleteBufferSuite) TestTryDiscard() {
-	buffer := NewListDeleteBuffer[*Item](10, 1)
+	buffer := NewListDeleteBuffer[*Item](10, 1, []string{"1", "dml-1"})
 	buffer.Put(&Item{
 		Ts: 10,
 		Data: []BufferItem{

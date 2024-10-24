@@ -24,8 +24,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -36,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -224,17 +221,6 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 		},
 	}
 
-	nextTargetBinlogs := []*datapb.SegmentBinlogs{
-		{
-			SegmentID:     11,
-			InsertChannel: "channel-1",
-		},
-		{
-			SegmentID:     12,
-			InsertChannel: "channel-2",
-		},
-	}
-
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
 	suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.assertSegments([]int64{11, 12}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
@@ -243,19 +229,10 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
 
 	suite.broker.ExpectedCalls = nil
-	// test getRecoveryInfoV2 failed , then back to getRecoveryInfo succeed
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		nil, nil, merr.WrapErrServiceUnimplemented(status.Errorf(codes.Unimplemented, "fake not found")))
-	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{1}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collectionID, int64(1)).Return(nextTargetChannels, nextTargetBinlogs, nil)
-	err := suite.mgr.UpdateCollectionNextTarget(collectionID)
-	suite.NoError(err)
-
-	suite.broker.ExpectedCalls = nil
 	// test getRecoveryInfoV2 failed , then retry getRecoveryInfoV2 succeed
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nil, nil, errors.New("fake error")).Times(1)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
-	err = suite.mgr.UpdateCollectionNextTarget(collectionID)
+	err := suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.NoError(err)
 
 	err = suite.mgr.UpdateCollectionNextTarget(collectionID)

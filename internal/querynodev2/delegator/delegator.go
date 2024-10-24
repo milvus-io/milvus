@@ -843,6 +843,9 @@ func (sd *shardDelegator) Close() {
 	// broadcast to all waitTsafe goroutine to quit
 	sd.tsCond.Broadcast()
 	sd.lifetime.Wait()
+
+	metrics.QueryNodeDeleteBufferSize.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
+	metrics.QueryNodeDeleteBufferRowNum.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
 }
 
 // As partition stats is an optimization for search/query which is not mandatory for milvus instance,
@@ -915,16 +918,17 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	excludedSegments := NewExcludedSegments(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.GetAsDuration(time.Second))
 
 	sd := &shardDelegator{
-		collectionID:     collectionID,
-		replicaID:        replicaID,
-		vchannelName:     channel,
-		version:          version,
-		collection:       collection,
-		segmentManager:   manager.Segment,
-		workerManager:    workerManager,
-		lifetime:         lifetime.NewLifetime(lifetime.Initializing),
-		distribution:     NewDistribution(),
-		deleteBuffer:     deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock),
+		collectionID:   collectionID,
+		replicaID:      replicaID,
+		vchannelName:   channel,
+		version:        version,
+		collection:     collection,
+		segmentManager: manager.Segment,
+		workerManager:  workerManager,
+		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
+		distribution:   NewDistribution(),
+		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
+			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
 		pkOracle:         pkoracle.NewPkOracle(),
 		tsafeManager:     tsafeManager,
 		latestTsafe:      atomic.NewUint64(startTs),

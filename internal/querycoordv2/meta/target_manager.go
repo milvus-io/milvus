@@ -22,7 +22,6 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -34,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -53,8 +51,6 @@ const (
 type TargetManagerInterface interface {
 	UpdateCollectionCurrentTarget(collectionID int64) bool
 	UpdateCollectionNextTarget(collectionID int64) error
-	PullNextTargetV1(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)
-	PullNextTargetV2(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)
 	RemoveCollection(collectionID int64)
 	RemovePartition(collectionID int64, partitionIDs ...int64)
 	GetGrowingSegmentsByCollection(collectionID int64, scope TargetScope) typeutil.UniqueSet
@@ -140,79 +136,49 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64) bool
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
+	var vChannelInfos []*datapb.VchannelInfo
+	var segmentInfos []*datapb.SegmentInfo
+	err := retry.Handle(context.TODO(), func() (bool, error) {
+		var err error
+		vChannelInfos, segmentInfos, err = mgr.broker.GetRecoveryInfoV2(context.TODO(), collectionID)
+		if err != nil {
+			return true, err
+		}
+		return false, nil
+	}, retry.Attempts(10))
+	if err != nil {
+		log.Warn("failed to get next targets for collection", zap.Int64("collectionID", collectionID), zap.Error(err))
+		return err
+	}
+
 	mgr.rwMutex.Lock()
+	defer mgr.rwMutex.Unlock()
 	partitions := mgr.meta.GetPartitionsByCollection(collectionID)
 	partitionIDs := lo.Map(partitions, func(partition *Partition, i int) int64 {
 		return partition.PartitionID
 	})
 	allocatedTarget := NewCollectionTarget(nil, nil, partitionIDs)
-	mgr.rwMutex.Unlock()
 
-	log := log.With(zap.Int64("collectionID", collectionID),
-		zap.Int64s("PartitionIDs", partitionIDs))
-	segments, channels, err := mgr.PullNextTargetV2(mgr.broker, collectionID, partitionIDs...)
-	if err != nil {
-		log.Warn("failed to get next targets for collection", zap.Error(err))
-		return err
-	}
-
-	if len(segments) == 0 && len(channels) == 0 {
-		log.Debug("skip empty next targets for collection")
-		return nil
-	}
-	allocatedTarget.segments = segments
-	allocatedTarget.dmChannels = channels
-
-	mgr.rwMutex.Lock()
-	defer mgr.rwMutex.Unlock()
-	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
-	log.Debug("finish to update next targets for collection",
-		zap.Int64s("segments", allocatedTarget.GetAllSegmentIDs()),
-		zap.Strings("channels", allocatedTarget.GetAllDmChannelNames()))
-
-	return nil
-}
-
-func (mgr *TargetManager) PullNextTargetV1(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error) {
-	if len(chosenPartitionIDs) == 0 {
-		return nil, nil, nil
-	}
 	channelInfos := make(map[string][]*datapb.VchannelInfo)
 	segments := make(map[int64]*datapb.SegmentInfo, 0)
 	dmChannels := make(map[string]*DmChannel)
 
-	fullPartitions, err := broker.GetPartitions(context.Background(), collectionID)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// we should pull `channel targets` from all partitions because QueryNodes need to load
-	// the complete growing segments. And we should pull `segments targets` only from the chosen partitions.
-	for _, partitionID := range fullPartitions {
-		log.Debug("get recovery info...",
-			zap.Int64("collectionID", collectionID),
-			zap.Int64("partitionID", partitionID))
-		vChannelInfos, binlogs, err := broker.GetRecoveryInfo(context.TODO(), collectionID, partitionID)
-		if err != nil {
-			return nil, nil, err
-		}
-		for _, info := range vChannelInfos {
-			channelInfos[info.GetChannelName()] = append(channelInfos[info.GetChannelName()], info)
-		}
-		if !lo.Contains(chosenPartitionIDs, partitionID) {
-			continue
-		}
-		for _, binlog := range binlogs {
-			segments[binlog.GetSegmentID()] = &datapb.SegmentInfo{
-				ID:            binlog.GetSegmentID(),
+	for _, info := range vChannelInfos {
+		channelInfos[info.GetChannelName()] = append(channelInfos[info.GetChannelName()], info)
+		for _, segmentID := range info.GetLevelZeroSegmentIds() {
+			segments[segmentID] = &datapb.SegmentInfo{
+				ID:            segmentID,
 				CollectionID:  collectionID,
-				PartitionID:   partitionID,
-				InsertChannel: binlog.GetInsertChannel(),
-				NumOfRows:     binlog.GetNumOfRows(),
-				Binlogs:       binlog.GetFieldBinlogs(),
-				Statslogs:     binlog.GetStatslogs(),
-				Deltalogs:     binlog.GetDeltalogs(),
+				InsertChannel: info.GetChannelName(),
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L0,
 			}
+		}
+	}
+	partitionSet := typeutil.NewUniqueSet(partitionIDs...)
+	for _, segmentInfo := range segmentInfos {
+		if partitionSet.Contain(segmentInfo.GetPartitionID()) || segmentInfo.GetPartitionID() == common.AllPartitionsID {
+			segments[segmentInfo.GetID()] = segmentInfo
 		}
 	}
 
@@ -221,69 +187,19 @@ func (mgr *TargetManager) PullNextTargetV1(broker Broker, collectionID int64, ch
 		dmChannels[merged.GetChannelName()] = merged
 	}
 
-	return segments, dmChannels, nil
-}
-
-func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error) {
-	log.Debug("start to pull next targets for collection",
-		zap.Int64("collectionID", collectionID),
-		zap.Int64s("chosenPartitionIDs", chosenPartitionIDs))
-
-	if len(chosenPartitionIDs) == 0 {
-		return nil, nil, nil
-	}
-
-	channelInfos := make(map[string][]*datapb.VchannelInfo)
-	segments := make(map[int64]*datapb.SegmentInfo, 0)
-	dmChannels := make(map[string]*DmChannel)
-
-	getRecoveryInfo := func() error {
-		var err error
-
-		vChannelInfos, segmentInfos, err := broker.GetRecoveryInfoV2(context.TODO(), collectionID)
-		if err != nil {
-			// if meet rpc error, for compatibility with previous versions, try pull next target v1
-			if errors.Is(err, merr.ErrServiceUnimplemented) {
-				segments, dmChannels, err = mgr.PullNextTargetV1(broker, collectionID, chosenPartitionIDs...)
-				return err
-			}
-
-			return err
-		}
-
-		for _, info := range vChannelInfos {
-			channelInfos[info.GetChannelName()] = append(channelInfos[info.GetChannelName()], info)
-			for _, segmentID := range info.GetLevelZeroSegmentIds() {
-				segments[segmentID] = &datapb.SegmentInfo{
-					ID:            segmentID,
-					CollectionID:  collectionID,
-					InsertChannel: info.GetChannelName(),
-					State:         commonpb.SegmentState_Flushed,
-					Level:         datapb.SegmentLevel_L0,
-				}
-			}
-		}
-
-		partitionSet := typeutil.NewUniqueSet(chosenPartitionIDs...)
-		for _, segmentInfo := range segmentInfos {
-			if partitionSet.Contain(segmentInfo.GetPartitionID()) || segmentInfo.GetPartitionID() == common.AllPartitionsID {
-				segments[segmentInfo.GetID()] = segmentInfo
-			}
-		}
-
-		for _, infos := range channelInfos {
-			merged := mgr.mergeDmChannelInfo(infos)
-			dmChannels[merged.GetChannelName()] = merged
-		}
+	if len(segments) == 0 && len(dmChannels) == 0 {
+		log.Debug("skip empty next targets for collection", zap.Int64("collectionID", collectionID), zap.Int64s("PartitionIDs", partitionIDs))
 		return nil
 	}
 
-	err := retry.Do(context.TODO(), getRecoveryInfo, retry.Attempts(10))
-	if err != nil {
-		return nil, nil, err
-	}
+	mgr.next.updateCollectionTarget(collectionID, NewCollectionTarget(segments, dmChannels, partitionIDs))
+	log.Debug("finish to update next targets for collection",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64s("PartitionIDs", partitionIDs),
+		zap.Int64s("segments", allocatedTarget.GetAllSegmentIDs()),
+		zap.Strings("channels", allocatedTarget.GetAllDmChannelNames()))
 
-	return segments, dmChannels, nil
+	return nil
 }
 
 func (mgr *TargetManager) mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {

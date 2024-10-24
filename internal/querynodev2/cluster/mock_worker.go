@@ -73,6 +73,65 @@ func (_c *MockWorker_Delete_Call) RunAndReturn(run func(context.Context, *queryp
 	return _c
 }
 
+// DeleteBatch provides a mock function with given fields: ctx, req
+func (_m *MockWorker) DeleteBatch(ctx context.Context, req *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteBatch")
+	}
+
+	var r0 *querypb.DeleteBatchResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DeleteBatchRequest) *querypb.DeleteBatchResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.DeleteBatchResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.DeleteBatchRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockWorker_DeleteBatch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteBatch'
+type MockWorker_DeleteBatch_Call struct {
+	*mock.Call
+}
+
+// DeleteBatch is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *querypb.DeleteBatchRequest
+func (_e *MockWorker_Expecter) DeleteBatch(ctx interface{}, req interface{}) *MockWorker_DeleteBatch_Call {
+	return &MockWorker_DeleteBatch_Call{Call: _e.mock.On("DeleteBatch", ctx, req)}
+}
+
+func (_c *MockWorker_DeleteBatch_Call) Run(run func(ctx context.Context, req *querypb.DeleteBatchRequest)) *MockWorker_DeleteBatch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.DeleteBatchRequest))
+	})
+	return _c
+}
+
+func (_c *MockWorker_DeleteBatch_Call) Return(_a0 *querypb.DeleteBatchResponse, _a1 error) *MockWorker_DeleteBatch_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWorker_DeleteBatch_Call) RunAndReturn(run func(context.Context, *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error)) *MockWorker_DeleteBatch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetStatistics provides a mock function with given fields: ctx, req
 func (_m *MockWorker) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
 	ret := _m.Called(ctx, req)
