@@ -151,8 +151,6 @@ def custom_tokenizer(language="en"):
 def analyze_documents(texts, language="en"):
 
     tokenizer = custom_tokenizer(language)
-    # Start timing
-    t0 = time.time()
     new_texts = []
     for text in texts:
         if isinstance(text, str):
@@ -171,10 +169,7 @@ def analyze_documents(texts, language="en"):
 
     # Convert token ids back to words
     word_freq = Counter({id_to_word[token_id]: count for token_id, count in freq.items()})
-
-    # End timing
-    tt = time.time() - t0
-    log.debug(f"Analyze document cost time: {tt}")
+    log.debug(f"word freq {word_freq.most_common(10)}")
 
     return word_freq
 
