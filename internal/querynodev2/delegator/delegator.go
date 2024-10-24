@@ -144,6 +144,9 @@ type shardDelegator struct {
 	// fieldId -> functionRunner map for search function field
 	functionRunners map[UniqueID]function.FunctionRunner
 	isBM25Field     map[UniqueID]bool
+
+	// current forward policy
+	l0ForwardPolicy string
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -917,6 +920,9 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	excludedSegments := NewExcludedSegments(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.GetAsDuration(time.Second))
 
+	policy := paramtable.Get().QueryNodeCfg.LevelZeroForwardPolicy.GetValue()
+	log.Info("shard delegator setup l0 forward policy", zap.String("policy", policy))
+
 	sd := &shardDelegator{
 		collectionID:   collectionID,
 		replicaID:      replicaID,
@@ -940,6 +946,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		excludedSegments: excludedSegments,
 		functionRunners:  make(map[int64]function.FunctionRunner),
 		isBM25Field:      make(map[int64]bool),
+		l0ForwardPolicy:  policy,
 	}
 
 	for _, tf := range collection.Schema().GetFunctions() {
