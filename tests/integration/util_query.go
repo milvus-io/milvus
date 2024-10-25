@@ -31,6 +31,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
@@ -96,6 +98,36 @@ func (s *MiniClusterSuite) WaitForLoadRefresh(ctx context.Context, dbName, colle
 		default:
 			time.Sleep(500 * time.Millisecond)
 		}
+	}
+}
+
+// CheckCollectionCacheReleased checks if the collection cache was released from querynodes.
+func (s *MiniClusterSuite) CheckCollectionCacheReleased(collectionID int64) {
+	for _, qn := range s.Cluster.GetAllQueryNodes() {
+		s.Eventually(func() bool {
+			state, err := qn.GetComponentStates(context.Background(), &milvuspb.GetComponentStatesRequest{})
+			s.NoError(err)
+			if state.GetState().GetStateCode() != commonpb.StateCode_Healthy {
+				// skip checking stopping/stopped node
+				return true
+			}
+			req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+			s.NoError(err)
+			resp, err := qn.GetQueryNode().GetMetrics(context.Background(), req)
+			err = merr.CheckRPCCall(resp.GetStatus(), err)
+			s.NoError(err)
+			infos := metricsinfo.QueryNodeInfos{}
+			err = metricsinfo.UnmarshalComponentInfos(resp.Response, &infos)
+			s.NoError(err)
+			for _, id := range infos.QuotaMetrics.Effect.CollectionIDs {
+				if id == collectionID {
+					s.T().Logf("collection %d was not released in querynode %d", collectionID, qn.GetQueryNode().GetNodeID())
+					return false
+				}
+			}
+			s.T().Logf("collection %d has been released from querynode %d", collectionID, qn.GetQueryNode().GetNodeID())
+			return true
+		}, 3*time.Minute, 200*time.Millisecond)
 	}
 }
 
