@@ -27,8 +27,8 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.5.0rc103
-pymilvus[bulk_writer]==2.5.0rc103
+pymilvus==2.5.0rc104
+pymilvus[bulk_writer]==2.5.0rc104
 
 # for customize config test
 python-benedict==0.24.3

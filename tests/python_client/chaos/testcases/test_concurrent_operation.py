@@ -28,7 +28,7 @@ from delayed_assert import assert_expectations
 
 def get_all_collections():
     try:
-        with open("/tmp/ci_logs/all_collections.json", "r") as f:
+        with open("/tmp/ci_logs/chaos_test_all_collections.json", "r") as f:
             data = json.load(f)
             all_collections = data["all"]
     except Exception as e:
