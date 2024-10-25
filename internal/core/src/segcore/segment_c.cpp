@@ -347,7 +347,9 @@ DeleteArray(CSegmentInterface c_segment,
     AssertInfo(pk_schema, "pk schema cannot be null");
     auto result = arrow::ImportArray(pk_array, pk_schema);
     AssertInfo(result.ok(), "failed to convert pk array with arrow bridge");
+    // get internal array ptr, discard the ownership of shared_ptr
     auto arr = result->get();
+    result->reset();
     try {
         auto res = segment->Delete(arr, timestamps);
         return milvus::SuccessCStatus();
