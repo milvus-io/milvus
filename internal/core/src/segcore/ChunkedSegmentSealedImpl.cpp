@@ -617,6 +617,11 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
         mmap_fields_.insert(field_id);
     }
 
+    {
+        std::unique_lock lck(mutex_);
+        update_row_count(num_rows);
+    }
+
     auto ok = unlink(filepath.c_str());
     AssertInfo(ok == 0,
                fmt::format("failed to unlink mmap data file {}, err: {}",
@@ -631,8 +636,19 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
         insert_record_.seal_pks();
     }
 
-    std::unique_lock lck(mutex_);
-    set_bit(field_data_ready_bitset_, field_id, true);
+    bool use_interim_index = false;
+    if (generate_interim_index(field_id)) {
+        std::unique_lock lck(mutex_);
+        // mmap_fields is useless, no change
+        fields_.erase(field_id);
+        set_bit(field_data_ready_bitset_, field_id, false);
+        use_interim_index = true;
+    }
+
+    if (!use_interim_index) {
+        std::unique_lock lck(mutex_);
+        set_bit(field_data_ready_bitset_, field_id, true);
+    }
 }
 
 void
@@ -2115,9 +2131,14 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
     bool is_sparse =
         field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT;
 
+    bool enable_growing_mmap = storage::MmapManager::GetInstance()
+                                   .GetMmapConfig()
+                                   .GetEnableGrowingMmap();
+
     auto enable_binlog_index = [&]() {
-        // checkout config
-        if (!segcore_config_.get_enable_interim_segment_index()) {
+        // check milvus config
+        if (!segcore_config_.get_enable_interim_segment_index() ||
+            enable_growing_mmap) {
             return false;
         }
         // check data type
