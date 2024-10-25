@@ -151,12 +151,14 @@ func (s *L0Segment) Delete(ctx context.Context, primaryKeys []storage.PrimaryKey
 	return merr.WrapErrIoFailedReason("delete not supported for L0 segment")
 }
 
-func (s *L0Segment) LoadDeltaData(ctx context.Context, deltaData *storage.DeleteData) error {
+func (s *L0Segment) LoadDeltaData(ctx context.Context, deltaData *storage.DeltaData) error {
 	s.dataGuard.Lock()
 	defer s.dataGuard.Unlock()
 
-	s.pks = append(s.pks, deltaData.Pks...)
-	s.tss = append(s.tss, deltaData.Tss...)
+	for i := 0; i < deltaData.DeletePks.Len(); i++ {
+		s.pks = append(s.pks, deltaData.DeletePks.Get(i))
+	}
+	s.tss = append(s.tss, deltaData.DeleteTimestamps...)
 	return nil
 }
 

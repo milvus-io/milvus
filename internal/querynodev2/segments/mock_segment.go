@@ -822,7 +822,7 @@ func (_c *MockSegment_Level_Call) RunAndReturn(run func() datapb.SegmentLevel) *
 }
 
 // LoadDeltaData provides a mock function with given fields: ctx, deltaData
-func (_m *MockSegment) LoadDeltaData(ctx context.Context, deltaData *storage.DeleteData) error {
+func (_m *MockSegment) LoadDeltaData(ctx context.Context, deltaData *storage.DeltaData) error {
 	ret := _m.Called(ctx, deltaData)
 
 	if len(ret) == 0 {
@@ -830,7 +830,7 @@ func (_m *MockSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *storage.DeleteData) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *storage.DeltaData) error); ok {
 		r0 = rf(ctx, deltaData)
 	} else {
 		r0 = ret.Error(0)
@@ -846,14 +846,14 @@ type MockSegment_LoadDeltaData_Call struct {
 
 // LoadDeltaData is a helper method to define mock.On call
 //   - ctx context.Context
-//   - deltaData *storage.DeleteData
+//   - deltaData *storage.DeltaData
 func (_e *MockSegment_Expecter) LoadDeltaData(ctx interface{}, deltaData interface{}) *MockSegment_LoadDeltaData_Call {
 	return &MockSegment_LoadDeltaData_Call{Call: _e.mock.On("LoadDeltaData", ctx, deltaData)}
 }
 
-func (_c *MockSegment_LoadDeltaData_Call) Run(run func(ctx context.Context, deltaData *storage.DeleteData)) *MockSegment_LoadDeltaData_Call {
+func (_c *MockSegment_LoadDeltaData_Call) Run(run func(ctx context.Context, deltaData *storage.DeltaData)) *MockSegment_LoadDeltaData_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*storage.DeleteData))
+		run(args[0].(context.Context), args[1].(*storage.DeltaData))
 	})
 	return _c
 }
@@ -863,7 +863,7 @@ func (_c *MockSegment_LoadDeltaData_Call) Return(_a0 error) *MockSegment_LoadDel
 	return _c
 }
 
-func (_c *MockSegment_LoadDeltaData_Call) RunAndReturn(run func(context.Context, *storage.DeleteData) error) *MockSegment_LoadDeltaData_Call {
+func (_c *MockSegment_LoadDeltaData_Call) RunAndReturn(run func(context.Context, *storage.DeltaData) error) *MockSegment_LoadDeltaData_Call {
 	_c.Call.Return(run)
 	return _c
 }
