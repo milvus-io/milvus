@@ -56,13 +56,13 @@ func (sd *shardDelegator) forwardL0Deletion(ctx context.Context,
 	targetNodeID int64,
 	worker cluster.Worker,
 ) error {
-	switch policy := paramtable.Get().QueryNodeCfg.LevelZeroForwardPolicy.GetValue(); policy {
+	switch sd.l0ForwardPolicy {
 	case ForwardPolicyDefault, L0ForwardPolicyBF:
 		return sd.forwardL0ByBF(ctx, info, candidate, targetNodeID, worker)
 	case L0ForwardPolicyRemoteLoad:
 		return sd.forwardL0RemoteLoad(ctx, info, req, targetNodeID, worker)
 	default:
-		return merr.WrapErrServiceInternal("Unknown l0 forward policy: %s", policy)
+		return merr.WrapErrServiceInternal("Unknown l0 forward policy: %s", sd.l0ForwardPolicy)
 	}
 }
 
