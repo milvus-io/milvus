@@ -130,6 +130,10 @@ func (m *GrpcQueryNodeClient) Delete(ctx context.Context, in *querypb.DeleteRequ
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcQueryNodeClient) DeleteBatch(ctx context.Context, in *querypb.DeleteBatchRequest, opts ...grpc.CallOption) (*querypb.DeleteBatchResponse, error) {
+	return &querypb.DeleteBatchResponse{}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) Close() error {
 	return m.Err
 }

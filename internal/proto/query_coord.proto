@@ -172,6 +172,10 @@ service QueryNode {
     }
     rpc Delete(DeleteRequest) returns (common.Status) {
     }
+    // DeleteBatch is the API to apply same delete data into multiple segments.
+    // it's basically same as `Delete` but cost less memory pressure.
+    rpc DeleteBatch(DeleteBatchRequest) returns (DeleteBatchResponse) {
+    } 
 }
 
 // --------------------QueryCoord grpc request and response proto------------------
@@ -770,6 +774,25 @@ message DeleteRequest {
     schema.IDs primary_keys = 6;
     repeated uint64 timestamps = 7;
     DataScope scope = 8;
+}
+
+message DeleteBatchRequest {
+    common.MsgBase base = 1;
+    int64 collection_id = 2;
+    int64 partition_id = 3;
+    string vchannel_name = 4;
+    repeated int64 segment_ids = 5;
+    schema.IDs primary_keys = 6;
+    repeated uint64 timestamps = 7;
+    DataScope scope = 8;
+}
+
+// DeleteBatchResponse returns failed/missing segment ids
+// cannot just using common.Status to handle partial failure logic
+message DeleteBatchResponse {
+    common.Status status = 1;
+    repeated int64 failed_ids = 2;
+    repeated int64 missing_ids = 3;
 }
 
 message ActivateCheckerRequest {
