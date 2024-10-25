@@ -48,6 +48,7 @@ import (
 
 type CollectionManager interface {
 	List() []int64
+	ListWithName() map[int64]string
 	Get(collectionID int64) *Collection
 	PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)
 	Ref(collectionID int64, count uint32) bool
@@ -73,6 +74,16 @@ func (m *collectionManager) List() []int64 {
 	defer m.mut.RUnlock()
 
 	return lo.Keys(m.collections)
+}
+
+// return all collections by map id --> name
+func (m *collectionManager) ListWithName() map[int64]string {
+	m.mut.RLock()
+	defer m.mut.RUnlock()
+
+	return lo.MapValues(m.collections, func(coll *Collection, _ int64) string {
+		return coll.Schema().GetName()
+	})
 }
 
 func (m *collectionManager) Get(collectionID int64) *Collection {

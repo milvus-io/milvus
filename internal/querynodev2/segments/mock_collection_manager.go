@@ -110,6 +110,53 @@ func (_c *MockCollectionManager_List_Call) RunAndReturn(run func() []int64) *Moc
 	return _c
 }
 
+// ListWithName provides a mock function with given fields:
+func (_m *MockCollectionManager) ListWithName() map[int64]string {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListWithName")
+	}
+
+	var r0 map[int64]string
+	if rf, ok := ret.Get(0).(func() map[int64]string); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64]string)
+		}
+	}
+
+	return r0
+}
+
+// MockCollectionManager_ListWithName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListWithName'
+type MockCollectionManager_ListWithName_Call struct {
+	*mock.Call
+}
+
+// ListWithName is a helper method to define mock.On call
+func (_e *MockCollectionManager_Expecter) ListWithName() *MockCollectionManager_ListWithName_Call {
+	return &MockCollectionManager_ListWithName_Call{Call: _e.mock.On("ListWithName")}
+}
+
+func (_c *MockCollectionManager_ListWithName_Call) Run(run func()) *MockCollectionManager_ListWithName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_ListWithName_Call) Return(_a0 map[int64]string) *MockCollectionManager_ListWithName_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCollectionManager_ListWithName_Call) RunAndReturn(run func() map[int64]string) *MockCollectionManager_ListWithName_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PutOrRef provides a mock function with given fields: collectionID, schema, meta, loadMeta
 func (_m *MockCollectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
 	_m.Called(collectionID, schema, meta, loadMeta)
