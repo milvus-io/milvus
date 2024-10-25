@@ -354,7 +354,10 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 
 	m[schemapb.DataType_VarChar] = stringEntry
 	m[schemapb.DataType_String] = stringEntry
-	m[schemapb.DataType_Array] = serdeEntry{
+
+	// We're not using the deserialized data in go, so we can skip the heavy pb serde.
+	// If there is need in the future, just assign it to m[schemapb.DataType_Array]
+	eagerArrayEntry := serdeEntry{
 		func(i int) arrow.DataType {
 			return arrow.BinaryTypes.Binary
 		},
@@ -419,16 +422,32 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				return true
 			}
 			if builder, ok := b.(*array.BinaryBuilder); ok {
-				if v, ok := v.([]byte); ok {
-					builder.Append(v)
+				if vv, ok := v.([]byte); ok {
+					builder.Append(vv)
 					return true
+				}
+				if vv, ok := v.(*schemapb.ScalarField); ok {
+					if bytes, err := proto.Marshal(vv); err == nil {
+						builder.Append(bytes)
+						return true
+					}
 				}
 			}
 			return false
 		},
-		sizeOfBytes,
+		func(v any) uint64 {
+			if v == nil {
+				return 8
+			}
+			if vv, ok := v.(*schemapb.ScalarField); ok {
+				return uint64(proto.Size(vv))
+			}
+			return uint64(len(v.([]byte)))
+		},
 	}
+	_ = eagerArrayEntry
 
+	m[schemapb.DataType_Array] = byteEntry
 	m[schemapb.DataType_JSON] = byteEntry
 
 	fixedSizeDeserializer := func(a arrow.Array, i int) (any, bool) {

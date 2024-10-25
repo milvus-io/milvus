@@ -154,10 +154,12 @@ func (t *mixCompactionTask) mergeSplit(
 		return nil, err
 	}
 	for _, paths := range binlogPaths {
-		err := t.dealBinlogPaths(ctx, delta, mWriter, pkField, paths, &deletedRowCount, &expiredRowCount)
+		del, exp, err := t.writePaths(ctx, delta, mWriter, pkField, paths)
 		if err != nil {
 			return nil, err
 		}
+		deletedRowCount += del
+		expiredRowCount += exp
 	}
 	res, err := mWriter.Finish()
 	if err != nil {
@@ -186,12 +188,14 @@ func isValueDeleted(v *storage.Value, delta map[interface{}]typeutil.Timestamp) 
 	return false
 }
 
-func (t *mixCompactionTask) dealBinlogPaths(ctx context.Context, delta map[interface{}]typeutil.Timestamp, mWriter *MultiSegmentWriter, pkField *schemapb.FieldSchema, paths []string, deletedRowCount, expiredRowCount *int64) error {
+func (t *mixCompactionTask) writePaths(ctx context.Context, delta map[interface{}]typeutil.Timestamp,
+	mWriter *MultiSegmentWriter, pkField *schemapb.FieldSchema, paths []string,
+) (deletedRowCount, expiredRowCount int64, err error) {
 	log := log.With(zap.Strings("paths", paths))
 	allValues, err := t.binlogIO.Download(ctx, paths)
 	if err != nil {
 		log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
-		return err
+		return
 	}
 
 	blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
@@ -201,42 +205,40 @@ func (t *mixCompactionTask) dealBinlogPaths(ctx context.Context, delta map[inter
 	iter, err := storage.NewBinlogDeserializeReader(blobs, pkField.GetFieldID())
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
-		return err
+		return
 	}
 	defer iter.Close()
 
 	for {
-		err := iter.Next()
+		err = iter.Next()
 		if err != nil {
 			if err == sio.EOF {
+				err = nil
 				break
 			} else {
 				log.Warn("compact wrong, failed to iter through data", zap.Error(err))
-				return err
+				return
 			}
 		}
 		v := iter.Value()
 		if isValueDeleted(v, delta) {
-			oldDeletedRowCount := *deletedRowCount
-			*deletedRowCount = oldDeletedRowCount + 1
+			deletedRowCount++
 			continue
 		}
 
 		// Filtering expired entity
 		if isExpiredEntity(t.plan.GetCollectionTtl(), t.currentTs, typeutil.Timestamp(v.Timestamp)) {
-			oldExpiredRowCount := *expiredRowCount
-			*expiredRowCount = oldExpiredRowCount + 1
+			expiredRowCount++
 			continue
 		}
 
 		err = mWriter.Write(v)
 		if err != nil {
 			log.Warn("compact wrong, failed to writer row", zap.Error(err))
-			return err
+			return
 		}
 	}
-
-	return nil
+	return
 }
 
 func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
