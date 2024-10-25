@@ -48,6 +48,7 @@ set(MILVUS_TEST_FILES
         test_expr.cpp
         test_expr_materialized_view.cpp
         test_float16.cpp
+        test_function.cpp
         test_futures.cpp
         test_group_by.cpp
         test_growing.cpp
