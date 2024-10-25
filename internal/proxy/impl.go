@@ -6247,6 +6247,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		zap.String("partition name", req.GetPartitionName()),
 		zap.Any("files", req.GetFiles()),
 		zap.String("role", typeutil.ProxyRole),
+		zap.Any("options", req.GetOptions()),
 	)
 
 	resp := &internalpb.ImportResponse{
