@@ -44,9 +44,9 @@ import (
 // TODO: we just warn about the long executing/queuing tasks
 // need to get rid of long queuing tasks because the compaction tasks are local optimum.
 var maxCompactionTaskExecutionDuration = map[datapb.CompactionType]time.Duration{
-	datapb.CompactionType_MixCompaction:          2 * paramtable.Get().DataCoordCfg.CompactionTimeoutInSeconds.GetAsDuration(time.Second),
-	datapb.CompactionType_Level0DeleteCompaction: 2 * paramtable.Get().DataCoordCfg.CompactionTimeoutInSeconds.GetAsDuration(time.Second),
-	datapb.CompactionType_ClusteringCompaction:   4 * paramtable.Get().DataCoordCfg.CompactionTimeoutInSeconds.GetAsDuration(time.Second),
+	datapb.CompactionType_MixCompaction:          30 * time.Minute,
+	datapb.CompactionType_Level0DeleteCompaction: 30 * time.Minute,
+	datapb.CompactionType_ClusteringCompaction:   60 * time.Minute,
 }
 
 type compactionPlanContext interface {
