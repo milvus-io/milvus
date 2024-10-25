@@ -74,7 +74,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	if err != nil {
 		return nil, err
 	}
-	count, err := estimateReadCountPerBatch(bufferSize, schema)
+	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
 	}
