@@ -6242,6 +6242,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
 	log := log.Ctx(ctx).With(
+		zap.String("dbName", req.GetDbName()),
 		zap.String("collectionName", req.GetCollectionName()),
 		zap.String("partition name", req.GetPartitionName()),
 		zap.Any("files", req.GetFiles()),
@@ -6267,6 +6268,11 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		}
 	}()
 
+	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, req.GetDbName())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		resp.Status = merr.Status(err)
@@ -6377,6 +6383,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		}
 	}
 	importRequest := &internalpb.ImportRequestInternal{
+		DbID:           dbInfo.dbID,
 		CollectionID:   collectionID,
 		CollectionName: req.GetCollectionName(),
 		PartitionIDs:   partitionIDs,
@@ -6401,14 +6408,28 @@ func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImp
 		}, nil
 	}
 	log := log.Ctx(ctx).With(
+		zap.String("dbName", req.GetDbName()),
 		zap.String("jobID", req.GetJobID()),
 	)
+
+	resp := &internalpb.GetImportProgressResponse{
+		Status: merr.Success(),
+	}
+
 	method := "GetImportProgress"
 	tr := timerecord.NewTimeRecorder(method)
 	log.Info(rpcReceived(method))
 
+	// Fill db id for datacoord.
+	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, req.GetDbName())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	req.DbID = dbInfo.dbID
+
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
-	resp, err := node.dataCoord.GetImportProgress(ctx, req)
+	resp, err = node.dataCoord.GetImportProgress(ctx, req)
 	if resp.GetStatus().GetCode() != 0 || err != nil {
 		log.Warn("get import progress failed", zap.String("reason", resp.GetStatus().GetReason()), zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel, req.GetDbName(), "").Inc()
@@ -6445,6 +6466,11 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 		err          error
 		collectionID UniqueID
 	)
+	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, req.GetDbName())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
 	if req.GetCollectionName() != "" {
 		collectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
@@ -6453,7 +6479,9 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 			return resp, nil
 		}
 	}
+
 	resp, err = node.dataCoord.ListImports(ctx, &internalpb.ListImportsRequestInternal{
+		DbID:         dbInfo.dbID,
 		CollectionID: collectionID,
 	})
 	if resp.GetStatus().GetCode() != 0 || err != nil {
