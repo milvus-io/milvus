@@ -408,7 +408,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 			Return(&datapb.CompactionPlanResult{
 				PlanID: t.GetTaskProto().GetPlanID(),
 				State:  datapb.CompactionTaskState_executing,
-			}, nil).Twice()
+			}, nil).Once()
 
 		got := t.Process()
 		s.False(got)
