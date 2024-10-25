@@ -1242,6 +1242,7 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		dl := reader.Value()
 		deltaData.DeletePks.MustAppend(dl.Pk)
 		deltaData.DeleteTimestamps = append(deltaData.DeleteTimestamps, dl.Ts)
+		deltaData.DelRowCount++
 	}
 
 	err = segment.LoadDeltaData(ctx, deltaData)
@@ -1249,7 +1250,7 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		return err
 	}
 
-	log.Info("load delta logs done", zap.Int("deleteCount", deltaData.DeletePks.Len()))
+	log.Info("load delta logs done", zap.Int64("deleteCount", deltaData.DelRowCount))
 	return nil
 }
 
