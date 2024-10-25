@@ -439,6 +439,7 @@ var (
 			Help:      "number of entities which can be searched/queried, clustered by collection, partition and state",
 		}, []string{
 			databaseLabelName,
+			collectionName,
 			nodeIDLabelName,
 			collectionIDLabelName,
 			partitionIDLabelName,
