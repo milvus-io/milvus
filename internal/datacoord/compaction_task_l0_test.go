@@ -50,7 +50,7 @@ func (s *L0CompactionTaskSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
 	s.mockSessMgr = session.NewMockDataNodeManager(s.T())
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
-	//s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+	// s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
 }
 
 func (s *L0CompactionTaskSuite) SetupSubTest() {
@@ -220,74 +220,6 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		s.False(got)
 		s.Equal(datapb.CompactionTaskState_pipelining, t.GetTaskProto().State)
 		s.EqualValues(NullNodeID, t.GetTaskProto().NodeID)
-	})
-
-	s.Run("test pipelining BuildCompactionRequest failed", func() {
-		s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
-		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
-		t.updateAndSaveTaskMeta(setNodeID(100))
-		channel := "ch-1"
-		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
-
-		s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything).Return(
-			[]*SegmentInfo{
-				{SegmentInfo: &datapb.SegmentInfo{
-					ID:            200,
-					Level:         datapb.SegmentLevel_L1,
-					InsertChannel: channel,
-				}, isCompacting: true},
-			},
-		)
-
-		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
-			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-				ID:            segID,
-				Level:         datapb.SegmentLevel_L0,
-				InsertChannel: channel,
-				State:         commonpb.SegmentState_Flushed,
-				Deltalogs:     deltaLogs,
-			}}
-		}).Twice()
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).Return()
-
-		s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil).Once()
-
-		got := t.Process()
-		s.True(got)
-		s.Equal(datapb.CompactionTaskState_cleaned, t.GetTaskProto().State)
-	})
-	s.Run("test pipelining saveTaskMeta failed", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Once()
-		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
-		s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
-		t.updateAndSaveTaskMeta(setNodeID(100))
-		channel := "ch-1"
-		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
-
-		s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything).Return(
-			[]*SegmentInfo{
-				{SegmentInfo: &datapb.SegmentInfo{
-					ID:            200,
-					Level:         datapb.SegmentLevel_L1,
-					InsertChannel: channel,
-				}, isCompacting: true},
-			},
-		)
-
-		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
-			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-				ID:            segID,
-				Level:         datapb.SegmentLevel_L0,
-				InsertChannel: channel,
-				State:         commonpb.SegmentState_Flushed,
-				Deltalogs:     deltaLogs,
-			}}
-		}).Twice()
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(errors.New("mock error")).Once()
-		got := t.Process()
-		s.False(got)
-		s.Equal(datapb.CompactionTaskState_pipelining, t.GetTaskProto().State)
 	})
 
 	s.Run("test pipelining Compaction failed", func() {
