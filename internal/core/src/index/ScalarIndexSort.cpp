@@ -97,7 +97,7 @@ ScalarIndexSort<T>::BuildWithFieldData(
         total_num_rows_ += data->get_num_rows();
         length += data->get_num_rows() - data->get_null_count();
     }
-    if (length == 0) {
+    if (total_num_rows_ == 0) {
         PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
     }
 

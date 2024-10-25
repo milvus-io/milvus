@@ -441,6 +441,15 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	if len(req.GetInfos()) > 1 {
 		var reqs []*querypb.LoadSegmentsRequest
 		for _, info := range req.GetInfos() {
+			// put meta l0, instead of load actual delta data
+			if info.GetLevel() == datapb.SegmentLevel_L0 && sd.l0ForwardPolicy == L0ForwardPolicyRemoteLoad {
+				l0Seg, err := segments.NewL0Segment(sd.collection, segments.SegmentTypeSealed, req.GetVersion(), info)
+				if err != nil {
+					return err
+				}
+				sd.segmentManager.Put(ctx, segments.SegmentTypeSealed, l0Seg)
+				continue
+			}
 			newReq := typeutil.Clone(req)
 			newReq.Infos = []*querypb.SegmentLoadInfo{info}
 			reqs = append(reqs, newReq)
