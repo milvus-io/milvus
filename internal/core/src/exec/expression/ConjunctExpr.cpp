@@ -15,7 +15,6 @@
 // limitations under the License.
 
 #include "ConjunctExpr.h"
-#include "log/Log.h"
 
 namespace milvus {
 namespace exec {
