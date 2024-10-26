@@ -453,7 +453,9 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             while (data.arrow_reader_channel->pop(r)) {
                 auto chunk =
                     create_chunk(field_meta,
-                                 IsVectorDataType(field_meta.get_data_type())
+                                 IsVectorDataType(field_meta.get_data_type()) &&
+                                         !IsSparseFloatVectorDataType(
+                                             field_meta.get_data_type())
                                      ? field_meta.get_dim()
                                      : 1,
                                  r->reader);
@@ -549,13 +551,15 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
         //                indices,
         //                element_indices,
         //                valid_data);
-        auto chunk = create_chunk(field_meta,
-                                  IsVectorDataType(field_meta.get_data_type())
-                                      ? field_meta.get_dim()
-                                      : 1,
-                                  file,
-                                  file_offset,
-                                  r->reader);
+        auto chunk = create_chunk(
+            field_meta,
+            IsVectorDataType(field_meta.get_data_type()) &&
+                    !IsSparseFloatVectorDataType(field_meta.get_data_type())
+                ? field_meta.get_dim()
+                : 1,
+            file,
+            file_offset,
+            r->reader);
         file_offset += chunk->Size();
         chunks.push_back(chunk);
     }
