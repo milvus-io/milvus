@@ -83,7 +83,7 @@ class ChunkedColumnBase : public ColumnBase {
         AssertInfo(chunks_.size() == 1,
                    "only support one chunk, but got {} chunk(s)",
                    chunks_.size());
-        return chunks_[0]->Data();
+        return chunks_[0]->RawData();
     }
 
     bool
