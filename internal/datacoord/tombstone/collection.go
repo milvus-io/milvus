@@ -19,8 +19,6 @@ import (
 
 const defaultTombstoneTTL = 7 * 24 * time.Hour
 
-var ErrDropped = errors.New("dropped")
-
 type (
 	DroppingCollection = datapb.CollectionTombstoneImpl
 	DroppingPartition  = datapb.PartitionTombstoneImpl
@@ -121,22 +119,13 @@ func (dt *collectionTombstoneImpl) MarkPartitionAsDropping(ctx context.Context, 
 	return nil
 }
 
-// CheckIfCollectionDropped checks if a collection is dropped.
-// Return error if collection is dropped.
-func (dt *collectionTombstoneImpl) CheckIfCollectionDropped(collectionID int64) error {
-	if _, ok := dt.collection.Get(collectionID); ok {
-		return errors.Wrapf(ErrDropped, "collection %d is dropped", collectionID)
-	}
-	return nil
-}
-
 // IsPartitionDropped checks if a partition is dropped.
 func (dt *collectionTombstoneImpl) CheckIfPartitionDropped(collectionID int64, partitionID int64) error {
 	if _, ok := dt.collection.Get(collectionID); ok {
-		return errors.Wrapf(ErrDropped, "collection %d is dropped", collectionID)
+		return merr.WrapErrCollectionDropped(collectionID)
 	}
 	if _, ok := dt.partition.Get(partitionID); ok {
-		return errors.Wrapf(ErrDropped, "partition %d at collection %d is dropped", partitionID, collectionID)
+		return merr.WrapErrPartitionDropped(partitionID)
 	}
 	return nil
 }

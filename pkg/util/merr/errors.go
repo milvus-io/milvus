@@ -70,11 +70,13 @@ var (
 	ErrCollectionIllegalSchema                 = newMilvusError("illegal collection schema", 105, false)
 	ErrCollectionOnRecovering                  = newMilvusError("collection on recovering", 106, true)
 	ErrCollectionVectorClusteringKeyNotAllowed = newMilvusError("vector clustering key not allowed", 107, false)
+	ErrCollectionDropped                       = newMilvusError("collection dropped", 108, false)
 
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false)
 	ErrPartitionNotLoaded      = newMilvusError("partition not loaded", 201, false)
 	ErrPartitionNotFullyLoaded = newMilvusError("partition not fully loaded", 202, true)
+	ErrPartitionDropped        = newMilvusError("partition dropped", 203, false)
 
 	// General capacity related
 	ErrGeneralCapacityExceeded = newMilvusError("general capacity exceeded", 250, false)
