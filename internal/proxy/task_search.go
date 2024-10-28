@@ -745,7 +745,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	t.result.CollectionName = t.request.GetCollectionName()
 	if t.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
 		// first page for iteration, need to set up sessionTs for iterator
-		t.result.SessionTs = t.BeginTs()
+		t.result.SessionTs = t.SearchRequest.GetGuaranteeTimestamp()
 	}
 
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
