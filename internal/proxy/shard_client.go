@@ -127,6 +127,10 @@ func (n *shardClient) initClients() error {
 	for i := 0; i < num; i++ {
 		client, err := n.creator(context.Background(), n.info.address, n.info.nodeID)
 		if err != nil {
+			// roll back already created clients
+			for _, c := range clients[:i] {
+				c.Close()
+			}
 			return errors.Wrap(err, fmt.Sprintf("create client for node=%d failed", n.info.nodeID))
 		}
 		clients = append(clients, client)
