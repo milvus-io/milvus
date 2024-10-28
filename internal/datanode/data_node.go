@@ -291,20 +291,6 @@ func (node *DataNode) registerMetricsRequest() {
 	log.Info("register metrics actions finished")
 }
 
-// tryToReleaseFlowgraph tries to release a flowgraph
-func (node *DataNode) tryToReleaseFlowgraph(channel string) {
-	log.Info("try to release flowgraph", zap.String("channel", channel))
-	if node.compactionExecutor != nil {
-		node.compactionExecutor.DiscardPlan(channel)
-	}
-	if node.flowgraphManager != nil {
-		node.flowgraphManager.RemoveFlowgraph(channel)
-	}
-	if node.writeBufferManager != nil {
-		node.writeBufferManager.RemoveChannel(channel)
-	}
-}
-
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
 	var startErr error

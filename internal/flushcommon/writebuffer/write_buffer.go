@@ -55,8 +55,6 @@ type WriteBuffer interface {
 	MemorySize() int64
 	// EvictBuffer evicts buffer to sync manager which match provided sync policies.
 	EvictBuffer(policies ...SyncPolicy)
-	// Close is the method to close and sink current buffer data.
-	Close(ctx context.Context, drop bool)
 }
 
 type checkpointCandidate struct {
@@ -629,51 +627,6 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 func (wb *writeBufferBase) getEstBatchSize() uint {
 	sizeLimit := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt64()
 	return uint(sizeLimit / int64(wb.estSizePerRecord))
-}
-
-func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
-	log := wb.logger
-	// sink all data and call Drop for meta writer
-	wb.mut.Lock()
-	defer wb.mut.Unlock()
-	if !drop {
-		return
-	}
-
-	var futures []*conc.Future[struct{}]
-	for id := range wb.buffers {
-		syncTask, err := wb.getSyncTask(ctx, id)
-		if err != nil {
-			// TODO
-			continue
-		}
-		switch t := syncTask.(type) {
-		case *syncmgr.SyncTask:
-			t.WithDrop()
-		}
-
-		f := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
-			if wb.taskObserverCallback != nil {
-				wb.taskObserverCallback(syncTask, err)
-			}
-
-			if err != nil {
-				return err
-			}
-			if syncTask.StartPosition() != nil {
-				wb.syncCheckpoint.Remove(syncTask.SegmentID(), syncTask.StartPosition().GetTimestamp())
-			}
-			return nil
-		})
-		futures = append(futures, f)
-	}
-
-	err := conc.AwaitAll(futures...)
-	if err != nil {
-		log.Error("failed to sink write buffer data", zap.Error(err))
-		// TODO change to remove channel in the future
-		panic(err)
-	}
 }
 
 // prepareInsert transfers InsertMsg into organized InsertData grouped by segmentID
