@@ -83,7 +83,6 @@ type compactionPlanHandler struct {
 
 	meta             CompactionMeta
 	allocator        allocator.Allocator
-	chManager        ChannelManager
 	sessions         session.DataNodeManager
 	cluster          Cluster
 	analyzeScheduler *taskScheduler
@@ -177,12 +176,11 @@ func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64)
 	return cnt
 }
 
-func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager, cm ChannelManager, meta CompactionMeta,
+func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager, meta CompactionMeta,
 	allocator allocator.Allocator, analyzeScheduler *taskScheduler, handler Handler,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		queueTasks:       *NewCompactionQueue(256, getPrioritizer()), // Higher capacity will have better ordering in priority, but consumes more memory.
-		chManager:        cm,
 		meta:             meta,
 		sessions:         sessions,
 		allocator:        allocator,
@@ -671,19 +669,6 @@ func (c *compactionPlanHandler) pickAnyNode(nodeSlots map[int64]int64, task Comp
 	}
 
 	return nodeID, useSlot
-}
-
-func (c *compactionPlanHandler) pickShardNode(nodeSlots map[int64]int64, t CompactionTask) int64 {
-	nodeID, err := c.chManager.FindWatcher(t.GetTaskProto().GetChannel())
-	if err != nil {
-		log.Info("failed to find watcher", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Error(err))
-		return NullNodeID
-	}
-
-	if nodeSlots[nodeID] > 0 {
-		return nodeID
-	}
-	return NullNodeID
 }
 
 // isFull return true if the task pool is full

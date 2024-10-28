@@ -45,6 +45,7 @@ type ChannelManager interface {
 	DeleteNode(nodeID UniqueID) error
 	Watch(ctx context.Context, ch RWChannel) error
 	Release(nodeID UniqueID, channelName string) error
+	ReleaseByCollectionID(collectionID int64) error
 
 	Match(nodeID UniqueID, channel string) bool
 	FindWatcher(channel string) (UniqueID, error)
@@ -229,6 +230,20 @@ func (m *ChannelManagerImpl) Release(nodeID UniqueID, channelName string) error 
 	defer m.mu.Unlock()
 	updates := NewChannelOpSet(NewChannelOp(nodeID, Release, ch))
 	return m.execute(updates)
+}
+
+func (m *ChannelManagerImpl) ReleaseByCollectionID(collectionID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	nodeChannels := m.store.GetNodeChannelsBy(WithAllNodes(), WithCollectionIDV2(collectionID))
+	updates := make([]*ChannelOp, 0)
+	for _, nodeChannel := range nodeChannels {
+		for _, ch := range nodeChannel.Channels {
+			updates = append(updates, NewChannelOp(nodeChannel.NodeID, Release, ch))
+		}
+	}
+	return m.execute(NewChannelOpSet(updates...))
 }
 
 func (m *ChannelManagerImpl) Watch(ctx context.Context, ch RWChannel) error {

@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 )
@@ -220,14 +221,16 @@ func (s *deleteCollectionDataStep) Execute(ctx context.Context) ([]nestedStep, e
 	if err != nil {
 		return nil, err
 	}
-	// wait for ts synced.
 	children := make([]nestedStep, 0, len(s.coll.PhysicalChannelNames))
-	for _, channel := range s.coll.PhysicalChannelNames {
-		children = append(children, &waitForTsSyncedStep{
-			baseStep: baseStep{core: s.core},
-			ts:       ddlTs,
-			channel:  channel,
-		})
+	if !streamingutil.IsStreamingServiceEnabled() {
+		// wait for ts synced.
+		for _, channel := range s.coll.PhysicalChannelNames {
+			children = append(children, &waitForTsSyncedStep{
+				baseStep: baseStep{core: s.core},
+				ts:       ddlTs,
+				channel:  channel,
+			})
+		}
 	}
 	return children, nil
 }
@@ -237,6 +240,60 @@ func (s *deleteCollectionDataStep) Desc() string {
 }
 
 func (s *deleteCollectionDataStep) Weight() stepPriority {
+	return stepPriorityImportant
+}
+
+func newDropCollectionAtDataCoordStep(core *Core, collectionID UniqueID, vChannels []string) *dropCollectionAtDataCoordStep {
+	return &dropCollectionAtDataCoordStep{
+		baseStep:     baseStep{core: core},
+		collectionID: collectionID,
+		vChannels:    vChannels,
+	}
+}
+
+type dropCollectionAtDataCoordStep struct {
+	baseStep
+	collectionID UniqueID
+	vChannels    []string
+}
+
+func (s *dropCollectionAtDataCoordStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	err := s.core.broker.DropCollectionAtDataCoord(ctx, s.collectionID, s.vChannels)
+	return nil, err
+}
+
+func (s *dropCollectionAtDataCoordStep) Desc() string {
+	return fmt.Sprintf("drop collection at data coord, collection: %d, vchannel count: %+v", s.collectionID, len(s.vChannels))
+}
+
+func (s *dropCollectionAtDataCoordStep) Weight() stepPriority {
+	return stepPriorityImportant
+}
+
+func newDropPartitionAtDataCoordStep(core *Core, collectionID UniqueID, partitionID UniqueID) *dropPartitionAtDataCoordStep {
+	return &dropPartitionAtDataCoordStep{
+		baseStep:     baseStep{core: core},
+		collectionID: collectionID,
+		partitionID:  partitionID,
+	}
+}
+
+type dropPartitionAtDataCoordStep struct {
+	baseStep
+	collectionID UniqueID
+	partitionID  UniqueID
+}
+
+func (s *dropPartitionAtDataCoordStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	err := s.core.broker.DropPartitionAtDataCoord(ctx, s.collectionID, s.partitionID)
+	return nil, err
+}
+
+func (s *dropPartitionAtDataCoordStep) Desc() string {
+	return fmt.Sprintf("drop collection at data coord, collection: %d, partition: %d", s.collectionID, s.partitionID)
+}
+
+func (s *dropPartitionAtDataCoordStep) Weight() stepPriority {
 	return stepPriorityImportant
 }
 

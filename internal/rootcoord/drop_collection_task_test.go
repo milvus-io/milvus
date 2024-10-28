@@ -122,6 +122,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		coll := &model.Collection{Name: collectionName}
 
 		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ChangeCollectionState(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		meta.On("GetCollectionByName",
 			mock.Anything, // context.Context
 			mock.Anything,

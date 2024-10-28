@@ -138,9 +138,9 @@ func (_c *GarbageCollector_GcPartitionData_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
-// ReDropCollection provides a mock function with given fields: collMeta, ts
-func (_m *GarbageCollector) ReDropCollection(collMeta *model.Collection, ts uint64) {
-	_m.Called(collMeta, ts)
+// ReDropCollection provides a mock function with given fields: collMeta, dbName, ts
+func (_m *GarbageCollector) ReDropCollection(collMeta *model.Collection, dbName string, ts uint64) {
+	_m.Called(collMeta, dbName, ts)
 }
 
 // GarbageCollector_ReDropCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReDropCollection'
@@ -150,14 +150,15 @@ type GarbageCollector_ReDropCollection_Call struct {
 
 // ReDropCollection is a helper method to define mock.On call
 //   - collMeta *model.Collection
+//   - dbName string
 //   - ts uint64
-func (_e *GarbageCollector_Expecter) ReDropCollection(collMeta interface{}, ts interface{}) *GarbageCollector_ReDropCollection_Call {
-	return &GarbageCollector_ReDropCollection_Call{Call: _e.mock.On("ReDropCollection", collMeta, ts)}
+func (_e *GarbageCollector_Expecter) ReDropCollection(collMeta interface{}, dbName interface{}, ts interface{}) *GarbageCollector_ReDropCollection_Call {
+	return &GarbageCollector_ReDropCollection_Call{Call: _e.mock.On("ReDropCollection", collMeta, dbName, ts)}
 }
 
-func (_c *GarbageCollector_ReDropCollection_Call) Run(run func(collMeta *model.Collection, ts uint64)) *GarbageCollector_ReDropCollection_Call {
+func (_c *GarbageCollector_ReDropCollection_Call) Run(run func(collMeta *model.Collection, dbName string, ts uint64)) *GarbageCollector_ReDropCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*model.Collection), args[1].(uint64))
+		run(args[0].(*model.Collection), args[1].(string), args[2].(uint64))
 	})
 	return _c
 }
@@ -167,14 +168,14 @@ func (_c *GarbageCollector_ReDropCollection_Call) Return() *GarbageCollector_ReD
 	return _c
 }
 
-func (_c *GarbageCollector_ReDropCollection_Call) RunAndReturn(run func(*model.Collection, uint64)) *GarbageCollector_ReDropCollection_Call {
+func (_c *GarbageCollector_ReDropCollection_Call) RunAndReturn(run func(*model.Collection, string, uint64)) *GarbageCollector_ReDropCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// ReDropPartition provides a mock function with given fields: dbID, pChannels, vchannels, partition, ts
-func (_m *GarbageCollector) ReDropPartition(dbID int64, pChannels []string, vchannels []string, partition *model.Partition, ts uint64) {
-	_m.Called(dbID, pChannels, vchannels, partition, ts)
+// ReDropPartition provides a mock function with given fields: collMeta, partition, dbName, ts
+func (_m *GarbageCollector) ReDropPartition(collMeta *model.Collection, partition *model.Partition, dbName string, ts uint64) {
+	_m.Called(collMeta, partition, dbName, ts)
 }
 
 // GarbageCollector_ReDropPartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReDropPartition'
@@ -183,18 +184,17 @@ type GarbageCollector_ReDropPartition_Call struct {
 }
 
 // ReDropPartition is a helper method to define mock.On call
-//   - dbID int64
-//   - pChannels []string
-//   - vchannels []string
+//   - collMeta *model.Collection
 //   - partition *model.Partition
+//   - dbName string
 //   - ts uint64
-func (_e *GarbageCollector_Expecter) ReDropPartition(dbID interface{}, pChannels interface{}, vchannels interface{}, partition interface{}, ts interface{}) *GarbageCollector_ReDropPartition_Call {
-	return &GarbageCollector_ReDropPartition_Call{Call: _e.mock.On("ReDropPartition", dbID, pChannels, vchannels, partition, ts)}
+func (_e *GarbageCollector_Expecter) ReDropPartition(collMeta interface{}, partition interface{}, dbName interface{}, ts interface{}) *GarbageCollector_ReDropPartition_Call {
+	return &GarbageCollector_ReDropPartition_Call{Call: _e.mock.On("ReDropPartition", collMeta, partition, dbName, ts)}
 }
 
-func (_c *GarbageCollector_ReDropPartition_Call) Run(run func(dbID int64, pChannels []string, vchannels []string, partition *model.Partition, ts uint64)) *GarbageCollector_ReDropPartition_Call {
+func (_c *GarbageCollector_ReDropPartition_Call) Run(run func(collMeta *model.Collection, partition *model.Partition, dbName string, ts uint64)) *GarbageCollector_ReDropPartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].([]string), args[2].([]string), args[3].(*model.Partition), args[4].(uint64))
+		run(args[0].(*model.Collection), args[1].(*model.Partition), args[2].(string), args[3].(uint64))
 	})
 	return _c
 }
@@ -204,7 +204,7 @@ func (_c *GarbageCollector_ReDropPartition_Call) Return() *GarbageCollector_ReDr
 	return _c
 }
 
-func (_c *GarbageCollector_ReDropPartition_Call) RunAndReturn(run func(int64, []string, []string, *model.Partition, uint64)) *GarbageCollector_ReDropPartition_Call {
+func (_c *GarbageCollector_ReDropPartition_Call) RunAndReturn(run func(*model.Collection, *model.Partition, string, uint64)) *GarbageCollector_ReDropPartition_Call {
 	_c.Call.Return(run)
 	return _c
 }

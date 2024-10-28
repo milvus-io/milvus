@@ -674,12 +674,6 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 		// TODO change to remove channel in the future
 		panic(err)
 	}
-	err = wb.metaWriter.DropChannel(ctx, wb.channelName)
-	if err != nil {
-		log.Error("failed to drop channel", zap.Error(err))
-		// TODO change to remove channel in the future
-		panic(err)
-	}
 }
 
 // prepareInsert transfers InsertMsg into organized InsertData grouped by segmentID

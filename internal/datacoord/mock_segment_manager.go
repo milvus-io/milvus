@@ -213,6 +213,40 @@ func (_c *MockManager_DropSegmentsOfChannel_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// DropSegmentsOfPartition provides a mock function with given fields: ctx, partitionID
+func (_m *MockManager) DropSegmentsOfPartition(ctx context.Context, partitionID int64) {
+	_m.Called(ctx, partitionID)
+}
+
+// MockManager_DropSegmentsOfPartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSegmentsOfPartition'
+type MockManager_DropSegmentsOfPartition_Call struct {
+	*mock.Call
+}
+
+// DropSegmentsOfPartition is a helper method to define mock.On call
+//   - ctx context.Context
+//   - partitionID int64
+func (_e *MockManager_Expecter) DropSegmentsOfPartition(ctx interface{}, partitionID interface{}) *MockManager_DropSegmentsOfPartition_Call {
+	return &MockManager_DropSegmentsOfPartition_Call{Call: _e.mock.On("DropSegmentsOfPartition", ctx, partitionID)}
+}
+
+func (_c *MockManager_DropSegmentsOfPartition_Call) Run(run func(ctx context.Context, partitionID int64)) *MockManager_DropSegmentsOfPartition_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockManager_DropSegmentsOfPartition_Call) Return() *MockManager_DropSegmentsOfPartition_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockManager_DropSegmentsOfPartition_Call) RunAndReturn(run func(context.Context, int64)) *MockManager_DropSegmentsOfPartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ExpireAllocations provides a mock function with given fields: channel, ts
 func (_m *MockManager) ExpireAllocations(channel string, ts uint64) error {
 	ret := _m.Called(channel, ts)

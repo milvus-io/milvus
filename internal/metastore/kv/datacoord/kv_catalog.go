@@ -982,3 +982,36 @@ func (kc *Catalog) DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) 
 	key := buildStatsTaskKey(taskID)
 	return kc.MetaKv.Remove(key)
 }
+
+func (kc *Catalog) ListCollectionTombstone(_ context.Context) ([]*model.CollectionTombstone, error) {
+	_, values, err := kc.MetaKv.LoadWithPrefix(CollectionTombstonePrefix + "/")
+	if err != nil {
+		return nil, err
+	}
+	tombstones := make([]*model.CollectionTombstone, 0, len(values))
+	for _, value := range values {
+		tombstone := &datapb.CollectionTombstone{}
+		err = proto.Unmarshal([]byte(value), tombstone)
+		if err != nil {
+			return nil, err
+		}
+		tombstones = append(tombstones, &model.CollectionTombstone{
+			Tombstone: tombstone,
+		})
+	}
+	return tombstones, nil
+}
+
+func (kc *Catalog) SaveCollectionTombstone(_ context.Context, tombstone *model.CollectionTombstone) error {
+	key := path.Join(CollectionTombstonePrefix, tombstone.Key())
+	value, err := proto.Marshal(tombstone.Tombstone)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(key, string(value))
+}
+
+func (kc *Catalog) DropCollectionTombstone(_ context.Context, tombstone *model.CollectionTombstone) error {
+	key := path.Join(CollectionTombstonePrefix, tombstone.Key())
+	return kc.MetaKv.Remove(key)
+}
