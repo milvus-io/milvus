@@ -119,8 +119,8 @@ func newDropCollectionRedoTask(
 		isSkip:   !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
 	})
 	redoTask.AddAsyncStep(&removeDmlChannelsStep{
-		baseStep:  baseStep{core: core},
-		pChannels: collMeta.PhysicalChannelNames,
+		baseStep: baseStep{core: core},
+		collInfo: collMeta,
 	})
 	redoTask.AddAsyncStep(newDropCollectionAtDataCoordStep(core, collMeta.CollectionID, collMeta.VirtualChannelNames))
 	redoTask.AddAsyncStep(newConfirmGCStep(core, collMeta.CollectionID, allPartition))

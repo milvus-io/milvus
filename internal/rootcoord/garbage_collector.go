@@ -86,8 +86,8 @@ func (c *bgGarbageCollector) RemoveCreatingCollection(collMeta *model.Collection
 		isSkip: !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
 	})
 	redo.AddAsyncStep(&removeDmlChannelsStep{
-		baseStep:  baseStep{core: c.s},
-		pChannels: collMeta.PhysicalChannelNames,
+		baseStep: baseStep{core: c.s},
+		collInfo: collMeta,
 	})
 	redo.AddAsyncStep(&deleteCollectionMetaStep{
 		baseStep:     baseStep{core: c.s},
@@ -135,7 +135,7 @@ func (c *bgGarbageCollector) RemoveCreatingPartition(dbID int64, partition *mode
 
 func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error) {
 	if streamingutil.IsStreamingServiceEnabled() {
-		return c.notifyCollectionGcByStreamingService(ctx, coll)
+		return notifyCollectionGcByStreamingService(ctx, coll, c.s.session.GetServerID())
 	}
 
 	ts, err := c.s.tsoAllocator.GenerateTSO(1)
@@ -151,7 +151,7 @@ func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		DropCollectionRequest: c.generateDropRequest(coll, ts),
+		DropCollectionRequest: generateDropRequest(coll, ts, c.s.session.GetServerID()),
 	}
 	msgPack.Msgs = append(msgPack.Msgs, msg)
 	if err := c.s.chanTimeTick.broadcastDmlChannels(coll.PhysicalChannelNames, &msgPack); err != nil {
@@ -161,20 +161,20 @@ func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model
 	return ts, nil
 }
 
-func (c *bgGarbageCollector) generateDropRequest(coll *model.Collection, ts uint64) *msgpb.DropCollectionRequest {
+func generateDropRequest(coll *model.Collection, ts uint64, serverID int64) *msgpb.DropCollectionRequest {
 	return &msgpb.DropCollectionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DropCollection),
 			commonpbutil.WithTimeStamp(ts),
-			commonpbutil.WithSourceID(c.s.session.ServerID),
+			commonpbutil.WithSourceID(serverID),
 		),
 		CollectionName: coll.Name,
 		CollectionID:   coll.CollectionID,
 	}
 }
 
-func (c *bgGarbageCollector) notifyCollectionGcByStreamingService(ctx context.Context, coll *model.Collection) (uint64, error) {
-	req := c.generateDropRequest(coll, 0) // ts is given by streamingnode.
+func notifyCollectionGcByStreamingService(ctx context.Context, coll *model.Collection, serverID int64) (uint64, error) {
+	req := generateDropRequest(coll, 0, serverID) // ts is given by streamingnode.
 
 	msgs := make([]message.MutableMessage, 0, len(coll.VirtualChannelNames))
 	for _, vchannel := range coll.VirtualChannelNames {
