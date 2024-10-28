@@ -637,6 +637,7 @@ dataNode:
     insertBufSize: 16777216
     deleteBufBytes: 16777216 # Max buffer size in bytes to flush del for a single channel, default as 16MB
     syncPeriod: 600 # The period to sync segments if buffer is not empty.
+    l0syncPeriod: 60 # The period to sync L0 segments if buffer is not empty.
   memory:
     forceSyncEnable: true # Set true to force sync if memory usage is too high
     forceSyncSegmentNum: 1 # number of segments to sync, segments with top largest buffer will be synced.

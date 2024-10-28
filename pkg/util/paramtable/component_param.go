@@ -4132,9 +4132,7 @@ type dataNodeConfig struct {
 	FlushDeleteBufferBytes ParamItem `refreshable:"true"`
 	BinLogMaxSize          ParamItem `refreshable:"true"`
 	SyncPeriod             ParamItem `refreshable:"true"`
-
-	// watchEvent
-	WatchEventTicklerInterval ParamItem `refreshable:"false"`
+	L0SyncPeriod           ParamItem `refreshable:"true"`
 
 	// io concurrency to add segment
 	IOConcurrency ParamItem `refreshable:"false"`
@@ -4347,12 +4345,14 @@ Setting this parameter too small causes the system to store a small amount of da
 	}
 	p.SyncPeriod.Init(base.mgr)
 
-	p.WatchEventTicklerInterval = ParamItem{
-		Key:          "dataNode.segment.watchEventTicklerInterval",
-		Version:      "2.2.3",
-		DefaultValue: "15",
+	p.L0SyncPeriod = ParamItem{
+		Key:          "dataNode.segment.l0syncPeriod",
+		Version:      "2.5.0",
+		DefaultValue: "60",
+		Doc:          "The period to sync L0 segments if buffer is not empty.",
+		Export:       true,
 	}
-	p.WatchEventTicklerInterval.Init(base.mgr)
+	p.L0SyncPeriod.Init(base.mgr)
 
 	p.IOConcurrency = ParamItem{
 		Key:          "dataNode.dataSync.ioConcurrency",

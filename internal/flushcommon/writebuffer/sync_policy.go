@@ -56,14 +56,20 @@ func GetFullBufferPolicy() SyncPolicy {
 		}, "buffer full")
 }
 
-func GetSyncStaleBufferPolicy(staleDuration time.Duration) SyncPolicy {
+func GetSyncStaleBufferPolicy(L1StaleDuration, l0StaleDuration time.Duration) SyncPolicy {
 	return wrapSelectSegmentFuncPolicy(func(buffers []*segmentBuffer, ts typeutil.Timestamp) []int64 {
 		current := tsoutil.PhysicalTime(ts)
 		return lo.FilterMap(buffers, func(buf *segmentBuffer, _ int) (int64, bool) {
 			minTs := buf.MinTimestamp()
 			start := tsoutil.PhysicalTime(minTs)
-			jitter := time.Duration(rand.Float64() * 0.1 * float64(staleDuration))
-			return buf.segmentID, current.Sub(start) > staleDuration+jitter
+
+			// Sync L0 Segment per 1 minute
+			if !buf.deltaBuffer.IsEmpty() {
+				return buf.segmentID, current.Sub(start) > l0StaleDuration
+			}
+
+			jitter := time.Duration(rand.Float64() * 0.1 * float64(L1StaleDuration))
+			return buf.segmentID, current.Sub(start) > L1StaleDuration+jitter
 		})
 	}, "buffer stale")
 }

@@ -27,7 +27,9 @@ func defaultWBOption(metacache metacache.MetaCache) *writeBufferOption {
 	return &writeBufferOption{
 		syncPolicies: []SyncPolicy{
 			GetFullBufferPolicy(),
-			GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
+			GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second),
+				paramtable.Get().DataNodeCfg.L0SyncPeriod.GetAsDuration(time.Second),
+			),
 			GetSealedSegmentsPolicy(metacache),
 			GetDroppedSegmentPolicy(metacache),
 		},
