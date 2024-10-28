@@ -41,10 +41,12 @@ import (
 	"unsafe"
 
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
@@ -67,6 +69,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -134,16 +137,19 @@ type QueryNode struct {
 	// record the last modify ts of segment/channel distribution
 	lastModifyLock lock.RWMutex
 	lastModifyTs   int64
+
+	metricsRequest *metricsinfo.MetricsRequest
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
 func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	ctx, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
-		ctx:      ctx,
-		cancel:   cancel,
-		factory:  factory,
-		lifetime: lifetime.NewLifetime(commonpb.StateCode_Abnormal),
+		ctx:            ctx,
+		cancel:         cancel,
+		factory:        factory,
+		lifetime:       lifetime.NewLifetime(commonpb.StateCode_Abnormal),
+		metricsRequest: metricsinfo.NewMetricsRequest(),
 	}
 
 	node.tSafeManager = tsafe.NewTSafeReplica()
@@ -272,10 +278,19 @@ func (node *QueryNode) CloseSegcore() {
 	initcore.CleanGlogManager()
 }
 
+func (node *QueryNode) registerMetricsRequest() {
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SystemInfoMetrics,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return getSystemInfoMetrics(ctx, req, node)
+		})
+	log.Info("register metrics actions finished")
+}
+
 // Init function init historical and streaming module to manage segments
 func (node *QueryNode) Init() error {
 	var initError error
 	node.initOnce.Do(func() {
+		node.registerMetricsRequest()
 		// ctx := context.Background()
 		log.Info("QueryNode session info", zap.String("metaPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
 		err := node.initSession()

@@ -199,3 +199,116 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 	assert.False(t, info.HasError)
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
 }
+
+func TestGetSyncTaskMetrics(t *testing.T) {
+	svr := Server{}
+	t.Run("ReturnsCorrectJSON", func(t *testing.T) {
+		req := &milvuspb.GetMetricsRequest{}
+		ctx := context.Background()
+
+		task := `[{"segment_id": 1, "batch_rows": 100, "segment_level": "L0", "ts_from": 1000, "ts_to": 2000,"delta_row_count": 10, "flush_size": 1024, "running_time": 2000000000}]`
+		mockResp := &milvuspb.GetMetricsResponse{
+			Status:   merr.Success(),
+			Response: task,
+		}
+
+		mockClient := &mockMetricDataNodeClient{
+			mock: func() (*milvuspb.GetMetricsResponse, error) {
+				return mockResp, nil
+			},
+		}
+
+		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+			return mockClient, nil
+		}
+
+		mockCluster := NewMockCluster(t)
+		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
+		svr.cluster = mockCluster
+
+		actualJSON, err := svr.GetSyncTaskMetrics(ctx, req)
+		assert.NoError(t, err)
+		expectedJSON := `{"datanode1":[{"segment_id":1,"batch_rows":100,"segment_level":"L0","ts_from":1000,"ts_to":2000,"delta_row_count":10,"flush_size":1024,"running_time":2000000000}]}`
+		assert.Equal(t, expectedJSON, actualJSON)
+	})
+
+	t.Run("ReturnsErrorOnRequestFailure", func(t *testing.T) {
+		req := &milvuspb.GetMetricsRequest{}
+		ctx := context.Background()
+
+		mockClient := &mockMetricDataNodeClient{
+			mock: func() (*milvuspb.GetMetricsResponse, error) {
+				return nil, errors.New("request failed")
+			},
+		}
+
+		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+			return mockClient, nil
+		}
+
+		mockCluster := NewMockCluster(t)
+		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
+		svr.cluster = mockCluster
+
+		actualJSON, err := svr.GetSyncTaskMetrics(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, "", actualJSON)
+	})
+
+	t.Run("ReturnsErrorOnUnmarshalFailure", func(t *testing.T) {
+		req := &milvuspb.GetMetricsRequest{}
+		ctx := context.Background()
+
+		mockResp := &milvuspb.GetMetricsResponse{
+			Status:   merr.Success(),
+			Response: `invalid json`,
+		}
+
+		mockClient := &mockMetricDataNodeClient{
+			mock: func() (*milvuspb.GetMetricsResponse, error) {
+				return mockResp, nil
+			},
+		}
+
+		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+			return mockClient, nil
+		}
+
+		mockCluster := NewMockCluster(t)
+		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
+		svr.cluster = mockCluster
+
+		actualJSON, err := svr.GetSyncTaskMetrics(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, "", actualJSON)
+	})
+
+	t.Run("ReturnsEmptyJSONWhenNoTasks", func(t *testing.T) {
+		req := &milvuspb.GetMetricsRequest{}
+		ctx := context.Background()
+
+		mockResp := &milvuspb.GetMetricsResponse{
+			Status:   merr.Success(),
+			Response: "",
+		}
+
+		mockClient := &mockMetricDataNodeClient{
+			mock: func() (*milvuspb.GetMetricsResponse, error) {
+				return mockResp, nil
+			},
+		}
+
+		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+			return mockClient, nil
+		}
+
+		mockCluster := NewMockCluster(t)
+		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
+		svr.cluster = mockCluster
+
+		expectedJSON := ""
+		actualJSON, err := svr.GetSyncTaskMetrics(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, expectedJSON, actualJSON)
+	})
+}

@@ -128,6 +128,8 @@ type Core struct {
 
 	enableActiveStandBy bool
 	activateFunc        func() error
+
+	metricsRequest *metricsinfo.MetricsRequest
 }
 
 // --------------------- function --------------------------
@@ -141,6 +143,7 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 		cancel:              cancel,
 		factory:             factory,
 		enableActiveStandBy: Params.RootCoordCfg.EnableActiveStandby.GetAsBool(),
+		metricsRequest:      metricsinfo.NewMetricsRequest(),
 	}
 
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -486,9 +489,18 @@ func (c *Core) initInternal() error {
 	return nil
 }
 
+func (c *Core) registerMetricsRequest() {
+	c.metricsRequest.RegisterMetricsRequest(metricsinfo.SystemInfoMetrics,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return c.getSystemInfoMetrics(ctx, req)
+		})
+	log.Info("register metrics actions finished")
+}
+
 // Init initialize routine
 func (c *Core) Init() error {
 	var initError error
+	c.registerMetricsRequest()
 	c.factory.Init(Params)
 	if err := c.initSession(); err != nil {
 		return err
@@ -1705,45 +1717,19 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 		}, nil
 	}
 
-	ret := gjson.Parse(in.GetRequest())
-	metricType, err := metricsinfo.ParseMetricRequestType(ret)
+	resp := &milvuspb.GetMetricsResponse{
+		Status:        merr.Success(),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, paramtable.GetNodeID()),
+	}
+
+	ret, err := c.metricsRequest.ExecuteMetricsRequest(ctx, in)
 	if err != nil {
-		log.Warn("ParseMetricType failed", zap.String("role", typeutil.RootCoordRole),
-			zap.Int64("nodeID", c.session.ServerID), zap.String("req", in.Request), zap.Error(err))
-		return &milvuspb.GetMetricsResponse{
-			Status:   merr.Status(err),
-			Response: "",
-		}, nil
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 
-	if metricType == metricsinfo.SystemInfoMetrics {
-		metrics, err := c.metricsCacheManager.GetSystemInfoMetrics()
-		if err != nil {
-			metrics, err = c.getSystemInfoMetrics(ctx, in)
-		}
-
-		if err != nil {
-			log.Warn("GetSystemInfoMetrics failed",
-				zap.String("role", typeutil.RootCoordRole),
-				zap.String("metricType", metricType),
-				zap.Error(err))
-			return &milvuspb.GetMetricsResponse{
-				Status:   merr.Status(err),
-				Response: "",
-			}, nil
-		}
-
-		c.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
-		return metrics, err
-	}
-
-	log.RatedWarn(60, "GetMetrics failed, metric type not implemented", zap.String("role", typeutil.RootCoordRole),
-		zap.String("metricType", metricType))
-
-	return &milvuspb.GetMetricsResponse{
-		Status:   merr.Status(merr.WrapErrMetricNotFound(metricType)),
-		Response: "",
-	}, nil
+	resp.Response = ret
+	return resp, nil
 }
 
 // CreateAlias create collection alias

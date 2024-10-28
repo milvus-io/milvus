@@ -50,7 +50,7 @@ func (s *L0CompactionTaskSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
 	s.mockSessMgr = session.NewMockDataNodeManager(s.T())
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
-	//s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+	// s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
 }
 
 func (s *L0CompactionTaskSuite) SetupSubTest() {

@@ -29,12 +29,14 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -162,6 +164,8 @@ type Server struct {
 
 	// streamingcoord server is embedding in datacoord now.
 	streamingCoord *streamingcoord.Server
+
+	metricsRequest *metricsinfo.MetricsRequest
 }
 
 type CollectionNameInfo struct {
@@ -214,6 +218,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
 		metricsCacheManager:    metricsinfo.NewMetricsCacheManager(),
 		enableActiveStandBy:    Params.DataCoordCfg.EnableActiveStandby.GetAsBool(),
+		metricsRequest:         metricsinfo.NewMetricsRequest(),
 	}
 
 	for _, opt := range opts {
@@ -296,6 +301,7 @@ func (s *Server) initSession() error {
 // Init change server state to Initializing
 func (s *Server) Init() error {
 	var err error
+	s.registerMetricsRequest()
 	s.factory.Init(Params)
 	if err = s.initSession(); err != nil {
 		return err
@@ -1125,20 +1131,33 @@ func (s *Server) stopServerLoop() {
 	s.serverLoopWg.Wait()
 }
 
-// func (s *Server) validateAllocRequest(collID UniqueID, partID UniqueID, channelName string) error {
-//	if !s.meta.HasCollection(collID) {
-//		return fmt.Errorf("can not find collection %d", collID)
-//	}
-//	if !s.meta.HasPartition(collID, partID) {
-//		return fmt.Errorf("can not find partition %d", partID)
-//	}
-//	for _, name := range s.insertChannels {
-//		if name == channelName {
-//			return nil
-//		}
-//	}
-//	return fmt.Errorf("can not find channel %s", channelName)
-// }
+func (s *Server) registerMetricsRequest() {
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SystemInfoMetrics,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.getSystemInfoMetrics(ctx, req)
+		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ImportTasks,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.importMeta.TaskStatsJSON(), nil
+		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.CompactionTasks,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.meta.compactionTaskMeta.TaskStatsJSON(), nil
+		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.BuildIndexTasks,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.meta.indexMeta.TaskStatsJSON(), nil
+		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTasks,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.GetSyncTaskMetrics(ctx, req)
+		})
+	log.Info("register metrics actions finished")
+}
 
 // loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
 // collection information will be added to server meta info.

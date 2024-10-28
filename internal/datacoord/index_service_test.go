@@ -2341,8 +2341,8 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 	m := &meta{
 		segments: NewSegmentsInfo(),
 		indexMeta: &indexMeta{
-			buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
-			segmentIndexes:       map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			segmentIndexes:   map[UniqueID]map[UniqueID]*model.SegmentIndex{},
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
 					indexID: {
