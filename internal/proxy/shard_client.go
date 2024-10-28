@@ -38,16 +38,18 @@ type shardClient struct {
 	poolSize int
 	pooling  bool
 
-	creator queryNodeCreatorFunc
+	initialized atomic.Bool
+	creator     queryNodeCreatorFunc
 }
 
 func (n *shardClient) getClient(ctx context.Context) (types.QueryNodeClient, error) {
-	if len(n.clients) == 0 {
+	if !n.initialized.Load() {
 		n.Lock()
-		if len(n.clients) == 0 {
+		if !n.initialized.Load() {
 			if err := n.initClients(); err != nil {
 				return nil, err
 			}
+			n.initialized.Store(true)
 		}
 		n.Unlock()
 	}
