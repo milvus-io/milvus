@@ -4426,6 +4426,7 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
                             check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
 
 
+@pytest.mark.xfail("unstable case, issue: https://github.com/milvus-io/milvus/issues/36962")
 class TestQueryTextMatch(TestcaseBase):
     """
     ******************************************************************

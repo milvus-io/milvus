@@ -13274,7 +13274,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          "limit": default_limit,
                                          "output_fields": output_fields})
 
-
+@pytest.mark.xfail("unstable case, issue: https://github.com/milvus-io/milvus/issues/36962")
 class TestSearchWithTextMatchFilter(TestcaseBase):
     """
     ******************************************************************
