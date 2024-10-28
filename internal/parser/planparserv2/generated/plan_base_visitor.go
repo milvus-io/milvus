@@ -47,6 +47,10 @@ func (v *BasePlanVisitor) VisitLogicalAnd(ctx *LogicalAndContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitTemplateVariable(ctx *TemplateVariableContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitEquality(ctx *EqualityContext) interface{} {
 	return v.VisitChildren(ctx)
 }
