@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/models"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -149,9 +150,9 @@ func (runner *OpenAIEmbeddingFunction) MaxBatch() int {
 	return 5 * maxBatch
 }
 
-func (runner *OpenAIEmbeddingFunction) callEmbedding(texts []string) ([][]float32, error) {
+func (runner *OpenAIEmbeddingFunction) callEmbedding(texts []string, batchLimit bool) ([][]float32, error) {
 	numRows := len(texts)
-	if numRows > runner.MaxBatch() {
+	if batchLimit && numRows > runner.MaxBatch() {
 		return nil, fmt.Errorf("OpenAI embedding supports up to [%d] pieces of data at a time, got [%d]", runner.MaxBatch(), numRows)
 	}
 
@@ -193,7 +194,7 @@ func (runner *OpenAIEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldDat
 		return nil, fmt.Errorf("Input texts is empty")
 	}
 
-	embds, err := runner.callEmbedding(texts)
+	embds, err := runner.callEmbedding(texts, true)
 	if err != nil {
 		return nil, err
 	}
@@ -222,9 +223,41 @@ func (runner *OpenAIEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldDat
 
 func (runner *OpenAIEmbeddingFunction) ProcessSearch(placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error) {
 	texts := funcutil.GetVarCharFromPlaceholder(placeholderGroup.Placeholders[0]) // Already checked externally
-	embds, err := runner.callEmbedding(texts)
+	embds, err := runner.callEmbedding(texts, true)
 	if err != nil {
 		return nil, err
 	}
 	return funcutil.Float32VectorsToPlaceholderGroup(embds), nil
+}
+
+func (runner *OpenAIEmbeddingFunction) ProcessBulkInsert(inputs []storage.FieldData) (map[storage.FieldID]storage.FieldData, error) {
+	if len(inputs) != 1 {
+		return nil, fmt.Errorf("OpenAIEmbedding function only receives one input, bug got [%d]", len(inputs))
+	}
+
+	if inputs[0].GetDataType() != schemapb.DataType_VarChar {
+		return nil, fmt.Errorf("OpenAIEmbedding only supports varchar field, the input is not varchar")
+	}
+
+	texts, ok := inputs[0].GetDataRows().([]string)
+	if !ok {
+		return nil, fmt.Errorf("Input texts is empty")
+	}
+
+	embds, err := runner.callEmbedding(texts, false)
+	if err != nil {
+		return nil, err
+	}
+	data := make([]float32, 0, len(texts)*int(runner.fieldDim))
+	for _, emb := range embds {
+		data = append(data, emb...)
+	}
+
+	field := &storage.FloatVectorFieldData{
+		Data: data,
+		Dim:  int(runner.fieldDim),
+	}
+	return map[storage.FieldID]storage.FieldData{
+		runner.outputFields[0].FieldID: field,
+	}, nil
 }

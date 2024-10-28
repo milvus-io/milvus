@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -38,6 +39,7 @@ type Runner interface {
 	MaxBatch() int
 	ProcessInsert(inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error)
 	ProcessSearch(placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error)
+	ProcessBulkInsert(inputs []storage.FieldData) (map[storage.FieldID]storage.FieldData, error)
 }
 
 type FunctionExecutor struct {
@@ -209,4 +211,35 @@ func (executor *FunctionExecutor) ProcessSearch(req *internalpb.SearchRequest) e
 	} else {
 		return executor.prcessAdvanceSearch(req)
 	}
+}
+
+func (executor *FunctionExecutor) processSingleBulkInsert(runner Runner, data *storage.InsertData) (map[storage.FieldID]storage.FieldData, error) {
+	inputs := make([]storage.FieldData, 0, len(runner.GetSchema().InputFieldIds))
+	for idx, id := range runner.GetSchema().InputFieldIds {
+		field, exist := data.Data[id]
+		if !exist {
+			return nil, fmt.Errorf("Can not find input field: [%s]", runner.GetSchema().GetInputFieldNames()[idx])
+		}
+		inputs = append(inputs, field)
+	}
+
+	outputs, err := runner.ProcessBulkInsert(inputs)
+	if err != nil {
+		return nil, err
+	}
+	return outputs, nil
+}
+
+func (executor *FunctionExecutor) ProcessBulkInsert(data *storage.InsertData) error {
+	// Since concurrency has already been used in the outer layer, only a serial logic access model is used here.
+	for _, runner := range executor.runners {
+		output, err := executor.processSingleBulkInsert(runner, data)
+		if err != nil {
+			return nil
+		}
+		for k, v := range output {
+			data.Data[k] = v
+		}
+	}
+	return nil
 }

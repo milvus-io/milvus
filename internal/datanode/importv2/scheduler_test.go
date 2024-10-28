@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -411,6 +412,104 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 		PartitionIDs: []int64{13},
 		Vchannels:    []string{"v0"},
 		Schema:       s.schema,
+		Files: []*internalpb.ImportFile{
+			{
+				Paths: []string{"dummy.json"},
+			},
+		},
+		Ts: 1000,
+		IDRange: &datapb.IDRange{
+			Begin: 0,
+			End:   int64(s.numRows),
+		},
+		RequestSegments: []*datapb.ImportRequestSegment{
+			{
+				SegmentID:   14,
+				PartitionID: 13,
+				Vchannel:    "v0",
+			},
+		},
+	}
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
+	s.manager.Add(importTask)
+	err = importTask.(*ImportTask).importFile(s.reader)
+	s.NoError(err)
+}
+
+func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) *conc.Future[struct{}] {
+		future := conc.Go(func() (struct{}, error) {
+			return struct{}{}, nil
+		})
+		return future
+	})
+	ts := function.CreateEmbeddingServer()
+	defer ts.Close()
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "128"},
+				},
+			},
+			{
+				FieldID:  101,
+				Name:     "vec",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "4",
+					},
+				},
+			},
+			{
+				FieldID:  102,
+				Name:     "int64",
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:           "test",
+				Type:           schemapb.FunctionType_OpenAIEmbedding,
+				InputFieldIds:  []int64{100},
+				OutputFieldIds: []int64{101},
+				Params: []*commonpb.KeyValuePair{
+					{Key: function.ModelNameParamKey, Value: "text-embedding-ada-002"},
+					{Key: function.OpenaiApiKeyParamKey, Value: "mock"},
+					{Key: function.OpenaiEmbeddingUrlParamKey, Value: ts.URL},
+					{Key: function.DimParamKey, Value: "4"},
+				},
+			},
+		},
+	}
+
+	var once sync.Once
+	data, err := testutil.CreateInsertData(schema, s.numRows)
+	s.NoError(err)
+	s.reader = importutilv2.NewMockReader(s.T())
+	s.reader.EXPECT().Read().RunAndReturn(func() (*storage.InsertData, error) {
+		var res *storage.InsertData
+		once.Do(func() {
+			res = data
+		})
+		if res != nil {
+			return res, nil
+		}
+		return nil, io.EOF
+	})
+	importReq := &datapb.ImportRequest{
+		JobID:        10,
+		TaskID:       11,
+		CollectionID: 12,
+		PartitionIDs: []int64{13},
+		Vchannels:    []string{"v0"},
+		Schema:       schema,
 		Files: []*internalpb.ImportFile{
 			{
 				Paths: []string{"dummy.json"},
