@@ -242,7 +242,8 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
-			if mixChannelExcludes.Contain(t.GetTaskProto().GetChannel()) {
+			if mixChannelExcludes.Contain(t.GetTaskProto().GetChannel()) ||
+				clusterChannelExcludes.Contain(t.GetTaskProto().GetChannel()) {
 				excluded = append(excluded, t)
 				continue
 			}
