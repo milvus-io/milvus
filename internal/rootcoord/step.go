@@ -110,17 +110,17 @@ func (s *deleteDatabaseMetaStep) Desc() string {
 
 type removeDmlChannelsStep struct {
 	baseStep
-	pChannels []string
+	collInfo *model.Collection
 }
 
 func (s *removeDmlChannelsStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	s.core.chanTimeTick.removeDmlChannels(s.pChannels...)
+	removeChannels(ctx, s.core, s.collInfo)
 	return nil, nil
 }
 
 func (s *removeDmlChannelsStep) Desc() string {
 	// this shouldn't be called.
-	return fmt.Sprintf("remove dml channels: %v", s.pChannels)
+	return fmt.Sprintf("remove dml channels: %v", s.collInfo.VirtualChannelNames)
 }
 
 func (s *removeDmlChannelsStep) Weight() stepPriority {
