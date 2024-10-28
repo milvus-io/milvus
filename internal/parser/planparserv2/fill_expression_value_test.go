@@ -1,14 +1,12 @@
 package planparserv2
 
 import (
-	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type FillExpressionValueSuite struct {
@@ -24,10 +22,17 @@ type testcase struct {
 	values map[string]*schemapb.TemplateValue
 }
 
-func (s *FillExpressionValueSuite) jsonMarshal(v interface{}) []byte {
-	r, err := json.Marshal(v)
-	s.NoError(err)
-	return r
+func (s *FillExpressionValueSuite) assertValidExpr(helper *typeutil.SchemaHelper, exprStr string, templateValues map[string]*schemapb.TemplateValue) {
+	expr, err := ParseExpr(helper, exprStr, templateValues)
+	s.NoError(err, exprStr)
+	s.NotNil(expr, exprStr)
+	ShowExpr(expr)
+}
+
+func (s *FillExpressionValueSuite) assertInvalidExpr(helper *typeutil.SchemaHelper, exprStr string, templateValues map[string]*schemapb.TemplateValue) {
+	expr, err := ParseExpr(helper, exprStr, templateValues)
+	s.Error(err, exprStr)
+	s.Nil(expr, exprStr)
 }
 
 func (s *FillExpressionValueSuite) TestTermExpr() {
@@ -88,17 +93,8 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
-
 		for _, c := range testcases {
-			plan, err := CreateSearchPlan(schemaH, c.expr, "FloatVectorField", &planpb.QueryInfo{
-				Topk:         0,
-				MetricType:   "",
-				SearchParams: "",
-				RoundDecimal: 0,
-			}, c.values)
-
-			s.NoError(err)
-			s.NotNil(plan)
+			s.assertValidExpr(schemaH, c.expr, c.values)
 		}
 	})
 
@@ -130,17 +126,8 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
-
 		for _, c := range testcases {
-			plan, err := CreateSearchPlan(schemaH, c.expr, "FloatVectorField", &planpb.QueryInfo{
-				Topk:         0,
-				MetricType:   "",
-				SearchParams: "",
-				RoundDecimal: 0,
-			}, c.values)
-			s.Error(err)
-			s.Nil(plan)
-			fmt.Println(plan)
+			s.assertInvalidExpr(schemaH, c.expr, c.values)
 		}
 	})
 }
@@ -172,19 +159,8 @@ func (s *FillExpressionValueSuite) TestUnaryRange() {
 			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
-
 		for _, c := range testcases {
-			plan, err := CreateSearchPlan(schemaH, c.expr, "FloatVectorField", &planpb.QueryInfo{
-				Topk:         0,
-				MetricType:   "",
-				SearchParams: "",
-				RoundDecimal: 0,
-			}, c.values)
-
-			s.NoError(err)
-			s.NotNil(plan)
-			s.NotNil(plan.GetVectorAnns())
-			s.NotNil(plan.GetVectorAnns().GetPredicates())
+			s.assertValidExpr(schemaH, c.expr, c.values)
 		}
 	})
 
@@ -214,17 +190,8 @@ func (s *FillExpressionValueSuite) TestUnaryRange() {
 			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
-
 		for _, c := range testcases {
-			plan, err := CreateSearchPlan(schemaH, c.expr, "FloatVectorField", &planpb.QueryInfo{
-				Topk:         0,
-				MetricType:   "",
-				SearchParams: "",
-				RoundDecimal: 0,
-			}, c.values)
-
-			s.Error(err)
-			s.Nil(plan)
+			s.assertInvalidExpr(schemaH, c.expr, c.values)
 		}
 	})
 }
@@ -264,19 +231,8 @@ func (s *FillExpressionValueSuite) TestBinaryRange() {
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
-
 		for _, c := range testcases {
-			plan, err := CreateSearchPlan(schemaH, c.expr, "FloatVectorField", &planpb.QueryInfo{
-				Topk:         0,
-				MetricType:   "",
-				SearchParams: "",
-				RoundDecimal: 0,
-			}, c.values)
-
-			s.NoError(err)
-			s.NotNil(plan)
-			s.NotNil(plan.GetVectorAnns())
-			s.NotNil(plan.GetVectorAnns().GetPredicates())
+			s.assertValidExpr(schemaH, c.expr, c.values)
 		}
 	})
 
@@ -311,17 +267,8 @@ func (s *FillExpressionValueSuite) TestBinaryRange() {
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
-
 		for _, c := range testcases {
-			plan, err := CreateSearchPlan(schemaH, c.expr, "FloatVectorField", &planpb.QueryInfo{
-				Topk:         0,
-				MetricType:   "",
-				SearchParams: "",
-				RoundDecimal: 0,
-			}, c.values)
-
-			s.Error(err)
-			s.Nil(plan)
+			s.assertInvalidExpr(schemaH, c.expr, c.values)
 		}
 	})
 }
@@ -343,22 +290,17 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 			{`ArrayField[0] % {offset} < 11`, map[string]*schemapb.TemplateValue{
 				"offset": generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
 			}},
+			{`array_length(ArrayField) == {length}`, map[string]*schemapb.TemplateValue{
+				"length": generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
+			}},
+			{`array_length(ArrayField) > {length}`, map[string]*schemapb.TemplateValue{
+				"length": generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
+			}},
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
-
 		for _, c := range testcases {
-			plan, err := CreateSearchPlan(schemaH, c.expr, "FloatVectorField", &planpb.QueryInfo{
-				Topk:         0,
-				MetricType:   "",
-				SearchParams: "",
-				RoundDecimal: 0,
-			}, c.values)
-
-			s.NoError(err)
-			s.NotNil(plan)
-			s.NotNil(plan.GetVectorAnns())
-			s.NotNil(plan.GetVectorAnns().GetPredicates())
+			s.assertValidExpr(schemaH, c.expr, c.values)
 		}
 	})
 
@@ -401,20 +343,14 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 				}),
 				"target": generateExpressionFieldData(schemapb.DataType_Int64, int64(5)),
 			}},
+			{`array_length(ArrayField) == {length}`, map[string]*schemapb.TemplateValue{
+				"length": generateExpressionFieldData(schemapb.DataType_String, "abc"),
+			}},
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
-
 		for _, c := range testcases {
-			plan, err := CreateSearchPlan(schemaH, c.expr, "FloatVectorField", &planpb.QueryInfo{
-				Topk:         0,
-				MetricType:   "",
-				SearchParams: "",
-				RoundDecimal: 0,
-			}, c.values)
-
-			s.Error(err)
-			s.Nil(plan)
+			s.assertInvalidExpr(schemaH, c.expr, c.values)
 		}
 	})
 }
@@ -494,17 +430,7 @@ func (s *FillExpressionValueSuite) TestJSONContainsExpression() {
 		schemaH := newTestSchemaHelper(s.T())
 
 		for _, c := range testcases {
-			plan, err := CreateSearchPlan(schemaH, c.expr, "FloatVectorField", &planpb.QueryInfo{
-				Topk:         0,
-				MetricType:   "",
-				SearchParams: "",
-				RoundDecimal: 0,
-			}, c.values)
-
-			s.NoError(err)
-			s.NotNil(plan)
-			s.NotNil(plan.GetVectorAnns())
-			s.NotNil(plan.GetVectorAnns().GetPredicates())
+			s.assertValidExpr(schemaH, c.expr, c.values)
 		}
 	})
 
@@ -554,15 +480,56 @@ func (s *FillExpressionValueSuite) TestJSONContainsExpression() {
 		schemaH := newTestSchemaHelper(s.T())
 
 		for _, c := range testcases {
-			plan, err := CreateSearchPlan(schemaH, c.expr, "FloatVectorField", &planpb.QueryInfo{
-				Topk:         0,
-				MetricType:   "",
-				SearchParams: "",
-				RoundDecimal: 0,
-			}, c.values)
+			s.assertInvalidExpr(schemaH, c.expr, c.values)
+		}
+	})
+}
 
-			s.Error(err)
-			s.Nil(plan)
+func (s *FillExpressionValueSuite) TestBinaryExpression() {
+	s.Run("normal case", func() {
+		testcases := []testcase{
+			{`Int64Field > {int} && StringField in {list}`, map[string]*schemapb.TemplateValue{
+				"int": generateExpressionFieldData(schemapb.DataType_Int64, int64(10)),
+				"list": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
+					generateExpressionFieldData(schemapb.DataType_VarChar, "abc"),
+					generateExpressionFieldData(schemapb.DataType_VarChar, "def"),
+					generateExpressionFieldData(schemapb.DataType_VarChar, "ghi"),
+				}),
+			}},
+			{`{max} > FloatField >= {min} or BoolField == {bool}`, map[string]*schemapb.TemplateValue{
+				"min":  generateExpressionFieldData(schemapb.DataType_Int64, int64(10)),
+				"max":  generateExpressionFieldData(schemapb.DataType_Float, 22.22),
+				"bool": generateExpressionFieldData(schemapb.DataType_Bool, true),
+			}},
+		}
+
+		schemaH := newTestSchemaHelper(s.T())
+
+		for _, c := range testcases {
+			s.assertValidExpr(schemaH, c.expr, c.values)
+		}
+	})
+
+	s.Run("failed case", func() {
+		testcases := []testcase{
+			{`Int64Field > {int} && StringField in {list}`, map[string]*schemapb.TemplateValue{
+				"int": generateExpressionFieldData(schemapb.DataType_String, "abc"),
+				"list": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
+					generateExpressionFieldData(schemapb.DataType_VarChar, "abc"),
+					generateExpressionFieldData(schemapb.DataType_Int64, int64(10)),
+					generateExpressionFieldData(schemapb.DataType_VarChar, "ghi"),
+				}),
+			}},
+			{`{max} > FloatField >= {min} or BoolField == {bool}`, map[string]*schemapb.TemplateValue{
+				"min":  generateExpressionFieldData(schemapb.DataType_Int64, int64(10)),
+				"bool": generateExpressionFieldData(schemapb.DataType_Bool, true),
+			}},
+		}
+
+		schemaH := newTestSchemaHelper(s.T())
+
+		for _, c := range testcases {
+			s.assertInvalidExpr(schemaH, c.expr, c.values)
 		}
 	})
 }

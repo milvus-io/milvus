@@ -269,6 +269,7 @@ func combineArrayLengthExpr(op planpb.OpType, arithOp planpb.ArithOpType, column
 				ValueTemplateVariableName: valueExpr.GetTemplateVariableName(),
 			},
 		},
+		IsTemplate: isTemplateExpr(valueExpr),
 	}, nil
 }
 
