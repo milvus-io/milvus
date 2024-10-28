@@ -428,6 +428,16 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	log.Debug("worker loads segments...")
 
 	sLoad := func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+		info := req.GetInfos()[0]
+		// put meta l0, instead of load actual delta data
+		if info.GetLevel() == datapb.SegmentLevel_L0 && sd.l0ForwardPolicy == L0ForwardPolicyRemoteLoad {
+			l0Seg, err := segments.NewL0Segment(sd.collection, segments.SegmentTypeSealed, req.GetVersion(), info)
+			if err != nil {
+				return err
+			}
+			sd.segmentManager.Put(ctx, segments.SegmentTypeSealed, l0Seg)
+			return nil
+		}
 		segmentID := req.GetInfos()[0].GetSegmentID()
 		nodeID := req.GetDstNodeID()
 		_, err, _ := sd.sf.Do(fmt.Sprintf("%d-%d", nodeID, segmentID), func() (struct{}, error) {
@@ -441,15 +451,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	if len(req.GetInfos()) > 1 {
 		var reqs []*querypb.LoadSegmentsRequest
 		for _, info := range req.GetInfos() {
-			// put meta l0, instead of load actual delta data
-			if info.GetLevel() == datapb.SegmentLevel_L0 && sd.l0ForwardPolicy == L0ForwardPolicyRemoteLoad {
-				l0Seg, err := segments.NewL0Segment(sd.collection, segments.SegmentTypeSealed, req.GetVersion(), info)
-				if err != nil {
-					return err
-				}
-				sd.segmentManager.Put(ctx, segments.SegmentTypeSealed, l0Seg)
-				continue
-			}
 			newReq := typeutil.Clone(req)
 			newReq.Infos = []*querypb.SegmentLoadInfo{info}
 			reqs = append(reqs, newReq)
@@ -1013,12 +1014,12 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
-		return 0, merr.WrapErrParameterInvalidMsg("please provide varchar for bm25")
+		return 0, merr.WrapErrParameterInvalidMsg("please provide varchar for BM25 Function based search")
 	}
 
 	holder := pb.Placeholders[0]
 	if holder.Type != commonpb.PlaceholderType_VarChar {
-		return 0, fmt.Errorf("can't build BM25 IDF for data not varchar")
+		return 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar for BM25 Function based search, got %s", holder.Type.String()))
 	}
 
 	str := funcutil.GetVarCharFromPlaceholder(holder)

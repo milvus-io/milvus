@@ -124,6 +124,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.factory = dependency.NewMockFactory(suite.T())
 	suite.msgStream = msgstream.NewMockMsgStream(suite.T())
 	// TODO:: cpp chunk manager not support local chunk manager
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, suite.T().TempDir())
 	// suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus-test"))
 	suite.chunkManagerFactory = storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.factory.EXPECT().Init(mock.Anything).Return()
@@ -168,9 +169,10 @@ func (suite *ServiceSuite) TearDownTest() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-	suite.node.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
+	suite.node.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
 	suite.node.Stop()
 	suite.etcdClient.Close()
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
 }
 
 func (suite *ServiceSuite) TestGetComponentStatesNormal() {
@@ -1748,30 +1750,22 @@ func (suite *ServiceSuite) TestShowConfigurations_Failed() {
 
 func (suite *ServiceSuite) TestGetMetric_Normal() {
 	ctx := context.Background()
-	metricReq := make(map[string]string)
-	metricReq[metricsinfo.MetricTypeKey] = metricsinfo.SystemInfoMetrics
-	mReq, err := json.Marshal(metricReq)
+	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	suite.NoError(err)
-
-	req := &milvuspb.GetMetricsRequest{
-		Base: &commonpb.MsgBase{
-			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
-		},
-		Request: string(mReq),
-	}
 
 	sd1 := delegator.NewMockShardDelegator(suite.T())
 	sd1.EXPECT().Collection().Return(100)
 	sd1.EXPECT().GetDeleteBufferSize().Return(10, 1000)
 	sd1.EXPECT().Close().Maybe()
 	suite.node.delegators.Insert("qn_unitest_dml_0_100v0", sd1)
+	defer suite.node.delegators.GetAndRemove("qn_unitest_dml_0_100v0")
 
 	sd2 := delegator.NewMockShardDelegator(suite.T())
 	sd2.EXPECT().Collection().Return(100)
 	sd2.EXPECT().GetDeleteBufferSize().Return(10, 1000)
 	sd2.EXPECT().Close().Maybe()
 	suite.node.delegators.Insert("qn_unitest_dml_1_100v1", sd2)
+	defer suite.node.delegators.GetAndRemove("qn_unitest_dml_1_100v1")
 
 	resp, err := suite.node.GetMetrics(ctx, req)
 	err = merr.CheckRPCCall(resp, err)
@@ -1808,7 +1802,7 @@ func (suite *ServiceSuite) TestGetMetric_Failed() {
 	resp, err := suite.node.GetMetrics(ctx, req)
 	suite.NoError(err)
 	err = merr.Error(resp.GetStatus())
-	suite.ErrorIs(err, merr.ErrMetricNotFound)
+	suite.Contains(err.Error(), metricsinfo.MsgUnimplementedMetric)
 
 	// metric parse failed
 	req.Request = "---"
@@ -1929,6 +1923,7 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 			return nil
 		})
 	suite.node.delegators.Insert(testChannel, mockDelegator)
+	defer suite.node.delegators.GetAndRemove(testChannel)
 
 	status, err = suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)

@@ -1139,9 +1139,9 @@ func TestRootCoord_GetMetrics(t *testing.T) {
 		ctx := context.Background()
 		c := newTestCore(withHealthyCode(),
 			withMetricsCacheManager())
-		resp, err := c.getSystemInfoMetrics(ctx, req)
+		ret, err := c.getSystemInfoMetrics(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.NotEmpty(t, ret)
 	})
 }
 
@@ -1992,7 +1992,7 @@ func TestCore_RestoreRBAC(t *testing.T) {
 	meta := mockrootcoord.NewIMetaTable(t)
 	c := newTestCore(withHealthyCode(), withMeta(meta))
 	mockProxyClientManager := proxyutil.NewMockProxyClientManager(t)
-	mockProxyClientManager.EXPECT().RefreshPolicyInfoCache(mock.Anything, mock.Anything).Return(nil)
+	mockProxyClientManager.EXPECT().RefreshPolicyInfoCache(mock.Anything, mock.Anything).Return(nil).Maybe()
 	c.proxyClientManager = mockProxyClientManager
 
 	meta.EXPECT().RestoreRBAC(mock.Anything, mock.Anything, mock.Anything).Return(nil)

@@ -32,16 +32,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
+var contentType = "application/json"
+
 func getConfigs(configs map[string]string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		bs, err := json.Marshal(configs)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				mhttp.HTTPReturnMessage: err.Error(),
 			})
 			return
 		}
-		c.IndentedJSON(http.StatusOK, string(bs))
+		c.Data(http.StatusOK, contentType, bs)
 	}
 }
 
@@ -49,7 +51,7 @@ func getClusterInfo(node *Proxy) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				mhttp.HTTPReturnMessage: err.Error(),
 			})
 			return
@@ -61,7 +63,7 @@ func getClusterInfo(node *Proxy) gin.HandlerFunc {
 			var err1 error
 			resp, err1 = getSystemInfoMetrics(c, req, node)
 			if err1 != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 					mhttp.HTTPReturnMessage: err1.Error(),
 				})
 				return
@@ -70,13 +72,12 @@ func getClusterInfo(node *Proxy) gin.HandlerFunc {
 		}
 
 		if !merr.Ok(resp.GetStatus()) {
-			c.JSON(http.StatusInternalServerError, gin.H{
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				mhttp.HTTPReturnMessage: resp.Status.Reason,
 			})
 			return
 		}
-
-		c.IndentedJSON(http.StatusOK, resp.GetResponse())
+		c.Data(http.StatusOK, contentType, []byte(resp.GetResponse()))
 	}
 }
 
@@ -84,12 +85,12 @@ func getConnectedClients(c *gin.Context) {
 	clients := connection.GetManager().List()
 	ret, err := json.Marshal(clients)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 			mhttp.HTTPReturnMessage: err.Error(),
 		})
 		return
 	}
-	c.IndentedJSON(http.StatusOK, string(ret))
+	c.Data(http.StatusOK, contentType, ret)
 }
 
 func getDependencies(c *gin.Context) {
@@ -109,12 +110,12 @@ func getDependencies(c *gin.Context) {
 		etcdConfig.EtcdTLSMinVersion.GetValue())
 	ret, err := json.Marshal(dependencies)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 			mhttp.HTTPReturnMessage: err.Error(),
 		})
 		return
 	}
-	c.IndentedJSON(http.StatusOK, string(ret))
+	c.Data(http.StatusOK, contentType, ret)
 }
 
 // buildReqParams fetch all parameters from query parameter of URL, add them into a map data structure.
@@ -139,7 +140,7 @@ func getQueryComponentMetrics(node *Proxy, metricsType string) gin.HandlerFunc {
 		params := buildReqParams(c, metricsType)
 		req, err := metricsinfo.ConstructGetMetricsRequest(params)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				mhttp.HTTPReturnMessage: err.Error(),
 			})
 			return
@@ -147,12 +148,33 @@ func getQueryComponentMetrics(node *Proxy, metricsType string) gin.HandlerFunc {
 
 		resp, err := node.queryCoord.GetMetrics(c, req)
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+		c.Data(http.StatusOK, contentType, []byte(resp.GetResponse()))
+	}
+}
+
+func getDataComponentMetrics(node *Proxy, metricsType string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		params := buildReqParams(c, metricsType)
+		req, err := metricsinfo.ConstructGetMetricsRequest(params)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				mhttp.HTTPReturnMessage: err.Error(),
 			})
 			return
 		}
 
-		c.IndentedJSON(http.StatusOK, resp.Response)
+		resp, err := node.dataCoord.GetMetrics(c, req)
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+		c.Data(http.StatusOK, contentType, []byte(resp.GetResponse()))
 	}
 }

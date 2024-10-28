@@ -46,6 +46,8 @@ func (v *ShowExprVisitor) VisitExpr(expr *planpb.Expr) interface{} {
 		js["expr"] = v.VisitUnaryExpr(realExpr.UnaryExpr)
 	case *planpb.Expr_BinaryExpr:
 		js["expr"] = v.VisitBinaryExpr(realExpr.BinaryExpr)
+	case *planpb.Expr_CallExpr:
+		js["expr"] = v.VisitCallExpr(realExpr.CallExpr)
 	case *planpb.Expr_CompareExpr:
 		js["expr"] = v.VisitCompareExpr(realExpr.CompareExpr)
 	case *planpb.Expr_UnaryRangeExpr:
@@ -90,6 +92,18 @@ func (v *ShowExprVisitor) VisitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 	js["expr_type"] = expr.Op.String()
 	js["left_child"] = v.VisitExpr(expr.Left)
 	js["right_child"] = v.VisitExpr(expr.Right)
+	return js
+}
+
+func (v *ShowExprVisitor) VisitCallExpr(expr *planpb.CallExpr) interface{} {
+	js := make(map[string]interface{})
+	js["expr_type"] = "call"
+	js["func_name"] = expr.FunctionName
+	params := make([]interface{}, 0, len(expr.FunctionParameters))
+	for _, p := range expr.FunctionParameters {
+		params = append(params, v.VisitExpr(p))
+	}
+	js["func_parameters"] = params
 	return js
 }
 
@@ -164,6 +178,6 @@ func NewShowExprVisitor() LogicalExprVisitor {
 func ShowExpr(expr *planpb.Expr) {
 	v := NewShowExprVisitor()
 	js := v.VisitExpr(expr)
-	b, _ := json.MarshalIndent(js, "", "  ")
+	b, _ := json.Marshal(js)
 	log.Info("[ShowExpr]", zap.String("expr", string(b)))
 }

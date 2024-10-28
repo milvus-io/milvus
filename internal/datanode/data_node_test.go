@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
@@ -187,10 +186,7 @@ func TestDataNode(t *testing.T) {
 		assert.NoError(t, err)
 		resp, err := emptyNode.getSystemInfoMetrics(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		log.Info("Test DataNode.getSystemInfoMetrics",
-			zap.String("name", resp.ComponentName),
-			zap.String("response", resp.Response))
+		assert.NotEmpty(t, resp)
 	})
 
 	t.Run("Test getSystemInfoMetrics with quotaMetric error", func(t *testing.T) {
@@ -202,8 +198,8 @@ func TestDataNode(t *testing.T) {
 		assert.NoError(t, err)
 		util2.DeregisterRateCollector(metricsinfo.InsertConsumeThroughput)
 		resp, err := emptyNode.getSystemInfoMetrics(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Error(t, err)
+		assert.Empty(t, resp)
 		util2.RegisterRateCollector(metricsinfo.InsertConsumeThroughput)
 	})
 }

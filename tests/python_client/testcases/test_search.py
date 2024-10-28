@@ -13335,13 +13335,15 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
 				enable_match=True,
                 tokenizer_params=tokenizer_params,
             ),
-            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="float32_emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
         collection_w = self.init_collection_wrap(
             name=cf.gen_unique_str(prefix), schema=schema
         )
+        log.info(f"collection {collection_w.describe()}")
         fake = fake_en
         if tokenizer == "jieba":
             language = "zh"
@@ -13356,7 +13358,8 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
                 "sentence": fake.sentence().lower(),
                 "paragraph": fake.paragraph().lower(),
                 "text": fake.text().lower(),
-                "emb": [random.random() for _ in range(dim)],
+                "float32_emb": [random.random() for _ in range(dim)],
+                "sparse_emb": cf.gen_sparse_vectors(1, dim=10000)[0],
             }
             for i in range(data_size)
         ]
@@ -13371,8 +13374,12 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
             )
             collection_w.flush()
         collection_w.create_index(
-            "emb",
+            "float32_emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
+        )
+        collection_w.create_index(
+            "sparse_emb",
+            {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"},
         )
         if enable_inverted_index:
             collection_w.create_index("word", {"index_type": "INVERTED"})
@@ -13382,47 +13389,56 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
         wf_map = {}
         for field in text_fields:
             wf_map[field] = cf.analyze_documents(df[field].tolist(), language=language)
-        # query single field for one token
+        # search with filter single field for one token
         df_split = cf.split_dataframes(df, text_fields, language=language)
         log.info(f"df_split\n{df_split}")
-        for field in text_fields:
-            token = wf_map[field].most_common()[0][0]
-            expr = f"TextMatch({field}, '{token}')"
-            manual_result = df_split[
-                df_split.apply(lambda row: token in row[field], axis=1)
-            ]
-            log.info(f"expr: {expr}, manual_check_result\n: {manual_result}")
-            res_list, _ = collection_w.search(
-                data=[[random.random() for _ in range(dim)]],
-                anns_field="emb",
-                param={},
-                limit=100,
-                expr=expr, output_fields=["id", field])
-            for res in res_list:
-                assert len(res) > 0
-                log.info(f"res len {len(res)} res {res}")
-                for r in res:
-                    r = r.to_dict()
-                    assert token in r["entity"][field]
+        for ann_field in ["float32_emb", "sparse_emb"]:
+            log.info(f"ann_field {ann_field}")
+            if ann_field == "float32_emb":
+                search_data = [[random.random() for _ in range(dim)]]
+            elif ann_field == "sparse_emb":
+                search_data = cf.gen_sparse_vectors(1,dim=10000)
+            else:
+                search_data = [[random.random() for _ in range(dim)]]
+            for field in text_fields:
+                token = wf_map[field].most_common()[0][0]
+                expr = f"TextMatch({field}, '{token}')"
+                manual_result = df_split[
+                    df_split.apply(lambda row: token in row[field], axis=1)
+                ]
+                log.info(f"expr: {expr}, manual_check_result: {len(manual_result)}")
+                res_list, _ = collection_w.search(
+                    data=search_data,
+                    anns_field=ann_field,
+                    param={},
+                    limit=100,
+                    expr=expr, output_fields=["id", field])
+                for res in res_list:
+                    log.info(f"res len {len(res)} res {res}")
+                    assert len(res) > 0
+                    for r in res:
+                        r = r.to_dict()
+                        assert token in r["entity"][field]
 
-        # query single field for multi-word
-        for field in text_fields:
-            # match top 10 most common words
-            top_10_tokens = []
-            for word, count in wf_map[field].most_common(10):
-                top_10_tokens.append(word)
-            string_of_top_10_words = " ".join(top_10_tokens)
-            expr = f"TextMatch({field}, '{string_of_top_10_words}')"
-            log.info(f"expr {expr}")
-            res_list, _ = collection_w.search(
-                data=[[random.random() for _ in range(dim)]],
-                anns_field="emb",
-                param={},
-                limit=100,
-                expr=expr, output_fields=["id", field])
-            for res in res_list:
-                log.info(f"res len {len(res)} res {res}")
-                for r in res:
-                    r = r.to_dict()
-                    assert any([token in r["entity"][field] for token in top_10_tokens])
+            # search with filter single field for multi-token
+            for field in text_fields:
+                # match top 10 most common words
+                top_10_tokens = []
+                for word, count in wf_map[field].most_common(10):
+                    top_10_tokens.append(word)
+                string_of_top_10_words = " ".join(top_10_tokens)
+                expr = f"TextMatch({field}, '{string_of_top_10_words}')"
+                log.info(f"expr {expr}")
+                res_list, _ = collection_w.search(
+                    data=search_data,
+                    anns_field=ann_field,
+                    param={},
+                    limit=100,
+                    expr=expr, output_fields=["id", field])
+                for res in res_list:
+                    log.info(f"res len {len(res)} res {res}")
+                    assert len(res) > 0
+                    for r in res:
+                        r = r.to_dict()
+                        assert any([token in r["entity"][field] for token in top_10_tokens])
 

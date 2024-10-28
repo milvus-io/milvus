@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -369,10 +368,10 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 
 		node.pipelineManager.Remove(req.GetChannelName())
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
-		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
+		_, sealed := node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
 		node.tSafeManager.Remove(ctx, req.GetChannelName())
 
-		node.manager.Collection.Unref(req.GetCollectionID(), 1)
+		node.manager.Collection.Unref(req.GetCollectionID(), uint32(1+sealed))
 	}
 	log.Info("unsubscribed channel")
 
@@ -1103,48 +1102,19 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	}
 	defer node.lifetime.Done()
 
-	ret := gjson.Parse(req.GetRequest())
-	metricType, err := metricsinfo.ParseMetricRequestType(ret)
+	resp := &milvuspb.GetMetricsResponse{
+		Status:        merr.Success(),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, paramtable.GetNodeID()),
+	}
+
+	ret, err := node.metricsRequest.ExecuteMetricsRequest(ctx, req)
 	if err != nil {
-		log.Warn("QueryNode.GetMetrics failed to parse metric type",
-			zap.Int64("nodeId", node.GetNodeID()),
-			zap.String("req", req.Request),
-			zap.Error(err))
-
-		return &milvuspb.GetMetricsResponse{
-			Status: merr.Status(err),
-		}, nil
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 
-	if metricType == metricsinfo.SystemInfoMetrics {
-		queryNodeMetrics, err := getSystemInfoMetrics(ctx, req, node)
-		if err != nil {
-			log.Warn("QueryNode.GetMetrics failed",
-				zap.Int64("nodeId", node.GetNodeID()),
-				zap.String("req", req.Request),
-				zap.String("metricType", metricType),
-				zap.Error(err))
-			return &milvuspb.GetMetricsResponse{
-				Status: merr.Status(err),
-			}, nil
-		}
-		log.RatedDebug(50, "QueryNode.GetMetrics",
-			zap.Int64("nodeID", node.GetNodeID()),
-			zap.String("req", req.Request),
-			zap.String("metricType", metricType),
-			zap.Any("queryNodeMetrics", queryNodeMetrics))
-
-		return queryNodeMetrics, nil
-	}
-
-	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("nodeID", node.GetNodeID()),
-		zap.String("req", req.Request),
-		zap.String("metricType", metricType))
-
-	return &milvuspb.GetMetricsResponse{
-		Status: merr.Status(merr.WrapErrMetricNotFound(metricType)),
-	}, nil
+	resp.Response = ret
+	return resp, nil
 }
 
 func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error) {

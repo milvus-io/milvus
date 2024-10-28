@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
 
 func TestImportMeta_Restore(t *testing.T) {
@@ -231,9 +233,54 @@ func TestImportMeta_Task_Failed(t *testing.T) {
 
 	err = im.AddTask(task)
 	assert.Error(t, err)
-	im.(*importMeta).tasks[task.GetTaskID()] = task
+	im.(*importMeta).tasks.add(task)
 	err = im.UpdateTask(task.GetTaskID(), UpdateNodeID(9))
 	assert.Error(t, err)
 	err = im.RemoveTask(task.GetTaskID())
 	assert.Error(t, err)
+}
+
+func TestTaskStatsJSON(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs().Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
+	catalog.EXPECT().ListImportTasks().Return(nil, nil)
+	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
+
+	im, err := NewImportMeta(catalog)
+	assert.NoError(t, err)
+
+	statsJSON := im.TaskStatsJSON()
+	assert.Equal(t, "", statsJSON)
+
+	task1 := &importTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			TaskID: 1,
+		},
+	}
+	err = im.AddTask(task1)
+	assert.NoError(t, err)
+
+	task2 := &importTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			TaskID: 2,
+		},
+	}
+	err = im.AddTask(task2)
+	assert.NoError(t, err)
+
+	err = im.UpdateTask(1, UpdateState(datapb.ImportTaskStateV2_Completed))
+	assert.NoError(t, err)
+
+	statsJSON = im.TaskStatsJSON()
+	var tasks []*metricsinfo.ImportTask
+	err = json.Unmarshal([]byte(statsJSON), &tasks)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(tasks))
+
+	taskMeta := im.(*importMeta).tasks
+	taskMeta.remove(1)
+	assert.Nil(t, taskMeta.get(1))
+	assert.NotNil(t, taskMeta.get(2))
+	assert.Equal(t, 2, len(taskMeta.listTaskStats()))
 }

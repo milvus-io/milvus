@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type PrimaryKey interface {
@@ -348,6 +349,33 @@ func ParseIDs2PrimaryKeys(ids *schemapb.IDs) []PrimaryKey {
 	}
 
 	return ret
+}
+
+func ParsePrimaryKeysBatch2IDs(pks PrimaryKeys) (*schemapb.IDs, error) {
+	ret := &schemapb.IDs{}
+	if pks.Len() == 0 {
+		return ret, nil
+	}
+	switch pks.Type() {
+	case schemapb.DataType_Int64:
+		int64Pks := pks.(*Int64PrimaryKeys)
+		ret.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: int64Pks.values,
+			},
+		}
+	case schemapb.DataType_VarChar:
+		varcharPks := pks.(*VarcharPrimaryKeys)
+		ret.IdField = &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: varcharPks.values,
+			},
+		}
+	default:
+		return nil, merr.WrapErrServiceInternal("parsing unsupported pk type", pks.Type().String())
+	}
+
+	return ret, nil
 }
 
 func ParsePrimaryKeys2IDs(pks []PrimaryKey) *schemapb.IDs {

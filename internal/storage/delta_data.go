@@ -34,14 +34,14 @@ var parserPool = &fastjson.ParserPool{}
 // DeltaData stores delta data
 // currently only delete tuples are stored
 type DeltaData struct {
-	pkType schemapb.DataType
+	PkType schemapb.DataType
 	// delete tuples
-	delPks PrimaryKeys
-	delTss []Timestamp
+	DeletePks        PrimaryKeys
+	DeleteTimestamps []Timestamp
 
 	// stats
-	delRowCount int64
-	memSize     int64
+	DelRowCount int64
+	MemSize     int64
 }
 
 type DeleteLog struct {

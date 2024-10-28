@@ -118,8 +118,6 @@ def get_bm25_ground_truth(corpus, queries, top_k=100, language="en"):
     return results, scores
 
 
-
-
 def custom_tokenizer(language="en"):
     def remove_punctuation(text):
         text = text.strip()
@@ -153,11 +151,12 @@ def custom_tokenizer(language="en"):
 def analyze_documents(texts, language="en"):
 
     tokenizer = custom_tokenizer(language)
-    # Start timing
-    t0 = time.time()
-
+    new_texts = []
+    for text in texts:
+        if isinstance(text, str):
+            new_texts.append(text)
     # Tokenize the corpus
-    tokenized = tokenizer.tokenize(texts, return_as="tuple")
+    tokenized = tokenizer.tokenize(new_texts, return_as="tuple")
     # log.info(f"Tokenized: {tokenized}")
     # Create a frequency counter
     freq = Counter()
@@ -170,12 +169,10 @@ def analyze_documents(texts, language="en"):
 
     # Convert token ids back to words
     word_freq = Counter({id_to_word[token_id]: count for token_id, count in freq.items()})
-
-    # End timing
-    tt = time.time() - t0
-    log.debug(f"Analyze document cost time: {tt}")
+    log.debug(f"word freq {word_freq.most_common(10)}")
 
     return word_freq
+
 
 def check_token_overlap(text_a, text_b, language="en"):
     word_freq_a = analyze_documents([text_a], language)
@@ -1667,7 +1664,7 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
     return data
 
 
-def gen_row_data_by_schema(nb=ct.default_nb, schema=None):
+def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=None):
     if schema is None:
         schema = gen_default_collection_schema()
     # ignore auto id field and the fields in function output
@@ -1691,6 +1688,9 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None):
         tmp = {}
         for field in fields_needs_data:
             tmp[field.name] = gen_data_by_collection_field(field)
+            if start is not None and field.dtype == DataType.INT64:
+                tmp[field.name] = start
+                start += 1
         data.append(tmp)
     return data
 
@@ -2102,6 +2102,8 @@ def gen_simple_index():
         if ct.all_index_types[i] in ct.binary_support:
             continue
         elif ct.all_index_types[i] in ct.sparse_support:
+            continue
+        elif ct.all_index_types[i] in ct.gpu_support:
             continue
         dic = {"index_type": ct.all_index_types[i], "metric_type": "L2"}
         dic.update({"params": ct.default_all_indexes_params[i]})
@@ -3052,7 +3054,7 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
 
     rng = np.random.default_rng()
     vectors = [{
-        d: rng.random() for d in random.sample(range(dim), random.randint(20, 30))
+        d: rng.random() for d in list(set(random.sample(range(dim), random.randint(20, 30)) + [0, 1]))
     } for _ in range(nb)]
     if sparse_format == "coo":
         vectors = [

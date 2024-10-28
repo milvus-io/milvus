@@ -375,7 +375,8 @@ func newMockProxy() *mockProxy {
 
 func newTestCore(opts ...Opt) *Core {
 	c := &Core{
-		session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}},
+		metricsRequest: metricsinfo.NewMetricsRequest(),
+		session:        &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}},
 	}
 	executor := newMockStepExecutor()
 	executor.AddStepsFunc = func(s *stepStack) {
@@ -387,6 +388,7 @@ func newTestCore(opts ...Opt) *Core {
 	for _, opt := range opts {
 		opt(c)
 	}
+	c.registerMetricsRequest()
 	return c
 }
 

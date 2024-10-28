@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"os"
 	"sort"
-	"strconv"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -36,9 +35,9 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -665,8 +664,7 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
 		})
 	})
 
@@ -709,8 +707,7 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
 		})
 	})
 
@@ -938,8 +935,7 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
 		})
 	})
 
@@ -968,8 +964,7 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
 		})
 	})
 
@@ -998,8 +993,7 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
 		})
 	})
 
