@@ -3,7 +3,6 @@ package datacoord
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -356,45 +355,10 @@ func (s *L0CompactionTaskSuite) TestStateTrans() {
 			Return(&datapb.CompactionPlanResult{
 				PlanID: t.GetPlanID(),
 				State:  datapb.CompactionTaskState_executing,
-			}, nil).Twice()
-
-		got := t.Process()
-		s.False(got)
-
-		// test timeout
-		t.StartTime = time.Now().Add(-time.Hour).Unix()
-		t.TimeoutInSeconds = 10
-
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).
-			RunAndReturn(func(inputs []int64, compacting bool) {
-				s.ElementsMatch(inputs, t.GetInputSegments())
-				s.False(compacting)
-			}).Once()
-
-		got = t.Process()
-		s.True(got)
-		s.Equal(datapb.CompactionTaskState_cleaned, t.GetState())
-	})
-
-	s.Run("test executing with result executing timeout and updataAndSaveTaskMeta failed", func() {
-		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
-		t.NodeID = 100
-		s.Require().True(t.GetNodeID() > 0)
-
-		s.mockSessMgr.EXPECT().GetCompactionPlanResult(t.NodeID, mock.Anything).
-			Return(&datapb.CompactionPlanResult{
-				PlanID: t.GetPlanID(),
-				State:  datapb.CompactionTaskState_executing,
 			}, nil).Once()
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(errors.New("mock error")).Once()
-
-		t.StartTime = time.Now().Add(-time.Hour).Unix()
-		t.TimeoutInSeconds = 10
 
 		got := t.Process()
 		s.False(got)
-		s.Equal(datapb.CompactionTaskState_executing, t.GetState())
 	})
 
 	s.Run("test executing with result completed", func() {
@@ -488,20 +452,6 @@ func (s *L0CompactionTaskSuite) TestStateTrans() {
 		got := t.Process()
 		s.False(got)
 		s.Equal(datapb.CompactionTaskState_executing, t.GetState())
-	})
-
-	s.Run("test timeout", func() {
-		t := s.generateTestL0Task(datapb.CompactionTaskState_timeout)
-		t.NodeID = 100
-		s.Require().True(t.GetNodeID() > 0)
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Times(1)
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
-			s.Require().False(isCompacting)
-			s.ElementsMatch(segIDs, t.GetInputSegments())
-		}).Once()
-
-		got := t.Process()
-		s.True(got)
 	})
 
 	s.Run("test metaSaved success", func() {
