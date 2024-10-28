@@ -98,6 +98,22 @@ func (lb *LBPolicyImpl) Start(ctx context.Context) {
 	}
 }
 
+func (lb *LBPolicyImpl) GetShardLeaders(ctx context.Context, dbName string, collName string, collectionID int64, withCache bool) (map[string][]nodeInfo, error) {
+	var shardLeaders map[string][]nodeInfo
+	// use retry to handle query coord service not ready
+	err := retry.Handle(ctx, func() (bool, error) {
+		var err error
+		shardLeaders, err = globalMetaCache.GetShards(ctx, withCache, dbName, collName, collectionID)
+		if err != nil {
+			return true, err
+		}
+
+		return false, nil
+	})
+
+	return shardLeaders, err
+}
+
 // try to select the best node from the available nodes
 func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, excludeNodes typeutil.UniqueSet) (int64, error) {
 	availableNodes := lo.FilterMap(workload.shardLeaders, func(node int64, _ int) (int64, bool) { return node, !excludeNodes.Contain(node) })
@@ -105,7 +121,7 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 	if err != nil {
 		log := log.Ctx(ctx)
 		globalMetaCache.DeprecateShardCache(workload.db, workload.collectionName)
-		shardLeaders, err := globalMetaCache.GetShards(ctx, false, workload.db, workload.collectionName, workload.collectionID)
+		shardLeaders, err := lb.GetShardLeaders(ctx, workload.db, workload.collectionName, workload.collectionID, false)
 		if err != nil {
 			log.Warn("failed to get shard delegator",
 				zap.Int64("collectionID", workload.collectionID),
@@ -195,7 +211,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 // Execute will execute collection workload in parallel
 func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad) error {
-	dml2leaders, err := globalMetaCache.GetShards(ctx, true, workload.db, workload.collectionName, workload.collectionID)
+	dml2leaders, err := lb.GetShardLeaders(ctx, workload.db, workload.collectionName, workload.collectionID, true)
 	if err != nil {
 		log.Ctx(ctx).Warn("failed to get shards", zap.Error(err))
 		return err
