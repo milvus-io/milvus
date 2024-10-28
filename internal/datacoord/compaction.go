@@ -37,9 +37,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+// TODO: we just warn about the long executing/queuing tasks
+// need to get rid of long queuing tasks because the compaction tasks are local optimum.
 var maxCompactionTaskExecutionDuration = map[datapb.CompactionType]time.Duration{
 	datapb.CompactionType_MixCompaction:          30 * time.Minute,
 	datapb.CompactionType_Level0DeleteCompaction: 30 * time.Minute,
@@ -180,8 +183,11 @@ func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64)
 func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager, cm ChannelManager, meta CompactionMeta,
 	allocator allocator.Allocator, analyzeScheduler *taskScheduler, handler Handler,
 ) *compactionPlanHandler {
+	// Higher capacity will have better ordering in priority, but consumes more memory.
+	// TODO[GOOSE]: Higher capacity makes tasks waiting longer, which need to be get rid of.
+	capacity := paramtable.Get().DataCoordCfg.CompactionTaskQueueCapacity.GetAsInt()
 	return &compactionPlanHandler{
-		queueTasks:       *NewCompactionQueue(256, getPrioritizer()), // Higher capacity will have better ordering in priority, but consumes more memory.
+		queueTasks:       *NewCompactionQueue(capacity, getPrioritizer()),
 		chManager:        cm,
 		meta:             meta,
 		sessions:         sessions,
@@ -293,6 +299,7 @@ func (c *compactionPlanHandler) loadMeta() {
 			state := task.GetState()
 			if state == datapb.CompactionTaskState_completed ||
 				state == datapb.CompactionTaskState_cleaned ||
+				state == datapb.CompactionTaskState_timeout ||
 				state == datapb.CompactionTaskState_unknown {
 				log.Info("compactionPlanHandler loadMeta abandon compactionTask",
 					zap.Int64("planID", task.GetPlanID()),
