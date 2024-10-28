@@ -1018,9 +1018,9 @@ func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fie
 	return nil
 }
 
-func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.DeleteData) error {
-	pks, tss := deltaData.Pks, deltaData.Tss
-	rowNum := deltaData.RowCount
+func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.DeltaData) error {
+	pks, tss := deltaData.DeletePks, deltaData.DeleteTimestamps
+	rowNum := deltaData.DelRowCount
 
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
@@ -1033,31 +1033,9 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 		zap.Int64("segmentID", s.ID()),
 	)
 
-	pkType := pks[0].Type()
-	ids := &schemapb.IDs{}
-	switch pkType {
-	case schemapb.DataType_Int64:
-		int64Pks := make([]int64, len(pks))
-		for index, pk := range pks {
-			int64Pks[index] = pk.(*storage.Int64PrimaryKey).Value
-		}
-		ids.IdField = &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{
-				Data: int64Pks,
-			},
-		}
-	case schemapb.DataType_VarChar:
-		varCharPks := make([]string, len(pks))
-		for index, pk := range pks {
-			varCharPks[index] = pk.(*storage.VarCharPrimaryKey).Value
-		}
-		ids.IdField = &schemapb.IDs_StrId{
-			StrId: &schemapb.StringArray{
-				Data: varCharPks,
-			},
-		}
-	default:
-		return fmt.Errorf("invalid data type of primary keys")
+	ids, err := storage.ParsePrimaryKeysBatch2IDs(pks)
+	if err != nil {
+		return err
 	}
 
 	idsBlob, err := proto.Marshal(ids)
