@@ -1262,8 +1262,9 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 // it also executes resource protection logic in case of OOM.
 func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error {
 	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID: segment.ID(),
-		Deltalogs: deltaLogs,
+		SegmentID:    segment.ID(),
+		CollectionID: segment.Collection(),
+		Deltalogs:    deltaLogs,
 	}
 	// Check memory & storage limit
 	requestResourceResult, err := loader.requestResource(ctx, loadInfo)
