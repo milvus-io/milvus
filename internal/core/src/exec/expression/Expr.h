@@ -503,7 +503,7 @@ class SegmentExpr : public Expr {
     template <typename T>
     TargetBitmap
     ProcessDataChunksForValid() {
-        TargetBitmap valid_result(batch_size_);
+        TargetBitmap valid_result(GetNextBatchSize());
         valid_result.set();
         int64_t processed_size = 0;
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {

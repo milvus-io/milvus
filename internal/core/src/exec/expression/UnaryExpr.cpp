@@ -758,53 +758,38 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow() {
                 cached_overflow_res_->size() == batch_size) {
                 return cached_overflow_res_;
             }
+            auto valid = ProcessChunksForValid<T>(CanUseIndex<T>());
+            auto res_vec = std::make_shared<ColumnVector>(
+                TargetBitmap(batch_size), std::move(valid));
+            TargetBitmapView res(res_vec->GetRawData(), batch_size);
+            TargetBitmapView valid_res(res_vec->GetValidRawData(), batch_size);
+            cached_overflow_res_ = res_vec;
             switch (expr_->op_type_) {
                 case proto::plan::GreaterThan:
                 case proto::plan::GreaterEqual: {
-                    auto valid_res = ProcessChunksForValid<T>(CanUseIndex<T>());
-                    auto res_vec = std::make_shared<ColumnVector>(
-                        TargetBitmap(batch_size), std::move(valid_res));
-                    TargetBitmapView res(res_vec->GetRawData(), batch_size);
-                    cached_overflow_res_ = res_vec;
-
                     if (milvus::query::lt_lb<T>(val)) {
                         res.set();
+                        res &= valid_res;
                         return res_vec;
                     }
                     return res_vec;
                 }
                 case proto::plan::LessThan:
                 case proto::plan::LessEqual: {
-                    auto valid_res = ProcessChunksForValid<T>(CanUseIndex<T>());
-                    auto res_vec = std::make_shared<ColumnVector>(
-                        TargetBitmap(batch_size), std::move(valid_res));
-                    TargetBitmapView res(res_vec->GetRawData(), batch_size);
-                    cached_overflow_res_ = res_vec;
-
                     if (milvus::query::gt_ub<T>(val)) {
                         res.set();
+                        res &= valid_res;
                         return res_vec;
                     }
                     return res_vec;
                 }
                 case proto::plan::Equal: {
-                    auto valid_res = ProcessChunksForValid<T>(CanUseIndex<T>());
-                    auto res_vec = std::make_shared<ColumnVector>(
-                        TargetBitmap(batch_size), std::move(valid_res));
-                    TargetBitmapView res(res_vec->GetRawData(), batch_size);
-                    cached_overflow_res_ = res_vec;
-
                     res.reset();
                     return res_vec;
                 }
                 case proto::plan::NotEqual: {
-                    auto valid_res = ProcessChunksForValid<T>(CanUseIndex<T>());
-                    auto res_vec = std::make_shared<ColumnVector>(
-                        TargetBitmap(batch_size), std::move(valid_res));
-                    TargetBitmapView res(res_vec->GetRawData(), batch_size);
-                    cached_overflow_res_ = res_vec;
-
                     res.set();
+                    res &= valid_res;
                     return res_vec;
                 }
                 default: {
