@@ -109,7 +109,7 @@ func newCompactionTrigger(
 }
 
 func (t *compactionTrigger) start() {
-	t.globalTrigger = time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
+	t.globalTrigger = time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
 	t.closeWaiter.Add(2)
 	go func() {
 		defer logutil.LogPanic()
@@ -132,8 +132,6 @@ func (t *compactionTrigger) start() {
 				default:
 					// no need to handle err in handleSignal
 					t.handleSignal(signal)
-					// shouldn't reset, otherwise a frequent flushed collection will affect other collections
-					// t.globalTrigger.Reset(Params.DataCoordCfg.GlobalCompactionInterval)
 				}
 			}
 		}
