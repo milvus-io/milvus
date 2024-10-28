@@ -283,6 +283,7 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`Int64Field % 10 == 9`,
 		`Int64Field % 10 != 9`,
 		`FloatField + 1.1 == 2.1`,
+		`Int64Field + 1.1 == 2.1`,
 		`A % 10 != 2`,
 		`Int8Field + 1 < 2`,
 		`Int16Field - 3 <= 4`,
@@ -298,13 +299,6 @@ func TestExpr_BinaryArith(t *testing.T) {
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
-	}
-
-	invalidExprs := []string{
-		`Int64Field + 1.1 == 2.1`,
-	}
-	for _, exprStr := range invalidExprs {
-		assertInvalidExpr(t, helper, exprStr)
 	}
 
 	// TODO: enable these after execution backend is ready.
