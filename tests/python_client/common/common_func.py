@@ -1664,7 +1664,7 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
     return data
 
 
-def gen_row_data_by_schema(nb=ct.default_nb, schema=None):
+def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=None):
     if schema is None:
         schema = gen_default_collection_schema()
     # ignore auto id field and the fields in function output
@@ -1688,6 +1688,9 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None):
         tmp = {}
         for field in fields_needs_data:
             tmp[field.name] = gen_data_by_collection_field(field)
+            if start is not None and field.dtype == DataType.INT64:
+                tmp[field.name] = start
+                start += 1
         data.append(tmp)
     return data
 
