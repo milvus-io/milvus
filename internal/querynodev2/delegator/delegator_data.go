@@ -435,6 +435,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			if err != nil {
 				return err
 			}
+			sd.collection.Ref(1)
 			sd.segmentManager.Put(ctx, segments.SegmentTypeSealed, l0Seg)
 			return nil
 		}
