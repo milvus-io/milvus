@@ -742,8 +742,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 	s.handler.checkCompaction()
 
 	t := s.handler.getCompactionTask(1)
-	// timeout
-	s.Nil(t)
+	s.NotNil(t)
 
 	t = s.handler.getCompactionTask(2)
 	// completed

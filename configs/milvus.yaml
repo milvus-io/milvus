@@ -559,9 +559,9 @@ dataCoord:
     # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
     taskPrioritizer: default
+    taskQueueCapacity: 256 # compaction task queue size
     rpcTimeout: 10
     maxParallelTaskNum: 10
-    workerMaxParallelTaskNum: 2
     dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
     gcInterval: 1800 # The time interval in seconds for compaction gc
     clustering:
