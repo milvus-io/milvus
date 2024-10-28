@@ -2,10 +2,6 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/models"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -319,31 +314,7 @@ func TestMaxInsertSize(t *testing.T) {
 }
 
 func TestInsertTask_Function(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req models.EmbeddingRequest
-		body, _ := io.ReadAll(r.Body)
-		defer r.Body.Close()
-		json.Unmarshal(body, &req)
-
-		var res models.EmbeddingResponse
-		res.Object = "list"
-		res.Model = "text-embedding-3-small"
-		for i := 0; i < len(req.Input); i++ {
-			res.Data = append(res.Data, models.EmbeddingData{
-				Object:    "embedding",
-				Embedding: make([]float32, req.Dimensions),
-				Index:     i,
-			})
-		}
-
-		res.Usage = models.Usage{
-			PromptTokens: 1,
-			TotalTokens:  100,
-		}
-		w.WriteHeader(http.StatusOK)
-		data, _ := json.Marshal(res)
-		w.Write(data)
-	}))
+	ts := function.CreateEmbeddingServer()
 	defer ts.Close()
 	data := []*schemapb.FieldData{}
 	f := schemapb.FieldData{

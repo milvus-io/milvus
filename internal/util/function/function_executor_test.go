@@ -128,34 +128,7 @@ func (s *FunctionExecutorSuite) createEmbedding(texts []string, dim int) [][]flo
 }
 
 func (s *FunctionExecutorSuite) TestExecutor() {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req models.EmbeddingRequest
-		body, _ := io.ReadAll(r.Body)
-		defer r.Body.Close()
-		json.Unmarshal(body, &req)
-
-		var res models.EmbeddingResponse
-		res.Object = "list"
-		res.Model = "text-embedding-3-small"
-		embs := s.createEmbedding(req.Input, req.Dimensions)
-		for i := 0; i < len(req.Input); i++ {
-			res.Data = append(res.Data, models.EmbeddingData{
-				Object:    "embedding",
-				Embedding: embs[i],
-				Index:     i,
-			})
-		}
-
-		res.Usage = models.Usage{
-			PromptTokens: 1,
-			TotalTokens:  100,
-		}
-		w.WriteHeader(http.StatusOK)
-		data, _ := json.Marshal(res)
-		w.Write(data)
-
-	}))
-
+	ts := CreateEmbeddingServer()
 	defer ts.Close()
 	schema := s.creataSchema(ts.URL)
 	exec, err := NewFunctionExecutor(schema)

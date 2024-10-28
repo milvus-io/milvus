@@ -17,7 +17,6 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -42,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/models"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -483,33 +481,8 @@ func TestSearchTask_PreExecute(t *testing.T) {
 }
 
 func TestSearchTask_WithFunctions(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req models.EmbeddingRequest
-		body, _ := io.ReadAll(r.Body)
-		defer r.Body.Close()
-		json.Unmarshal(body, &req)
-
-		var res models.EmbeddingResponse
-		res.Object = "list"
-		res.Model = "text-embedding-3-small"
-		for i := 0; i < len(req.Input); i++ {
-			res.Data = append(res.Data, models.EmbeddingData{
-				Object:    "embedding",
-				Embedding: make([]float32, req.Dimensions),
-				Index:     i,
-			})
-		}
-
-		res.Usage = models.Usage{
-			PromptTokens: 1,
-			TotalTokens:  100,
-		}
-		w.WriteHeader(http.StatusOK)
-		data, _ := json.Marshal(res)
-		w.Write(data)
-	}))
+	ts := function.CreateEmbeddingServer()
 	defer ts.Close()
-
 	collectionName := "TestInsertTask_function"
 	schema := &schemapb.CollectionSchema{
 		Name:        collectionName,
