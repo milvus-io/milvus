@@ -3189,25 +3189,29 @@ type dataCoordConfig struct {
 	IndexBasedCompaction      ParamItem `refreshable:"true"`
 	CompactionTaskPrioritizer ParamItem `refreshable:"true"`
 
-	CompactionRPCTimeout              ParamItem `refreshable:"true"`
-	CompactionMaxParallelTasks        ParamItem `refreshable:"true"`
-	CompactionWorkerParalleTasks      ParamItem `refreshable:"true"`
-	MinSegmentToMerge                 ParamItem `refreshable:"true"`
-	MaxSegmentToMerge                 ParamItem `refreshable:"true"`
-	SegmentSmallProportion            ParamItem `refreshable:"true"`
-	SegmentCompactableProportion      ParamItem `refreshable:"true"`
-	SegmentExpansionRate              ParamItem `refreshable:"true"`
-	CompactionTimeoutInSeconds        ParamItem `refreshable:"true"`
-	CompactionDropToleranceInSeconds  ParamItem `refreshable:"true"`
-	CompactionGCIntervalInSeconds     ParamItem `refreshable:"true"`
-	CompactionCheckIntervalInSeconds  ParamItem `refreshable:"false"`
+	CompactionRPCTimeout             ParamItem `refreshable:"true"`
+	CompactionMaxParallelTasks       ParamItem `refreshable:"true"`
+	CompactionWorkerParalleTasks     ParamItem `refreshable:"true"`
+	MinSegmentToMerge                ParamItem `refreshable:"true"`
+	MaxSegmentToMerge                ParamItem `refreshable:"true"`
+	SegmentSmallProportion           ParamItem `refreshable:"true"`
+	SegmentCompactableProportion     ParamItem `refreshable:"true"`
+	SegmentExpansionRate             ParamItem `refreshable:"true"`
+	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"`
+	CompactionDropToleranceInSeconds ParamItem `refreshable:"true"`
+	CompactionGCIntervalInSeconds    ParamItem `refreshable:"true"`
+	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"`
+	MixCompactionTriggerInterval     ParamItem `refreshable:"false"`
+	L0CompactionTriggerInterval      ParamItem `refreshable:"false"`
+	GlobalCompactionInterval         ParamItem `refreshable:"false"`
+
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
 	SingleCompactionExpiredLogMaxSize ParamItem `refreshable:"true"`
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
-	GlobalCompactionInterval          ParamItem `refreshable:"false"`
-	ChannelCheckpointMaxLag           ParamItem `refreshable:"true"`
-	SyncSegmentsInterval              ParamItem `refreshable:"false"`
+
+	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
+	SyncSegmentsInterval    ParamItem `refreshable:"false"`
 
 	// Clustering Compaction
 	ClusteringCompactionEnable                 ParamItem `refreshable:"true"`
@@ -3578,13 +3582,17 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.single.ratio.threshold",
 		Version:      "2.0.0",
 		DefaultValue: "0.2",
+		Doc:          "The ratio threshold of a segment to trigger a single compaction, default as 0.2",
+		Export:       true,
 	}
 	p.SingleCompactionRatioThreshold.Init(base.mgr)
 
 	p.SingleCompactionDeltaLogMaxSize = ParamItem{
 		Key:          "dataCoord.compaction.single.deltalog.maxsize",
 		Version:      "2.0.0",
-		DefaultValue: strconv.Itoa(2 * 1024 * 1024),
+		DefaultValue: "16777216",
+		Doc:          "The deltalog size of a segment to trigger a single compaction, default as 16MB",
+		Export:       true,
 	}
 	p.SingleCompactionDeltaLogMaxSize.Init(base.mgr)
 
@@ -3592,6 +3600,8 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.single.expiredlog.maxsize",
 		Version:      "2.0.0",
 		DefaultValue: "10485760",
+		Doc:          "The expired log size of a segment to trigger a compaction, default as 10MB",
+		Export:       true,
 	}
 	p.SingleCompactionExpiredLogMaxSize.Init(base.mgr)
 
@@ -3599,6 +3609,8 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.single.deltalog.maxnum",
 		Version:      "2.0.0",
 		DefaultValue: "200",
+		Doc:          "The deltalog count of a segment to trigger a compaction, default as 200",
+		Export:       true,
 	}
 	p.SingleCompactionDeltalogMaxNum.Init(base.mgr)
 
@@ -3608,6 +3620,22 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "60",
 	}
 	p.GlobalCompactionInterval.Init(base.mgr)
+
+	p.MixCompactionTriggerInterval = ParamItem{
+		Key:          "dataCoord.compaction.mix.triggerInterval",
+		Version:      "2.4.15",
+		Doc:          "The time interval in seconds for trigger mix compaction, default as 60s",
+		DefaultValue: "60",
+	}
+	p.MixCompactionTriggerInterval.Init(base.mgr)
+
+	p.L0CompactionTriggerInterval = ParamItem{
+		Key:          "dataCoord.compaction.levelzero.triggerInterval",
+		Version:      "2.4.15",
+		Doc:          "The time interval in seconds for trigger L0 compaction, default as 10s",
+		DefaultValue: "10",
+	}
+	p.L0CompactionTriggerInterval.Init(base.mgr)
 
 	p.ChannelCheckpointMaxLag = ParamItem{
 		Key:          "dataCoord.compaction.channelMaxCPLag",

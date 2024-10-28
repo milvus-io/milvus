@@ -564,6 +564,14 @@ dataCoord:
     workerMaxParallelTaskNum: 2
     dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
     gcInterval: 1800 # The time interval in seconds for compaction gc
+    single:
+      ratio:
+        threshold: 0.2 # The ratio threshold of a segment to trigger a single compaction, default as 0.2
+      deltalog:
+        maxsize: 16777216 # The deltalog size of a segment to trigger a single compaction, default as 16MB
+        maxnum: 200 # The deltalog count of a segment to trigger a compaction, default as 200
+      expiredlog:
+        maxsize: 10485760 # The expired log size of a segment to trigger a compaction, default as 10MB
     clustering:
       enable: true # Enable clustering compaction
       autoEnable: false # Enable auto clustering compaction
