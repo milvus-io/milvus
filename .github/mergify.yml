@@ -22,6 +22,9 @@ misc:
   - branch: &BRANCHES
       #  In this pull request, the changes are based on the master branch
       - &MASTER_BRANCH base=master
+      - &23_BRANCH base=2.3
+      - &24_BRANCH base=2.4
+      - &25_BRANCH base=2.5
       #  In this pull request, the changes are based on the 2.x(or 2.x.x) branch
       - &2X_BRANCH base~=^2(\.\d+){1,2}$
 
@@ -297,10 +300,12 @@ pull_request_rules:
           - lgtm
           - approved
 
-  - name:  master - Remove ci-passed label when status for code checker or ut is not success
+  - name:  master or 2.5 - Remove ci-passed label when status for code checker or ut is not success
     conditions:
       # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
-      - *MASTER_BRANCH
+      - or:
+        - *MASTER_BRANCH
+        - *25_BRANCH
       - label!=manual-pass
       - *source_code_files
       - or:
@@ -317,9 +322,11 @@ pull_request_rules:
         remove:
           - ci-passed
 
-  - name: 2.x - Remove ci-passed label when status for code checker or ut  is not success
+  - name: 2.3 or 2.4 - Remove ci-passed label when status for code checker or ut  is not success
     conditions:
-      - *2X_BRANCH
+      - or:
+        - *23_BRANCH
+        - *24_BRANCH
       - label!=manual-pass
       - *source_code_files
       - or:
