@@ -44,15 +44,18 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		confirmGCInterval = oldValue
 	}()
 	confirmGCInterval = 0
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().ListAliasesByID(mock.Anything).Return(nil).Maybe()
+
 	t.Run("failed to release collection", func(t *testing.T) {
 		broker := newMockBroker()
 		broker.ReleaseCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
 			return errors.New("error mock ReleaseCollection")
 		}
 		ticker := newTickerWithMockNormalStream()
-		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withValidProxyManager())
+		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withValidProxyManager(), withMeta(meta))
 		gc := newBgGarbageCollector(core)
-		gc.ReDropCollection(&model.Collection{}, 1000)
+		gc.ReDropCollection(&model.Collection{}, "", 1000)
 	})
 
 	t.Run("failed to DropCollectionIndex", func(t *testing.T) {
@@ -68,10 +71,10 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			return errors.New("error mock DropCollectionIndex")
 		}
 		ticker := newTickerWithMockNormalStream()
-		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withValidProxyManager())
+		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withValidProxyManager(), withMeta(meta))
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
-		gc.ReDropCollection(&model.Collection{}, 1000)
+		gc.ReDropCollection(&model.Collection{}, "", 1000)
 		<-releaseCollectionChan
 		assert.True(t, releaseCollectionCalled)
 	})
@@ -97,13 +100,13 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
 			return 100, nil
 		}
-		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withValidProxyManager())
+		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withValidProxyManager(), withMeta(meta))
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
 		shardsNum := common.DefaultShardsNum
 		pchans := ticker.getDmlChannelNames(int(shardsNum))
-		gc.ReDropCollection(&model.Collection{PhysicalChannelNames: pchans}, 1000)
+		gc.ReDropCollection(&model.Collection{PhysicalChannelNames: pchans}, "", 1000)
 		<-releaseCollectionChan
 		assert.True(t, releaseCollectionCalled)
 		<-dropCollectionIndexChan
@@ -144,6 +147,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 				dropMetaChan <- struct{}{}
 			}).
 			Return(errors.New("error mock RemoveCollection"))
+		meta.EXPECT().ListAliasesByID(mock.Anything).Return(nil)
 		ticker := newTickerWithMockNormalStream()
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
@@ -157,7 +161,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
-		gc.ReDropCollection(&model.Collection{}, 1000)
+		gc.ReDropCollection(&model.Collection{}, "", 1000)
 		<-releaseCollectionChan
 		assert.True(t, releaseCollectionCalled)
 		<-dropCollectionIndexChan
@@ -193,6 +197,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		removeCollectionCalled := false
 		removeCollectionChan := make(chan struct{}, 1)
+		meta.EXPECT().ListAliasesByID(mock.Anything).Return(nil)
 		meta.On("RemoveCollection",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("int64"),
@@ -215,7 +220,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
-		gc.ReDropCollection(&model.Collection{}, 1000)
+		gc.ReDropCollection(&model.Collection{}, "", 1000)
 		<-releaseCollectionChan
 		assert.True(t, releaseCollectionCalled)
 		<-dropCollectionIndexChan
@@ -352,11 +357,14 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
 			return 100, nil
 		}
-		core := newTestCore(withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withDropIndex())
+		core := newTestCore(withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withDropIndex(), withValidProxyManager())
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
-		gc.ReDropPartition(0, pchans, nil, &model.Partition{}, 100000)
+		gc.ReDropPartition(&model.Collection{
+			CollectionID:         0,
+			PhysicalChannelNames: pchans,
+		}, &model.Partition{}, "", 100000)
 	})
 
 	t.Run("failed to RemovePartition", func(t *testing.T) {
@@ -392,11 +400,11 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
 			return 100, nil
 		}
-		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withDropIndex(), withBroker(broker))
+		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withDropIndex(), withBroker(broker), withValidProxyManager())
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
-		gc.ReDropPartition(0, pchans, nil, &model.Partition{}, 100000)
+		gc.ReDropPartition(&model.Collection{CollectionID: 0, PhysicalChannelNames: pchans}, &model.Partition{}, "", 100000)
 		<-gcConfirmChan
 		assert.True(t, gcConfirmCalled)
 		<-removePartitionChan
@@ -437,11 +445,11 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
 			return 100, nil
 		}
-		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withDropIndex(), withBroker(broker))
+		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withDropIndex(), withBroker(broker), withValidProxyManager())
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
-		gc.ReDropPartition(0, pchans, nil, &model.Partition{}, 100000)
+		gc.ReDropPartition(&model.Collection{CollectionID: 0, PhysicalChannelNames: pchans}, &model.Partition{}, "", 100000)
 		<-gcConfirmChan
 		assert.True(t, gcConfirmCalled)
 		<-removePartitionChan

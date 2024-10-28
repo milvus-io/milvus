@@ -174,6 +174,11 @@ type DataCoordCatalog interface {
 	ListStatsTasks(ctx context.Context) ([]*indexpb.StatsTask, error)
 	SaveStatsTask(ctx context.Context, task *indexpb.StatsTask) error
 	DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) error
+
+	// CollectionTombstone
+	ListCollectionTombstone(ctx context.Context) ([]*model.CollectionTombstone, error)
+	SaveCollectionTombstone(ctx context.Context, tombstone *model.CollectionTombstone) error
+	DropCollectionTombstone(ctx context.Context, tombstone *model.CollectionTombstone) error
 }
 
 type QueryCoordCatalog interface {

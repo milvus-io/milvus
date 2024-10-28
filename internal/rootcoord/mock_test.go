@@ -377,6 +377,7 @@ func newTestCore(opts ...Opt) *Core {
 	c := &Core{
 		metricsRequest: metricsinfo.NewMetricsRequest(),
 		session:        &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}},
+		broker:         &mockBroker{},
 	}
 	executor := newMockStepExecutor()
 	executor.AddStepsFunc = func(s *stepStack) {
@@ -935,6 +936,14 @@ func (b mockBroker) BroadcastAlteredCollection(ctx context.Context, req *milvusp
 
 func (b mockBroker) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {
 	return b.GCConfirmFunc(ctx, collectionID, partitionID)
+}
+
+func (b mockBroker) DropCollectionAtDataCoord(ctx context.Context, collectionID UniqueID, vchannels []string) error {
+	return nil
+}
+
+func (b mockBroker) DropPartitionAtDataCoord(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
+	return nil
 }
 
 func withBroker(b Broker) Opt {
