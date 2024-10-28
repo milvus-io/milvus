@@ -558,6 +558,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 	// Update segment info in memory and meta.
 	if err := s.meta.UpdateSegmentsInfo(operators...); err != nil {
+		if merr.IsCollectionOrPartitionDropped(err) {
+			log.Warn("SaveBinlogPaths ignored, collection or partition is dropped", zap.Error(err))
+			return merr.Success(), nil
+		}
 		log.Error("save binlog and checkpoints failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
