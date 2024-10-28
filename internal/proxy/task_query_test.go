@@ -867,7 +867,7 @@ func Test_matchCountRule(t *testing.T) {
 
 func Test_createCntPlan(t *testing.T) {
 	t.Run("plan without filter", func(t *testing.T) {
-		plan, err := createCntPlan("", nil)
+		plan, err := createCntPlan("", nil, nil)
 		assert.NoError(t, err)
 		assert.True(t, plan.GetQuery().GetIsCount())
 		assert.Nil(t, plan.GetQuery().GetPredicates())
@@ -886,7 +886,7 @@ func Test_createCntPlan(t *testing.T) {
 		}
 		schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
-		plan, err := createCntPlan("a > 4", schemaHelper)
+		plan, err := createCntPlan("a > 4", schemaHelper, nil)
 		assert.NoError(t, err)
 		assert.True(t, plan.GetQuery().GetIsCount())
 		assert.NotNil(t, plan.GetQuery().GetPredicates())
