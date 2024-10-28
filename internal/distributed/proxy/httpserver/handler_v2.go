@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -61,41 +62,49 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(CollectionCategory+LoadAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.loadCollection)))))
 	router.POST(CollectionCategory+ReleaseAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.releaseCollection)))))
 
-	router.POST(EntityCategory+QueryAction, timeoutMiddleware(wrapperPost(func() any {
+	// Query
+	router.POST(EntityCategory+QueryAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &QueryReqV2{
 			Limit:        100,
 			OutputFields: []string{DefaultOutputFields},
 		}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.query)))))
-	router.POST(EntityCategory+GetAction, timeoutMiddleware(wrapperPost(func() any {
+	}, wrapperTraceLog(h.wrapperCheckDatabase(h.query)))), true))
+	// Get
+	router.POST(EntityCategory+GetAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionIDReq{
 			OutputFields: []string{DefaultOutputFields},
 		}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.get)))))
-	router.POST(EntityCategory+DeleteAction, timeoutMiddleware(wrapperPost(func() any {
+	}, wrapperTraceLog(h.wrapperCheckDatabase(h.get)))), true))
+	// Delete
+	router.POST(EntityCategory+DeleteAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionFilterReq{}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.delete)))))
-	router.POST(EntityCategory+InsertAction, timeoutMiddleware(wrapperPost(func() any {
+	}, wrapperTraceLog(h.wrapperCheckDatabase(h.delete)))), false))
+	// Insert
+	router.POST(EntityCategory+InsertAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionDataReq{}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.insert)))))
-	router.POST(EntityCategory+UpsertAction, timeoutMiddleware(wrapperPost(func() any {
+	}, wrapperTraceLog(h.wrapperCheckDatabase(h.insert)))), false))
+	// Upsert
+	router.POST(EntityCategory+UpsertAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionDataReq{}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.upsert)))))
-	router.POST(EntityCategory+SearchAction, timeoutMiddleware(wrapperPost(func() any {
+	}, wrapperTraceLog(h.wrapperCheckDatabase(h.upsert)))), false))
+	// Search
+	router.POST(EntityCategory+SearchAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &SearchReqV2{
 			Limit: 100,
 		}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.search)))))
-	router.POST(EntityCategory+AdvancedSearchAction, timeoutMiddleware(wrapperPost(func() any {
+	}, wrapperTraceLog(h.wrapperCheckDatabase(h.search)))), true))
+	// advanced_search, backward compatible uri
+	router.POST(EntityCategory+AdvancedSearchAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.advancedSearch)))))
-	router.POST(EntityCategory+HybridSearchAction, timeoutMiddleware(wrapperPost(func() any {
+	}, wrapperTraceLog(h.wrapperCheckDatabase(h.advancedSearch)))), true))
+	// HybridSearch
+	router.POST(EntityCategory+HybridSearchAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.advancedSearch)))))
+	}, wrapperTraceLog(h.wrapperCheckDatabase(h.advancedSearch)))), true))
 
 	router.POST(PartitionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listPartitions)))))
 	router.POST(PartitionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.hasPartitions)))))
@@ -183,7 +192,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			}
 		}
 		username, _ := c.Get(ContextUsername)
-		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(context.Background(), c.Request.URL.Path)
+		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(c, c.Request.URL.Path)
 		defer span.End()
 		ctx = proxy.NewContextWithMetadata(ctx, username.(string), dbName)
 		traceID := span.SpanContext().TraceID().String()
@@ -192,6 +201,15 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		log.Ctx(ctx).Debug("high level restful api, read parameters from request body, then start to handle.",
 			zap.Any("url", c.Request.URL.Path))
 		v2(ctx, c, req, dbName)
+	}
+}
+
+// restfulSizeMiddleware is the middleware fetchs metrics stats from gin struct.
+func restfulSizeMiddleware(handler gin.HandlerFunc, observeOutbound bool) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		h := metrics.WrapRestfulContext(ctx, ctx.Request.ContentLength)
+		handler(ctx)
+		metrics.RecordRestfulMetrics(h, int64(ctx.Writer.Size()), observeOutbound)
 	}
 }
 
