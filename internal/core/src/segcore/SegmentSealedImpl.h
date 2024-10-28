@@ -121,12 +121,6 @@ class SegmentSealedImpl : public SegmentSealed {
     std::vector<SegOffset>
     search_pk(const PkType& pk, int64_t insert_barrier) const;
 
-    std::shared_ptr<DeletedRecord::TmpBitmap>
-    get_deleted_bitmap_s(int64_t del_barrier,
-                         int64_t insert_barrier,
-                         DeletedRecord& delete_record,
-                         Timestamp query_timestamp) const;
-
     std::unique_ptr<DataArray>
     get_vector(FieldId field_id,
                const int64_t* ids,
