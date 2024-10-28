@@ -155,10 +155,10 @@ func (s *L0Segment) LoadDeltaData(ctx context.Context, deltaData *storage.DeltaD
 	s.dataGuard.Lock()
 	defer s.dataGuard.Unlock()
 
-	for i := 0; i < deltaData.DeletePks.Len(); i++ {
-		s.pks = append(s.pks, deltaData.DeletePks.Get(i))
+	for i := 0; i < int(deltaData.DeleteRowCount()); i++ {
+		s.pks = append(s.pks, deltaData.DeletePks().Get(i))
 	}
-	s.tss = append(s.tss, deltaData.DeleteTimestamps...)
+	s.tss = append(s.tss, deltaData.DeleteTimestamps()...)
 	return nil
 }
 

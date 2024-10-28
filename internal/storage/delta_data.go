@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/samber/lo"
 	"github.com/valyala/fastjson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // parserPool use object pooling to reduce fastjson.Parser allocation.
@@ -34,14 +36,84 @@ var parserPool = &fastjson.ParserPool{}
 // DeltaData stores delta data
 // currently only delete tuples are stored
 type DeltaData struct {
-	PkType schemapb.DataType
+	pkType schemapb.DataType
 	// delete tuples
-	DeletePks        PrimaryKeys
-	DeleteTimestamps []Timestamp
+	deletePks        PrimaryKeys
+	deleteTimestamps []Timestamp
 
 	// stats
-	DelRowCount int64
-	MemSize     int64
+	delRowCount int64
+
+	initCap      int64
+	typeInitOnce sync.Once
+}
+
+func (dd *DeltaData) initPkType(pkType schemapb.DataType) error {
+	var err error
+	dd.typeInitOnce.Do(func() {
+		switch pkType {
+		case schemapb.DataType_Int64:
+			dd.deletePks = NewInt64PrimaryKeys(dd.initCap)
+		case schemapb.DataType_VarChar:
+			dd.deletePks = NewVarcharPrimaryKeys(dd.initCap)
+		default:
+			err = merr.WrapErrServiceInternal("unsupported pk type", pkType.String())
+		}
+		dd.pkType = pkType
+	})
+	return err
+}
+
+func (dd *DeltaData) PkType() schemapb.DataType {
+	return dd.pkType
+}
+
+func (dd *DeltaData) DeletePks() PrimaryKeys {
+	return dd.deletePks
+}
+
+func (dd *DeltaData) DeleteTimestamps() []Timestamp {
+	return dd.deleteTimestamps
+}
+
+func (dd *DeltaData) Append(pk PrimaryKey, ts Timestamp) error {
+	dd.initPkType(pk.Type())
+	err := dd.deletePks.Append(pk)
+	if err != nil {
+		return err
+	}
+	dd.deleteTimestamps = append(dd.deleteTimestamps, ts)
+	dd.delRowCount++
+	return nil
+}
+
+func (dd *DeltaData) DeleteRowCount() int64 {
+	return dd.delRowCount
+}
+
+func (dd *DeltaData) MemSize() int64 {
+	var result int64
+	if dd.deletePks != nil {
+		result += dd.deletePks.Size()
+	}
+	result += int64(len(dd.deleteTimestamps) * 8)
+	return result
+}
+
+func NewDeltaData(cap int64) *DeltaData {
+	return &DeltaData{
+		deleteTimestamps: make([]Timestamp, 0, cap),
+		initCap:          cap,
+	}
+}
+
+func NewDeltaDataWithPkType(cap int64, pkType schemapb.DataType) (*DeltaData, error) {
+	result := NewDeltaData(cap)
+	err := result.initPkType(pkType)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 type DeleteLog struct {

@@ -23,6 +23,8 @@ import (
 	"math"
 	"sort"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -761,13 +763,17 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 }
 
 // Deserialize deserializes the deltalog blobs into DeleteData
-func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *DeleteData, err error) {
+func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *DeltaData, err error) {
 	if len(blobs) == 0 {
 		return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("blobs is empty")
 	}
 
+	rowNum := lo.SumBy(blobs, func(blob *Blob) int64 {
+		return blob.RowNum
+	})
+
 	var pid, sid UniqueID
-	result := &DeleteData{}
+	result := NewDeltaData(rowNum)
 
 	deserializeBlob := func(blob *Blob) error {
 		binlogReader, err := NewBinlogReader(blob.Value)
@@ -801,7 +807,10 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				if err != nil {
 					return err
 				}
-				result.Append(deleteLog.Pk, deleteLog.Ts)
+				err = result.Append(deleteLog.Pk, deleteLog.Ts)
+				if err != nil {
+					return err
+				}
 			}
 			return nil
 		}
