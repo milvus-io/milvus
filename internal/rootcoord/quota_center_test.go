@@ -393,6 +393,65 @@ func TestQuotaCenter(t *testing.T) {
 		}
 	})
 
+	t.Run("disk quota exhausted", func(t *testing.T) {
+		qc := mocks.NewMockQueryCoordClient(t)
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().
+			GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).
+			Return(nil, merr.ErrCollectionNotFound).
+			Maybe()
+
+		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
+		quotaCenter.collectionIDToDBID = typeutil.NewConcurrentMap[int64, int64]()
+		quotaCenter.collectionIDToDBID.Insert(1, 0)
+		quotaCenter.collectionIDToDBID.Insert(2, 0)
+
+		quotaCenter.writableCollections = map[int64]map[int64][]int64{
+			0: collectionIDToPartitionIDs,
+		}
+		quotaCenter.writableCollections[0][1] = append(quotaCenter.writableCollections[0][1], 1000)
+
+		err := quotaCenter.resetAllCurrentRates()
+		assert.NoError(t, err)
+
+		updateLimit := func(node *interalratelimitutil.RateLimiterNode, rateType internalpb.RateType, limit int64) {
+			limiter, ok := node.GetLimiters().Get(rateType)
+			if !ok {
+				return
+			}
+			limiter.SetLimit(Limit(limit))
+		}
+		assertLimit := func(node *interalratelimitutil.RateLimiterNode, rateType internalpb.RateType, expectValue int64) {
+			limiter, ok := node.GetLimiters().Get(rateType)
+			if !ok {
+				assert.FailNow(t, "limiter not found")
+				return
+			}
+			assert.EqualValues(t, expectValue, limiter.Limit())
+		}
+
+		updateLimit(quotaCenter.rateLimiter.GetRootLimiters(), internalpb.RateType_DMLInsert, 10)
+		updateLimit(quotaCenter.rateLimiter.GetRootLimiters(), internalpb.RateType_DMLDelete, 9)
+		updateLimit(quotaCenter.rateLimiter.GetDatabaseLimiters(0), internalpb.RateType_DMLInsert, 10)
+		updateLimit(quotaCenter.rateLimiter.GetDatabaseLimiters(0), internalpb.RateType_DMLDelete, 9)
+		updateLimit(quotaCenter.rateLimiter.GetCollectionLimiters(0, 1), internalpb.RateType_DMLInsert, 10)
+		updateLimit(quotaCenter.rateLimiter.GetCollectionLimiters(0, 1), internalpb.RateType_DMLDelete, 9)
+		updateLimit(quotaCenter.rateLimiter.GetCollectionLimiters(0, 2), internalpb.RateType_DMLInsert, 10)
+		updateLimit(quotaCenter.rateLimiter.GetCollectionLimiters(0, 2), internalpb.RateType_DMLDelete, 9)
+
+		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, true, []int64{0}, []int64{1}, nil)
+		assert.NoError(t, err)
+
+		assertLimit(quotaCenter.rateLimiter.GetRootLimiters(), internalpb.RateType_DMLInsert, 0)
+		assertLimit(quotaCenter.rateLimiter.GetRootLimiters(), internalpb.RateType_DMLDelete, 9)
+		assertLimit(quotaCenter.rateLimiter.GetDatabaseLimiters(0), internalpb.RateType_DMLInsert, 0)
+		assertLimit(quotaCenter.rateLimiter.GetDatabaseLimiters(0), internalpb.RateType_DMLDelete, 9)
+		assertLimit(quotaCenter.rateLimiter.GetCollectionLimiters(0, 1), internalpb.RateType_DMLInsert, 0)
+		assertLimit(quotaCenter.rateLimiter.GetCollectionLimiters(0, 1), internalpb.RateType_DMLDelete, 9)
+		assertLimit(quotaCenter.rateLimiter.GetCollectionLimiters(0, 2), internalpb.RateType_DMLInsert, 10)
+		assertLimit(quotaCenter.rateLimiter.GetCollectionLimiters(0, 2), internalpb.RateType_DMLDelete, 9)
+	})
+
 	t.Run("test calculateRates", func(t *testing.T) {
 		forceBak := Params.QuotaConfig.ForceDenyWriting.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.ForceDenyWriting.Key, "false")
@@ -854,7 +913,7 @@ func TestQuotaCenter(t *testing.T) {
 						b, _ := limiters.Get(internalpb.RateType_DMLUpsert)
 						assert.Equal(t, Limit(0), b.Limit())
 						c, _ := limiters.Get(internalpb.RateType_DMLDelete)
-						assert.Equal(t, Limit(0), c.Limit())
+						assert.NotEqual(t, Limit(0), c.Limit())
 					}
 				}
 			}
@@ -1473,14 +1532,20 @@ func TestQuotaCenterSuite(t *testing.T) {
 
 func TestUpdateLimiter(t *testing.T) {
 	t.Run("nil node", func(t *testing.T) {
-		updateLimiter(nil, nil, internalpb.RateScope_Database, dql)
+		updateLimiter(nil, nil, &LimiterRange{
+			RateScope: internalpb.RateScope_Collection,
+			OpType:    dql,
+		})
 	})
 
 	t.Run("normal op", func(t *testing.T) {
 		node := interalratelimitutil.NewRateLimiterNode(internalpb.RateScope_Collection)
 		node.GetLimiters().Insert(internalpb.RateType_DQLSearch, ratelimitutil.NewLimiter(5, 5))
 		newLimit := ratelimitutil.NewLimiter(10, 10)
-		updateLimiter(node, newLimit, internalpb.RateScope_Collection, dql)
+		updateLimiter(node, newLimit, &LimiterRange{
+			RateScope: internalpb.RateScope_Collection,
+			OpType:    dql,
+		})
 
 		searchLimit, _ := node.GetLimiters().Get(internalpb.RateType_DQLSearch)
 		assert.Equal(t, Limit(10), searchLimit.Limit())

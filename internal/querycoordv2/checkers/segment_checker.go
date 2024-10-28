@@ -192,13 +192,14 @@ func (c *SegmentChecker) getGrowingSegmentDiff(collectionID int64,
 			continue
 		}
 
+		nextTargetExist := c.targetMgr.IsNextTargetExist(collectionID)
 		nextTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(collectionID, meta.NextTarget)
 		currentTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(collectionID, meta.CurrentTarget)
 		currentTargetChannelMap := c.targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
 
 		// get segment which exist on leader view, but not on current target and next target
 		for _, segment := range view.GrowingSegments {
-			if !currentTargetSegmentIDs.Contain(segment.GetID()) && !nextTargetSegmentIDs.Contain(segment.GetID()) {
+			if !currentTargetSegmentIDs.Contain(segment.GetID()) && nextTargetExist && !nextTargetSegmentIDs.Contain(segment.GetID()) {
 				if channel, ok := currentTargetChannelMap[segment.InsertChannel]; ok {
 					timestampInSegment := segment.GetStartPosition().GetTimestamp()
 					timestampInTarget := channel.GetSeekPosition().GetTimestamp()
@@ -270,6 +271,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		return !existInDist
 	}
 
+	nextTargetExist := c.targetMgr.IsNextTargetExist(collectionID)
 	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(collectionID, meta.NextTarget)
 	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(collectionID, meta.CurrentTarget)
 
@@ -298,7 +300,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		_, existOnNext := nextTargetMap[segment.GetID()]
 
 		// l0 segment should be release with channel together
-		if !existOnNext && !existOnCurrent {
+		if !existOnNext && nextTargetExist && !existOnCurrent {
 			toRelease = append(toRelease, segment)
 		}
 	}

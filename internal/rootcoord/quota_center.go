@@ -109,6 +109,12 @@ var dqlRateTypes = typeutil.NewSet(
 	internalpb.RateType_DQLQuery,
 )
 
+type LimiterRange struct {
+	RateScope        internalpb.RateScope
+	OpType           opType
+	ExcludeRateTypes typeutil.Set[internalpb.RateType]
+}
+
 // QuotaCenter manages the quota and limitations of the whole cluster,
 // it receives metrics info from DataNodes, QueryNodes and Proxies, and
 // notifies Proxies to limit rate of requests from clients or reject
@@ -223,18 +229,19 @@ func initLimiter(limiterFunc func(internalpb.RateType) *ratelimitutil.Limiter, r
 	return rateLimiters
 }
 
-func updateLimiter(node *rlinternal.RateLimiterNode, limiter *ratelimitutil.Limiter, rateScope internalpb.RateScope, opType opType) {
+func updateLimiter(node *rlinternal.RateLimiterNode, limiter *ratelimitutil.Limiter, limiterRange *LimiterRange) {
 	if node == nil {
-		log.Warn("update limiter failed, node is nil", zap.Any("rateScope", rateScope), zap.Any("opType", opType))
+		log.Warn("update limiter failed, node is nil", zap.Any("rateScope", limiterRange.RateScope), zap.Any("opType", limiterRange.OpType))
 		return
 	}
 	limiters := node.GetLimiters()
-	getRateTypes(rateScope, opType).Range(func(rt internalpb.RateType) bool {
+	getRateTypes(limiterRange.RateScope, limiterRange.OpType).
+		Complement(limiterRange.ExcludeRateTypes).Range(func(rt internalpb.RateType) bool {
 		originLimiter, ok := limiters.Get(rt)
 		if !ok {
 			log.Warn("update limiter failed, limiter not found",
-				zap.Any("rateScope", rateScope),
-				zap.Any("opType", opType),
+				zap.Any("rateScope", limiterRange.RateScope),
+				zap.Any("opType", limiterRange.OpType),
 				zap.Any("rateType", rt))
 			return true
 		}
@@ -552,9 +559,17 @@ func (q *QuotaCenter) collectMetrics() error {
 // forceDenyWriting sets dml rates to 0 to reject all dml requests.
 func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster bool, dbIDs, collectionIDs []int64, col2partitionIDs map[int64][]int64) error {
 	log := log.Ctx(context.TODO()).WithRateGroup("quotaCenter.forceDenyWriting", 1.0, 60.0)
+	var excludeRange typeutil.Set[internalpb.RateType]
+	if errorCode == commonpb.ErrorCode_DiskQuotaExhausted {
+		excludeRange = typeutil.NewSet(internalpb.RateType_DMLDelete)
+	}
 	if cluster {
 		clusterLimiters := q.rateLimiter.GetRootLimiters()
-		updateLimiter(clusterLimiters, GetEarliestLimiter(), internalpb.RateScope_Cluster, dml)
+		updateLimiter(clusterLimiters, GetEarliestLimiter(), &LimiterRange{
+			RateScope:        internalpb.RateScope_Cluster,
+			OpType:           dml,
+			ExcludeRateTypes: excludeRange,
+		})
 		clusterLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, errorCode)
 	}
 
@@ -564,7 +579,11 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 			log.Warn("db limiter not found of db ID", zap.Int64("dbID", dbID))
 			continue
 		}
-		updateLimiter(dbLimiters, GetEarliestLimiter(), internalpb.RateScope_Database, dml)
+		updateLimiter(dbLimiters, GetEarliestLimiter(), &LimiterRange{
+			RateScope:        internalpb.RateScope_Database,
+			OpType:           dml,
+			ExcludeRateTypes: excludeRange,
+		})
 		dbLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, errorCode)
 	}
 
@@ -581,7 +600,11 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 				zap.Int64("collectionID", collectionID))
 			continue
 		}
-		updateLimiter(collectionLimiter, GetEarliestLimiter(), internalpb.RateScope_Collection, dml)
+		updateLimiter(collectionLimiter, GetEarliestLimiter(), &LimiterRange{
+			RateScope:        internalpb.RateScope_Collection,
+			OpType:           dml,
+			ExcludeRateTypes: excludeRange,
+		})
 		collectionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, errorCode)
 	}
 
@@ -600,7 +623,11 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 					zap.Int64("partitionID", partitionID))
 				continue
 			}
-			updateLimiter(partitionLimiter, GetEarliestLimiter(), internalpb.RateScope_Partition, dml)
+			updateLimiter(partitionLimiter, GetEarliestLimiter(), &LimiterRange{
+				RateScope:        internalpb.RateScope_Partition,
+				OpType:           dml,
+				ExcludeRateTypes: excludeRange,
+			})
 			partitionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, errorCode)
 		}
 	}
@@ -624,7 +651,10 @@ func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode, cluster boo
 		for dbID, collectionIDToPartIDs := range q.readableCollections {
 			for collectionID := range collectionIDToPartIDs {
 				collectionLimiter := q.rateLimiter.GetCollectionLimiters(dbID, collectionID)
-				updateLimiter(collectionLimiter, GetEarliestLimiter(), internalpb.RateScope_Collection, dql)
+				updateLimiter(collectionLimiter, GetEarliestLimiter(), &LimiterRange{
+					RateScope: internalpb.RateScope_Collection,
+					OpType:    dql,
+				})
 				collectionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, errorCode)
 				collectionIDs = append(collectionIDs, collectionID)
 			}
@@ -642,7 +672,10 @@ func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode, cluster boo
 				log.Warn("db limiter not found of db ID", zap.Int64("dbID", dbID))
 				continue
 			}
-			updateLimiter(dbLimiters, GetEarliestLimiter(), internalpb.RateScope_Database, dql)
+			updateLimiter(dbLimiters, GetEarliestLimiter(), &LimiterRange{
+				RateScope: internalpb.RateScope_Database,
+				OpType:    dql,
+			})
 			dbLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, errorCode)
 			mlog.RatedWarn(10, "QuotaCenter force to deny reading",
 				zap.Int64s("dbIDs", dbIDs),
