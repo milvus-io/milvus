@@ -311,6 +311,11 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
             ->StringViews();
     }
 
+    std::shared_ptr<Chunk>
+    GetChunk(int64_t chunk_id) const {
+        return chunks_[chunk_id];
+    }
+
     BufferView
     GetBatchBuffer(int64_t start_offset, int64_t length) override {
         if (start_offset < 0 || start_offset > num_rows_ ||

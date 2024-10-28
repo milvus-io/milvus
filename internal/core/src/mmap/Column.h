@@ -749,6 +749,30 @@ class SingleChunkVariableColumn : public SingleChunkColumnBase {
         return ViewType(pos + sizeof(uint32_t), size);
     }
 
+    int
+    findStringPosition(std::string_view target) {
+        int left = 0;
+        int right = num_rows_ - 1;  // `right` should be num_rows_ - 1
+        int result =
+            -1;  // Initialize result to store the first occurrence index
+
+        while (left <= right) {
+            int mid = left + (right - left) / 2;
+            std::string_view midString = this->RawAt(mid);
+            if (midString == target) {
+                result = mid;     // Store the index of match
+                right = mid - 1;  // Continue searching in the left half
+            } else if (midString < target) {
+                // midString < target
+                left = mid + 1;
+            } else {
+                // midString > target
+                right = mid - 1;
+            }
+        }
+        return result;
+    }
+
     std::string_view
     RawAt(const int i) const {
         return std::string_view((*this)[i]);

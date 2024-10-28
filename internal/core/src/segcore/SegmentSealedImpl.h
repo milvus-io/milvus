@@ -121,6 +121,10 @@ class SegmentSealedImpl : public SegmentSealed {
     std::vector<SegOffset>
     search_pk(const PkType& pk, int64_t insert_barrier) const;
 
+    template <typename Condition>
+    std::vector<SegOffset>
+    search_pk_internal(const PkType& pk, Condition condition) const;
+
     std::unique_ptr<DataArray>
     get_vector(FieldId field_id,
                const int64_t* ids,
