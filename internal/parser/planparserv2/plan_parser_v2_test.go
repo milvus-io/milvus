@@ -226,6 +226,7 @@ func TestExpr_BinaryArith(t *testing.T) {
 	exprStrs := []string{
 		`Int64Field % 10 == 9`,
 		`Int64Field % 10 != 9`,
+		`FloatField + 1.1 == 2.1`,
 		`Int64Field + 1.1 == 2.1`,
 		`A % 10 != 2`,
 		`Int8Field + 1 < 2`,

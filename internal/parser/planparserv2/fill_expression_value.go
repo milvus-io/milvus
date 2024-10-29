@@ -143,39 +143,43 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 	var err error
 	var ok bool
 
-	operand := expr.GetRightOperand()
-	if operand == nil || expr.GetOperandTemplateVariableName() != "" {
-		operand, ok = templateValues[expr.GetOperandTemplateVariableName()]
-		if !ok {
-			return fmt.Errorf("the right operand value of expression template variable name {%s} is not found", expr.GetOperandTemplateVariableName())
+	if expr.ArithOp == planpb.ArithOpType_ArrayLength {
+		dataType = schemapb.DataType_Int64
+	} else {
+		operand := expr.GetRightOperand()
+		if operand == nil || expr.GetOperandTemplateVariableName() != "" {
+			operand, ok = templateValues[expr.GetOperandTemplateVariableName()]
+			if !ok {
+				return fmt.Errorf("the right operand value of expression template variable name {%s} is not found", expr.GetOperandTemplateVariableName())
+			}
 		}
-	}
 
-	operandExpr := toValueExpr(operand)
-	lDataType, rDataType := expr.GetColumnInfo().GetDataType(), operandExpr.dataType
-	if typeutil.IsArrayType(expr.GetColumnInfo().GetDataType()) {
-		lDataType = expr.GetColumnInfo().GetElementType()
-	}
+		operandExpr := toValueExpr(operand)
+		lDataType, rDataType := expr.GetColumnInfo().GetDataType(), operandExpr.dataType
+		if typeutil.IsArrayType(expr.GetColumnInfo().GetDataType()) {
+			lDataType = expr.GetColumnInfo().GetElementType()
+		}
 
-	if err = checkValidModArith(expr.GetArithOp(), expr.GetColumnInfo().GetDataType(), expr.GetColumnInfo().GetElementType(),
-		rDataType, schemapb.DataType_None); err != nil {
-		return err
-	}
+		if err = checkValidModArith(expr.GetArithOp(), expr.GetColumnInfo().GetDataType(), expr.GetColumnInfo().GetElementType(),
+			rDataType, schemapb.DataType_None); err != nil {
+			return err
+		}
 
-	if operand.GetArrayVal() != nil {
-		return fmt.Errorf("can not comparisons array directly")
-	}
+		if operand.GetArrayVal() != nil {
+			return fmt.Errorf("can not comparisons array directly")
+		}
 
-	dataType, err = getTargetType(lDataType, rDataType)
-	if err != nil {
-		return err
-	}
+		dataType, err = getTargetType(lDataType, rDataType)
+		if err != nil {
+			return err
+		}
 
-	castedOperand, err := castValue(dataType, operand)
-	if err != nil {
-		return err
+		castedOperand, err := castValue(dataType, operand)
+		if err != nil {
+			return err
+		}
+		expr.RightOperand = castedOperand
 	}
-	expr.RightOperand = castedOperand
 
 	value := expr.GetValue()
 	if expr.GetValue() == nil || expr.GetValueTemplateVariableName() != "" {
