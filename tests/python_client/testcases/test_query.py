@@ -4520,6 +4520,9 @@ class TestQueryTextMatch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i : len(df)]
             )
+        # only if the collection is flushed, the inverted index ca be applied.
+        # growing segment may be not applied, although in strong consistency.
+        collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}},
@@ -5172,6 +5175,9 @@ class TestQueryTextMatch(TestcaseBase):
                 if i + batch_size < data_size
                 else data[i:data_size]
             )
+        # only if the collection is flushed, the inverted index ca be applied.
+        # growing segment may be not applied, although in strong consistency.
+        collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}},
