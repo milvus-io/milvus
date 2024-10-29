@@ -83,7 +83,8 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     BitsetView bv(bitset_data, total_row_count);
 
     auto query_ds = segcore::DataGen(schema, 1);
-    auto query_data = query_ds.get_col<float>(fakevec_id).data();
+    auto col_query_data = query_ds.get_col<float>(fakevec_id);
+    auto query_data = col_query_data.data();
     SearchResult search_result;
 
     query::SearchOnSealed(*schema,
