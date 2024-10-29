@@ -1,8 +1,6 @@
 package datacoord
 
 import (
-	"testing"
-
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 
