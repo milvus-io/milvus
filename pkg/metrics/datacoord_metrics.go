@@ -95,6 +95,7 @@ var (
 		}, []string{
 			databaseLabelName,
 			collectionIDLabelName,
+			collectionName,
 			segmentStateLabelName,
 		})
 
@@ -162,6 +163,7 @@ var (
 			Help:      "index files size of the segments",
 		}, []string{
 			databaseLabelName,
+			collectionName,
 			collectionIDLabelName,
 			segmentIDLabelName,
 		})
@@ -390,7 +392,7 @@ func CleanupDataCoordSegmentMetrics(dbName string, collectionID int64, segmentID
 		collectionIDLabelName: fmt.Sprint(collectionID),
 		segmentIDLabelName:    fmt.Sprint(segmentID),
 	})
-	DataCoordStoredIndexFilesSize.Delete(prometheus.Labels{
+	DataCoordStoredIndexFilesSize.DeletePartialMatch(prometheus.Labels{
 		databaseLabelName:     dbName,
 		collectionIDLabelName: fmt.Sprint(collectionID),
 		segmentIDLabelName:    fmt.Sprint(segmentID),
