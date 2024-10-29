@@ -19,7 +19,6 @@ package querynodev2
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -1475,7 +1474,7 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 
 	// control the execution batch parallel with P number
 	// maybe it shall be lower in case of heavy CPU usage may impacting search/query
-	pool := conc.NewPool[struct{}](runtime.GOMAXPROCS(0))
+	pool := segments.GetDeletePool()
 	futures := make([]*conc.Future[struct{}], 0, len(segs))
 	errSet := typeutil.NewConcurrentSet[int64]()
 
