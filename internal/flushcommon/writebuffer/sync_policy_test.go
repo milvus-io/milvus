@@ -50,27 +50,44 @@ func (s *SyncPolicySuite) TestSyncFullBuffer() {
 }
 
 func (s *SyncPolicySuite) TestSyncStalePolicy() {
-	policy := GetSyncStaleBufferPolicy(2 * time.Minute)
+	policy := GetSyncStaleBufferPolicy(2*time.Minute, 1*time.Minute)
 
 	buffer, err := newSegmentBuffer(100, s.collSchema)
 	s.Require().NoError(err)
+	l0buffer, err := newSegmentBuffer(200, s.collSchema)
+	s.Require().NoError(err)
+	l0buffer.deltaBuffer.rows = 1
+	l0buffer.deltaBuffer.startPos = &msgpb.MsgPosition{
+		Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+	}
 
-	ids := policy.SelectSegments([]*segmentBuffer{buffer}, tsoutil.ComposeTSByTime(time.Now(), 0))
+	buffers := []*segmentBuffer{
+		buffer,
+		l0buffer,
+	}
+
+	ids := policy.SelectSegments(buffers, tsoutil.ComposeTSByTime(time.Now(), 0))
 	s.Equal(0, len(ids), "empty buffer shall not be synced")
 
 	buffer.insertBuffer.startPos = &msgpb.MsgPosition{
 		Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-time.Minute*3), 0),
 	}
 
-	ids = policy.SelectSegments([]*segmentBuffer{buffer}, tsoutil.ComposeTSByTime(time.Now(), 0))
+	ids = policy.SelectSegments(buffers, tsoutil.ComposeTSByTime(time.Now(), 0))
 	s.ElementsMatch([]int64{100}, ids)
 
 	buffer.insertBuffer.startPos = &msgpb.MsgPosition{
 		Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-time.Minute), 0),
 	}
 
-	ids = policy.SelectSegments([]*segmentBuffer{buffer}, tsoutil.ComposeTSByTime(time.Now(), 0))
+	ids = policy.SelectSegments(buffers, tsoutil.ComposeTSByTime(time.Now(), 0))
 	s.Equal(0, len(ids), "")
+
+	l0buffer.deltaBuffer.startPos = &msgpb.MsgPosition{
+		Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-time.Minute*2), 0),
+	}
+	ids = policy.SelectSegments(buffers, tsoutil.ComposeTSByTime(time.Now(), 0))
+	s.ElementsMatch([]int64{200}, ids)
 }
 
 func (s *SyncPolicySuite) TestSyncDroppedPolicy() {
