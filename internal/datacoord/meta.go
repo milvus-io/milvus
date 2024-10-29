@@ -1745,6 +1745,10 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 	if pos == nil || pos.GetMsgID() == nil {
 		return fmt.Errorf("channelCP is nil, vChannel=%s", vChannel)
 	}
+	if err := tombstone.CollectionTombstone().CheckIfVChannelDropped(vChannel); err != nil {
+		log.Warn("channel has been dropped, ignore check point update", zap.String("vChannel", vChannel), zap.Any("pos", pos))
+		return nil
+	}
 
 	m.channelCPs.Lock()
 	defer m.channelCPs.Unlock()
@@ -1801,6 +1805,11 @@ func (m *meta) UpdateChannelCheckpoints(positions []*msgpb.MsgPosition) error {
 		}
 		vChannel := pos.GetChannelName()
 		oldPosition, ok := m.channelCPs.checkpoints[vChannel]
+
+		if err := tombstone.CollectionTombstone().CheckIfVChannelDropped(vChannel); err != nil {
+			log.Warn("channel has been dropped, ignore check point updates", zap.String("vChannel", vChannel), zap.Any("pos", pos))
+			return false
+		}
 		return !ok || oldPosition.Timestamp < pos.Timestamp
 	})
 	err := m.catalog.SaveChannelCheckpoints(m.ctx, toUpdates)

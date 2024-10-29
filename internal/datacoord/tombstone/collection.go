@@ -28,11 +28,12 @@ type (
 // It is used to perform drop operation atomic and idempotent between coords.
 // TODO: It can be removed after we have a global unique coordination mechanism (merge all coord into one).
 type collectionTombstoneImpl struct {
-	mu         sync.Mutex
-	collection *typeutil.ConcurrentMap[int64, *datapb.CollectionTombstoneImpl]
-	partition  *typeutil.ConcurrentMap[int64, *datapb.PartitionTombstoneImpl]
-	catalog    metastore.DataCoordCatalog
-	notifier   *syncutil.AsyncTaskNotifier[struct{}]
+	mu              sync.Mutex
+	collection      *typeutil.ConcurrentMap[int64, *datapb.CollectionTombstoneImpl]
+	partition       *typeutil.ConcurrentMap[int64, *datapb.PartitionTombstoneImpl]
+	virtualChannels *typeutil.ConcurrentMap[string, int64]
+	catalog         metastore.DataCoordCatalog
+	notifier        *syncutil.AsyncTaskNotifier[struct{}]
 }
 
 // recoverCollectionTombstone recovers the collection tombstone from the metastore.
@@ -43,11 +44,15 @@ func recoverCollectionTombstone(ctx context.Context, catalog metastore.DataCoord
 	}
 	collectionTombstones := typeutil.NewConcurrentMap[int64, *datapb.CollectionTombstoneImpl]()
 	partitionTombstones := typeutil.NewConcurrentMap[int64, *datapb.PartitionTombstoneImpl]()
+	virtualChannels := typeutil.NewConcurrentMap[string, int64]()
 
 	for _, tombstone := range tombstones {
 		switch tombstone := tombstone.Tombstone.Tombstone.(type) {
 		case *datapb.CollectionTombstone_Collection:
 			collectionTombstones.Insert(tombstone.Collection.GetCollectionId(), tombstone.Collection)
+			for _, vchannel := range tombstone.Collection.GetVchannels() {
+				virtualChannels.Insert(vchannel, tombstone.Collection.GetCollectionId())
+			}
 		case *datapb.CollectionTombstone_Partition:
 			partitionTombstones.Insert(tombstone.Partition.GetPartitionId(), tombstone.Partition)
 		default:
@@ -56,11 +61,12 @@ func recoverCollectionTombstone(ctx context.Context, catalog metastore.DataCoord
 	}
 
 	ct := &collectionTombstoneImpl{
-		mu:         sync.Mutex{},
-		collection: collectionTombstones,
-		partition:  partitionTombstones,
-		catalog:    catalog,
-		notifier:   syncutil.NewAsyncTaskNotifier[struct{}](),
+		mu:              sync.Mutex{},
+		collection:      collectionTombstones,
+		partition:       partitionTombstones,
+		virtualChannels: virtualChannels,
+		catalog:         catalog,
+		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
 	}
 	go ct.background()
 	return ct, nil
@@ -88,6 +94,9 @@ func (dt *collectionTombstoneImpl) MarkCollectionAsDropping(ctx context.Context,
 		return err
 	}
 	dt.collection.Insert(collection.GetCollectionId(), collection)
+	for _, vchannel := range collection.GetVchannels() {
+		dt.virtualChannels.Insert(vchannel, collection.GetCollectionId())
+	}
 	return nil
 }
 
@@ -126,6 +135,16 @@ func (dt *collectionTombstoneImpl) CheckIfPartitionDropped(collectionID int64, p
 	}
 	if _, ok := dt.partition.Get(partitionID); ok {
 		return merr.WrapErrPartitionDropped(partitionID)
+	}
+	return nil
+}
+
+func (dt *collectionTombstoneImpl) CheckIfVChannelDropped(vchannel string) error {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+
+	if collectionID, ok := dt.virtualChannels.Get(vchannel); ok {
+		return merr.WrapErrCollectionDropped(collectionID)
 	}
 	return nil
 }
@@ -184,6 +203,9 @@ func (dt *collectionTombstoneImpl) removeCollectionTombstone(ctx context.Context
 
 	if err := dt.catalog.DropCollectionTombstone(ctx, newCollectionTombstone(tombstone)); err != nil {
 		return err
+	}
+	for _, vchannel := range tombstone.GetVchannels() {
+		dt.virtualChannels.Remove(vchannel)
 	}
 	dt.collection.Remove(collectionID)
 	return nil

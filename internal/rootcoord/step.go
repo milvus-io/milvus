@@ -600,7 +600,7 @@ func newConfirmGCStep(core *Core, collectionID, partitionID UniqueID) *confirmGC
 		baseStep:          baseStep{core: core},
 		collectionID:      collectionID,
 		partitionID:       partitionID,
-		lastScheduledTime: time.Now(),
+		lastScheduledTime: time.Unix(0, 0),
 	}
 }
 
