@@ -72,8 +72,10 @@ class TestCreateIndex(TestBase):
                              "metricType": f"{metric_type}"}]
         }
         if index_type == "HNSW":
+            payload["indexParams"][0]["indexType"]="HNSW"
             payload["indexParams"][0]["params"] = {"index_type": "HNSW", "M": "16", "efConstruction": "200"}
         if index_type == "AUTOINDEX":
+            payload["indexParams"][0]["indexType"]="AUTOINDEX"
             payload["indexParams"][0]["params"] = {"index_type": "AUTOINDEX"}
         rsp = self.index_client.index_create(payload)
         assert rsp['code'] == 0
@@ -89,8 +91,8 @@ class TestCreateIndex(TestBase):
         for i in range(len(expected_index)):
             assert expected_index[i]['fieldName'] == actual_index[i]['fieldName']
             assert expected_index[i]['indexName'] == actual_index[i]['indexName']
+            assert expected_index[i]['indexType'] == actual_index[i]['indexType']
             assert expected_index[i]['metricType'] == actual_index[i]['metricType']
-            assert expected_index[i]["params"]['index_type'] == actual_index[i]['indexType']
 
         # drop index
         for i in range(len(actual_index)):
@@ -152,7 +154,7 @@ class TestCreateIndex(TestBase):
         # create index
         payload = {
             "collectionName": name,
-            "indexParams": [{"fieldName": "word_count", "indexName": "word_count_vector",
+            "indexParams": [{"fieldName": "word_count", "indexName": "word_count_vector","indexType": "INVERTED",
                              "params": {"index_type": "INVERTED"}}]
         }
         rsp = self.index_client.index_create(payload)
@@ -169,7 +171,7 @@ class TestCreateIndex(TestBase):
         for i in range(len(expected_index)):
             assert expected_index[i]['fieldName'] == actual_index[i]['fieldName']
             assert expected_index[i]['indexName'] == actual_index[i]['indexName']
-            assert expected_index[i]['params']['index_type'] == actual_index[i]['indexType']
+            assert expected_index[i]['indexType'] == actual_index[i]['indexType']
 
     @pytest.mark.parametrize("index_type", ["BIN_FLAT", "BIN_IVF_FLAT"])
     @pytest.mark.parametrize("metric_type", ["JACCARD", "HAMMING"])
@@ -220,7 +222,7 @@ class TestCreateIndex(TestBase):
         index_name = "binary_vector_index"
         payload = {
             "collectionName": name,
-            "indexParams": [{"fieldName": "binary_vector", "indexName": index_name, "metricType": metric_type,
+            "indexParams": [{"fieldName": "binary_vector", "indexName": index_name, "metricType": metric_type,"indexType": index_type,
                              "params": {"index_type": index_type}}]
         }
         if index_type == "BIN_IVF_FLAT":
@@ -239,7 +241,7 @@ class TestCreateIndex(TestBase):
         for i in range(len(expected_index)):
             assert expected_index[i]['fieldName'] == actual_index[i]['fieldName']
             assert expected_index[i]['indexName'] == actual_index[i]['indexName']
-            assert expected_index[i]['params']['index_type'] == actual_index[i]['indexType']
+            assert expected_index[i]['indexType'] == actual_index[i]['indexType']
 
 
 @pytest.mark.L1
