@@ -1019,8 +1019,8 @@ func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fie
 }
 
 func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.DeltaData) error {
-	pks, tss := deltaData.DeletePks, deltaData.DeleteTimestamps
-	rowNum := deltaData.DelRowCount
+	pks, tss := deltaData.DeletePks(), deltaData.DeleteTimestamps()
+	rowNum := deltaData.DeleteRowCount()
 
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
