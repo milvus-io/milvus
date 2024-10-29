@@ -92,7 +92,7 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
                           search_info,
                           query_data,
                           1,
-                          chunk_size * chunk_num,
+                          total_row_count,
                           bv,
                           search_result);
 
@@ -103,6 +103,33 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
         }
     }
     // check all rows are returned
+    ASSERT_EQ(total_row_count, offsets.size());
+    for (int i = 0; i < total_row_count; i++) {
+        ASSERT_TRUE(offsets.find(i) != offsets.end());
+    }
+
+    // test with group by
+    search_info.group_by_field_id_ = fakevec_id;
+    std::fill(bitset_data, bitset_data + bitset_size, 0);
+    query::SearchOnSealed(*schema,
+                          column,
+                          search_info,
+                          query_data,
+                          1,
+                          total_row_count,
+                          bv,
+                          search_result);
+
+    ASSERT_EQ(1, search_result.vector_iterators_->size());
+
+    auto iter = search_result.vector_iterators_->at(0);
+    // collect all offsets
+    offsets.clear();
+    while (iter->HasNext()) {
+        auto [offset, distance] = iter->Next().value();
+        offsets.insert(offset);
+    }
+
     ASSERT_EQ(total_row_count, offsets.size());
     for (int i = 0; i < total_row_count; i++) {
         ASSERT_TRUE(offsets.find(i) != offsets.end());

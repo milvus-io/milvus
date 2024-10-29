@@ -165,6 +165,11 @@ class ChunkedColumnBase : public ColumnBase {
         return num_rows_until_chunk_[chunk_id];
     }
 
+    const std::vector<int64_t>&
+    GetNumRowsUntilChunk() const {
+        return num_rows_until_chunk_;
+    }
+
  protected:
     bool nullable_{false};
     size_t num_rows_{0};
