@@ -70,9 +70,9 @@ func NewClient(ctx context.Context) (types.RootCoordClient, error) {
 	client.grpcClient.SetGetAddrFunc(client.getRootCoordAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetSession(sess)
-	if config.InternalTLSEnabled.GetAsBool() {
+	if Params.InternalTLSCfg.InternalTLSEnabled.GetAsBool() {
 		client.grpcClient.EnableEncryption()
-		cp, err := utils.CreateCertPoolforClient(Params.RootCoordGrpcClientCfg.InternalTLSCaPemPath.GetValue(), "RootCoord")
+		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "RootCoord")
 		if err != nil {
 			log.Error("Failed to create cert pool for RootCoord client")
 			return nil, err

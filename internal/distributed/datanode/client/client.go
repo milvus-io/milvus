@@ -72,9 +72,9 @@ func NewClient(ctx context.Context, addr string, serverID int64) (types.DataNode
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetNodeID(serverID)
 	client.grpcClient.SetSession(sess)
-	if config.InternalTLSEnabled.GetAsBool() {
+	if Params.InternalTLSCfg.InternalTLSEnabled.GetAsBool() {
 		client.grpcClient.EnableEncryption()
-		cp, err := utils.CreateCertPoolforClient(Params.DataNodeGrpcClientCfg.InternalTLSCaPemPath.GetValue(), "DataNode")
+		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "DataNode")
 		if err != nil {
 			log.Error("Failed to create cert pool for DataNode client")
 			return nil, err

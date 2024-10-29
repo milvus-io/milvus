@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
@@ -200,7 +201,9 @@ func (s *Server) startGrpcLoop() {
 				}
 				return s.serverID.Load()
 			}),
-		))}
+		)),
+		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
+	}
 
 	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("QueryNode"))
 	s.grpcServer = grpc.NewServer(grpcOpts...)

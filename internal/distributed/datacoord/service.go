@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -199,7 +200,9 @@ func (s *Server) startGrpcLoop() {
 				return s.serverID.Load()
 			}),
 			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
-		))}
+		)),
+		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
+	}
 
 	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("DataCoord"))
 	s.grpcServer = grpc.NewServer(grpcOpts...)

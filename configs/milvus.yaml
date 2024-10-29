@@ -136,11 +136,17 @@ minio:
   # aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/latest/attach-an-instance-ram-role
   useIAM: false
   # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
+  # Cloud Provider of Google Cloud Storage. Supports: "gcpnative".
   # You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
   # You can use "gcp" for other cloud provider supports S3 API with signature v2
   # You can use "aliyun" for other cloud provider uses virtual host style bucket
+  # You can use "gcpnative" for the Google Cloud Platform provider. Uses service account credentials
+  # for authentication.
   # When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now
   cloudProvider: aws
+  # The JSON content contains the gcs service account credentials.
+  # Used only for the "gcpnative" cloud provider.
+  gcpCredentialJSON: 
   # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
   # Leave it empty if you want to use AWS default endpoint
   iamEndpoint: 
@@ -164,6 +170,7 @@ mq:
   enablePursuitMode: true # Default value: "true"
   pursuitLag: 10 # time tick lag threshold to enter pursuit mode, in seconds
   pursuitBufferSize: 8388608 # pursuit mode buffer size in bytes
+  pursuitBufferTime: 60 # pursuit mode buffer time in seconds
   mqBufSize: 16 # MQ client consumer buffer length
   dispatcher:
     mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
@@ -181,9 +188,9 @@ pulsar:
   port: 6650 # Port of Pulsar service.
   webport: 80 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
   # The maximum size of each message in Pulsar. Unit: Byte.
-  # By default, Pulsar can transmit at most 5 MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
+  # By default, Pulsar can transmit at most 2MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
   # If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
-  maxMessageSize: 5242880
+  maxMessageSize: 2097152
   # Pulsar can be provisioned for specific tenants with appropriate capacity allocated to the tenant.
   # To share a Pulsar instance among multiple Milvus instances, you can change this to an Pulsar tenant rather than the default one for each Milvus instance before you start them. However, if you do not want Pulsar multi-tenancy, you are advised to change msgChannel.chanNamePrefix.cluster to the different value.
   tenant: public
@@ -418,7 +425,11 @@ queryNode:
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
-    growingMmapEnabled: false # Enable mmap for using in growing raw data
+    chunkCache: true # Enable mmap for chunk cache (raw vector retrieving).
+    # Enable memory mapping (mmap) to optimize the handling of growing raw data. 
+    # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
+    # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
+    growingMmapEnabled: false
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
   lazyload:
@@ -428,6 +439,7 @@ queryNode:
     requestResourceRetryInterval: 2000 # retry interval in milliseconds for waiting request resource for lazy load, 2s by default
     maxRetryTimes: 1 # max retry times for lazy load, 1 by default
     maxEvictPerRetry: 1 # max evict count for lazy load, 1 by default
+  indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   grouping:
     enabled: true
     maxNQ: 1000
@@ -462,7 +474,8 @@ queryNode:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
   enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
-  queryStreamBatchSize: 4194304 # return batch size of stream query
+  queryStreamBatchSize: 4194304 # return min batch size of stream query
+  queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
   bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool
@@ -661,8 +674,9 @@ dataNode:
     maxConcurrentTaskNum: 16 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
     readBufferSizeInMB: 16 # The data block size (in MB) read from chunk manager by the datanode during import.
+    maxTaskSlotNum: 16 # The maximum number of slots occupied by each import/pre-import task.
   compaction:
-    levelZeroBatchMemoryRatio: 0.05 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
+    levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
     useMergeSort: false # Whether to enable mergeSort mode when performing mixCompaction.
   gracefulStopTimeout: 1800 # seconds. force stop node without graceful stop
@@ -771,10 +785,9 @@ tls:
   caPemPath: configs/cert/ca.pem
 
 internaltls:
-      serverPemPath: configs/cert1/server.pem
-      serverKeyPath: configs/cert1/server.key
-      caPemPath: configs/cert1/ca.pem
-      internalAdd: #pod internal address
+  serverPemPath: #path to server.pem
+  serverKeyPath: #path to server.key
+  caPemPath: #path to ca.key
 
 common:
   defaultPartitionName: _default # Name of the default partition when a collection is created
@@ -796,7 +809,6 @@ common:
     BeamWidthRatio: 4
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
-  bitmapIndexCardinalityBound: 500
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
@@ -884,6 +896,7 @@ quotaAndLimits:
     maxCollectionNumPerDB: 65536 # Maximum number of collections per database.
     maxInsertSize: -1 # maximum size of a single insert request, in bytes, -1 means no limit
     maxResourceGroupNumOfQueryNode: 1024 # maximum number of resource groups of query nodes
+    maxGroupSize: 10 # maximum size for one single group when doing search group by
   ddl:
     enabled: false # Whether DDL request throttling is enabled.
     # Maximum number of collection-related DDL requests per second.
@@ -1035,37 +1048,20 @@ quotaAndLimits:
       diskQuotaPerPartition: -1 # MB, (0, +inf), default no limit
     l0SegmentsRowCountProtection:
       enabled: false # switch to enable l0 segment row count quota
-      lowWaterLevel: 32768 # l0 segment row count quota, low water level
-      highWaterLevel: 65536 # l0 segment row count quota, low water level
+      lowWaterLevel: 30000000 # l0 segment row count quota, low water level
+      highWaterLevel: 50000000 # l0 segment row count quota, high water level
+    deleteBufferRowCountProtection:
+      enabled: false # switch to enable delete buffer row count quota
+      lowWaterLevel: 32768 # delete buffer row count quota, low water level
+      highWaterLevel: 65536 # delete buffer row count quota, high water level
+    deleteBufferSizeProtection:
+      enabled: false # switch to enable delete buffer size quota
+      lowWaterLevel: 134217728 # delete buffer size quota, low water level
+      highWaterLevel: 268435456 # delete buffer size quota, high water level
   limitReading:
     # forceDeny false means dql requests are allowed (except for some
     # specific conditions, such as collection has been dropped), true means always reject all dql requests.
     forceDeny: false
-    queueProtection:
-      enabled: false
-      # nqInQueueThreshold indicated that the system was under backpressure for Search/Query path.
-      # If NQ in any QueryNode's queue is greater than nqInQueueThreshold, search&query rates would gradually cool off
-      # until the NQ in queue no longer exceeds nqInQueueThreshold. We think of the NQ of query request as 1.
-      # int, default no limit
-      nqInQueueThreshold: -1
-      # queueLatencyThreshold indicated that the system was under backpressure for Search/Query path.
-      # If dql latency of queuing is greater than queueLatencyThreshold, search&query rates would gradually cool off
-      # until the latency of queuing no longer exceeds queueLatencyThreshold.
-      # The latency here refers to the averaged latency over a period of time.
-      # milliseconds, default no limit
-      queueLatencyThreshold: -1
-    resultProtection:
-      enabled: false
-      # maxReadResultRate indicated that the system was under backpressure for Search/Query path.
-      # If dql result rate is greater than maxReadResultRate, search&query rates would gradually cool off
-      # until the read result rate no longer exceeds maxReadResultRate.
-      # MB/s, default no limit
-      maxReadResultRate: -1
-      maxReadResultRatePerDB: -1
-      maxReadResultRatePerCollection: -1
-    # colOffSpeed is the speed of search&query rates cool off.
-    # (0, 1]
-    coolOffSpeed: 0.9
 
 trace:
   # trace exporter type, default is stdout,

@@ -366,7 +366,9 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 				}
 				return s.serverID.Load()
 			}),
-		))}
+		)),
+		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
+	}
 
 	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("Proxy"))
 	s.grpcInternalServer = grpc.NewServer(grpcOpts...)

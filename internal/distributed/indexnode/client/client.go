@@ -73,9 +73,9 @@ func NewClient(ctx context.Context, addr string, nodeID int64, encryption bool) 
 	if encryption {
 		client.grpcClient.EnableEncryption()
 	}
-	if config.InternalTLSEnabled.GetAsBool() {
+	if Params.InternalTLSCfg.InternalTLSEnabled.GetAsBool() {
 		client.grpcClient.EnableEncryption()
-		cp, err := utils.CreateCertPoolforClient(Params.IndexNodeGrpcClientCfg.InternalTLSCaPemPath.GetValue(), "IndexNode")
+		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "IndexNode")
 		if err != nil {
 			log.Error("Failed to create cert pool for IndexNode client")
 			return nil, err

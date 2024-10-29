@@ -70,9 +70,9 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.ProxyClien
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetNodeID(nodeID)
 	client.grpcClient.SetSession(sess)
-	if config.InternalTLSEnabled.GetAsBool() {
+	if Params.InternalTLSCfg.InternalTLSEnabled.GetAsBool() {
 		client.grpcClient.EnableEncryption()
-		cp, err := utils.CreateCertPoolforClient(Params.ProxyGrpcServerCfg.InternalTLSCaPemPath.GetValue(), "Proxy")
+		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "Proxy")
 		if err != nil {
 			log.Error("Failed to create cert pool for Proxy client")
 			return nil, err

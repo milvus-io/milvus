@@ -2,8 +2,8 @@ package utils
 
 import (
 	"crypto/x509"
+	"errors"
 	"os"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -49,31 +49,11 @@ func getTLSCreds(certFile string, keyFile string, nodeType string) credentials.T
 
 func EnableInternalTLS(NodeType string) grpc.ServerOption {
 	var Params *paramtable.ComponentParam = paramtable.Get()
-	var serverCfg *paramtable.GrpcServerConfig
-	switch strings.ToLower(NodeType) {
-	case "datacoord":
-		serverCfg = &Params.DataCoordGrpcServerCfg
-	case "datanode":
-		serverCfg = &Params.DataNodeGrpcServerCfg
-	case "indexnode":
-		serverCfg = &Params.IndexNodeGrpcServerCfg
-	case "proxy":
-		serverCfg = &Params.ProxyGrpcServerCfg
-	case "querycoord":
-		serverCfg = &Params.QueryCoordGrpcServerCfg
-	case "querynode":
-		serverCfg = &Params.QueryNodeGrpcServerCfg
-	case "rootcoord":
-		serverCfg = &Params.RootCoordGrpcServerCfg
-	default:
-		log.Error("Unknown NodeType")
-		return grpc.Creds(nil)
-	}
-	certFile := serverCfg.InternalTLSServerPemPath.GetValue()
-	keyFile := serverCfg.InternalTLSServerKeyPath.GetValue()
-	internaltlsEnabled := serverCfg.InternalTLSEnabled.GetAsBool()
+	certFile := Params.InternalTLSCfg.InternalTLSServerPemPath.GetValue()
+	keyFile := Params.InternalTLSCfg.InternalTLSServerKeyPath.GetValue()
+	internaltlsEnabled := Params.InternalTLSCfg.InternalTLSEnabled.GetAsBool()
 
-	log.Info("internal TLS Enabled", zap.Bool("value", internaltlsEnabled))
+	log.Info("Internal TLS Enabled", zap.Bool("value", internaltlsEnabled))
 
 	if internaltlsEnabled {
 		creds := getTLSCreds(certFile, keyFile, NodeType)
@@ -95,7 +75,7 @@ func CreateCertPoolforClient(caFile string, nodeType string) (*x509.CertPool, er
 
 	if !certPool.AppendCertsFromPEM(b) {
 		log.Error("credentials: failed to append certificates")
-		return nil, err // Cert pool is invalid, return nil and the error
+		return nil, errors.New("failed to append certificates") // Cert pool is invalid, return nil and the error
 	}
 	return certPool, err
 }
