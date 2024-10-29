@@ -468,6 +468,46 @@ func TestDatabaseWrapper(t *testing.T) {
 	}
 }
 
+func TestCreateIndex(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	postTestCases := []requestBodyTestCase{}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(IndexCategory, CreateAction)
+	// the previous format
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2", "params": {"index_type": "L2", "nlist": 10}}]}`),
+	})
+	// the current format
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2", "indexType": "L2", "params":{"nlist": 10}}]}`),
+	})
+
+	for _, testcase := range postTestCases {
+		t.Run("post"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			}
+		})
+	}
+}
+
 func TestCreateCollection(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
