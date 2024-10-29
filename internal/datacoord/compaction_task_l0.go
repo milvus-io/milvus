@@ -296,17 +296,9 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	}))
 
 	if len(sealedSegments) == 0 {
-		// TO-DO fast finish l0 segment, just drop l0 segment
+		// TODO fast finish l0 segment, just drop l0 segment
 		log.Info("l0Compaction available non-L0 Segments is empty ")
 		return nil, errors.Errorf("Selected zero L1/L2 segments for the position=%v", taskProto.GetPos())
-	}
-
-	for _, segInfo := range sealedSegments {
-		// TODO should allow parallel executing of l0 compaction
-		if segInfo.isCompacting {
-			log.Warn("l0CompactionTask candidate segment is compacting", zap.Int64("segmentID", segInfo.GetID()))
-			return nil, merr.WrapErrCompactionPlanConflict(fmt.Sprintf("segment %d is compacting", segInfo.GetID()))
-		}
 	}
 
 	sealedSegBinlogs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {

@@ -1081,8 +1081,23 @@ func TestHasCollectionTask(t *testing.T) {
 	err = task.PreExecute(ctx)
 	assert.Error(t, err)
 
-	rc.updateState(commonpb.StateCode_Abnormal)
 	task.CollectionName = collectionName
+
+	// invalidate collection cache, trigger rootcoord rpc
+	globalMetaCache.RemoveCollection(ctx, dbName, collectionName)
+
+	// rc return collection not found error
+	rc.describeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		return nil, merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName)
+	}
+	err = task.PreExecute(ctx)
+	assert.NoError(t, err)
+	err = task.Execute(ctx)
+	assert.NoError(t, err)
+	assert.False(t, task.result.GetValue())
+
+	// rootcoord failed to get response
+	rc.updateState(commonpb.StateCode_Abnormal)
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
 	err = task.Execute(ctx)

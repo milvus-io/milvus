@@ -551,7 +551,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
 		// first page for iteration, need to set up sessionTs for iterator
-		t.result.SessionTs = t.BeginTs()
+		t.result.SessionTs = t.GetGuaranteeTimestamp()
 	}
 	log.Debug("Query PostExecute done")
 	return nil
