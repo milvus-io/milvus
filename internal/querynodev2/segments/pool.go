@@ -46,6 +46,9 @@ var (
 	warmupPool atomic.Pointer[conc.Pool[any]]
 	warmupOnce sync.Once
 
+	deletePool     atomic.Pointer[conc.Pool[struct{}]]
+	deletePoolOnce sync.Once
+
 	bfPool      atomic.Pointer[conc.Pool[any]]
 	bfApplyOnce sync.Once
 )
@@ -131,6 +134,13 @@ func initBFApplyPool() {
 	})
 }
 
+func initDeletePool() {
+	deletePoolOnce.Do(func() {
+		pool := conc.NewPool[struct{}](runtime.GOMAXPROCS(0))
+		deletePool.Store(pool)
+	})
+}
+
 // GetSQPool returns the singleton pool instance for search/query operations.
 func GetSQPool() *conc.Pool[any] {
 	initSQPool()
@@ -156,6 +166,11 @@ func GetWarmupPool() *conc.Pool[any] {
 func GetBFApplyPool() *conc.Pool[any] {
 	initBFApplyPool()
 	return bfPool.Load()
+}
+
+func GetDeletePool() *conc.Pool[struct{}] {
+	initDeletePool()
+	return deletePool.Load()
 }
 
 func ResizeSQPool(evt *config.Event) {

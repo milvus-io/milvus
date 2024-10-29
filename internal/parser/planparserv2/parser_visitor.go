@@ -826,6 +826,7 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 				Op:    planpb.BinaryExpr_LogicalOr,
 			},
 		},
+		IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
 	}
 
 	return &ExprWithType{
@@ -874,6 +875,7 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 				Op:    planpb.BinaryExpr_LogicalAnd,
 			},
 		},
+		IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
 	}
 
 	return &ExprWithType{
