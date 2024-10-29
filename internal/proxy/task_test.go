@@ -1095,6 +1095,7 @@ func TestHasCollectionTask(t *testing.T) {
 	err = task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.False(t, task.result.GetValue())
+	assert.NotNil(t, task.result.GetStatus())
 
 	// rootcoord failed to get response
 	rc.updateState(commonpb.StateCode_Abnormal)

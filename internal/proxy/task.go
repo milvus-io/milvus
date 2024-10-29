@@ -564,10 +564,13 @@ func (t *hasCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *hasCollectionTask) Execute(ctx context.Context) error {
+	t.result = &milvuspb.BoolResponse{
+		Status: merr.Success(),
+	}
 	_, err := globalMetaCache.GetCollectionID(ctx, t.HasCollectionRequest.GetDbName(), t.HasCollectionRequest.GetCollectionName())
-	t.result = &milvuspb.BoolResponse{}
 	// error other than
 	if err != nil && !errors.Is(err, merr.ErrCollectionNotFound) {
+		t.result.Status = merr.Status(err)
 		return err
 	}
 	// if collection not nil, means error is ErrCollectionNotFound, result is false
