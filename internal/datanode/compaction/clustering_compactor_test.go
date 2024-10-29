@@ -277,8 +277,9 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 
 	// 8 + 8 + 8 + 7 + 8 = 39
 	// 39*1024 = 39936
+	// plus buffer on null bitsets etc., let's make it 45000
 	// writer will automatically flush after 1024 rows.
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "39935")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "45000")
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
 
 	compactionResult, err := s.task.Compact()
