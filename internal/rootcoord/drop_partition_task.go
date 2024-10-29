@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type dropPartitionTask struct {
@@ -64,7 +65,7 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 	if partID == common.InvalidPartitionID {
 		log.Warn("drop an non-existent partition", zap.String("collection", t.Req.GetCollectionName()), zap.String("partition", t.Req.GetPartitionName()))
 		// make dropping partition idempotent.
-		return nil
+		return merr.ErrPartitionNotFound
 	}
 
 	redoTask := newBaseRedoTask(t.core.stepExecutor)

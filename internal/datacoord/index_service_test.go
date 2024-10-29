@@ -2185,7 +2185,7 @@ func TestServer_DropIndex(t *testing.T) {
 		}
 		resp, err := s.DropIndex(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_IndexNotExist, resp.GetErrorCode())
 	})
 }
 

@@ -60,7 +60,7 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 	if errors.Is(err, merr.ErrCollectionNotFound) {
 		// make dropping collection idempotent.
 		log.Warn("drop non-existent collection", zap.String("collection", t.Req.GetCollectionName()))
-		return nil
+		return merr.ErrCollectionNotFound
 	}
 
 	if err != nil {

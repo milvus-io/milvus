@@ -817,7 +817,7 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		log.Info(fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName))
-		return merr.Success(), nil
+		return merr.Status(merr.ErrIndexNotFound), nil
 	}
 
 	if !req.GetDropAll() && len(indexes) > 1 {
