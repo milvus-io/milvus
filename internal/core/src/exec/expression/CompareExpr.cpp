@@ -64,15 +64,16 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
             right_current_chunk_id_,
             right_current_chunk_pos_);
         for (int i = 0; i < real_batch_size; ++i) {
-            if (!left().has_value() || !right().has_value()) {
+            auto left_value = left(), right_value = right();
+            if (!left_value.has_value() || !right_value.has_value()) {
                 res[i] = false;
                 valid_res[i] = false;
                 continue;
             }
             res[i] =
                 boost::apply_visitor(milvus::query::Relational<decltype(op)>{},
-                                     left().value(),
-                                     right().value());
+                                     left_value.value(),
+                                     right_value.value());
         }
         return res_vec;
     } else {
