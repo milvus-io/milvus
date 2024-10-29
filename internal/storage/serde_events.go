@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -390,8 +391,6 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 				if !ok {
 					return nil, 0, merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", types[fid]))
 				}
-				eventWriters[fid].memorySize += int(typeEntry.sizeof(e))
-				memorySize += typeEntry.sizeof(e)
 			}
 		}
 		arrays := make([]arrow.Array, len(types))
@@ -400,6 +399,12 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 		i := 0
 		for fid, builder := range builders {
 			arrays[i] = builder.NewArray()
+			size := lo.SumBy[*memory.Buffer, int](arrays[i].Data().Buffers(), func(b *memory.Buffer) int {
+				return b.Len()
+			})
+			eventWriters[fid].memorySize += size
+			memorySize += uint64(size)
+
 			builder.Release()
 			fields[i] = arrow.Field{
 				Name:     strconv.Itoa(int(fid)),
