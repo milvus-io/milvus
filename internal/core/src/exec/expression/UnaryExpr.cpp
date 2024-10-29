@@ -754,16 +754,11 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow() {
                     ? active_count_ - overflow_check_pos_
                     : batch_size_;
             overflow_check_pos_ += batch_size;
-            if (cached_overflow_res_ != nullptr &&
-                cached_overflow_res_->size() == batch_size) {
-                return cached_overflow_res_;
-            }
             auto valid = ProcessChunksForValid<T>(CanUseIndex<T>());
             auto res_vec = std::make_shared<ColumnVector>(
                 TargetBitmap(batch_size), std::move(valid));
             TargetBitmapView res(res_vec->GetRawData(), batch_size);
             TargetBitmapView valid_res(res_vec->GetValidRawData(), batch_size);
-            cached_overflow_res_ = res_vec;
             switch (expr_->op_type_) {
                 case proto::plan::GreaterThan:
                 case proto::plan::GreaterEqual: {
