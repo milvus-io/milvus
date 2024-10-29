@@ -47,6 +47,10 @@ func (v *BasePlanVisitor) VisitLogicalAnd(ctx *LogicalAndContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitTemplateVariable(ctx *TemplateVariableContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitEquality(ctx *EqualityContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -64,6 +68,10 @@ func (v *BasePlanVisitor) VisitReverseRange(ctx *ReverseRangeContext) interface{
 }
 
 func (v *BasePlanVisitor) VisitBitOr(ctx *BitOrContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitEmptyArray(ctx *EmptyArrayContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -116,10 +124,6 @@ func (v *BasePlanVisitor) VisitExists(ctx *ExistsContext) interface{} {
 }
 
 func (v *BasePlanVisitor) VisitBitAnd(ctx *BitAndContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitEmptyTerm(ctx *EmptyTermContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

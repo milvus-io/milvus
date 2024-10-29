@@ -54,6 +54,7 @@ const (
 	NQKey                = "nq"
 	MetricTypeKey        = common.MetricTypeKey
 	SearchParamsKey      = "params"
+	ExprParamsKey        = "expr_params"
 	RoundDecimalKey      = "round_decimal"
 	OffsetKey            = "offset"
 	LimitKey             = "limit"

@@ -31,26 +31,37 @@ var errClosed = errors.New("client is closed")
 type shardClient struct {
 	sync.RWMutex
 	info     nodeInfo
-	client   types.QueryNodeClient
 	isClosed bool
 	refCnt   int
 	clients  []types.QueryNodeClient
 	idx      atomic.Int64
 	poolSize int
 	pooling  bool
+
+	initialized atomic.Bool
+	creator     queryNodeCreatorFunc
 }
 
 func (n *shardClient) getClient(ctx context.Context) (types.QueryNodeClient, error) {
+	if !n.initialized.Load() {
+		n.Lock()
+		if !n.initialized.Load() {
+			if err := n.initClients(); err != nil {
+				return nil, err
+			}
+			n.initialized.Store(true)
+		}
+		n.Unlock()
+	}
+
 	n.RLock()
 	defer n.RUnlock()
 	if n.isClosed {
 		return nil, errClosed
 	}
-	if n.pooling {
-		idx := n.idx.Inc()
-		return n.clients[int(idx)%n.poolSize], nil
-	}
-	return n.client, nil
+
+	idx := n.idx.Inc()
+	return n.clients[int(idx)%n.poolSize], nil
 }
 
 func (n *shardClient) inc() {
@@ -65,12 +76,13 @@ func (n *shardClient) inc() {
 func (n *shardClient) close() {
 	n.isClosed = true
 	n.refCnt = 0
-	if n.client != nil {
-		if err := n.client.Close(); err != nil {
+
+	for _, client := range n.clients {
+		if err := client.Close(); err != nil {
 			log.Warn("close grpc client failed", zap.Error(err))
 		}
-		n.client = nil
 	}
+	n.clients = nil
 }
 
 func (n *shardClient) dec() bool {
@@ -94,41 +106,39 @@ func (n *shardClient) Close() {
 	n.close()
 }
 
-func newShardClient(info *nodeInfo, client types.QueryNodeClient) *shardClient {
-	ret := &shardClient{
+func newPoolingShardClient(info *nodeInfo, creator queryNodeCreatorFunc) (*shardClient, error) {
+	return &shardClient{
 		info: nodeInfo{
 			nodeID:  info.nodeID,
 			address: info.address,
 		},
-		client: client,
-		refCnt: 1,
-	}
-	return ret
+		refCnt:  1,
+		pooling: true,
+		creator: creator,
+	}, nil
 }
 
-func newPoolingShardClient(info *nodeInfo, creator queryNodeCreatorFunc) (*shardClient, error) {
+func (n *shardClient) initClients() error {
 	num := paramtable.Get().ProxyCfg.QueryNodePoolingSize.GetAsInt()
 	if num <= 0 {
 		num = 1
 	}
 	clients := make([]types.QueryNodeClient, 0, num)
 	for i := 0; i < num; i++ {
-		client, err := creator(context.Background(), info.address, info.nodeID)
+		client, err := n.creator(context.Background(), n.info.address, n.info.nodeID)
 		if err != nil {
-			return nil, err
+			// roll back already created clients
+			for _, c := range clients[:i] {
+				c.Close()
+			}
+			return errors.Wrap(err, fmt.Sprintf("create client for node=%d failed", n.info.nodeID))
 		}
 		clients = append(clients, client)
 	}
-	return &shardClient{
-		info: nodeInfo{
-			nodeID:  info.nodeID,
-			address: info.address,
-		},
-		refCnt:   1,
-		pooling:  true,
-		clients:  clients,
-		poolSize: num,
-	}, nil
+
+	n.clients = clients
+	n.poolSize = num
+	return nil
 }
 
 type shardClientMgr interface {

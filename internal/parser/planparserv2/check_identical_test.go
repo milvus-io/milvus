@@ -17,9 +17,9 @@ func TestCheckIdentical(t *testing.T) {
 	exprStr1 := `not (((Int64Field > 0) and (FloatField <= 20.0)) or ((Int32Field in [1, 2, 3]) and (VarCharField < "str")))`
 	exprStr2 := `Int32Field in [1, 2, 3]`
 
-	expr1, err := ParseExpr(helper, exprStr1)
+	expr1, err := ParseExpr(helper, exprStr1, nil)
 	assert.NoError(t, err)
-	expr2, err := ParseExpr(helper, exprStr2)
+	expr2, err := ParseExpr(helper, exprStr2, nil)
 	assert.NoError(t, err)
 
 	assert.True(t, CheckPredicatesIdentical(expr1, expr1))
