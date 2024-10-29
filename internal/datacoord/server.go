@@ -509,7 +509,11 @@ func (s *Server) initCluster() error {
 	s.sessionManager = session.NewDataNodeManagerImpl(session.WithDataNodeCreator(s.dataNodeCreator))
 
 	var err error
-	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, s.sessionManager, s.idAllocator, withCheckerV2())
+	channelManagerOpts := []ChannelmanagerOpt{withCheckerV2()}
+	if streamingutil.IsStreamingServiceEnabled() {
+		channelManagerOpts = append(channelManagerOpts, withEmptyPolicyFactory())
+	}
+	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, s.sessionManager, s.idAllocator, channelManagerOpts...)
 	if err != nil {
 		return err
 	}
