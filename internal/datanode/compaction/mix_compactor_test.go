@@ -718,12 +718,11 @@ func BenchmarkMixCompactor(b *testing.B) {
 		b.StopTimer()
 		seq := int64(i * 100000)
 		segments := []int64{seq, seq + 1, seq + 2}
-		alloc := allocator.NewLocalAllocator(seq+3, math.MaxInt64)
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 		s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
 		for _, segID := range segments {
 			s.initSegBuffer(100000, segID)
-			kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+			kvs, fBinlogs, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
 			s.Require().NoError(err)
 			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
 				left, right := lo.Difference(keys, lo.Keys(kvs))
