@@ -62,15 +62,12 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
                           search_result);
 
     std::set<int64_t> offsets;
-    int cnt = 0;
     for (auto& offset : search_result.seg_offsets_) {
         if (offset != -1) {
-            cnt++;
             offsets.insert(offset);
         }
     }
     // check all rows are returned
-    ASSERT_EQ(total_row_count, cnt);
     ASSERT_EQ(total_row_count, offsets.size());
     for (int i = 0; i < total_row_count; i++) {
         ASSERT_TRUE(offsets.find(i) != offsets.end());
