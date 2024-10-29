@@ -22,8 +22,8 @@ patch_faker_text(fake_zh, zh_vocabularies_distribution)
 
 index_param_map = {
     "FLAT": {},
-    "IVF_SQ8": {"nlist": 16384},
-    "HNSW": {"M": 16, "efConstruction": 500},
+    "IVF_SQ8": {"nlist": 128},
+    "HNSW": {"M": 16, "efConstruction": 200},
     "BM25_SPARSE_INVERTED_INDEX": {"bm25_k1": 0.5, "bm25_b": 0.5},
     "AUTOINDEX": {}
 }
