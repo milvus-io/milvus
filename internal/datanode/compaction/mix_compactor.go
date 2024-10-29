@@ -142,17 +142,6 @@ func (t *mixCompactionTask) mergeSplit(
 
 	mWriter := NewMultiSegmentWriter(t.binlogIO, t.Allocator, t.plan, t.maxRows, t.partitionID, t.collectionID)
 
-	isValueDeleted := func(v *storage.Value) bool {
-		ts, ok := delta[v.PK.GetValue()]
-		// insert task and delete task has the same ts when upsert
-		// here should be < instead of <=
-		// to avoid the upsert data to be deleted after compact
-		if ok && uint64(v.Timestamp) < ts {
-			return true
-		}
-		return false
-	}
-
 	deletedRowCount := int64(0)
 	expiredRowCount := int64(0)
 

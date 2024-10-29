@@ -172,7 +172,7 @@ func (s *MixCompactionTaskSuite) TestCompactTwoToOne() {
 	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
 	for _, segID := range segments {
 		s.initSegBuffer(1, segID)
-		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
 		s.Require().NoError(err)
 		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
 			left, right := lo.Difference(keys, lo.Keys(kvs))
@@ -509,7 +509,7 @@ func getRow(magic int64) map[int64]interface{} {
 }
 
 func (s *MixCompactionTaskSuite) initSegBuffer(size int, seed int64) {
-	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 100, seed, PartitionID, CollectionID, []int64{})
+	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 100, seed, PartitionID, CollectionID)
 	s.Require().NoError(err)
 
 	for i := 0; i < size; i++ {

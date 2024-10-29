@@ -33,6 +33,7 @@ import (
 	"github.com/apache/arrow/go/v12/parquet/compress"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
@@ -999,8 +1000,6 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 				if !ok {
 					return nil, 0, errors.New(fmt.Sprintf("serialize error on type %s", types[fid]))
 				}
-				writers[fid].memorySize += int(typeEntry.sizeof(e))
-				memorySize += typeEntry.sizeof(e)
 			}
 		}
 		arrays := make([]arrow.Array, len(types))
@@ -1009,6 +1008,11 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 		i := 0
 		for fid, builder := range builders {
 			arrays[i] = builder.NewArray()
+			size := lo.SumBy[*memory.Buffer, int](arrays[i].Data().Buffers(), func(b *memory.Buffer) int {
+				return b.Len()
+			})
+			writers[fid].memorySize += size
+			memorySize += uint64(size)
 			builder.Release()
 			fields[i] = arrow.Field{
 				Name: strconv.Itoa(int(fid)),
