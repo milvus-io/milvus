@@ -28,6 +28,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -161,51 +162,13 @@ func (t *mixCompactionTask) mergeSplit(
 		return nil, err
 	}
 	for _, paths := range binlogPaths {
-		log := log.With(zap.Strings("paths", paths))
-		allValues, err := t.binlogIO.Download(ctx, paths)
-		if err != nil {
-			log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
-			return nil, err
-		}
-
-		blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
-			return &storage.Blob{Key: paths[i], Value: v}
-		})
-
-		iter, err := storage.NewBinlogDeserializeReader(blobs, pkField.GetFieldID())
+		del, exp, err := t.writePaths(ctx, delta, mWriter, pkField, paths)
 		if err != nil {
 			log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 			return nil, err
 		}
-
-		for {
-			err := iter.Next()
-			if err != nil {
-				if err == sio.EOF {
-					break
-				} else {
-					log.Warn("compact wrong, failed to iter through data", zap.Error(err))
-					return nil, err
-				}
-			}
-			v := iter.Value()
-			if isValueDeleted(v) {
-				deletedRowCount++
-				continue
-			}
-
-			// Filtering expired entity
-			if isExpiredEntity(t.plan.GetCollectionTtl(), t.currentTs, typeutil.Timestamp(v.Timestamp)) {
-				expiredRowCount++
-				continue
-			}
-
-			err = mWriter.Write(v)
-			if err != nil {
-				log.Warn("compact wrong, failed to writer row", zap.Error(err))
-				return nil, err
-			}
-		}
+		deletedRowCount += del
+		expiredRowCount += exp
 	}
 	res, err := mWriter.Finish()
 	if err != nil {
@@ -221,6 +184,70 @@ func (t *mixCompactionTask) mergeSplit(
 		zap.Duration("total elapse", totalElapse))
 
 	return res, nil
+}
+
+func isValueDeleted(v *storage.Value, delta map[interface{}]typeutil.Timestamp) bool {
+	ts, ok := delta[v.PK.GetValue()]
+	// insert task and delete task has the same ts when upsert
+	// here should be < instead of <=
+	// to avoid the upsert data to be deleted after compact
+	if ok && uint64(v.Timestamp) < ts {
+		return true
+	}
+	return false
+}
+
+func (t *mixCompactionTask) writePaths(ctx context.Context, delta map[interface{}]typeutil.Timestamp,
+	mWriter *MultiSegmentWriter, pkField *schemapb.FieldSchema, paths []string,
+) (deletedRowCount, expiredRowCount int64, err error) {
+	log := log.With(zap.Strings("paths", paths))
+	allValues, err := t.binlogIO.Download(ctx, paths)
+	if err != nil {
+		log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
+		return
+	}
+
+	blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
+		return &storage.Blob{Key: paths[i], Value: v}
+	})
+
+	iter, err := storage.NewBinlogDeserializeReader(blobs, pkField.GetFieldID())
+	if err != nil {
+		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
+		return
+	}
+	defer iter.Close()
+
+	for {
+		err = iter.Next()
+		if err != nil {
+			if err == sio.EOF {
+				err = nil
+				break
+			} else {
+				log.Warn("compact wrong, failed to iter through data", zap.Error(err))
+				return
+			}
+		}
+		v := iter.Value()
+		if isValueDeleted(v, delta) {
+			deletedRowCount++
+			continue
+		}
+
+		// Filtering expired entity
+		if isExpiredEntity(t.plan.GetCollectionTtl(), t.currentTs, typeutil.Timestamp(v.Timestamp)) {
+			expiredRowCount++
+			continue
+		}
+
+		err = mWriter.Write(v)
+		if err != nil {
+			log.Warn("compact wrong, failed to writer row", zap.Error(err))
+			return
+		}
+	}
+	return
 }
 
 func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
