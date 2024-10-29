@@ -551,7 +551,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
 		// first page for iteration, need to set up sessionTs for iterator
-		t.result.SessionTs = t.GetGuaranteeTimestamp()
+		t.result.SessionTs = getMaxMvccTsFromChannels(t.channelsMvcc, t.BeginTs())
 	}
 	log.Debug("Query PostExecute done")
 	return nil
