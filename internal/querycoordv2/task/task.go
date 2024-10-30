@@ -18,10 +18,12 @@ package task
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
@@ -97,6 +99,11 @@ type Task interface {
 	SetReason(reason string)
 	String() string
 
+	// MarshalJSON marshal task info to json
+	MarshalJSON() ([]byte, error)
+	Name() string
+	GetReason() string
+
 	RecordStartTs()
 	GetTaskLatency() int64
 }
@@ -123,6 +130,7 @@ type baseTask struct {
 
 	// span for tracing
 	span trace.Span
+	name string
 
 	// startTs
 	startTs time.Time
@@ -278,6 +286,14 @@ func (task *baseTask) SetReason(reason string) {
 	task.reason = reason
 }
 
+func (task *baseTask) GetReason() string {
+	return task.reason
+}
+
+func (task *baseTask) MarshalJSON() ([]byte, error) {
+	return marshalJSON(task)
+}
+
 func (task *baseTask) String() string {
 	var actionsStr string
 	for _, action := range task.actions {
@@ -296,6 +312,10 @@ func (task *baseTask) String() string {
 		len(task.actions),
 		actionsStr,
 	)
+}
+
+func (task *baseTask) Name() string {
+	return fmt.Sprintf("%s-%s-%d", task.source.String(), GetTaskType(task).String(), task.id)
 }
 
 type SegmentTask struct {
@@ -326,10 +346,10 @@ func NewSegmentTask(ctx context.Context,
 			return nil, errors.WithStack(merr.WrapErrParameterInvalid("SegmentAction", "other action", "all actions must be with the same type"))
 		}
 		if segmentID == -1 {
-			segmentID = action.SegmentID()
-			shard = action.Shard()
-		} else if segmentID != action.SegmentID() {
-			return nil, errors.WithStack(merr.WrapErrParameterInvalid(segmentID, action.SegmentID(), "all actions must operate the same segment"))
+			segmentID = action.GetSegmentID()
+			shard = action.GetShard()
+		} else if segmentID != action.GetSegmentID() {
+			return nil, errors.WithStack(merr.WrapErrParameterInvalid(segmentID, action.GetSegmentID(), "all actions must operate the same segment"))
 		}
 	}
 
@@ -346,11 +366,19 @@ func (task *SegmentTask) SegmentID() typeutil.UniqueID {
 }
 
 func (task *SegmentTask) Index() string {
-	return fmt.Sprintf("%s[segment=%d][growing=%t]", task.baseTask.Index(), task.segmentID, task.Actions()[0].(*SegmentAction).Scope() == querypb.DataScope_Streaming)
+	return fmt.Sprintf("%s[segment=%d][growing=%t]", task.baseTask.Index(), task.segmentID, task.Actions()[0].(*SegmentAction).GetScope() == querypb.DataScope_Streaming)
+}
+
+func (task *SegmentTask) Name() string {
+	return fmt.Sprintf("%s-SegmentTask[%d]-%d", task.source.String(), task.ID(), task.segmentID)
 }
 
 func (task *SegmentTask) String() string {
 	return fmt.Sprintf("%s [segmentID=%d]", task.baseTask.String(), task.segmentID)
+}
+
+func (task *SegmentTask) MarshalJSON() ([]byte, error) {
+	return marshalJSON(task)
 }
 
 type ChannelTask struct {
@@ -399,8 +427,16 @@ func (task *ChannelTask) Index() string {
 	return fmt.Sprintf("%s[channel=%s]", task.baseTask.Index(), task.shard)
 }
 
+func (task *ChannelTask) Name() string {
+	return fmt.Sprintf("%s-ChannelTask[%d]-%s", task.source.String(), task.ID(), task.shard)
+}
+
 func (task *ChannelTask) String() string {
 	return fmt.Sprintf("%s [channel=%s]", task.baseTask.String(), task.Channel())
+}
+
+func (task *ChannelTask) MarshalJSON() ([]byte, error) {
+	return marshalJSON(task)
 }
 
 type LeaderTask struct {
@@ -408,6 +444,7 @@ type LeaderTask struct {
 
 	segmentID typeutil.UniqueID
 	leaderID  int64
+	innerName string
 }
 
 func NewLeaderSegmentTask(ctx context.Context,
@@ -418,12 +455,13 @@ func NewLeaderSegmentTask(ctx context.Context,
 	action *LeaderAction,
 ) *LeaderTask {
 	segmentID := action.SegmentID()
-	base := newBaseTask(ctx, source, collectionID, replica, action.Shard(), fmt.Sprintf("LeaderSegmentTask-%s-%d", action.Type().String(), segmentID))
+	base := newBaseTask(ctx, source, collectionID, replica, action.Shard, fmt.Sprintf("LeaderSegmentTask-%s-%d", action.Type().String(), segmentID))
 	base.actions = []Action{action}
 	return &LeaderTask{
 		baseTask:  base,
 		segmentID: segmentID,
 		leaderID:  leaderID,
+		innerName: fmt.Sprintf("%s-LeaderSegmentTask", source.String()),
 	}
 }
 
@@ -434,11 +472,12 @@ func NewLeaderPartStatsTask(ctx context.Context,
 	leaderID int64,
 	action *LeaderAction,
 ) *LeaderTask {
-	base := newBaseTask(ctx, source, collectionID, replica, action.Shard(), fmt.Sprintf("LeaderPartitionStatsTask-%s", action.Type().String()))
+	base := newBaseTask(ctx, source, collectionID, replica, action.Shard, fmt.Sprintf("LeaderPartitionStatsTask-%s", action.Type().String()))
 	base.actions = []Action{action}
 	return &LeaderTask{
-		baseTask: base,
-		leaderID: leaderID,
+		baseTask:  base,
+		leaderID:  leaderID,
+		innerName: fmt.Sprintf("%s-LeaderPartitionStatsTask", source.String()),
 	}
 }
 
@@ -452,4 +491,38 @@ func (task *LeaderTask) Index() string {
 
 func (task *LeaderTask) String() string {
 	return fmt.Sprintf("%s [segmentID=%d][leader=%d]", task.baseTask.String(), task.segmentID, task.leaderID)
+}
+
+func (task *LeaderTask) Name() string {
+	return fmt.Sprintf("%s[%d]-%d", task.innerName, task.ID(), task.leaderID)
+}
+
+func (task *LeaderTask) MarshalJSON() ([]byte, error) {
+	return marshalJSON(task)
+}
+
+func marshalJSON(task Task) ([]byte, error) {
+	return json.Marshal(&struct {
+		TaskName     string   `json:"task_name,omitempty"`
+		CollectionID int64    `json:"collection_id,omitempty"`
+		Replica      int64    `json:"replica_id,omitempty"`
+		TaskType     string   `json:"task_type,omitempty"`
+		TaskStatus   string   `json:"task_status,omitempty"`
+		Priority     string   `json:"priority,omitempty"`
+		Actions      []string `json:"actions,omitempty"`
+		Step         int      `json:"step,omitempty"`
+		Reason       string   `json:"reason,omitempty"`
+	}{
+		TaskName:     task.Name(),
+		CollectionID: task.CollectionID(),
+		Replica:      task.ReplicaID(),
+		TaskType:     GetTaskType(task).String(),
+		TaskStatus:   task.Status(),
+		Priority:     task.Priority().String(),
+		Actions: lo.Map(task.Actions(), func(t Action, i int) string {
+			return t.Desc()
+		}),
+		Step:   task.Step(),
+		Reason: task.GetReason(),
+	})
 }

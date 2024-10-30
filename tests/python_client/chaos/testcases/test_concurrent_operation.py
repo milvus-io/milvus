@@ -7,6 +7,7 @@ from chaos.checker import (InsertChecker,
                            UpsertChecker,
                            FlushChecker,
                            SearchChecker,
+                           FullTextSearchChecker,
                            HybridSearchChecker,
                            QueryChecker,
                            TextMatchChecker,
@@ -27,7 +28,7 @@ from delayed_assert import assert_expectations
 
 def get_all_collections():
     try:
-        with open("/tmp/ci_logs/all_collections.json", "r") as f:
+        with open("/tmp/ci_logs/chaos_test_all_collections.json", "r") as f:
             data = json.load(f)
             all_collections = data["all"]
     except Exception as e:
@@ -76,6 +77,7 @@ class TestOperations(TestBase):
             Op.upsert: UpsertChecker(collection_name=c_name),
             Op.flush: FlushChecker(collection_name=c_name),
             Op.search: SearchChecker(collection_name=c_name),
+            Op.full_text_search: FullTextSearchChecker(collection_name=c_name),
             Op.hybrid_search: HybridSearchChecker(collection_name=c_name),
             Op.query: QueryChecker(collection_name=c_name),
             Op.text_match: TextMatchChecker(collection_name=c_name),

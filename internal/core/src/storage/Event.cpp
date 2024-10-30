@@ -273,10 +273,12 @@ BaseEventData::Serialize() {
                 auto string_view =
                     static_cast<const Json*>(field_data->RawValue(offset))
                         ->data();
+                auto size =
+                    field_data->is_valid(offset) ? string_view.size() : -1;
                 payload_writer->add_one_binary_payload(
                     reinterpret_cast<const uint8_t*>(
                         std::string(string_view).c_str()),
-                    string_view.size());
+                    size);
             }
             break;
         }

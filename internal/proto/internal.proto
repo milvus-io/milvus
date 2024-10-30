@@ -345,6 +345,7 @@ message ImportResponse {
 message GetImportProgressRequest {
   string db_name = 1;
   string jobID = 2;
+  int64 dbID = 3;
 }
 
 message ImportTaskProgress {

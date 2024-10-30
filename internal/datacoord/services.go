@@ -25,7 +25,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -1073,54 +1072,27 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log := log.Ctx(ctx)
 	if err := merr.CheckHealthyStandby(s.GetStateCode()); err != nil {
+		msg := "failed to get metrics"
+		log.Warn(msg, zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
-			Status: merr.Status(err),
+			Status: merr.Status(errors.Wrap(err, msg)),
 		}, nil
 	}
 
-	ret := gjson.Parse(req.GetRequest())
-	metricType, err := metricsinfo.ParseMetricRequestType(ret)
+	resp := &milvuspb.GetMetricsResponse{
+		Status: merr.Success(),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole,
+			paramtable.GetNodeID()),
+	}
+
+	ret, err := s.metricsRequest.ExecuteMetricsRequest(ctx, req)
 	if err != nil {
-		log.Warn("DataCoord.GetMetrics failed to parse metric type",
-			zap.Int64("nodeID", paramtable.GetNodeID()),
-			zap.String("req", req.Request),
-			zap.Error(err),
-		)
-
-		return &milvuspb.GetMetricsResponse{
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),
-			Status:        merr.Status(err),
-		}, nil
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 
-	if metricType == metricsinfo.SystemInfoMetrics {
-		metrics, err := s.getSystemInfoMetrics(ctx, req)
-		if err != nil {
-			log.Warn("DataCoord GetMetrics failed", zap.Int64("nodeID", paramtable.GetNodeID()), zap.Error(err))
-			return &milvuspb.GetMetricsResponse{
-				Status: merr.Status(err),
-			}, nil
-		}
-
-		log.RatedDebug(60, "DataCoord.GetMetrics",
-			zap.Int64("nodeID", paramtable.GetNodeID()),
-			zap.String("req", req.Request),
-			zap.String("metricType", metricType),
-			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
-			zap.Error(err))
-
-		return metrics, nil
-	}
-
-	log.RatedWarn(60.0, "DataCoord.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("nodeID", paramtable.GetNodeID()),
-		zap.String("req", req.Request),
-		zap.String("metricType", metricType))
-
-	return &milvuspb.GetMetricsResponse{
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),
-		Status:        merr.Status(merr.WrapErrMetricNotFound(metricType)),
-	}, nil
+	resp.Response = ret
+	return resp, nil
 }
 
 // ManualCompaction triggers a compaction for a collection
@@ -1676,22 +1648,17 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		Status: merr.Success(),
 	}
 
-	log := log.With(zap.Int64("collection", in.GetCollectionID()),
+	log := log.With(
+		zap.Int64("dbID", in.GetDbID()),
+		zap.Int64("collection", in.GetCollectionID()),
 		zap.Int64s("partitions", in.GetPartitionIDs()),
 		zap.Strings("channels", in.GetChannelNames()))
-	log.Info("receive import request", zap.Any("files", in.GetFiles()))
+	log.Info("receive import request", zap.Any("files", in.GetFiles()), zap.Any("options", in.GetOptions()))
 
-	var timeoutTs uint64 = math.MaxUint64
-	timeoutStr, err := funcutil.GetAttrByKeyFromRepeatedKV("timeout", in.GetOptions())
-	if err == nil {
-		// Specifies the timeout duration for import, such as "300s", "1.5h" or "1h45m".
-		dur, err := time.ParseDuration(timeoutStr)
-		if err != nil {
-			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse import timeout failed, err=%w", err)))
-			return resp, nil
-		}
-		curTs := tsoutil.GetCurrentTime()
-		timeoutTs = tsoutil.AddPhysicalDurationOnTs(curTs, dur)
+	timeoutTs, err := importutilv2.GetTimeoutTs(in.GetOptions())
+	if err != nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(err.Error()))
+		return resp, nil
 	}
 
 	files := in.GetFiles()
@@ -1742,6 +1709,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
 			JobID:          idStart,
+			DbID:           in.GetDbID(),
 			CollectionID:   in.GetCollectionID(),
 			CollectionName: in.GetCollectionName(),
 			PartitionIDs:   in.GetPartitionIDs(),
@@ -1768,7 +1736,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 }
 
 func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
-	log := log.With(zap.String("jobID", in.GetJobID()))
+	log := log.With(zap.String("jobID", in.GetJobID()), zap.Int64("dbID", in.GetDbID()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.GetImportProgressResponse{
 			Status: merr.Status(err),
@@ -1786,6 +1754,10 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	job := s.importMeta.GetJob(jobID)
 	if job == nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
+		return resp, nil
+	}
+	if job.GetDbID() != 0 && job.GetDbID() != in.GetDbID() {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d, dbID=%d", jobID, in.GetDbID())))
 		return resp, nil
 	}
 	progress, state, importedRows, totalRows, reason := GetJobProgress(jobID, s.importMeta, s.meta, s.jobManager)
@@ -1818,11 +1790,14 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 	}
 
 	var jobs []ImportJob
-	if req.GetCollectionID() != 0 {
-		jobs = s.importMeta.GetJobBy(WithCollectionID(req.GetCollectionID()))
-	} else {
-		jobs = s.importMeta.GetJobBy()
+	filters := make([]ImportJobFilter, 0)
+	if req.GetDbID() != 0 {
+		filters = append(filters, WithDbID(req.GetDbID()))
 	}
+	if req.GetCollectionID() != 0 {
+		filters = append(filters, WithCollectionID(req.GetCollectionID()))
+	}
+	jobs = s.importMeta.GetJobBy(filters...)
 
 	for _, job := range jobs {
 		progress, state, _, _, reason := GetJobProgress(job.GetJobID(), s.importMeta, s.meta, s.jobManager)
@@ -1832,5 +1807,7 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 		resp.Progresses = append(resp.Progresses, progress)
 		resp.CollectionNames = append(resp.CollectionNames, job.GetCollectionName())
 	}
+	log.Info("ListImports done", zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64("dbID", req.GetDbID()), zap.Any("resp", resp))
 	return resp, nil
 }

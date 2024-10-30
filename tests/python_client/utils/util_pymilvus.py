@@ -57,6 +57,8 @@ default_index_params = [
 def create_target_index(index, field_name):
     index["field_name"] = field_name
 
+def gpu_support():
+    return ["GPU_IVF_FLAT", "GPU_IVF_PQ"]
 
 def binary_support():
     return ["BIN_FLAT", "BIN_IVF_FLAT"]
@@ -763,6 +765,8 @@ def gen_simple_index():
     index_params = []
     for i in range(len(all_index_types)):
         if all_index_types[i] in binary_support():
+            continue
+        if all_index_types[i] in gpu_support():
             continue
         dic = {"index_type": all_index_types[i], "metric_type": "L2"}
         dic.update({"params": default_index_params[i]})

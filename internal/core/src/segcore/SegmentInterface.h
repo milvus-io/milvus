@@ -149,9 +149,7 @@ class SegmentInternalInterface : public SegmentInterface {
     template <typename ViewType>
     std::pair<std::vector<ViewType>, FixedVector<bool>>
     chunk_view(FieldId field_id, int64_t chunk_id) const {
-        auto chunk_info = chunk_view_impl(field_id, chunk_id);
-        auto string_views = chunk_info.first;
-        auto valid_data = chunk_info.second;
+        auto [string_views, valid_data] = chunk_view_impl(field_id, chunk_id);
         if constexpr (std::is_same_v<ViewType, std::string_view>) {
             return std::make_pair(std::move(string_views),
                                   std::move(valid_data));

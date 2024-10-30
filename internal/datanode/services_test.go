@@ -481,7 +481,8 @@ func (s *DataNodeServicesSuite) TestShowConfigurations() {
 }
 
 func (s *DataNodeServicesSuite) TestGetMetrics() {
-	node := &DataNode{}
+	node := NewDataNode(context.TODO(), nil)
+	node.registerMetricsRequest()
 	node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 	node.flowgraphManager = pipeline.NewFlowgraphManager()
 	// server is closed

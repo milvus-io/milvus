@@ -330,6 +330,8 @@ type SegmentWriter struct {
 	sch          *schemapb.CollectionSchema
 	rowCount     *atomic.Int64
 	syncedSize   *atomic.Int64
+
+	maxBinlogSize uint64
 }
 
 func (w *SegmentWriter) GetRowNum() int64 {
@@ -412,12 +414,12 @@ func (w *SegmentWriter) GetBm25StatsBlob() (map[int64]*storage.Blob, error) {
 }
 
 func (w *SegmentWriter) IsFull() bool {
-	return w.writer.WrittenMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
+	return w.writer.WrittenMemorySize() > w.maxBinlogSize
 }
 
 func (w *SegmentWriter) FlushAndIsFull() bool {
 	w.writer.Flush()
-	return w.writer.WrittenMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
+	return w.writer.WrittenMemorySize() > w.maxBinlogSize
 }
 
 func (w *SegmentWriter) FlushAndIsFullWithBinlogMaxSize(binLogMaxSize uint64) bool {
@@ -502,6 +504,8 @@ func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, segID, par
 		collectionID: collID,
 		rowCount:     atomic.NewInt64(0),
 		syncedSize:   atomic.NewInt64(0),
+
+		maxBinlogSize: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 	}
 
 	for _, fieldID := range Bm25Fields {

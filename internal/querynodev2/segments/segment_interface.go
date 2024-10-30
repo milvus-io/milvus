@@ -78,7 +78,7 @@ type Segment interface {
 	// Modification related
 	Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error
 	Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error
-	LoadDeltaData(ctx context.Context, deltaData *storage.DeleteData) error
+	LoadDeltaData(ctx context.Context, deltaData *storage.DeltaData) error
 	LastDeltaTimestamp() uint64
 	Release(ctx context.Context, opts ...releaseOption)
 

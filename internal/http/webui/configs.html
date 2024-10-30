@@ -11,26 +11,9 @@
   <script src="./static/js/jquery.min.js"></script>
   <script src="./static/js/bootstrap.min.js"></script>
   <script src="./static/js/bootstrap.bundle.min.js"></script>
-  <script src="./static/js/scripts.js"></script>
-  <script>
-    $(document).ready(function(){
-      $('#header').load("header.html");
-      $('#footer').load("footer.html");
-    });
-
-    // load cluster configurations
-    document.addEventListener("DOMContentLoaded", function() {
-      fetch(MILVUS_URI + '/_cluster/configs')
-              .then(response => response.json())
-              .then(text => {
-                data = JSON.parse(text)
-                renderConfigs(data)
-              })
-              .catch(error => {
-                handleError(error);
-              });
-    });
-  </script>
+  <script src="./static/js/render.js"></script>
+  <script src="./static/js/common.js"></script>
+  <script src="./static/js/mockdata.js"></script>
 </head>
 <body>
 <div class="container-fluid">
@@ -51,6 +34,22 @@
       <div class="col-md-2"></div>
     </div>
   <div id="footer"></div>
+
+  <script>
+    $(document).ready(function(){
+      $('#header').load("header.html");
+      $('#footer').load("footer.html");
+    });
+
+    // load cluster configurations
+    fetchData(MILVUS_URI + '/_cluster/configs', mconfigs)
+            .then(data => {
+              renderConfigs(data)
+            })
+            .catch(error => {
+              handleError(error);
+            });
+  </script>
 </div>
 </body>
 </html>

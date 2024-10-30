@@ -27,8 +27,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -58,7 +58,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("read json file failed, path=%s, err=%s", path, err.Error()))
 	}
-	count, err := estimateReadCountPerBatch(bufferSize, schema)
+	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -181,14 +181,3 @@ func (j *reader) Size() (int64, error) {
 }
 
 func (j *reader) Close() {}
-
-func estimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema) (int64, error) {
-	sizePerRecord, err := typeutil.EstimateMaxSizePerRecord(schema)
-	if err != nil {
-		return 0, err
-	}
-	if 1000*sizePerRecord <= bufferSize {
-		return 1000, nil
-	}
-	return int64(bufferSize) / int64(sizePerRecord), nil
-}

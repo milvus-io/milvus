@@ -361,6 +361,47 @@ func (_c *MockScheduler_GetSegmentTaskNum_Call) RunAndReturn(run func() int) *Mo
 	return _c
 }
 
+// GetTasksJSON provides a mock function with given fields:
+func (_m *MockScheduler) GetTasksJSON() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockScheduler_GetTasksJSON_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTasksJSON'
+type MockScheduler_GetTasksJSON_Call struct {
+	*mock.Call
+}
+
+// GetTasksJSON is a helper method to define mock.On call
+func (_e *MockScheduler_Expecter) GetTasksJSON() *MockScheduler_GetTasksJSON_Call {
+	return &MockScheduler_GetTasksJSON_Call{Call: _e.mock.On("GetTasksJSON")}
+}
+
+func (_c *MockScheduler_GetTasksJSON_Call) Run(run func()) *MockScheduler_GetTasksJSON_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockScheduler_GetTasksJSON_Call) Return(_a0 string) *MockScheduler_GetTasksJSON_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockScheduler_GetTasksJSON_Call) RunAndReturn(run func() string) *MockScheduler_GetTasksJSON_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoveByNode provides a mock function with given fields: node
 func (_m *MockScheduler) RemoveByNode(node int64) {
 	_m.Called(node)
