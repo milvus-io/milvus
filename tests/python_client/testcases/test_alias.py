@@ -416,7 +416,6 @@ class TestAliasOperationInvalid(TestcaseBase):
                                                  check_items={exp_name: c_name, exp_schema: schema})
         alias_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_w.name, alias_name)
-        # collection_w.create_alias(alias_name)
         collection_alias = self.init_collection_wrap(name=alias_name, schema=schema,
                                                      check_task=CheckTasks.check_collection_property,
                                                      check_items={exp_name: alias_name,
@@ -427,7 +426,6 @@ class TestAliasOperationInvalid(TestcaseBase):
         collection_alias.drop(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #36963")
     def test_alias_reuse_alias_name_from_dropped_collection(self):
         """
         target: test dropping a collection which has a alias
@@ -457,19 +455,23 @@ class TestAliasOperationInvalid(TestcaseBase):
         res2 = self.utility_wrap.list_aliases(c_name)[0]
         assert len(res2) == 0
         # the same alias name can be reused for another collection
-        self.utility_wrap.create_alias(c_name, alias_name)
-        res2 = self.utility_wrap.list_aliases(c_name)[0]
-        assert len(res2) == 1
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"{alias_name} is alias to another collection: {collection_w.name}: alias already exist"}
+        self.utility_wrap.create_alias(c_name, alias_name,
+                                       check_task=CheckTasks.err_res,
+                                       check_items=error)
+        # res2 = self.utility_wrap.list_aliases(c_name)[0]
+        # assert len(res2) == 1
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #36963")
     def test_alias_rename_collection_to_alias_name(self):
         """
         target: test renaming a collection to a alias name
         method:
                 1.create a collection
                 2.create an alias for the collection
-                3.rename the collection to the alias name
+                3.rename the collection to the alias name no matter the collection was dropped or not
+        expected: in step 3, rename collection to alias name failed
         """
         self._connect()
         c_name = cf.gen_unique_str("collection")
@@ -479,7 +481,7 @@ class TestAliasOperationInvalid(TestcaseBase):
         alias_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_w.name, alias_name)
         error = {ct.err_code: 999,
-                 ct.err_msg: f"duplicated new collection name default:{alias_name} with other collection name or alias"}
+                 ct.err_msg: f"cannot rename collection to an existing alias: {alias_name}"}
         self.utility_wrap.rename_collection(collection_w.name, alias_name,
                                             check_task=CheckTasks.err_res, check_items=error)
 
@@ -487,7 +489,5 @@ class TestAliasOperationInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"this is not expected, any collection name or alias name shall be unique"}
         self.utility_wrap.rename_collection(collection_w.name, alias_name,
                                             check_task=CheckTasks.err_res, check_items=error)
