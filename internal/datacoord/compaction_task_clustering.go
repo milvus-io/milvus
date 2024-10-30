@@ -485,6 +485,12 @@ func (t *clusteringCompactionTask) completeTask() error {
 		return err
 	}
 
+	err = t.meta.GetPartitionStatsMeta().SaveCurrentPartitionStatsVersion(t.GetTaskProto().GetCollectionID(),
+		t.GetTaskProto().GetPartitionID(), t.GetTaskProto().GetChannel(), t.GetTaskProto().GetPlanID())
+	if err != nil {
+		return merr.WrapErrClusteringCompactionMetaError("SaveCurrentPartitionStatsVersion", err)
+	}
+
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
 }
 
