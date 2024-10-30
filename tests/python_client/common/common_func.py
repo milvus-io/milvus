@@ -227,7 +227,7 @@ def generate_text_match_expr(query_dict):
 
     def process_node(node):
         if isinstance(node, dict) and 'field' in node and 'value' in node:
-            return f"TextMatch({node['field']}, '{node['value']}')"
+            return f"TEXT_MATCH({node['field']}, '{node['value']}')"
         elif isinstance(node, dict) and 'not' in node:
             return f"not {process_node(node['not'])}"
         elif isinstance(node, list):
