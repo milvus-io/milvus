@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "LocalChunkManager.h"
+#include "log/Log.h"
 
 #include <boost/filesystem.hpp>
 #include <boost/system/error_code.hpp>
@@ -232,7 +233,17 @@ LocalChunkManager::GetSizeOfDir(const std::string& dir) {
          it != v.end();
          ++it) {
         if (boost::filesystem::is_regular_file(it->path())) {
-            total_file_size += boost::filesystem::file_size(it->path());
+            boost::system::error_code ec;
+            auto file_size = boost::filesystem::file_size(it->path(), ec);
+            if (ec) {
+                // The file may be removed concurrently by other threads.
+                // So the file size cannot be obtained, just ignore it.
+                LOG_INFO("size of file {} cannot be obtained with error: {}",
+                         it->path().string(),
+                         ec.message());
+                continue;
+            }
+            total_file_size += file_size;
         }
         if (boost::filesystem::is_directory(it->path())) {
             total_file_size += GetSizeOfDir(it->path().string());
