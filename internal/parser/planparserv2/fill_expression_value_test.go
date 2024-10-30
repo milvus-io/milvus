@@ -3,11 +3,10 @@ package planparserv2
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
-
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type FillExpressionValueSuite struct {
@@ -125,6 +124,9 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			{"Int64Field not in {not_list}", map[string]*schemapb.TemplateValue{
 				"not_list": generateExpressionFieldData(schemapb.DataType_Int64, int64(33)),
 			}},
+			{"Int64Field not in {not_list}", map[string]*schemapb.TemplateValue{
+				"age": generateExpressionFieldData(schemapb.DataType_Int64, int64(33)),
+			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
 		for _, c := range testcases {
@@ -187,6 +189,9 @@ func (s *FillExpressionValueSuite) TestUnaryRange() {
 				"str": generateExpressionFieldData(schemapb.DataType_Int64, int64(5)),
 			}},
 			{`{int} != StringField`, map[string]*schemapb.TemplateValue{
+				"int": generateExpressionFieldData(schemapb.DataType_Int64, int64(5)),
+			}},
+			{`{str} != StringField`, map[string]*schemapb.TemplateValue{
 				"int": generateExpressionFieldData(schemapb.DataType_Int64, int64(5)),
 			}},
 		}
