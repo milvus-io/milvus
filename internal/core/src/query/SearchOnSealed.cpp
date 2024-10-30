@@ -130,13 +130,12 @@ SearchOnSealed(const Schema& schema,
                 chunk_size);
             bitset_ptr = reinterpret_cast<const uint8_t*>(bitset_data);
         }
-        offset += chunk_size;
         BitsetView bitset_view(bitset_ptr, chunk_size);
 
         if (search_info.group_by_field_id_.has_value()) {
             auto sub_qr = BruteForceSearchIterators(dataset,
                                                     vec_data,
-                                                    row_count,
+                                                    chunk_size,
                                                     search_info,
                                                     bitset_view,
                                                     data_type);
@@ -144,16 +143,22 @@ SearchOnSealed(const Schema& schema,
         } else {
             auto sub_qr = BruteForceSearch(dataset,
                                            vec_data,
-                                           row_count,
+                                           chunk_size,
                                            search_info,
                                            bitset_view,
                                            data_type);
+            for (auto& o : sub_qr.mutable_seg_offsets()) {
+                if (o != -1) {
+                    o += offset;
+                }
+            }
             final_qr.merge(sub_qr);
         }
 
         if (!aligned) {
             delete[] bitset_ptr;
         }
+        offset += chunk_size;
     }
     if (search_info.group_by_field_id_.has_value()) {
         result.AssembleChunkVectorIterators(

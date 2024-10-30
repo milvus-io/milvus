@@ -211,6 +211,7 @@ class ChunkedColumnBase : public ColumnBase {
 
 class ChunkedColumn : public ChunkedColumnBase {
  public:
+    ChunkedColumn() = default;
     // memory mode ctor
     ChunkedColumn(const FieldMeta& field_meta) : ChunkedColumnBase(field_meta) {
     }
