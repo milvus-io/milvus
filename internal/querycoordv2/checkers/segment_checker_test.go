@@ -690,14 +690,14 @@ func (suite *SegmentCheckerTestSuite) TestReleaseCompactedGrowingSegments() {
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].Actions()[0].(*task.SegmentAction).GetSegmentID() < tasks[j].Actions()[0].(*task.SegmentAction).GetSegmentID()
+		return tasks[i].Actions()[0].(*task.SegmentAction).SegmentID() < tasks[j].Actions()[0].(*task.SegmentAction).SegmentID()
 	})
 	suite.Len(tasks[0].Actions(), 1)
 	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
 	suite.True(ok)
 	suite.EqualValues(1, tasks[0].ReplicaID())
 	suite.Equal(task.ActionTypeReduce, action.Type())
-	suite.EqualValues(4, action.GetSegmentID())
+	suite.EqualValues(4, action.SegmentID())
 	suite.EqualValues(2, action.Node())
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
 }
