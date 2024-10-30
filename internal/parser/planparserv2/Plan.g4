@@ -57,7 +57,7 @@ NE: '!=';
 
 LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
-TEXTMATCH: 'TextMatch'|'textmatch'|'TEXTMATCH';
+TEXTMATCH: 'text_match'|'TEXT_MATCH';
 
 ADD: '+';
 SUB: '-';

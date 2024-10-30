@@ -216,15 +216,15 @@ func TestExpr_TextMatch(t *testing.T) {
 	assert.NoError(t, err)
 
 	exprStrs := []string{
-		`TextMatch(VarCharField, "query")`,
+		`text_match(VarCharField, "query")`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
 	}
 
 	unsupported := []string{
-		`TextMatch(not_exist, "query")`,
-		`TextMatch(BoolField, "query")`,
+		`text_match(not_exist, "query")`,
+		`text_match(BoolField, "query")`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
