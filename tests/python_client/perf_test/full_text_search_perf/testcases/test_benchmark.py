@@ -257,7 +257,7 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
     expected: full text search successfully and result is correct
     """
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("dataset",
                              ["arguana", "climate-fever", "cqadupstack", "dbpedia-entity", "fever", "fiqa", "hotpotqa",
