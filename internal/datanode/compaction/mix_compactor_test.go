@@ -340,7 +340,7 @@ func (s *MixCompactionTaskSuite) TestSplitMergeEntityExpired() {
 	s.task.partitionID = PartitionID
 	s.task.maxRows = 1000
 
-	compactionSegments, err := s.task.mergeSplit(s.task.ctx, [][]string{lo.Keys(kvs)}, nil)
+	compactionSegments, err := s.task.mergeSplit(s.task.ctx, map[int64][]string{s.segWriter.segmentID: lo.Keys(kvs)}, nil)
 	s.NoError(err)
 	s.Equal(1, len(compactionSegments))
 	s.EqualValues(0, compactionSegments[0].GetNumOfRows())
@@ -355,31 +355,45 @@ func (s *MixCompactionTaskSuite) TestMergeNoExpiration() {
 	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
 	tests := []struct {
 		description string
-		deletions   map[interface{}]uint64
+		deletions   map[int64]uint64
 		expectedRes int
 		leftNumRows int
 	}{
 		{"no deletion", nil, 1, 1},
-		{"mismatch deletion", map[interface{}]uint64{int64(1): deleteTs}, 1, 1},
-		{"deleted pk=4", map[interface{}]uint64{int64(4): deleteTs}, 1, 0},
+		{"mismatch deletion", map[int64]uint64{int64(1): deleteTs}, 1, 1},
+		{"deleted pk=4", map[int64]uint64{int64(4): deleteTs}, 1, 0},
 	}
 
 	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
 	kvs, _, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+	insertPaths := lo.Keys(kvs)
 	s.Require().NoError(err)
 	for _, test := range tests {
 		s.Run(test.description, func() {
-			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
+			s.mockBinlogIO.EXPECT().Download(mock.Anything, insertPaths).RunAndReturn(
 				func(ctx context.Context, paths []string) ([][]byte, error) {
 					s.Require().Equal(len(paths), len(kvs))
 					return lo.Values(kvs), nil
 				})
+			deletePaths := make(map[int64][]string, 0)
+			if len(test.deletions) > 0 {
+				blob, err := getInt64DeltaBlobs(
+					s.segWriter.segmentID,
+					lo.Keys(test.deletions),
+					lo.Values(test.deletions),
+				)
+				s.Require().NoError(err)
+				s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{"foo"}).
+					Return([][]byte{blob.GetValue()}, nil).Once()
+				deletePaths[s.segWriter.segmentID] = []string{"foo"}
+			}
+
 			s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 			s.task.collectionID = CollectionID
 			s.task.partitionID = PartitionID
 			s.task.maxRows = 1000
-			res, err := s.task.mergeSplit(s.task.ctx, [][]string{lo.Keys(kvs)}, test.deletions)
+			res, err := s.task.mergeSplit(s.task.ctx, map[int64][]string{s.segWriter.segmentID: insertPaths}, deletePaths)
 			s.NoError(err)
 			s.EqualValues(test.expectedRes, len(res))
 			s.EqualValues(test.leftNumRows, res[0].GetNumOfRows())
@@ -478,7 +492,7 @@ func (s *MixCompactionTaskSuite) TestMergeDeltalogsMultiSegment() {
 			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).
 				Return(dValues, nil)
 
-			got, err := mergeDeltalogs(s.task.ctx, s.task.binlogIO, map[int64][]string{100: {"random"}})
+			got, err := mergeDeltalogs(s.task.ctx, s.task.binlogIO, []string{"random"})
 			s.NoError(err)
 
 			s.Equal(len(test.expectedpk2ts), len(got))
@@ -508,12 +522,12 @@ func (s *MixCompactionTaskSuite) TestMergeDeltalogsOneSegment() {
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{"mock_error"}).
 		Return(nil, errors.New("mock_error")).Once()
 
-	invalidPaths := map[int64][]string{2000: {"mock_error"}}
+	invalidPaths := []string{"mock_error"}
 	got, err := mergeDeltalogs(s.task.ctx, s.task.binlogIO, invalidPaths)
 	s.Error(err)
 	s.Nil(got)
 
-	dpaths := map[int64][]string{1000: {"a"}}
+	dpaths := []string{"a"}
 	got, err = mergeDeltalogs(s.task.ctx, s.task.binlogIO, dpaths)
 	s.NoError(err)
 	s.NotNil(got)
