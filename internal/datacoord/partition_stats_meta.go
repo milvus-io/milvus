@@ -121,8 +121,6 @@ func (psm *partitionStatsMeta) SavePartitionStatsInfo(info *datapb.PartitionStat
 	}
 
 	psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos[info.GetVersion()] = info
-	// after v2.5.0,  the current version will be updated when updating the partition stats info, so there’s no need to split it into two steps
-	psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].currentVersion = info.Version
 	return nil
 }
 
