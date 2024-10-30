@@ -25,12 +25,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-// milvusGrpcKey is context key type.
-type milvusGrpcKey struct{}
+// milvusStatsKey is context key type.
+type milvusStatsKey struct{}
 
-// GrpcStats stores the meta and payload size info
+// RPCStats stores the meta and payload size info
 // it should be attached to context so that request sizing could be avoided
-type GrpcStats struct {
+type RPCStats struct {
 	fullMethodName     string
 	collectionName     string
 	inboundPayloadSize int
@@ -38,7 +38,7 @@ type GrpcStats struct {
 	nodeID             int64
 }
 
-func (s *GrpcStats) SetCollectionName(collName string) *GrpcStats {
+func (s *RPCStats) SetCollectionName(collName string) *RPCStats {
 	if s == nil {
 		return s
 	}
@@ -46,7 +46,7 @@ func (s *GrpcStats) SetCollectionName(collName string) *GrpcStats {
 	return s
 }
 
-func (s *GrpcStats) SetInboundLabel(label string) *GrpcStats {
+func (s *RPCStats) SetInboundLabel(label string) *RPCStats {
 	if s == nil {
 		return s
 	}
@@ -54,7 +54,7 @@ func (s *GrpcStats) SetInboundLabel(label string) *GrpcStats {
 	return s
 }
 
-func (s *GrpcStats) SetNodeID(nodeID int64) *GrpcStats {
+func (s *RPCStats) SetNodeID(nodeID int64) *RPCStats {
 	if s == nil {
 		return s
 	}
@@ -62,12 +62,12 @@ func (s *GrpcStats) SetNodeID(nodeID int64) *GrpcStats {
 	return s
 }
 
-func attachStats(ctx context.Context, stats *GrpcStats) context.Context {
-	return context.WithValue(ctx, milvusGrpcKey{}, stats)
+func attachStats(ctx context.Context, stats *RPCStats) context.Context {
+	return context.WithValue(ctx, milvusStatsKey{}, stats)
 }
 
-func GetStats(ctx context.Context) *GrpcStats {
-	stats, ok := ctx.Value(milvusGrpcKey{}).(*GrpcStats)
+func GetStats(ctx context.Context) *RPCStats {
+	stats, ok := ctx.Value(milvusStatsKey{}).(*RPCStats)
 	if !ok {
 		return nil
 	}
@@ -122,7 +122,7 @@ func (h *grpcSizeStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInf
 		return ctx
 	}
 	// attach stats
-	return attachStats(ctx, &GrpcStats{fullMethodName: info.FullMethodName})
+	return attachStats(ctx, &RPCStats{fullMethodName: info.FullMethodName})
 }
 
 // HandleRPC implements per-RPC stats instrumentation.
