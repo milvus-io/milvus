@@ -111,11 +111,9 @@ SearchOnSealed(const Schema& schema,
                              search_info.round_decimal_);
 
     auto offset = 0;
-    std::vector<int64_t> chunk_rows;
     for (int i = 0; i < num_chunk; ++i) {
         auto vec_data = column->Data(i);
         auto chunk_size = column->chunk_row_nums(i);
-        chunk_rows.push_back(chunk_size);
         const uint8_t* bitset_ptr = nullptr;
         bool aligned = false;
         if ((offset & 0x7) == 0) {

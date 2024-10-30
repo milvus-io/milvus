@@ -150,10 +150,9 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             }
         }
         if (info.group_by_field_id_.has_value()) {
-            auto chunk_rows =
-                std::vector<int64_t>(max_chunk, vec_size_per_chunk);
+            std::vector<int64_t> chunk_rows(max_chunk, 0);
             for (int i = 1; i < max_chunk; ++i) {
-                chunk_rows[i] += chunk_rows[i - 1];
+                chunk_rows[i] = i * vec_size_per_chunk;
             }
             search_result.AssembleChunkVectorIterators(
                 num_queries, max_chunk, chunk_rows, final_qr.chunk_iterators());

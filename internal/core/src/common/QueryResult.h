@@ -140,7 +140,6 @@ struct VectorIterator {
                         OffsetDisPairComparator>
         heap_;
     bool sealed = false;
-    // int64_t chunk_rows_ = -1;
     std::vector<int64_t> total_rows_until_chunk_;
     //currently, VectorIterator is guaranteed to be used serially without concurrent problem, in the future
     //we may need to add mutex to protect the variable sealed
