@@ -727,17 +727,14 @@ func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID))
 
-			modPack.segments[segmentID] = &SegmentInfo{
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:            segmentID,
-					CollectionID:  collectionID,
-					PartitionID:   partitionID,
-					InsertChannel: channel,
-					NumOfRows:     0,
-					State:         commonpb.SegmentState_Flushed,
-					Level:         datapb.SegmentLevel_L0,
-				},
-			}
+			modPack.segments[segmentID] = NewSegmentInfo(&datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  collectionID,
+				PartitionID:   partitionID,
+				InsertChannel: channel,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L0,
+			})
 			modPack.metricMutation.addNewSeg(commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0, false, 0)
 		}
 		return true
@@ -882,6 +879,10 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 		segment.Binlogs = mergeFieldBinlogs(segment.GetBinlogs(), binlogs)
 		segment.Statslogs = mergeFieldBinlogs(segment.GetStatslogs(), statslogs)
 		segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
+		if len(deltalogs) > 0 {
+			segment.deltaRowcount.Store(-1)
+		}
+
 		segment.Bm25Statslogs = mergeFieldBinlogs(segment.GetBm25Statslogs(), bm25logs)
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
