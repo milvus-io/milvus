@@ -1208,22 +1208,13 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		return blob.RowNum
 	})
 
-	var deltaData *storage.DeltaData
 	collection := loader.manager.Collection.Get(segment.Collection())
 
 	helper, _ := typeutil.CreateSchemaHelper(collection.Schema())
 	pkField, _ := helper.GetPrimaryKeyField()
-	switch pkField.DataType {
-	case schemapb.DataType_Int64:
-		deltaData = &storage.DeltaData{
-			DeletePks:        storage.NewInt64PrimaryKeys(int(rowNums)),
-			DeleteTimestamps: make([]uint64, 0, rowNums),
-		}
-	case schemapb.DataType_VarChar:
-		deltaData = &storage.DeltaData{
-			DeletePks:        storage.NewVarcharPrimaryKeys(int(rowNums)),
-			DeleteTimestamps: make([]uint64, 0, rowNums),
-		}
+	deltaData, err := storage.NewDeltaDataWithPkType(rowNums, pkField.DataType)
+	if err != nil {
+		return err
 	}
 
 	reader, err := storage.CreateDeltalogReader(blobs)
@@ -1240,9 +1231,10 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 			return err
 		}
 		dl := reader.Value()
-		deltaData.DeletePks.MustAppend(dl.Pk)
-		deltaData.DeleteTimestamps = append(deltaData.DeleteTimestamps, dl.Ts)
-		deltaData.DelRowCount++
+		err = deltaData.Append(dl.Pk, dl.Ts)
+		if err != nil {
+			return err
+		}
 	}
 
 	err = segment.LoadDeltaData(ctx, deltaData)
@@ -1250,7 +1242,7 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		return err
 	}
 
-	log.Info("load delta logs done", zap.Int64("deleteCount", deltaData.DelRowCount))
+	log.Info("load delta logs done", zap.Int64("deleteCount", deltaData.DeleteRowCount()))
 	return nil
 }
 

@@ -38,7 +38,7 @@ type Int64PrimaryKeys struct {
 	values []int64
 }
 
-func NewInt64PrimaryKeys(cap int) *Int64PrimaryKeys {
+func NewInt64PrimaryKeys(cap int64) *Int64PrimaryKeys {
 	return &Int64PrimaryKeys{values: make([]int64, 0, cap)}
 }
 
@@ -97,7 +97,7 @@ type VarcharPrimaryKeys struct {
 	size   int64
 }
 
-func NewVarcharPrimaryKeys(cap int) *VarcharPrimaryKeys {
+func NewVarcharPrimaryKeys(cap int64) *VarcharPrimaryKeys {
 	return &VarcharPrimaryKeys{
 		values: make([]string, 0, cap),
 	}
