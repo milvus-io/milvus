@@ -17,6 +17,7 @@ from pymilvus import (
 )
 
 import beir.util
+from beir.retrieval.search.lexical import BM25Search
 from beir.datasets.data_loader import GenericDataLoader
 from beir.retrieval.evaluation import EvaluateRetrieval
 
@@ -80,7 +81,7 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
     batch_size = 5000
     for i in tqdm(range(0, len(corpus_data), batch_size), desc="Inserting data"):
         hello_bm25.insert(corpus_data[i:i + batch_size])
-
+    hello_bm25.flush()
     log.info(f"Data inserted successfully, start to create index")
     hello_bm25.create_index(
         "sparse",
@@ -191,6 +192,62 @@ def Lucene_full_text_search(corpus, queries, qrels, top_k=1000):
     return ndcg, _map, recall, precision
 
 
+def es_full_text_search(corpus, queries, qrels, top_k=1000, index_name="hello", hostname="localhost", k1=1.5, b=0.75):
+    num_docs = len(corpus)
+    num_queries = len(queries)
+
+    print("=" * 50)
+    print(f"Corpus Size: {num_docs:,}")
+    print(f"Queries Size: {num_queries:,}")
+    model = BM25Search(
+        index_name=index_name, hostname=hostname, language="english", number_of_shards=1, initialize=False
+    )
+    es_bm25_settings = {
+        "settings": {
+            "index": {
+                "similarity": {
+                    "default": {
+                        "type": "BM25",
+                        "k1": k1,
+                        "b": b,
+                    }
+                }
+            },
+            "analysis": {
+                "analyzer": {
+                    "custom_analyzer": {
+                        "type": "standard",
+                        "max_token_length": 1_000_000,
+                        "stopwords": "_english_",
+                        "filter": ["lowercase", "custom_snowball"]
+                    }
+                },
+                "filter": {
+                    "custom_snowball": {
+                        "type": "snowball",
+                        "language": "English"
+                    }
+                }
+            }
+        }
+    }
+    model.initialise()
+    model.index(corpus)
+    model.es.es.indices.close(index=index_name)
+    model.es.es.indices.put_settings(index=index_name, body=es_bm25_settings)
+    model.es.es.indices.open(index=index_name)
+    t0 = time.time()
+    results = model.search(corpus=corpus, queries=queries, top_k=top_k)
+    tt = time.time() - t0
+    log.info(f"ES Search time: {tt}")
+    ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(
+        qrels, results, [1, 10, 100, 1000]
+    )
+    log.info(f"ES NDCG: {ndcg}, MAP: {_map}, Recall: {recall}, Precision: {precision}")
+
+    return ndcg, _map, recall, precision
+
+
 class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
     """
     target: test full text search
@@ -206,17 +263,18 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
                              ["arguana", "climate-fever", "cqadupstack", "dbpedia-entity", "fever", "fiqa", "hotpotqa",
                               "msmarco", "nfcorpus", "nq", "quora", "scidocs", "scifact", "trec-covid",
                               "webis-touche2021"])
-    def test_search_with_full_text_search(self, dataset, index_type):
+    def test_search_with_full_text_search(self, dataset, index_type, es_host, dataset_dir):
         self._connect()
-        BASE_URL = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{}.zip"
-        data_path = beir.util.download_and_unzip(BASE_URL.format(dataset), out_dir="./tmp/dataset")
+        dataset="climate-fever"
+        BASE_URL = f"https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{dataset}.zip"
+        data_path = beir.util.download_and_unzip(BASE_URL, out_dir=dataset_dir)
         split = "test" if dataset != "msmarco" else "dev"
         corpus, queries, qrels = GenericDataLoader(data_folder=data_path).load(split=split)
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = dataset + "_full_text_search"
         top_k = 1000
         milvus_full_text_search_result = milvus_full_text_search(collection_name, corpus, queries, qrels,
                                                                  top_k=top_k, index_type=index_type)
-        lucene_full_text_search_result = Lucene_full_text_search(corpus, queries, qrels, top_k=top_k)
+        es_full_text_search_result = es_full_text_search(corpus, queries, qrels, top_k=top_k, index_name=collection_name, hostname=es_host)
         log.info(f"result for dataset {dataset}")
         log.info(f"milvus full text search result {milvus_full_text_search_result}")
-        log.info(f"lucene full text search result {lucene_full_text_search_result}")
+        log.info(f"es full text search result {es_full_text_search_result}")
