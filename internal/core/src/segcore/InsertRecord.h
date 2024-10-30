@@ -179,7 +179,7 @@ class OffsetOrderedArray : public OffsetMap {
                              [](const std::pair<T, int64_t>& elem,
                                 const T& value) { return elem.first < value; });
 
-        return it != array_.end();
+        return it != array_.end() && it->first == target;
     }
 
     std::vector<int64_t>
