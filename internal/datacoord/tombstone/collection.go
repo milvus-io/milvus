@@ -89,7 +89,7 @@ func (dt *collectionTombstoneImpl) MarkCollectionAsDropping(ctx context.Context,
 
 	// The tombstone's creation is always idempotent.
 	collection.CreateTimestamp = time.Now().Unix()
-	tombstone := newCollectionTombstone(collection)
+	tombstone := model.NewCollectionTombstone(collection)
 	if err := dt.catalog.SaveCollectionTombstone(ctx, tombstone); err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func (dt *collectionTombstoneImpl) MarkPartitionAsDropping(ctx context.Context, 
 
 	// The tombstone's creation is always idempotent.
 	partition.CreateTimestamp = time.Now().Unix()
-	tombstone := newParititionTombstone(partition)
+	tombstone := model.NewParititionTombstone(partition)
 	if err := dt.catalog.SaveCollectionTombstone(ctx, tombstone); err != nil {
 		return err
 	}
@@ -201,7 +201,7 @@ func (dt *collectionTombstoneImpl) removeCollectionTombstone(ctx context.Context
 		return nil
 	}
 
-	if err := dt.catalog.DropCollectionTombstone(ctx, newCollectionTombstone(tombstone)); err != nil {
+	if err := dt.catalog.DropCollectionTombstone(ctx, model.NewCollectionTombstone(tombstone)); err != nil {
 		return err
 	}
 	for _, vchannel := range tombstone.GetVchannels() {
@@ -221,7 +221,7 @@ func (dt *collectionTombstoneImpl) removeParitionTombstone(ctx context.Context, 
 		return nil
 	}
 
-	if err := dt.catalog.DropCollectionTombstone(ctx, newParititionTombstone(tombstone)); err != nil {
+	if err := dt.catalog.DropCollectionTombstone(ctx, model.NewParititionTombstone(tombstone)); err != nil {
 		return err
 	}
 	dt.partition.Remove(partitionID)
@@ -232,24 +232,4 @@ func (dt *collectionTombstoneImpl) removeParitionTombstone(ctx context.Context, 
 func (dt *collectionTombstoneImpl) Close() {
 	dt.notifier.Cancel()
 	dt.notifier.BlockUntilFinish()
-}
-
-func newCollectionTombstone(dc *DroppingCollection) *model.CollectionTombstone {
-	return &model.CollectionTombstone{
-		Tombstone: &datapb.CollectionTombstone{
-			Tombstone: &datapb.CollectionTombstone_Collection{
-				Collection: dc,
-			},
-		},
-	}
-}
-
-func newParititionTombstone(dp *DroppingPartition) *model.CollectionTombstone {
-	return &model.CollectionTombstone{
-		Tombstone: &datapb.CollectionTombstone{
-			Tombstone: &datapb.CollectionTombstone_Partition{
-				Partition: dp,
-			},
-		},
-	}
 }

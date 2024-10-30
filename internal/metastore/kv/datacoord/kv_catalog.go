@@ -990,25 +990,18 @@ func (kc *Catalog) ListCollectionTombstone(_ context.Context) ([]*model.Collecti
 	}
 	tombstones := make([]*model.CollectionTombstone, 0, len(values))
 	for _, value := range values {
-		tombstone := &datapb.CollectionTombstone{}
-		err = proto.Unmarshal([]byte(value), tombstone)
+		tombstone, err := model.NewCollectionTombstoneFromValue(value)
 		if err != nil {
 			return nil, err
 		}
-		tombstones = append(tombstones, &model.CollectionTombstone{
-			Tombstone: tombstone,
-		})
+		tombstones = append(tombstones, tombstone)
 	}
 	return tombstones, nil
 }
 
 func (kc *Catalog) SaveCollectionTombstone(_ context.Context, tombstone *model.CollectionTombstone) error {
 	key := path.Join(CollectionTombstonePrefix, tombstone.Key())
-	value, err := proto.Marshal(tombstone.Tombstone)
-	if err != nil {
-		return err
-	}
-	return kc.MetaKv.Save(key, string(value))
+	return kc.MetaKv.Save(key, tombstone.Value())
 }
 
 func (kc *Catalog) DropCollectionTombstone(_ context.Context, tombstone *model.CollectionTombstone) error {

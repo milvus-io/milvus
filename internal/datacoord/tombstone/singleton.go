@@ -3,27 +3,34 @@ package tombstone
 import (
 	"context"
 
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus/internal/metastore"
 )
 
 // collectionTombstone is the singleton instance of CollectionTtombstone
-var collectionTombstone *collectionTombstoneImpl
+var collectionTombstone atomic.Pointer[collectionTombstoneImpl]
 
 // RecoverCollectionTombstone recovers the collection tombstone from the metastore
 func RecoverCollectionTombstone(ctx context.Context, catalog metastore.DataCoordCatalog) error {
-	if collectionTombstone != nil {
+	if collectionTombstone.Load() != nil {
 		return nil
 	}
-
-	var err error
-	collectionTombstone, err = recoverCollectionTombstone(ctx, catalog)
-	return err
+	tombstone, err := recoverCollectionTombstone(ctx, catalog)
+	if err != nil {
+		return err
+	}
+	if swapped := collectionTombstone.CompareAndSwap(nil, tombstone); !swapped {
+		tombstone.Close()
+	}
+	return nil
 }
 
 // CollectionTombstone returns the singleton instance of CollectionTombstone
 func CollectionTombstone() *collectionTombstoneImpl {
-	if collectionTombstone == nil {
+	tombstone := collectionTombstone.Load()
+	if tombstone == nil {
 		panic("collection tombstone is not initialized")
 	}
-	return collectionTombstone
+	return tombstone
 }
