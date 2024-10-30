@@ -326,7 +326,8 @@ class TestQueryParams(TestcaseBase):
         # not support filter bool field with expr 'bool in [0/ 1]'
         not_support_expr = f'{ct.default_bool_field_name} in [0]'
         error = {ct.err_code: 65535,
-                 ct.err_msg: "cannot parse expression: bool in [0], error: value '0' in list cannot be casted to Bool"}
+                 ct.err_msg: "cannot parse expression: bool in [0], error: value 'int64_val:0' "
+                             "in list cannot be casted to Bool"}
         self.collection_wrap.query(not_support_expr, output_fields=[ct.default_bool_field_name],
                                    check_task=CheckTasks.err_res, check_items=error)
 
@@ -442,8 +443,9 @@ class TestQueryParams(TestcaseBase):
         collection_w.query(expr_1, check_task=CheckTasks.err_res, check_items=error_1)
 
         expr_3 = f'{ct.default_int64_field_name} in not [1, 2]'
-        error_3 = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 in not [1, 2], "
-                                                   "error: line 1:9 no viable alternative at input 'innot'"}
+        error_3 = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 in not [1, 2], error: "
+                                                   "contains_any operation are only supported explicitly "
+                                                   "specified element, got: not[1,2]"}
         collection_w.query(expr_3, check_task=CheckTasks.err_res, check_items=error_3)
 
     @pytest.mark.tags(CaseLabel.L1)
