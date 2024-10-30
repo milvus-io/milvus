@@ -2392,12 +2392,12 @@ class TestGroupSearch(TestCaseClassBase):
         all_pages_grpby_field_values = []
         for r in range(page_rounds):
             page_res = self.collection_wrap.search(search_vectors, anns_field=default_search_field,
-                                           param=search_param, limit=limit, offset=limit * r,
-                                           expr=default_search_exp, group_by_field=grpby_field,
-                                           output_fields=[grpby_field],
-                                           check_task=CheckTasks.check_search_results,
-                                           check_items={"nq": 1, "limit": limit},
-                                           )[0]
+                                                   param=search_param, limit=limit, offset=limit * r,
+                                                   expr=default_search_exp, group_by_field=grpby_field,
+                                                   output_fields=[grpby_field],
+                                                   check_task=CheckTasks.check_search_results,
+                                                   check_items={"nq": 1, "limit": limit},
+                                                   )[0]
             for j in range(limit):
                 all_pages_grpby_field_values.append(page_res[0][j].get(grpby_field))
             all_pages_ids += page_res[0].ids
@@ -2405,12 +2405,12 @@ class TestGroupSearch(TestCaseClassBase):
         assert hit_rate >= 0.8
 
         total_res = self.collection_wrap.search(search_vectors, anns_field=default_search_field,
-                                        param=search_param, limit=limit * page_rounds,
-                                        expr=default_search_exp, group_by_field=grpby_field,
-                                        output_fields=[grpby_field],
-                                        check_task=CheckTasks.check_search_results,
-                                        check_items={"nq": 1, "limit": limit * page_rounds}
-                                        )[0]
+                                                param=search_param, limit=limit * page_rounds,
+                                                expr=default_search_exp, group_by_field=grpby_field,
+                                                output_fields=[grpby_field],
+                                                check_task=CheckTasks.check_search_results,
+                                                check_items={"nq": 1, "limit": limit * page_rounds}
+                                                )[0]
         hit_num = len(set(total_res[0].ids).intersection(set(all_pages_ids)))
         hit_rate = round(hit_num / (limit * page_rounds), 3)
         assert hit_rate >= 0.8
@@ -2473,3 +2473,46 @@ class TestGroupSearch(TestCaseClassBase):
             grpby_field_values.append(total_res[0][i].fields.get(grpby_field))
         assert len(grpby_field_values) == total_count
         assert len(set(grpby_field_values)) == limit * page_rounds
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_group_size_min_max(self):
+        """
+        verify search group by works with min and max group size
+        """
+        group_by_field = self.inverted_string_field
+        default_search_field = self.vector_fields[1]
+        search_vectors = cf.gen_vectors(1, dim=self.dims[1], vector_data_type=self.vector_fields[1])
+        search_params = {}
+        limit = 10
+        max_group_size = 10
+        self.collection_wrap.search(data=search_vectors, anns_field=default_search_field,
+                                    param=search_params, limit=limit,
+                                    group_by_field=group_by_field,
+                                    group_size=max_group_size, group_strict_size=True,
+                                    output_fields=[group_by_field])
+        exceed_max_group_size = max_group_size + 1
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"input group size:{exceed_max_group_size} exceeds configured max "
+                             f"group size:{max_group_size}"}
+        self.collection_wrap.search(data=search_vectors, anns_field=default_search_field,
+                                    param=search_params, limit=limit,
+                                    group_by_field=group_by_field,
+                                    group_size=exceed_max_group_size, group_strict_size=True,
+                                    output_fields=[group_by_field],
+                                    check_task=CheckTasks.err_res, check_items=error)
+
+        min_group_size = 1
+        self.collection_wrap.search(data=search_vectors, anns_field=default_search_field,
+                                    param=search_params, limit=limit,
+                                    group_by_field=group_by_field,
+                                    group_size=max_group_size, group_strict_size=True,
+                                    output_fields=[group_by_field])
+        below_min_group_size = min_group_size - 1
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"input group size:{below_min_group_size} is negative"}
+        self.collection_wrap.search(data=search_vectors, anns_field=default_search_field,
+                                    param=search_params, limit=limit,
+                                    group_by_field=group_by_field,
+                                    group_size=below_min_group_size, group_strict_size=True,
+                                    output_fields=[group_by_field],
+                                    check_task=CheckTasks.err_res, check_items=error)

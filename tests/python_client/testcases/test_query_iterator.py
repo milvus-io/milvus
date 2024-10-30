@@ -25,7 +25,7 @@ class TestQueryIterator(TestcaseBase):
                 3. query iterator with checkpoint file
                 4. iterator.next() for 10 times
                 5. delete some entities before calling a new query iterator
-                6. call a new query iterator with the same checkpoint file
+                6. call a new query iterator with the same checkpoint file, with diff batch_size and output_fields
                 7. iterator.next() until the end
                 verify:
                   1. no pk lost in interator results for the 2 iterators
@@ -59,16 +59,14 @@ class TestQueryIterator(TestcaseBase):
                 iterator.close()
                 assert False, f"The iterator ends before {first_iter_times} times iterators: iter_times: {iter_times}"
                 break
-            pk_name = ct.default_int64_field_name if res[0].get(ct.default_int64_field_name, None) is not None \
-                else ct.default_string_field_name
             for i in range(len(res)):
-                pk_list1.append(res[i][pk_name])
+                pk_list1.append(res[i][primary_field])
         file_exist = os.path.isfile(iterator_cp_file)
         assert file_exist is True, "The checkpoint file exists without iterator close"
 
         # 4. try to delete and insert some entities before calling a new query iterator
         delete_ids = random.sample(insert_ids[:nb//2], 101) + random.sample(insert_ids[nb//2:], 101)
-        del_res, _ = collection_w.delete(expr=f"{pk_name} in {delete_ids}")
+        del_res, _ = collection_w.delete(expr=f"{primary_field} in {delete_ids}")
         assert del_res.delete_count == len(delete_ids)
 
         data = cf.gen_default_list_data(nb=333, start=nb)
@@ -77,18 +75,16 @@ class TestQueryIterator(TestcaseBase):
             collection_w.flush()
 
         # 5. call a new query iterator with the same checkpoint file to continue the first iterator
-        iterator2 = collection_w.query_iterator(batch_size, expr=expr, iterator_cp_file=iterator_cp_file)[0]
-        pk_list2 = []
+        iterator2 = collection_w.query_iterator(batch_size*2, expr=expr,
+                                                output_fields=[primary_field, ct.default_float_field_name],
+                                                iterator_cp_file=iterator_cp_file)[0]
         while True:
             res = iterator2.next()
             if len(res) == 0:
                 iterator2.close()
                 break
-            pk_name = ct.default_int64_field_name if res[0].get(ct.default_int64_field_name, None) is not None \
-                else ct.default_string_field_name
             for i in range(len(res)):
-                pk_list2.append(res[i][pk_name])
-                pk_list1.append(res[i][pk_name])
+                pk_list1.append(res[i][primary_field])
         # 6. verify
         assert len(pk_list1) == len(set(pk_list1)) == nb
         file_exist = os.path.isfile(iterator_cp_file)
@@ -299,3 +295,41 @@ class TestQueryIterator(TestcaseBase):
         collection_w.query_iterator(check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": nb,
                                                  "batch_size": ct.default_batch_size})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("issue #37109, need debug due to the resolution of the issue")
+    def test_query_iterator_on_two_collections(self):
+        """
+        target: test query iterator on two collections
+        method: 1. create two collections
+                2. query iterator on the first collection
+                3. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True)[0]
+        collection_w2 = self.init_collection_general(prefix, False, primary_field=ct.default_string_field_name)[0]
+
+        data = cf.gen_default_list_data(nb=ct.default_nb, primary_field=ct.default_string_field_name)
+        string_values = [cf.gen_str_by_length(20) for _ in range(ct.default_nb)]
+        data[2] = string_values
+        collection_w2.insert(data)
+
+        # 2. call a new query iterator and iterator for some times
+        batch_size = 150
+        iterator_cp_file = f"/tmp/it_{collection_w.name}_cp"
+        iterator2 = collection_w2.query_iterator(batch_size=batch_size // 2, iterator_cp_file=iterator_cp_file)[0]
+        iter_times = 0
+        first_iter_times = ct.default_nb // batch_size // 2 // 2  # only iterate half of the data for the 1st time
+        while iter_times < first_iter_times:
+            iter_times += 1
+            res = iterator2.next()
+            if len(res) == 0:
+                iterator2.close()
+                assert False, f"The iterator ends before {first_iter_times} times iterators: iter_times: {iter_times}"
+                break
+
+        # 3. query iterator on the second collection with the same checkpoint file
+
+        iterator = collection_w.query_iterator(batch_size=batch_size, iterator_cp_file=iterator_cp_file)[0]
+        print(iterator.next())
