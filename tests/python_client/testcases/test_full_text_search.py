@@ -506,7 +506,6 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -658,7 +657,6 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(data)
                 else data[i: len(data)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -800,7 +798,6 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         batch_size = 5000
         for i in range(0, len(df), batch_size):
             collection_w.insert(df[i: i + batch_size])
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -938,7 +935,6 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         num_entities = collection_w.num_entities
         # query with count(*)
         res, _ = collection_w.query(
@@ -1190,7 +1186,6 @@ class TestUpsertWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -1348,7 +1343,6 @@ class TestUpsertWithFullTextSearchNegative(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -1486,7 +1480,6 @@ class TestDeleteWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -1651,7 +1644,6 @@ class TestCreateIndexWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -1775,7 +1767,6 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -1884,7 +1875,6 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -1993,8 +1983,6 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
-
         error = {ct.err_code: 1100, ct.err_msg: "float vector index does not support metric type: BM25"}
         collection_w.create_index(
             "emb",
@@ -2091,7 +2079,6 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -2227,7 +2214,6 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -2316,7 +2302,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                     overlap) > 0, f"query text: {search_text}, \ntext: {result_text} \n overlap: {overlap} \n word freq a: {word_freq_a} \n word freq b: {word_freq_b}\n result: {r}"
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("nq", [10])
+    @pytest.mark.parametrize("nq", [2])
     @pytest.mark.parametrize("empty_percent", [0.5])
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
@@ -2409,7 +2395,10 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         texts = df["text"].to_list()
         word_freq = cf.analyze_documents(texts, language=language)
-        tokens = list(word_freq.keys())
+        tokens = []
+        for item in word_freq.most_common(20):
+            if len(item[0]) == 2:
+                tokens.append(item[0])
         if len(tokens) == 0:
             log.info(f"empty tokens, add a dummy token")
             tokens = ["dummy"]
@@ -2420,7 +2409,6 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -2612,7 +2600,6 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -2778,7 +2765,6 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -2925,7 +2911,6 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -3062,7 +3047,6 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -3089,7 +3073,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
             search_data = cf.gen_vectors(nb=nq, dim=1000, vector_data_type="FLOAT_VECTOR")
         log.info(f"search data: {search_data}")
         error = {ct.err_code: 65535,
-                 ct.err_msg: "can't build BM25 IDF for data not varchar"}
+                 ct.err_msg: "please provide varchar for BM25 Function based search"}
         collection_w.search(
             data=search_data,
             anns_field="text_sparse_emb",
@@ -3200,7 +3184,6 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "dense_emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},

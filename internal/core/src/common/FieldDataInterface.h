@@ -484,7 +484,7 @@ class FieldDataImpl : public FieldDataBase {
     int64_t
     get_null_count() const override {
         std::shared_lock lck(tell_mutex_);
-        return null_count;
+        return null_count_;
     }
 
     bool
@@ -507,7 +507,7 @@ class FieldDataImpl : public FieldDataBase {
     // number of elements data_ can hold
     int64_t num_rows_;
     mutable std::shared_mutex num_rows_mutex_;
-    int64_t null_count{0};
+    int64_t null_count_{0};
     // number of actual elements in data_
     size_t length_{};
     mutable std::shared_mutex tell_mutex_;
@@ -616,6 +616,7 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
         if (n == 0) {
             return;
         }
+        null_count_ = array->null_count();
 
         std::lock_guard lck(tell_mutex_);
         if (length_ + n > get_num_rows()) {
@@ -624,8 +625,11 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
 
         auto i = 0;
         for (const auto& json : *array) {
-            data_[length_ + i] = Json(simdjson::padded_string(json.value()));
-            i++;
+            if (!json.has_value()) {
+                i++;
+                continue;
+            }
+            data_[length_ + i++] = Json(simdjson::padded_string(json.value()));
         }
         if (IsNullable()) {
             auto valid_data = array->null_bitmap_data();

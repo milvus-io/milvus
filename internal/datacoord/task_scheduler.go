@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -61,6 +62,8 @@ type taskScheduler struct {
 	indexEngineVersionManager IndexEngineVersionManager
 	handler                   Handler
 	allocator                 allocator.Allocator
+
+	taskStats *expirable.LRU[UniqueID, Task]
 }
 
 func newTaskScheduler(
@@ -88,6 +91,7 @@ func newTaskScheduler(
 		handler:                   handler,
 		indexEngineVersionManager: indexEngineVersionManager,
 		allocator:                 allocator,
+		taskStats:                 expirable.NewLRU[UniqueID, Task](1024, nil, time.Minute*5),
 	}
 	ts.reloadFromMeta()
 	return ts
@@ -112,7 +116,7 @@ func (s *taskScheduler) reloadFromMeta() {
 				continue
 			}
 			if segIndex.IndexState != commonpb.IndexState_Finished && segIndex.IndexState != commonpb.IndexState_Failed {
-				s.tasks[segIndex.BuildID] = &indexBuildTask{
+				s.enqueue(&indexBuildTask{
 					taskID: segIndex.BuildID,
 					nodeID: segIndex.NodeID,
 					taskInfo: &workerpb.IndexTaskInfo{
@@ -123,7 +127,7 @@ func (s *taskScheduler) reloadFromMeta() {
 					queueTime: time.Now(),
 					startTime: time.Now(),
 					endTime:   time.Now(),
-				}
+				})
 			}
 		}
 	}
@@ -131,7 +135,7 @@ func (s *taskScheduler) reloadFromMeta() {
 	allAnalyzeTasks := s.meta.analyzeMeta.GetAllTasks()
 	for taskID, t := range allAnalyzeTasks {
 		if t.State != indexpb.JobState_JobStateFinished && t.State != indexpb.JobState_JobStateFailed {
-			s.tasks[taskID] = &analyzeTask{
+			s.enqueue(&analyzeTask{
 				taskID: taskID,
 				nodeID: t.NodeID,
 				taskInfo: &workerpb.AnalyzeResult{
@@ -142,14 +146,14 @@ func (s *taskScheduler) reloadFromMeta() {
 				queueTime: time.Now(),
 				startTime: time.Now(),
 				endTime:   time.Now(),
-			}
+			})
 		}
 	}
 
 	allStatsTasks := s.meta.statsTaskMeta.GetAllTasks()
 	for taskID, t := range allStatsTasks {
 		if t.GetState() != indexpb.JobState_JobStateFinished && t.GetState() != indexpb.JobState_JobStateFailed {
-			s.tasks[taskID] = &statsTask{
+			s.enqueue(&statsTask{
 				taskID:          taskID,
 				segmentID:       t.GetSegmentID(),
 				targetSegmentID: t.GetTargetSegmentID(),
@@ -163,7 +167,7 @@ func (s *taskScheduler) reloadFromMeta() {
 				startTime:  time.Now(),
 				endTime:    time.Now(),
 				subJobType: t.GetSubJobType(),
-			}
+			})
 		}
 	}
 }
@@ -184,6 +188,7 @@ func (s *taskScheduler) enqueue(task Task) {
 	taskID := task.GetTaskID()
 	if _, ok := s.tasks[taskID]; !ok {
 		s.tasks[taskID] = task
+		s.taskStats.Add(taskID, task)
 		task.SetQueueTime(time.Now())
 		log.Info("taskScheduler enqueue task", zap.Int64("taskID", taskID))
 	}

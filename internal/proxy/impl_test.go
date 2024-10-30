@@ -20,10 +20,13 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
@@ -36,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -1616,8 +1620,17 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
-		// no such collection
+		// no such database
 		mc := NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, mockErr)
+		globalMetaCache = mc
+		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
+		// no such collection
+		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, mockErr)
 		globalMetaCache = mc
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
@@ -1626,6 +1639,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// get schema failed
 		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
 		globalMetaCache = mc
@@ -1635,6 +1649,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// get channel failed
 		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
@@ -1659,6 +1674,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// get partitions failed
 		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
@@ -1673,6 +1689,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// get partitionID failed
 		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{},
@@ -1685,6 +1702,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// no file
 		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{},
@@ -1731,7 +1749,18 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
+		// no such database
+		mc := NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, mockErr)
+		globalMetaCache = mc
+		rsp, err = node.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
 		// normal case
+		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
+		globalMetaCache = mc
 		dataCoord := mocks.NewMockDataCoordClient(t)
 		dataCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(nil, nil)
 		node.dataCoord = dataCoord
@@ -1749,8 +1778,19 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
-		// normal case
+		// no such database
 		mc := NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, mockErr)
+		globalMetaCache = mc
+		rsp, err = node.ListImports(ctx, &internalpb.ListImportsRequest{
+			CollectionName: "col",
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
+		// normal case
+		mc = NewMockCache(t)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		globalMetaCache = mc
 		dataCoord := mocks.NewMockDataCoordClient(t)
@@ -1819,4 +1859,43 @@ func TestProxy_InvalidateShardLeaderCache(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, merr.Ok(resp))
 	})
+}
+
+func TestRegisterRestRouter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+
+	dc := mocks.NewMockDataCoordClient(t)
+	dc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+	qc := mocks.NewMockQueryCoordClient(t)
+	qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+
+	proxy := &Proxy{
+		dataCoord:  dc,
+		queryCoord: qc,
+	}
+	proxy.RegisterRestRouter(router)
+
+	tests := []struct {
+		path       string
+		statusCode int
+	}{
+		{path: mhttp.QCoordSegmentsPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.QCoordChannelsPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.QCoordAllTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DNodeSyncTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DCoordCompactionTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DCoordImportTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DCoordBuildIndexTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DNodeSyncTasksPath, statusCode: http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			req, _ := http.NewRequest("GET", tt.path, nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			assert.Equal(t, tt.statusCode, w.Code)
+		})
+	}
 }

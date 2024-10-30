@@ -66,6 +66,11 @@ class Chunk {
         return data_;
     }
 
+    const char*
+    RawData() const {
+        return data_;
+    }
+
     virtual bool
     isValid(int offset) {
         return valid_[offset];

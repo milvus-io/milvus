@@ -131,7 +131,7 @@ func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 			}
 			task.mergedStatsBlob = mergedStatsBlob
 
-			if len(pack.bm25Stats) > 0 {
+			if hasBM25Function(s.schema) {
 				mergedBM25Blob, err := s.serializeMergedBM25Stats(pack)
 				if err != nil {
 					log.Warn("failed to serialize merged bm25 stats log", zap.Error(err))
@@ -169,7 +169,7 @@ func (s *storageV1Serializer) setTaskMeta(task *SyncTask, pack *SyncPack) {
 		WithPartitionID(pack.partitionID).
 		WithChannelName(pack.channelName).
 		WithSegmentID(pack.segmentID).
-		WithBatchSize(pack.batchSize).
+		WithBatchRows(pack.batchRows).
 		WithSchema(s.metacache.Schema()).
 		WithStartPosition(pack.startPosition).
 		WithCheckpoint(pack.checkpoint).
@@ -235,7 +235,7 @@ func (s *storageV1Serializer) serializeStatslog(pack *SyncPack) (*storage.Primar
 		stats.UpdateByMsgs(chunkPkData)
 	}
 
-	blob, err := s.inCodec.SerializePkStats(stats, pack.batchSize)
+	blob, err := s.inCodec.SerializePkStats(stats, pack.batchRows)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -310,4 +310,13 @@ func (s *storageV1Serializer) serializeDeltalog(pack *SyncPack) (*storage.Blob, 
 	}
 	writer.Close()
 	return finalizer()
+}
+
+func hasBM25Function(schema *schemapb.CollectionSchema) bool {
+	for _, function := range schema.GetFunctions() {
+		if function.GetType() == schemapb.FunctionType_BM25 {
+			return true
+		}
+	}
+	return false
 }

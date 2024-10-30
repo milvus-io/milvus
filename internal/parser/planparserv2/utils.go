@@ -223,14 +223,14 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 	return nil, fmt.Errorf("cannot cast value to %s, value: %s", dataType.String(), value)
 }
 
-func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, columnInfo *planpb.ColumnInfo, operand *planpb.GenericValue, value *planpb.GenericValue) *planpb.Expr {
+func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, columnInfo *planpb.ColumnInfo, operand *planpb.GenericValue, value *planpb.GenericValue) (*planpb.Expr, error) {
 	dataType := columnInfo.GetDataType()
 	if typeutil.IsArrayType(dataType) && len(columnInfo.GetNestedPath()) != 0 {
 		dataType = columnInfo.GetElementType()
 	}
 	castedValue, err := castValue(dataType, operand)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	return &planpb.Expr{
 		Expr: &planpb.Expr_BinaryArithOpEvalRangeExpr{
@@ -242,7 +242,7 @@ func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, column
 				Value:        value,
 			},
 		},
-	}
+	}, nil
 }
 
 func combineArrayLengthExpr(op planpb.OpType, arithOp planpb.ArithOpType, columnInfo *planpb.ColumnInfo, value *planpb.GenericValue) (*planpb.Expr, error) {
@@ -282,7 +282,7 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 		// a * 2 == 3
 		// a / 2 == 3
 		// a % 2 == 3
-		return combineBinaryArithExpr(op, arithOp, leftExpr.GetInfo(), rightValue.GetValue(), valueExpr.GetValue()), nil
+		return combineBinaryArithExpr(op, arithOp, leftExpr.GetInfo(), rightValue.GetValue(), valueExpr.GetValue())
 	} else if rightExpr != nil && leftValue != nil {
 		// 2 + a == 3
 		// 2 - a == 3
@@ -292,7 +292,7 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 
 		switch arithExpr.GetOp() {
 		case planpb.ArithOpType_Add, planpb.ArithOpType_Mul:
-			return combineBinaryArithExpr(op, arithOp, rightExpr.GetInfo(), leftValue.GetValue(), valueExpr.GetValue()), nil
+			return combineBinaryArithExpr(op, arithOp, rightExpr.GetInfo(), leftValue.GetValue(), valueExpr.GetValue())
 		default:
 			return nil, fmt.Errorf("module field is not yet supported")
 		}

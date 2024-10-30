@@ -28,14 +28,14 @@ const (
 
 var DefaultScores = []float32{0.01, 0.04, 0.09}
 
-func generatePrimaryField(datatype schemapb.DataType) *schemapb.FieldSchema {
+func generatePrimaryField(datatype schemapb.DataType, autoID bool) *schemapb.FieldSchema {
 	return &schemapb.FieldSchema{
 		FieldID:      common.StartOfUserFieldID,
 		Name:         FieldBookID,
 		IsPrimaryKey: true,
 		Description:  "",
 		DataType:     datatype,
-		AutoID:       false,
+		AutoID:       autoID,
 	}
 }
 
@@ -93,8 +93,8 @@ func generateVectorFieldSchema(dataType schemapb.DataType) *schemapb.FieldSchema
 	}
 }
 
-func generateCollectionSchema(primaryDataType schemapb.DataType) *schemapb.CollectionSchema {
-	primaryField := generatePrimaryField(primaryDataType)
+func generateCollectionSchema(primaryDataType schemapb.DataType, autoID bool) *schemapb.CollectionSchema {
+	primaryField := generatePrimaryField(primaryDataType, autoID)
 	vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
 	vectorField.Name = FieldBookIntro
 	return &schemapb.CollectionSchema{
@@ -116,7 +116,7 @@ func generateCollectionSchema(primaryDataType schemapb.DataType) *schemapb.Colle
 }
 
 func generateDocInDocOutCollectionSchema(primaryDataType schemapb.DataType) *schemapb.CollectionSchema {
-	primaryField := generatePrimaryField(primaryDataType)
+	primaryField := generatePrimaryField(primaryDataType, false)
 	vectorField := generateVectorFieldSchema(schemapb.DataType_SparseFloatVector)
 	vectorField.Name = FieldBookIntro
 	vectorField.IsFunctionOutput = true
@@ -382,7 +382,7 @@ func generateQueryResult64(withDistance bool) []map[string]interface{} {
 }
 
 func TestPrintCollectionDetails(t *testing.T) {
-	coll := generateCollectionSchema(schemapb.DataType_Int64)
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false)
 	indexes := generateIndexes()
 	assert.Equal(t, []gin.H{
 		{
@@ -514,8 +514,8 @@ func TestPrintCollectionDetails(t *testing.T) {
 }
 
 func TestPrimaryField(t *testing.T) {
-	coll := generateCollectionSchema(schemapb.DataType_Int64)
-	primaryField := generatePrimaryField(schemapb.DataType_Int64)
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false)
+	primaryField := generatePrimaryField(schemapb.DataType_Int64, false)
 	field, ok := getPrimaryField(coll)
 	assert.Equal(t, true, ok)
 	assert.EqualExportedValues(t, primaryField, field)
@@ -532,13 +532,13 @@ func TestPrimaryField(t *testing.T) {
 	assert.Equal(t, nil, err)
 	assert.Equal(t, "book_id in [1,2,3]", filter)
 
-	primaryField = generatePrimaryField(schemapb.DataType_VarChar)
+	primaryField = generatePrimaryField(schemapb.DataType_VarChar, false)
 	jsonStr = "{\"id\": [\"1\", \"2\", \"3\"]}"
 	idStr = gjson.Get(jsonStr, "id")
 	rangeStr, err = convertRange(primaryField, idStr)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, `"1","2","3"`, rangeStr)
-	coll2 := generateCollectionSchema(schemapb.DataType_VarChar)
+	coll2 := generateCollectionSchema(schemapb.DataType_VarChar, false)
 	filter, err = checkGetPrimaryKey(coll2, idStr)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, `book_id in ["1","2","3"]`, filter)
@@ -547,7 +547,7 @@ func TestPrimaryField(t *testing.T) {
 func TestInsertWithDynamicFields(t *testing.T) {
 	body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}"
 	req := InsertReq{}
-	coll := generateCollectionSchema(schemapb.DataType_Int64)
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false)
 	var err error
 	err, req.Data, _ = checkAndSetData(body, coll)
 	assert.Equal(t, nil, err)
@@ -564,7 +564,7 @@ func TestInsertWithDynamicFields(t *testing.T) {
 func TestInsertWithoutVector(t *testing.T) {
 	body := "{\"data\": {}}"
 	var err error
-	primaryField := generatePrimaryField(schemapb.DataType_Int64)
+	primaryField := generatePrimaryField(schemapb.DataType_Int64, false)
 	primaryField.AutoID = true
 	floatVectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
 	floatVectorField.Name = "floatVector"
@@ -615,7 +615,7 @@ func TestInsertWithoutVector(t *testing.T) {
 func TestInsertWithInt64(t *testing.T) {
 	arrayFieldName := "array-int64"
 	body := "{\"data\": {\"book_id\": 9999999999999999, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}"
-	coll := generateCollectionSchema(schemapb.DataType_Int64)
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false)
 	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 		Name:        arrayFieldName,
 		DataType:    schemapb.DataType_Array,
@@ -632,7 +632,7 @@ func TestInsertWithInt64(t *testing.T) {
 
 func TestInsertWithNullableField(t *testing.T) {
 	arrayFieldName := "array-int64"
-	coll := generateCollectionSchema(schemapb.DataType_Int64)
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false)
 	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 		Name:        arrayFieldName,
 		DataType:    schemapb.DataType_Array,
@@ -664,7 +664,7 @@ func TestInsertWithNullableField(t *testing.T) {
 
 func TestInsertWithDefaultValueField(t *testing.T) {
 	arrayFieldName := "array-int64"
-	coll := generateCollectionSchema(schemapb.DataType_Int64)
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false)
 	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 		Name:        arrayFieldName,
 		DataType:    schemapb.DataType_Array,
@@ -1587,7 +1587,7 @@ func newRowsWithArray(results []map[string]interface{}) []map[string]interface{}
 
 func TestArray(t *testing.T) {
 	body, _ := generateRequestBody(schemapb.DataType_Int64)
-	collectionSchema := generateCollectionSchema(schemapb.DataType_Int64)
+	collectionSchema := generateCollectionSchema(schemapb.DataType_Int64, false)
 	err, rows, validRows := checkAndSetData(string(body), collectionSchema)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 0, len(validRows))
@@ -1597,7 +1597,7 @@ func TestArray(t *testing.T) {
 	assert.Equal(t, len(collectionSchema.Fields)+1, len(data))
 
 	body, _ = generateRequestBodyWithArray(schemapb.DataType_Int64)
-	collectionSchema = newCollectionSchemaWithArray(generateCollectionSchema(schemapb.DataType_Int64))
+	collectionSchema = newCollectionSchemaWithArray(generateCollectionSchema(schemapb.DataType_Int64, false))
 	err, rows, validRows = checkAndSetData(string(body), collectionSchema)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 0, len(validRows))
@@ -1638,7 +1638,7 @@ func TestVector(t *testing.T) {
 		sparseFloatVector: map[uint32]float32{987621: 32190.31, 32189: 0.0001},
 	}
 	body, _ := wrapRequestBody([]map[string]interface{}{row1, row2, row3})
-	primaryField := generatePrimaryField(schemapb.DataType_Int64)
+	primaryField := generatePrimaryField(schemapb.DataType_Int64, false)
 	floatVectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
 	floatVectorField.Name = floatVector
 	binaryVectorField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)

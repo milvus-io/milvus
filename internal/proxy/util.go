@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -48,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -999,6 +999,22 @@ func parseGuaranteeTs(ts, tMax typeutil.Timestamp) typeutil.Timestamp {
 		ts = tsoutil.AddPhysicalDurationOnTs(tMax, -ratio)
 	}
 	return ts
+}
+
+func getMaxMvccTsFromChannels(channelsTs map[string]uint64, beginTs typeutil.Timestamp) typeutil.Timestamp {
+	maxTs := typeutil.Timestamp(0)
+	for _, ts := range channelsTs {
+		if ts > maxTs {
+			maxTs = ts
+		}
+	}
+
+	if maxTs == 0 {
+		log.Warn("no channel ts found, use beginTs instead")
+		return beginTs
+	}
+
+	return maxTs
 }
 
 func validateName(entity string, nameType string) error {

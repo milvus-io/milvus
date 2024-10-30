@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.62.0') _
+@Library('jenkins-shared-library@v0.63.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 def milvus_helm_chart_version = '4.2.8'
@@ -40,7 +40,7 @@ pipeline {
                                               pullRequestNumber: "$env.CHANGE_ID",
                                               make_cmd: "make clean && make USE_ASAN=ON build-cpp-with-coverage",
                                               test_entrypoint: "./scripts/run_cpp_codecov.sh",
-                                              codecov_files: "./lcov_output.info,./it_coverage.txt"
+                                              codecov_files: "./lcov_output.info"
                     }
                 }
             }

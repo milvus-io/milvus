@@ -77,6 +77,7 @@ class Expr {
     DataType type_;
     const std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
+    // NOTE: unused
     std::shared_ptr<VectorFunction> vector_func_;
 };
 
@@ -84,6 +85,9 @@ using ExprPtr = std::shared_ptr<milvus::exec::Expr>;
 
 using SkipFunc = bool (*)(const milvus::SkipIndex&, FieldId, int);
 
+/*
+ * The expr has only one column.
+ */
 class SegmentExpr : public Expr {
  public:
     SegmentExpr(const std::vector<ExprPtr>&& input,
@@ -137,15 +141,8 @@ class SegmentExpr : public Expr {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            int64_t size = 0;
-            if (segment_->type() == SegmentType::Growing) {
-                size = (i == (num_data_chunk_ - 1) &&
-                        active_count_ % size_per_chunk_ != 0)
-                           ? active_count_ % size_per_chunk_ - data_pos
-                           : size_per_chunk_ - data_pos;
-            } else {
-                size = segment_->chunk_size(field_id_, i) - data_pos;
-            }
+            // if segment is chunked, type won't be growing
+            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
 
             size = std::min(size, batch_size_ - processed_size);
 
@@ -353,16 +350,8 @@ class SegmentExpr : public Expr {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
 
-            int64_t size = 0;
-            if (segment_->type() == SegmentType::Growing) {
-                size = (i == (num_data_chunk_ - 1))
-                           ? (active_count_ % size_per_chunk_ == 0
-                                  ? size_per_chunk_ - data_pos
-                                  : active_count_ % size_per_chunk_ - data_pos)
-                           : size_per_chunk_ - data_pos;
-            } else {
-                size = segment_->chunk_size(field_id_, i) - data_pos;
-            }
+            // if segment is chunked, type won't be growing
+            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
 
             size = std::min(size, batch_size_ - processed_size);
 
@@ -520,14 +509,19 @@ class SegmentExpr : public Expr {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            auto size =
-                (i == (num_data_chunk_ - 1))
-                    ? (segment_->type() == SegmentType::Growing
-                           ? (active_count_ % size_per_chunk_ == 0
-                                  ? size_per_chunk_ - data_pos
-                                  : active_count_ % size_per_chunk_ - data_pos)
-                           : active_count_ - data_pos)
-                    : size_per_chunk_ - data_pos;
+            int64_t size = 0;
+            if (segment_->is_chunked()) {
+                size = segment_->chunk_size(field_id_, i) - data_pos;
+            } else {
+                size = (i == (num_data_chunk_ - 1))
+                           ? (segment_->type() == SegmentType::Growing
+                                  ? (active_count_ % size_per_chunk_ == 0
+                                         ? size_per_chunk_ - data_pos
+                                         : active_count_ % size_per_chunk_ -
+                                               data_pos)
+                                  : active_count_ - data_pos)
+                           : size_per_chunk_ - data_pos;
+            }
 
             size = std::min(size, batch_size_ - processed_size);
 
@@ -772,7 +766,8 @@ CompileExpression(const expr::TypedExprPtr& expr,
 class ExprSet {
  public:
     explicit ExprSet(const std::vector<expr::TypedExprPtr>& logical_exprs,
-                     ExecContext* exec_ctx) {
+                     ExecContext* exec_ctx)
+        : exec_ctx_(exec_ctx) {
         exprs_ = CompileExpressions(logical_exprs, exec_ctx);
     }
 

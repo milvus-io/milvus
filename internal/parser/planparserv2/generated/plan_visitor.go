@@ -46,6 +46,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Shift.
 	VisitShift(ctx *ShiftContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#Call.
+	VisitCall(ctx *CallContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#ReverseRange.
 	VisitReverseRange(ctx *ReverseRangeContext) interface{}
 

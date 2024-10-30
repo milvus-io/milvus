@@ -213,6 +213,7 @@ func (suite *ServiceSuite) SetupTest() {
 		getBalancerFunc:     func() balance.Balance { return suite.balancer },
 		distController:      suite.distController,
 		ctx:                 context.Background(),
+		metricsRequest:      metricsinfo.NewMetricsRequest(),
 	}
 
 	suite.server.registerMetricsRequest()
@@ -1357,8 +1358,8 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 			suite.Len(actions, 2)
 			growAction := actions[0].(*task.SegmentAction)
 			reduceAction := actions[1].(*task.SegmentAction)
-			suite.True(lo.Contains(segmentOnCollection[collection], growAction.SegmentID()))
-			suite.True(lo.Contains(segmentOnCollection[collection], reduceAction.SegmentID()))
+			suite.True(lo.Contains(segmentOnCollection[collection], growAction.GetSegmentID()))
+			suite.True(lo.Contains(segmentOnCollection[collection], reduceAction.GetSegmentID()))
 			suite.Equal(dstNode, growAction.Node())
 			suite.Equal(srcNode, reduceAction.Node())
 			t.Cancel(nil)

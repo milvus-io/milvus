@@ -161,6 +161,9 @@ func RollStats(newStats ...*storage.PrimaryKeyStats) SegmentAction {
 
 func MergeBm25Stats(newStats map[int64]*storage.BM25Stats) SegmentAction {
 	return func(info *SegmentInfo) {
+		if info.bm25stats == nil {
+			info.bm25stats = NewEmptySegmentBM25Stats()
+		}
 		info.bm25stats.Merge(newStats)
 	}
 }

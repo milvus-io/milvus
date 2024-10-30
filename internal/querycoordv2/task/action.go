@@ -51,44 +51,45 @@ type Action interface {
 	Node() int64
 	Type() ActionType
 	IsFinished(distMgr *meta.DistributionManager) bool
+	Desc() string
 	String() string
 }
 
 type BaseAction struct {
-	nodeID typeutil.UniqueID
-	typ    ActionType
-	shard  string
+	NodeID typeutil.UniqueID
+	Typ    ActionType
+	Shard  string
 }
 
 func NewBaseAction(nodeID typeutil.UniqueID, typ ActionType, shard string) *BaseAction {
 	return &BaseAction{
-		nodeID: nodeID,
-		typ:    typ,
-		shard:  shard,
+		NodeID: nodeID,
+		Typ:    typ,
+		Shard:  shard,
 	}
 }
 
 func (action *BaseAction) Node() int64 {
-	return action.nodeID
+	return action.NodeID
 }
 
 func (action *BaseAction) Type() ActionType {
-	return action.typ
+	return action.Typ
 }
 
-func (action *BaseAction) Shard() string {
-	return action.shard
+func (action *BaseAction) GetShard() string {
+	return action.Shard
 }
 
 func (action *BaseAction) String() string {
-	return fmt.Sprintf(`{[type=%v][node=%d][shard=%v]}`, action.Type(), action.Node(), action.Shard())
+	return fmt.Sprintf(`{[type=%v][node=%d][shard=%v]}`, action.Type(), action.Node(), action.Shard)
 }
 
 type SegmentAction struct {
 	*BaseAction
 
-	segmentID typeutil.UniqueID
-	scope     querypb.DataScope
+	SegmentID typeutil.UniqueID
+	Scope     querypb.DataScope
 
 	rpcReturned atomic.Bool
 }
@@ -101,18 +102,18 @@ func NewSegmentActionWithScope(nodeID typeutil.UniqueID, typ ActionType, shard s
 	base := NewBaseAction(nodeID, typ, shard)
 	return &SegmentAction{
 		BaseAction:  base,
-		segmentID:   segmentID,
-		scope:       scope,
+		SegmentID:   segmentID,
+		Scope:       scope,
 		rpcReturned: *atomic.NewBool(false),
 	}
 }
 
-func (action *SegmentAction) SegmentID() typeutil.UniqueID {
-	return action.segmentID
+func (action *SegmentAction) GetSegmentID() typeutil.UniqueID {
+	return action.SegmentID
 }
 
-func (action *SegmentAction) Scope() querypb.DataScope {
-	return action.scope
+func (action *SegmentAction) GetScope() querypb.DataScope {
+	return action.Scope
 }
 
 func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool {
@@ -123,13 +124,13 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 		}
 
 		// segment found in leader view
-		views := distMgr.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(action.segmentID, false))
+		views := distMgr.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(action.SegmentID, false))
 		if len(views) == 0 {
 			return false
 		}
 
 		// segment found in dist
-		segmentInTargetNode := distMgr.SegmentDistManager.GetByFilter(meta.WithNodeID(action.Node()), meta.WithSegmentID(action.SegmentID()))
+		segmentInTargetNode := distMgr.SegmentDistManager.GetByFilter(meta.WithNodeID(action.Node()), meta.WithSegmentID(action.SegmentID))
 		return len(segmentInTargetNode) > 0
 	} else if action.Type() == ActionTypeReduce {
 		// FIXME: Now shard leader's segment view is a map of segment ID to node ID,
@@ -148,7 +149,7 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 			segments = append(segments, segment.GetID())
 		}
 		segments = append(segments, growing...)
-		if !funcutil.SliceContain(segments, action.SegmentID()) {
+		if !funcutil.SliceContain(segments, action.GetSegmentID()) {
 			return true
 		}
 		return action.rpcReturned.Load()
@@ -159,8 +160,12 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 	return true
 }
 
+func (action *SegmentAction) Desc() string {
+	return fmt.Sprintf("type:%s node id: %d, data scope:%s", action.Type().String(), action.Node(), action.Scope.String())
+}
+
 func (action *SegmentAction) String() string {
-	return action.BaseAction.String() + fmt.Sprintf(`{[segmentID=%d][scope=%d]}`, action.SegmentID(), action.Scope())
+	return action.BaseAction.String() + fmt.Sprintf(`{[segmentID=%d][scope=%d]}`, action.SegmentID, action.Scope)
 }
 
 type ChannelAction struct {
@@ -174,7 +179,11 @@ func NewChannelAction(nodeID typeutil.UniqueID, typ ActionType, channelName stri
 }
 
 func (action *ChannelAction) ChannelName() string {
-	return action.shard
+	return action.Shard
+}
+
+func (action *ChannelAction) Desc() string {
+	return fmt.Sprintf("type:%s node id: %d", action.Type().String(), action.Node())
 }
 
 func (action *ChannelAction) IsFinished(distMgr *meta.DistributionManager) bool {
@@ -232,6 +241,11 @@ func (action *LeaderAction) PartStats() map[int64]int64 {
 	return action.partStatsVersions
 }
 
+func (action *LeaderAction) Desc() string {
+	return fmt.Sprintf("type:%s, node id: %d, segment id:%d ,version:%d, leader id:%d",
+		action.Type().String(), action.Node(), action.SegmentID(), action.Version(), action.GetLeaderID())
+}
+
 func (action *LeaderAction) String() string {
 	partStatsStr := ""
 	if action.PartStats() != nil {
@@ -246,7 +260,7 @@ func (action *LeaderAction) GetLeaderID() typeutil.UniqueID {
 }
 
 func (action *LeaderAction) IsFinished(distMgr *meta.DistributionManager) bool {
-	views := distMgr.LeaderViewManager.GetByFilter(meta.WithNodeID2LeaderView(action.leaderID), meta.WithChannelName2LeaderView(action.Shard()))
+	views := distMgr.LeaderViewManager.GetByFilter(meta.WithNodeID2LeaderView(action.leaderID), meta.WithChannelName2LeaderView(action.Shard))
 	if len(views) == 0 {
 		return false
 	}

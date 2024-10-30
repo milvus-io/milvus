@@ -564,9 +564,16 @@ func (t *hasCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *hasCollectionTask) Execute(ctx context.Context) error {
-	var err error
-	t.result, err = t.rootCoord.HasCollection(ctx, t.HasCollectionRequest)
-	return merr.CheckRPCCall(t.result, err)
+	_, err := globalMetaCache.GetCollectionID(ctx, t.HasCollectionRequest.GetDbName(), t.HasCollectionRequest.GetCollectionName())
+	t.result = &milvuspb.BoolResponse{}
+	// error other than
+	if err != nil && !errors.Is(err, merr.ErrCollectionNotFound) {
+		return err
+	}
+	// if collection not nil, means error is ErrCollectionNotFound, result is false
+	// otherwise, result is true
+	t.result.Value = (err == nil)
+	return nil
 }
 
 func (t *hasCollectionTask) PostExecute(ctx context.Context) error {

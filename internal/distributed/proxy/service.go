@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -94,6 +95,9 @@ type Server struct {
 	ctx                context.Context
 	wg                 sync.WaitGroup
 	proxy              types.ProxyComponent
+	httpListener       net.Listener
+	grpcListener       net.Listener
+	tcpServer          cmux.CMux
 	httpServer         *http.Server
 	grpcInternalServer *grpc.Server
 	grpcExternalServer *grpc.Server

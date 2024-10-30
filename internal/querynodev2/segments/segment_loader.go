@@ -72,6 +72,8 @@ type Loader interface {
 	// NOTE: make sure the ref count of the corresponding collection will never go down to 0 during this
 	Load(ctx context.Context, collectionID int64, segmentType SegmentType, version int64, segments ...*querypb.SegmentLoadInfo) ([]Segment, error)
 
+	// LoadDeltaLogs load deltalog and write delta data into provided segment.
+	// it also executes resource protection logic in case of OOM.
 	LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error
 
 	// LoadBloomFilterSet loads needed statslog for RemoteSegment.
@@ -334,7 +336,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 				}
 			}
 		}
-		if err = loader.LoadDeltaLogs(ctx, segment, loadInfo.GetDeltalogs()); err != nil {
+		if err = loader.loadDeltalogs(ctx, segment, loadInfo.GetDeltalogs()); err != nil {
 			return errors.Wrap(err, "At LoadDeltaLogs")
 		}
 
@@ -1158,7 +1160,9 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 	return nil
 }
 
-func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error {
+// loadDeltalogs performs the internal actions of `LoadDeltaLogs`
+// this function does not perform resource check and is meant be used among other load APIs.
+func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error {
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadDeltalogs-%d", segment.ID()))
 	defer sp.End()
 	log := log.Ctx(ctx).With(
@@ -1207,9 +1211,14 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 	rowNums := lo.SumBy(blobs, func(blob *storage.Blob) int64 {
 		return blob.RowNum
 	})
-	deltaData := &storage.DeleteData{
-		Pks: make([]storage.PrimaryKey, 0, rowNums),
-		Tss: make([]uint64, 0, rowNums),
+
+	collection := loader.manager.Collection.Get(segment.Collection())
+
+	helper, _ := typeutil.CreateSchemaHelper(collection.Schema())
+	pkField, _ := helper.GetPrimaryKeyField()
+	deltaData, err := storage.NewDeltaDataWithPkType(rowNums, pkField.DataType)
+	if err != nil {
+		return err
 	}
 
 	reader, err := storage.CreateDeltalogReader(blobs)
@@ -1226,7 +1235,10 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 			return err
 		}
 		dl := reader.Value()
-		deltaData.Append(dl.Pk, dl.Ts)
+		err = deltaData.Append(dl.Pk, dl.Ts)
+		if err != nil {
+			return err
+		}
 	}
 
 	err = segment.LoadDeltaData(ctx, deltaData)
@@ -1234,8 +1246,26 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		return err
 	}
 
-	log.Info("load delta logs done", zap.Int64("deleteCount", deltaData.RowCount))
+	log.Info("load delta logs done", zap.Int64("deleteCount", deltaData.DeleteRowCount()))
 	return nil
+}
+
+// LoadDeltaLogs load deltalog and write delta data into provided segment.
+// it also executes resource protection logic in case of OOM.
+func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error {
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    segment.ID(),
+		CollectionID: segment.Collection(),
+		Deltalogs:    deltaLogs,
+	}
+	// Check memory & storage limit
+	requestResourceResult, err := loader.requestResource(ctx, loadInfo)
+	if err != nil {
+		log.Warn("request resource failed", zap.Error(err))
+		return err
+	}
+	defer loader.freeRequest(requestResourceResult.Resource)
+	return loader.loadDeltalogs(ctx, segment, deltaLogs)
 }
 
 func (loader *segmentLoader) patchEntryNumber(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo) error {

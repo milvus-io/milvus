@@ -25,7 +25,7 @@ import bm25s
 import jieba
 import re
 
-from pymilvus import CollectionSchema, DataType
+from pymilvus import CollectionSchema, DataType, FunctionType, Function
 
 from bm25s.tokenization import Tokenizer
 
@@ -118,8 +118,6 @@ def get_bm25_ground_truth(corpus, queries, top_k=100, language="en"):
     return results, scores
 
 
-
-
 def custom_tokenizer(language="en"):
     def remove_punctuation(text):
         text = text.strip()
@@ -129,7 +127,7 @@ def custom_tokenizer(language="en"):
     # Tokenize the corpus
     def jieba_split(text):
         text_without_punctuation = remove_punctuation(text)
-        return jieba.lcut(text_without_punctuation)
+        return jieba.cut_for_search(text_without_punctuation)
 
     def blank_space_split(text):
         text_without_punctuation = remove_punctuation(text)
@@ -153,11 +151,12 @@ def custom_tokenizer(language="en"):
 def analyze_documents(texts, language="en"):
 
     tokenizer = custom_tokenizer(language)
-    # Start timing
-    t0 = time.time()
-
+    new_texts = []
+    for text in texts:
+        if isinstance(text, str):
+            new_texts.append(text)
     # Tokenize the corpus
-    tokenized = tokenizer.tokenize(texts, return_as="tuple")
+    tokenized = tokenizer.tokenize(new_texts, return_as="tuple")
     # log.info(f"Tokenized: {tokenized}")
     # Create a frequency counter
     freq = Counter()
@@ -171,11 +170,14 @@ def analyze_documents(texts, language="en"):
     # Convert token ids back to words
     word_freq = Counter({id_to_word[token_id]: count for token_id, count in freq.items()})
 
-    # End timing
-    tt = time.time() - t0
-    log.debug(f"Analyze document cost time: {tt}")
 
+    # if language in ["zh", "cn", "chinese"], remove the long words
+    # this is a trick to make the text match test case verification simple, because the long word can be still split
+    if language in ["zh", "cn", "chinese"]:
+        word_freq = Counter({word: count for word, count in word_freq.items() if 1< len(word) <= 3})
+    log.info(f"word freq {word_freq.most_common(10)}")
     return word_freq
+
 
 def check_token_overlap(text_a, text_b, language="en"):
     word_freq_a = analyze_documents([text_a], language)
@@ -717,12 +719,21 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         gen_array_field(name="array_bool", element_type=DataType.BOOL),
         gen_float_vec_field(dim=dim),
         gen_float_vec_field(name="image_emb", dim=dim),
-        gen_float_vec_field(name="text_emb", dim=dim),
+        gen_float_vec_field(name="text_sparse_emb", vector_data_type="SPARSE_FLOAT_VECTOR"),
         gen_float_vec_field(name="voice_emb", dim=dim),
     ]
+
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
                                                                     enable_dynamic_field=enable_dynamic_field, **kwargs)
+    bm25_function = Function(
+        name=f"text",
+        function_type=FunctionType.BM25,
+        input_field_names=["text"],
+        output_field_names=["text_sparse_emb"],
+        params={},
+    )
+    schema.add_function(bm25_function)
     return schema
 
 
@@ -738,7 +749,7 @@ def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.de
             log.error("Primary key only support int or varchar")
             assert False
     else:
-        fields = [gen_int64_field(), gen_float_vec_field(dim=dim), gen_json_field(),
+        fields = [gen_int64_field(), gen_float_vec_field(dim=dim), gen_json_field(nullable=True),
                   gen_array_field(name=ct.default_int32_array_field_name, element_type=DataType.INT32,
                                   max_capacity=max_capacity),
                   gen_array_field(name=ct.default_float_array_field_name, element_type=DataType.FLOAT,
@@ -746,7 +757,7 @@ def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.de
                   gen_array_field(name=ct.default_string_array_field_name, element_type=DataType.VARCHAR,
                                   max_capacity=max_capacity, max_length=max_length, nullable=True)]
         if with_json is False:
-            fields.remove(gen_json_field())
+            fields.remove(gen_json_field(nullable=True))
 
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
@@ -1018,11 +1029,24 @@ def gen_vectors(nb, dim, vector_data_type="FLOAT_VECTOR"):
         vectors = gen_bf16_vectors(nb, dim)[1]
     elif vector_data_type == "SPARSE_FLOAT_VECTOR":
         vectors = gen_sparse_vectors(nb, dim)
-
+    elif vector_data_type == "TEXT_SPARSE_VECTOR":
+        vectors = gen_text_vectors(nb)
+    else:
+        log.error(f"Invalid vector data type: {vector_data_type}")
+        raise Exception(f"Invalid vector data type: {vector_data_type}")
     if dim > 1:
         if vector_data_type == "FLOAT_VECTOR":
             vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
             vectors = vectors.tolist()
+    return vectors
+
+
+def gen_text_vectors(nb, language="en"):
+
+    fake = Faker("en_US")
+    if language == "zh":
+        fake = Faker("zh_CN")
+    vectors = [" milvus " + fake.text() for _ in range(nb)]
     return vectors
 
 
@@ -1411,7 +1435,7 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
         null_number = int(nb * nullable_fields[ct.default_bool_field_name])
         null_data = [None for _ in range(null_number)]
         bool_data = bool_data[:nb - null_number] + null_data
-        bool_values = pd.Series(data=bool_data, dtype=object)
+        bool_values = pd.Series(data=bool_data, dtype="bool")
 
     float_data = [np.float32(i) for i in range(start, start + nb)]
     float_values = pd.Series(data=float_data, dtype="float32")
@@ -1645,7 +1669,7 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
     return data
 
 
-def gen_row_data_by_schema(nb=ct.default_nb, schema=None):
+def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=None):
     if schema is None:
         schema = gen_default_collection_schema()
     # ignore auto id field and the fields in function output
@@ -1669,6 +1693,9 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None):
         tmp = {}
         for field in fields_needs_data:
             tmp[field.name] = gen_data_by_collection_field(field)
+            if start is not None and field.dtype == DataType.INT64:
+                tmp[field.name] = start
+                start += 1
         data.append(tmp)
     return data
 
@@ -1765,6 +1792,18 @@ def get_binary_vec_field_name_list(schema=None):
             vec_fields.append(field.name)
     return vec_fields
 
+
+def get_bm25_vec_field_name_list(schema=None):
+    if not hasattr(schema, "functions"):
+        return []
+    functions = schema.functions
+    bm25_func = [func for func in functions if func.type == FunctionType.BM25]
+    bm25_outputs = []
+    for func in bm25_func:
+        bm25_outputs.extend(func.output_field_names)
+    bm25_outputs = list(set(bm25_outputs))
+
+    return bm25_outputs
 
 def get_dim_by_schema(schema=None):
     if schema is None:
@@ -2068,6 +2107,8 @@ def gen_simple_index():
         if ct.all_index_types[i] in ct.binary_support:
             continue
         elif ct.all_index_types[i] in ct.sparse_support:
+            continue
+        elif ct.all_index_types[i] in ct.gpu_support:
             continue
         dic = {"index_type": ct.all_index_types[i], "metric_type": "L2"}
         dic.update({"params": ct.default_all_indexes_params[i]})
@@ -3018,7 +3059,7 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
 
     rng = np.random.default_rng()
     vectors = [{
-        d: rng.random() for d in random.sample(range(dim), random.randint(20, 30))
+        d: rng.random() for d in list(set(random.sample(range(dim), random.randint(20, 30)) + [0, 1]))
     } for _ in range(nb)]
     if sparse_format == "coo":
         vectors = [
@@ -3042,7 +3083,10 @@ def gen_vectors_based_on_vector_type(num, dim, vector_data_type=ct.float_type):
         vectors = gen_bf16_vectors(num, dim)[1]
     elif vector_data_type == ct.sparse_vector:
         vectors = gen_sparse_vectors(num, dim)
-
+    elif vector_data_type == ct.text_sparse_vector:
+        vectors = gen_text_vectors(num)
+    else:
+        raise Exception("vector_data_type is invalid")
     return vectors
 
 

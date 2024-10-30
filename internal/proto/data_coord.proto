@@ -900,6 +900,8 @@ message PreImportTask {
   ImportTaskStateV2 state = 7;
   string reason = 8;
   repeated ImportFileStats file_stats = 10;
+  string created_time = 11;
+  string complete_time = 12;
 }
 
 message ImportTaskV2 {
@@ -913,6 +915,7 @@ message ImportTaskV2 {
   string complete_time = 8;
   repeated ImportFileStats file_stats = 9;
   repeated int64 stats_segmentIDs = 10;
+  string created_time = 11;
 }
 
 enum GcCommand {
