@@ -50,6 +50,17 @@ class TestBase(Base):
                 rsp = self.collection_client.collection_drop(payload)
             except Exception as e:
                 logger.error(e)
+        for item in self.collection_client.name_list:
+            db_name = item[0]
+            c_name = item[1]
+            payload = {
+                "collectionName": c_name,
+                "dbName": db_name
+            }
+            try:
+                self.collection_client.collection_drop(payload)
+            except Exception as e:
+                logger.error(e)
 
     @pytest.fixture(scope="function", autouse=True)
     def init_client(self, endpoint, token, minio_host, bucket_name, root_path):
