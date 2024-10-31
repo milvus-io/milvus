@@ -408,7 +408,7 @@ class Checker:
         self.c_wrap.load(replica_number=self.replica_number)
 
         self.p_wrap.init_partition(self.c_name, self.p_name)
-        if insert_data:
+        if insert_data and self.c_wrap.num_entities == 0:
             log.info(f"collection {c_name} created, start to insert data")
             t0 = time.perf_counter()
             self.insert_data(nb=constants.ENTITIES_FOR_SEARCH, partition_name=self.p_name)
