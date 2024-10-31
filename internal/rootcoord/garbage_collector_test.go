@@ -52,6 +52,9 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		broker.ReleaseCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
 			return errors.New("error mock ReleaseCollection")
 		}
+		broker.DropCollectionFunc = func(ctx context.Context, collectionID UniqueID, vchannel []string) error {
+			return nil
+		}
 		ticker := newTickerWithMockNormalStream()
 		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withValidProxyManager(), withMeta(meta))
 		gc := newBgGarbageCollector(core)
@@ -69,6 +72,9 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		}
 		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 			return errors.New("error mock DropCollectionIndex")
+		}
+		broker.DropCollectionFunc = func(ctx context.Context, collectionID UniqueID, vchannel []string) error {
+			return nil
 		}
 		ticker := newTickerWithMockNormalStream()
 		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withValidProxyManager(), withMeta(meta))
@@ -93,6 +99,9 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 			dropCollectionIndexCalled = true
 			dropCollectionIndexChan <- struct{}{}
+			return nil
+		}
+		broker.DropCollectionFunc = func(ctx context.Context, collectionID UniqueID, vchannel []string) error {
 			return nil
 		}
 		ticker := newTickerWithMockFailStream() // failed to broadcast drop msg.
@@ -120,6 +129,9 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		broker.ReleaseCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
 			releaseCollectionCalled = true
 			releaseCollectionChan <- struct{}{}
+			return nil
+		}
+		broker.DropCollectionFunc = func(ctx context.Context, collectionID UniqueID, vchannel []string) error {
 			return nil
 		}
 		gcConfirmCalled := false
@@ -193,6 +205,9 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			gcConfirmCalled = true
 			close(gcConfirmChan)
 			return true
+		}
+		broker.DropCollectionFunc = func(ctx context.Context, collectionID UniqueID, vchannel []string) error {
+			return nil
 		}
 		meta := mockrootcoord.NewIMetaTable(t)
 		removeCollectionCalled := false
@@ -395,6 +410,9 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 			close(gcConfirmChan)
 			return true
 		}
+		broker.DropPartitionFunc = func(ctx context.Context, collectionID, partitionID UniqueID) error {
+			return nil
+		}
 
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
@@ -439,6 +457,9 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 			gcConfirmCalled = true
 			close(gcConfirmChan)
 			return true
+		}
+		broker.DropPartitionFunc = func(ctx context.Context, collectionID, partitionID UniqueID) error {
+			return nil
 		}
 
 		tsoAllocator := newMockTsoAllocator()

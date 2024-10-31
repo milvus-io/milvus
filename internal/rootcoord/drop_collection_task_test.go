@@ -240,6 +240,9 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		broker.GCConfirmFunc = func(ctx context.Context, collectionID, partitionID UniqueID) bool {
 			return true
 		}
+		broker.DropCollectionFunc = func(ctx context.Context, collectionID UniqueID, vchannel []string) error {
+			return nil
+		}
 
 		gc := mockrootcoord.NewGarbageCollector(t)
 		deleteCollectionCalled := false

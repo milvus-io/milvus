@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/tombstone"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -115,6 +116,8 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCollectionTombstone(mock.Anything).Return(nil, nil)
+	tombstone.RecoverCollectionTombstoneForTest(context.Background(), catalog)
 
 	meta, err := newMeta(context.TODO(), catalog, nil)
 	assert.NoError(t, err)
