@@ -327,6 +327,23 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, merr.Ok(ret.GetStatus()))
 	})
+
+	t.Run("DropCollection", func(t *testing.T) {
+		mockDataCoord.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(&datapb.DropCollectionResponse{
+			Status: merr.Success(),
+		}, nil)
+		ret, err := server.DropCollection(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, ret)
+	})
+	t.Run("DropPartition", func(t *testing.T) {
+		mockDataCoord.EXPECT().DropPartition(mock.Anything, mock.Anything).Return(&datapb.DropPartitionResponse{
+			Status: merr.Success(),
+		}, nil)
+		ret, err := server.DropPartition(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, ret)
+	})
 }
 
 func Test_Run(t *testing.T) {

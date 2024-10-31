@@ -121,7 +121,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 
 	meta, err := newMemoryMeta()
 	assert.NoError(t, err)
-	tombstone.RecoverCollectionTombstone(context.Background(), meta.catalog)
+	tombstone.RecoverCollectionTombstoneForTest(context.Background(), meta.catalog)
 
 	t.Run("key is reference", func(t *testing.T) {
 		gc := newGarbageCollector(meta, newMockHandler(), GcOption{

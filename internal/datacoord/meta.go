@@ -635,15 +635,16 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 
 	// Persist segment updates first.
 	clonedSegment := curSegInfo.Clone()
-	if err := m.checkIfSegmentInfoUpdatable(clonedSegment.SegmentInfo); err != nil {
-		return err
-	}
+
 	metricMutation := &segMetricMutation{
 		stateChange: make(map[string]map[string]map[string]int),
 	}
 	if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
 		// Update segment state and prepare segment metric update.
 		updateSegStateAndPrepareMetrics(clonedSegment, targetState, metricMutation)
+		if err := m.checkIfSegmentInfoUpdatable(clonedSegment.SegmentInfo); err != nil {
+			return err
+		}
 		if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{clonedSegment.SegmentInfo}); err != nil {
 			log.Warn("meta update: setting segment state - failed to alter segments",
 				zap.Int64("segmentID", segmentID),
@@ -1068,6 +1069,8 @@ func (m *meta) UpdateSegmentsInfo(operators ...UpdateOperator) error {
 		return nil
 	}
 
+	// Precondition: all segments should belong to the same parition
+	// and collection, otherwise the implementation of checker is unsound.
 	for _, segment := range updatePack.segments {
 		if err := m.checkIfSegmentInfoUpdatable(segment.SegmentInfo); err != nil {
 			return err

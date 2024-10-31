@@ -838,3 +838,46 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 		})
 	}
 }
+
+func TestSegmentManager_DropSegmentOfPartition(t *testing.T) {
+	s := &SegmentManager{
+		meta: &meta{
+			segments: &SegmentsInfo{
+				segments: map[int64]*SegmentInfo{
+					1: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:            1,
+							InsertChannel: "ch1",
+							PartitionID:   2,
+							State:         commonpb.SegmentState_Growing,
+						},
+						allocations: []*Allocation{},
+					},
+					2: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:            2,
+							InsertChannel: "ch2",
+							PartitionID:   1,
+							State:         commonpb.SegmentState_Growing,
+						},
+						allocations: []*Allocation{},
+					},
+					3: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:            3,
+							InsertChannel: "ch3",
+							PartitionID:   1,
+							State:         commonpb.SegmentState_Growing,
+						},
+						allocations: []*Allocation{},
+					},
+				},
+			},
+		},
+		segments: []UniqueID{1, 2, 3},
+	}
+	s.DropSegmentsOfPartition(context.Background(), 1)
+	assert.NotNil(t, s.meta.GetSegment(1).allocations)
+	assert.Nil(t, s.meta.GetSegment(2).allocations)
+	assert.Nil(t, s.meta.GetSegment(3).allocations)
+}

@@ -332,6 +332,58 @@ func TestServerBroker_GcConfirm(t *testing.T) {
 	})
 }
 
+func TestServerBroker_DropCollectionAtDataCoord(t *testing.T) {
+	t.Run("failed to execute", func(t *testing.T) {
+		c := newTestCore(withInvalidDataCoord())
+		b := newServerBroker(c)
+		ctx := context.Background()
+		err := b.DropCollectionAtDataCoord(ctx, 1, []string{"vchannel1"})
+		assert.Error(t, err)
+	})
+
+	t.Run("non success error code on execute", func(t *testing.T) {
+		c := newTestCore(withFailedDataCoord())
+		b := newServerBroker(c)
+		ctx := context.Background()
+		err := b.DropCollectionAtDataCoord(ctx, 1, []string{"vchannel1"})
+		assert.Error(t, err)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		c := newTestCore(withValidDataCoord())
+		b := newServerBroker(c)
+		ctx := context.Background()
+		err := b.DropCollectionAtDataCoord(ctx, 1, []string{"vchannel1"})
+		assert.NoError(t, err)
+	})
+}
+
+func TestServerBroker_DropPartitionAtDataCoord(t *testing.T) {
+	t.Run("failed to execute", func(t *testing.T) {
+		c := newTestCore(withInvalidDataCoord())
+		b := newServerBroker(c)
+		ctx := context.Background()
+		err := b.DropPartitionAtDataCoord(ctx, 1, 1)
+		assert.Error(t, err)
+	})
+
+	t.Run("non success error code on execute", func(t *testing.T) {
+		c := newTestCore(withFailedDataCoord())
+		b := newServerBroker(c)
+		ctx := context.Background()
+		err := b.DropPartitionAtDataCoord(ctx, 1, 1)
+		assert.Error(t, err)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		c := newTestCore(withValidDataCoord())
+		b := newServerBroker(c)
+		ctx := context.Background()
+		err := b.DropPartitionAtDataCoord(ctx, 1, 1)
+		assert.NoError(t, err)
+	})
+}
+
 func mockGetDatabase(meta *mockrootcoord.IMetaTable) {
 	db := model.NewDatabase(1, "default", pb.DatabaseState_DatabaseCreated, nil)
 	meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
