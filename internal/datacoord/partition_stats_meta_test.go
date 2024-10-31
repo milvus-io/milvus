@@ -42,6 +42,7 @@ func (s *PartitionStatsMetaSuite) SetupTest() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().SavePartitionStatsInfo(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveCurrentPartitionStatsVersion(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.catalog = catalog
 }
 
@@ -73,6 +74,9 @@ func (s *PartitionStatsMetaSuite) TestGetPartitionStats() {
 
 	ps := partitionStatsMeta.GetPartitionStats(1, 2, "ch-1", 100)
 	s.NotNil(ps)
+
+	err = partitionStatsMeta.SaveCurrentPartitionStatsVersion(1, 2, "ch-1", 100)
+	s.NoError(err)
 
 	currentVersion := partitionStatsMeta.GetCurrentPartitionStatsVersion(1, 2, "ch-1")
 	s.Equal(int64(100), currentVersion)
