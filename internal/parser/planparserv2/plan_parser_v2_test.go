@@ -719,7 +719,7 @@ func Test_FixErrorListenerNotRemoved(t *testing.T) {
 
 	normal := "1 < Int32Field < (Int16Field)"
 	for i := 0; i < 10; i++ {
-		err := handleExprWithErrorListener(schemaHelper, normal, &errorListenerTest{})
+		err := handleExpr(schemaHelper, normal)
 		err1, ok := err.(error)
 		assert.True(t, ok)
 		assert.Error(t, err1)
@@ -1379,25 +1379,21 @@ func BenchmarkPlanCache(b *testing.B) {
 
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
-		r := handleExpr(schemaHelper, "array_length(ArrayField) == 10")
-		err := getError(r)
-		assert.NoError(b, err)
-	}
-}
+	b.Run("cached", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			r := handleExpr(schemaHelper, "array_length(ArrayField) == 10")
+			err := getError(r)
+			assert.NoError(b, err)
+		}
+	})
 
-func BenchmarkNoPlanCache(b *testing.B) {
-	schema := newTestSchema()
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-	require.NoError(b, err)
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		r := handleExpr(schemaHelper, fmt.Sprintf("array_length(ArrayField) == %d", i))
-		err := getError(r)
-		assert.NoError(b, err)
-	}
+	b.Run("uncached", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			r := handleExpr(schemaHelper, fmt.Sprintf("array_length(ArrayField) == %d", i))
+			err := getError(r)
+			assert.NoError(b, err)
+		}
+	})
 }
 
 func randomChineseString(length int) string {
