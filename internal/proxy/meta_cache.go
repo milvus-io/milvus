@@ -89,8 +89,6 @@ type Cache interface {
 	RemoveDatabase(ctx context.Context, database string)
 	HasDatabase(ctx context.Context, database string) bool
 	GetDatabaseInfo(ctx context.Context, database string) (*databaseInfo, error)
-	// AllocID is only using on requests that need to skip timestamp allocation, don't overuse it.
-	AllocID(ctx context.Context) (int64, error)
 }
 type collectionBasicInfo struct {
 	collID                typeutil.UniqueID

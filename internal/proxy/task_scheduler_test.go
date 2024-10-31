@@ -625,7 +625,6 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 			collID:           collID,
 			consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 		}, nil)
-	mockMetaCache.EXPECT().AllocID(mock.Anything).Return(1, nil).Twice()
 
 	t.Run("query", func(t *testing.T) {
 		qt := &queryTask{
@@ -657,22 +656,5 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 
 		err := queue.Enqueue(st)
 		assert.NoError(t, err)
-	})
-
-	mockMetaCache.EXPECT().AllocID(mock.Anything).Return(0, fmt.Errorf("mock error")).Once()
-	t.Run("failed", func(t *testing.T) {
-		st := &searchTask{
-			SearchRequest: &internalpb.SearchRequest{
-				Base: &commonpb.MsgBase{},
-			},
-			request: &milvuspb.SearchRequest{
-				DbName:                dbName,
-				CollectionName:        collName,
-				UseDefaultConsistency: true,
-			},
-		}
-
-		err := queue.Enqueue(st)
-		assert.Error(t, err)
 	})
 }

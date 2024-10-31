@@ -177,18 +177,14 @@ func (queue *baseTaskQueue) Enqueue(t task) error {
 	var id UniqueID
 	if t.CanSkipAllocTimestamp() {
 		ts = tsoutil.ComposeTS(time.Now().UnixMilli(), 0)
-		id, err = globalMetaCache.AllocID(t.TraceCtx())
-		if err != nil {
-			return err
-		}
 	} else {
 		ts, err = queue.tsoAllocatorIns.AllocOne(t.TraceCtx())
 		if err != nil {
 			return err
 		}
-		// we always use same msg id and ts for now.
-		id = UniqueID(ts)
 	}
+	// we always use same msg id and ts for now.
+	id = UniqueID(ts)
 	t.SetTs(ts)
 	t.SetID(id)
 
