@@ -483,6 +483,10 @@ func IsFloatVectorType(dataType schemapb.DataType) bool {
 	return IsDenseFloatVectorType(dataType) || IsSparseFloatVectorType(dataType)
 }
 
+func IsFixDimVectorType(dataType schemapb.DataType) bool {
+	return IsBinaryVectorType(dataType) || IsDenseFloatVectorType(dataType)
+}
+
 // IsVectorType returns true if input is a vector type, otherwise false
 func IsVectorType(dataType schemapb.DataType) bool {
 	return IsBinaryVectorType(dataType) || IsFloatVectorType(dataType)
