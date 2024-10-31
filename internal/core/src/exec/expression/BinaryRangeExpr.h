@@ -235,7 +235,6 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr> expr_;
-    ColumnVectorPtr cached_overflow_res_{nullptr};
     int64_t overflow_check_pos_{0};
 };
 }  //namespace exec
