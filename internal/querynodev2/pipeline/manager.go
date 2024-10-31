@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -40,6 +41,7 @@ type Manager interface {
 	Remove(channels ...string)
 	Start(channels ...string) error
 	Close()
+	GetChannelStats() []*metricsinfo.Channel
 }
 
 type manager struct {
@@ -153,6 +155,27 @@ func (m *manager) Close() {
 	for _, pipeline := range m.channel2Pipeline {
 		pipeline.Close()
 	}
+}
+
+func (m *manager) GetChannelStats() []*metricsinfo.Channel {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ret := make([]*metricsinfo.Channel, 0, len(m.channel2Pipeline))
+	for ch, p := range m.channel2Pipeline {
+		tt, err := m.tSafeManager.Get(ch)
+		if err != nil {
+			log.Warn("get tSafe failed", zap.String("channel", ch), zap.Error(err))
+		}
+		ret = append(ret, &metricsinfo.Channel{
+			Name:           ch,
+			WatchState:     p.Status(),
+			LatestTimeTick: typeutil.TimestampToString(tt),
+			NodeID:         paramtable.GetNodeID(),
+			CollectionID:   p.GetCollectionID(),
+		})
+	}
+	return ret
 }
 
 func NewManager(dataManager *DataManager,

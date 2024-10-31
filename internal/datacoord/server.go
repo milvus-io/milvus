@@ -1137,6 +1137,11 @@ func (s *Server) registerMetricsRequest() {
 			return s.getSystemInfoMetrics(ctx, req)
 		})
 
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataDist,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.getDistJSON(ctx, req), nil
+		})
+
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ImportTasks,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.importMeta.TaskStatsJSON(), nil
@@ -1154,8 +1159,19 @@ func (s *Server) registerMetricsRequest() {
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTasks,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return s.GetSyncTaskMetrics(ctx, req)
+			return s.getSyncTaskJSON(ctx, req)
 		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataSegments,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.getSegmentsJSON(ctx, req)
+		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataChannels,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.getChannelsJSON(ctx, req)
+		})
+
 	log.Info("register metrics actions finished")
 }
 

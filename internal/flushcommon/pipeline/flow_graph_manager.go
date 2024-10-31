@@ -18,6 +18,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -25,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -40,6 +42,8 @@ type FlowgraphManager interface {
 	GetFlowgraphCount() int
 	GetCollectionIDs() []int64
 
+	GetChannelsJSON() string
+	GetSegmentsJSON() string
 	Close()
 }
 
@@ -113,6 +117,59 @@ func (fm *fgManagerImpl) GetCollectionIDs() []int64 {
 	})
 
 	return collectionSet.Collect()
+}
+
+// GetChannelsJSON  returns all channels in json format.
+func (fm *fgManagerImpl) GetChannelsJSON() string {
+	var channels []*metricsinfo.Channel
+	fm.flowgraphs.Range(func(ch string, ds *DataSyncService) bool {
+		latestTimeTick := ds.timetickSender.GetLatestTimestamp(ch)
+		channels = append(channels, &metricsinfo.Channel{
+			Name:           ch,
+			WatchState:     ds.fg.Status(),
+			LatestTimeTick: typeutil.TimestampToString(latestTimeTick),
+			NodeID:         paramtable.GetNodeID(),
+			CollectionID:   ds.metacache.Collection(),
+		})
+		return true
+	})
+
+	ret, err := json.Marshal(channels)
+	if err != nil {
+		log.Warn("failed to marshal channels", zap.Error(err))
+		return ""
+	}
+	return string(ret)
+}
+
+func (fm *fgManagerImpl) GetSegmentsJSON() string {
+	var segments []*metricsinfo.Segment
+	fm.flowgraphs.Range(func(ch string, ds *DataSyncService) bool {
+		meta := ds.metacache
+		for _, segment := range meta.GetSegmentsBy() {
+			segments = append(segments, &metricsinfo.Segment{
+				SegmentID:      segment.SegmentID(),
+				CollectionID:   meta.Collection(),
+				PartitionID:    segment.PartitionID(),
+				Channel:        ch,
+				State:          segment.State().String(),
+				Level:          segment.Level().String(),
+				NodeID:         paramtable.GetNodeID(),
+				NumOfRows:      segment.NumOfRows(),
+				FlushedRows:    segment.FlushedRows(),
+				SyncBufferRows: segment.BufferRows(),
+				SyncingRows:    segment.SyncingRows(),
+			})
+		}
+		return true
+	})
+
+	ret, err := json.Marshal(segments)
+	if err != nil {
+		log.Warn("failed to marshal segments", zap.Error(err))
+		return ""
+	}
+	return string(ret)
 }
 
 func (fm *fgManagerImpl) Close() {

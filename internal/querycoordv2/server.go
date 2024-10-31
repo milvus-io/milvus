@@ -199,8 +199,41 @@ func (s *Server) registerMetricsRequest() {
 		return s.taskScheduler.GetTasksJSON(), nil
 	}
 
+	QueryDistAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+		return s.targetMgr.GetTargetJSON(meta.CurrentTarget), nil
+	}
+
+	QueryTargetAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+		return s.dist.GetDistributionJSON(), nil
+	}
+
+	QueryReplicasAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+		return s.meta.GetReplicasJSON(), nil
+	}
+
+	QueryResourceGroupsAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+		return s.meta.GetResourceGroupsJSON(), nil
+	}
+
+	QuerySegmentsAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+		return s.getSegmentsFromQueryNode(ctx, req)
+	}
+
+	QueryChannelsAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+		return s.getChannelsFromQueryNode(ctx, req)
+	}
+
+	// register actions that requests are processed in querycoord
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SystemInfoMetrics, getSystemInfoAction)
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.QueryCoordAllTasks, QueryTasksAction)
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.QueryDist, QueryDistAction)
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.QueryTarget, QueryTargetAction)
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.QueryReplicas, QueryReplicasAction)
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.QueryResourceGroups, QueryResourceGroupsAction)
+
+	// register actions that requests are processed in querynode
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.QuerySegments, QuerySegmentsAction)
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.QueryChannels, QueryChannelsAction)
 	log.Info("register metrics actions finished")
 }
 

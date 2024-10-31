@@ -17,13 +17,20 @@
 package meta
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -316,4 +323,75 @@ func (suite *LeaderViewManagerSuite) TestNotifyDelegatorChanges() {
 
 func TestLeaderViewManager(t *testing.T) {
 	suite.Run(t, new(LeaderViewManagerSuite))
+}
+
+func TestGetLeaderView(t *testing.T) {
+	manager := NewLeaderViewManager()
+	leaderView1 := &LeaderView{
+		ID:           1,
+		CollectionID: 100,
+		Channel:      "channel-1",
+		Version:      1,
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1}},
+		GrowingSegments: map[int64]*Segment{
+			1: {SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-1", NumOfRows: 1000, State: commonpb.SegmentState_Growing}, Node: 1},
+		},
+		TargetVersion:      1,
+		NumOfGrowingRows:   1000,
+		UnServiceableError: nil,
+	}
+
+	leaderView2 := &LeaderView{
+		ID:           2,
+		CollectionID: 200,
+		Channel:      "channel-2",
+		Version:      1,
+		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
+		GrowingSegments: map[int64]*Segment{
+			2: {SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 200, PartitionID: 20, InsertChannel: "channel-2", NumOfRows: 2000, State: commonpb.SegmentState_Growing}, Node: 2},
+		},
+		TargetVersion:      1,
+		NumOfGrowingRows:   2000,
+		UnServiceableError: nil,
+	}
+
+	manager.Update(1, leaderView1)
+	manager.Update(2, leaderView2)
+
+	// Call GetLeaderView
+	leaderViews := manager.GetLeaderView()
+	jsonOutput, err := json.Marshal(leaderViews)
+	assert.NoError(t, err)
+
+	var result []*metricsinfo.LeaderView
+	err = json.Unmarshal(jsonOutput, &result)
+	assert.NoError(t, err)
+	assert.Len(t, result, 2)
+
+	log.Info("====", zap.Any("result", result))
+	checkResult := func(lv *metricsinfo.LeaderView) {
+		if lv.LeaderID == 1 {
+			assert.Equal(t, int64(100), lv.CollectionID)
+			assert.Equal(t, "channel-1", lv.Channel)
+			assert.Equal(t, int64(1), lv.Version)
+			assert.Len(t, lv.SealedSegments, 1)
+			assert.Len(t, lv.GrowingSegments, 1)
+			assert.Equal(t, int64(1), lv.SealedSegments[0].SegmentID)
+			assert.Equal(t, int64(1), lv.GrowingSegments[0].SegmentID)
+		} else if lv.LeaderID == 2 {
+			assert.Equal(t, int64(200), lv.CollectionID)
+			assert.Equal(t, "channel-2", lv.Channel)
+			assert.Equal(t, int64(1), lv.Version)
+			assert.Len(t, lv.SealedSegments, 1)
+			assert.Len(t, lv.GrowingSegments, 1)
+			assert.Equal(t, int64(2), lv.SealedSegments[0].SegmentID)
+			assert.Equal(t, int64(2), lv.GrowingSegments[0].SegmentID)
+		} else {
+			assert.Failf(t, "unexpected leader id", "unexpected leader id %d", lv.LeaderID)
+		}
+	}
+
+	for _, lv := range result {
+		checkResult(lv)
+	}
 }

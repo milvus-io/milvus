@@ -87,6 +87,14 @@ func (s *SegmentInfo) Level() datapb.SegmentLevel {
 	return s.level
 }
 
+func (s *SegmentInfo) BufferRows() int64 {
+	return s.bufferRows
+}
+
+func (s *SegmentInfo) SyncingRows() int64 {
+	return s.syncingRows
+}
+
 func (s *SegmentInfo) Clone() *SegmentInfo {
 	return &SegmentInfo{
 		segmentID:        s.segmentID,
