@@ -1,14 +1,12 @@
 <img src="https://repository-images.githubusercontent.com/208728772/998c09ca-cfa6-4c01-ac75-3dfad7f4862b" alt="milvus banner">
 
 <div class="column" align="middle">
-  <a href="https://discord.com/invite/8uyFbECzPX"><img height="20" src="https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white" alt="license"/></a>
-  <img src="https://img.shields.io/github/license/milvus-io/milvus" alt="license"/>
-  <img src="https://img.shields.io/docker/pulls/milvusdb/milvus" alt="docker-pull-count" />
+  <a href="https://github.com/milvus-io/milvus/blob/master/LICENSE"><img height="20" src="https://img.shields.io/github/license/milvus-io/milvus" alt="license"/></a>
+  <a href="https://milvus.io/docs/install_standalone-docker.md"><img src="https://img.shields.io/docker/pulls/milvusdb/milvus" alt="docker-pull-count"/></a>
+  <a href="https://discord.com/invite/8uyFbECzPX"><img height="20" src="https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white" alt="discord"/></a>
 </div>
 
 ## What is Milvus?
-
-<img src="https://github.com/milvus-io/artwork/blob/master/horizontal/color/milvus-horizontal-color.png" alt="milvus-logo"/>
 
 Milvus is an open-source vector database built to power embedding similarity search and AI applications. Milvus makes unstructured data search more accessible, and provides a consistent user experience regardless of the deployment environment.
 
