@@ -218,6 +218,28 @@ func TestExpr_BinaryRange(t *testing.T) {
 	}
 }
 
+func TestExpr_castValue(t *testing.T) {
+	schema := newTestSchema()
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	exprStr := `Int64Field + 1.1 == 2.1`
+	expr, err := ParseExpr(helper, exprStr, nil)
+	assert.NoError(t, err, exprStr)
+	assert.NotNil(t, expr, exprStr)
+	assert.NotNil(t, expr.GetBinaryArithOpEvalRangeExpr())
+	assert.NotNil(t, expr.GetBinaryArithOpEvalRangeExpr().GetRightOperand().GetFloatVal())
+	assert.NotNil(t, expr.GetBinaryArithOpEvalRangeExpr().GetValue().GetFloatVal())
+
+	exprStr = `FloatField +1 == 2`
+	expr, err = ParseExpr(helper, exprStr, nil)
+	assert.NoError(t, err, exprStr)
+	assert.NotNil(t, expr, exprStr)
+	assert.NotNil(t, expr.GetBinaryArithOpEvalRangeExpr())
+	assert.NotNil(t, expr.GetBinaryArithOpEvalRangeExpr().GetRightOperand().GetFloatVal())
+	assert.NotNil(t, expr.GetBinaryArithOpEvalRangeExpr().GetValue().GetFloatVal())
+}
+
 func TestExpr_BinaryArith(t *testing.T) {
 	schema := newTestSchema()
 	helper, err := typeutil.CreateSchemaHelper(schema)
@@ -227,7 +249,6 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`Int64Field % 10 == 9`,
 		`Int64Field % 10 != 9`,
 		`FloatField + 1.1 == 2.1`,
-		`Int64Field + 1.1 == 2.1`,
 		`A % 10 != 2`,
 		`Int8Field + 1 < 2`,
 		`Int16Field - 3 <= 4`,

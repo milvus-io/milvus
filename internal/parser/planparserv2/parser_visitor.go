@@ -516,8 +516,7 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	} else {
 		elementValue := valueExpr.GetValue()
 		if elementValue == nil {
-			return fmt.Errorf(
-				"contains_any operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
+			return fmt.Errorf("value '%s' in list cannot be a non-const expression", ctx.Expr(1).GetText())
 		}
 
 		if !IsArray(elementValue) {
@@ -610,12 +609,12 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	lowerValue := lowerValueExpr.GetValue()
 	upperValue := upperValueExpr.GetValue()
 	if !isTemplateExpr(lowerValueExpr) {
-		if err = checkRangeCompared(fieldDataType, lowerValue); err != nil {
+		if lowerValue, err = castRangeValue(fieldDataType, lowerValue); err != nil {
 			return err
 		}
 	}
 	if !isTemplateExpr(upperValueExpr) {
-		if err = checkRangeCompared(fieldDataType, upperValue); err != nil {
+		if upperValue, err = castRangeValue(fieldDataType, upperValue); err != nil {
 			return err
 		}
 	}
@@ -692,12 +691,12 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	lowerValue := lowerValueExpr.GetValue()
 	upperValue := upperValueExpr.GetValue()
 	if !isTemplateExpr(lowerValueExpr) {
-		if err = checkRangeCompared(fieldDataType, lowerValue); err != nil {
+		if lowerValue, err = castRangeValue(fieldDataType, lowerValue); err != nil {
 			return err
 		}
 	}
 	if !isTemplateExpr(upperValueExpr) {
-		if err = checkRangeCompared(fieldDataType, upperValue); err != nil {
+		if upperValue, err = castRangeValue(fieldDataType, upperValue); err != nil {
 			return err
 		}
 	}
