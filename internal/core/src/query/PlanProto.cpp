@@ -226,7 +226,6 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
 
     auto plan_node = RetrievePlanNodeFromProto(plan_node_proto);
 
-    LOG_WARN("CREATED PALNNODE!!");
     retrieve_plan->plan_node_ = std::move(plan_node);
     for (auto field_id_raw : plan_node_proto.output_field_ids()) {
         auto field_id = FieldId(field_id_raw);
@@ -470,11 +469,8 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
             break;
         }
         case ppe::kGisfunctionFilterExpr: {
-            LOG_WARN("PARSE GIS!!");
             result =
                 ParseGISFunctionFilterExprs(expr_pb.gisfunction_filter_expr());
-            Assert(result != nullptr);
-            LOG_WARN("the result:{}", result->ToString());
             break;
         }
         default: {
