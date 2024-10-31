@@ -2798,16 +2798,17 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             output_fields=["id", "text", "text_sparse_emb"],
             limit=limit
         )
+        iter_result = []
         while True:
             result = iterator.next()
             if not result:
                 iterator.close()
                 break
             else:
-                assert len(result) == batch_size
+                iter_result.append(len(result))
+        for r in iter_result[:-1]:
+            assert r == batch_size
 
-
-# @pytest.mark.skip("skip")
 class TestSearchWithFullTextSearchNegative(TestcaseBase):
     """
     ******************************************************************
