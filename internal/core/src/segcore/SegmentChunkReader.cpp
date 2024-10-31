@@ -39,10 +39,9 @@ SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
             };
         }
     }
-    auto chunk_data =
-        segment_->chunk_data<T>(field_id, current_chunk_id).data();
-    auto chunk_valid_data =
-        segment_->chunk_data<T>(field_id, current_chunk_id).valid_data();
+    auto chunk_info = segment_->chunk_data<T>(field_id, current_chunk_id);
+    auto chunk_data = chunk_info.data();
+    auto chunk_valid_data = chunk_info.valid_data();
     auto current_chunk_size = segment_->chunk_size(field_id, current_chunk_id);
     return [=,
             &current_chunk_id,
@@ -50,11 +49,10 @@ SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
         if (current_chunk_pos >= current_chunk_size) {
             current_chunk_id++;
             current_chunk_pos = 0;
-            chunk_data =
-                segment_->chunk_data<T>(field_id, current_chunk_id).data();
-            chunk_valid_data =
-                segment_->chunk_data<T>(field_id, current_chunk_id)
-                    .valid_data();
+            auto chunk_info =
+                segment_->chunk_data<T>(field_id, current_chunk_id);
+            chunk_data = chunk_info.data();
+            chunk_valid_data = chunk_info.valid_data();
             current_chunk_size =
                 segment_->chunk_size(field_id, current_chunk_id);
         }
@@ -94,12 +92,10 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
         !storage::MmapManager::GetInstance()
              .GetMmapConfig()
              .growing_enable_mmap) {
-        auto chunk_data =
-            segment_->chunk_data<std::string>(field_id, current_chunk_id)
-                .data();
-        auto chunk_valid_data =
-            segment_->chunk_data<std::string>(field_id, current_chunk_id)
-                .valid_data();
+        auto chunk_info =
+            segment_->chunk_data<std::string>(field_id, current_chunk_id);
+        auto chunk_data = chunk_info.data();
+        auto chunk_valid_data = chunk_info.valid_data();
         auto current_chunk_size =
             segment_->chunk_size(field_id, current_chunk_id);
         return [=,
@@ -126,12 +122,12 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
             return chunk_data[current_chunk_pos++];
         };
     } else {
-        auto chunk_data =
-            segment_->chunk_view<std::string_view>(field_id, current_chunk_id)
-                .first.data();
-        auto chunk_valid_data =
-            segment_->chunk_data<std::string_view>(field_id, current_chunk_id)
-                .valid_data();
+        auto chunk_info =
+            segment_->chunk_view<std::string_view>(field_id, current_chunk_id);
+
+        auto chunk_data = chunk_info.first.data();
+        auto chunk_valid_data = chunk_info.second;
+
         auto current_chunk_size =
             segment_->chunk_size(field_id, current_chunk_id);
         return [=,
@@ -140,18 +136,15 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
             if (current_chunk_pos >= current_chunk_size) {
                 current_chunk_id++;
                 current_chunk_pos = 0;
-                chunk_data = segment_
-                                 ->chunk_view<std::string_view>(
-                                     field_id, current_chunk_id)
-                                 .first.data();
-                chunk_valid_data = segment_
-                                       ->chunk_data<std::string_view>(
-                                           field_id, current_chunk_id)
-                                       .valid_data();
+                auto chunk_info = segment_->chunk_view<std::string_view>(
+                    field_id, current_chunk_id);
+                chunk_data = chunk_info.first.data();
+                chunk_valid_data = chunk_info.second;
                 current_chunk_size =
                     segment_->chunk_size(field_id, current_chunk_id);
             }
-            if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
+            if (current_chunk_pos < chunk_valid_data.size() &&
+                !chunk_valid_data[current_chunk_pos]) {
                 current_chunk_pos++;
                 return std::nullopt;
             }

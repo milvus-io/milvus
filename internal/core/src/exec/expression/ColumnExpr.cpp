@@ -85,11 +85,12 @@ PhyColumnExpr::DoEval() {
             current_chunk_id_,
             current_chunk_pos_);
         for (int i = 0; i < real_batch_size; ++i) {
-            if (!chunk_data().has_value()) {
+            auto data = chunk_data();
+            if (!data.has_value()) {
                 valid_res[i] = false;
                 continue;
             }
-            res_value[i] = boost::get<T>(chunk_data().value());
+            res_value[i] = boost::get<T>(data.value());
         }
         return res_vec;
     } else {
