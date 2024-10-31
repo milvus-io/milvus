@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
@@ -547,11 +548,17 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 		}
 
 		if dr.limiter != nil {
-			err := dr.limiter.Alloc(ctx, dr.dbID, map[int64][]int64{dr.collectionID: partitionIDs}, internalpb.RateType_DMLDelete, proto.Size(result.GetIds()))
+			size := proto.Size(result.GetIds())
+			err := dr.limiter.Alloc(ctx, dr.dbID, map[int64][]int64{dr.collectionID: partitionIDs}, internalpb.RateType_DMLDelete, size)
 			if err != nil {
 				log.Warn("query stream for delete failed because rate limiter", zap.Int64("msgID", dr.msgID), zap.Error(err))
 				return err
 			}
+			metrics.ProxyReceiveBytes.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				metrics.DeleteLabel,
+				dr.req.GetCollectionName(),
+			).Add(float64(size))
 		}
 
 		task, err := dr.produce(ctx, result.GetIds())
