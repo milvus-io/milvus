@@ -71,7 +71,7 @@ func (sd *shardDelegator) forwardL0Deletion(ctx context.Context,
 }
 
 func (sd *shardDelegator) forwardStreamingDeletion(ctx context.Context, deleteData []*DeleteData) {
-	// TODO add `auto` policy
+	// TODO @congqixia add `auto` policy
 	// using direct when streaming size is too large
 	// need some experimental data to support this policy
 	switch policy := paramtable.Get().QueryNodeCfg.StreamingDeltaForwardPolicy.GetValue(); policy {
