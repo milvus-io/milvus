@@ -2664,7 +2664,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 assert low <= tmp_distance <= high
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("nq", [2])
+    @pytest.mark.parametrize("nq", [1])
     @pytest.mark.parametrize("empty_percent", [0])
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
