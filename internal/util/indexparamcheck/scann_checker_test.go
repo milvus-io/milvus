@@ -159,7 +159,7 @@ func Test_scaNNChecker_CheckValidDataType(t *testing.T) {
 		},
 	}
 
-	c := newScaNNChecker()
+	c, _ := GetIndexCheckerMgrInstance().GetChecker("SCANN")
 	for _, test := range cases {
 		err := c.CheckValidDataType("SCANN", &schemapb.FieldSchema{DataType: test.dType})
 		if test.errIsNil {

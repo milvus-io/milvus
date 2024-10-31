@@ -142,8 +142,7 @@ func Test_ivfPQChecker_CheckTrain(t *testing.T) {
 		{p7, false},
 	}
 
-	// c, _ := GetIndexCheckerMgrInstance().GetChecker("IVF_PQ")
-	c := newIVFPQChecker()
+	c, _ := GetIndexCheckerMgrInstance().GetChecker("IVF_PQ")
 	for _, test := range cases {
 		test.params[common.IndexTypeKey] = "IVF_PQ"
 		err := c.CheckTrain(schemapb.DataType_FloatVector, test.params)
