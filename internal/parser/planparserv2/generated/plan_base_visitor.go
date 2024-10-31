@@ -39,10 +39,6 @@ func (v *BasePlanVisitor) VisitIdentifier(ctx *IdentifierContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BasePlanVisitor) VisitSTIntersects(ctx *STIntersectsContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
 func (v *BasePlanVisitor) VisitLike(ctx *LikeContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -68,10 +64,6 @@ func (v *BasePlanVisitor) VisitShift(ctx *ShiftContext) interface{} {
 }
 
 func (v *BasePlanVisitor) VisitCall(ctx *CallContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitSTCrosses(ctx *STCrossesContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -103,23 +95,11 @@ func (v *BasePlanVisitor) VisitTextMatch(ctx *TextMatchContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BasePlanVisitor) VisitSTTouches(ctx *STTouchesContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitSTContains(ctx *STContainsContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
 func (v *BasePlanVisitor) VisitTerm(ctx *TermContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
 func (v *BasePlanVisitor) VisitJSONContains(ctx *JSONContainsContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitSTWithin(ctx *STWithinContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -155,14 +135,6 @@ func (v *BasePlanVisitor) VisitBitAnd(ctx *BitAndContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BasePlanVisitor) VisitSTEuqals(ctx *STEuqalsContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
 func (v *BasePlanVisitor) VisitPower(ctx *PowerContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitSTOverlaps(ctx *STOverlapsContext) interface{} {
 	return v.VisitChildren(ctx)
 }

@@ -398,7 +398,6 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 
 	m[schemapb.DataType_Array] = byteEntry
 	m[schemapb.DataType_JSON] = byteEntry
-	m[schemapb.DataType_Geometry] = byteEntry
 
 	fixedSizeDeserializer := func(a arrow.Array, i int) (any, bool) {
 		if a.IsNull(i) {

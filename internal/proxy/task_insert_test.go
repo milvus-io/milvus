@@ -47,7 +47,6 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	float16VectorFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Float16Vector}
 	bfloat16VectorFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_BFloat16Vector}
 	varCharFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_VarChar}
-	geometryFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Geometry}
 
 	numRows := 20
 	dim := 128
@@ -79,7 +78,6 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 				float16VectorFieldSchema,
 				bfloat16VectorFieldSchema,
 				varCharFieldSchema,
-				geometryFieldSchema,
 			},
 		},
 	}
@@ -99,7 +97,6 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 		newFloat16VectorFieldData("Float16Vector", numRows, dim),
 		newBFloat16VectorFieldData("BFloat16Vector", numRows, dim),
 		newScalarFieldData(varCharFieldSchema, "VarChar", numRows),
-		newScalarFieldData(geometryFieldSchema, "Geometry", numRows),
 	}
 	err = case2.insertMsg.CheckAligned()
 	assert.NoError(t, err)
