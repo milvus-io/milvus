@@ -1129,7 +1129,7 @@ func TestMethodGet(t *testing.T) {
 	mp.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(&milvuspb.BoolResponse{Status: commonErrorStatus}, nil).Once()
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false),
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
 	}, nil).Twice()
@@ -1585,7 +1585,7 @@ func TestDML(t *testing.T) {
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false),
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
 	}, nil).Times(6)
@@ -1607,7 +1607,7 @@ func TestDML(t *testing.T) {
 	mp.EXPECT().Delete(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus}, nil).Once()
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true),
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
 	}, nil).Once()
@@ -1729,7 +1729,7 @@ func TestAllowInt64(t *testing.T) {
 	})
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false),
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
 	}, nil).Twice()
@@ -1765,7 +1765,7 @@ func TestSearchV2(t *testing.T) {
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false),
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
 	}, nil).Times(11)
@@ -1789,7 +1789,7 @@ func TestSearchV2(t *testing.T) {
 		Scores:       DefaultScores,
 	}}, nil).Once()
 	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
-	collSchema := generateCollectionSchema(schemapb.DataType_Int64, false)
+	collSchema := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	binaryVectorField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)
 	binaryVectorField.Name = "binaryVector"
 	float16VectorField := generateVectorFieldSchema(schemapb.DataType_Float16Vector)
