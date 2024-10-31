@@ -2293,7 +2293,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 result_text = r.text
                 # verify search result satisfies the filter
                 if expr == "text_match":
-                    assert tokens[0] in result_text
+                    assert token in result_text
                 if expr == "id_range":
                     assert _id < data_size // 2
                 # verify search result has overlap with search text
