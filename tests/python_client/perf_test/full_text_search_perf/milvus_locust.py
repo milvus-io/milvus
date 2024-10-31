@@ -1,8 +1,11 @@
 import gevent.monkey
 gevent.monkey.patch_all()
+import grpc.experimental.gevent as grpc_gevent
+grpc_gevent.init_gevent()
 
 
 from locust import User, FastHttpUser, events, task, constant_throughput, tag
+from locust.runners import MasterRunner, WorkerRunner
 from locust.env import Environment
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility, MilvusClient
 import numpy as np
@@ -13,6 +16,91 @@ import os
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+
+def setup_collection(environment):
+    """在master上执行collection的初始化"""
+    logger.info("Setting up collection in master...")
+
+    # 获取配置参数
+    collection_name = environment.parsed_options.milvus_collection
+    dim = environment.parsed_options.milvus_dim
+    nlist = environment.parsed_options.milvus_nlist
+
+    try:
+        # 建立连接
+        connections.connect(uri=environment.host)
+
+        # 定义 collection schema
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+
+        # 如果collection已存在则删除
+        if utility.has_collection(collection_name):
+            logger.info(f"Dropping existing collection: {collection_name}")
+            utility.drop_collection(collection_name)
+
+        # 创建collection
+        logger.info(f"Creating new collection: {collection_name}")
+        collection = Collection(name=collection_name, schema=schema)
+
+        # 创建索引
+        index_params = {
+            "metric_type": "L2",
+            "index_type": "IVF_FLAT",
+            "params": {"nlist": nlist}
+        }
+        logger.info("Creating index...")
+        collection.create_index("vector", index_params)
+        collection.load()
+        logger.info("Collection setup completed successfully")
+
+        # 存储setup状态
+        environment.setup_completed = True
+
+    except Exception as e:
+        logger.error(f"Failed to setup collection: {str(e)}")
+        raise
+    finally:
+        connections.disconnect("default")
+
+
+@events.init.add_listener
+def on_locust_init(environment, **_kwargs):
+    """初始化事件监听器，仅在master上执行setup"""
+    if isinstance(environment.runner, MasterRunner):
+        logger.info("Initializing in master...")
+        setup_collection(environment)
+
+    # 为所有runner添加setup状态标记
+    environment.setup_completed = False
+
+
+@events.test_start.add_listener
+def on_test_start(environment, **_kwargs):
+    """测试开始时的处理"""
+    if isinstance(environment.runner, MasterRunner):
+        logger.info("Test starting in master...")
+        # Master已经完成setup
+        environment.setup_completed = True
+    elif isinstance(environment.runner, WorkerRunner):
+        logger.info("Test starting in worker...")
+        # Worker等待master完成setup
+        wait_for_setup(environment)
+
+
+def wait_for_setup(environment):
+    """等待setup完成"""
+    timeout = 30  # 30秒超时
+    start_time = time.time()
+    while not environment.setup_completed:
+        if time.time() - start_time > timeout:
+            raise Exception("Timeout waiting for collection setup")
+        time.sleep(1)
+    logger.info("Setup confirmed completed")
 
 
 class MilvusBaseUser(User):
@@ -38,8 +126,9 @@ class MilvusBaseUser(User):
     def on_start(self):
         """Called when a User starts running"""
         logger.debug("Starting MilvusBaseUser setup")
+        connections.connect(uri=self.environment.host)
         self._init_client()
-        self._setup_collection()
+        # self._setup_collection()
 
     def _init_client(self):
         """Initialize the appropriate client based on mode"""
@@ -121,7 +210,7 @@ class MilvusORMClient:
 
     def __init__(self, environment):
         logger.debug("Initializing MilvusORMClient")
-        self.request_type = "Milvus ORM"
+        self.request_type = "ORM"
         self.collection_name = environment.parsed_options.milvus_collection
 
     def insert(self, vectors, ids):
