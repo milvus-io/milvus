@@ -147,15 +147,9 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
                                  ? active_count_ - overflow_check_pos_
                                  : batch_size_;
         overflow_check_pos_ += batch_size;
-        if (cached_overflow_res_ != nullptr &&
-            cached_overflow_res_->size() == batch_size) {
-            return cached_overflow_res_;
-        }
         auto valid_res = ProcessChunksForValid<T>(is_index_mode_);
         auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
                                                       std::move(valid_res));
-        cached_overflow_res_ = res_vec;
-
         return res_vec;
     };
 

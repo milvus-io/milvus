@@ -560,6 +560,117 @@ TEST_P(ExprTest, TestRangeNullable) {
                  }
                  return v != 2000;
              }},
+            {R"(binary_range_expr: <
+              column_info: <
+                field_id: 103
+                data_type: Int8
+              >
+              lower_inclusive: false,
+              upper_inclusive: false,
+              lower_value: <
+                int64_val: 1000000
+              >
+              upper_value: <
+                int64_val: 1000001
+              >
+        >)",
+             [](int v, bool valid) { return false; }},
+            {R"(binary_range_expr: <
+              column_info: <
+                field_id: 103
+                data_type: Int8
+              >
+              lower_inclusive: false,
+              upper_inclusive: false,
+              lower_value: <
+                int64_val: -1000001
+              >
+              upper_value: <
+                int64_val: -1000000
+              >
+        >)",
+             [](int v, bool valid) { return false; }},
+            {R"(unary_range_expr: <
+              column_info: <
+                field_id: 103
+                data_type: Int8
+              >
+              op: GreaterEqual,
+              value: <
+                int64_val: 1000000
+              >
+        >)",
+             [](int v, bool valid) { return false; }},
+            {R"(unary_range_expr: <
+              column_info: <
+                field_id: 103
+                data_type: Int8
+              >
+              op: GreaterEqual,
+              value: <
+                int64_val: -1000000
+              >
+        >)",
+             [](int v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return true;
+             }},
+            {R"(unary_range_expr: <
+              column_info: <
+                field_id: 103
+                data_type: Int8
+              >
+              op: LessEqual,
+              value: <
+                int64_val: 1000000
+              >
+        >)",
+             [](int v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return true;
+             }},
+            {R"(unary_range_expr: <
+              column_info: <
+                field_id: 103
+                data_type: Int8
+              >
+              op: LessThan,
+              value: <
+                int64_val: -1000000
+              >
+        >)",
+             [](int v, bool valid) { return false; }},
+            {R"(unary_range_expr: <
+              column_info: <
+                field_id: 103
+                data_type: Int8
+              >
+              op: Equal,
+              value: <
+                int64_val: 1000000
+              >
+        >)",
+             [](int v, bool valid) { return false; }},
+            {R"(unary_range_expr: <
+              column_info: <
+                field_id: 103
+                data_type: Int8
+              >
+              op: NotEqual,
+              value: <
+                int64_val: 1000000
+              >
+        >)",
+             [](int v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return true;
+             }},
         };
 
     std::string raw_plan_tmp = R"(vector_anns: <
@@ -581,6 +692,9 @@ TEST_P(ExprTest, TestRangeNullable) {
     schema->set_primary_field_id(i64_fid);
     auto nullable_fid =
         schema->AddDebugField("nullable", DataType::INT64, true);
+
+    auto nullable_fid_pre_check =
+        schema->AddDebugField("pre_check", DataType::INT8, true);
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
@@ -625,7 +739,8 @@ TEST_P(ExprTest, TestRangeNullable) {
             auto val = data_col[i];
             auto valid_data = valid_data_col[i];
             auto ref = ref_func(val, valid_data);
-            ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            ASSERT_EQ(ans, ref)
+                << clause << "@" << i << "!!" << val << "!!" << valid_data;
         }
     }
 }
