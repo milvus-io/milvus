@@ -372,7 +372,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 }
 
 func (dr *deleteRunner) Run(ctx context.Context) error {
-	plan, err := planparserv2.CreateRetrievePlan(dr.schema.schemaHelper, dr.req.GetExpr())
+	plan, err := planparserv2.CreateRetrievePlan(dr.schema.schemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues())
 	if err != nil {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))
 	}
