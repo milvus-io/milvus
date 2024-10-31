@@ -76,7 +76,6 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	putParser(parser)
 
 	exprCache.Add(exprStr, ast)
-	val = ast
 	return
 }
 
