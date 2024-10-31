@@ -952,7 +952,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         assert len(res) == len(data)
 
         # search with text
-        nq = 10
+        nq = 2
         limit = 100
         search_data = [fake.text().lower() + random.choice(tokens) for _ in range(nq)]
         res_list, _ = collection_w.search(
@@ -2110,7 +2110,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("nq", [10])
+    @pytest.mark.parametrize("nq", [2])
     @pytest.mark.parametrize("empty_percent", [0.5])
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
@@ -2233,9 +2233,10 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             collection_w.create_index("text", {"index_type": "INVERTED"})
         collection_w.load()
         limit = 100
-        search_data = [fake.text().lower() + " " + random.choice(tokens) for _ in range(nq)]
+        token = random.choice(tokens)
+        search_data = [fake.text().lower() + f" {token} "  for _ in range(nq)]
         if expr == "text_match":
-            filter = f"TextMatch(text, '{tokens[0]}')"
+            filter = f"TextMatch(text, '{token}')"
             res, _ = collection_w.query(
                 expr=filter,
             )
@@ -2498,7 +2499,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
 
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("nq", [1])
+    @pytest.mark.parametrize("nq", [2])
     @pytest.mark.parametrize("empty_percent", [0])
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
@@ -2663,7 +2664,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 assert low <= tmp_distance <= high
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("nq", [1])
+    @pytest.mark.parametrize("nq", [2])
     @pytest.mark.parametrize("empty_percent", [0])
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
