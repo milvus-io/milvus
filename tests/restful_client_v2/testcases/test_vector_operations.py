@@ -6,7 +6,7 @@ import sys
 import json
 import time
 from utils import constant
-from utils.utils import gen_collection_name, get_sorted_distance
+from utils.utils import gen_collection_name, get_sorted_distance, patch_faker_text, en_vocabularies_distribution, zh_vocabularies_distribution
 from utils.util_log import test_log as logger
 import pytest
 from base.testbase import TestBase
@@ -19,6 +19,9 @@ from faker import Faker
 Faker.seed(19530)
 fake_en = Faker("en_US")
 fake_zh = Faker("zh_CN")
+
+patch_faker_text(fake_en, en_vocabularies_distribution)
+patch_faker_text(fake_zh, zh_vocabularies_distribution)
 
 
 @pytest.mark.L0
@@ -1193,14 +1196,108 @@ class TestSearchVector(TestBase):
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
 
+
+    @pytest.mark.parametrize("insert_round", [1])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("is_partition_key", [True, False])
+    @pytest.mark.parametrize("enable_dynamic_schema", [True])
+    @pytest.mark.parametrize("nb", [3000])
+    @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("groupingField", ['user_id', None])
+    @pytest.mark.parametrize("tokenizer", ['default'])
+    def test_search_vector_for_en_full_text_search(self, nb, dim, insert_round, auto_id,
+                                                      is_partition_key, enable_dynamic_schema, groupingField, tokenizer):
+        """
+        Insert a vector with a simple payload
+        """
+        # create a collection
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": auto_id,
+                "enableDynamicField": enable_dynamic_schema,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": is_partition_key,
+                     "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "document_content", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "1000", "enable_tokenizer": True,
+                                           "analyzer_params": {
+                                               "tokenizer": tokenizer,
+                                           },
+                                           "enable_match": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_fn",
+                        "type": "BM25",
+                        "inputFieldNames": ["document_content"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_vector", "metricType": "BM25",
+                 "params": {"index_type": "SPARSE_INVERTED_INDEX"}}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 0
+        if tokenizer == 'default':
+            fake = fake_en
+        elif tokenizer == 'jieba':
+            fake = fake_zh
+        else:
+            raise Exception("Invalid tokenizer")
+
+        # insert data
+        for i in range(insert_round):
+            data = []
+            for j in range(nb):
+                idx = i * nb + j
+                if auto_id:
+                    tmp = {
+                        "user_id": idx%100,
+                        "word_count": j,
+                        "book_describe": f"book_{idx}",
+                        "document_content": fake.text().lower(),
+                    }
+                else:
+                    tmp = {
+                        "book_id": idx,
+                        "user_id": idx%100,
+                        "word_count": j,
+                        "book_describe": f"book_{idx}",
+                        "document_content": fake.text().lower(),
+                    }
+                if enable_dynamic_schema:
+                    tmp.update({f"dynamic_field_{i}": i})
+                data.append(tmp)
+            payload = {
+                "collectionName": name,
+                "data": data,
+            }
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 0
+            assert rsp['data']['insertCount'] == nb
+        assert rsp['code'] == 0
+
         # search data
         payload = {
             "collectionName": name,
-            "data": [gen_vector(datatype="SparseFloatVector", dim=dim, sparse_format="coo")],
+            "data": [fake.text().lower() for _ in range(1)],
             "filter": "word_count > 100",
             "outputFields": ["*"],
             "searchParams": {
-                "metricType": "IP",
                 "params": {
                     "drop_ratio_search": "0.2",
                 }
@@ -1211,6 +1308,125 @@ class TestSearchVector(TestBase):
             payload["groupingField"] = groupingField
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
+        assert len(rsp['data']) > 0
+
+
+    @pytest.mark.parametrize("insert_round", [1])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("is_partition_key", [True, False])
+    @pytest.mark.parametrize("enable_dynamic_schema", [True])
+    @pytest.mark.parametrize("nb", [3000])
+    @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("groupingField", ['user_id', None])
+    @pytest.mark.parametrize("tokenizer", ['jieba'])
+    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/36751")
+    def test_search_vector_for_zh_full_text_search(self, nb, dim, insert_round, auto_id,
+                                                      is_partition_key, enable_dynamic_schema, groupingField, tokenizer):
+        """
+        Insert a vector with a simple payload
+        """
+        # create a collection
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": auto_id,
+                "enableDynamicField": enable_dynamic_schema,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": is_partition_key,
+                     "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "document_content", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "1000", "enable_tokenizer": True,
+                                           "analyzer_params": {
+                                               "tokenizer": tokenizer,
+                                           },
+                                           "enable_match": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_fn",
+                        "type": "BM25",
+                        "inputFieldNames": ["document_content"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_vector", "metricType": "BM25",
+                 "params": {"index_type": "SPARSE_INVERTED_INDEX"}}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 0
+        if tokenizer == 'default':
+            fake = fake_en
+        elif tokenizer == 'jieba':
+            fake = fake_zh
+        else:
+            raise Exception("Invalid tokenizer")
+
+        # insert data
+        for i in range(insert_round):
+            data = []
+            for j in range(nb):
+                idx = i * nb + j
+                if auto_id:
+                    tmp = {
+                        "user_id": idx%100,
+                        "word_count": j,
+                        "book_describe": f"book_{idx}",
+                        "document_content": fake.text().lower(),
+                    }
+                else:
+                    tmp = {
+                        "book_id": idx,
+                        "user_id": idx%100,
+                        "word_count": j,
+                        "book_describe": f"book_{idx}",
+                        "document_content": fake.text().lower(),
+                    }
+                if enable_dynamic_schema:
+                    tmp.update({f"dynamic_field_{i}": i})
+                data.append(tmp)
+            payload = {
+                "collectionName": name,
+                "data": data,
+            }
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 0
+            assert rsp['data']['insertCount'] == nb
+        assert rsp['code'] == 0
+
+        # search data
+        payload = {
+            "collectionName": name,
+            "data": [fake.text().lower() for _ in range(2)],
+            "filter": "word_count > 100",
+            "outputFields": ["*"],
+            "searchParams": {
+                "params": {
+                    "drop_ratio_search": "0.2",
+                }
+            },
+            "limit": 500,
+        }
+        if groupingField:
+            payload["groupingField"] = groupingField
+        rsp = self.vector_client.vector_search(payload)
+        assert rsp['code'] == 0
+        assert len(rsp['data']) > 0
+
+
+
 
     @pytest.mark.parametrize("insert_round", [2])
     @pytest.mark.parametrize("auto_id", [True])
@@ -1789,6 +2005,29 @@ class TestSearchVectorNegative(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 1802
+
+    @pytest.mark.parametrize("invalid_metric_type", ["L2", "IP", "UNSUPPORTED"])
+    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/37138")
+    def test_search_vector_with_invalid_metric_type(self, invalid_metric_type):
+        """
+        Search a vector with a simple payload
+        """
+        name = gen_collection_name()
+        self.name = name
+        self.init_collection(name, metric_type="COSINE")
+
+        # search data
+        dim = 128
+        payload = {
+            "collectionName": name,
+            "data": [preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()],
+            "searchParams": {
+                "metricType": invalid_metric_type
+            }
+        }
+        rsp = self.vector_client.vector_search(payload)
+        assert rsp['code'] != 0
+
 
     @pytest.mark.parametrize("limit", [0, 16385])
     def test_search_vector_with_invalid_limit(self, limit):

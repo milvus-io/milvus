@@ -14,8 +14,72 @@ from sklearn.metrics import pairwise_distances
 from collections import Counter
 import bm25s
 import jieba
+
+
 fake = Faker()
+fake.seed_instance(19530)
 rng = np.random.default_rng()
+
+
+en_vocabularies_distribution = {
+    "hello": 0.01,
+    "milvus": 0.01,
+    "vector": 0.01,
+    "database": 0.01
+}
+
+zh_vocabularies_distribution = {
+    "你好": 0.01,
+    "向量": 0.01,
+    "数据": 0.01,
+    "库": 0.01
+}
+
+
+def patch_faker_text(fake_instance, vocabularies_distribution):
+    """
+    Monkey patch the text() method of a Faker instance to include custom vocabulary.
+    Each word in vocabularies_distribution has an independent chance to be inserted.
+    Args:
+        fake_instance: Faker instance to patch
+        vocabularies_distribution: Dictionary where:
+            - key: word to insert
+            - value: probability (0-1) of inserting this word into each sentence
+    Example:
+        vocabularies_distribution = {
+            "hello": 0.1,    # 10% chance to insert "hello" in each sentence
+            "milvus": 0.1,   # 10% chance to insert "milvus" in each sentence
+        }
+    """
+    original_text = fake_instance.text
+
+    def new_text(*args, **kwargs):
+        sentences = []
+        # Split original text into sentences
+        original_sentences = original_text(*args,**kwargs).split('.')
+        original_sentences = [s.strip() for s in original_sentences if s.strip()]
+
+        for base_sentence in original_sentences:
+            words = base_sentence.split()
+
+            # Independently decide whether to insert each word
+            for word, probability in vocabularies_distribution.items():
+                if random.random() < probability:
+                    # Choose random position to insert the word
+                    insert_pos = random.randint(0, len(words))
+                    words.insert(insert_pos, word)
+
+            # Reconstruct the sentence
+            base_sentence = ' '.join(words)
+
+            # Ensure proper capitalization
+            base_sentence = base_sentence[0].upper() + base_sentence[1:]
+            sentences.append(base_sentence)
+
+        return '. '.join(sentences) + '.'
+
+    # Replace the original text method with our custom one
+    fake_instance.text = new_text
 
 
 def analyze_documents(texts, language="en"):
