@@ -102,6 +102,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 			// here should be < instead of <=
 			// to avoid the upsert data to be deleted after compact
 			if ok && uint64(v.Timestamp) < ts {
+				deletedRowCount++
 				continue
 			}
 			return v, nil

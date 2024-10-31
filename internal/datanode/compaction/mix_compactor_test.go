@@ -18,6 +18,7 @@ package compaction
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -286,6 +287,7 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
 	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
+	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
 	for _, segID := range segments {
 		s.initMultiRowsSegBuffer(segID, 100, 3)
 		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
@@ -295,11 +297,25 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
 			return len(left) == 0 && len(right) == 0
 		})).Return(lo.Values(kvs), nil).Once()
 
+		blob, err := getInt64DeltaBlobs(
+			segID,
+			[]int64{segID, segID + 3, segID + 6},
+			[]uint64{deleteTs, deleteTs, deleteTs},
+		)
+		s.Require().NoError(err)
+		deltaPath := fmt.Sprintf("deltalog/%d", segID)
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{deltaPath}).
+			Return([][]byte{blob.GetValue()}, nil).Once()
+
 		s.plan.SegmentBinlogs = append(s.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			SegmentID:    segID,
 			FieldBinlogs: lo.Values(fBinlogs),
 			IsSorted:     true,
+			Deltalogs: []*datapb.FieldBinlog{
+				{Binlogs: []*datapb.Binlog{{LogPath: deltaPath}}},
+			},
 		})
+
 	}
 
 	result, err := s.task.Compact()
@@ -312,7 +328,7 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
 
 	segment := result.GetSegments()[0]
 	s.EqualValues(19531, segment.GetSegmentID())
-	s.EqualValues(300, segment.GetNumOfRows())
+	s.EqualValues(291, segment.GetNumOfRows())
 	s.NotEmpty(segment.InsertLogs)
 
 	s.NotEmpty(segment.Field2StatslogPaths)
