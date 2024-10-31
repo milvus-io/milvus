@@ -781,7 +781,7 @@ func compareRow(m1 map[string]interface{}, m2 map[string]interface{}) bool {
 					return false
 				}
 			}
-		} else if key == "field-json" || key == "field-geometry" {
+		} else if key == "field-json" {
 			arr1 := value.([]byte)
 			arr2 := m2[key].([]byte)
 			if len(arr1) != len(arr2) {
@@ -800,7 +800,7 @@ func compareRow(m1 map[string]interface{}, m2 map[string]interface{}) bool {
 	}
 
 	for key, value := range m2 {
-		if (key == FieldBookIntro) || (key == "field-json") || (key == "field-geometry") || (key == "field-array") {
+		if (key == FieldBookIntro) || (key == "field-json") || (key == "field-array") {
 			continue
 		} else if strings.HasPrefix(key, "array-") {
 			continue
@@ -900,12 +900,6 @@ func newCollectionSchema(coll *schemapb.CollectionSchema) *schemapb.CollectionSc
 	}
 	coll.Fields = append(coll.Fields, &fieldSchema10)
 
-	fieldSchema11 := schemapb.FieldSchema{
-		Name:      "field-geometry",
-		DataType:  schemapb.DataType_Geometry,
-		IsDynamic: false,
-	}
-	coll.Fields = append(coll.Fields, &fieldSchema11)
 	return coll
 }
 
@@ -1152,28 +1146,6 @@ func newFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schemapb.Data
 	}
 	fieldDatas = append(fieldDatas, &fieldData11)
 
-	fieldData12 := schemapb.FieldData{
-		Type:      schemapb.DataType_Geometry,
-		FieldName: "field-geometry",
-		Field: &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_GeometryData{
-					GeometryData: &schemapb.GeometryArray{
-						// WKT: POINT (30.123 -10.456)
-						Data: [][]byte{
-							[]byte(`POINT (30.123 -10.456)`),
-							[]byte(`POINT (30.123 -10.456)`),
-							[]byte(`POINT (30.123 -10.456)`),
-							// wkb:{0x01, 0x01, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x4},
-						},
-					},
-				},
-			},
-		},
-		IsDynamic: false,
-	}
-	fieldDatas = append(fieldDatas, &fieldData12)
-
 	switch firstFieldType {
 	case schemapb.DataType_None:
 		return fieldDatas
@@ -1209,8 +1181,6 @@ func newFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schemapb.Data
 		return []*schemapb.FieldData{&fieldData10}
 	case schemapb.DataType_JSON:
 		return []*schemapb.FieldData{&fieldData9}
-	case schemapb.DataType_Geometry:
-		return []*schemapb.FieldData{&fieldData12}
 	case schemapb.DataType_SparseFloatVector:
 		vectorField := generateVectorFieldData(firstFieldType)
 		return []*schemapb.FieldData{&vectorField}
@@ -1476,7 +1446,6 @@ func newSearchResult(results []map[string]interface{}) []map[string]interface{} 
 		result["field-varchar"] = strconv.Itoa(i)
 		result["field-string"] = strconv.Itoa(i)
 		result["field-json"] = []byte(`{"XXX": 0}`)
-		result["field-geometry"] = []byte(`POINT (30.123 -10.456)`)
 		result["field-array"] = []bool{true}
 		result["array-bool"] = []bool{true}
 		result["array-int8"] = []int32{0}
@@ -1737,7 +1706,6 @@ func TestBuildQueryResps(t *testing.T) {
 		schemapb.DataType_Float, schemapb.DataType_Double,
 		schemapb.DataType_String, schemapb.DataType_VarChar,
 		schemapb.DataType_JSON, schemapb.DataType_Array,
-		schemapb.DataType_Geometry,
 	}
 	for _, dateType := range dataTypes {
 		_, err := buildQueryResp(int64(0), outputFields, newFieldData([]*schemapb.FieldData{}, dateType), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true)

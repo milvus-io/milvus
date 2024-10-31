@@ -34,7 +34,6 @@ const (
 	DoubleField         = "doubleField"
 	VarCharField        = "varCharField"
 	JSONField           = "jsonField"
-	GeometryField       = "geometryField"
 	FloatVecField       = "floatVecField"
 	BinVecField         = "binVecField"
 	Float16VecField     = "float16VecField"
@@ -84,7 +83,7 @@ func ConstructSchema(collection string, dim int, autoID bool, fields ...*schemap
 	}
 }
 
-func ConstructSchemaOfVecDataType(collection string, dim int, autoID bool, dataType ...schemapb.DataType) *schemapb.CollectionSchema {
+func ConstructSchemaOfVecDataType(collection string, dim int, autoID bool, dataType schemapb.DataType) *schemapb.CollectionSchema {
 	pk := &schemapb.FieldSchema{
 		FieldID:      100,
 		Name:         Int64Field,
@@ -97,41 +96,33 @@ func ConstructSchemaOfVecDataType(collection string, dim int, autoID bool, dataT
 	}
 	var name string
 	var typeParams []*commonpb.KeyValuePair
-	var fieldSchemaArray []*schemapb.FieldSchema
-	fieldSchemaArray = append(fieldSchemaArray, pk)
-	for i := 0; i < len(dataType); i++ {
-		switch dataType[i] {
-		case schemapb.DataType_FloatVector:
-			name = FloatVecField
-			typeParams = []*commonpb.KeyValuePair{
-				{
-					Key:   common.DimKey,
-					Value: fmt.Sprintf("%d", dim),
-				},
-			}
-		case schemapb.DataType_SparseFloatVector:
-			name = SparseFloatVecField
-			typeParams = nil
-		case schemapb.DataType_Geometry:
-			name = GeometryField
-			typeParams = nil
-		default:
-			panic("unsupported data type")
+	switch dataType {
+	case schemapb.DataType_FloatVector:
+		name = FloatVecField
+		typeParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: fmt.Sprintf("%d", dim),
+			},
 		}
-		sche := &schemapb.FieldSchema{
-			FieldID:      101 + int64(i),
-			Name:         name,
-			IsPrimaryKey: false,
-			Description:  "",
-			DataType:     dataType[i],
-			TypeParams:   typeParams,
-			IndexParams:  nil,
-		}
-		fieldSchemaArray = append(fieldSchemaArray, sche)
+	case schemapb.DataType_SparseFloatVector:
+		name = SparseFloatVecField
+		typeParams = nil
+	default:
+		panic("unsupported data type")
+	}
+	fVec := &schemapb.FieldSchema{
+		FieldID:      101,
+		Name:         name,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     dataType,
+		TypeParams:   typeParams,
+		IndexParams:  nil,
 	}
 	return &schemapb.CollectionSchema{
 		Name:   collection,
 		AutoID: autoID,
-		Fields: fieldSchemaArray,
+		Fields: []*schemapb.FieldSchema{pk, fVec},
 	}
 }
