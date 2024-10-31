@@ -75,10 +75,11 @@ func NewChannelManager(pipelineParams *util.PipelineParams, fgManager pipeline.F
 			if pipelineParams.CompactionExecutor != nil {
 				pipelineParams.CompactionExecutor.DiscardPlan(channelName)
 			}
+			// RemoveFlowgraph before remove WriteBuffer, otherwise panics will happen.
+			fgManager.RemoveFlowgraph(channelName)
 			if pipelineParams.WriteBufferManager != nil {
 				pipelineParams.WriteBufferManager.RemoveChannel(channelName)
 			}
-			fgManager.RemoveFlowgraph(channelName)
 		},
 
 		closeCh: lifetime.NewSafeChan(),
