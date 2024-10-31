@@ -746,9 +746,11 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return h.proxy.Delete(reqCtx, req.(*milvuspb.DeleteRequest))
 	})
 	if err == nil {
-		HTTPReturn(c, http.StatusOK, wrapperReturnDefaultWithCost(
-			proxy.GetCostValue(resp.(*milvuspb.MutationResult).GetStatus()),
-		))
+		deleteResp := resp.(*milvuspb.MutationResult)
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{"deleteCount": deleteResp.DeleteCnt},
+		})
 	}
 	return resp, err
 }
@@ -779,7 +781,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.NumRows = uint32(len(httpReq.Data))
-	req.FieldsData, err = anyToColumns(httpReq.Data, collSchema)
+	req.FieldsData, err = anyToColumns(httpReq.Data, collSchema, true)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with insert data", zap.Any("data", httpReq.Data), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -852,7 +854,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.NumRows = uint32(len(httpReq.Data))
-	req.FieldsData, err = anyToColumns(httpReq.Data, collSchema)
+	req.FieldsData, err = anyToColumns(httpReq.Data, collSchema, false)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with upsert data", zap.Any("data", httpReq.Data), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{

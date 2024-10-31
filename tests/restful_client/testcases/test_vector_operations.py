@@ -33,6 +33,7 @@ class TestInsertVector(TestBase):
             "dimension": dim,
             "primaryField": primary_field,
             "vectorField": vector_field,
+            "autoID":True,
         }
         rsp = self.collection_client.collection_create(collection_payload)
         assert rsp['code'] == 200
