@@ -86,20 +86,28 @@ def on_test_start(environment, **_kwargs):
         logger.info("Test starting in master...")
         # Master已经完成setup
         environment.setup_completed = True
+        logger.info(f"environment.setup_completed: {environment.setup_completed}")
+        logger.info(" master setup confirmed completed")
     elif isinstance(environment.runner, WorkerRunner):
         logger.info("Test starting in worker...")
         # Worker等待master完成setup
         wait_for_setup(environment)
+        logger.info("worker setup confirmed completed")
 
 
 def wait_for_setup(environment):
     """等待setup完成"""
-    timeout = 30  # 30秒超时
+    timeout = 60  # 30秒超时
+    connections.connect(uri=environment.host)
+    collection = Collection(environment.parsed_options.milvus_collection)
+    is_loaded = len(collection.get_replicas().groups) > 0
     start_time = time.time()
-    while not environment.setup_completed:
+
+    while not is_loaded:
         if time.time() - start_time > timeout:
             raise Exception("Timeout waiting for collection setup")
         time.sleep(1)
+        is_loaded = len(collection.get_replicas().groups) > 0
     logger.info("Setup confirmed completed")
 
 
