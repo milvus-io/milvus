@@ -879,6 +879,10 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 		segment.Binlogs = mergeFieldBinlogs(segment.GetBinlogs(), binlogs)
 		segment.Statslogs = mergeFieldBinlogs(segment.GetStatslogs(), statslogs)
 		segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
+		if len(deltalogs) > 0 {
+			segment.deltaRowcount.Store(-1)
+		}
+
 		segment.Bm25Statslogs = mergeFieldBinlogs(segment.GetBm25Statslogs(), bm25logs)
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,

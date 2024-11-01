@@ -508,10 +508,9 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 	return s.size.Load()
 }
 
-// L1 segment deltaCount changes in any state
-// L0 segment deltaCount won't change
+// Any edits on deltalogs of flushed segments will reset deltaRowcount to -1
 func (s *SegmentInfo) getDeltaCount() int64 {
-	if s.deltaRowcount.Load() < 0 || s.GetLevel() != datapb.SegmentLevel_L0 {
+	if s.deltaRowcount.Load() < 0 || s.GetState() != commonpb.SegmentState_Flushed {
 		var rc int64
 		for _, deltaLogs := range s.GetDeltalogs() {
 			for _, l := range deltaLogs.GetBinlogs() {
