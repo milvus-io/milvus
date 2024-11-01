@@ -44,7 +44,8 @@ type CostMetrics struct {
 type LookAsideBalancer struct {
 	clientMgr shardClientMgr
 
-	metricsMap *typeutil.ConcurrentMap[int64, *CostMetrics]
+	knownNodeInfos *typeutil.ConcurrentMap[int64, nodeInfo]
+	metricsMap     *typeutil.ConcurrentMap[int64, *CostMetrics]
 	// query node id -> number of consecutive heartbeat failures
 	failedHeartBeatCounter *typeutil.ConcurrentMap[int64, *atomic.Int64]
 
@@ -64,6 +65,7 @@ type LookAsideBalancer struct {
 func NewLookAsideBalancer(clientMgr shardClientMgr) *LookAsideBalancer {
 	balancer := &LookAsideBalancer{
 		clientMgr:              clientMgr,
+		knownNodeInfos:         typeutil.NewConcurrentMap[int64, nodeInfo](),
 		metricsMap:             typeutil.NewConcurrentMap[int64, *CostMetrics](),
 		failedHeartBeatCounter: typeutil.NewConcurrentMap[int64, *atomic.Int64](),
 		closeCh:                make(chan struct{}),
@@ -86,6 +88,12 @@ func (b *LookAsideBalancer) Close() {
 		close(b.closeCh)
 		b.wg.Wait()
 	})
+}
+
+func (b *LookAsideBalancer) RegisterNodeInfo(nodeInfos []nodeInfo) {
+	for _, node := range nodeInfos {
+		b.knownNodeInfos.Insert(node.nodeID, node)
+	}
 }
 
 func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
@@ -233,9 +241,10 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 		case <-ticker.C:
 			var futures []*conc.Future[any]
 			now := time.Now()
-			b.metricsMap.Range(func(node int64, metrics *CostMetrics) bool {
+			b.knownNodeInfos.Range(func(node int64, info nodeInfo) bool {
 				futures = append(futures, pool.Submit(func() (any, error) {
-					if now.UnixMilli()-metrics.ts.Load() > checkHealthInterval.Milliseconds() {
+					metrics, ok := b.metricsMap.Get(node)
+					if !ok || now.UnixMilli()-metrics.ts.Load() > checkHealthInterval.Milliseconds() {
 						checkTimeout := Params.ProxyCfg.HealthCheckTimeout.GetAsDuration(time.Millisecond)
 						ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
 						defer cancel()
@@ -244,13 +253,14 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 							panic("let it panic")
 						}
 
-						qn, err := b.clientMgr.GetClient(ctx, node)
+						qn, err := b.clientMgr.GetClient(ctx, info)
 						if err != nil {
 							// get client from clientMgr failed, which means this qn isn't a shard leader anymore, skip it's health check
 							b.trySetQueryNodeUnReachable(node, err)
 							log.RatedInfo(10, "get client failed", zap.Int64("node", node), zap.Error(err))
 							return struct{}{}, nil
 						}
+						defer b.clientMgr.ReleaseClient(node)
 
 						resp, err := qn.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 						if err != nil {
@@ -304,6 +314,7 @@ func (b *LookAsideBalancer) trySetQueryNodeUnReachable(node int64, err error) {
 			zap.Int64("nodeID", node))
 		// stop the heartbeat
 		b.metricsMap.Remove(node)
+		b.knownNodeInfos.Remove(node)
 		return
 	}
 
