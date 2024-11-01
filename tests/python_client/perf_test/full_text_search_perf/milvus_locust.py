@@ -157,14 +157,14 @@ class MilvusBaseUser(User):
     def wait_time(self):
         if self.target_throughput > 0:
             return constant_throughput(self.target_throughput)(self)
-        return 0.01
+        return 0.1
 
 
 class MilvusUser(MilvusBaseUser):
     """Main Milvus user class that defines the test tasks"""
 
     @tag('insert')
-    @task(2)
+    @task(3)
     def insert(self):
         """Insert random vectors"""
         batch_size = 1000
@@ -179,7 +179,7 @@ class MilvusUser(MilvusBaseUser):
         self.client.insert(data)
 
     @tag('search')
-    @task(2)
+    @task(4)
     def search(self):
         """full text search"""
         search_data = [faker.text(max_nb_chars=300)]
@@ -198,11 +198,11 @@ class MilvusUser(MilvusBaseUser):
         self.client.query(expr=expr)
 
     @tag('delete')
-    @task(2)
+    @task(1)
     def delete(self):
-        """delete random vectors"""
-        _min = int((time.time()-60)*(10**6))
-        _max = int((time.time()-30)*(10**6))
+        """delete random vectors in 2 min window"""
+        _min = int((time.time()-600)*(10**6))
+        _max = int((time.time()-480)*(10**6))
 
         expr = f"id >= {_min} and id <= {_max}"
 
