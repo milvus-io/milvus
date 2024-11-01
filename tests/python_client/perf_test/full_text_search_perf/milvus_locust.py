@@ -4,21 +4,18 @@ import grpc.experimental.gevent as grpc_gevent
 grpc_gevent.init_gevent()
 
 
-from locust import User, FastHttpUser, events, task, constant_throughput, tag
+from locust import User, events, task, constant_throughput, tag
 from locust.runners import MasterRunner, WorkerRunner
-from locust.env import Environment
 from pymilvus import (connections, Collection, FieldSchema, CollectionSchema, DataType, FunctionType,
-                      Function, utility, MilvusClient)
+                      Function)
 import numpy as np
-import random
 import time
 import logging
-import os
 from faker import Faker
 faker = Faker()
 
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -28,24 +25,17 @@ def setup_collection(environment):
 
     # 获取配置参数
     collection_name = environment.parsed_options.milvus_collection
-    dim = environment.parsed_options.milvus_dim
-    nlist = environment.parsed_options.milvus_nlist
 
     try:
         # 建立连接
         connections.connect(uri=environment.host)
-
-        has = utility.has_collection(collection_name)
-        if has:
-            logger.info(f"Collection {collection_name} already exists, will drop it")
-            utility.drop_collection(collection_name)
         tokenizer_params = {
             "tokenizer": "default"
         }
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
             FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=25536,
-                        enable_tokenizer=True, tokenizer_params=tokenizer_params, enable_match=True),
+                        enable_tokenizer=True, tokenizer_params=tokenizer_params),
             FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="beir test collection")
@@ -58,7 +48,7 @@ def setup_collection(environment):
         )
         schema.add_function(bm25_function)
         collection = Collection(collection_name, schema)
-        collection.flush()
+
         # 创建索引
         collection.create_index(
             "sparse",
@@ -189,9 +179,9 @@ class MilvusUser(MilvusBaseUser):
         self.client.insert(data)
 
     @tag('search')
-    @task(0)
+    @task(2)
     def search(self):
-        """Search for similar vectors"""
+        """full text search"""
         search_data = [faker.text(max_nb_chars=300)]
         logger.debug("Performing vector search")
         self.client.search(data=search_data,
@@ -201,15 +191,14 @@ class MilvusUser(MilvusBaseUser):
     @tag('query')
     @task(2)
     def query(self):
-        """Search for similar vectors"""
-        query_data = faker.sentence()
-        logger.debug("Performing  query")
-        expr = f"TextMatch(text, '{query_data}')"
-        # expr = f"id > 0"
+        """Text Match"""
+        search_data = faker.sentence()
+        expr = f"TextMatch(text, '{search_data}')"
+        logger.debug("Performing query")
         self.client.query(expr=expr)
 
     @tag('delete')
-    @task(0)
+    @task(2)
     def delete(self):
         """delete random vectors"""
         _min = int((time.time()-60)*(10**6))
@@ -267,9 +256,10 @@ class MilvusORMClient:
             )
             total_time = (time.time() - start) * 1000
             for r in res:
-                logger.info(f"Search result: {r}")
+                logger.debug(f"Search result: {r}")
                 if len(r) == 0:
-                    raise Exception("Search result is empty")
+                    logger.warning("No results found")
+                    raise Exception("Empty results")
             events.request.fire(
                 request_type=self.request_type,
                 name="Search",
@@ -297,9 +287,9 @@ class MilvusORMClient:
                 output_fields=output_fields
             )
             total_time = (time.time() - start) * 1000
-            logger.debug(f"query result: {res}")
             if len(res) == 0:
-                raise Exception("Query result is empty")
+                logger.warning("No results found")
+                raise Exception("Empty results")
             events.request.fire(
                 request_type=self.request_type,
                 name="Query",
