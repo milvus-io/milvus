@@ -34,6 +34,7 @@ enum MessageType {
     CreatePartition  = 7;
     DropPartition    = 8;
     ManualFlush      = 9;
+    CreateSegment    = 10;
     // begin transaction message is only used for transaction, once a begin
     // transaction message is received, all messages combined with the
     // transaction message cannot be consumed until a CommitTxn message
@@ -79,6 +80,18 @@ message FlushMessageBody {
 
 // ManualFlushMessageBody is the body of manual flush message.
 message ManualFlushMessageBody {}
+
+// CreateSegmentMessageBody is the body of create segment message.
+message CreateSegmentMessageBody {
+    int64 collection_id = 1;
+    repeated CreateSegmentInfo segments = 2;
+}
+
+// CreateSegmentInfo is the info of create segment.
+message CreateSegmentInfo {
+    int64 partition_id  = 1;
+    int64 segment_id    = 2;
+}
 
 // BeginTxnMessageBody is the body of begin transaction message.
 // Just do nothing now.
@@ -137,6 +150,9 @@ message DeleteMessageHeader {
 
 // FlushMessageHeader just nothing.
 message FlushMessageHeader {}
+
+// CreateSegmentMessageHeader just nothing.
+message CreateSegmentMessageHeader {}
 
 message ManualFlushMessageHeader {
     int64 collection_id = 1;

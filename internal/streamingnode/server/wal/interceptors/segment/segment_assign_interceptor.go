@@ -4,10 +4,11 @@ import (
 	"context"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/manager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
@@ -15,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -134,7 +136,7 @@ func (impl *segmentInterceptor) handleInsertMessage(ctx context.Context, msg mes
 		return nil, err
 	}
 	// Assign segment for insert message.
-	// Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
+	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
 	header := insertMsg.Header()
 	for _, partition := range header.GetPartitions() {
 		result, err := impl.assignManager.Get().AssignSegment(ctx, &manager.AssignSegmentRequest{
@@ -147,6 +149,15 @@ func (impl *segmentInterceptor) handleInsertMessage(ctx context.Context, msg mes
 			TimeTick:   msg.TimeTick(),
 			TxnSession: txn.GetTxnSessionFromContext(ctx),
 		})
+		if errors.Is(err, manager.ErrTimeTickTooOld) {
+			// If current time tick of insert message is too old to alloc segment,
+			// we just redo it to refresh a new latest timetick.
+			return nil, redo.ErrRedo
+		}
+		if errors.Is(err, manager.ErrTooLargeInsert) {
+			// Message is too large, so retry operation is unrecoverable, can't be retry at client side.
+			return nil, status.NewUnrecoverableError("insert too large, binary size: %d", msg.EstimateSize())
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -173,17 +184,24 @@ func (impl *segmentInterceptor) handleManualFlushMessage(ctx context.Context, ms
 		return nil, err
 	}
 	header := maunalFlushMsg.Header()
-	segmentIDs, err := impl.assignManager.Get().SealAllSegmentsAndFenceUntil(ctx, header.GetCollectionId(), header.GetFlushTs())
+	segmentIDs, err := impl.assignManager.Get().SealAndFenceSegmentUntil(ctx, header.GetCollectionId(), header.GetFlushTs())
 	if err != nil {
 		return nil, status.NewInner("segment seal failure with error: %s", err.Error())
 	}
-
-	// create extra response for manual flush message.
-	extraResponse, err := anypb.New(&message.ManualFlushExtraResponse{
-		SegmentIds: segmentIDs,
+	// Modify the extra response for manual flush message.
+	utility.ModifyAppendResultExtra(ctx, func(old *message.ManualFlushExtraResponse) *message.ManualFlushExtraResponse {
+		if old == nil {
+			return &messagespb.ManualFlushExtraResponse{SegmentIds: segmentIDs}
+		}
+		return &messagespb.ManualFlushExtraResponse{SegmentIds: append(old.GetSegmentIds(), segmentIDs...)}
 	})
-	if err != nil {
-		return nil, status.NewInner("create extra response failed with error: %s", err.Error())
+	if len(segmentIDs) > 0 {
+		// There's some new segment sealed, we need to retry the manual flush operation refresh the context.
+		// If we don't refresh the context, the sequence of message in wal will be:
+		// FlushTsHere -> ManualFlush -> FlushSegment1 -> FlushSegment2 -> FlushSegment3.
+		// After refresh the context, keep the sequence of the message in the wal with following seq:
+		// FlushTsHere -> FlushSegment1 -> FlushSegment2 -> FlushSegment3 -> ManualFlush.
+		return nil, redo.ErrRedo
 	}
 
 	// send the manual flush message.
@@ -192,7 +210,6 @@ func (impl *segmentInterceptor) handleManualFlushMessage(ctx context.Context, ms
 		return nil, err
 	}
 
-	utility.AttachAppendResultExtra(ctx, extraResponse)
 	return msgID, nil
 }
 
@@ -234,7 +251,7 @@ func (impl *segmentInterceptor) recoverPChannelManager(param interceptors.Interc
 		}
 
 		// register the manager into inspector, to do the seal asynchronously
-		inspector.GetSegmentSealedInspector().RegsiterPChannelManager(pm)
+		inspector.GetSegmentSealedInspector().RegisterPChannelManager(pm)
 		impl.assignManager.Set(pm)
 		impl.logger.Info("recover PChannel Assignment Manager success")
 		return

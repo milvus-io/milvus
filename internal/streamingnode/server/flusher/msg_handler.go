@@ -16,9 +16,15 @@
 
 package flusher
 
-import "github.com/milvus-io/milvus/pkg/streaming/util/message"
+import (
+	"context"
 
-type FlushMsgHandler interface {
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+)
+
+type MsgHandler interface {
+	HandleCreateSegment(ctx context.Context, vchannel string, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error
+
 	HandleFlush(vchannel string, flushMsg message.ImmutableFlushMessageV2) error
 
 	HandleManualFlush(vchannel string, flushMsg message.ImmutableManualFlushMessageV2) error

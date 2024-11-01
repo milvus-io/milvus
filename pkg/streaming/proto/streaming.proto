@@ -432,4 +432,5 @@ message SegmentAssignmentStat {
     int64 create_timestamp_nanoseconds        = 4;
     int64 last_modified_timestamp_nanoseconds = 5;
     uint64 binlog_counter                     = 6;
+    uint64 create_segment_time_tick           = 7; // The timetick of create segment message in wal.
 }

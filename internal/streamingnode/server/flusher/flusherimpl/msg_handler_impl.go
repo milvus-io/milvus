@@ -20,22 +20,45 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
-func newFlushMsgHandler(wbMgr writebuffer.BufferManager) *flushMsgHandlerImpl {
-	return &flushMsgHandlerImpl{
+func newMsgHandler(wbMgr writebuffer.BufferManager) *msgHandlerImpl {
+	return &msgHandlerImpl{
 		wbMgr: wbMgr,
 	}
 }
 
-type flushMsgHandlerImpl struct {
+type msgHandlerImpl struct {
 	wbMgr writebuffer.BufferManager
 }
 
-func (impl *flushMsgHandlerImpl) HandleFlush(vchannel string, flushMsg message.ImmutableFlushMessageV2) error {
+func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, vchannel string, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error {
+	body, err := createSegmentMsg.Body()
+	if err != nil {
+		return errors.Wrap(err, "failed to get create segment message body")
+	}
+	for _, segmentInfo := range body.GetSegments() {
+		if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, segmentInfo.GetPartitionId(), segmentInfo.GetSegmentId()); err != nil {
+			log.Warn("fail to create new growing segment",
+				zap.String("vchannel", vchannel),
+				zap.Int64("partition_id", segmentInfo.GetPartitionId()),
+				zap.Int64("segment_id", segmentInfo.GetSegmentId()))
+			return err
+		}
+		log.Info("create new growing segment",
+			zap.String("vchannel", vchannel),
+			zap.Int64("partition_id", segmentInfo.GetPartitionId()),
+			zap.Int64("segment_id", segmentInfo.GetSegmentId()))
+	}
+	return nil
+}
+
+func (impl *msgHandlerImpl) HandleFlush(vchannel string, flushMsg message.ImmutableFlushMessageV2) error {
 	body, err := flushMsg.Body()
 	if err != nil {
 		return errors.Wrap(err, "failed to get flush message body")
@@ -46,7 +69,7 @@ func (impl *flushMsgHandlerImpl) HandleFlush(vchannel string, flushMsg message.I
 	return nil
 }
 
-func (impl *flushMsgHandlerImpl) HandleManualFlush(vchannel string, flushMsg message.ImmutableManualFlushMessageV2) error {
+func (impl *msgHandlerImpl) HandleManualFlush(vchannel string, flushMsg message.ImmutableManualFlushMessageV2) error {
 	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.Header().GetFlushTs()); err != nil {
 		return errors.Wrap(err, "failed to flush channel")
 	}

@@ -71,7 +71,7 @@ type ddNode struct {
 
 	dropMode           atomic.Value
 	compactionExecutor compaction.Executor
-	flushMsgHandler    flusher.FlushMsgHandler
+	msgHandler         flusher.MsgHandler
 
 	// for recovery
 	growingSegInfo    map[typeutil.UniqueID]*datapb.SegmentInfo // segmentID
@@ -236,6 +236,19 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
 				Add(float64(dmsg.GetNumRows()))
 			fgMsg.DeleteMessages = append(fgMsg.DeleteMessages, dmsg)
+		case commonpb.MsgType_CreateSegment:
+			createSegment := msg.(*adaptor.CreateSegmentMessageBody)
+			logger := log.With(
+				zap.String("vchannel", ddn.Name()),
+				zap.Int32("msgType", int32(msg.Type())),
+				zap.Uint64("timetick", createSegment.CreateSegmentMessage.TimeTick()),
+			)
+			logger.Info("receive create segment message")
+			if err := ddn.msgHandler.HandleCreateSegment(context.Background(), ddn.vChannelName, createSegment.CreateSegmentMessage); err != nil {
+				logger.Warn("handle create segment message failed", zap.Error(err))
+			} else {
+				logger.Info("handle create segment message success")
+			}
 		case commonpb.MsgType_FlushSegment:
 			flushMsg := msg.(*adaptor.FlushMessageBody)
 			logger := log.With(
@@ -244,7 +257,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				zap.Uint64("timetick", flushMsg.FlushMessage.TimeTick()),
 			)
 			logger.Info("receive flush message")
-			if err := ddn.flushMsgHandler.HandleFlush(ddn.vChannelName, flushMsg.FlushMessage); err != nil {
+			if err := ddn.msgHandler.HandleFlush(ddn.vChannelName, flushMsg.FlushMessage); err != nil {
 				logger.Warn("handle flush message failed", zap.Error(err))
 			} else {
 				logger.Info("handle flush message success")
@@ -258,7 +271,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				zap.Uint64("flushTs", manualFlushMsg.ManualFlushMessage.Header().FlushTs),
 			)
 			logger.Info("receive manual flush message")
-			if err := ddn.flushMsgHandler.HandleManualFlush(ddn.vChannelName, manualFlushMsg.ManualFlushMessage); err != nil {
+			if err := ddn.msgHandler.HandleManualFlush(ddn.vChannelName, manualFlushMsg.ManualFlushMessage); err != nil {
 				logger.Warn("handle manual flush message failed", zap.Error(err))
 			} else {
 				logger.Info("handle manual flush message success")
@@ -318,7 +331,7 @@ func (ddn *ddNode) Close() {
 }
 
 func newDDNode(ctx context.Context, collID typeutil.UniqueID, vChannelName string, droppedSegmentIDs []typeutil.UniqueID,
-	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compaction.Executor, handler flusher.FlushMsgHandler,
+	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compaction.Executor, handler flusher.MsgHandler,
 ) (*ddNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
@@ -333,7 +346,7 @@ func newDDNode(ctx context.Context, collID typeutil.UniqueID, vChannelName strin
 		droppedSegmentIDs:  droppedSegmentIDs,
 		vChannelName:       vChannelName,
 		compactionExecutor: executor,
-		flushMsgHandler:    handler,
+		msgHandler:         handler,
 	}
 
 	dd.dropMode.Store(false)
