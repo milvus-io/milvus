@@ -243,17 +243,11 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 		log.Warn("compact wrong, task context done or timeout")
 		return nil, ctx.Err()
 	}
-	ctxTimeout, cancelAll := context.WithTimeout(ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
-	defer cancelAll()
 	defer t.cleanUp(ctx)
 
-	// 1, download delta logs to build deltaMap
-	deltaBlobs, _, err := composePaths(t.plan.GetSegmentBinlogs())
-	if err != nil {
-		return nil, err
-	}
-	deltaPk2Ts, err := mergeDeltalogs(ctxTimeout, t.binlogIO, deltaBlobs)
-	if err != nil {
+	// 1, decompose binlogs as preparation for later mapping
+	if err := binlog.DecompressCompactionBinlogs(t.plan.SegmentBinlogs); err != nil {
+		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
 		return nil, err
 	}
 
@@ -272,7 +266,7 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 
 	// 3, mapping
 	log.Info("Clustering compaction start mapping", zap.Int("bufferNum", len(t.clusterBuffers)))
-	uploadSegments, partitionStats, err := t.mapping(ctx, deltaPk2Ts)
+	uploadSegments, partitionStats, err := t.mapping(ctx)
 	if err != nil {
 		log.Error("failed in mapping", zap.Error(err))
 		return nil, err
@@ -418,7 +412,6 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 
 // mapping read and split input segments into buffers
 func (t *clusteringCompactionTask) mapping(ctx context.Context,
-	deltaPk2Ts map[interface{}]typeutil.Timestamp,
 ) ([]*datapb.CompactionSegment, *storage.PartitionStatsSnapshot, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mapping-%d", t.GetPlanID()))
 	defer span.End()
@@ -436,7 +429,7 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 			FieldBinlogs: segment.FieldBinlogs,
 		}
 		future := t.mappingPool.Submit(func() (any, error) {
-			err := t.mappingSegment(ctx, segmentClone, deltaPk2Ts)
+			err := t.mappingSegment(ctx, segmentClone)
 			return struct{}{}, err
 		})
 		futures = append(futures, future)
@@ -511,7 +504,6 @@ func (t *clusteringCompactionTask) getBufferTotalUsedMemorySize() int64 {
 func (t *clusteringCompactionTask) mappingSegment(
 	ctx context.Context,
 	segment *datapb.CompactionSegmentBinlogs,
-	delta map[interface{}]typeutil.Timestamp,
 ) error {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mappingSegment-%d-%d", t.GetPlanID(), segment.GetSegmentID()))
 	defer span.End()
@@ -527,6 +519,17 @@ func (t *clusteringCompactionTask) mappingSegment(
 		deleted  int64 = 0
 		remained int64 = 0
 	)
+
+	deltaPaths := make([]string, 0)
+	for _, d := range segment.GetDeltalogs() {
+		for _, l := range d.GetBinlogs() {
+			deltaPaths = append(deltaPaths, l.GetLogPath())
+		}
+	}
+	delta, err := mergeDeltalogs(ctx, t.binlogIO, deltaPaths)
+	if err != nil {
+		return err
+	}
 
 	isDeletedValue := func(v *storage.Value) bool {
 		ts, ok := delta[v.PK.GetValue()]
