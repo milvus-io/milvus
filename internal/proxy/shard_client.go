@@ -47,6 +47,7 @@ func (n *shardClient) getClient(ctx context.Context) (types.QueryNodeClient, err
 		n.Lock()
 		if !n.initialized.Load() {
 			if err := n.initClients(); err != nil {
+				n.Unlock()
 				return nil, err
 			}
 			n.initialized.Store(true)
