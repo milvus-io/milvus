@@ -99,6 +99,10 @@ func (t *L0ImportTask) GetSchema() *schemapb.CollectionSchema {
 	return t.req.GetSchema()
 }
 
+func (t *L0ImportTask) GetSlots() int64 {
+	return 1
+}
+
 func (t *L0ImportTask) Cancel() {
 	t.cancel()
 }
@@ -143,11 +147,13 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 				fmt.Sprintf("there should be one prefix for l0 import, but got %v", t.req.GetFiles()))
 			return
 		}
-		pkField, err := typeutil.GetPrimaryFieldSchema(t.GetSchema())
+		var pkField *schemapb.FieldSchema
+		pkField, err = typeutil.GetPrimaryFieldSchema(t.GetSchema())
 		if err != nil {
 			return
 		}
-		reader, err := binlog.NewL0Reader(t.ctx, t.cm, pkField, t.req.GetFiles()[0], bufferSize)
+		var reader binlog.L0Reader
+		reader, err = binlog.NewL0Reader(t.ctx, t.cm, pkField, t.req.GetFiles()[0], bufferSize)
 		if err != nil {
 			return
 		}
@@ -221,7 +227,7 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 			return nil, nil, err
 		}
 		syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
-			segmentID, partitionID, t.GetCollectionID(), channel, nil, data)
+			segmentID, partitionID, t.GetCollectionID(), channel, nil, data, nil)
 		if err != nil {
 			return nil, nil, err
 		}

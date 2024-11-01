@@ -94,7 +94,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      * deprecated, only used in small chunk index.
      */
     void
-    Build(size_t n, const T* values) override {
+    Build(size_t n, const T* values, const bool* valid_data) override {
         PanicInfo(ErrorCode::NotImplemented, "Build should not be called");
     }
 
@@ -136,7 +136,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         return false;
     }
 
-    T
+    std::optional<T>
     Reverse_Lookup(size_t offset) const override {
         PanicInfo(ErrorCode::NotImplemented,
                   "Reverse_Lookup should not be handled by inverted index");
@@ -173,10 +173,10 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     const TargetBitmap
     RegexQuery(const std::string& regex_pattern) override;
 
+ protected:
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
- private:
     void
     finish();
 
@@ -184,7 +184,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     build_index_for_array(
         const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
 
- private:
+ protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
     TantivyDataType d_type_;
     std::string path_;

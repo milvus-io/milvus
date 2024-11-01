@@ -91,13 +91,12 @@ func Async(ctx context.Context, f CGOAsyncFunction, opts ...Opt) Future {
 
 	ctx, cancel := context.WithCancel(ctx)
 	future := &futureImpl{
-		closure:      f,
-		ctx:          ctx,
-		ctxCancel:    cancel,
-		releaserOnce: sync.Once{},
-		future:       cFuturePtr,
-		opts:         options,
-		state:        newFutureState(),
+		closure:   f,
+		ctx:       ctx,
+		ctxCancel: cancel,
+		future:    cFuturePtr,
+		opts:      options,
+		state:     newFutureState(),
 	}
 
 	// register the future to do timeout notification.
@@ -106,29 +105,33 @@ func Async(ctx context.Context, f CGOAsyncFunction, opts ...Opt) Future {
 }
 
 type futureImpl struct {
-	ctx          context.Context
-	ctxCancel    context.CancelFunc
-	future       *C.CFuture
-	closure      CGOAsyncFunction
-	opts         *options
-	state        futureState
-	releaserOnce sync.Once
+	ctx       context.Context
+	ctxCancel context.CancelFunc
+	future    *C.CFuture
+	closure   CGOAsyncFunction
+	opts      *options
+	state     futureState
 }
 
+// Context return the context of the future.
 func (f *futureImpl) Context() context.Context {
 	return f.ctx
 }
 
+// BlockUntilReady block until the future is ready or canceled.
 func (f *futureImpl) BlockUntilReady() {
 	f.blockUntilReady()
 }
 
+// BlockAndLeakyGet block until the future is ready or canceled, and return the leaky result.
 func (f *futureImpl) BlockAndLeakyGet() (unsafe.Pointer, error) {
 	f.blockUntilReady()
 
-	if !f.state.intoConsumed() {
+	guard := f.state.LockForConsume()
+	if guard == nil {
 		return nil, ErrConsumed
 	}
+	defer guard.Unlock()
 
 	var ptr unsafe.Pointer
 	var status C.CStatus
@@ -144,21 +147,31 @@ func (f *futureImpl) BlockAndLeakyGet() (unsafe.Pointer, error) {
 	return ptr, err
 }
 
+// Release the resource of the future.
 func (f *futureImpl) Release() {
 	// block until ready to release the future.
 	f.blockUntilReady()
+
+	guard := f.state.LockForRelease()
+	if guard == nil {
+		return
+	}
+	defer guard.Unlock()
+
 	// release the future.
 	getCGOCaller().call("future_destroy", func() {
 		C.future_destroy(f.future)
 	})
 }
 
+// cancel the future with error.
 func (f *futureImpl) cancel(err error) {
-	if !f.state.checkUnready() {
-		// only unready future can be canceled.
-		// a ready future' cancel make no sense.
+	// only unready future can be canceled.
+	guard := f.state.LockForCancel()
+	if guard == nil {
 		return
 	}
+	defer guard.Unlock()
 
 	if errors.IsAny(err, context.DeadlineExceeded, context.Canceled) {
 		getCGOCaller().call("future_cancel", func() {
@@ -169,8 +182,9 @@ func (f *futureImpl) cancel(err error) {
 	panic("unreachable: invalid cancel error type")
 }
 
+// blockUntilReady block until the future is ready or canceled.
 func (f *futureImpl) blockUntilReady() {
-	if !f.state.checkUnready() {
+	if !f.state.CheckUnready() {
 		// only unready future should be block until ready.
 		return
 	}
@@ -183,10 +197,7 @@ func (f *futureImpl) blockUntilReady() {
 	mu.Lock()
 
 	// mark the future as ready at go side to avoid more cgo calls.
-	f.state.intoReady()
+	f.state.IntoReady()
 	// notify the future manager that the future is ready.
 	f.ctxCancel()
-	if f.opts.releaser != nil {
-		f.releaserOnce.Do(f.opts.releaser)
-	}
 }

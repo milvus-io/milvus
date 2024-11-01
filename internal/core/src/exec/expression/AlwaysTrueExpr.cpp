@@ -25,16 +25,19 @@ PhyAlwaysTrueExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                   ? active_count_ - current_pos_
                                   : batch_size_;
 
+    // always true no need to skip null
     if (real_batch_size == 0) {
         result = nullptr;
         return;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     res.set();
+    valid_res.set();
 
     result = res_vec;
     current_pos_ += real_batch_size;

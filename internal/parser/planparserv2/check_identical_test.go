@@ -14,17 +14,27 @@ func TestCheckIdentical(t *testing.T) {
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
-	exprStr1 := `not (((Int64Field > 0) and (FloatField <= 20.0)) or ((Int32Field in [1, 2, 3]) and (VarCharField < "str")))`
-	exprStr2 := `Int32Field in [1, 2, 3]`
+	exprStr1Arr := []string{
+		`not (((Int64Field > 0) and (FloatField <= 20.0)) or ((Int32Field in [1, 2, 3]) and (VarCharField < "str")))`,
+		`f1()`,
+	}
+	exprStr2Arr := []string{
+		`Int32Field in [1, 2, 3]`,
+		`f2(Int32Field, Int64Field)`,
+	}
+	for i := range exprStr1Arr {
+		exprStr1 := exprStr1Arr[i]
+		exprStr2 := exprStr2Arr[i]
 
-	expr1, err := ParseExpr(helper, exprStr1)
-	assert.NoError(t, err)
-	expr2, err := ParseExpr(helper, exprStr2)
-	assert.NoError(t, err)
+		expr1, err := ParseExpr(helper, exprStr1, nil)
+		assert.NoError(t, err)
+		expr2, err := ParseExpr(helper, exprStr2, nil)
+		assert.NoError(t, err)
 
-	assert.True(t, CheckPredicatesIdentical(expr1, expr1))
-	assert.True(t, CheckPredicatesIdentical(expr2, expr2))
-	assert.False(t, CheckPredicatesIdentical(expr1, expr2))
+		assert.True(t, CheckPredicatesIdentical(expr1, expr1))
+		assert.True(t, CheckPredicatesIdentical(expr2, expr2))
+		assert.False(t, CheckPredicatesIdentical(expr1, expr2))
+	}
 }
 
 func TestCheckQueryInfoIdentical(t *testing.T) {

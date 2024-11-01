@@ -33,12 +33,10 @@ import (
 )
 
 const (
-	// SuggestPulsarMaxMessageSize defines the maximum size of Pulsar message.
-	SuggestPulsarMaxMessageSize = 5 * 1024 * 1024
-	defaultEtcdLogLevel         = "info"
-	defaultEtcdLogPath          = "stdout"
-	KafkaProducerConfigPrefix   = "kafka.producer."
-	KafkaConsumerConfigPrefix   = "kafka.consumer."
+	defaultEtcdLogLevel       = "info"
+	defaultEtcdLogPath        = "stdout"
+	KafkaProducerConfigPrefix = "kafka.producer."
+	KafkaConsumerConfigPrefix = "kafka.consumer."
 )
 
 // ServiceParam is used to quickly and easily access all basic service configurations.
@@ -457,7 +455,9 @@ It is recommended to change this parameter before starting Milvus for the first 
 }
 
 type MetaStoreConfig struct {
-	MetaStoreType ParamItem `refreshable:"false"`
+	MetaStoreType              ParamItem `refreshable:"false"`
+	SnapshotTTLSeconds         ParamItem `refreshable:"true"`
+	SnapshotReserveTimeSeconds ParamItem `refreshable:"true"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -469,6 +469,24 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MetaStoreType.Init(base.mgr)
+
+	p.SnapshotTTLSeconds = ParamItem{
+		Key:          "metastore.snapshot.ttl",
+		Version:      "2.4.14",
+		DefaultValue: "86400",
+		Doc:          `snapshot ttl in seconds`,
+		Export:       true,
+	}
+	p.SnapshotTTLSeconds.Init(base.mgr)
+
+	p.SnapshotReserveTimeSeconds = ParamItem{
+		Key:          "metastore.snapshot.reserveTime",
+		Version:      "2.4.14",
+		DefaultValue: "3600",
+		Doc:          `snapshot reserve time in seconds`,
+		Export:       true,
+	}
+	p.SnapshotReserveTimeSeconds.Init(base.mgr)
 
 	// TODO: The initialization operation of metadata storage is called in the initialization phase of every node.
 	// There should be a single initialization operation for meta store, then move the metrics registration to there.
@@ -484,6 +502,7 @@ type MQConfig struct {
 	EnablePursuitMode ParamItem `refreshable:"true"`
 	PursuitLag        ParamItem `refreshable:"true"`
 	PursuitBufferSize ParamItem `refreshable:"true"`
+	PursuitBufferTime ParamItem `refreshable:"true"`
 
 	MQBufSize         ParamItem `refreshable:"false"`
 	ReceiveBufSize    ParamItem `refreshable:"false"`
@@ -560,6 +579,15 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 		Export:       true,
 	}
 	p.PursuitBufferSize.Init(base.mgr)
+
+	p.PursuitBufferTime = ParamItem{
+		Key:          "mq.pursuitBufferTime",
+		Version:      "2.4.12",
+		DefaultValue: "60", // 60 s
+		Doc:          `pursuit mode buffer time in seconds`,
+		Export:       true,
+	}
+	p.PursuitBufferTime.Init(base.mgr)
 
 	p.MQBufSize = ParamItem{
 		Key:          "mq.mqBufSize",
@@ -672,9 +700,9 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 	p.MaxMessageSize = ParamItem{
 		Key:          "pulsar.maxMessageSize",
 		Version:      "2.0.0",
-		DefaultValue: strconv.Itoa(SuggestPulsarMaxMessageSize),
+		DefaultValue: "2097152",
 		Doc: `The maximum size of each message in Pulsar. Unit: Byte.
-By default, Pulsar can transmit at most 5 MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
+By default, Pulsar can transmit at most 2MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
 If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.`,
 		Export: true,
 	}
@@ -764,7 +792,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	// due to implicit rule of MQ priority，the default address should be empty
 	k.Address = ParamItem{
 		Key:          "kafka.brokerList",
-		DefaultValue: "",
+		DefaultValue: "localhost:9092",
 		Version:      "2.1.0",
 		Export:       true,
 	}
@@ -1107,6 +1135,7 @@ type MinioConfig struct {
 	RootPath           ParamItem `refreshable:"false"`
 	UseIAM             ParamItem `refreshable:"false"`
 	CloudProvider      ParamItem `refreshable:"false"`
+	GcpCredentialJSON  ParamItem `refreshable:"false"`
 	IAMEndpoint        ParamItem `refreshable:"false"`
 	LogLevel           ParamItem `refreshable:"false"`
 	Region             ParamItem `refreshable:"false"`
@@ -1247,15 +1276,28 @@ aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/lates
 	p.CloudProvider = ParamItem{
 		Key:          "minio.cloudProvider",
 		DefaultValue: DefaultMinioCloudProvider,
-		Version:      "2.2.0",
+		Version:      "2.4.1",
 		Doc: `Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
+Cloud Provider of Google Cloud Storage. Supports: "gcpnative".
 You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
 You can use "gcp" for other cloud provider supports S3 API with signature v2
 You can use "aliyun" for other cloud provider uses virtual host style bucket
+You can use "gcpnative" for the Google Cloud Platform provider. Uses service account credentials
+for authentication.
 When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now`,
 		Export: true,
 	}
 	p.CloudProvider.Init(base.mgr)
+
+	p.GcpCredentialJSON = ParamItem{
+		Key:          "minio.gcpCredentialJSON",
+		Version:      "2.4.1",
+		DefaultValue: "",
+		Doc: `The JSON content contains the gcs service account credentials.
+Used only for the "gcpnative" cloud provider.`,
+		Export: true,
+	}
+	p.GcpCredentialJSON.Init(base.mgr)
 
 	p.IAMEndpoint = ParamItem{
 		Key:          "minio.iamEndpoint",

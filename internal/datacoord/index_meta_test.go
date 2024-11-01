@@ -19,8 +19,10 @@ package datacoord
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -33,6 +35,7 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/common"
 )
 
@@ -74,6 +77,136 @@ func TestReloadFromKV(t *testing.T) {
 		meta, err := newIndexMeta(context.TODO(), catalog)
 		assert.NoError(t, err)
 		assert.NotNil(t, meta)
+	})
+}
+
+func TestMeta_ScalarAutoIndex(t *testing.T) {
+	var (
+		collID      = UniqueID(1)
+		indexID     = UniqueID(10)
+		fieldID     = UniqueID(100)
+		indexName   = "_default_idx"
+		typeParams  = []*commonpb.KeyValuePair{}
+		indexParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.IndexTypeKey,
+				Value: "HYBRID",
+			},
+		}
+		userIndexParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.IndexTypeKey,
+				Value: common.AutoIndexName,
+			},
+		}
+	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	m := newSegmentIndexMeta(catalog)
+
+	req := &indexpb.CreateIndexRequest{
+		CollectionID:    collID,
+		FieldID:         fieldID,
+		IndexName:       indexName,
+		TypeParams:      typeParams,
+		IndexParams:     indexParams,
+		Timestamp:       0,
+		IsAutoIndex:     true,
+		UserIndexParams: userIndexParams,
+	}
+
+	t.Run("user index params consistent", func(t *testing.T) {
+		m.indexes[collID] = map[UniqueID]*model.Index{
+			indexID: {
+				TenantID:        "",
+				CollectionID:    collID,
+				FieldID:         fieldID,
+				IndexID:         indexID,
+				IndexName:       indexName,
+				IsDeleted:       false,
+				CreateTime:      10,
+				TypeParams:      typeParams,
+				IndexParams:     indexParams,
+				IsAutoIndex:     false,
+				UserIndexParams: userIndexParams,
+			},
+		}
+		tmpIndexID, err := m.CanCreateIndex(req)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(indexID), tmpIndexID)
+	})
+
+	t.Run("user index params not consistent", func(t *testing.T) {
+		m.indexes[collID] = map[UniqueID]*model.Index{
+			indexID: {
+				TenantID:        "",
+				CollectionID:    collID,
+				FieldID:         fieldID,
+				IndexID:         indexID,
+				IndexName:       indexName,
+				IsDeleted:       false,
+				CreateTime:      10,
+				TypeParams:      typeParams,
+				IndexParams:     indexParams,
+				IsAutoIndex:     false,
+				UserIndexParams: userIndexParams,
+			},
+		}
+		req.UserIndexParams = append(req.UserIndexParams, &commonpb.KeyValuePair{Key: "bitmap_cardinality_limit", Value: "1000"})
+		tmpIndexID, err := m.CanCreateIndex(req)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), tmpIndexID)
+
+		req.UserIndexParams = append(req.UserIndexParams, &commonpb.KeyValuePair{Key: "bitmap_cardinality_limit", Value: "500"})
+		tmpIndexID, err = m.CanCreateIndex(req)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), tmpIndexID)
+	})
+
+	req = &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+		IndexName:    indexName,
+		TypeParams:   typeParams,
+		IndexParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.IndexTypeKey,
+				Value: "HYBRID",
+			},
+		},
+		Timestamp:       0,
+		IsAutoIndex:     true,
+		UserIndexParams: userIndexParams,
+	}
+
+	t.Run("index param rewrite", func(t *testing.T) {
+		m.indexes[collID] = map[UniqueID]*model.Index{
+			indexID: {
+				TenantID:     "",
+				CollectionID: collID,
+				FieldID:      fieldID,
+				IndexID:      indexID,
+				IndexName:    indexName,
+				IsDeleted:    false,
+				CreateTime:   10,
+				TypeParams:   typeParams,
+				IndexParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "INVERTED",
+					},
+				},
+				IsAutoIndex:     false,
+				UserIndexParams: userIndexParams,
+			},
+		}
+		tmpIndexID, err := m.CanCreateIndex(req)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(indexID), tmpIndexID)
+		newIndexParams := req.GetIndexParams()
+		assert.Equal(t, len(newIndexParams), 1)
+		assert.Equal(t, newIndexParams[0].Key, common.IndexTypeKey)
+		assert.Equal(t, newIndexParams[0].Value, "INVERTED")
 	})
 }
 
@@ -304,12 +437,12 @@ func TestMeta_HasSameReq(t *testing.T) {
 
 func newSegmentIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 	return &indexMeta{
-		RWMutex:              sync.RWMutex{},
-		ctx:                  context.Background(),
-		catalog:              catalog,
-		indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
-		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
-		segmentIndexes:       make(map[UniqueID]map[UniqueID]*model.SegmentIndex),
+		RWMutex:          sync.RWMutex{},
+		ctx:              context.Background(),
+		catalog:          catalog,
+		indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
+		segmentIndexes:   make(map[UniqueID]map[UniqueID]*model.SegmentIndex),
 	}
 }
 
@@ -634,24 +767,23 @@ func TestMeta_GetIndexedSegment(t *testing.T) {
 			},
 		},
 	}
-	m.buildID2SegmentIndex = map[UniqueID]*model.SegmentIndex{
-		buildID: {
-			SegmentID:     segID,
-			CollectionID:  collID,
-			PartitionID:   partID,
-			NumRows:       1025,
-			IndexID:       indexID,
-			BuildID:       buildID,
-			NodeID:        nodeID,
-			IndexVersion:  1,
-			IndexState:    commonpb.IndexState_Finished,
-			FailReason:    "",
-			IsDeleted:     false,
-			CreateTime:    10,
-			IndexFileKeys: nil,
-			IndexSize:     0,
-		},
-	}
+
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		SegmentID:     segID,
+		CollectionID:  collID,
+		PartitionID:   partID,
+		NumRows:       1025,
+		IndexID:       indexID,
+		BuildID:       buildID,
+		NodeID:        nodeID,
+		IndexVersion:  1,
+		IndexState:    commonpb.IndexState_Finished,
+		FailReason:    "",
+		IsDeleted:     false,
+		CreateTime:    10,
+		IndexFileKeys: nil,
+		IndexSize:     0,
+	})
 
 	t.Run("success", func(t *testing.T) {
 		segments := m.GetIndexedSegments(collID, []int64{segID}, []int64{fieldID})
@@ -734,7 +866,7 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 
 func TestMeta_GetSegmentIndexes(t *testing.T) {
 	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
-	m := createMeta(catalog, nil, createIndexMeta(catalog))
+	m := createMeta(catalog, withIndexMeta(createIndexMeta(catalog)))
 
 	t.Run("success", func(t *testing.T) {
 		segIndexes := m.indexMeta.getSegmentIndexes(segID)
@@ -958,24 +1090,22 @@ func TestMeta_GetIndexParams(t *testing.T) {
 
 func TestMeta_GetIndexJob(t *testing.T) {
 	m := newSegmentIndexMeta(nil)
-	m.buildID2SegmentIndex = map[UniqueID]*model.SegmentIndex{
-		buildID: {
-			SegmentID:     segID,
-			CollectionID:  collID,
-			PartitionID:   partID,
-			NumRows:       1025,
-			IndexID:       indexID,
-			BuildID:       buildID,
-			NodeID:        1,
-			IndexVersion:  1,
-			IndexState:    commonpb.IndexState_Unissued,
-			FailReason:    "",
-			IsDeleted:     false,
-			CreateTime:    0,
-			IndexFileKeys: nil,
-			IndexSize:     0,
-		},
-	}
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		SegmentID:     segID,
+		CollectionID:  collID,
+		PartitionID:   partID,
+		NumRows:       1025,
+		IndexID:       indexID,
+		BuildID:       buildID,
+		NodeID:        1,
+		IndexVersion:  1,
+		IndexState:    commonpb.IndexState_Unissued,
+		FailReason:    "",
+		IsDeleted:     false,
+		CreateTime:    0,
+		IndexFileKeys: nil,
+		IndexSize:     0,
+	})
 
 	t.Run("exist", func(t *testing.T) {
 		segIndex, exist := m.GetIndexJob(buildID)
@@ -1047,6 +1177,24 @@ func updateSegmentIndexMeta(t *testing.T) *indexMeta {
 		mock.Anything,
 	).Return(nil)
 
+	indexBuildInfo := newSegmentIndexBuildInfo()
+	indexBuildInfo.Add(&model.SegmentIndex{
+		SegmentID:     segID,
+		CollectionID:  collID,
+		PartitionID:   partID,
+		NumRows:       1025,
+		IndexID:       indexID,
+		BuildID:       buildID,
+		NodeID:        0,
+		IndexVersion:  0,
+		IndexState:    commonpb.IndexState_Unissued,
+		FailReason:    "",
+		IsDeleted:     false,
+		CreateTime:    0,
+		IndexFileKeys: nil,
+		IndexSize:     0,
+	})
+
 	return &indexMeta{
 		catalog: sc,
 		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
@@ -1086,24 +1234,7 @@ func updateSegmentIndexMeta(t *testing.T) *indexMeta {
 				},
 			},
 		},
-		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
-			buildID: {
-				SegmentID:     segID,
-				CollectionID:  collID,
-				PartitionID:   partID,
-				NumRows:       1025,
-				IndexID:       indexID,
-				BuildID:       buildID,
-				NodeID:        0,
-				IndexVersion:  0,
-				IndexState:    commonpb.IndexState_Unissued,
-				FailReason:    "",
-				IsDeleted:     false,
-				CreateTime:    0,
-				IndexFileKeys: nil,
-				IndexSize:     0,
-			},
-		},
+		segmentBuildInfo: indexBuildInfo,
 	}
 }
 
@@ -1116,18 +1247,18 @@ func TestMeta_UpdateVersion(t *testing.T) {
 	).Return(errors.New("fail"))
 
 	t.Run("success", func(t *testing.T) {
-		err := m.UpdateVersion(buildID)
+		err := m.UpdateVersion(buildID, nodeID)
 		assert.NoError(t, err)
 	})
 
 	t.Run("fail", func(t *testing.T) {
 		m.catalog = ec
-		err := m.UpdateVersion(buildID)
+		err := m.UpdateVersion(buildID, nodeID)
 		assert.Error(t, err)
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.UpdateVersion(buildID + 1)
+		err := m.UpdateVersion(buildID+1, nodeID)
 		assert.Error(t, err)
 	})
 }
@@ -1136,7 +1267,7 @@ func TestMeta_FinishTask(t *testing.T) {
 	m := updateSegmentIndexMeta(t)
 
 	t.Run("success", func(t *testing.T) {
-		err := m.FinishTask(&indexpb.IndexTaskInfo{
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID:        buildID,
 			State:          commonpb.IndexState_Finished,
 			IndexFileKeys:  []string{"file1", "file2"},
@@ -1153,7 +1284,7 @@ func TestMeta_FinishTask(t *testing.T) {
 		m.catalog = &datacoord.Catalog{
 			MetaKv: metakv,
 		}
-		err := m.FinishTask(&indexpb.IndexTaskInfo{
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID:        buildID,
 			State:          commonpb.IndexState_Finished,
 			IndexFileKeys:  []string{"file1", "file2"},
@@ -1164,7 +1295,7 @@ func TestMeta_FinishTask(t *testing.T) {
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.FinishTask(&indexpb.IndexTaskInfo{
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID:        buildID + 1,
 			State:          commonpb.IndexState_Finished,
 			IndexFileKeys:  []string{"file1", "file2"},
@@ -1184,18 +1315,18 @@ func TestMeta_BuildIndex(t *testing.T) {
 	).Return(errors.New("fail"))
 
 	t.Run("success", func(t *testing.T) {
-		err := m.BuildIndex(buildID, nodeID)
+		err := m.BuildIndex(buildID)
 		assert.NoError(t, err)
 	})
 
 	t.Run("fail", func(t *testing.T) {
 		m.catalog = ec
-		err := m.BuildIndex(buildID, nodeID)
+		err := m.BuildIndex(buildID)
 		assert.Error(t, err)
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.BuildIndex(buildID+1, nodeID)
+		err := m.BuildIndex(buildID + 1)
 		assert.Error(t, err)
 	})
 }
@@ -1232,11 +1363,12 @@ func TestMeta_DeleteTask_Error(t *testing.T) {
 		).Return(errors.New("fail"))
 		m.catalog = ec
 
-		m.buildID2SegmentIndex[buildID] = &model.SegmentIndex{
+		m.segmentBuildInfo.Add(&model.SegmentIndex{
+			BuildID:      buildID,
 			SegmentID:    segID,
 			PartitionID:  partID,
 			CollectionID: collID,
-		}
+		})
 
 		err := m.DeleteTask(buildID)
 		assert.Error(t, err)
@@ -1357,22 +1489,20 @@ func TestRemoveSegmentIndex(t *testing.T) {
 					indexID: &model.SegmentIndex{},
 				},
 			},
-			buildID2SegmentIndex: map[int64]*model.SegmentIndex{
-				buildID: {},
-			},
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
 		}
 
 		err := m.RemoveSegmentIndex(collID, partID, segID, indexID, buildID)
 		assert.NoError(t, err)
 
 		assert.Equal(t, len(m.segmentIndexes), 0)
-		assert.Equal(t, len(m.buildID2SegmentIndex), 0)
+		assert.Equal(t, len(m.segmentBuildInfo.List()), 0)
 	})
 }
 
 func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
 	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
-	m := createMeta(catalog, nil, createIndexMeta(catalog))
+	m := createMeta(catalog, withIndexMeta(createIndexMeta(catalog)))
 
 	// normal case
 	segmentIDs := make([]int64, 0, 11)
@@ -1385,4 +1515,54 @@ func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
 	// no index
 	unindexed = m.indexMeta.GetUnindexedSegments(collID+1, segmentIDs)
 	assert.Equal(t, 0, len(unindexed))
+}
+
+func TestBuildIndexTaskStatsJSON(t *testing.T) {
+	im := &indexMeta{segmentBuildInfo: newSegmentIndexBuildInfo()}
+	si1 := &model.SegmentIndex{
+		BuildID:      1,
+		CollectionID: 100,
+		SegmentID:    1000,
+		IndexID:      10,
+		IndexState:   commonpb.IndexState_Finished,
+		FailReason:   "",
+		IndexSize:    1024,
+		IndexVersion: 1,
+		CreateTime:   uint64(time.Now().Unix()),
+	}
+	si2 := &model.SegmentIndex{
+		BuildID:      2,
+		CollectionID: 101,
+		SegmentID:    1001,
+		IndexID:      11,
+		IndexState:   commonpb.IndexState_Finished,
+		FailReason:   "",
+		IndexSize:    2048,
+		IndexVersion: 1,
+		CreateTime:   uint64(time.Now().Unix()),
+	}
+
+	actualJSON := im.TaskStatsJSON()
+	assert.Equal(t, "", actualJSON)
+
+	im.segmentBuildInfo.Add(si1)
+	im.segmentBuildInfo.Add(si2)
+
+	assert.Equal(t, 2, len(im.segmentBuildInfo.List()))
+	ret1, ok := im.segmentBuildInfo.Get(si1.BuildID)
+	assert.True(t, ok)
+	assert.EqualValues(t, si1, ret1)
+
+	expectedTasks := []*indexTaskStats{
+		newIndexTaskStats(si1),
+		newIndexTaskStats(si2),
+	}
+	expectedJSON, err := json.Marshal(expectedTasks)
+	assert.NoError(t, err)
+
+	actualJSON = im.TaskStatsJSON()
+	assert.JSONEq(t, string(expectedJSON), actualJSON)
+
+	im.segmentBuildInfo.Remove(si1.BuildID)
+	assert.Equal(t, 1, len(im.segmentBuildInfo.List()))
 }

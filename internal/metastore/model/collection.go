@@ -18,6 +18,7 @@ type Collection struct {
 	Description          string
 	AutoID               bool
 	Fields               []*Field
+	Functions            []*Function
 	VirtualChannelNames  []string
 	PhysicalChannelNames []string
 	ShardsNum            int32
@@ -54,6 +55,7 @@ func (c *Collection) Clone() *Collection {
 		Properties:           common.CloneKeyValuePairs(c.Properties),
 		State:                c.State,
 		EnableDynamicField:   c.EnableDynamicField,
+		Functions:            CloneFunctions(c.Functions),
 	}
 }
 

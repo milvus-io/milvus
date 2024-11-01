@@ -51,8 +51,6 @@ type importScheduler struct {
 	alloc   allocator.Allocator
 	imeta   ImportMeta
 
-	buildIndexCh chan UniqueID
-
 	closeOnce sync.Once
 	closeChan chan struct{}
 }
@@ -61,15 +59,13 @@ func NewImportScheduler(meta *meta,
 	cluster Cluster,
 	alloc allocator.Allocator,
 	imeta ImportMeta,
-	buildIndexCh chan UniqueID,
 ) ImportScheduler {
 	return &importScheduler{
-		meta:         meta,
-		cluster:      cluster,
-		alloc:        alloc,
-		imeta:        imeta,
-		buildIndexCh: buildIndexCh,
-		closeChan:    make(chan struct{}),
+		meta:      meta,
+		cluster:   cluster,
+		alloc:     alloc,
+		imeta:     imeta,
+		closeChan: make(chan struct{}),
 	}
 }
 
@@ -95,23 +91,6 @@ func (s *importScheduler) Close() {
 }
 
 func (s *importScheduler) process() {
-	getNodeID := func(nodeSlots map[int64]int64) int64 {
-		var (
-			nodeID   int64 = NullNodeID
-			maxSlots int64 = -1
-		)
-		for id, slots := range nodeSlots {
-			if slots > 0 && slots > maxSlots {
-				nodeID = id
-				maxSlots = slots
-			}
-		}
-		if nodeID != NullNodeID {
-			nodeSlots[nodeID]--
-		}
-		return nodeID
-	}
-
 	jobs := s.imeta.GetJobBy()
 	sort.Slice(jobs, func(i, j int) bool {
 		return jobs[i].GetJobID() < jobs[j].GetJobID()
@@ -122,7 +101,7 @@ func (s *importScheduler) process() {
 		for _, task := range tasks {
 			switch task.GetState() {
 			case datapb.ImportTaskStateV2_Pending:
-				nodeID := getNodeID(nodeSlots)
+				nodeID := s.getNodeID(task, nodeSlots)
 				switch task.GetType() {
 				case PreImportTaskType:
 					s.processPendingPreImport(task, nodeID)
@@ -171,6 +150,25 @@ func (s *importScheduler) peekSlots() map[int64]int64 {
 	return nodeSlots
 }
 
+func (s *importScheduler) getNodeID(task ImportTask, nodeSlots map[int64]int64) int64 {
+	var (
+		nodeID   int64 = NullNodeID
+		maxSlots int64 = -1
+	)
+	require := task.GetSlots()
+	for id, slots := range nodeSlots {
+		// find the most idle datanode
+		if slots > 0 && slots >= require && slots > maxSlots {
+			nodeID = id
+			maxSlots = slots
+		}
+	}
+	if nodeID != NullNodeID {
+		nodeSlots[nodeID] -= require
+	}
+	return nodeID
+}
+
 func (s *importScheduler) processPendingPreImport(task ImportTask, nodeID int64) {
 	if nodeID == NullNodeID {
 		return
@@ -190,7 +188,9 @@ func (s *importScheduler) processPendingPreImport(task ImportTask, nodeID int64)
 		log.Warn("update import task failed", WrapTaskLog(task, zap.Error(err))...)
 		return
 	}
-	log.Info("process pending preimport task done", WrapTaskLog(task)...)
+	pendingDuration := task.GetTR().RecordSpan()
+	metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
+	log.Info("preimport task start to execute", WrapTaskLog(task, zap.Int64("scheduledNodeID", nodeID), zap.Duration("taskTimeCost/pending", pendingDuration))...)
 }
 
 func (s *importScheduler) processPendingImport(task ImportTask, nodeID int64) {
@@ -216,7 +216,9 @@ func (s *importScheduler) processPendingImport(task ImportTask, nodeID int64) {
 		log.Warn("update import task failed", WrapTaskLog(task, zap.Error(err))...)
 		return
 	}
-	log.Info("processing pending import task done", WrapTaskLog(task)...)
+	pendingDuration := task.GetTR().RecordSpan()
+	metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
+	log.Info("import task start to execute", WrapTaskLog(task, zap.Int64("scheduledNodeID", nodeID), zap.Duration("taskTimeCost/pending", pendingDuration))...)
 }
 
 func (s *importScheduler) processInProgressPreImport(task ImportTask) {
@@ -253,6 +255,11 @@ func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 	}
 	log.Info("query preimport", WrapTaskLog(task, zap.String("state", resp.GetState().String()),
 		zap.Any("fileStats", resp.GetFileStats()))...)
+	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
+		preimportDuration := task.GetTR().RecordSpan()
+		metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePreImport).Observe(float64(preimportDuration.Milliseconds()))
+		log.Info("preimport done", WrapTaskLog(task, zap.Duration("taskTimeCost/preimport", preimportDuration))...)
+	}
 }
 
 func (s *importScheduler) processInProgressImport(task ImportTask) {
@@ -319,10 +326,6 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 				log.Warn("update import segment binlogs failed", WrapTaskLog(task, zap.Error(err))...)
 				return
 			}
-			select {
-			case s.buildIndexCh <- info.GetSegmentID(): // accelerate index building:
-			default:
-			}
 		}
 		completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 		err = s.imeta.UpdateTask(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))
@@ -330,6 +333,9 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 			log.Warn("update import task failed", WrapTaskLog(task, zap.Error(err))...)
 			return
 		}
+		importDuration := task.GetTR().RecordSpan()
+		metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStageImport).Observe(float64(importDuration.Milliseconds()))
+		log.Info("import done", WrapTaskLog(task, zap.Duration("taskTimeCost/import", importDuration))...)
 	}
 	log.Info("query import", WrapTaskLog(task, zap.String("state", resp.GetState().String()),
 		zap.String("reason", resp.GetReason()))...)
@@ -344,7 +350,9 @@ func (s *importScheduler) processCompleted(task ImportTask) {
 
 func (s *importScheduler) processFailed(task ImportTask) {
 	if task.GetType() == ImportTaskType {
-		segments := task.(*importTask).GetSegmentIDs()
+		originSegmentIDs := task.(*importTask).GetSegmentIDs()
+		statsSegmentIDs := task.(*importTask).GetStatsSegmentIDs()
+		segments := append(originSegmentIDs, statsSegmentIDs...)
 		for _, segment := range segments {
 			op := UpdateStatusOperator(segment, commonpb.SegmentState_Dropped)
 			err := s.meta.UpdateSegmentsInfo(op)
@@ -354,7 +362,7 @@ func (s *importScheduler) processFailed(task ImportTask) {
 			}
 		}
 		if len(segments) > 0 {
-			err := s.imeta.UpdateTask(task.GetTaskID(), UpdateSegmentIDs(nil))
+			err := s.imeta.UpdateTask(task.GetTaskID(), UpdateSegmentIDs(nil), UpdateStatsSegmentIDs(nil))
 			if err != nil {
 				log.Warn("update import task segments failed", WrapTaskLog(task, zap.Error(err))...)
 			}

@@ -6,8 +6,10 @@ package compaction
 
 import (
 	"context"
+	"fmt"
 	"math"
 
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -21,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
 )
 
 // Not concurrent safe.
@@ -47,6 +48,8 @@ type MultiSegmentWriter struct {
 	// segID -> fieldID -> binlogs
 
 	res []*datapb.CompactionSegment
+	// DONOT leave it empty of all segments are deleted, just return a segment with zero meta for datacoord
+	bm25Fields []int64
 }
 
 type compactionAlloactor struct {
@@ -69,7 +72,7 @@ func (alloc *compactionAlloactor) getLogIDAllocator() allocator.Interface {
 	return alloc.logIDAlloc
 }
 
-func NewMultiSegmentWriter(binlogIO io.BinlogIO, allocator *compactionAlloactor, plan *datapb.CompactionPlan, maxRows int64, partitionID, collectionID int64) *MultiSegmentWriter {
+func NewMultiSegmentWriter(binlogIO io.BinlogIO, allocator *compactionAlloactor, plan *datapb.CompactionPlan, maxRows int64, partitionID, collectionID int64, bm25Fields []int64) *MultiSegmentWriter {
 	return &MultiSegmentWriter{
 		binlogIO:  binlogIO,
 		allocator: allocator,
@@ -87,6 +90,7 @@ func NewMultiSegmentWriter(binlogIO io.BinlogIO, allocator *compactionAlloactor,
 
 		cachedMeta: make(map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog),
 		res:        make([]*datapb.CompactionSegment, 0),
+		bm25Fields: bm25Fields,
 	}
 }
 
@@ -115,13 +119,24 @@ func (w *MultiSegmentWriter) finishCurrent() error {
 		return err
 	}
 
-	w.res = append(w.res, &datapb.CompactionSegment{
+	result := &datapb.CompactionSegment{
 		SegmentID:           writer.GetSegmentID(),
 		InsertLogs:          lo.Values(allBinlogs),
 		Field2StatslogPaths: []*datapb.FieldBinlog{sPath},
 		NumOfRows:           writer.GetRowNum(),
 		Channel:             w.channel,
-	})
+	}
+
+	if len(w.bm25Fields) > 0 {
+		bmBinlogs, err := bm25SerializeWrite(context.TODO(), w.binlogIO, w.allocator.getLogIDAllocator(), writer)
+		if err != nil {
+			log.Warn("compact wrong, failed to serialize write segment bm25 stats", zap.Error(err))
+			return err
+		}
+		result.Bm25Logs = bmBinlogs
+	}
+
+	w.res = append(w.res, result)
 
 	log.Info("Segment writer flushed a segment",
 		zap.Int64("segmentID", writer.GetSegmentID()),
@@ -138,7 +153,7 @@ func (w *MultiSegmentWriter) addNewWriter() error {
 	if err != nil {
 		return err
 	}
-	writer, err := NewSegmentWriter(w.schema, w.maxRows, newSegmentID, w.partitionID, w.collectionID)
+	writer, err := NewSegmentWriter(w.schema, w.maxRows, newSegmentID, w.partitionID, w.collectionID, w.bm25Fields)
 	if err != nil {
 		return err
 	}
@@ -195,9 +210,27 @@ func (w *MultiSegmentWriter) Write(v *storage.Value) error {
 	return writer.Write(v)
 }
 
-// Could return an empty list if every insert of the segment is deleted
+func (w *MultiSegmentWriter) appendEmptySegment() error {
+	writer, err := w.getWriter()
+	if err != nil {
+		return err
+	}
+
+	w.res = append(w.res, &datapb.CompactionSegment{
+		SegmentID: writer.GetSegmentID(),
+		NumOfRows: 0,
+		Channel:   w.channel,
+	})
+	return nil
+}
+
+// DONOT return an empty list if every insert of the segment is deleted,
+// append an empty segment instead
 func (w *MultiSegmentWriter) Finish() ([]*datapb.CompactionSegment, error) {
 	if w.current == -1 {
+		if err := w.appendEmptySegment(); err != nil {
+			return nil, err
+		}
 		return w.res, nil
 	}
 
@@ -288,13 +321,17 @@ type SegmentWriter struct {
 	tsFrom  typeutil.Timestamp
 	tsTo    typeutil.Timestamp
 
-	pkstats      *storage.PrimaryKeyStats
+	pkstats   *storage.PrimaryKeyStats
+	bm25Stats map[int64]*storage.BM25Stats
+
 	segmentID    int64
 	partitionID  int64
 	collectionID int64
 	sch          *schemapb.CollectionSchema
 	rowCount     *atomic.Int64
 	syncedSize   *atomic.Int64
+
+	maxBinlogSize uint64
 }
 
 func (w *SegmentWriter) GetRowNum() int64 {
@@ -331,6 +368,19 @@ func (w *SegmentWriter) Write(v *storage.Value) error {
 	}
 
 	w.pkstats.Update(v.PK)
+	for fieldID, stats := range w.bm25Stats {
+		data, ok := v.Value.(map[storage.FieldID]interface{})[fieldID]
+		if !ok {
+			return fmt.Errorf("bm25 field value not found")
+		}
+
+		bytes, ok := data.([]byte)
+		if !ok {
+			return fmt.Errorf("bm25 field value not sparse bytes")
+		}
+		stats.AppendBytes(bytes)
+	}
+
 	w.rowCount.Inc()
 	return w.writer.Write(v)
 }
@@ -341,13 +391,40 @@ func (w *SegmentWriter) Finish() (*storage.Blob, error) {
 	return codec.SerializePkStats(w.pkstats, w.GetRowNum())
 }
 
+func (w *SegmentWriter) GetBm25Stats() map[int64]*storage.BM25Stats {
+	return w.bm25Stats
+}
+
+func (w *SegmentWriter) GetBm25StatsBlob() (map[int64]*storage.Blob, error) {
+	result := make(map[int64]*storage.Blob)
+	for fieldID, stats := range w.bm25Stats {
+		bytes, err := stats.Serialize()
+		if err != nil {
+			return nil, err
+		}
+		result[fieldID] = &storage.Blob{
+			Key:        fmt.Sprintf("%d", fieldID),
+			Value:      bytes,
+			RowNum:     stats.NumRow(),
+			MemorySize: int64(len(bytes)),
+		}
+	}
+
+	return result, nil
+}
+
 func (w *SegmentWriter) IsFull() bool {
-	return w.writer.WrittenMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
+	return w.writer.WrittenMemorySize() > w.maxBinlogSize
 }
 
 func (w *SegmentWriter) FlushAndIsFull() bool {
 	w.writer.Flush()
-	return w.writer.WrittenMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
+	return w.writer.WrittenMemorySize() > w.maxBinlogSize
+}
+
+func (w *SegmentWriter) FlushAndIsFullWithBinlogMaxSize(binLogMaxSize uint64) bool {
+	w.writer.Flush()
+	return w.writer.WrittenMemorySize() > binLogMaxSize
 }
 
 func (w *SegmentWriter) IsEmpty() bool {
@@ -396,7 +473,7 @@ func (w *SegmentWriter) clear() {
 	w.tsTo = 0
 }
 
-func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, segID, partID, collID int64) (*SegmentWriter, error) {
+func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, segID, partID, collID int64, Bm25Fields []int64) (*SegmentWriter, error) {
 	writer, closers, err := newBinlogWriter(collID, partID, segID, sch)
 	if err != nil {
 		return nil, err
@@ -420,14 +497,20 @@ func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, segID, par
 		tsTo:    0,
 
 		pkstats:      stats,
+		bm25Stats:    make(map[int64]*storage.BM25Stats),
 		sch:          sch,
 		segmentID:    segID,
 		partitionID:  partID,
 		collectionID: collID,
 		rowCount:     atomic.NewInt64(0),
 		syncedSize:   atomic.NewInt64(0),
+
+		maxBinlogSize: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 	}
 
+	for _, fieldID := range Bm25Fields {
+		segWriter.bm25Stats[fieldID] = storage.NewBM25Stats()
+	}
 	return &segWriter, nil
 }
 

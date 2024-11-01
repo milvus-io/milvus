@@ -30,9 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	grpcdatacoord "github.com/milvus-io/milvus/internal/distributed/datacoord"
-	grpcquerycoord "github.com/milvus-io/milvus/internal/distributed/querycoord"
-	grpcrootcoord "github.com/milvus-io/milvus/internal/distributed/rootcoord"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -277,7 +274,6 @@ func (s *CoordDownSearch) setupData() {
 }
 
 func (s *CoordDownSearch) searchAfterCoordDown() float64 {
-	var err error
 	c := s.Cluster
 
 	params := paramtable.Get()
@@ -285,19 +281,19 @@ func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 
 	start := time.Now()
 	log.Info("=========================Data Coordinators stopped=========================")
-	c.DataCoord.Stop()
+	c.StopDataCoord()
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
 
 	log.Info("=========================Query Coordinators stopped=========================")
-	c.QueryCoord.Stop()
+	c.StopQueryCoord()
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
 
 	log.Info("=========================Root Coordinators stopped=========================")
-	c.RootCoord.Stop()
+	c.StopRootCoord()
 	params.Save(params.CommonCfg.GracefulTime.Key, "60000")
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
@@ -307,28 +303,19 @@ func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 	log.Info(fmt.Sprintf("=========================Failed search cost: %fs=========================", time.Since(failedStart).Seconds()))
 
 	log.Info("=========================restart Root Coordinators=========================")
-	c.RootCoord, err = grpcrootcoord.NewServer(context.TODO(), c.GetFactory())
-	s.NoError(err)
-	err = c.RootCoord.Run()
-	s.NoError(err)
+	c.StartRootCoord()
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
 
 	log.Info("=========================restart Data Coordinators=========================")
-	c.DataCoord = grpcdatacoord.NewServer(context.TODO(), c.GetFactory())
-	s.NoError(err)
-	err = c.DataCoord.Run()
-	s.NoError(err)
+	c.StartDataCoord()
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
 
 	log.Info("=========================restart Query Coordinators=========================")
-	c.QueryCoord, err = grpcquerycoord.NewServer(context.TODO(), c.GetFactory())
-	s.NoError(err)
-	err = c.QueryCoord.Run()
-	s.NoError(err)
+	c.StartQueryCoord()
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)

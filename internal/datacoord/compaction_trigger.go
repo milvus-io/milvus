@@ -317,7 +317,8 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
-			segment.GetLevel() != datapb.SegmentLevel_L2 // ignore l2 segment
+			segment.GetLevel() != datapb.SegmentLevel_L2 && // ignore l2 segment
+			!segment.GetIsInvisible()
 	}) // partSegments is list of chanPartSegments, which is channel-partition organized segments
 
 	if len(partSegments) == 0 {
@@ -335,7 +336,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.segments = FilterInIndexedSegments(t.handler, t.meta, group.segments...)
+			group.segments = FilterInIndexedSegments(t.handler, t.meta, signal.isForce, group.segments...)
 		}
 
 		coll, err := t.getCollection(group.collectionID)
@@ -385,10 +386,14 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 				PartitionID:      group.partitionID,
 				Channel:          group.channelName,
 				InputSegments:    inputSegmentIDs,
-				ResultSegments:   []int64{startID + 1, endID}, // pre-allocated target segment
+				ResultSegments:   []int64{},
 				TotalRows:        totalRows,
 				Schema:           coll.Schema,
 				MaxSize:          getExpandedSize(expectedSize),
+				PreAllocatedSegmentIDs: &datapb.IDRange{
+					Begin: startID + 1,
+					End:   endID,
+				},
 			}
 			err = t.compactionHandler.enqueueCompaction(task)
 			if err != nil {
@@ -491,10 +496,14 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 			PartitionID:      partitionID,
 			Channel:          channel,
 			InputSegments:    inputSegmentIDs,
-			ResultSegments:   []int64{startID + 1, endID}, // pre-allocated target segment
+			ResultSegments:   []int64{},
 			TotalRows:        totalRows,
 			Schema:           coll.Schema,
 			MaxSize:          getExpandedSize(expectedSize),
+			PreAllocatedSegmentIDs: &datapb.IDRange{
+				Begin: startID + 1,
+				End:   endID,
+			},
 		}
 		if err := t.compactionHandler.enqueueCompaction(task); err != nil {
 			log.Warn("failed to execute compaction task",
@@ -693,7 +702,7 @@ func reverseGreedySelect(candidates []*SegmentInfo, free int64, maxSegment int) 
 func (t *compactionTrigger) getCandidateSegments(channel string, partitionID UniqueID) []*SegmentInfo {
 	segments := t.meta.GetSegmentsByChannel(channel)
 	if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-		segments = FilterInIndexedSegments(t.handler, t.meta, segments...)
+		segments = FilterInIndexedSegments(t.handler, t.meta, false, segments...)
 	}
 
 	var res []*SegmentInfo

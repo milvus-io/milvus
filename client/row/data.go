@@ -269,6 +269,25 @@ func NewArrayColumn(f *entity.Field) column.Column {
 	}
 }
 
+func SetField(receiver any, fieldName string, value any) error {
+	candidates, err := reflectValueCandi(reflect.ValueOf(receiver))
+	if err != nil {
+		return err
+	}
+
+	candidate, ok := candidates[fieldName]
+	// if field not found, just return
+	if !ok {
+		return nil
+	}
+
+	if candidate.v.CanSet() {
+		candidate.v.Set(reflect.ValueOf(value))
+	}
+
+	return nil
+}
+
 type fieldCandi struct {
 	name    string
 	v       reflect.Value
@@ -276,60 +295,91 @@ type fieldCandi struct {
 }
 
 func reflectValueCandi(v reflect.Value) (map[string]fieldCandi, error) {
-	if v.Kind() == reflect.Ptr {
+	// unref **/***/... struct{}
+	for v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
 
-	result := make(map[string]fieldCandi)
 	switch v.Kind() {
 	case reflect.Map: // map[string]any
-		iter := v.MapRange()
-		for iter.Next() {
-			key := iter.Key().String()
-			result[key] = fieldCandi{
-				name: key,
-				v:    iter.Value(),
-			}
-		}
-		return result, nil
+		return getMapReflectCandidates(v), nil
 	case reflect.Struct:
-		for i := 0; i < v.NumField(); i++ {
-			ft := v.Type().Field(i)
-			name := ft.Name
-			tag, ok := ft.Tag.Lookup(MilvusTag)
-
-			settings := make(map[string]string)
-			if ok {
-				if tag == MilvusSkipTagValue {
-					continue
-				}
-				settings = ParseTagSetting(tag, MilvusTagSep)
-				fn, has := settings[MilvusTagName]
-				if has {
-					// overwrite column to tag name
-					name = fn
-				}
-			}
-			_, ok = result[name]
-			// duplicated
-			if ok {
-				return nil, fmt.Errorf("column has duplicated name: %s when parsing field: %s", name, ft.Name)
-			}
-
-			v := v.Field(i)
-			if v.Kind() == reflect.Array {
-				v = v.Slice(0, v.Len())
-			}
-
-			result[name] = fieldCandi{
-				name:    name,
-				v:       v,
-				options: settings,
-			}
-		}
-
-		return result, nil
+		return getStructReflectCandidates(v)
 	default:
 		return nil, fmt.Errorf("unsupport row type: %s", v.Kind().String())
 	}
+}
+
+// getMapReflectCandidates converts input map into fieldCandidate struct.
+// if value is struct/map etc, it will be treated as json data type directly(if schema say so).
+func getMapReflectCandidates(v reflect.Value) map[string]fieldCandi {
+	result := make(map[string]fieldCandi)
+	iter := v.MapRange()
+	for iter.Next() {
+		key := iter.Key().String()
+		result[key] = fieldCandi{
+			name: key,
+			v:    iter.Value(),
+		}
+	}
+	return result
+}
+
+// getStructReflectCandidates parses struct fields into fieldCandidates.
+// embedded struct will be flatten as field as well.
+func getStructReflectCandidates(v reflect.Value) (map[string]fieldCandi, error) {
+	result := make(map[string]fieldCandi)
+	for i := 0; i < v.NumField(); i++ {
+		ft := v.Type().Field(i)
+		name := ft.Name
+
+		// embedded struct, flatten all fields
+		if ft.Anonymous && ft.Type.Kind() == reflect.Struct {
+			embedCandidate, err := reflectValueCandi(v.Field(i))
+			if err != nil {
+				return nil, err
+			}
+			for key, candi := range embedCandidate {
+				// check duplicated field name in different structs
+				_, ok := result[key]
+				if ok {
+					return nil, fmt.Errorf("column has duplicated name: %s when parsing field: %s", key, ft.Name)
+				}
+				result[key] = candi
+			}
+			continue
+		}
+
+		tag, ok := ft.Tag.Lookup(MilvusTag)
+		settings := make(map[string]string)
+		if ok {
+			if tag == MilvusSkipTagValue {
+				continue
+			}
+			settings = ParseTagSetting(tag, MilvusTagSep)
+			fn, has := settings[MilvusTagName]
+			if has {
+				// overwrite column to tag name
+				name = fn
+			}
+		}
+		_, ok = result[name]
+		// duplicated
+		if ok {
+			return nil, fmt.Errorf("column has duplicated name: %s when parsing field: %s", name, ft.Name)
+		}
+
+		v := v.Field(i)
+		if v.Kind() == reflect.Array {
+			v = v.Slice(0, v.Len())
+		}
+
+		result[name] = fieldCandi{
+			name:    name,
+			v:       v,
+			options: settings,
+		}
+	}
+
+	return result, nil
 }

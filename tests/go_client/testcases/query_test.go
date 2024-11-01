@@ -73,7 +73,7 @@ func TestQueryNotExistName(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query with not existed partition
-	_, errPar := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{"aaa"}))
+	_, errPar := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions("aaa"))
 	common.CheckErr(t, errPar, false, "partition name aaa not found")
 }
 
@@ -88,7 +88,7 @@ func TestQueryInvalidPartitionName(t *testing.T) {
 	expr := fmt.Sprintf("%s >= %d", common.DefaultInt64FieldName, 0)
 	emptyPartitionName := ""
 	// query from "" partitions, expect to query from default partition
-	_, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{emptyPartitionName}))
+	_, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions(emptyPartitionName))
 	common.CheckErr(t, err, false, "Partition name should not be empty")
 }
 
@@ -122,22 +122,22 @@ func TestQueryPartition(t *testing.T) {
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{expColumn})
 
 	// query with empty partition names
-	queryRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{}).WithConsistencyLevel(entity.ClStrong))
+	queryRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions().WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{expColumn})
 
 	// query with default partition
-	queryRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{common.DefaultPartition}).WithConsistencyLevel(entity.ClStrong))
+	queryRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions(common.DefaultPartition).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{i1Res.IDs})
 
 	// query with specify partition
-	queryRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{parName}).WithConsistencyLevel(entity.ClStrong))
+	queryRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions(parName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{i2Res.IDs})
 
 	// query with all partitions
-	queryRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{common.DefaultPartition, parName}).WithConsistencyLevel(entity.ClStrong))
+	queryRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions(common.DefaultPartition, parName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{expColumn})
 }
@@ -181,12 +181,12 @@ func TestQueryOutputFields(t *testing.T) {
 		expr := fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, 10)
 
 		// query with empty output fields []string{}-> output "int64"
-		queryNilOutputs, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{}))
+		queryNilOutputs, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields())
 		common.CheckErr(t, err, true)
 		common.CheckOutputFields(t, []string{common.DefaultInt64FieldName}, queryNilOutputs.Fields)
 
 		// query with empty output fields []string{""}-> output "int64" and dynamic field
-		_, err1 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{""}))
+		_, err1 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields(""))
 		if enableDynamic {
 			common.CheckErr(t, err1, false, "parse output field name failed")
 		} else {
@@ -195,7 +195,7 @@ func TestQueryOutputFields(t *testing.T) {
 
 		// query with not existed field -> output field as dynamic or error
 		fakeName := "aaa"
-		res2, err2 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{fakeName}))
+		res2, err2 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields(fakeName))
 		if enableDynamic {
 			common.CheckErr(t, err2, true)
 			for _, c := range res2.Fields {
@@ -213,7 +213,7 @@ func TestQueryOutputFields(t *testing.T) {
 		}
 
 		// query with part not existed field ["aa", "$meat"]: error or as dynamic field
-		res3, err3 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{fakeName, common.DefaultDynamicFieldName}))
+		res3, err3 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields(fakeName, common.DefaultDynamicFieldName))
 		if enableDynamic {
 			common.CheckErr(t, err3, true)
 			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, fakeName, common.DefaultDynamicFieldName}, res3.Fields)
@@ -222,7 +222,7 @@ func TestQueryOutputFields(t *testing.T) {
 		}
 
 		// query with repeated field: ["*", "$meat"], ["floatVec", floatVec"] unique field
-		res4, err4 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{"*", common.DefaultDynamicFieldName}))
+		res4, err4 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields("*", common.DefaultDynamicFieldName))
 		if enableDynamic {
 			common.CheckErr(t, err4, true)
 			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName, common.DefaultDynamicFieldName}, res4.Fields)
@@ -230,8 +230,7 @@ func TestQueryOutputFields(t *testing.T) {
 			common.CheckErr(t, err4, false, "$meta not exist")
 		}
 
-		res5, err5 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields(
-			[]string{common.DefaultFloatVecFieldName, common.DefaultFloatVecFieldName, common.DefaultInt64FieldName}))
+		res5, err5 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields(common.DefaultFloatVecFieldName, common.DefaultFloatVecFieldName, common.DefaultInt64FieldName))
 		common.CheckErr(t, err5, true)
 		common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName}, res5.Fields)
 	}
@@ -277,7 +276,7 @@ func TestQueryOutputAllFieldsColumn(t *testing.T) {
 			allFieldsName = append(allFieldsName, common.DefaultDynamicFieldName)
 		}
 		queryResultAll, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).
-			WithFilter(fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, pos)).WithOutputFields([]string{"*"}))
+			WithFilter(fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, pos)).WithOutputFields("*"))
 		common.CheckErr(t, errQuery, true)
 		common.CheckOutputFields(t, allFieldsName, queryResultAll.Fields)
 
@@ -318,7 +317,7 @@ func TestQueryOutputAllFieldsRows(t *testing.T) {
 		allFieldsName = append(allFieldsName, field.Name)
 	}
 	queryResultAll, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).
-		WithFilter(fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, 10)).WithOutputFields([]string{"*"}))
+		WithFilter(fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, 10)).WithOutputFields("*"))
 	common.CheckErr(t, errQuery, true)
 	common.CheckOutputFields(t, allFieldsName, queryResultAll.Fields)
 }
@@ -348,7 +347,7 @@ func TestQueryOutputBinaryAndVarchar(t *testing.T) {
 	expr := fmt.Sprintf("%s in ['0', '1', '2', '3', '4', '5'] ", common.DefaultVarcharFieldName)
 	allFieldsName := []string{common.DefaultVarcharFieldName, common.DefaultBinaryVecFieldName, common.DefaultDynamicFieldName}
 	queryResultAll, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).
-		WithFilter(expr).WithOutputFields([]string{"*"}))
+		WithFilter(expr).WithOutputFields("*"))
 	common.CheckErr(t, errQuery, true)
 	common.CheckOutputFields(t, allFieldsName, queryResultAll.Fields)
 
@@ -383,7 +382,7 @@ func TestQueryOutputSparse(t *testing.T) {
 	// query output all fields -> output all fields, includes vector and $meta field
 	expr := fmt.Sprintf("%s < 100 ", common.DefaultInt64FieldName)
 	expFieldsName := []string{common.DefaultInt64FieldName, common.DefaultVarcharFieldName, common.DefaultSparseVecFieldName}
-	queryResultAll, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{"*"}))
+	queryResultAll, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields("*"))
 	common.CheckErr(t, errQuery, true)
 	common.CheckOutputFields(t, expFieldsName, queryResultAll.Fields)
 
@@ -423,19 +422,19 @@ func TestQueryArrayDifferentLenBetweenRows(t *testing.T) {
 
 	// query array idx exceeds max capacity, array[200]
 	expr := fmt.Sprintf("%s[%d] > 0", common.DefaultInt64ArrayField, common.TestCapacity*2)
-	countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{common.QueryCountFieldName}))
+	countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields(common.QueryCountFieldName))
 	common.CheckErr(t, err, true)
 	count, _ := countRes.Fields[0].GetAsInt64(0)
 	require.Equal(t, int64(0), count)
 
-	countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{"Count(*)"}))
+	countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields("Count(*)"))
 	common.CheckErr(t, err, true)
 	count, _ = countRes.Fields[0].GetAsInt64(0)
 	require.Equal(t, int64(0), count)
 
 	// query: some rows has element greater than expr index array[100]
 	expr2 := fmt.Sprintf("%s[%d] > 0", common.DefaultInt64ArrayField, common.TestCapacity)
-	countRes2, err2 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr2).WithOutputFields([]string{common.QueryCountFieldName}))
+	countRes2, err2 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr2).WithOutputFields(common.QueryCountFieldName))
 	common.CheckErr(t, err2, true)
 	count2, _ := countRes2.Fields[0].GetAsInt64(0)
 	require.Equal(t, int64(common.DefaultNb), count2)
@@ -456,7 +455,7 @@ func TestQueryJsonDynamicExpr(t *testing.T) {
 	expr := fmt.Sprintf("%s['number'] < 10 || %s < 10", common.DefaultJSONFieldName, common.DefaultDynamicNumberField)
 
 	queryRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong).
-		WithOutputFields([]string{common.DefaultJSONFieldName, common.DefaultDynamicFieldName}))
+		WithOutputFields(common.DefaultJSONFieldName, common.DefaultDynamicFieldName))
 
 	// verify output fields and count, dynamicNumber value
 	common.CheckErr(t, err, true)
@@ -557,7 +556,7 @@ func TestQueryCountJsonDynamicExpr(t *testing.T) {
 
 	for _, _exprCount := range exprCounts {
 		log.Debug("TestQueryCountJsonDynamicExpr", zap.String("expr", _exprCount.expr))
-		countRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_exprCount.expr).WithOutputFields([]string{common.QueryCountFieldName}))
+		countRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_exprCount.expr).WithOutputFields(common.QueryCountFieldName))
 		count, _ := countRes.Fields[0].GetAsInt64(0)
 		require.Equal(t, _exprCount.count, count)
 	}
@@ -600,7 +599,7 @@ func TestQueryArrayFieldExpr(t *testing.T) {
 
 	for _, _exprCount := range exprCounts {
 		log.Debug("TestQueryCountJsonDynamicExpr", zap.String("expr", _exprCount.expr))
-		countRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_exprCount.expr).WithOutputFields([]string{common.QueryCountFieldName}))
+		countRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_exprCount.expr).WithOutputFields(common.QueryCountFieldName))
 		count, _ := countRes.Fields[0].GetAsInt64(0)
 		require.Equal(t, _exprCount.count, count)
 	}
@@ -632,7 +631,7 @@ func TestQueryOutputInvalidOutputFieldCount(t *testing.T) {
 		queryExpr := fmt.Sprintf("%s >= 0", common.DefaultInt64FieldName)
 
 		// query with empty output fields []string{}-> output "int64"
-		_, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(queryExpr).WithOutputFields([]string{invalidCount.countField}))
+		_, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(queryExpr).WithOutputFields(invalidCount.countField))
 		common.CheckErr(t, err, false, invalidCount.errMsg)
 	}
 }

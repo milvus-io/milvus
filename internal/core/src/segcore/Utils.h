@@ -110,11 +110,15 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
 
 template <bool is_sealed>
 std::shared_ptr<DeletedRecord::TmpBitmap>
-get_deleted_bitmap(int64_t del_barrier,
-                   int64_t insert_barrier,
-                   DeletedRecord& delete_record,
-                   const InsertRecord<is_sealed>& insert_record,
-                   Timestamp query_timestamp) {
+get_deleted_bitmap(
+    int64_t del_barrier,
+    int64_t insert_barrier,
+    DeletedRecord& delete_record,
+    const InsertRecord<is_sealed>& insert_record,
+    Timestamp query_timestamp,
+    bool is_sorted_by_pk = false,
+    const std::function<std::vector<SegOffset>(const PkType&, int64_t)>&
+        search_fn = nullptr) {
     // if insert_barrier and del_barrier have not changed, use cache data directly
     bool hit_cache = false;
     int64_t old_del_barrier = 0;
@@ -153,7 +157,9 @@ get_deleted_bitmap(int64_t del_barrier,
     }
 
     for (auto& [pk, timestamp] : delete_timestamps) {
-        auto segOffsets = insert_record.search_pk(pk, insert_barrier);
+        auto segOffsets = is_sorted_by_pk
+                              ? search_fn(pk, insert_barrier)
+                              : insert_record.search_pk(pk, insert_barrier);
         for (auto offset : segOffsets) {
             int64_t insert_row_offset = offset.get();
 
@@ -185,9 +191,12 @@ ReverseDataFromIndex(const index::IndexBase* index,
                      const FieldMeta& field_meta);
 
 void
+LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
+                          std::shared_ptr<ArrowReaderChannel> channel);
+
+void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                          FieldDataChannelPtr channel);
-
 /**
  * Returns an index pointing to the first element in the range [first, last) such that `value < element` is true
  * (i.e. that is strictly greater than value), or last if no such element is found.

@@ -18,15 +18,12 @@ package grpcrootcoord
 
 import (
 	"context"
-	"net"
-	"strconv"
 	"sync"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -51,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/netutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
@@ -59,6 +57,7 @@ import (
 type Server struct {
 	rootCoord   types.RootCoordComponent
 	grpcServer  *grpc.Server
+	listener    *netutil.NetListener
 	grpcErrChan chan error
 
 	grpcWG sync.WaitGroup
@@ -143,6 +142,20 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	return s, err
 }
 
+func (s *Server) Prepare() error {
+	listener, err := netutil.NewListener(
+		netutil.OptIP(paramtable.Get().RootCoordGrpcServerCfg.IP),
+		netutil.OptPort(paramtable.Get().RootCoordGrpcServerCfg.Port.GetAsInt()),
+	)
+	if err != nil {
+		log.Warn("RootCoord fail to create net listener", zap.Error(err))
+		return err
+	}
+	log.Info("RootCoord listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	s.listener = listener
+	return nil
+}
+
 func (s *Server) setClient() {
 	s.newDataCoordClient = func() types.DataCoordClient {
 		dsClient, err := dcc.NewClient(s.ctx)
@@ -166,12 +179,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("RootCoord init done ...")
+	log.Info("RootCoord init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Debug("RootCoord start done ...")
+	log.Info("RootCoord start done ...")
 	return nil
 }
 
@@ -180,8 +193,7 @@ var getTiKVClient = tikv.GetTiKVClient
 func (s *Server) init() error {
 	params := paramtable.Get()
 	etcdConfig := &params.EtcdCfg
-	rpcParams := &params.RootCoordGrpcServerCfg
-	log.Debug("init params done..")
+	log.Info("init params done..")
 
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -195,33 +207,33 @@ func (s *Server) init() error {
 		etcdConfig.EtcdTLSCACert.GetValue(),
 		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
-		log.Debug("RootCoord connect to etcd failed", zap.Error(err))
+		log.Warn("RootCoord connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
 	s.rootCoord.SetEtcdClient(s.etcdCli)
-	s.rootCoord.SetAddress(rpcParams.GetAddress())
-	log.Debug("etcd connect done ...")
+	s.rootCoord.SetAddress(s.listener.Address())
+	log.Info("etcd connect done ...")
 
 	if params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
 		log.Info("Connecting to tikv metadata storage.")
 		s.tikvCli, err = getTiKVClient(&paramtable.Get().TiKVCfg)
 		if err != nil {
-			log.Debug("RootCoord failed to connect to tikv", zap.Error(err))
+			log.Warn("RootCoord failed to connect to tikv", zap.Error(err))
 			return err
 		}
 		s.rootCoord.SetTiKVClient(s.tikvCli)
 		log.Info("Connected to tikv. Using tikv as metadata storage.")
 	}
 
-	err = s.startGrpc(rpcParams.Port.GetAsInt())
+	err = s.startGrpc()
 	if err != nil {
 		return err
 	}
-	log.Debug("grpc init done ...")
+	log.Info("grpc init done ...")
 
 	if s.newDataCoordClient != nil {
-		log.Debug("RootCoord start to create DataCoord client")
+		log.Info("RootCoord start to create DataCoord client")
 		dataCoord := s.newDataCoordClient()
 		s.dataCoord = dataCoord
 		if err := s.rootCoord.SetDataCoordClient(dataCoord); err != nil {
@@ -230,7 +242,7 @@ func (s *Server) init() error {
 	}
 
 	if s.newQueryCoordClient != nil {
-		log.Debug("RootCoord start to create QueryCoord client")
+		log.Info("RootCoord start to create QueryCoord client")
 		queryCoord := s.newQueryCoordClient()
 		s.queryCoord = queryCoord
 		if err := s.rootCoord.SetQueryCoordClient(queryCoord); err != nil {
@@ -241,15 +253,15 @@ func (s *Server) init() error {
 	return s.rootCoord.Init()
 }
 
-func (s *Server) startGrpc(port int) error {
+func (s *Server) startGrpc() error {
 	s.grpcWG.Add(1)
-	go s.startGrpcLoop(port)
+	go s.startGrpcLoop()
 	// wait for grpc server loop start
 	err := <-s.grpcErrChan
 	return err
 }
 
-func (s *Server) startGrpcLoop(port int) {
+func (s *Server) startGrpcLoop() {
 	defer s.grpcWG.Done()
 	Params := &paramtable.Get().RootCoordGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
@@ -261,25 +273,17 @@ func (s *Server) startGrpcLoop(port int) {
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
-	log.Debug("start grpc ", zap.Int("port", port))
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(port))
-	if err != nil {
-		log.Error("GrpcServer:failed to listen", zap.Error(err))
-		s.grpcErrChan <- err
-		return
-	}
+	log.Info("start grpc ", zap.Int("port", s.listener.Port()))
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 
-	opts := tracer.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
@@ -290,7 +294,6 @@ func (s *Server) startGrpcLoop(port int) {
 			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			otelgrpc.StreamServerInterceptor(opts...),
 			logutil.StreamTraceLoggerInterceptor,
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
@@ -299,11 +302,12 @@ func (s *Server) startGrpcLoop(port int) {
 				}
 				return s.serverID.Load()
 			}),
-		)))
+		)),
+		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()))
 	rootcoordpb.RegisterRootCoordServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
-	if err := s.grpcServer.Serve(lis); err != nil {
+	if err := s.grpcServer.Serve(s.listener); err != nil {
 		s.grpcErrChan <- err
 	}
 }
@@ -324,8 +328,10 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() (err error) {
-	Params := &paramtable.Get().RootCoordGrpcServerCfg
-	logger := log.With(zap.String("address", Params.GetAddress()))
+	logger := log.With()
+	if s.listener != nil {
+		logger = log.With(zap.String("address", s.listener.Address()))
+	}
 	logger.Info("Rootcoord stopping")
 	defer func() {
 		logger.Info("Rootcoord stopped", zap.Error(err))
@@ -361,6 +367,9 @@ func (s *Server) Stop() (err error) {
 	}
 
 	s.cancel()
+	if s.listener != nil {
+		s.listener.Close()
+	}
 	return nil
 }
 

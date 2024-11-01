@@ -334,6 +334,54 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("primary field set nullable", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "pk",
+					IsPrimaryKey: true,
+					Nullable:     true,
+				},
+			},
+		}
+		err := task.validateSchema(schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("primary field set default_value", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "pk",
+					IsPrimaryKey: true,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_LongData{
+							LongData: 1,
+						},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(schema)
+		assert.Error(t, err)
+	})
+
 	t.Run("has system fields", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{
@@ -360,11 +408,27 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 				CollectionName: collectionName,
 			},
 		}
-		schema1 := &schemapb.CollectionSchema{
+		schema := &schemapb.CollectionSchema{
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
 					DataType: schemapb.DataType_BinaryVector,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_BoolData{
+							BoolData: false,
+						},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(schema)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		schema1 := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_Int16,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_BoolData{
 							BoolData: false,
@@ -380,7 +444,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_IntData{
 							IntData: 1,
@@ -396,7 +460,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_LongData{
 							LongData: 1,
@@ -412,7 +476,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_FloatData{
 							FloatData: 1,
@@ -428,7 +492,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_DoubleData{
 							DoubleData: 1,
@@ -444,7 +508,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_StringData{
 							StringData: "a",

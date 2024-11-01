@@ -81,6 +81,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return insert_record_.is_valid_data_exist(field_id);
     };
 
+    void
+    CreateTextIndex(FieldId field_id) override;
+
  public:
     const InsertRecord<>&
     get_insert_record() const {
@@ -130,6 +133,22 @@ class SegmentGrowingImpl : public SegmentGrowing {
     int64_t
     size_per_chunk() const final {
         return segcore_config_.get_chunk_rows();
+    }
+
+    virtual int64_t
+    chunk_size(FieldId field_id, int64_t chunk_id) const final {
+        return segcore_config_.get_chunk_rows();
+    }
+
+    std::pair<int64_t, int64_t>
+    get_chunk_by_offset(FieldId field_id, int64_t offset) const override {
+        auto size_per_chunk = segcore_config_.get_chunk_rows();
+        return {offset / size_per_chunk, offset % size_per_chunk};
+    }
+
+    int64_t
+    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override {
+        return chunk_id * segcore_config_.get_chunk_rows();
     }
 
     void
@@ -243,6 +262,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
                 storage::MmapManager::GetInstance().GetMmapChunkManager();
             mcm->Register(mmap_descriptor_);
         }
+        this->CreateTextIndexes();
     }
 
     ~SegmentGrowingImpl() {
@@ -254,7 +274,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     void
-    mask_with_timestamps(BitsetType& bitset_chunk,
+    mask_with_timestamps(BitsetTypeView& bitset_chunk,
                          Timestamp timestamp) const override;
 
     void
@@ -270,7 +290,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  public:
     void
-    mask_with_delete(BitsetType& bitset,
+    mask_with_delete(BitsetTypeView& bitset,
                      int64_t ins_barrier,
                      Timestamp timestamp) const override;
 
@@ -316,7 +336,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  protected:
     int64_t
-    num_chunk() const override;
+    num_chunk(FieldId field_id) const override;
 
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
@@ -343,6 +363,16 @@ class SegmentGrowingImpl : public SegmentGrowing {
     get_timestamps() const override {
         return insert_record_.timestamps_;
     }
+
+ private:
+    void
+    AddTexts(FieldId field_id,
+             const std::string* texts,
+             size_t n,
+             int64_t offset_begin);
+
+    void
+    CreateTextIndexes();
 
  private:
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;

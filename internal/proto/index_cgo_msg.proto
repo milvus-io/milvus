@@ -48,6 +48,7 @@ message StorageConfig {
   string cloud_provider = 12;
   int64 request_timeout_ms = 13;
   string sslCACert = 14;
+  string GcpCredentialJSON = 15;
 }
 
 // Synchronously modify OptionalFieldInfo in index_coord.proto file
@@ -80,4 +81,14 @@ message BuildIndexInfo {
   string index_store_path = 18;
   repeated OptionalFieldInfo opt_fields = 19;
   bool partition_key_isolation = 20;
+}
+
+message LoadTextIndexInfo {
+  int64 FieldID = 1;
+  int64 version = 2;
+  int64 buildID = 3;
+  repeated string files = 4;
+  schema.FieldSchema schema = 5;
+  int64 collectionID = 6;
+  int64 partitionID = 7;
 }

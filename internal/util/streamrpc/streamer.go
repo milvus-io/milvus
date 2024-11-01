@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type QueryStreamServer interface {
@@ -102,23 +103,65 @@ func mergeCostAggregation(a *internalpb.CostAggregation, b *internalpb.CostAggre
 	return &internalpb.CostAggregation{
 		ResponseTime:         a.GetResponseTime() + b.GetResponseTime(),
 		ServiceTime:          a.GetServiceTime() + b.GetServiceTime(),
-		TotalNQ:              a.GetTotalNQ() + b.GetTotalNQ(),
+		TotalNQ:              a.GetTotalNQ(),
 		TotalRelatedDataSize: a.GetTotalRelatedDataSize() + b.GetTotalRelatedDataSize(),
 	}
 }
 
 // Merge result by size and time.
 type ResultCacheServer struct {
-	srv   QueryStreamServer
-	cache *RetrieveResultCache
-	mu    sync.Mutex
+	mu         sync.Mutex
+	srv        QueryStreamServer
+	cache      *RetrieveResultCache
+	maxMsgSize int
 }
 
-func NewResultCacheServer(srv QueryStreamServer, cap int) *ResultCacheServer {
+func NewResultCacheServer(srv QueryStreamServer, cap int, maxMsgSize int) *ResultCacheServer {
 	return &ResultCacheServer{
-		srv:   srv,
-		cache: &RetrieveResultCache{cap: cap},
+		srv:        srv,
+		cache:      &RetrieveResultCache{cap: cap},
+		maxMsgSize: maxMsgSize,
 	}
+}
+
+func (s *ResultCacheServer) splitMsgToMaxSize(result *internalpb.RetrieveResults) []*internalpb.RetrieveResults {
+	newpks := make([]*schemapb.IDs, 0)
+	switch result.GetIds().GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		pks := result.GetIds().GetIntId().Data
+		batch := s.maxMsgSize / 8
+		print(batch)
+		for start := 0; start < len(pks); start += batch {
+			newpks = append(newpks, &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: pks[start:min(start+batch, len(pks))]}}})
+		}
+
+	case *schemapb.IDs_StrId:
+		pks := result.GetIds().GetStrId().Data
+		start := 0
+		size := 0
+		for i, pk := range pks {
+			if size+len(pk) > s.maxMsgSize {
+				newpks = append(newpks, &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: pks[start:i]}}})
+				start = i
+				size = 0
+			}
+			size += len(pk)
+		}
+		if size > 0 {
+			newpks = append(newpks, &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: pks[start:]}}})
+		}
+	}
+
+	results := make([]*internalpb.RetrieveResults, len(newpks))
+	for i, pks := range newpks {
+		results[i] = &internalpb.RetrieveResults{
+			Status: merr.Status(nil),
+			Ids:    pks,
+		}
+	}
+	results[len(results)-1].AllRetrieveCount = result.AllRetrieveCount
+	results[len(results)-1].CostAggregation = result.CostAggregation
+	return results
 }
 
 func (s *ResultCacheServer) Send(result *internalpb.RetrieveResults) error {
@@ -133,10 +176,22 @@ func (s *ResultCacheServer) Send(result *internalpb.RetrieveResults) error {
 	}
 
 	s.cache.Put(result)
-	if s.cache.IsFull() {
+	if s.cache.IsFull() && s.cache.size <= s.maxMsgSize {
 		result := s.cache.Flush()
 		if err := s.srv.Send(result); err != nil {
 			return err
+		}
+	} else if s.cache.IsFull() && s.cache.size > s.maxMsgSize {
+		results := s.splitMsgToMaxSize(s.cache.Flush())
+		if proto.Size(results[len(results)-1]) < s.cache.cap {
+			s.cache.Put(results[len(results)-1])
+			results = results[:len(results)-1]
+		}
+
+		for _, result := range results {
+			if err := s.srv.Send(result); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

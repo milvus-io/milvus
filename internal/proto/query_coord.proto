@@ -105,6 +105,8 @@ service QueryCoord {
   rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
   rpc TransferChannel(TransferChannelRequest) returns (common.Status) {}
   rpc CheckQueryNodeDistribution(CheckQueryNodeDistributionRequest) returns (common.Status) {}
+
+  rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -170,6 +172,10 @@ service QueryNode {
     }
     rpc Delete(DeleteRequest) returns (common.Status) {
     }
+    // DeleteBatch is the API to apply same delete data into multiple segments.
+    // it's basically same as `Delete` but cost less memory pressure.
+    rpc DeleteBatch(DeleteBatchRequest) returns (DeleteBatchResponse) {
+    } 
 }
 
 // --------------------QueryCoord grpc request and response proto------------------
@@ -363,6 +369,9 @@ message SegmentLoadInfo {
     int64 readableVersion = 16;
     data.SegmentLevel level = 17;
     int64 storageVersion = 18;
+    bool is_sorted = 19;
+    map<int64, data.TextIndexStats> textStatsLogs = 20;
+    repeated data.FieldBinlog bm25logs = 21;
 }
 
 message FieldIndexInfo {
@@ -553,6 +562,7 @@ message SegmentInfo {
     bool enable_index = 16;
     bool is_fake = 17;
     data.SegmentLevel level = 18;
+    bool is_sorted = 19;
 }
 
 message CollectionInfo {
@@ -604,6 +614,7 @@ message GetDataDistributionResponse {
     repeated ChannelVersionInfo channels = 4;
     repeated LeaderView leader_views = 5;
     int64 lastModifyTs = 6;
+    double memCapacityInMB = 7;
 }
 
 message LeaderView {
@@ -630,7 +641,8 @@ message SegmentVersionInfo {
     int64 version = 5;
     uint64 last_delta_timestamp = 6;
     map<int64, FieldIndexInfo> index_info = 7;
-    data.SegmentLevel level = 8; 
+    data.SegmentLevel level = 8;
+    bool is_sorted = 9;
 }
 
 message ChannelVersionInfo {
@@ -769,6 +781,25 @@ message DeleteRequest {
     DataScope scope = 8;
 }
 
+message DeleteBatchRequest {
+    common.MsgBase base = 1;
+    int64 collection_id = 2;
+    int64 partition_id = 3;
+    string vchannel_name = 4;
+    repeated int64 segment_ids = 5;
+    schema.IDs primary_keys = 6;
+    repeated uint64 timestamps = 7;
+    DataScope scope = 8;
+}
+
+// DeleteBatchResponse returns failed/missing segment ids
+// cannot just using common.Status to handle partial failure logic
+message DeleteBatchResponse {
+    common.Status status = 1;
+    repeated int64 failed_ids = 2;
+    repeated int64 missing_ids = 3;
+}
+
 message ActivateCheckerRequest {
     common.MsgBase base = 1;
     int32 checkerID = 2;
@@ -890,4 +921,10 @@ message CheckQueryNodeDistributionRequest {
   int64 target_nodeID = 4;
 }
 
-
+message UpdateLoadConfigRequest {
+    common.MsgBase base = 1;
+    int64 dbID = 2;
+    repeated int64 collectionIDs = 3;
+    int32 replica_number = 4;
+    repeated string resource_groups = 5;
+}

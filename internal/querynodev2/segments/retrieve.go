@@ -124,7 +124,8 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 					CostAggregation: &internalpb.CostAggregation{
 						TotalRelatedDataSize: GetSegmentRelatedDataSize(segment),
 					},
-					AllRetrieveCount: result.GetAllRetrieveCount(),
+					SealedSegmentIDsRetrieved: []int64{segment.ID()},
+					AllRetrieveCount:          result.GetAllRetrieveCount(),
 				}); err != nil {
 					errs[i] = err
 				}
@@ -155,10 +156,10 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
-		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, nil, segIDs)
+		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
 	} else {
 		SegType = SegmentTypeGrowing
-		retrieveSegments, err = validateOnStream(ctx, manager, collID, nil, segIDs)
+		retrieveSegments, err = validateOnStream(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
 	}
 
 	if err != nil {
@@ -180,10 +181,10 @@ func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, r
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
-		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, nil, segIDs)
+		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
 	} else {
 		SegType = SegmentTypeGrowing
-		retrieveSegments, err = validateOnStream(ctx, manager, collID, nil, segIDs)
+		retrieveSegments, err = validateOnStream(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
 	}
 
 	if err != nil {

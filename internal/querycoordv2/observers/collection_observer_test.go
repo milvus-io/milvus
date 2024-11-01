@@ -226,8 +226,8 @@ func (suite *CollectionObserverSuite) SetupTest() {
 }
 
 func (suite *CollectionObserverSuite) TearDownTest() {
-	suite.targetObserver.Stop()
 	suite.ob.Stop()
+	suite.targetObserver.Stop()
 	suite.kv.Close()
 }
 

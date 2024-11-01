@@ -148,11 +148,17 @@ struct UnaryElementFuncForArray {
                                        ValueType>;
     void
     operator()(const ArrayView* src,
+               const bool* valid_data,
                size_t size,
                ValueType val,
                int index,
-               TargetBitmapView res) {
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
         for (int i = 0; i < size; ++i) {
+            if (valid_data != nullptr && !valid_data[i]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
             if constexpr (op == proto::plan::OpType::Equal) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     res[i] = src[i].is_same_array(val);
@@ -224,7 +230,11 @@ struct UnaryIndexFuncForMatch {
             RegexMatcher matcher(regex_pattern);
             for (int64_t i = 0; i < cnt; i++) {
                 auto raw = index->Reverse_Lookup(i);
-                res[i] = matcher(raw);
+                if (!raw.has_value()) {
+                    res[i] = false;
+                    continue;
+                }
+                res[i] = matcher(raw.value());
             }
             return res;
         }
@@ -331,9 +341,11 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     bool
     CanUseIndexForArray();
 
+    VectorPtr
+    ExecTextMatch();
+
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;
-    ColumnVectorPtr cached_overflow_res_{nullptr};
     int64_t overflow_check_pos_{0};
 };
 }  // namespace exec

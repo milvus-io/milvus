@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -26,7 +27,7 @@ func TestSession(t *testing.T) {
 	resource.InitForTest(t)
 	ctx := context.Background()
 
-	m := NewTxnManager()
+	m := NewTxnManager(types.PChannelInfo{Name: "test"})
 	session, err := m.BeginNewTxn(ctx, 0, 10*time.Millisecond)
 	assert.NotNil(t, session)
 	assert.NoError(t, err)
@@ -111,7 +112,7 @@ func TestSession(t *testing.T) {
 
 func TestManager(t *testing.T) {
 	resource.InitForTest(t)
-	m := NewTxnManager()
+	m := NewTxnManager(types.PChannelInfo{Name: "test"})
 
 	wg := &sync.WaitGroup{}
 

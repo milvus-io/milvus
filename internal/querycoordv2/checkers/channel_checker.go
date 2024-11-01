@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
@@ -91,11 +92,27 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 		}
 	}
 
+	// clean channel which has been released
 	channels := c.dist.ChannelDistManager.GetByFilter()
 	released := utils.FilterReleased(channels, collectionIDs)
 	releaseTasks := c.createChannelReduceTasks(ctx, released, meta.NilReplica)
 	task.SetReason("collection released", releaseTasks...)
 	tasks = append(tasks, releaseTasks...)
+
+	// clean node which has been move out from replica
+	for _, nodeInfo := range c.nodeMgr.GetAll() {
+		nodeID := nodeInfo.ID()
+		channelOnQN := c.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(nodeID))
+		collectionChannels := lo.GroupBy(channelOnQN, func(ch *meta.DmChannel) int64 { return ch.CollectionID })
+		for collectionID, channels := range collectionChannels {
+			replica := c.meta.ReplicaManager.GetByCollectionAndNode(collectionID, nodeID)
+			if replica == nil {
+				reduceTasks := c.createChannelReduceTasks(ctx, channels, meta.NilReplica)
+				task.SetReason("dirty channel exists", reduceTasks...)
+				tasks = append(tasks, reduceTasks...)
+			}
+		}
+	}
 	return tasks
 }
 
@@ -171,7 +188,6 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 	}
 	dist := c.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithReplica2Channel(replica))
 
-	targets := c.targetMgr.GetSealedSegmentsByCollection(replica.GetCollectionID(), meta.CurrentTarget)
 	versionsMap := make(map[string]*meta.DmChannel)
 	for _, ch := range dist {
 		leaderView := c.dist.LeaderViewManager.GetLeaderShardView(ch.Node, ch.GetChannelName())
@@ -184,13 +200,13 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 			continue
 		}
 
-		if err := utils.CheckLeaderAvailable(c.nodeMgr, leaderView, targets); err != nil {
+		if leaderView.UnServiceableError != nil {
 			log.RatedInfo(10, "replica has unavailable shard leader",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replicaID),
 				zap.Int64("leaderID", ch.Node),
 				zap.String("channel", ch.GetChannelName()),
-				zap.Error(err))
+				zap.Error(leaderView.UnServiceableError))
 			continue
 		}
 

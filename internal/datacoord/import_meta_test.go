@@ -17,6 +17,9 @@
 package datacoord
 
 import (
+	"encoding/json"
+	"fmt"
+	"math/rand"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -26,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
 
 func TestImportMeta_Restore(t *testing.T) {
@@ -70,7 +74,7 @@ func TestImportMeta_Restore(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestImportMeta_ImportJob(t *testing.T) {
+func TestImportMeta_Job(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListImportJobs().Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
@@ -81,54 +85,66 @@ func TestImportMeta_ImportJob(t *testing.T) {
 	im, err := NewImportMeta(catalog)
 	assert.NoError(t, err)
 
-	var job ImportJob = &importJob{
-		ImportJob: &datapb.ImportJob{
-			JobID:        0,
-			CollectionID: 1,
-			PartitionIDs: []int64{2},
-			Vchannels:    []string{"ch0"},
-			State:        internalpb.ImportJobState_Pending,
-		},
+	jobIDs := []int64{1000, 2000, 3000}
+
+	for i, jobID := range jobIDs {
+		var job ImportJob = &importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID:        jobID,
+				CollectionID: rand.Int63(),
+				PartitionIDs: []int64{rand.Int63()},
+				Vchannels:    []string{fmt.Sprintf("ch-%d", rand.Int63())},
+				State:        internalpb.ImportJobState_Pending,
+			},
+		}
+		err = im.AddJob(job)
+		assert.NoError(t, err)
+		ret := im.GetJob(jobID)
+		assert.Equal(t, job, ret)
+		jobs := im.GetJobBy()
+		assert.Equal(t, i+1, len(jobs))
+
+		// Add again, test idempotency
+		err = im.AddJob(job)
+		assert.NoError(t, err)
+		ret = im.GetJob(jobID)
+		assert.Equal(t, job, ret)
+		jobs = im.GetJobBy()
+		assert.Equal(t, i+1, len(jobs))
 	}
 
-	err = im.AddJob(job)
-	assert.NoError(t, err)
 	jobs := im.GetJobBy()
+	assert.Equal(t, 3, len(jobs))
+
+	err = im.UpdateJob(jobIDs[0], UpdateJobState(internalpb.ImportJobState_Completed))
+	assert.NoError(t, err)
+	job0 := im.GetJob(jobIDs[0])
+	assert.NotNil(t, job0)
+	assert.Equal(t, internalpb.ImportJobState_Completed, job0.GetState())
+
+	err = im.UpdateJob(jobIDs[1], UpdateJobState(internalpb.ImportJobState_Importing))
+	assert.NoError(t, err)
+	job1 := im.GetJob(jobIDs[1])
+	assert.NotNil(t, job1)
+	assert.Equal(t, internalpb.ImportJobState_Importing, job1.GetState())
+
+	jobs = im.GetJobBy(WithJobStates(internalpb.ImportJobState_Pending))
 	assert.Equal(t, 1, len(jobs))
-	err = im.AddJob(job)
+	jobs = im.GetJobBy(WithoutJobStates(internalpb.ImportJobState_Pending))
+	assert.Equal(t, 2, len(jobs))
+	count := im.CountJobBy()
+	assert.Equal(t, 3, count)
+	count = im.CountJobBy(WithJobStates(internalpb.ImportJobState_Pending))
+	assert.Equal(t, 1, count)
+	count = im.CountJobBy(WithoutJobStates(internalpb.ImportJobState_Pending))
+	assert.Equal(t, 2, count)
+
+	err = im.RemoveJob(jobIDs[0])
 	assert.NoError(t, err)
 	jobs = im.GetJobBy()
-	assert.Equal(t, 1, len(jobs))
-
-	assert.Nil(t, job.GetSchema())
-	err = im.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed))
-	assert.NoError(t, err)
-	job2 := im.GetJob(job.GetJobID())
-	assert.Equal(t, internalpb.ImportJobState_Completed, job2.GetState())
-	assert.Equal(t, job.GetJobID(), job2.GetJobID())
-	assert.Equal(t, job.GetCollectionID(), job2.GetCollectionID())
-	assert.Equal(t, job.GetPartitionIDs(), job2.GetPartitionIDs())
-	assert.Equal(t, job.GetVchannels(), job2.GetVchannels())
-
-	err = im.RemoveJob(job.GetJobID())
-	assert.NoError(t, err)
-	jobs = im.GetJobBy()
-	assert.Equal(t, 0, len(jobs))
-
-	// test failed
-	mockErr := errors.New("mock err")
-	catalog = mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().SaveImportJob(mock.Anything).Return(mockErr)
-	catalog.EXPECT().DropImportJob(mock.Anything).Return(mockErr)
-	im.(*importMeta).catalog = catalog
-
-	err = im.AddJob(job)
-	assert.Error(t, err)
-	im.(*importMeta).jobs[job.GetJobID()] = job
-	err = im.UpdateJob(job.GetJobID())
-	assert.Error(t, err)
-	err = im.RemoveJob(job.GetJobID())
-	assert.Error(t, err)
+	assert.Equal(t, 2, len(jobs))
+	count = im.CountJobBy()
+	assert.Equal(t, 2, count)
 }
 
 func TestImportMeta_ImportTask(t *testing.T) {
@@ -189,19 +205,82 @@ func TestImportMeta_ImportTask(t *testing.T) {
 	assert.NoError(t, err)
 	tasks = im.GetTaskBy()
 	assert.Equal(t, 1, len(tasks))
+}
 
-	// test failed
+func TestImportMeta_Task_Failed(t *testing.T) {
 	mockErr := errors.New("mock err")
-	catalog = mocks.NewDataCoordCatalog(t)
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs().Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
+	catalog.EXPECT().ListImportTasks().Return(nil, nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(mockErr)
 	catalog.EXPECT().DropImportTask(mock.Anything).Return(mockErr)
+
+	im, err := NewImportMeta(catalog)
+	assert.NoError(t, err)
 	im.(*importMeta).catalog = catalog
 
+	task := &importTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			JobID:        1,
+			TaskID:       2,
+			CollectionID: 3,
+			SegmentIDs:   []int64{5, 6},
+			NodeID:       7,
+			State:        datapb.ImportTaskStateV2_Pending,
+		},
+	}
+
+	err = im.AddTask(task)
+	assert.Error(t, err)
+	im.(*importMeta).tasks.add(task)
+	err = im.UpdateTask(task.GetTaskID(), UpdateNodeID(9))
+	assert.Error(t, err)
+	err = im.RemoveTask(task.GetTaskID())
+	assert.Error(t, err)
+}
+
+func TestTaskStatsJSON(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs().Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
+	catalog.EXPECT().ListImportTasks().Return(nil, nil)
+	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
+
+	im, err := NewImportMeta(catalog)
+	assert.NoError(t, err)
+
+	statsJSON := im.TaskStatsJSON()
+	assert.Equal(t, "", statsJSON)
+
+	task1 := &importTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			TaskID: 1,
+		},
+	}
 	err = im.AddTask(task1)
-	assert.Error(t, err)
-	im.(*importMeta).tasks[task1.GetTaskID()] = task1
-	err = im.UpdateTask(task1.GetTaskID(), UpdateNodeID(9))
-	assert.Error(t, err)
-	err = im.RemoveTask(task1.GetTaskID())
-	assert.Error(t, err)
+	assert.NoError(t, err)
+
+	task2 := &importTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			TaskID: 2,
+		},
+	}
+	err = im.AddTask(task2)
+	assert.NoError(t, err)
+
+	err = im.UpdateTask(1, UpdateState(datapb.ImportTaskStateV2_Completed))
+	assert.NoError(t, err)
+
+	statsJSON = im.TaskStatsJSON()
+	var tasks []*metricsinfo.ImportTask
+	err = json.Unmarshal([]byte(statsJSON), &tasks)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(tasks))
+
+	taskMeta := im.(*importMeta).tasks
+	taskMeta.remove(1)
+	assert.Nil(t, taskMeta.get(1))
+	assert.NotNil(t, taskMeta.get(2))
+	assert.Equal(t, 2, len(taskMeta.listTaskStats()))
 }

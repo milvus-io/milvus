@@ -43,7 +43,7 @@ const (
 	GrantPrivilegeAction  = "grant_privilege"
 	RevokePrivilegeAction = "revoke_privilege"
 	AlterAction           = "alter"
-	GetProgressAction     = "get_progress"
+	GetProgressAction     = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
 )
 
 const (
@@ -77,6 +77,7 @@ const (
 	HTTPIndexField           = "fieldName"
 	HTTPAliasName            = "aliasName"
 	HTTPRequestData          = "data"
+	HTTPRequestDefaultValue  = "defaultValue"
 	DefaultDbName            = "default"
 	DefaultIndexName         = "vector_idx"
 	DefaultAliasName         = "the_alias"
@@ -94,14 +95,23 @@ const (
 
 	HTTPReturnHas = "has"
 
-	HTTPReturnFieldName         = "name"
-	HTTPReturnFieldID           = "id"
-	HTTPReturnFieldType         = "type"
-	HTTPReturnFieldPrimaryKey   = "primaryKey"
-	HTTPReturnFieldPartitionKey = "partitionKey"
-	HTTPReturnFieldAutoID       = "autoId"
-	HTTPReturnFieldElementType  = "elementType"
-	HTTPReturnDescription       = "description"
+	HTTPReturnFieldName             = "name"
+	HTTPReturnFieldID               = "id"
+	HTTPReturnFieldType             = "type"
+	HTTPReturnFieldPrimaryKey       = "primaryKey"
+	HTTPReturnFieldPartitionKey     = "partitionKey"
+	HTTPReturnFieldClusteringKey    = "clusteringKey"
+	HTTPReturnFieldAutoID           = "autoId"
+	HTTPReturnFieldElementType      = "elementType"
+	HTTPReturnDescription           = "description"
+	HTTPReturnFieldIsFunctionOutput = "isFunctionOutput"
+
+	HTTPReturnFunctionName             = "name"
+	HTTPReturnFunctionID               = "id"
+	HTTPReturnFunctionType             = "type"
+	HTTPReturnFunctionInputFieldNames  = "inputFieldNames"
+	HTTPReturnFunctionOutputFieldNames = "outputFieldNames"
+	HTTPReturnFunctionParams           = "params"
 
 	HTTPReturnIndexMetricType  = "metricType"
 	HTTPReturnIndexType        = "indexType"
@@ -129,13 +139,15 @@ const (
 )
 
 const (
-	ParamAnnsField    = "anns_field"
-	Params            = "params"
-	ParamRoundDecimal = "round_decimal"
-	ParamOffset       = "offset"
-	ParamLimit        = "limit"
-	ParamRadius       = "radius"
-	ParamRangeFilter  = "range_filter"
-	ParamGroupByField = "group_by_field"
-	BoundedTimestamp  = 2
+	ParamAnnsField       = "anns_field"
+	Params               = "params"
+	ParamRoundDecimal    = "round_decimal"
+	ParamOffset          = "offset"
+	ParamLimit           = "limit"
+	ParamRadius          = "radius"
+	ParamRangeFilter     = "range_filter"
+	ParamGroupByField    = "group_by_field"
+	ParamGroupSize       = "group_size"
+	ParamGroupStrictSize = "group_strict_size"
+	BoundedTimestamp     = 2
 )

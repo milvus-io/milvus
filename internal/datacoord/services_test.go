@@ -25,8 +25,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -877,7 +877,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			BuildID:   seg1.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg1.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -887,7 +887,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			BuildID:   seg2.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg2.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1061,7 +1061,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			BuildID:   segment.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: segment.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1319,6 +1319,12 @@ func TestImportV2(t *testing.T) {
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
 
 		// alloc failed
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListImportJobs().Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
+		catalog.EXPECT().ListImportTasks().Return(nil, nil)
+		s.importMeta, err = NewImportMeta(catalog)
+		assert.NoError(t, err)
 		alloc := allocator.NewMockAllocator(t)
 		alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, mockErr)
 		s.allocator = alloc
@@ -1330,7 +1336,7 @@ func TestImportV2(t *testing.T) {
 		s.allocator = alloc
 
 		// add job failed
-		catalog := mocks.NewDataCoordCatalog(t)
+		catalog = mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListImportJobs().Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
 		catalog.EXPECT().ListImportTasks().Return(nil, nil)
@@ -1367,6 +1373,13 @@ func TestImportV2(t *testing.T) {
 		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
 		jobs = s.importMeta.GetJobBy()
 		assert.Equal(t, 1, len(jobs))
+
+		// number of jobs reached the limit
+		Params.Save(paramtable.Get().DataCoordCfg.MaxImportJobNum.Key, "1")
+		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{})
+		assert.NoError(t, err)
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+		Params.Reset(paramtable.Get().DataCoordCfg.MaxImportJobNum.Key)
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {
@@ -1399,9 +1412,10 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
 
-		// normal case
+		// db does not exist
 		var job ImportJob = &importJob{
 			ImportJob: &datapb.ImportJob{
+				DbID:   1,
 				JobID:  0,
 				Schema: &schemapb.CollectionSchema{},
 				State:  internalpb.ImportJobState_Failed,
@@ -1410,12 +1424,31 @@ func TestImportV2(t *testing.T) {
 		err = s.importMeta.AddJob(job)
 		assert.NoError(t, err)
 		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
+			DbID:  2,
+			JobID: "0",
+		})
+		assert.NoError(t, err)
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+
+		// normal case
+		job = &importJob{
+			ImportJob: &datapb.ImportJob{
+				DbID:   1,
+				JobID:  0,
+				Schema: &schemapb.CollectionSchema{},
+				State:  internalpb.ImportJobState_Pending,
+			},
+		}
+		err = s.importMeta.AddJob(job)
+		assert.NoError(t, err)
+		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
+			DbID:  1,
 			JobID: "0",
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
-		assert.Equal(t, int64(0), resp.GetProgress())
-		assert.Equal(t, internalpb.ImportJobState_Failed, resp.GetState())
+		assert.Equal(t, int64(10), resp.GetProgress())
+		assert.Equal(t, internalpb.ImportJobState_Pending, resp.GetState())
 	})
 
 	t.Run("ListImports", func(t *testing.T) {
@@ -1438,6 +1471,7 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		var job ImportJob = &importJob{
 			ImportJob: &datapb.ImportJob{
+				DbID:         2,
 				JobID:        0,
 				CollectionID: 1,
 				Schema:       &schemapb.CollectionSchema{},
@@ -1454,7 +1488,20 @@ func TestImportV2(t *testing.T) {
 		}
 		err = s.importMeta.AddTask(task)
 		assert.NoError(t, err)
+		// db id not match
 		resp, err = s.ListImports(ctx, &internalpb.ListImportsRequestInternal{
+			DbID:         3,
+			CollectionID: 1,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
+		assert.Equal(t, 0, len(resp.GetJobIDs()))
+		assert.Equal(t, 0, len(resp.GetStates()))
+		assert.Equal(t, 0, len(resp.GetReasons()))
+		assert.Equal(t, 0, len(resp.GetProgresses()))
+		// db id match
+		resp, err = s.ListImports(ctx, &internalpb.ListImportsRequestInternal{
+			DbID:         2,
 			CollectionID: 1,
 		})
 		assert.NoError(t, err)

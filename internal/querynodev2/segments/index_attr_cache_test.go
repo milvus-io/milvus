@@ -24,8 +24,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -62,7 +62,7 @@ func (s *IndexAttrCacheSuite) TestCacheMissing() {
 func (s *IndexAttrCacheSuite) TestDiskANN() {
 	info := &querypb.FieldIndexInfo{
 		IndexParams: []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexDISKANN},
+			{Key: common.IndexTypeKey, Value: "DISKANN"},
 		},
 		CurrentIndexVersion: 0,
 		IndexSize:           100,
@@ -71,7 +71,7 @@ func (s *IndexAttrCacheSuite) TestDiskANN() {
 	memory, disk, err := s.c.GetIndexResourceUsage(info, paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(), nil)
 	s.Require().NoError(err)
 
-	_, has := s.c.loadWithDisk.Get(typeutil.NewPair[string, int32](indexparamcheck.IndexDISKANN, 0))
+	_, has := s.c.loadWithDisk.Get(typeutil.NewPair[string, int32]("DISKANN", 0))
 	s.False(has, "DiskANN shall never be checked load with disk")
 
 	s.EqualValues(25, memory)

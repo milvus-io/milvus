@@ -24,6 +24,7 @@
 
 #include "common/FieldData.h"
 #include "common/Types.h"
+#include "storage/PayloadReader.h"
 #include "storage/Types.h"
 #include "storage/BinlogReader.h"
 
@@ -76,12 +77,14 @@ struct BaseEventData {
     Timestamp start_timestamp;
     Timestamp end_timestamp;
     FieldDataPtr field_data;
+    std::shared_ptr<PayloadReader> payload_reader;
 
     BaseEventData() = default;
     explicit BaseEventData(BinlogReaderPtr reader,
                            int event_length,
                            DataType data_type,
-                           bool nullable);
+                           bool nullable,
+                           bool is_field_data = true);
 
     std::vector<uint8_t>
     Serialize();

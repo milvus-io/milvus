@@ -18,10 +18,10 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -29,7 +29,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	kvmock "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/kv/predicates"
@@ -47,7 +47,7 @@ type ChannelManagerSuite struct {
 
 	mockKv      *kvmock.MetaKv
 	mockCluster *MockSubCluster
-	mockAlloc   *allocator.MockAllocator
+	mockAlloc   *globalIDAllocator.MockGlobalIDAllocator
 	mockHandler *NMockHandler
 }
 
@@ -96,7 +96,6 @@ func (s *ChannelManagerSuite) checkNoAssignment(m *ChannelManagerImpl, nodeID in
 func (s *ChannelManagerSuite) SetupTest() {
 	s.mockKv = kvmock.NewMetaKv(s.T())
 	s.mockCluster = NewMockSubCluster(s.T())
-	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.mockHandler = NewNMockHandler(s.T())
 	s.mockHandler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).
 		RunAndReturn(func(ch RWChannel, partitionID UniqueID) *datapb.VchannelInfo {
@@ -105,12 +104,13 @@ func (s *ChannelManagerSuite) SetupTest() {
 				ChannelName:  ch.GetName(),
 			}
 		}).Maybe()
-	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
 	s.mockKv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).RunAndReturn(
 		func(save map[string]string, removals []string, preds ...predicates.Predicate) error {
 			log.Info("test save and remove", zap.Any("save", save), zap.Any("removals", removals))
 			return nil
 		}).Maybe()
+	s.mockAlloc = globalIDAllocator.NewMockGlobalIDAllocator(s.T())
+	s.mockAlloc.EXPECT().AllocOne().Return(1, nil).Maybe()
 }
 
 func (s *ChannelManagerSuite) TearDownTest() {}
@@ -791,8 +791,8 @@ func (s *ChannelManagerSuite) TestStartupRootCoordFailed() {
 	}
 	s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
 
-	s.mockAlloc = allocator.NewMockAllocator(s.T())
-	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(0, errors.New("mock rootcoord failure"))
+	s.mockAlloc = globalIDAllocator.NewMockGlobalIDAllocator(s.T())
+	s.mockAlloc.EXPECT().AllocOne().Return(0, errors.New("mock error")).Maybe()
 	m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 	s.Require().NoError(err)
 

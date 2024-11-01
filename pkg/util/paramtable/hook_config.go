@@ -37,3 +37,7 @@ func (h *hookConfig) init(base *BaseTable) {
 func (h *hookConfig) WatchHookWithPrefix(ident string, keyPrefix string, onEvent func(*config.Event)) {
 	h.hookBase.mgr.Dispatcher.RegisterForKeyPrefix(keyPrefix, config.NewHandler(ident, onEvent))
 }
+
+func (h *hookConfig) GetAll() map[string]string {
+	return h.hookBase.mgr.GetConfigs()
+}

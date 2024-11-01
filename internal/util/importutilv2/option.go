@@ -21,6 +21,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -31,16 +32,50 @@ import (
 )
 
 const (
-	StartTs    = "start_ts"
-	StartTs2   = "startTs"
-	EndTs      = "end_ts"
-	EndTs2     = "endTs"
+	// Timeout specifies the timeout duration for import, such as "300s", "1.5h" or "1h45m".
+	Timeout = "timeout"
+
+	// SkipDQC indicates whether to bypass the disk quota check, default to false.
+	SkipDQC = "skip_disk_quota_check"
+
+	// CSVSep specifies the delimiter used for importing CSV files.
+	CSVSep = "sep"
+
+	// CSVNullKey specifies the null key used when importing CSV files.
+	CSVNullKey = "nullkey"
+)
+
+// Options for backup-restore mode.
+const (
+	// BackupFlag indicates whether the import is in backup-restore mode, default to false.
 	BackupFlag = "backup"
-	L0Import   = "l0_import"
-	SkipDQC    = "skip_disk_quota_check"
+
+	// L0Import indicates whether to import l0 segments only.
+	L0Import = "l0_import"
+
+	// StartTs StartTs2 EndTs EndTs2 are used to filter data during backup-restore import.
+	StartTs  = "start_ts"
+	StartTs2 = "startTs"
+	EndTs    = "end_ts"
+	EndTs2   = "endTs"
 )
 
 type Options []*commonpb.KeyValuePair
+
+func GetTimeoutTs(options Options) (uint64, error) {
+	var timeoutTs uint64 = math.MaxUint64
+	timeoutStr, err := funcutil.GetAttrByKeyFromRepeatedKV(Timeout, options)
+	if err == nil {
+		var dur time.Duration
+		dur, err = time.ParseDuration(timeoutStr)
+		if err != nil {
+			return 0, fmt.Errorf("parse timeout failed, err=%w", err)
+		}
+		curTs := tsoutil.GetCurrentTime()
+		timeoutTs = tsoutil.AddPhysicalDurationOnTs(curTs, dur)
+	}
+	return timeoutTs, nil
+}
 
 func ParseTimeRange(options Options) (uint64, uint64, error) {
 	importOptions := funcutil.KeyValuePair2Map(options)
@@ -103,8 +138,8 @@ func SkipDiskQuotaCheck(options Options) bool {
 }
 
 func GetCSVSep(options Options) (rune, error) {
-	sep, err := funcutil.GetAttrByKeyFromRepeatedKV("sep", options)
-	unsupportedSep := []rune{0, '\n', '\r', '"'}
+	sep, err := funcutil.GetAttrByKeyFromRepeatedKV(CSVSep, options)
+	unsupportedSep := []rune{0, '\n', '\r', '"', 0xFFFD}
 	defaultSep := ','
 	if err != nil || len(sep) == 0 {
 		return defaultSep, nil
@@ -112,4 +147,13 @@ func GetCSVSep(options Options) (rune, error) {
 		return 0, merr.WrapErrImportFailed(fmt.Sprintf("unsupported csv separator: %s", sep))
 	}
 	return []rune(sep)[0], nil
+}
+
+func GetCSVNullKey(options Options) (string, error) {
+	nullKey, err := funcutil.GetAttrByKeyFromRepeatedKV(CSVNullKey, options)
+	defaultNullKey := ""
+	if err != nil || len(nullKey) == 0 {
+		return defaultNullKey, nil
+	}
+	return nullKey, nil
 }

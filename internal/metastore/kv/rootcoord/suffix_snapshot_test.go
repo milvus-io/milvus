@@ -444,7 +444,7 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 
 	now := time.Now()
 	ftso := func(ts int) typeutil.Timestamp {
-		return tsoutil.ComposeTS(now.Add(-1*time.Duration(ts)*time.Millisecond).UnixMilli(), 0)
+		return tsoutil.ComposeTS(now.Add(-1*time.Duration(ts)*time.Hour).UnixMilli(), 0)
 	}
 
 	getKey := func(prefix string, id int) string {
@@ -456,7 +456,7 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 		cnt := 0
 		for i := 0; i < kVersion; i++ {
 			kvs := make(map[string]string)
-			ts := ftso((i + 1) * 100)
+			ts := ftso((i + 1) * 2)
 			for v := 0; v < kCnt; v++ {
 				if i == 0 && v%2 == 0 && cnt < expiredKeyCnt {
 					value = string(SuffixSnapshotTombstone)
@@ -509,27 +509,27 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 	t.Run("partial expired and all expired", func(t *testing.T) {
 		prefix := fmt.Sprintf("prefix%d", rand.Int())
 		value := "v"
-		ts := ftso(100)
+		ts := ftso(1)
 		saveFn(getKey(prefix, 0), value, ts)
-		ts = ftso(200)
+		ts = ftso(2)
 		saveFn(getKey(prefix, 0), value, ts)
-		ts = ftso(300)
+		ts = ftso(3)
 		saveFn(getKey(prefix, 0), value, ts)
 
 		// insert partial expired kv
-		ts = ftso(25)
+		ts = ftso(2)
 		saveFn(getKey(prefix, 1), string(SuffixSnapshotTombstone), ts)
-		ts = ftso(50)
+		ts = ftso(4)
 		saveFn(getKey(prefix, 1), value, ts)
-		ts = ftso(70)
+		ts = ftso(6)
 		saveFn(getKey(prefix, 1), value, ts)
 
 		// insert all expired kv
-		ts = ftso(100)
+		ts = ftso(1)
 		saveFn(getKey(prefix, 2), string(SuffixSnapshotTombstone), ts)
-		ts = ftso(200)
+		ts = ftso(2)
 		saveFn(getKey(prefix, 2), value, ts)
-		ts = ftso(300)
+		ts = ftso(3)
 		saveFn(getKey(prefix, 2), value, ts)
 
 		cnt := countPrefix(prefix)
@@ -541,6 +541,47 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 
 		cnt = countPrefix(prefix)
 		assert.Equal(t, 4, cnt)
+
+		// clean all data
+		err := etcdkv.RemoveWithPrefix("")
+		assert.NoError(t, err)
+	})
+
+	t.Run("partial 24 expired and all expired", func(t *testing.T) {
+		prefix := fmt.Sprintf("prefix%d", rand.Int())
+		value := "v"
+		ts := ftso(100)
+		saveFn(getKey(prefix, 0), value, ts)
+		ts = ftso(200)
+		saveFn(getKey(prefix, 0), value, ts)
+		ts = ftso(300)
+		saveFn(getKey(prefix, 0), value, ts)
+
+		// insert partial expired kv
+		ts = ftso(2)
+		saveFn(getKey(prefix, 1), string(SuffixSnapshotTombstone), ts)
+		ts = ftso(4)
+		saveFn(getKey(prefix, 1), value, ts)
+		ts = ftso(6)
+		saveFn(getKey(prefix, 1), value, ts)
+
+		// insert all expired kv
+		ts = ftso(1)
+		saveFn(getKey(prefix, 2), string(SuffixSnapshotTombstone), ts)
+		ts = ftso(2)
+		saveFn(getKey(prefix, 2), value, ts)
+		ts = ftso(3)
+		saveFn(getKey(prefix, 2), value, ts)
+
+		cnt := countPrefix(prefix)
+		assert.Equal(t, 12, cnt)
+
+		// err = ss.removeExpiredKvs(now, time.Duration(50)*time.Millisecond)
+		err = ss.removeExpiredKvs(now)
+		assert.NoError(t, err)
+
+		cnt = countPrefix(prefix)
+		assert.Equal(t, 1, cnt)
 
 		// clean all data
 		err := etcdkv.RemoveWithPrefix("")

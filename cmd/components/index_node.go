@@ -48,6 +48,10 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, 
 	return n, nil
 }
 
+func (n *IndexNode) Prepare() error {
+	return n.svr.Prepare()
+}
+
 // Run starts service
 func (n *IndexNode) Run() error {
 	if err := n.svr.Run(); err != nil {

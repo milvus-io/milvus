@@ -3,6 +3,7 @@ package consumer
 import (
 	"context"
 	"io"
+	"math"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -39,13 +40,15 @@ func CreateConsumer(
 	opts *ConsumerOptions,
 	handlerClient streamingpb.StreamingNodeHandlerServiceClient,
 ) (Consumer, error) {
-	ctx, err := createConsumeRequest(ctx, opts)
+	ctxWithReq, err := createConsumeRequest(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
 
 	// TODO: configurable or auto adjust grpc.MaxCallRecvMsgSize
-	streamClient, err := handlerClient.Consume(ctx, grpc.MaxCallRecvMsgSize(8388608))
+	// The messages are always managed by milvus cluster, so the size of message shouldn't be controlled here
+	// to avoid infinitely blocks.
+	streamClient, err := handlerClient.Consume(ctxWithReq, grpc.MaxCallRecvMsgSize(math.MaxInt32))
 	if err != nil {
 		return nil, err
 	}
@@ -61,6 +64,7 @@ func CreateConsumer(
 		return nil, status.NewInvalidRequestSeq("first message arrive must be create response")
 	}
 	cli := &consumerImpl{
+		ctx:              ctx,
 		walName:          createResp.GetWalName(),
 		assignment:       *opts.Assignment,
 		grpcStreamClient: streamClient,
@@ -90,6 +94,7 @@ func createConsumeRequest(ctx context.Context, opts *ConsumerOptions) (context.C
 }
 
 type consumerImpl struct {
+	ctx              context.Context // TODO: the cancel method of consumer should be managed by consumerImpl, fix it in future.
 	walName          string
 	assignment       types.PChannelInfoAssigned
 	grpcStreamClient streamingpb.StreamingNodeHandlerService_ConsumeClient
@@ -174,12 +179,17 @@ func (c *consumerImpl) recvLoop() (err error) {
 				resp.Consume.GetMessage().GetProperties(),
 			)
 			if newImmutableMsg.TxnContext() != nil {
-				c.handleTxnMessage(newImmutableMsg)
+				if err := c.handleTxnMessage(newImmutableMsg); err != nil {
+					return err
+				}
 			} else {
 				if c.txnBuilder != nil {
 					panic("unreachable code: txn builder should be nil if we receive a non-txn message")
 				}
-				c.msgHandler.Handle(newImmutableMsg)
+				if _, err := c.msgHandler.Handle(c.ctx, newImmutableMsg); err != nil {
+					c.logger.Warn("message handle canceled", zap.Error(err))
+					return errors.Wrapf(err, "At Handler")
+				}
 			}
 		case *streamingpb.ConsumeResponse_Close:
 			// Should receive io.EOF after that.
@@ -190,7 +200,7 @@ func (c *consumerImpl) recvLoop() (err error) {
 	}
 }
 
-func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) {
+func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
 	switch msg.MessageType() {
 	case message.MessageTypeBeginTxn:
 		if c.txnBuilder != nil {
@@ -199,7 +209,7 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) {
 		beginMsg, err := message.AsImmutableBeginTxnMessageV2(msg)
 		if err != nil {
 			c.logger.Warn("failed to convert message to begin txn message", zap.Any("messageID", beginMsg.MessageID()), zap.Error(err))
-			return
+			return nil
 		}
 		c.txnBuilder = message.NewImmutableTxnMessageBuilder(beginMsg)
 	case message.MessageTypeCommitTxn:
@@ -210,19 +220,23 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) {
 		if err != nil {
 			c.logger.Warn("failed to convert message to commit txn message", zap.Any("messageID", commitMsg.MessageID()), zap.Error(err))
 			c.txnBuilder = nil
-			return
+			return nil
 		}
 		msg, err := c.txnBuilder.Build(commitMsg)
 		c.txnBuilder = nil
 		if err != nil {
 			c.logger.Warn("failed to build txn message", zap.Any("messageID", commitMsg.MessageID()), zap.Error(err))
-			return
+			return nil
 		}
-		c.msgHandler.Handle(msg)
+		if _, err := c.msgHandler.Handle(c.ctx, msg); err != nil {
+			c.logger.Warn("message handle canceled at txn", zap.Error(err))
+			return errors.Wrap(err, "At Handler Of Txn")
+		}
 	default:
 		if c.txnBuilder == nil {
 			panic("unreachable code: txn builder should not be nil if we receive a non-begin txn message")
 		}
 		c.txnBuilder.Add(msg)
 	}
+	return nil
 }

@@ -128,7 +128,14 @@ int64_t
 GetDimFromConfig(const Config& config) {
     auto dimension = GetValueFromConfig<std::string>(config, "dim");
     AssertInfo(dimension.has_value(), "dimension not exist in config");
-    return (std::stoi(dimension.value()));
+    try {
+        return (std::stoi(dimension.value()));
+    } catch (const std::logic_error& e) {
+        auto err_message = fmt::format(
+            "invalided dimension:{}, error:{}", dimension.value(), e.what());
+        LOG_ERROR(err_message);
+        throw std::logic_error(err_message);
+    }
 }
 
 std::string
@@ -151,7 +158,16 @@ GetIndexEngineVersionFromConfig(const Config& config) {
         GetValueFromConfig<std::string>(config, INDEX_ENGINE_VERSION);
     AssertInfo(index_engine_version.has_value(),
                "index_engine not exist in config");
-    return (std::stoi(index_engine_version.value()));
+    try {
+        return (std::stoi(index_engine_version.value()));
+    } catch (const std::logic_error& e) {
+        auto err_message =
+            fmt::format("invalided index engine version:{}, error:{}",
+                        index_engine_version.value(),
+                        e.what());
+        LOG_ERROR(err_message);
+        throw std::logic_error(err_message);
+    }
 }
 
 int32_t
@@ -160,7 +176,15 @@ GetBitmapCardinalityLimitFromConfig(const Config& config) {
         config, index::BITMAP_INDEX_CARDINALITY_LIMIT);
     AssertInfo(bitmap_limit.has_value(),
                "bitmap cardinality limit not exist in config");
-    return (std::stoi(bitmap_limit.value()));
+    try {
+        return (std::stoi(bitmap_limit.value()));
+    } catch (const std::logic_error& e) {
+        auto err_message = fmt::format("invalided bitmap limit:{}, error:{}",
+                                       bitmap_limit.value(),
+                                       e.what());
+        LOG_ERROR(err_message);
+        throw std::logic_error(err_message);
+    }
 }
 
 // TODO :: too ugly

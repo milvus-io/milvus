@@ -19,15 +19,22 @@ package integration
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"path"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpcdatacoord "github.com/milvus-io/milvus/internal/distributed/datacoord"
@@ -49,7 +56,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -60,18 +66,27 @@ import (
 
 var params *paramtable.ComponentParam = paramtable.Get()
 
+var (
+	initOnce  sync.Once
+	configMap map[string]string
+)
+
 func DefaultParams() map[string]string {
-	testPath := fmt.Sprintf("integration-test-%d", time.Now().Unix())
-	return map[string]string{
-		params.EtcdCfg.RootPath.Key:  testPath,
-		params.MinioCfg.RootPath.Key: testPath,
-		//"runtime.role": typeutil.StandaloneRole,
-		//params.IntegrationTestCfg.IntegrationMode.Key: "true",
-		params.LocalStorageCfg.Path.Key:              path.Join("/tmp", testPath),
-		params.CommonCfg.StorageType.Key:             "local",
-		params.DataNodeCfg.MemoryForceSyncEnable.Key: "false", // local execution will print too many logs
-		params.CommonCfg.GracefulStopTimeout.Key:     "30",
-	}
+	initOnce.Do(func() {
+		testPath := fmt.Sprintf("integration-test-%d", time.Now().Unix())
+
+		// Notice: don't use ParamItem.Key here, the config key will be empty before param table init
+		configMap = map[string]string{
+			"etcd.rootPath":                   testPath,
+			"minio.rootPath":                  testPath,
+			"localStorage.path":               path.Join("/tmp", testPath),
+			"common.storageType":              "local",
+			"dataNode.memory.forceSyncEnable": "false", // local execution will print too many logs
+			"common.gracefulStopTimeout":      "30",
+		}
+	})
+
+	return configMap
 }
 
 type MiniClusterV2 struct {
@@ -95,6 +110,7 @@ type MiniClusterV2 struct {
 	RootCoordClient  types.RootCoordClient
 	QueryCoordClient types.QueryCoordClient
 
+	MilvusClient    milvuspb.MilvusServiceClient
 	ProxyClient     types.ProxyClient
 	DataNodeClient  types.DataNodeClient
 	QueryNodeClient types.QueryNodeClient
@@ -113,7 +129,8 @@ type MiniClusterV2 struct {
 	dnid           atomic.Int64
 	streamingnodes []*streamingnode.Server
 
-	Extension *ReportChanExtension
+	clientConn *grpc.ClientConn
+	Extension  *ReportChanExtension
 }
 
 type OptionV2 func(cluster *MiniClusterV2)
@@ -214,7 +231,10 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	if err != nil {
 		return nil, err
 	}
-	cluster.DataCoord = grpcdatacoord.NewServer(ctx, cluster.factory)
+	cluster.DataCoord, err = grpcdatacoord.NewServer(ctx, cluster.factory)
+	if err != nil {
+		return nil, err
+	}
 	cluster.QueryCoord, err = grpcquerycoord.NewServer(ctx, cluster.factory)
 	if err != nil {
 		return nil, err
@@ -264,10 +284,7 @@ func (cluster *MiniClusterV2) AddQueryNode() *grpcquerynode.Server {
 	if err != nil {
 		return nil
 	}
-	err = node.Run()
-	if err != nil {
-		return nil
-	}
+	runComponent(node)
 	paramtable.SetNodeID(oid)
 
 	req := &milvuspb.GetComponentStatesRequest{}
@@ -292,10 +309,7 @@ func (cluster *MiniClusterV2) AddDataNode() *grpcdatanode.Server {
 	if err != nil {
 		return nil
 	}
-	err = node.Run()
-	if err != nil {
-		return nil
-	}
+	runComponent(node)
 	paramtable.SetNodeID(oid)
 
 	req := &milvuspb.GetComponentStatesRequest{}
@@ -316,50 +330,19 @@ func (cluster *MiniClusterV2) AddStreamingNode() {
 	if err != nil {
 		panic(err)
 	}
-	err = node.Run()
-	if err != nil {
-		panic(err)
-	}
-
+	runComponent(node)
 	cluster.streamingnodes = append(cluster.streamingnodes, node)
 }
 
 func (cluster *MiniClusterV2) Start() error {
 	log.Info("mini cluster start")
-	err := cluster.RootCoord.Run()
-	if err != nil {
-		return err
-	}
-
-	err = cluster.DataCoord.Run()
-	if err != nil {
-		return err
-	}
-
-	err = cluster.QueryCoord.Run()
-	if err != nil {
-		return err
-	}
-
-	err = cluster.DataNode.Run()
-	if err != nil {
-		return err
-	}
-
-	err = cluster.QueryNode.Run()
-	if err != nil {
-		return err
-	}
-
-	err = cluster.IndexNode.Run()
-	if err != nil {
-		return err
-	}
-
-	err = cluster.Proxy.Run()
-	if err != nil {
-		return err
-	}
+	runComponent(cluster.RootCoord)
+	runComponent(cluster.DataCoord)
+	runComponent(cluster.QueryCoord)
+	runComponent(cluster.DataNode)
+	runComponent(cluster.QueryNode)
+	runComponent(cluster.IndexNode)
+	runComponent(cluster.Proxy)
 
 	ctx2, cancel := context.WithTimeout(context.Background(), time.Second*120)
 	defer cancel()
@@ -374,18 +357,105 @@ func (cluster *MiniClusterV2) Start() error {
 	}
 
 	if streamingutil.IsStreamingServiceEnabled() {
-		err = cluster.StreamingNode.Run()
-		if err != nil {
-			return err
-		}
+		runComponent(cluster.StreamingNode)
 	}
 
+	port := params.ProxyGrpcServerCfg.Port.GetAsInt()
+	var err error
+	cluster.clientConn, err = grpc.DialContext(cluster.ctx, fmt.Sprintf("localhost:%d", port), getGrpcDialOpt()...)
+	if err != nil {
+		return err
+	}
+
+	cluster.MilvusClient = milvuspb.NewMilvusServiceClient(cluster.clientConn)
 	log.Info("minicluster started")
 	return nil
 }
 
+func (cluster *MiniClusterV2) StopRootCoord() {
+	if err := cluster.RootCoord.Stop(); err != nil {
+		panic(err)
+	}
+	cluster.RootCoord = nil
+}
+
+func (cluster *MiniClusterV2) StartRootCoord() {
+	if cluster.RootCoord == nil {
+		var err error
+		if cluster.RootCoord, err = grpcrootcoord.NewServer(cluster.ctx, cluster.factory); err != nil {
+			panic(err)
+		}
+		runComponent(cluster.RootCoord)
+	}
+}
+
+func (cluster *MiniClusterV2) StopDataCoord() {
+	if err := cluster.DataCoord.Stop(); err != nil {
+		panic(err)
+	}
+	cluster.DataCoord = nil
+}
+
+func (cluster *MiniClusterV2) StartDataCoord() {
+	if cluster.DataCoord == nil {
+		var err error
+		if cluster.DataCoord, err = grpcdatacoord.NewServer(cluster.ctx, cluster.factory); err != nil {
+			panic(err)
+		}
+		runComponent(cluster.DataCoord)
+	}
+}
+
+func (cluster *MiniClusterV2) StopQueryCoord() {
+	if err := cluster.QueryCoord.Stop(); err != nil {
+		panic(err)
+	}
+	cluster.QueryCoord = nil
+}
+
+func (cluster *MiniClusterV2) StartQueryCoord() {
+	if cluster.QueryCoord == nil {
+		var err error
+		if cluster.QueryCoord, err = grpcquerycoord.NewServer(cluster.ctx, cluster.factory); err != nil {
+			panic(err)
+		}
+		runComponent(cluster.QueryCoord)
+	}
+}
+
+func getGrpcDialOpt() []grpc.DialOption {
+	return []grpc.DialOption{
+		grpc.WithBlock(),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                5 * time.Second,
+			Timeout:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff: backoff.Config{
+				BaseDelay:  100 * time.Millisecond,
+				Multiplier: 1.6,
+				Jitter:     0.2,
+				MaxDelay:   3 * time.Second,
+			},
+			MinConnectTimeout: 3 * time.Second,
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(grpc_retry.UnaryClientInterceptor(
+			grpc_retry.WithMax(6),
+			grpc_retry.WithBackoff(func(attempt uint) time.Duration {
+				return 60 * time.Millisecond * time.Duration(math.Pow(3, float64(attempt)))
+			}),
+			grpc_retry.WithCodes(codes.Unavailable, codes.ResourceExhausted)),
+		),
+	}
+}
+
 func (cluster *MiniClusterV2) Stop() error {
 	log.Info("mini cluster stop")
+	if cluster.clientConn != nil {
+		cluster.clientConn.Close()
+	}
 	cluster.RootCoord.Stop()
 	log.Info("mini cluster rootCoord stopped")
 	cluster.DataCoord.Stop()
@@ -418,8 +488,6 @@ func (cluster *MiniClusterV2) Stop() error {
 		}
 	}
 	cluster.ChunkManager.RemoveWithPrefix(cluster.ctx, cluster.ChunkManager.RootPath())
-
-	kvfactory.CloseEtcdClient()
 	return nil
 }
 
@@ -524,4 +592,18 @@ func (r *ReportChanExtension) Report(info any) int {
 
 func (r *ReportChanExtension) GetReportChan() <-chan any {
 	return r.reportChan
+}
+
+type component interface {
+	Prepare() error
+	Run() error
+}
+
+func runComponent(c component) {
+	if err := c.Prepare(); err != nil {
+		panic(err)
+	}
+	if err := c.Run(); err != nil {
+		panic(err)
+	}
 }

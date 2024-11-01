@@ -75,6 +75,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -90,6 +91,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -102,6 +104,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{
 			{
 				ID:           1,
@@ -121,7 +124,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.NoError(err)
 
-		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String()), 1)
+		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String(), "unsorted"), 1)
 	})
 }
 
@@ -600,8 +603,8 @@ func TestMeta_Basic(t *testing.T) {
 	})
 
 	t.Run("Test GetCollectionBinlogSize", func(t *testing.T) {
-		meta := createMeta(&datacoord.Catalog{}, nil, createIndexMeta(&datacoord.Catalog{}))
-		ret := meta.GetCollectionIndexFilesSize()
+		meta := createMeta(&datacoord.Catalog{}, withIndexMeta(createIndexMeta(&datacoord.Catalog{})))
+		ret := meta.SetStoredIndexFileSizeMetric()
 		assert.Equal(t, uint64(0), ret)
 
 		meta.collections = map[UniqueID]*collectionInfo{
@@ -610,7 +613,7 @@ func TestMeta_Basic(t *testing.T) {
 				DatabaseName: "db",
 			},
 		}
-		ret = meta.GetCollectionIndexFilesSize()
+		ret = meta.SetStoredIndexFileSizeMetric()
 		assert.Equal(t, uint64(11), ret)
 	})
 
@@ -672,6 +675,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 1)},
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 1)},
 				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: "", LogID: 2}}}},
+				[]*datapb.FieldBinlog{},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
@@ -732,7 +736,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
-			AddBinlogsOperator(1, nil, nil, nil),
+			AddBinlogsOperator(1, nil, nil, nil, nil),
 		)
 		assert.NoError(t, err)
 
@@ -813,6 +817,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
 				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: "", LogID: 2}}}},
+				[]*datapb.FieldBinlog{},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
@@ -856,7 +861,7 @@ func Test_meta_SetSegmentsCompacting(t *testing.T) {
 							isCompacting: false,
 						},
 					},
-					compactionTo: make(map[int64]UniqueID),
+					compactionTo: make(map[int64][]UniqueID),
 				},
 			},
 			args{

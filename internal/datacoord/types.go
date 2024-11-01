@@ -27,14 +27,14 @@ import (
 type Task interface {
 	GetTaskID() int64
 	GetNodeID() int64
-	ResetNodeID()
+	ResetTask(mt *meta)
 	PreCheck(ctx context.Context, dependency *taskScheduler) bool
 	CheckTaskHealthy(mt *meta) bool
 	SetState(state indexpb.JobState, failReason string)
 	GetState() indexpb.JobState
 	GetFailReason() string
-	UpdateVersion(ctx context.Context, meta *meta) error
-	UpdateMetaBuildingState(nodeID int64, meta *meta) error
+	UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error
+	UpdateMetaBuildingState(meta *meta) error
 	AssignTask(ctx context.Context, client types.IndexNodeClient) bool
 	QueryResult(ctx context.Context, client types.IndexNodeClient)
 	DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool

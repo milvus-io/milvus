@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -74,6 +75,8 @@ func (suite *DistHandlerSuite) TestBasic() {
 		suite.dispatchMockCall.Unset()
 		suite.dispatchMockCall = nil
 	}
+
+	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{})
 	suite.dispatchMockCall = suite.scheduler.EXPECT().Dispatch(mock.Anything).Maybe()
 	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -120,6 +123,7 @@ func (suite *DistHandlerSuite) TestGetDistributionFailed() {
 		suite.dispatchMockCall.Unset()
 		suite.dispatchMockCall = nil
 	}
+	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
 	suite.dispatchMockCall = suite.scheduler.EXPECT().Dispatch(mock.Anything).Maybe()
 	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -139,6 +143,8 @@ func (suite *DistHandlerSuite) TestForcePullDist() {
 		suite.dispatchMockCall.Unset()
 		suite.dispatchMockCall = nil
 	}
+
+	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
 
 	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,

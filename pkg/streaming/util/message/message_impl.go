@@ -220,6 +220,15 @@ func (m *immutableTxnMessageImpl) Begin() ImmutableMessage {
 	return m.begin
 }
 
+// EstimateSize returns the estimated size of current message.
+func (m *immutableTxnMessageImpl) EstimateSize() int {
+	size := 0
+	for _, msg := range m.messages {
+		size += msg.EstimateSize()
+	}
+	return size
+}
+
 // RangeOver iterates over the underlying messages in the transaction message.
 func (m *immutableTxnMessageImpl) RangeOver(fn func(ImmutableMessage) error) error {
 	for _, msg := range m.messages {

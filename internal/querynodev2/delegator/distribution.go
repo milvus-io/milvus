@@ -74,6 +74,8 @@ type distribution struct {
 	// current is the snapshot for quick usage for search/query
 	// generated for each change of distribution
 	current *atomic.Pointer[snapshot]
+
+	idfOracle IDFOracle
 	// protects current & segments
 	mut sync.RWMutex
 }
@@ -102,6 +104,12 @@ func NewDistribution() *distribution {
 
 	dist.genSnapshot()
 	return dist
+}
+
+func (d *distribution) SetIDFOracle(idfOracle IDFOracle) {
+	d.mut.Lock()
+	defer d.mut.Unlock()
+	d.idfOracle = idfOracle
 }
 
 func (d *distribution) PinReadableSegments(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, version int64, err error) {
@@ -367,6 +375,9 @@ func (d *distribution) genSnapshot() chan struct{} {
 	d.current.Store(newSnapShot)
 	// shall be a new one
 	d.snapshots.GetOrInsert(d.snapshotVersion, newSnapShot)
+	if d.idfOracle != nil {
+		d.idfOracle.SyncDistribution(newSnapShot)
+	}
 
 	// first snapshot, return closed chan
 	if last == nil {

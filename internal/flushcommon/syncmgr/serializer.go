@@ -41,12 +41,15 @@ type SyncPack struct {
 	// data
 	insertData []*storage.InsertData
 	deltaData  *storage.DeleteData
+	bm25Stats  map[int64]*storage.BM25Stats
+
 	// statistics
 	tsFrom        typeutil.Timestamp
 	tsTo          typeutil.Timestamp
 	startPosition *msgpb.MsgPosition
 	checkpoint    *msgpb.MsgPosition
-	batchSize     int64 // batchSize is the row number of this sync task,not the total num of rows of segemnt
+	batchRows     int64 // batchRows is the row number of this sync task,not the total num of rows of segment
+	dataSource    string
 	isFlush       bool
 	isDrop        bool
 	// metadata
@@ -55,6 +58,8 @@ type SyncPack struct {
 	segmentID    int64
 	channelName  string
 	level        datapb.SegmentLevel
+	// error handler function
+	errHandler func(err error)
 }
 
 func (p *SyncPack) WithInsertData(insertData []*storage.InsertData) *SyncPack {
@@ -66,6 +71,11 @@ func (p *SyncPack) WithInsertData(insertData []*storage.InsertData) *SyncPack {
 
 func (p *SyncPack) WithDeleteData(deltaData *storage.DeleteData) *SyncPack {
 	p.deltaData = deltaData
+	return p
+}
+
+func (p *SyncPack) WithBM25Stats(stats map[int64]*storage.BM25Stats) *SyncPack {
+	p.bm25Stats = stats
 	return p
 }
 
@@ -114,12 +124,22 @@ func (p *SyncPack) WithDrop() *SyncPack {
 	return p
 }
 
-func (p *SyncPack) WithBatchSize(batchSize int64) *SyncPack {
-	p.batchSize = batchSize
+func (p *SyncPack) WithBatchRows(batchRows int64) *SyncPack {
+	p.batchRows = batchRows
 	return p
 }
 
 func (p *SyncPack) WithLevel(level datapb.SegmentLevel) *SyncPack {
 	p.level = level
+	return p
+}
+
+func (p *SyncPack) WithErrorHandler(handler func(err error)) *SyncPack {
+	p.errHandler = handler
+	return p
+}
+
+func (p *SyncPack) WithDataSource(source string) *SyncPack {
+	p.dataSource = source
 	return p
 }

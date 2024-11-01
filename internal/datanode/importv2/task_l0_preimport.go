@@ -94,6 +94,10 @@ func (t *L0PreImportTask) GetSchema() *schemapb.CollectionSchema {
 	return t.schema
 }
 
+func (t *L0PreImportTask) GetSlots() int64 {
+	return 1
+}
+
 func (t *L0PreImportTask) Cancel() {
 	t.cancel()
 }

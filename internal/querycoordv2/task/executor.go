@@ -192,7 +192,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		return err
 	}
 
-	loadInfo, indexInfos, err := ex.getLoadInfo(ctx, task.CollectionID(), action.SegmentID(), channel)
+	loadInfo, indexInfos, err := ex.getLoadInfo(ctx, task.CollectionID(), action.SegmentID, channel)
 	if err != nil {
 		return err
 	}
@@ -215,7 +215,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		log.Warn(msg, zap.Error(err))
 		return err
 	}
-	view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard()))
+	view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard))
 	if view == nil {
 		msg := "no shard leader for the segment to execute loading"
 		err = merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
@@ -265,7 +265,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 		req.Checkpoint = channel.GetSeekPosition()
 	}
 
-	if action.Scope() == querypb.DataScope_Streaming {
+	if action.Scope == querypb.DataScope_Streaming {
 		// Any modification to the segment distribution have to set NeedTransfer true,
 		// to protect the version, which serves search/query
 		req.NeedTransfer = true
@@ -276,22 +276,23 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 			// get segment's replica first, then get shard leader by replica
 			replica := ex.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
 			if replica == nil {
-				msg := "node doesn't belong to any replica"
+				msg := "node doesn't belong to any replica, try to send release to worker"
 				err := merr.WrapErrNodeNotAvailable(action.Node())
 				log.Warn(msg, zap.Error(err))
-				return
+				dstNode = action.Node()
+				req.NeedTransfer = false
+			} else {
+				view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard))
+				if view == nil {
+					msg := "no shard leader for the segment to execute releasing"
+					err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
+					log.Warn(msg, zap.Error(err))
+					return
+				}
+				dstNode = view.ID
+				log = log.With(zap.Int64("shardLeader", view.ID))
+				req.NeedTransfer = true
 			}
-			view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard()))
-			if view == nil {
-				msg := "no shard leader for the segment to execute releasing"
-				err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
-				log.Warn(msg, zap.Error(err))
-				return
-			}
-
-			dstNode = view.ID
-			log = log.With(zap.Int64("shardLeader", view.ID))
-			req.NeedTransfer = true
 		}
 	}
 

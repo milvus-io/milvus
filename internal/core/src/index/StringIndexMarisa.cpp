@@ -19,6 +19,7 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -35,6 +36,7 @@
 #include "index/StringIndexMarisa.h"
 #include "index/Utils.h"
 #include "index/Index.h"
+#include "marisa/base.h"
 #include "storage/Util.h"
 
 namespace milvus::index {
@@ -92,7 +94,7 @@ StringIndexMarisa::BuildWithFieldData(
         }
         total_num_rows += slice_num;
     }
-    trie_.build(keyset);
+    trie_.build(keyset, MARISA_LABEL_ORDER);
 
     // fill str_ids_
     str_ids_.resize(total_num_rows, MARISA_NULL_KEY_ID);
@@ -117,7 +119,9 @@ StringIndexMarisa::BuildWithFieldData(
 }
 
 void
-StringIndexMarisa::Build(size_t n, const std::string* values) {
+StringIndexMarisa::Build(size_t n,
+                         const std::string* values,
+                         const bool* valid_data) {
     if (built_) {
         PanicInfo(IndexAlreadyBuild, "index has been built");
     }
@@ -126,12 +130,14 @@ StringIndexMarisa::Build(size_t n, const std::string* values) {
     {
         // fill key set.
         for (size_t i = 0; i < n; i++) {
-            keyset.push_back(values[i].c_str());
+            if (valid_data == nullptr || valid_data[i]) {
+                keyset.push_back(values[i].c_str());
+            }
         }
     }
 
-    trie_.build(keyset);
-    fill_str_ids(n, values);
+    trie_.build(keyset, MARISA_LABEL_ORDER);
+    fill_str_ids(n, values, valid_data);
     fill_offsets();
 
     built_ = true;
@@ -202,7 +208,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     }
 
     file.Seek(0, SEEK_SET);
-    if (config.contains(ENABLE_MMAP)) {
+    if (config.contains(MMAP_FILE_PATH)) {
         trie_.mmap(file_name.c_str());
     } else {
         trie_.read(file.Descriptor());
@@ -212,7 +218,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
 
     auto str_ids = set.GetByName(MARISA_STR_IDS);
     auto str_ids_len = str_ids->size;
-    str_ids_.resize(str_ids_len / sizeof(size_t));
+    str_ids_.resize(str_ids_len / sizeof(size_t), MARISA_NULL_KEY_ID);
     memcpy(str_ids_.data(), str_ids->data.get(), str_ids_len);
 
     fill_offsets();
@@ -309,50 +315,101 @@ StringIndexMarisa::Range(std::string value, OpType op) {
     TargetBitmap bitset(count);
     std::vector<size_t> ids;
     marisa::Agent agent;
+    bool in_lexico_order = in_lexicographic_order();
     switch (op) {
         case OpType::GreaterThan: {
-            while (trie_.predictive_search(agent)) {
-                auto key = std::string(agent.key().ptr(), agent.key().length());
-                if (key > value) {
+            if (in_lexico_order) {
+                while (trie_.predictive_search(agent)) {
+                    auto key =
+                        std::string(agent.key().ptr(), agent.key().length());
+                    if (key > value) {
+                        ids.push_back(agent.key().id());
+                        break;
+                    }
+                };
+                // since in lexicographic order, all following nodes is greater than value
+                while (trie_.predictive_search(agent)) {
                     ids.push_back(agent.key().id());
-                    break;
                 }
-            };
-            while (trie_.predictive_search(agent)) {
-                ids.push_back(agent.key().id());
+            } else {
+                // lexicographic order is not guaranteed, check all values
+                while (trie_.predictive_search(agent)) {
+                    auto key =
+                        std::string(agent.key().ptr(), agent.key().length());
+                    if (key > value) {
+                        ids.push_back(agent.key().id());
+                    }
+                };
             }
             break;
         }
         case OpType::GreaterEqual: {
-            while (trie_.predictive_search(agent)) {
-                auto key = std::string(agent.key().ptr(), agent.key().length());
-                if (key >= value) {
+            if (in_lexico_order) {
+                while (trie_.predictive_search(agent)) {
+                    auto key =
+                        std::string(agent.key().ptr(), agent.key().length());
+                    if (key >= value) {
+                        ids.push_back(agent.key().id());
+                        break;
+                    }
+                };
+                // since in lexicographic order, all following nodes is greater than or equal value
+                while (trie_.predictive_search(agent)) {
                     ids.push_back(agent.key().id());
-                    break;
                 }
-            }
-            while (trie_.predictive_search(agent)) {
-                ids.push_back(agent.key().id());
+            } else {
+                // lexicographic order is not guaranteed, check all values
+                while (trie_.predictive_search(agent)) {
+                    auto key =
+                        std::string(agent.key().ptr(), agent.key().length());
+                    if (key >= value) {
+                        ids.push_back(agent.key().id());
+                    }
+                };
             }
             break;
         }
         case OpType::LessThan: {
-            while (trie_.predictive_search(agent)) {
-                auto key = std::string(agent.key().ptr(), agent.key().length());
-                if (key >= value) {
-                    break;
+            if (in_lexico_order) {
+                while (trie_.predictive_search(agent)) {
+                    auto key =
+                        std::string(agent.key().ptr(), agent.key().length());
+                    if (key >= value) {
+                        break;
+                    }
+                    ids.push_back(agent.key().id());
                 }
-                ids.push_back(agent.key().id());
+            } else {
+                // lexicographic order is not guaranteed, check all values
+                while (trie_.predictive_search(agent)) {
+                    auto key =
+                        std::string(agent.key().ptr(), agent.key().length());
+                    if (key < value) {
+                        ids.push_back(agent.key().id());
+                    }
+                };
             }
             break;
         }
         case OpType::LessEqual: {
-            while (trie_.predictive_search(agent)) {
-                auto key = std::string(agent.key().ptr(), agent.key().length());
-                if (key > value) {
-                    break;
+            if (in_lexico_order) {
+                while (trie_.predictive_search(agent)) {
+                    auto key =
+                        std::string(agent.key().ptr(), agent.key().length());
+                    if (key > value) {
+                        break;
+                    }
+                    ids.push_back(agent.key().id());
                 }
-                ids.push_back(agent.key().id());
+            } else {
+                // lexicographic order is not guaranteed, check all values
+                while (trie_.predictive_search(agent)) {
+                    auto key =
+                        std::string(agent.key().ptr(), agent.key().length());
+                    if (key <= value) {
+                        ids.push_back(agent.key().id());
+                    }
+                };
             }
             break;
         }
@@ -384,6 +441,8 @@ StringIndexMarisa::Range(std::string lower_bound_value,
         return bitset;
     }
 
+    bool in_lexico_oder = in_lexicographic_order();
+
     auto common_prefix = GetCommonPrefix(lower_bound_value, upper_bound_value);
     marisa::Agent agent;
     agent.set_query(common_prefix.c_str());
@@ -393,7 +452,12 @@ StringIndexMarisa::Range(std::string lower_bound_value,
             std::string_view(agent.key().ptr(), agent.key().length());
         if (val > upper_bound_value ||
             (!ub_inclusive && val == upper_bound_value)) {
-            break;
+            // we could only break when trie in lexicographic order.
+            if (in_lexico_oder) {
+                break;
+            } else {
+                continue;
+            }
         }
 
         if (val < lower_bound_value ||
@@ -432,9 +496,14 @@ StringIndexMarisa::PrefixMatch(std::string_view prefix) {
 }
 
 void
-StringIndexMarisa::fill_str_ids(size_t n, const std::string* values) {
-    str_ids_.resize(n);
+StringIndexMarisa::fill_str_ids(size_t n,
+                                const std::string* values,
+                                const bool* valid_data) {
+    str_ids_.resize(n, MARISA_NULL_KEY_ID);
     for (size_t i = 0; i < n; i++) {
+        if (valid_data != nullptr && !valid_data[i]) {
+            continue;
+        }
         auto str = values[i];
         auto str_id = lookup(str);
         AssertInfo(valid_str_id(str_id), "invalid marisa key");
@@ -475,14 +544,27 @@ StringIndexMarisa::prefix_match(const std::string_view prefix) {
     }
     return ret;
 }
-
-std::string
+std::optional<std::string>
 StringIndexMarisa::Reverse_Lookup(size_t offset) const {
     AssertInfo(offset < str_ids_.size(), "out of range of total count");
     marisa::Agent agent;
+    if (str_ids_[offset] < 0) {
+        return std::nullopt;
+    }
     agent.set_query(str_ids_[offset]);
     trie_.reverse_lookup(agent);
     return std::string(agent.key().ptr(), agent.key().length());
 }
 
+bool
+StringIndexMarisa::in_lexicographic_order() {
+    // by default, marisa trie uses `MARISA_WEIGHT_ORDER` to build trie
+    // so `predictive_search` will not iterate in lexicographic order
+    // now we build trie using `MARISA_LABEL_ORDER` and also handle old index in weight order.
+    if (trie_.node_order() == MARISA_LABEL_ORDER) {
+        return true;
+    }
+
+    return false;
+}
 }  // namespace milvus::index

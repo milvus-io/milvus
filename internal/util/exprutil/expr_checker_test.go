@@ -117,7 +117,7 @@ func TestParsePartitionKeys(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// test search plan
-			searchPlan, err := planparserv2.CreateSearchPlan(schemaHelper, tc.expr, "fvec_field", queryInfo)
+			searchPlan, err := planparserv2.CreateSearchPlan(schemaHelper, tc.expr, "fvec_field", queryInfo, nil)
 			assert.NoError(t, err)
 			expr, err := ParseExprFromPlan(searchPlan)
 			assert.NoError(t, err)
@@ -130,7 +130,7 @@ func TestParsePartitionKeys(t *testing.T) {
 			}
 
 			// test query plan
-			queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, tc.expr)
+			queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, tc.expr, nil)
 			assert.NoError(t, err)
 			expr, err = ParseExprFromPlan(queryPlan)
 			assert.NoError(t, err)
@@ -173,7 +173,7 @@ func TestParseIntRanges(t *testing.T) {
 	// test query plan
 	{
 		expr := "cluster_key_field > 50"
-		queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr)
+		queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr, nil)
 		assert.NoError(t, err)
 		planExpr, err := ParseExprFromPlan(queryPlan)
 		assert.NoError(t, err)
@@ -190,7 +190,7 @@ func TestParseIntRanges(t *testing.T) {
 	// test binary query plan
 	{
 		expr := "cluster_key_field > 50 and cluster_key_field <= 100"
-		queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr)
+		queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr, nil)
 		assert.NoError(t, err)
 		planExpr, err := ParseExprFromPlan(queryPlan)
 		assert.NoError(t, err)
@@ -206,7 +206,7 @@ func TestParseIntRanges(t *testing.T) {
 	// test binary query plan
 	{
 		expr := "cluster_key_field >= 50 and cluster_key_field < 100"
-		queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr)
+		queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr, nil)
 		assert.NoError(t, err)
 		planExpr, err := ParseExprFromPlan(queryPlan)
 		assert.NoError(t, err)
@@ -222,7 +222,7 @@ func TestParseIntRanges(t *testing.T) {
 	// test binary query plan
 	{
 		expr := "cluster_key_field in [100]"
-		queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr)
+		queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr, nil)
 		assert.NoError(t, err)
 		planExpr, err := ParseExprFromPlan(queryPlan)
 		assert.NoError(t, err)
@@ -264,7 +264,7 @@ func TestParseStrRanges(t *testing.T) {
 	// test query plan
 	{
 		expr := "cluster_key_field >= \"aaa\""
-		queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr)
+		queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr, nil)
 		assert.NoError(t, err)
 		planExpr, err := ParseExprFromPlan(queryPlan)
 		assert.NoError(t, err)
@@ -477,7 +477,7 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, tc.expr)
+			queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, tc.expr, nil)
 			assert.NoError(t, err)
 			planExpr, err := ParseExprFromPlan(queryPlan)
 			assert.NoError(t, err)

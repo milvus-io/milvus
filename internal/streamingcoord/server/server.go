@@ -32,7 +32,6 @@ type Server struct {
 // Init initializes the streamingcoord server.
 func (s *Server) Init(ctx context.Context) (err error) {
 	log.Info("init streamingcoord server...")
-	s.componentStateService.OnInitializing()
 
 	// Init all underlying component of streamingcoord server.
 	if err := s.initBasicComponent(ctx); err != nil {

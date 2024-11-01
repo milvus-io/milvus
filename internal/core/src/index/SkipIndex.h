@@ -16,15 +16,22 @@
 #include "common/Types.h"
 #include "log/Log.h"
 #include "mmap/Column.h"
+#include "mmap/ChunkedColumn.h"
 
 namespace milvus {
 
-using Metrics = std::
-    variant<int8_t, int16_t, int32_t, int64_t, float, double, std::string_view>;
+using Metrics =
+    std::variant<int8_t, int16_t, int32_t, int64_t, float, double, std::string>;
 
+// MetricsDataType is used to avoid copy when get min/max value from FieldChunkMetrics
 template <typename T>
 using MetricsDataType =
     std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
+
+// ReverseMetricsDataType is used to avoid copy when get min/max value from FieldChunkMetrics
+template <typename T>
+using ReverseMetricsDataType =
+    std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
 
 struct FieldChunkMetrics {
     Metrics min_;
@@ -33,6 +40,22 @@ struct FieldChunkMetrics {
     int64_t null_count_;
 
     FieldChunkMetrics() : hasValue_(false){};
+
+    template <typename T>
+    std::pair<MetricsDataType<T>, MetricsDataType<T>>
+    GetMinMax() const {
+        AssertInfo(hasValue_,
+                   "GetMinMax should never be called when hasValue_ is false");
+        MetricsDataType<T> lower_bound;
+        MetricsDataType<T> upper_bound;
+        try {
+            lower_bound = std::get<ReverseMetricsDataType<T>>(min_);
+            upper_bound = std::get<ReverseMetricsDataType<T>>(max_);
+        } catch (const std::bad_variant_access& e) {
+            return {};
+        }
+        return {lower_bound, upper_bound};
+    }
 };
 
 class SkipIndex {
@@ -78,10 +101,32 @@ class SkipIndex {
                   const bool* valid_data,
                   int64_t count);
 
+    template <typename T>
     void
     LoadString(milvus::FieldId field_id,
                int64_t chunk_id,
-               const milvus::VariableColumn<std::string>& var_column);
+               const T& var_column) {
+        int num_rows = var_column.NumRows();
+        auto chunkMetrics = std::make_unique<FieldChunkMetrics>();
+        if (num_rows > 0) {
+            auto info = ProcessStringFieldMetrics(var_column);
+            chunkMetrics->min_ = Metrics(info.min_);
+            chunkMetrics->max_ = Metrics(info.max_);
+            chunkMetrics->null_count_ = info.null_count_;
+        }
+
+        chunkMetrics->hasValue_ =
+            chunkMetrics->null_count_ == num_rows ? false : true;
+
+        std::unique_lock lck(mutex_);
+        if (fieldChunkMetrics_.count(field_id) == 0) {
+            fieldChunkMetrics_.insert(std::make_pair(
+                field_id,
+                std::unordered_map<int64_t,
+                                   std::unique_ptr<FieldChunkMetrics>>()));
+        }
+        fieldChunkMetrics_[field_id].emplace(chunk_id, std::move(chunkMetrics));
+    }
 
  private:
     const FieldChunkMetrics&
@@ -100,22 +145,6 @@ class SkipIndex {
     };
 
     template <typename T>
-    std::pair<MetricsDataType<T>, MetricsDataType<T>>
-    GetMinMax(const FieldChunkMetrics& field_chunk_metrics) const {
-        MetricsDataType<T> lower_bound;
-        MetricsDataType<T> upper_bound;
-        try {
-            lower_bound =
-                std::get<MetricsDataType<T>>(field_chunk_metrics.min_);
-            upper_bound =
-                std::get<MetricsDataType<T>>(field_chunk_metrics.max_);
-        } catch (const std::bad_variant_access&) {
-            return {};
-        }
-        return {lower_bound, upper_bound};
-    }
-
-    template <typename T>
     std::enable_if_t<SkipIndex::IsAllowedType<T>::value, bool>
     MinMaxUnaryFilter(const FieldChunkMetrics& field_chunk_metrics,
                       OpType op_type,
@@ -123,13 +152,12 @@ class SkipIndex {
         if (!field_chunk_metrics.hasValue_) {
             return false;
         }
-        std::pair<MetricsDataType<T>, MetricsDataType<T>> minMax =
-            GetMinMax<T>(field_chunk_metrics);
-        if (minMax.first == MetricsDataType<T>() ||
-            minMax.second == MetricsDataType<T>()) {
+        auto [lower_bound, upper_bound] = field_chunk_metrics.GetMinMax<T>();
+        if (lower_bound == MetricsDataType<T>() ||
+            upper_bound == MetricsDataType<T>()) {
             return false;
         }
-        return RangeShouldSkip<T>(val, minMax.first, minMax.second, op_type);
+        return RangeShouldSkip<T>(val, lower_bound, upper_bound, op_type);
     }
 
     template <typename T>
@@ -150,15 +178,12 @@ class SkipIndex {
         if (!field_chunk_metrics.hasValue_) {
             return false;
         }
-        std::pair<MetricsDataType<T>, MetricsDataType<T>> minMax =
-            GetMinMax<T>(field_chunk_metrics);
-        if (minMax.first == MetricsDataType<T>() ||
-            minMax.second == MetricsDataType<T>()) {
+        auto [lower_bound, upper_bound] = field_chunk_metrics.GetMinMax<T>();
+        if (lower_bound == MetricsDataType<T>() ||
+            upper_bound == MetricsDataType<T>()) {
             return false;
         }
         bool should_skip = false;
-        MetricsDataType<T> lower_bound = minMax.first;
-        MetricsDataType<T> upper_bound = minMax.second;
         if (lower_inclusive && upper_inclusive) {
             should_skip =
                 (lower_val > upper_bound) || (upper_val < lower_bound);
@@ -267,9 +292,9 @@ class SkipIndex {
         return {minValue, maxValue, null_count};
     }
 
-    metricInfo<std::string_view>
-    ProcessStringFieldMetrics(
-        const milvus::VariableColumn<std::string>& var_column) {
+    template <typename T>
+    metricInfo<std::string>
+    ProcessStringFieldMetrics(const T& var_column) {
         int num_rows = var_column.NumRows();
         // find first not null value
         int64_t start = 0;
@@ -281,7 +306,7 @@ class SkipIndex {
             break;
         }
         if (start > num_rows - 1) {
-            return {std::string_view(), std::string_view(), num_rows};
+            return {std::string(), std::string(), num_rows};
         }
         std::string_view min_string = var_column.RawAt(start);
         std::string_view max_string = var_column.RawAt(start);
@@ -299,7 +324,8 @@ class SkipIndex {
                 max_string = val;
             }
         }
-        return {min_string, max_string, null_count};
+        // The field data may be released, so we need to copy the string to avoid invalid memory access.
+        return {std::string(min_string), std::string(max_string), null_count};
     }
 
  private:

@@ -1,30 +1,27 @@
 package message
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestMessageHandler(t *testing.T) {
-	ch := make(chan ImmutableMessage, 100)
+	ch := make(chan ImmutableMessage, 1)
 	h := ChanMessageHandler(ch)
-	h.Handle(nil)
-	assert.Nil(t, <-ch)
-	h.Close()
-	_, ok := <-ch
+	ok, err := h.Handle(context.Background(), nil)
+	assert.NoError(t, err)
+	assert.True(t, ok)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ok, err = h.Handle(ctx, nil)
+	assert.ErrorIs(t, err, ctx.Err())
 	assert.False(t, ok)
 
-	ch = make(chan ImmutableMessage, 100)
-	hNop := NopCloseHandler{
-		Handler: ChanMessageHandler(ch),
-	}
-	hNop.Handle(nil)
 	assert.Nil(t, <-ch)
-	hNop.Close()
-	select {
-	case <-ch:
-		panic("should not be closed")
-	default:
-	}
+	h.Close()
+	_, ok = <-ch
+	assert.False(t, ok)
 }

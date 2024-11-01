@@ -23,6 +23,7 @@ package querynodev2
 #include "segcore/segment_c.h"
 #include "segcore/segcore_init_c.h"
 #include "common/init_c.h"
+#include "exec/expression/function/init_c.h"
 
 */
 import "C"
@@ -40,10 +41,12 @@ import (
 	"unsafe"
 
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
@@ -66,6 +69,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -109,8 +113,7 @@ type QueryNode struct {
 	loader segments.Loader
 
 	// Search/Query
-	scheduler       tasks.Scheduler
-	streamBatchSzie int
+	scheduler tasks.Scheduler
 
 	// etcd client
 	etcdCli *clientv3.Client
@@ -134,16 +137,19 @@ type QueryNode struct {
 	// record the last modify ts of segment/channel distribution
 	lastModifyLock lock.RWMutex
 	lastModifyTs   int64
+
+	metricsRequest *metricsinfo.MetricsRequest
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
 func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	ctx, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
-		ctx:      ctx,
-		cancel:   cancel,
-		factory:  factory,
-		lifetime: lifetime.NewLifetime(commonpb.StateCode_Abnormal),
+		ctx:            ctx,
+		cancel:         cancel,
+		factory:        factory,
+		lifetime:       lifetime.NewLifetime(commonpb.StateCode_Abnormal),
+		metricsRequest: metricsinfo.NewMetricsRequest(),
 	}
 
 	node.tSafeManager = tsafe.NewTSafeReplica()
@@ -253,6 +259,7 @@ func (node *QueryNode) InitSegcore() error {
 	}
 
 	initcore.InitTraceConfig(paramtable.Get())
+	C.InitExecExpressionFunctionFactory()
 	return nil
 }
 
@@ -271,10 +278,19 @@ func (node *QueryNode) CloseSegcore() {
 	initcore.CleanGlogManager()
 }
 
+func (node *QueryNode) registerMetricsRequest() {
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SystemInfoMetrics,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return getSystemInfoMetrics(ctx, req, node)
+		})
+	log.Info("register metrics actions finished")
+}
+
 // Init function init historical and streaming module to manage segments
 func (node *QueryNode) Init() error {
 	var initError error
 	node.initOnce.Do(func() {
+		node.registerMetricsRequest()
 		// ctx := context.Background()
 		log.Info("QueryNode session info", zap.String("metaPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
 		err := node.initSession()
@@ -316,9 +332,8 @@ func (node *QueryNode) Init() error {
 		node.scheduler = tasks.NewScheduler(
 			schedulePolicy,
 		)
-		node.streamBatchSzie = paramtable.Get().QueryNodeCfg.QueryStreamBatchSize.GetAsInt()
-		log.Info("queryNode init scheduler", zap.String("policy", schedulePolicy))
 
+		log.Info("queryNode init scheduler", zap.String("policy", schedulePolicy))
 		node.clusterManager = cluster.NewWorkerManager(func(ctx context.Context, nodeID int64) (cluster.Worker, error) {
 			if nodeID == node.GetNodeID() {
 				return NewLocalWorker(node), nil
@@ -378,8 +393,9 @@ func (node *QueryNode) Start() error {
 		growingmmapEnable := paramtable.Get().QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
 		mmapVectorIndex := paramtable.Get().QueryNodeCfg.MmapVectorIndex.GetAsBool()
 		mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
-		mmapScarlarIndex := paramtable.Get().QueryNodeCfg.MmapScalarIndex.GetAsBool()
-		mmapScarlarField := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+		mmapScalarIndex := paramtable.Get().QueryNodeCfg.MmapScalarIndex.GetAsBool()
+		mmapScalarField := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+		mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
@@ -391,8 +407,9 @@ func (node *QueryNode) Start() error {
 			zap.Bool("growingmmapEnable", growingmmapEnable),
 			zap.Bool("mmapVectorIndex", mmapVectorIndex),
 			zap.Bool("mmapVectorField", mmapVectorField),
-			zap.Bool("mmapScarlarIndex", mmapScarlarIndex),
-			zap.Bool("mmapScarlarField", mmapScarlarField),
+			zap.Bool("mmapScalarIndex", mmapScalarIndex),
+			zap.Bool("mmapScalarField", mmapScalarField),
+			zap.Bool("mmapChunkCache", mmapChunkCache),
 		)
 	})
 

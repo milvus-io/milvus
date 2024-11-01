@@ -37,6 +37,7 @@ class Base:
 
 class TestBase(Base):
     req = None
+
     def teardown_method(self):
         self.collection_client.api_key = self.api_key
         all_collections = self.collection_client.collection_list()['data']
@@ -49,10 +50,17 @@ class TestBase(Base):
                 rsp = self.collection_client.collection_drop(payload)
             except Exception as e:
                 logger.error(e)
-
-    # def setup_method(self):
-    #     self.req = Requests()
-    #     self.req.uuid = str(uuid.uuid1())
+        for item in self.collection_client.name_list:
+            db_name = item[0]
+            c_name = item[1]
+            payload = {
+                "collectionName": c_name,
+                "dbName": db_name
+            }
+            try:
+                self.collection_client.collection_drop(payload)
+            except Exception as e:
+                logger.error(e)
 
     @pytest.fixture(scope="function", autouse=True)
     def init_client(self, endpoint, token, minio_host, bucket_name, root_path):
@@ -101,7 +109,8 @@ class TestBase(Base):
         batch_size = batch_size
         batch = nb // batch_size
         remainder = nb % batch_size
-        data = []
+
+        full_data = []
         insert_ids = []
         for i in range(batch):
             nb = batch_size
@@ -116,6 +125,7 @@ class TestBase(Base):
             assert rsp['code'] == 0
             if return_insert_id:
                 insert_ids.extend(rsp['data']['insertIds'])
+            full_data.extend(data)
         # insert remainder data
         if remainder:
             nb = remainder
@@ -128,10 +138,11 @@ class TestBase(Base):
             assert rsp['code'] == 0
             if return_insert_id:
                 insert_ids.extend(rsp['data']['insertIds'])
+            full_data.extend(data)
         if return_insert_id:
-            return schema_payload, data, insert_ids
+            return schema_payload, full_data, insert_ids
 
-        return schema_payload, data
+        return schema_payload, full_data
 
     def wait_collection_load_completed(self, name):
         t0 = time.time()
@@ -159,3 +170,6 @@ class TestBase(Base):
         self.collection_client.db_name = db_name
         self.vector_client.db_name = db_name
         self.import_job_client.db_name = db_name
+
+
+

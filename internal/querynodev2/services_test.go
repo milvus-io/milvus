@@ -94,7 +94,7 @@ func (suite *ServiceSuite) SetupSuite() {
 	// collection and segments data
 	// init param
 	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GCEnabled.Key, "false")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.GCEnabled.Key, "false")
 
 	suite.rootPath = suite.T().Name()
 	suite.collectionID = 111
@@ -124,6 +124,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.factory = dependency.NewMockFactory(suite.T())
 	suite.msgStream = msgstream.NewMockMsgStream(suite.T())
 	// TODO:: cpp chunk manager not support local chunk manager
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, suite.T().TempDir())
 	// suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus-test"))
 	suite.chunkManagerFactory = storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.factory.EXPECT().Init(mock.Anything).Return()
@@ -168,9 +169,10 @@ func (suite *ServiceSuite) TearDownTest() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-	suite.node.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
+	suite.node.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
 	suite.node.Stop()
 	suite.etcdClient.Close()
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
 }
 
 func (suite *ServiceSuite) TestGetComponentStatesNormal() {
@@ -1157,7 +1159,7 @@ func (suite *ServiceSuite) TestGetSegmentInfo_Failed() {
 }
 
 // Test Search
-func (suite *ServiceSuite) genCSearchRequest(nq int64, dataType schemapb.DataType, fieldID int64, metricType string) (*internalpb.SearchRequest, error) {
+func (suite *ServiceSuite) genCSearchRequest(nq int64, dataType schemapb.DataType, fieldID int64, metricType string, isTopkReduce bool) (*internalpb.SearchRequest, error) {
 	placeHolder, err := genPlaceHolderGroup(nq)
 	if err != nil {
 		return nil, err
@@ -1181,6 +1183,7 @@ func (suite *ServiceSuite) genCSearchRequest(nq int64, dataType schemapb.DataTyp
 		DslType:            commonpb.DslType_BoolExprV1,
 		Nq:                 nq,
 		MvccTimestamp:      typeutil.MaxTimestamp,
+		IsTopkReduce:       isTopkReduce,
 	}, nil
 }
 
@@ -1190,7 +1193,7 @@ func (suite *ServiceSuite) TestSearch_Normal() {
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
 
-	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType)
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false)
 	req := &querypb.SearchRequest{
 		Req: creq,
 
@@ -1214,7 +1217,7 @@ func (suite *ServiceSuite) TestSearch_Concurrent() {
 	futures := make([]*conc.Future[*internalpb.SearchResults], 0, concurrency)
 	for i := 0; i < concurrency; i++ {
 		future := conc.Go(func() (*internalpb.SearchResults, error) {
-			creq, err := suite.genCSearchRequest(30, schemapb.DataType_FloatVector, 107, defaultMetricType)
+			creq, err := suite.genCSearchRequest(30, schemapb.DataType_FloatVector, 107, defaultMetricType, false)
 			req := &querypb.SearchRequest{
 				Req: creq,
 
@@ -1240,7 +1243,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 
 	// data
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
-	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, "invalidMetricType")
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, "invalidMetricType", false)
 	req := &querypb.SearchRequest{
 		Req: creq,
 
@@ -1319,6 +1322,7 @@ func (suite *ServiceSuite) TestSearchSegments_Unhealthy() {
 
 	rsp, err := suite.node.SearchSegments(ctx, req)
 	suite.NoError(err)
+	suite.Equal(false, rsp.GetIsTopkReduce())
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, rsp.GetStatus().GetErrorCode())
 	suite.Equal(merr.Code(merr.ErrServiceNotReady), rsp.GetStatus().GetCode())
 }
@@ -1338,6 +1342,7 @@ func (suite *ServiceSuite) TestSearchSegments_Failed() {
 
 	rsp, err := suite.node.SearchSegments(ctx, req)
 	suite.NoError(err)
+	suite.Equal(false, rsp.GetIsTopkReduce())
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, rsp.GetStatus().GetErrorCode())
 	suite.Equal(merr.Code(merr.ErrCollectionNotLoaded), rsp.GetStatus().GetCode())
 
@@ -1358,7 +1363,7 @@ func (suite *ServiceSuite) TestSearchSegments_Normal() {
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
 
-	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType)
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false)
 	req := &querypb.SearchRequest{
 		Req: creq,
 
@@ -1369,6 +1374,14 @@ func (suite *ServiceSuite) TestSearchSegments_Normal() {
 
 	rsp, err := suite.node.SearchSegments(ctx, req)
 	suite.NoError(err)
+	suite.Equal(rsp.GetIsTopkReduce(), false)
+	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
+
+	req.Req, err = suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, true)
+	suite.NoError(err)
+	rsp, err = suite.node.SearchSegments(ctx, req)
+	suite.NoError(err)
+	suite.Equal(rsp.GetIsTopkReduce(), true)
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 }
 
@@ -1378,7 +1391,7 @@ func (suite *ServiceSuite) TestStreamingSearch() {
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.UseStreamComputing.Key, "true")
-	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType)
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false)
 	req := &querypb.SearchRequest{
 		Req:             creq,
 		FromShardLeader: true,
@@ -1391,6 +1404,7 @@ func (suite *ServiceSuite) TestStreamingSearch() {
 
 	rsp, err := suite.node.SearchSegments(ctx, req)
 	suite.NoError(err)
+	suite.Equal(false, rsp.GetIsTopkReduce())
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 }
 
@@ -1399,7 +1413,7 @@ func (suite *ServiceSuite) TestStreamingSearchGrowing() {
 	// pre
 	suite.TestWatchDmChannelsInt64()
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.UseStreamComputing.Key, "true")
-	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType)
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false)
 	req := &querypb.SearchRequest{
 		Req:             creq,
 		FromShardLeader: true,
@@ -1736,22 +1750,37 @@ func (suite *ServiceSuite) TestShowConfigurations_Failed() {
 
 func (suite *ServiceSuite) TestGetMetric_Normal() {
 	ctx := context.Background()
-	metricReq := make(map[string]string)
-	metricReq[metricsinfo.MetricTypeKey] = metricsinfo.SystemInfoMetrics
-	mReq, err := json.Marshal(metricReq)
+	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	suite.NoError(err)
 
-	req := &milvuspb.GetMetricsRequest{
-		Base: &commonpb.MsgBase{
-			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
-		},
-		Request: string(mReq),
-	}
+	sd1 := delegator.NewMockShardDelegator(suite.T())
+	sd1.EXPECT().Collection().Return(100)
+	sd1.EXPECT().GetDeleteBufferSize().Return(10, 1000)
+	sd1.EXPECT().Close().Maybe()
+	suite.node.delegators.Insert("qn_unitest_dml_0_100v0", sd1)
+	defer suite.node.delegators.GetAndRemove("qn_unitest_dml_0_100v0")
+
+	sd2 := delegator.NewMockShardDelegator(suite.T())
+	sd2.EXPECT().Collection().Return(100)
+	sd2.EXPECT().GetDeleteBufferSize().Return(10, 1000)
+	sd2.EXPECT().Close().Maybe()
+	suite.node.delegators.Insert("qn_unitest_dml_1_100v1", sd2)
+	defer suite.node.delegators.GetAndRemove("qn_unitest_dml_1_100v1")
 
 	resp, err := suite.node.GetMetrics(ctx, req)
+	err = merr.CheckRPCCall(resp, err)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+	info := &metricsinfo.QueryNodeInfos{}
+	err = metricsinfo.UnmarshalComponentInfos(resp.GetResponse(), info)
+	suite.NoError(err)
+
+	entryNum, ok := info.QuotaMetrics.DeleteBufferInfo.CollectionDeleteBufferNum[100]
+	suite.True(ok)
+	suite.EqualValues(20, entryNum)
+	memorySize, ok := info.QuotaMetrics.DeleteBufferInfo.CollectionDeleteBufferSize[100]
+	suite.True(ok)
+	suite.EqualValues(2000, memorySize)
 }
 
 func (suite *ServiceSuite) TestGetMetric_Failed() {
@@ -1773,7 +1802,7 @@ func (suite *ServiceSuite) TestGetMetric_Failed() {
 	resp, err := suite.node.GetMetrics(ctx, req)
 	suite.NoError(err)
 	err = merr.Error(resp.GetStatus())
-	suite.ErrorIs(err, merr.ErrMetricNotFound)
+	suite.Contains(err.Error(), metricsinfo.MsgUnimplementedMetric)
 
 	// metric parse failed
 	req.Request = "---"
@@ -1894,6 +1923,7 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 			return nil
 		})
 	suite.node.delegators.Insert(testChannel, mockDelegator)
+	defer suite.node.delegators.GetAndRemove(testChannel)
 
 	status, err = suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)

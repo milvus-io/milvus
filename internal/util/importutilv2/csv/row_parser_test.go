@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package csv
 
 import (
@@ -51,9 +67,11 @@ func TestNewRowParser_Invalid(t *testing.T) {
 		{header: []string{"id", "vector", "$meta"}, expectErr: "value of field is missed: 'str'"},
 	}
 
+	nullkey := ""
+
 	for i, c := range cases {
 		t.Run(fmt.Sprintf("test_%d", i), func(t *testing.T) {
-			_, err := NewRowParser(schema, c.header)
+			_, err := NewRowParser(schema, c.header, nullkey)
 			assert.Error(t, err)
 			assert.True(t, strings.Contains(err.Error(), c.expectErr))
 		})
@@ -98,8 +116,10 @@ func TestRowParser_Parse_Valid(t *testing.T) {
 		{header: []string{"id", "vector", "str", "$meta"}, row: []string{"1", "[1, 2]", "xxsddsffwq", "{\"y\": 2}"}, dyFields: map[string]any{"y": 2.0, "str": "xxsddsffwq"}},
 	}
 
+	nullkey := ""
+
 	for i, c := range cases {
-		r, err := NewRowParser(schema, c.header)
+		r, err := NewRowParser(schema, c.header, nullkey)
 		assert.NoError(t, err)
 		t.Run(fmt.Sprintf("test_%d", i), func(t *testing.T) {
 			data, err := r.Parse(c.row)
@@ -161,13 +181,70 @@ func TestRowParser_Parse_Invalid(t *testing.T) {
 		{header: []string{"id", "vector", "x", "$meta"}, row: []string{"1", "[1, 2]", "8"}, expectErr: "the number of fields in the row is not equal to the header"},
 	}
 
+	nullkey := ""
+
 	for i, c := range cases {
-		r, err := NewRowParser(schema, c.header)
+		r, err := NewRowParser(schema, c.header, nullkey)
 		assert.NoError(t, err)
 		t.Run(fmt.Sprintf("test_%d", i), func(t *testing.T) {
 			_, err := r.Parse(c.row)
 			assert.Error(t, err)
 			assert.True(t, strings.Contains(err.Error(), c.expectErr))
+		})
+	}
+}
+
+func TestRowParser_Parse_NULL(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      1,
+				Name:         "id",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:    2,
+				Name:       "vector",
+				DataType:   schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+			},
+			{
+				FieldID:  3,
+				Name:     "str",
+				DataType: schemapb.DataType_String,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.MaxLengthKey,
+						Value: "128",
+					},
+				},
+				Nullable: true,
+			},
+		},
+	}
+
+	header := []string{"id", "vector", "str"}
+
+	type testCase struct {
+		nullkey  string
+		row      []string
+		nulldata interface{}
+	}
+
+	cases := []testCase{
+		{nullkey: "", row: []string{"1", "[1, 2]", ""}, nulldata: nil},
+		{nullkey: "NULL", row: []string{"1", "[1, 2]", "NULL"}, nulldata: nil},
+		{nullkey: "\\N", row: []string{"1", "[1, 2]", "\\N"}, nulldata: nil},
+	}
+
+	for i, c := range cases {
+		r, err := NewRowParser(schema, header, c.nullkey)
+		assert.NoError(t, err)
+		t.Run(fmt.Sprintf("test_%d", i), func(t *testing.T) {
+			data, err := r.Parse(c.row)
+			assert.NoError(t, err)
+			assert.EqualValues(t, c.nulldata, data[3])
 		})
 	}
 }

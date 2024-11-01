@@ -29,27 +29,29 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, error) {
+func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, [][]bool, error) {
 	rowsSet := make([]any, 0)
+	validDataRowsSet := make([][]bool, 0)
 	for {
 		event, err := reader.NextEventReader()
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to iterate events reader, error: %v", err))
+			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to iterate events reader, error: %v", err))
 		}
 		if event == nil {
 			break // end of the file
 		}
 		if event.TypeCode != et {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("wrong binlog type, expect:%s, actual:%s",
+			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("wrong binlog type, expect:%s, actual:%s",
 				et.String(), event.TypeCode.String()))
 		}
-		rows, _, _, err := event.PayloadReaderInterface.GetDataFromPayload()
+		rows, validDataRows, _, err := event.PayloadReaderInterface.GetDataFromPayload()
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read data, error: %v", err))
+			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read data, error: %v", err))
 		}
 		rowsSet = append(rowsSet, rows)
+		validDataRowsSet = append(validDataRowsSet, validDataRows)
 	}
-	return rowsSet, nil
+	return rowsSet, validDataRowsSet, nil
 }
 
 func newBinlogReader(ctx context.Context, cm storage.ChunkManager, path string) (*storage.BinlogReader, error) {
@@ -112,5 +114,6 @@ func verify(schema *schemapb.CollectionSchema, insertLogs map[int64][]string) er
 				fieldID, len(logs), common.RowIDField, len(insertLogs[common.RowIDField])))
 		}
 	}
+	// for Function output field, we do not re-run the Function when restoring from a backup.
 	return nil
 }

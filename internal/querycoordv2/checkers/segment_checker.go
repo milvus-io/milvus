@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
 const initialTargetVersion = int64(0)
@@ -103,6 +104,22 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	task.SetReason("collection released", reduceTasks...)
 	task.SetPriority(task.TaskPriorityNormal, reduceTasks...)
 	results = append(results, reduceTasks...)
+
+	// clean node which has been move out from replica
+	for _, nodeInfo := range c.nodeMgr.GetAll() {
+		nodeID := nodeInfo.ID()
+		segmentsOnQN := c.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(nodeID))
+		collectionSegments := lo.GroupBy(segmentsOnQN, func(segment *meta.Segment) int64 { return segment.GetCollectionID() })
+		for collectionID, segments := range collectionSegments {
+			replica := c.meta.ReplicaManager.GetByCollectionAndNode(collectionID, nodeID)
+			if replica == nil {
+				reduceTasks := c.createSegmentReduceTasks(ctx, segments, meta.NilReplica, querypb.DataScope_Historical)
+				task.SetReason("dirty segment exists", reduceTasks...)
+				task.SetPriority(task.TaskPriorityNormal, reduceTasks...)
+				results = append(results, reduceTasks...)
+			}
+		}
+	}
 
 	return results
 }
@@ -176,16 +193,23 @@ func (c *SegmentChecker) getGrowingSegmentDiff(collectionID int64,
 			continue
 		}
 
+		nextTargetExist := c.targetMgr.IsNextTargetExist(collectionID)
 		nextTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(collectionID, meta.NextTarget)
 		currentTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(collectionID, meta.CurrentTarget)
 		currentTargetChannelMap := c.targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
 
 		// get segment which exist on leader view, but not on current target and next target
 		for _, segment := range view.GrowingSegments {
-			if !currentTargetSegmentIDs.Contain(segment.GetID()) && !nextTargetSegmentIDs.Contain(segment.GetID()) {
+			if !currentTargetSegmentIDs.Contain(segment.GetID()) && nextTargetExist && !nextTargetSegmentIDs.Contain(segment.GetID()) {
 				if channel, ok := currentTargetChannelMap[segment.InsertChannel]; ok {
 					timestampInSegment := segment.GetStartPosition().GetTimestamp()
 					timestampInTarget := channel.GetSeekPosition().GetTimestamp()
+					// release growing segment if in dropped segment list
+					if funcutil.SliceContain(channel.GetDroppedSegmentIds(), segment.GetID()) {
+						log.Info("growing segment exists in dropped segment list, release it", zap.Int64("segmentID", segment.GetID()))
+						toRelease = append(toRelease, segment)
+						continue
+					}
 					// filter toRelease which seekPosition is newer than next target dmChannel
 					if timestampInSegment < timestampInTarget {
 						log.Info("growing segment not exist in target, so release it",
@@ -254,6 +278,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		return !existInDist
 	}
 
+	nextTargetExist := c.targetMgr.IsNextTargetExist(collectionID)
 	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(collectionID, meta.NextTarget)
 	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(collectionID, meta.CurrentTarget)
 
@@ -282,7 +307,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		_, existOnNext := nextTargetMap[segment.GetID()]
 
 		// l0 segment should be release with channel together
-		if !existOnNext && !existOnCurrent {
+		if !existOnNext && nextTargetExist && !existOnCurrent {
 			toRelease = append(toRelease, segment)
 		}
 	}

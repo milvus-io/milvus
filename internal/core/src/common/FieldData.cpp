@@ -69,7 +69,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     ssize_t byte_count = (element_count + 7) / 8;
     // Note: if 'nullable == true` and valid_data is nullptr
     // means null_count == 0, will fill it with 0xFF
-    if (!valid_data) {
+    if (valid_data == nullptr) {
         valid_data_.assign(byte_count, 0xFF);
     } else {
         std::copy_n(valid_data, byte_count, valid_data_.data());
@@ -100,7 +100,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     if (element_count == 0) {
         return;
     }
-    null_count = array->null_count();
+    null_count_ = array->null_count();
     switch (data_type_) {
         case DataType::BOOL: {
             AssertInfo(array->type()->id() == arrow::Type::type::BOOL,
@@ -195,6 +195,8 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(values.data(), element_count);
         }
         case DataType::JSON: {
+            // The code here is not referenced.
+            // A subclass named FieldDataJsonImpl is implemented, which overloads this function.
             AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
                        "inconsistent data type");
             auto json_array =

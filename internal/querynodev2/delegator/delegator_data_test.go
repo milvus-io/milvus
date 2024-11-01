@@ -26,14 +26,19 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/pingcap/log"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -42,10 +47,12 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
@@ -95,13 +102,7 @@ func (s *DelegatorDataSuite) TearDownSuite() {
 	paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key)
 }
 
-func (s *DelegatorDataSuite) SetupTest() {
-	s.workerManager = &cluster.MockManager{}
-	s.manager = segments.NewManager()
-	s.tsafeManager = tsafe.NewTSafeReplica()
-	s.loader = &segments.MockLoader{}
-
-	// init schema
+func (s *DelegatorDataSuite) genNormalCollection() {
 	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 		Name: "TestCollection",
 		Fields: []*schemapb.FieldSchema{
@@ -154,7 +155,59 @@ func (s *DelegatorDataSuite) SetupTest() {
 		LoadType:     querypb.LoadType_LoadCollection,
 		PartitionIDs: []int64{1001, 1002},
 	})
+}
 
+func (s *DelegatorDataSuite) genCollectionWithFunction() {
+	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		Name: "TestCollection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:         "id",
+				FieldID:      100,
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+				AutoID:       true,
+			}, {
+				Name:         "vector",
+				FieldID:      101,
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_SparseFloatVector,
+			}, {
+				Name:     "text",
+				FieldID:  102,
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.MaxLengthKey,
+						Value: "256",
+					},
+				},
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{102},
+			OutputFieldIds: []int64{101},
+		}},
+	}, nil, nil)
+
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
+		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
+			return s.mq, nil
+		},
+	}, 10000, nil, s.chunkManager)
+	s.NoError(err)
+	s.delegator = delegator.(*shardDelegator)
+}
+
+func (s *DelegatorDataSuite) SetupTest() {
+	s.workerManager = &cluster.MockManager{}
+	s.manager = segments.NewManager()
+	s.tsafeManager = tsafe.NewTSafeReplica()
+	s.loader = &segments.MockLoader{}
+
+	// init schema
+	s.genNormalCollection()
 	s.mq = &msgstream.MockMsgStream{}
 	s.rootPath = s.Suite.T().Name()
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
@@ -469,6 +522,127 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	}, 10)
 	s.Require().NoError(err)
 	s.False(s.delegator.distribution.Serviceable())
+}
+
+func (s *DelegatorDataSuite) TestLoadGrowingWithBM25() {
+	s.genCollectionWithFunction()
+	mockSegment := segments.NewMockSegment(s.T())
+	s.loader.EXPECT().Load(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]segments.Segment{mockSegment}, nil)
+
+	mockSegment.EXPECT().Partition().Return(111)
+	mockSegment.EXPECT().ID().Return(111)
+	mockSegment.EXPECT().Type().Return(commonpb.SegmentState_Growing)
+	mockSegment.EXPECT().GetBM25Stats().Return(map[int64]*storage.BM25Stats{})
+
+	err := s.delegator.LoadGrowing(context.Background(), []*querypb.SegmentLoadInfo{{SegmentID: 1}}, 1)
+	s.NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
+	s.genCollectionWithFunction()
+	s.Run("normal_run", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			s.loader.ExpectedCalls = nil
+		}()
+
+		statsMap := typeutil.NewConcurrentMap[int64, map[int64]*storage.BM25Stats]()
+		stats := storage.NewBM25Stats()
+		stats.Append(map[uint32]float32{1: 1})
+
+		statsMap.Insert(1, map[int64]*storage.BM25Stats{101: stats})
+
+		s.loader.EXPECT().LoadBM25Stats(mock.Anything, s.collectionID, mock.Anything).Return(statsMap, nil)
+		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.AnythingOfType("int64"), mock.Anything).
+			Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+				return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+			})
+		}, func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) error {
+			return nil
+		})
+
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		workers[1] = worker1
+
+		worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+			Return(nil)
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:     100,
+					PartitionID:   500,
+					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				},
+			},
+		})
+
+		s.NoError(err)
+		sealed, _ := s.delegator.GetSegmentInfo(false)
+		s.Require().Equal(1, len(sealed))
+		s.Equal(int64(1), sealed[0].NodeID)
+		s.ElementsMatch([]SegmentEntry{
+			{
+				SegmentID:     100,
+				NodeID:        1,
+				PartitionID:   500,
+				TargetVersion: unreadableTargetVersion,
+				Level:         datapb.SegmentLevel_L1,
+			},
+		}, sealed[0].Segments)
+	})
+
+	s.Run("loadBM25_failed", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			s.loader.ExpectedCalls = nil
+		}()
+
+		s.loader.EXPECT().LoadBM25Stats(mock.Anything, s.collectionID, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		workers[1] = worker1
+
+		worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+			Return(nil)
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:     100,
+					PartitionID:   500,
+					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				},
+			},
+		})
+
+		s.Error(err)
+	})
 }
 
 func (s *DelegatorDataSuite) TestLoadSegments() {
@@ -883,6 +1057,214 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
+func (s *DelegatorDataSuite) TestBuildBM25IDF() {
+	s.genCollectionWithFunction()
+
+	genBM25Stats := func(start uint32, end uint32) map[int64]*storage.BM25Stats {
+		result := make(map[int64]*storage.BM25Stats)
+		result[101] = storage.NewBM25Stats()
+		for i := start; i < end; i++ {
+			row := map[uint32]float32{i: 1}
+			result[101].Append(row)
+		}
+		return result
+	}
+
+	genSnapShot := func(seals, grows []int64, targetVersion int64) *snapshot {
+		snapshot := &snapshot{
+			dist:          []SnapshotItem{{1, make([]SegmentEntry, 0)}},
+			targetVersion: targetVersion,
+		}
+
+		newSeal := []SegmentEntry{}
+		for _, seg := range seals {
+			newSeal = append(newSeal, SegmentEntry{NodeID: 1, SegmentID: seg, TargetVersion: targetVersion})
+		}
+
+		newGrow := []SegmentEntry{}
+		for _, seg := range grows {
+			newGrow = append(newGrow, SegmentEntry{NodeID: 1, SegmentID: seg, TargetVersion: targetVersion})
+		}
+
+		log.Info("Test-", zap.Any("shanshot", snapshot), zap.Any("seg", newSeal))
+		snapshot.dist[0].Segments = newSeal
+		snapshot.growing = newGrow
+		return snapshot
+	}
+
+	genStringFieldData := func(strs ...string) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			Type:    schemapb.DataType_VarChar,
+			FieldId: 102,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: strs,
+						},
+					},
+				},
+			},
+		}
+	}
+
+	s.Run("normal case", func() {
+		// register sealed
+		sealedSegs := []int64{1, 2, 3, 4}
+		for _, segID := range sealedSegs {
+			// every segment stats only has one token, avgdl = 1
+			s.delegator.idfOracle.Register(segID, genBM25Stats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
+		}
+		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
+
+		s.delegator.idfOracle.SyncDistribution(snapshot)
+		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
+		s.NoError(err)
+
+		plan, err := proto.Marshal(&planpb.PlanNode{
+			Node: &planpb.PlanNode_VectorAnns{
+				VectorAnns: &planpb.VectorANNS{
+					QueryInfo: &planpb.QueryInfo{},
+				},
+			},
+		})
+		s.NoError(err)
+
+		req := &internalpb.SearchRequest{
+			PlaceholderGroup:   placeholderGroupBytes,
+			SerializedExprPlan: plan,
+			FieldId:            101,
+		}
+		avgdl, err := s.delegator.buildBM25IDF(req)
+		s.NoError(err)
+		s.Equal(float64(1), avgdl)
+
+		// check avgdl in plan
+		newplan := &planpb.PlanNode{}
+		err = proto.Unmarshal(req.GetSerializedExprPlan(), newplan)
+		s.NoError(err)
+
+		annplan, ok := newplan.GetNode().(*planpb.PlanNode_VectorAnns)
+		s.Require().True(ok)
+		s.Equal(avgdl, annplan.VectorAnns.QueryInfo.Bm25Avgdl)
+
+		// check idf in placeholder
+		placeholder := &commonpb.PlaceholderGroup{}
+		err = proto.Unmarshal(req.GetPlaceholderGroup(), placeholder)
+		s.Require().NoError(err)
+		s.Equal(placeholder.GetPlaceholders()[0].GetType(), commonpb.PlaceholderType_SparseFloatVector)
+	})
+
+	s.Run("invalid place holder type error", func() {
+		placeholderGroupBytes, err := proto.Marshal(&commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{{Type: commonpb.PlaceholderType_SparseFloatVector}},
+		})
+		s.NoError(err)
+
+		req := &internalpb.SearchRequest{
+			PlaceholderGroup: placeholderGroupBytes,
+			FieldId:          101,
+		}
+		_, err = s.delegator.buildBM25IDF(req)
+		s.Error(err)
+	})
+
+	s.Run("no function runner error", func() {
+		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
+		s.NoError(err)
+
+		req := &internalpb.SearchRequest{
+			PlaceholderGroup: placeholderGroupBytes,
+			FieldId:          103, // invalid field id
+		}
+
+		_, err = s.delegator.buildBM25IDF(req)
+		s.Error(err)
+	})
+
+	s.Run("function runner run failed error", func() {
+		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
+		s.NoError(err)
+
+		oldRunner := s.delegator.functionRunners
+		mockRunner := function.NewMockFunctionRunner(s.T())
+		s.delegator.functionRunners = map[int64]function.FunctionRunner{101: mockRunner}
+		mockRunner.EXPECT().BatchRun(mock.Anything).Return(nil, fmt.Errorf("mock err"))
+		defer func() {
+			s.delegator.functionRunners = oldRunner
+		}()
+
+		req := &internalpb.SearchRequest{
+			PlaceholderGroup: placeholderGroupBytes,
+			FieldId:          101,
+		}
+		_, err = s.delegator.buildBM25IDF(req)
+		s.Error(err)
+	})
+
+	s.Run("function runner output type error", func() {
+		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
+		s.NoError(err)
+
+		oldRunner := s.delegator.functionRunners
+		mockRunner := function.NewMockFunctionRunner(s.T())
+		s.delegator.functionRunners = map[int64]function.FunctionRunner{101: mockRunner}
+		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{1}, nil)
+		defer func() {
+			s.delegator.functionRunners = oldRunner
+		}()
+
+		req := &internalpb.SearchRequest{
+			PlaceholderGroup: placeholderGroupBytes,
+			FieldId:          101,
+		}
+		_, err = s.delegator.buildBM25IDF(req)
+		s.Error(err)
+	})
+
+	s.Run("idf oracle build idf error", func() {
+		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
+		s.NoError(err)
+
+		oldRunner := s.delegator.functionRunners
+		mockRunner := function.NewMockFunctionRunner(s.T())
+		s.delegator.functionRunners = map[int64]function.FunctionRunner{103: mockRunner}
+		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{&schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1})}}}, nil)
+		defer func() {
+			s.delegator.functionRunners = oldRunner
+		}()
+
+		req := &internalpb.SearchRequest{
+			PlaceholderGroup: placeholderGroupBytes,
+			FieldId:          103, // invalid field
+		}
+		_, err = s.delegator.buildBM25IDF(req)
+		s.Error(err)
+		log.Info("test", zap.Error(err))
+	})
+
+	s.Run("set avgdl failed", func() {
+		// register sealed
+		sealedSegs := []int64{1, 2, 3, 4}
+		for _, segID := range sealedSegs {
+			// every segment stats only has one token, avgdl = 1
+			s.delegator.idfOracle.Register(segID, genBM25Stats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
+		}
+		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
+
+		s.delegator.idfOracle.SyncDistribution(snapshot)
+		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
+		s.NoError(err)
+
+		req := &internalpb.SearchRequest{
+			PlaceholderGroup: placeholderGroupBytes,
+			FieldId:          101,
+		}
+		_, err = s.delegator.buildBM25IDF(req)
+		s.Error(err)
+	})
+}
+
 func (s *DelegatorDataSuite) TestReleaseSegment() {
 	s.loader.EXPECT().
 		Load(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything).
@@ -1127,8 +1509,15 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	delegator := s.delegator
 	partitionID := int64(10)
-	partitionDeleteData := storage.NewDeleteData([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1)}, []storage.Timestamp{100})
-	allPartitionDeleteData := storage.NewDeleteData([]storage.PrimaryKey{storage.NewInt64PrimaryKey(2)}, []storage.Timestamp{101})
+	partitionDeleteData, err := storage.NewDeltaDataWithPkType(1, schemapb.DataType_Int64)
+	s.Require().NoError(err)
+	err = partitionDeleteData.Append(storage.NewInt64PrimaryKey(1), 100)
+	s.Require().NoError(err)
+
+	allPartitionDeleteData, err := storage.NewDeltaDataWithPkType(1, schemapb.DataType_Int64)
+	s.Require().NoError(err)
+	err = allPartitionDeleteData.Append(storage.NewInt64PrimaryKey(2), 101)
+	s.Require().NoError(err)
 
 	schema := segments.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64, true)
 	collection := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
@@ -1157,29 +1546,29 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	l0Global.LoadDeltaData(context.TODO(), allPartitionDeleteData)
 
 	pks, _ := delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
-	s.True(pks[0].EQ(partitionDeleteData.Pks[0]))
+	s.True(pks[0].EQ(partitionDeleteData.DeletePks().Get(0)))
 
 	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.Empty(pks)
 
 	delegator.segmentManager.Put(context.TODO(), segments.SegmentTypeSealed, l0Global)
 	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
-	s.ElementsMatch(pks, []storage.PrimaryKey{partitionDeleteData.Pks[0], allPartitionDeleteData.Pks[0]})
+	s.ElementsMatch(pks, []storage.PrimaryKey{partitionDeleteData.DeletePks().Get(0), allPartitionDeleteData.DeletePks().Get(0)})
 
 	bfs := pkoracle.NewBloomFilterSet(3, l0.Partition(), commonpb.SegmentState_Sealed)
-	bfs.UpdateBloomFilter(allPartitionDeleteData.Pks)
+	bfs.UpdateBloomFilter([]storage.PrimaryKey{allPartitionDeleteData.DeletePks().Get(0)})
 
 	pks, _ = delegator.GetLevel0Deletions(partitionID, bfs)
 	// bf filtered segment
 	s.Equal(len(pks), 1)
-	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
+	s.True(pks[0].EQ(allPartitionDeleteData.DeletePks().Get(0)))
 
 	delegator.segmentManager.Remove(context.TODO(), l0.ID(), querypb.DataScope_All)
 	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
-	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
+	s.True(pks[0].EQ(allPartitionDeleteData.DeletePks().Get(0)))
 
 	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
-	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
+	s.True(pks[0].EQ(allPartitionDeleteData.DeletePks().Get(0)))
 
 	delegator.segmentManager.Remove(context.TODO(), l0Global.ID(), querypb.DataScope_All)
 	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))

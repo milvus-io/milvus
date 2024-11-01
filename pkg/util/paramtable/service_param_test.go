@@ -96,7 +96,7 @@ func TestServiceParam(t *testing.T) {
 		{
 			assert.NotEqual(t, SParams.PulsarCfg.Address.GetValue(), "")
 			t.Logf("pulsar address = %s", SParams.PulsarCfg.Address.GetValue())
-			assert.Equal(t, SParams.PulsarCfg.MaxMessageSize.GetAsInt(), SuggestPulsarMaxMessageSize)
+			assert.Equal(t, SParams.PulsarCfg.MaxMessageSize.GetAsInt(), 2097152)
 		}
 
 		address := "pulsar://localhost:6650"
@@ -170,7 +170,7 @@ func TestServiceParam(t *testing.T) {
 			kc := &KafkaConfig{}
 			base := &BaseTable{mgr: config.NewManager()}
 			kc.Init(base)
-			assert.Empty(t, kc.Address.GetValue())
+			assert.Equal(t, "localhost:9092", kc.Address.GetValue())
 			assert.Empty(t, kc.SaslMechanisms.GetValue())
 			assert.Empty(t, kc.SecurityProtocol.GetValue())
 			assert.Equal(t, kc.ReadTimeout.GetAsDuration(time.Second), 10*time.Second)
@@ -203,6 +203,8 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, Params.CloudProvider.GetValue(), "aws")
 
 		assert.Equal(t, Params.IAMEndpoint.GetValue(), "")
+
+		assert.Equal(t, Params.GcpCredentialJSON.GetValue(), "")
 
 		t.Logf("Minio BucketName = %s", Params.BucketName.GetValue())
 

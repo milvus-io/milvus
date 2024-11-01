@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/metadata"
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -47,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -274,6 +275,10 @@ func validateFieldName(fieldName string) error {
 			msg := invalidMsg + "Field name can only contain numbers, letters, and underscores."
 			return merr.WrapErrFieldNameInvalid(fieldName, msg)
 		}
+	}
+	if _, ok := common.FieldNameKeywords[fieldName]; ok {
+		msg := invalidMsg + fmt.Sprintf("%s is keyword in milvus.", fieldName)
+		return merr.WrapErrFieldNameInvalid(fieldName, msg)
 	}
 	return nil
 }
@@ -609,6 +614,148 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
+func validateFunction(coll *schemapb.CollectionSchema) error {
+	nameMap := lo.SliceToMap(coll.GetFields(), func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
+		return field.GetName(), field
+	})
+	usedOutputField := typeutil.NewSet[string]()
+	usedFunctionName := typeutil.NewSet[string]()
+
+	for _, function := range coll.GetFunctions() {
+		if err := checkFunctionBasicParams(function); err != nil {
+			return err
+		}
+
+		if usedFunctionName.Contain(function.GetName()) {
+			return fmt.Errorf("duplicate function name: %s", function.GetName())
+		}
+
+		usedFunctionName.Insert(function.GetName())
+		inputFields := []*schemapb.FieldSchema{}
+		for _, name := range function.GetInputFieldNames() {
+			inputField, ok := nameMap[name]
+			if !ok {
+				return fmt.Errorf("function input field not found: %s", name)
+			}
+			if inputField.GetNullable() {
+				return fmt.Errorf("function input field cannot be nullable: function %s, field %s", function.GetName(), inputField.GetName())
+			}
+			inputFields = append(inputFields, inputField)
+		}
+
+		if err := checkFunctionInputField(function, inputFields); err != nil {
+			return err
+		}
+
+		outputFields := make([]*schemapb.FieldSchema, len(function.GetOutputFieldNames()))
+		for i, name := range function.GetOutputFieldNames() {
+			outputField, ok := nameMap[name]
+			if !ok {
+				return fmt.Errorf("function output field not found: %s", name)
+			}
+
+			if outputField.GetIsPrimaryKey() {
+				return fmt.Errorf("function output field cannot be primary key: function %s, field %s", function.GetName(), outputField.GetName())
+			}
+
+			if outputField.GetIsPartitionKey() || outputField.GetIsClusteringKey() {
+				return fmt.Errorf("function output field cannot be partition key or clustering key: function %s, field %s", function.GetName(), outputField.GetName())
+			}
+
+			if outputField.GetNullable() {
+				return fmt.Errorf("function output field cannot be nullable: function %s, field %s", function.GetName(), outputField.GetName())
+			}
+
+			outputField.IsFunctionOutput = true
+			outputFields[i] = outputField
+			if usedOutputField.Contain(name) {
+				return fmt.Errorf("duplicate function output field: function %s, field %s", function.GetName(), name)
+			}
+			usedOutputField.Insert(name)
+		}
+
+		if err := checkFunctionOutputField(function, outputFields); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
+	switch function.GetType() {
+	case schemapb.FunctionType_BM25:
+		if len(fields) != 1 {
+			return fmt.Errorf("BM25 function only need 1 output field, but got %d", len(fields))
+		}
+
+		if !typeutil.IsSparseFloatVectorType(fields[0].GetDataType()) {
+			return fmt.Errorf("BM25 function output field must be a SparseFloatVector field, but got %s", fields[0].DataType.String())
+		}
+	default:
+		return fmt.Errorf("check output field for unknown function type")
+	}
+	return nil
+}
+
+func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
+	switch function.GetType() {
+	case schemapb.FunctionType_BM25:
+		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_VarChar {
+			return fmt.Errorf("BM25 function input field must be a VARCHAR field, got %d field with type %s",
+				len(fields), fields[0].DataType.String())
+		}
+		h := typeutil.CreateFieldSchemaHelper(fields[0])
+		if !h.EnableTokenizer() {
+			return fmt.Errorf("BM25 function input field must set enable_tokenizer to true")
+		}
+
+	default:
+		return fmt.Errorf("check input field with unknown function type")
+	}
+	return nil
+}
+
+func checkFunctionBasicParams(function *schemapb.FunctionSchema) error {
+	if function.GetName() == "" {
+		return fmt.Errorf("function name cannot be empty")
+	}
+	if len(function.GetInputFieldNames()) == 0 {
+		return fmt.Errorf("function input field names cannot be empty, function: %s", function.GetName())
+	}
+	if len(function.GetOutputFieldNames()) == 0 {
+		return fmt.Errorf("function output field names cannot be empty, function: %s", function.GetName())
+	}
+	for _, input := range function.GetInputFieldNames() {
+		if input == "" {
+			return fmt.Errorf("function input field name cannot be empty string, function: %s", function.GetName())
+		}
+		// if input occurs more than once, error
+		if lo.Count(function.GetInputFieldNames(), input) > 1 {
+			return fmt.Errorf("each function input field should be used exactly once in the same function, function: %s, input field: %s", function.GetName(), input)
+		}
+	}
+	for _, output := range function.GetOutputFieldNames() {
+		if output == "" {
+			return fmt.Errorf("function output field name cannot be empty string, function: %s", function.GetName())
+		}
+		if lo.Count(function.GetInputFieldNames(), output) > 0 {
+			return fmt.Errorf("a single field cannot be both input and output in the same function, function: %s, field: %s", function.GetName(), output)
+		}
+		if lo.Count(function.GetOutputFieldNames(), output) > 1 {
+			return fmt.Errorf("each function output field should be used exactly once in the same function, function: %s, output field: %s", function.GetName(), output)
+		}
+	}
+	switch function.GetType() {
+	case schemapb.FunctionType_BM25:
+		if len(function.GetParams()) != 0 {
+			return fmt.Errorf("BM25 function accepts no params")
+		}
+	default:
+		return fmt.Errorf("check function params with unknown function type")
+	}
+	return nil
+}
+
 // validateMultipleVectorFields check if schema has multiple vector fields.
 func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 	vecExist := false
@@ -634,9 +781,6 @@ func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 }
 
 func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
-	// ignore error if not found
-	// partitionKeyField, _ := s.schemaHelper.GetPartitionKeyField()
-
 	var vectorCnt int
 	for _, field := range schema.Fields {
 		shouldLoad, err := common.ShouldFieldBeLoaded(field.GetTypeParams())
@@ -657,6 +801,10 @@ func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
 
 		if field.IsPartitionKey {
 			return merr.WrapErrParameterInvalidMsg("Partition Key field %s cannot skip loading", field.GetName())
+		}
+
+		if field.IsClusteringKey {
+			return merr.WrapErrParameterInvalidMsg("Clustering Key field %s cannot skip loading", field.GetName())
 		}
 	}
 
@@ -751,21 +899,37 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 	}
 }
 
-// fillFieldIDBySchema set fieldID to fieldData according FieldSchemas
-func fillFieldIDBySchema(columns []*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
-	if len(columns) != len(schema.GetFields()) {
-		return fmt.Errorf("len(columns) mismatch the len(fields), len(columns): %d, len(fields): %d",
-			len(columns), len(schema.GetFields()))
-	}
+// fillFieldPropertiesBySchema set fieldID to fieldData according FieldSchemas
+func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
 	fieldName2Schema := make(map[string]*schemapb.FieldSchema)
+
+	expectColumnNum := 0
 	for _, field := range schema.GetFields() {
 		fieldName2Schema[field.Name] = field
+		if !field.GetIsFunctionOutput() {
+			expectColumnNum++
+		}
+	}
+
+	if len(columns) != expectColumnNum {
+		return fmt.Errorf("len(columns) mismatch the expectColumnNum, expectColumnNum: %d, len(columns): %d",
+			expectColumnNum, len(columns))
 	}
 
 	for _, fieldData := range columns {
 		if fieldSchema, ok := fieldName2Schema[fieldData.FieldName]; ok {
 			fieldData.FieldId = fieldSchema.FieldID
 			fieldData.Type = fieldSchema.DataType
+
+			// Set the ElementType because it may not be set in the insert request.
+			if fieldData.Type == schemapb.DataType_Array {
+				fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
+				if !ok {
+					return fmt.Errorf("field convert FieldData_Scalars fail in fieldData, fieldName: %s,"+
+						" collectionName:%s", fieldData.FieldName, schema.Name)
+				}
+				fd.Scalars.GetArrayData().ElementType = fieldSchema.ElementType
+			}
 		} else {
 			return fmt.Errorf("fieldName %v not exist in collection schema", fieldData.FieldName)
 		}
@@ -835,6 +999,22 @@ func parseGuaranteeTs(ts, tMax typeutil.Timestamp) typeutil.Timestamp {
 		ts = tsoutil.AddPhysicalDurationOnTs(tMax, -ratio)
 	}
 	return ts
+}
+
+func getMaxMvccTsFromChannels(channelsTs map[string]uint64, beginTs typeutil.Timestamp) typeutil.Timestamp {
+	maxTs := typeutil.Timestamp(0)
+	for _, ts := range channelsTs {
+		if ts > maxTs {
+			maxTs = ts
+		}
+	}
+
+	if maxTs == 0 {
+		log.Warn("no channel ts found, use beginTs instead")
+		return beginTs
+	}
+
+	return maxTs
 }
 
 func validateName(entity string, nameType string) error {
@@ -1210,15 +1390,16 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
-		if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert {
+		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || fieldSchema.GetIsFunctionOutput() {
 			// when inInsert, no need to pass when pk is autoid and SkipAutoIDCheck is false
 			autoGenFieldNum++
 		}
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || fieldSchema.GetIsFunctionOutput() {
 				// autoGenField
 				continue
 			}
+
 			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 				log.Warn("no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
 				return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())

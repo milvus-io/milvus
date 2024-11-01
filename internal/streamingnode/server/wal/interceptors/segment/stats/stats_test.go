@@ -43,10 +43,11 @@ func TestSegmentStats(t *testing.T) {
 			Rows:       100,
 			BinarySize: 200,
 		},
-		MaxBinarySize:    400,
-		CreateTime:       now,
-		LastModifiedTime: now,
-		BinLogCounter:    3,
+		MaxBinarySize:     400,
+		CreateTime:        now,
+		LastModifiedTime:  now,
+		BinLogCounter:     3,
+		BinLogFileCounter: 4,
 	}
 
 	insert1 := InsertMetrics{
@@ -68,8 +69,10 @@ func TestSegmentStats(t *testing.T) {
 	assert.Equal(t, stat.Insert.Rows, uint64(160))
 	assert.Equal(t, stat.Insert.BinarySize, uint64(320))
 
-	stat.UpdateOnFlush(FlushOperationMetrics{
-		BinLogCounter: 4,
+	stat.UpdateOnSync(SyncOperationMetrics{
+		BinLogCounterIncr:     4,
+		BinLogFileCounterIncr: 9,
 	})
-	assert.Equal(t, uint64(4), stat.BinLogCounter)
+	assert.Equal(t, uint64(7), stat.BinLogCounter)
+	assert.Equal(t, uint64(13), stat.BinLogFileCounter)
 }

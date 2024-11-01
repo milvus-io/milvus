@@ -44,7 +44,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // WatchDmChannels is not in use
@@ -165,38 +167,20 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		}, nil
 	}
 
-	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	resp := &milvuspb.GetMetricsResponse{
+		Status: merr.Success(),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole,
+			paramtable.GetNodeID()),
+	}
+
+	ret, err := node.metricsRequest.ExecuteMetricsRequest(ctx, req)
 	if err != nil {
-		log.Warn("DataNode.GetMetrics failed to parse metric type",
-			zap.Int64("nodeID", node.GetNodeID()),
-			zap.String("req", req.Request),
-			zap.Error(err))
-
-		return &milvuspb.GetMetricsResponse{
-			Status: merr.Status(err),
-		}, nil
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 
-	if metricType == metricsinfo.SystemInfoMetrics {
-		systemInfoMetrics, err := node.getSystemInfoMetrics(ctx, req)
-		if err != nil {
-			log.Warn("DataNode GetMetrics failed", zap.Int64("nodeID", node.GetNodeID()), zap.Error(err))
-			return &milvuspb.GetMetricsResponse{
-				Status: merr.Status(err),
-			}, nil
-		}
-
-		return systemInfoMetrics, nil
-	}
-
-	log.RatedWarn(60, "DataNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("nodeID", node.GetNodeID()),
-		zap.String("req", req.Request),
-		zap.String("metric_type", metricType))
-
-	return &milvuspb.GetMetricsResponse{
-		Status: merr.Status(merr.WrapErrMetricNotFound(metricType)),
-	}, nil
+	resp.Response = ret
+	return resp, nil
 }
 
 // CompactionV2 handles compaction request from DataCoord
@@ -234,7 +218,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			req,
 		)
 	case datapb.CompactionType_MixCompaction:
-		if req.GetPreAllocatedSegments() == nil || req.GetPreAllocatedSegments().GetBegin() == 0 {
+		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
 		}
 		task = compaction.NewMixCompactionTask(
@@ -243,7 +227,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			req,
 		)
 	case datapb.CompactionType_ClusteringCompaction:
-		if req.GetPreAllocatedSegments() == nil || req.GetPreAllocatedSegments().GetBegin() == 0 {
+		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
 		}
 		task = compaction.NewClusteringCompactionTask(

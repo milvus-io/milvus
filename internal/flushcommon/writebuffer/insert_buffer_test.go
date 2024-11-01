@@ -20,6 +20,7 @@ import (
 type InsertBufferSuite struct {
 	suite.Suite
 	collSchema *schemapb.CollectionSchema
+	pkField    *schemapb.FieldSchema
 }
 
 func (s *InsertBufferSuite) SetupSuite() {
@@ -44,6 +45,7 @@ func (s *InsertBufferSuite) SetupSuite() {
 			},
 		},
 	}
+	s.pkField = &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
 }
 
 func (s *InsertBufferSuite) composeInsertMsg(rowCount int, dim int) ([]int64, *msgstream.InsertMsg) {
@@ -127,15 +129,12 @@ func (s *InsertBufferSuite) TestBasic() {
 }
 
 func (s *InsertBufferSuite) TestBuffer() {
-	wb := &writeBufferBase{
-		collSchema: s.collSchema,
-	}
 	_, insertMsg := s.composeInsertMsg(10, 128)
 
 	insertBuffer, err := NewInsertBuffer(s.collSchema)
 	s.Require().NoError(err)
 
-	groups, err := wb.prepareInsert([]*msgstream.InsertMsg{insertMsg})
+	groups, err := PrepareInsert(s.collSchema, s.pkField, []*msgstream.InsertMsg{insertMsg})
 	s.Require().NoError(err)
 	s.Require().Len(groups, 1)
 
@@ -146,9 +145,6 @@ func (s *InsertBufferSuite) TestBuffer() {
 }
 
 func (s *InsertBufferSuite) TestYield() {
-	wb := &writeBufferBase{
-		collSchema: s.collSchema,
-	}
 	insertBuffer, err := NewInsertBuffer(s.collSchema)
 	s.Require().NoError(err)
 
@@ -159,7 +155,7 @@ func (s *InsertBufferSuite) TestYield() {
 	s.Require().NoError(err)
 
 	pks, insertMsg := s.composeInsertMsg(10, 128)
-	groups, err := wb.prepareInsert([]*msgstream.InsertMsg{insertMsg})
+	groups, err := PrepareInsert(s.collSchema, s.pkField, []*msgstream.InsertMsg{insertMsg})
 	s.Require().NoError(err)
 	s.Require().Len(groups, 1)
 

@@ -111,6 +111,26 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 			},
 		},
 	}
+
+	if dt == schemapb.DataType_VarChar {
+		// Add a BM25 function if data type is VarChar
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:          103,
+			Name:             "sparse",
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+		schema.Functions = append(schema.Functions, &schemapb.FunctionSchema{
+			Id:               1000,
+			Name:             "bm25",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldIds:    []int64{102},
+			InputFieldNames:  []string{dt.String()},
+			OutputFieldIds:   []int64{103},
+			OutputFieldNames: []string{"sparse"},
+		})
+	}
+
 	insertData, err := testutil.CreateInsertData(schema, suite.numRows)
 	suite.NoError(err)
 	fieldIDToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
@@ -118,6 +138,9 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	})
 	files := make(map[int64]string)
 	for _, field := range schema.GetFields() {
+		if field.GetIsFunctionOutput() {
+			continue
+		}
 		files[field.GetFieldID()] = fmt.Sprintf("%s.npy", field.GetName())
 	}
 
@@ -319,6 +342,58 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 	suite.Error(err)
 }
 
+func (suite *ReaderSuite) failRunNullable(dt schemapb.DataType, nullable bool) {
+	const dim = 8
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     suite.pkDataType,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_length",
+						Value: "256",
+					},
+				},
+			},
+			{
+				FieldID:  101,
+				Name:     "vec",
+				DataType: suite.vecDataType,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: fmt.Sprintf("%d", dim),
+					},
+				},
+			},
+			{
+				FieldID:     102,
+				Name:        dt.String(),
+				DataType:    dt,
+				ElementType: schemapb.DataType_Int32,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_length",
+						Value: "256",
+					},
+				},
+				Nullable: nullable,
+			},
+		},
+	}
+	files := make(map[int64]string)
+	for _, field := range schema.GetFields() {
+		files[field.GetFieldID()] = fmt.Sprintf("%s.npy", field.GetName())
+	}
+
+	cm := mocks.NewChunkManager(suite.T())
+	_, err := NewReader(context.Background(), cm, schema, lo.Values(files), math.MaxInt)
+	suite.Error(err)
+}
+
 func (suite *ReaderSuite) TestReadScalarFields() {
 	suite.run(schemapb.DataType_Bool)
 	suite.run(schemapb.DataType_Int8)
@@ -330,6 +405,15 @@ func (suite *ReaderSuite) TestReadScalarFields() {
 	suite.run(schemapb.DataType_VarChar)
 	suite.run(schemapb.DataType_JSON)
 	suite.failRun(schemapb.DataType_JSON, true)
+	suite.failRunNullable(schemapb.DataType_Bool, true)
+	suite.failRunNullable(schemapb.DataType_Int8, true)
+	suite.failRunNullable(schemapb.DataType_Int16, true)
+	suite.failRunNullable(schemapb.DataType_Int32, true)
+	suite.failRunNullable(schemapb.DataType_Int64, true)
+	suite.failRunNullable(schemapb.DataType_Float, true)
+	suite.failRunNullable(schemapb.DataType_Double, true)
+	suite.failRunNullable(schemapb.DataType_VarChar, true)
+	suite.failRunNullable(schemapb.DataType_JSON, true)
 }
 
 func (suite *ReaderSuite) TestStringPK() {
@@ -390,5 +474,20 @@ func TestCreateReaders(t *testing.T) {
 		},
 	}
 	_, err = CreateReaders(ctx, cm, schema, []string{"pk", "vec"})
+	assert.NoError(t, err)
+
+	// auto id and Function
+	schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{Name: "vec", DataType: schemapb.DataType_FloatVector},
+			{Name: "text", DataType: schemapb.DataType_VarChar},
+			{Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{Name: "bm25", InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse"}},
+		},
+	}
+	_, err = CreateReaders(ctx, cm, schema, []string{"vec", "text"})
 	assert.NoError(t, err)
 }

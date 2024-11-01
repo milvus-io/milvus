@@ -138,6 +138,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cLogLevel := C.CString(params.MinioCfg.LogLevel.GetValue())
 	cRegion := C.CString(params.MinioCfg.Region.GetValue())
 	cSslCACert := C.CString(params.MinioCfg.SslCACert.GetValue())
+	cGcpCredentialJSON := C.CString(params.MinioCfg.GcpCredentialJSON.GetValue())
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -149,22 +150,24 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cRegion))
 	defer C.free(unsafe.Pointer(cCloudProvider))
 	defer C.free(unsafe.Pointer(cSslCACert))
+	defer C.free(unsafe.Pointer(cGcpCredentialJSON))
 	storageConfig := C.CStorageConfig{
-		address:          cAddress,
-		bucket_name:      cBucketName,
-		access_key_id:    cAccessKey,
-		access_key_value: cAccessValue,
-		root_path:        cRootPath,
-		storage_type:     cStorageType,
-		iam_endpoint:     cIamEndPoint,
-		cloud_provider:   cCloudProvider,
-		useSSL:           C.bool(params.MinioCfg.UseSSL.GetAsBool()),
-		sslCACert:        cSslCACert,
-		useIAM:           C.bool(params.MinioCfg.UseIAM.GetAsBool()),
-		log_level:        cLogLevel,
-		region:           cRegion,
-		useVirtualHost:   C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
-		requestTimeoutMs: C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
+		address:             cAddress,
+		bucket_name:         cBucketName,
+		access_key_id:       cAccessKey,
+		access_key_value:    cAccessValue,
+		root_path:           cRootPath,
+		storage_type:        cStorageType,
+		iam_endpoint:        cIamEndPoint,
+		cloud_provider:      cCloudProvider,
+		useSSL:              C.bool(params.MinioCfg.UseSSL.GetAsBool()),
+		sslCACert:           cSslCACert,
+		useIAM:              C.bool(params.MinioCfg.UseIAM.GetAsBool()),
+		log_level:           cLogLevel,
+		region:              cRegion,
+		useVirtualHost:      C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
+		requestTimeoutMs:    C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
+		gcp_credential_json: cGcpCredentialJSON,
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)
@@ -181,11 +184,12 @@ func InitMmapManager(params *paramtable.ComponentParam) error {
 	diskLimit := uint64(float64(params.QueryNodeCfg.MaxMmapDiskPercentageForMmapManager.GetAsUint64()*diskCapacity) * 0.01)
 	mmapFileSize := params.QueryNodeCfg.FixedFileSizeForMmapManager.GetAsFloat() * 1024 * 1024
 	mmapConfig := C.CMmapConfig{
-		cache_read_ahead_policy: cCacheReadAheadPolicy,
-		mmap_path:               cMmapChunkManagerDir,
-		disk_limit:              C.uint64_t(diskLimit),
-		fix_file_size:           C.uint64_t(mmapFileSize),
-		growing_enable_mmap:     C.bool(params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()),
+		cache_read_ahead_policy:  cCacheReadAheadPolicy,
+		mmap_path:                cMmapChunkManagerDir,
+		disk_limit:               C.uint64_t(diskLimit),
+		fix_file_size:            C.uint64_t(mmapFileSize),
+		growing_enable_mmap:      C.bool(params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()),
+		scalar_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapScalarIndex.GetAsBool()),
 	}
 	status := C.InitMmapManager(mmapConfig)
 	return HandleCStatus(&status, "InitMmapManager failed")

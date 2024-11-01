@@ -20,6 +20,7 @@
 #include "storage/MmapManager.h"
 #include "storage/MinioChunkManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
@@ -507,7 +508,7 @@ TEST(Sealed, LoadFieldData) {
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
-    ASSERT_EQ(segment->num_chunk(), 1);
+    ASSERT_EQ(segment->num_chunk(FieldId(0)), 1);
     ASSERT_EQ(segment->num_chunk_index(double_id), 0);
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
@@ -670,7 +671,7 @@ TEST(Sealed, ClearData) {
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
-    ASSERT_EQ(segment->num_chunk(), 1);
+    ASSERT_EQ(segment->num_chunk(FieldId(0)), 1);
     ASSERT_EQ(segment->num_chunk_index(double_id), 0);
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
@@ -774,7 +775,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
-    ASSERT_EQ(segment->num_chunk(), 1);
+    ASSERT_EQ(segment->num_chunk(FieldId(0)), 1);
     ASSERT_EQ(segment->num_chunk_index(double_id), 0);
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
@@ -1035,7 +1036,8 @@ TEST(Sealed, Delete) {
     segment->LoadDeletedRecord(info);
 
     BitsetType bitset(N, false);
-    segment->mask_with_delete(bitset, 10, 11);
+    auto bitset_view = BitsetTypeView(bitset);
+    segment->mask_with_delete(bitset_view, 10, 11);
     ASSERT_EQ(bitset.count(), pks.size());
 
     int64_t new_count = 3;
@@ -1130,13 +1132,13 @@ TEST(Sealed, OverlapDelete) {
     LoadDeletedRecordInfo overlap_info = {
         timestamps.data(), new_ids.get(), row_count};
     segment->LoadDeletedRecord(overlap_info);
-
-    BitsetType bitset(N, false);
     // NOTE: need to change delete timestamp, so not to hit the cache
     ASSERT_EQ(segment->get_deleted_count(), pks.size())
         << "deleted_count=" << segment->get_deleted_count()
         << " pks_count=" << pks.size() << std::endl;
-    segment->mask_with_delete(bitset, 10, 12);
+    BitsetType bitset(N, false);
+    auto bitset_view = BitsetTypeView(bitset);
+    segment->mask_with_delete(bitset_view, 10, 12);
     ASSERT_EQ(bitset.count(), pks.size())
         << "bitset_count=" << bitset.count() << " pks_count=" << pks.size()
         << std::endl;
@@ -1427,9 +1429,6 @@ TEST(Sealed, GetVector) {
 }
 
 TEST(Sealed, GetVectorFromChunkCache) {
-    // skip test due to mem leak from AWS::InitSDK
-    return;
-
     auto dim = 16;
     auto topK = 5;
     auto N = ROW_COUNT;
@@ -1439,10 +1438,8 @@ TEST(Sealed, GetVectorFromChunkCache) {
     auto file_name = std::string(
         "sealed_test_get_vector_from_chunk_cache/insert_log/1/101/1000000");
 
-    auto sc = milvus::storage::StorageConfig{};
-    milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(sc);
-    auto mcm = std::make_unique<milvus::storage::MinioChunkManager>(sc);
-    // mcm->CreateBucket(sc.bucket_name);
+    auto sc = milvus::storage::MmapConfig{};
+    milvus::storage::MmapManager::GetInstance().Init(sc);
 
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
@@ -1463,7 +1460,8 @@ TEST(Sealed, GetVectorFromChunkCache) {
                                         fakevec_id,
                                         milvus::DataType::VECTOR_FLOAT,
                                         dim,
-                                        metric_type);
+                                        metric_type,
+                                        false);
 
     auto rcm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();
@@ -1529,9 +1527,6 @@ TEST(Sealed, GetVectorFromChunkCache) {
 }
 
 TEST(Sealed, GetSparseVectorFromChunkCache) {
-    // skip test due to mem leak from AWS::InitSDK
-    return;
-
     auto dim = 16;
     auto topK = 5;
     auto N = ROW_COUNT;
@@ -1543,9 +1538,8 @@ TEST(Sealed, GetSparseVectorFromChunkCache) {
     auto file_name = std::string(
         "sealed_test_get_vector_from_chunk_cache/insert_log/1/101/1000000");
 
-    auto sc = milvus::storage::StorageConfig{};
-    milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(sc);
-    auto mcm = std::make_unique<milvus::storage::MinioChunkManager>(sc);
+    auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
+                   .GetChunkManager();
 
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
@@ -1562,19 +1556,28 @@ TEST(Sealed, GetSparseVectorFromChunkCache) {
     auto dataset = DataGen(schema, N);
     auto field_data_meta =
         milvus::storage::FieldDataMeta{1, 2, 3, fakevec_id.get()};
-    auto field_meta = milvus::FieldMeta(milvus::FieldName("facevec"),
+    auto field_meta = milvus::FieldMeta(milvus::FieldName("fakevec"),
                                         fakevec_id,
                                         milvus::DataType::VECTOR_SPARSE_FLOAT,
                                         dim,
-                                        metric_type);
+                                        metric_type,
+                                        false);
 
-    auto rcm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                   .GetRemoteChunkManager();
     auto data = dataset.get_col<knowhere::sparse::SparseRow<float>>(fakevec_id);
-    auto data_slices = std::vector<void*>{data.data()};
-    auto slice_sizes = std::vector<int64_t>{static_cast<int64_t>(N)};
-    auto slice_names = std::vector<std::string>{file_name};
-    PutFieldData(rcm.get(),
+
+    // write to multiple files for better coverage
+    auto data_slices = std::vector<void*>();
+    auto slice_sizes = std::vector<int64_t>();
+    auto slice_names = std::vector<std::string>();
+
+    const int64_t slice_size = (N + 9) / 10;
+    for (int64_t i = 0; i < N; i += slice_size) {
+        int64_t current_slice_size = std::min(slice_size, N - i);
+        data_slices.push_back(data.data() + i);
+        slice_sizes.push_back(current_slice_size);
+        slice_names.push_back(file_name + "_" + std::to_string(i / slice_size));
+    }
+    PutFieldData(lcm.get(),
                  data_slices,
                  slice_sizes,
                  slice_names,
@@ -1598,11 +1601,7 @@ TEST(Sealed, GetSparseVectorFromChunkCache) {
     segment_sealed->LoadIndex(vec_info);
 
     auto field_binlog_info =
-        FieldBinlogInfo{fakevec_id.get(),
-                        N,
-                        std::vector<int64_t>{N},
-                        false,
-                        std::vector<std::string>{file_name}};
+        FieldBinlogInfo{fakevec_id.get(), N, slice_sizes, false, slice_names};
     segment_sealed->AddFieldDataInfoForSealed(
         LoadFieldDataInfo{std::map<int64_t, FieldBinlogInfo>{
             {fakevec_id.get(), field_binlog_info}}});
@@ -1629,15 +1628,14 @@ TEST(Sealed, GetSparseVectorFromChunkCache) {
             "sparse float vector doesn't match");
     }
 
-    rcm->Remove(file_name);
-    auto exist = rcm->Exist(file_name);
-    Assert(!exist);
+    for (const auto& name : slice_names) {
+        lcm->Remove(name);
+        auto exist = lcm->Exist(name);
+        Assert(!exist);
+    }
 }
 
 TEST(Sealed, WarmupChunkCache) {
-    // skip test due to mem leak from AWS::InitSDK
-    return;
-
     auto dim = 16;
     auto topK = 5;
     auto N = ROW_COUNT;
@@ -1648,9 +1646,8 @@ TEST(Sealed, WarmupChunkCache) {
     auto file_name = std::string(
         "sealed_test_get_vector_from_chunk_cache/insert_log/1/101/1000000");
 
-    auto sc = milvus::storage::StorageConfig{};
-    milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(sc);
-    auto mcm = std::make_unique<milvus::storage::MinioChunkManager>(sc);
+    auto sc = milvus::storage::MmapConfig{};
+    milvus::storage::MmapManager::GetInstance().Init(sc);
 
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
@@ -1671,7 +1668,8 @@ TEST(Sealed, WarmupChunkCache) {
                                         fakevec_id,
                                         milvus::DataType::VECTOR_FLOAT,
                                         dim,
-                                        metric_type);
+                                        metric_type,
+                                        false);
 
     auto rcm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();
@@ -2015,12 +2013,12 @@ TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
 
     //test for int64
     std::vector<int64_t> int64s = {1, 2, 3, 4, 5};
-    uint8_t* valid_data = new uint8_t[1]{0x03};
+    std::array<uint8_t, 1> valid_data = {0x03};
     FixedVector<bool> valid_data_ = {true, true, false, false, false};
     auto int64s_field_data =
         storage::CreateFieldData(DataType::INT64, true, 1, 5);
 
-    int64s_field_data->FillFieldData(int64s.data(), valid_data, 5);
+    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5);
     segment->LoadPrimitiveSkipIndex(i64_fid,
                                     0,
                                     DataType::INT64,
@@ -2084,12 +2082,12 @@ TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
 
     //test for int64
     std::vector<int64_t> int64s = {1, 2, 3, 4, 5};
-    uint8_t* valid_data = new uint8_t[1]{0x03};
+    std::array<uint8_t, 1> valid_data = {0x03};
     FixedVector<bool> valid_data_ = {true, true, false, false, false};
     auto int64s_field_data =
         storage::CreateFieldData(DataType::INT64, true, 1, 5);
 
-    int64s_field_data->FillFieldData(int64s.data(), valid_data, 5);
+    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5);
     segment->LoadPrimitiveSkipIndex(i64_fid,
                                     0,
                                     DataType::INT64,

@@ -175,6 +175,8 @@ std::map<std::string, std::string> scalarLatencyLabels{
     {"type", "scalar_latency"}};
 std::map<std::string, std::string> vectorLatencyLabels{
     {"type", "vector_latency"}};
+std::map<std::string, std::string> groupbyLatencyLabels{
+    {"type", "groupby_latency"}};
 std::map<std::string, std::string> scalarProportionLabels{
     {"type", "scalar_proportion"}};
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency,
@@ -185,6 +187,9 @@ DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_scalar,
 DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_vector,
                             internal_core_search_latency,
                             vectorLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_groupby,
+                            internal_core_search_latency,
+                            groupbyLatencyLabels)
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_core_search_latency_scalar_proportion,
     internal_core_search_latency,

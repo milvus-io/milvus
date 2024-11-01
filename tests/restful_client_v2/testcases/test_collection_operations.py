@@ -103,7 +103,7 @@ class TestCreateCollection(TestBase):
             "collectionName": name,
             "dimension": dim,
             "metricType": metric_type,
-            "params":{
+            "params": {
                 "enableDynamicField": enable_dynamic_field,
                 "shardsNum": request_shards_num,
                 "consistencyLevel": f"{consistency_level}",
@@ -138,42 +138,108 @@ class TestCreateCollection(TestBase):
         assert rsp['data']['consistencyLevel'] == consistency_level
         assert ttl_seconds_actual == ttl_seconds
 
-    def test_create_collections_with_all_params(self):
+    @pytest.mark.parametrize("primary_key_field", ["book_id"])
+    @pytest.mark.parametrize("partition_key_field", ["word_count"])
+    @pytest.mark.parametrize("clustering_key_field", ["book_category"])
+    @pytest.mark.parametrize("shardsNum", [4])
+    @pytest.mark.parametrize("partitionsNum", [16])
+    @pytest.mark.parametrize("ttl_seconds", [60])
+    @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
+    @pytest.mark.parametrize("consistency_level", ["Strong", "Bounded"])
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("index_type", ["AUTOINDEX", "IVF_SQ8", "HNSW"])
+    @pytest.mark.parametrize("dim", [128])
+    def test_create_collections_with_all_params(self,
+                                                dim,
+                                                index_type,
+                                                enable_dynamic_field,
+                                                consistency_level,
+                                                metric_type,
+                                                ttl_seconds,
+                                                partitionsNum,
+                                                shardsNum,
+                                                clustering_key_field,
+                                                partition_key_field,
+                                                primary_key_field,
+                                                ):
         """
         target: test create collection
         method: create a collection with a simple schema
         expected: create collection success
         """
         name = gen_collection_name()
-        dim = 128
-        metric_type = "COSINE"
+        dim = dim
+        metric_type = metric_type
         client = self.collection_client
-        num_shards = 2
-        num_partitions = 36
-        consistency_level = "Strong"
-        ttl_seconds = 360
+        num_shards = shardsNum
+        num_partitions = partitionsNum
+        consistency_level = consistency_level
+        ttl_seconds = ttl_seconds
+        index_param_map = {
+            "FLAT": {},
+            "IVF_SQ8": {"nlist": 16384},
+            "HNSW": {"M": 16, "efConstruction": 500},
+            "BM25_SPARSE_INVERTED_INDEX": {"bm25_k1": 0.5, "bm25_b": 0.5},
+            "AUTOINDEX": {}
+        }
+
         payload = {
             "collectionName": name,
-            "enableDynamicField": True,
-            "params":{
+            "params": {
                 "shardsNum": f"{num_shards}",
                 "partitionsNum": f"{num_partitions}",
                 "consistencyLevel": f"{consistency_level}",
                 "ttlSeconds": f"{ttl_seconds}",
             },
             "schema": {
+                "enableDynamicField": enable_dynamic_field,
                 "fields": [
-                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_id", "dataType": "Int64",
+                     "isPrimary": primary_key_field == "book_id", "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64",
+                     "isPartitionKey": partition_key_field == "word_count",
+                     "isClusteringKey": clustering_key_field == "word_count", "elementTypeParams": {}},
+                    {"fieldName": "book_category", "dataType": "Int64",
+                     "isPartitionKey": partition_key_field == "book_category",
+                     "isClusteringKey": clustering_key_field == "book_category", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "document_content", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "1000", "enable_tokenizer": True,
+                                           "analyzer_params": {
+                                               "tokenizer": "default"
+                                           },
+                                           "enable_match": True}},
                     {"fieldName": "json", "dataType": "JSON", "elementTypeParams": {}},
                     {"fieldName": "int_array", "dataType": "Array", "elementDataType": "Int64",
                      "elementTypeParams": {"max_capacity": "1024"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"}
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_fn",
+                        "type": "BM25",
+                        "inputFieldNames": ["document_content"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
                 ]
             },
             "indexParams": [
-                {"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": f"{metric_type}"}]
+                {"fieldName": "book_intro",
+                 "indexName": "book_intro_vector",
+                 "metricType": f"{metric_type}",
+                 "indexType": index_type,
+                 "params": index_param_map[index_type]
+                 },
+                {"fieldName": "sparse_vector",
+                 "indexName": "sparse_vector_index",
+                 "metricType": "BM25",
+                 "indexType": "SPARSE_INVERTED_INDEX",
+                 "params": index_param_map["BM25_SPARSE_INVERTED_INDEX"]
+                }
+            ]
         }
 
         logging.info(f"create collection {name} with payload: {payload}")
@@ -186,11 +252,11 @@ class TestCreateCollection(TestBase):
         # describe collection by pymilvus
         c = Collection(name)
         res = c.describe()
-        logger.info(f"describe collection: {res}")
+        logger.info(f"pymilvus describe collection: {res}")
         # describe collection
         time.sleep(10)
         rsp = client.collection_describe(name)
-        logger.info(f"describe collection: {rsp}")
+        logger.info(f"restful describe collection: {rsp}")
 
         ttl_seconds_actual = None
         for d in rsp["data"]["properties"]:
@@ -198,11 +264,37 @@ class TestCreateCollection(TestBase):
                 ttl_seconds_actual = int(d["value"])
         assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
+        assert rsp['data']['enableDynamicField'] == enable_dynamic_field
         assert rsp['data']['shardsNum'] == num_shards
         assert rsp['data']['partitionsNum'] == num_partitions
         assert rsp['data']['consistencyLevel'] == consistency_level
         assert ttl_seconds_actual == ttl_seconds
+        assert len(rsp['data']["functions"]) == len(payload["schema"]["functions"])
+        #
+        # # check fields properties
+        fields = rsp['data']['fields']
+        assert len(fields) == len(payload['schema']['fields'])
+        for field in fields:
+            if field['name'] == primary_key_field:
+                assert field['primaryKey'] is True
+            if field['name'] == partition_key_field:
+                assert field['partitionKey'] is True
+            if field['name'] == clustering_key_field:
+                assert field['clusteringKey'] is True
 
+        # check index
+        index_info = [index.to_dict() for index in c.indexes]
+        logger.info(f"index_info: {index_info}")
+        assert len(index_info) == 2
+        for index in index_info:
+            index_param = index["index_param"]
+            if index_param["index_type"] == "SPARSE_INVERTED_INDEX":
+                assert index_param["metric_type"] == "BM25"
+                assert index_param.get("params", {}) == index_param_map["BM25_SPARSE_INVERTED_INDEX"]
+            else:
+                assert index_param["metric_type"] == metric_type
+                assert index_param["index_type"] == index_type
+                assert index_param.get("params", {}) == index_param_map[index_type]
 
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
@@ -389,7 +481,7 @@ class TestCreateCollection(TestBase):
         indexes = rsp['data']['indexes']
         assert len(indexes) == len(payload['indexParams'])
         # assert load success
-        assert rsp['data']['load'] == "LoadStateLoaded"
+        assert rsp['data']['load'] in ["LoadStateLoaded", "LoadStateLoading"]
 
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("enable_dynamic_field", [True])
@@ -583,6 +675,7 @@ class TestCreateCollectionNegative(TestBase):
 
     def test_create_collections_custom_with_invalid_datatype(self):
         """
+        VARCHAR is not a valid data type, it should be VarChar
         """
         name = gen_collection_name()
         dim = 128
@@ -602,22 +695,27 @@ class TestCreateCollectionNegative(TestBase):
         rsp = client.collection_create(payload)
         assert rsp['code'] == 1100
 
-    def test_create_collections_with_invalid_api_key(self):
+    def test_create_collections_custom_with_invalid_params(self):
         """
-        target: test create collection with invalid api key(wrong username and password)
-        method: create collections with invalid api key
-        expected: create collection failed
         """
         name = gen_collection_name()
         dim = 128
         client = self.collection_client
-        client.api_key = "illegal_api_key"
         payload = {
             "collectionName": name,
-            "dimension": dim,
+            "schema": {
+                "enableDynamicField": 1,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            }
         }
+        logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 1800
+        assert rsp['code'] == 1801
 
     @pytest.mark.parametrize("name",
                              [" ", "test_collection_" * 100, "test collection", "test/collection", "test\collection"])
@@ -728,6 +826,7 @@ class TestGetCollectionStats(TestBase):
         assert rsp['data']['rowCount'] == nb
 
 
+@pytest.mark.L0
 class TestLoadReleaseCollection(TestBase):
 
     def test_load_and_release_collection(self):
@@ -774,6 +873,7 @@ class TestLoadReleaseCollection(TestBase):
         time.sleep(5)
         rsp = client.collection_load_state(collection_name=name)
         assert rsp['data']['loadState'] == "LoadStateNotLoad"
+
 
 @pytest.mark.L0
 class TestGetCollectionLoadState(TestBase):
@@ -847,34 +947,6 @@ class TestListCollections(TestBase):
         all_collections = rsp['data']
         for name in name_list:
             assert name in all_collections
-
-
-@pytest.mark.L1
-class TestListCollectionsNegative(TestBase):
-    def test_list_collections_with_invalid_api_key(self):
-        """
-        target: test list collection with an invalid api key
-        method: list collection with invalid api key
-        expected: raise error with right error code and message
-        """
-        client = self.collection_client
-        name_list = []
-        for i in range(2):
-            name = gen_collection_name()
-            dim = 128
-            payload = {
-                "collectionName": name,
-                "metricType": "L2",
-                "dimension": dim,
-            }
-            time.sleep(1)
-            rsp = client.collection_create(payload)
-            assert rsp['code'] == 0
-            name_list.append(name)
-        client = self.collection_client
-        client.api_key = "illegal_api_key"
-        rsp = client.collection_list()
-        assert rsp['code'] == 1800
 
 
 @pytest.mark.L0
@@ -954,30 +1026,8 @@ class TestDescribeCollection(TestBase):
         assert rsp['data']['enableDynamicField'] is True
 
 
-@pytest.mark.L1
+@pytest.mark.L0
 class TestDescribeCollectionNegative(TestBase):
-    def test_describe_collections_with_invalid_api_key(self):
-        """
-        target: test describe collection with invalid api key
-        method: describe collection with invalid api key
-        expected: raise error with right error code and message
-        """
-        name = gen_collection_name()
-        dim = 128
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "dimension": dim,
-        }
-        rsp = client.collection_create(payload)
-        assert rsp['code'] == 0
-        rsp = client.collection_list()
-        all_collections = rsp['data']
-        assert name in all_collections
-        # describe collection
-        illegal_client = CollectionClient(self.endpoint, "illegal_api_key")
-        rsp = illegal_client.collection_describe(name)
-        assert rsp['code'] == 1800
 
     def test_describe_collections_with_invalid_collection_name(self):
         """
@@ -1042,36 +1092,8 @@ class TestDropCollection(TestBase):
             assert name not in all_collections
 
 
-@pytest.mark.L1
+@pytest.mark.L0
 class TestDropCollectionNegative(TestBase):
-    def test_drop_collections_with_invalid_api_key(self):
-        """
-        target: test drop collection with invalid api key
-        method: drop collection with invalid api key
-        expected: raise error with right error code and message; collection still in collection list
-        """
-        name = gen_collection_name()
-        dim = 128
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "dimension": dim,
-        }
-        rsp = client.collection_create(payload)
-        assert rsp['code'] == 0
-        rsp = client.collection_list()
-        all_collections = rsp['data']
-        assert name in all_collections
-        # drop collection
-        payload = {
-            "collectionName": name,
-        }
-        illegal_client = CollectionClient(self.endpoint, "invalid_api_key")
-        rsp = illegal_client.collection_drop(payload)
-        assert rsp['code'] == 1800
-        rsp = client.collection_list()
-        all_collections = rsp['data']
-        assert name in all_collections
 
     def test_drop_collections_with_invalid_collection_name(self):
         """
@@ -1133,3 +1155,100 @@ class TestRenameCollection(TestBase):
         all_collections = rsp['data']
         assert new_name in all_collections
         assert name not in all_collections
+
+
+@pytest.mark.L1
+class TestCollectionWithAuth(TestBase):
+    def test_drop_collections_with_invalid_api_key(self):
+        """
+        target: test drop collection with invalid api key
+        method: drop collection with invalid api key
+        expected: raise error with right error code and message; collection still in collection list
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = client.collection_list()
+        all_collections = rsp['data']
+        assert name in all_collections
+        # drop collection
+        payload = {
+            "collectionName": name,
+        }
+        illegal_client = CollectionClient(self.endpoint, "invalid_api_key")
+        rsp = illegal_client.collection_drop(payload)
+        assert rsp['code'] == 1800
+        rsp = client.collection_list()
+        all_collections = rsp['data']
+        assert name in all_collections
+
+    def test_describe_collections_with_invalid_api_key(self):
+        """
+        target: test describe collection with invalid api key
+        method: describe collection with invalid api key
+        expected: raise error with right error code and message
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = client.collection_list()
+        all_collections = rsp['data']
+        assert name in all_collections
+        # describe collection
+        illegal_client = CollectionClient(self.endpoint, "illegal_api_key")
+        rsp = illegal_client.collection_describe(name)
+        assert rsp['code'] == 1800
+
+    def test_list_collections_with_invalid_api_key(self):
+        """
+        target: test list collection with an invalid api key
+        method: list collection with invalid api key
+        expected: raise error with right error code and message
+        """
+        client = self.collection_client
+        name_list = []
+        for i in range(2):
+            name = gen_collection_name()
+            dim = 128
+            payload = {
+                "collectionName": name,
+                "metricType": "L2",
+                "dimension": dim,
+            }
+            time.sleep(1)
+            rsp = client.collection_create(payload)
+            assert rsp['code'] == 0
+            name_list.append(name)
+        client = self.collection_client
+        client.api_key = "illegal_api_key"
+        rsp = client.collection_list()
+        assert rsp['code'] == 1800
+
+    def test_create_collections_with_invalid_api_key(self):
+        """
+        target: test create collection with invalid api key(wrong username and password)
+        method: create collections with invalid api key
+        expected: create collection failed
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        client.api_key = "illegal_api_key"
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 1800

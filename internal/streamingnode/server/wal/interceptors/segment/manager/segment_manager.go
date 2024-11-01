@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -22,6 +23,7 @@ const dirtyThreshold = 30 * 1024 * 1024 // 30MB
 func newSegmentAllocManagerFromProto(
 	pchannel types.PChannelInfo,
 	inner *streamingpb.SegmentAssignmentMeta,
+	metrics *metricsutil.SegmentAssignMetrics,
 ) *segmentAllocManager {
 	stat := stats.NewSegmentStatFromProto(inner.Stat)
 	// Growing segment's stat should be registered to stats manager.
@@ -36,6 +38,7 @@ func newSegmentAllocManagerFromProto(
 		}, inner.GetSegmentId(), stat)
 		stat = nil
 	}
+	metrics.UpdateGrowingSegmentState(streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_UNKNOWN, inner.GetState())
 	return &segmentAllocManager{
 		pchannel:      pchannel,
 		inner:         inner,
@@ -43,6 +46,7 @@ func newSegmentAllocManagerFromProto(
 		ackSem:        atomic.NewInt32(0),
 		txnSem:        atomic.NewInt32(0),
 		dirtyBytes:    0,
+		metrics:       metrics,
 	}
 }
 
@@ -53,6 +57,7 @@ func newSegmentAllocManager(
 	partitionID int64,
 	segmentID int64,
 	vchannel string,
+	metrics *metricsutil.SegmentAssignMetrics,
 ) *segmentAllocManager {
 	return &segmentAllocManager{
 		pchannel: pchannel,
@@ -61,13 +66,14 @@ func newSegmentAllocManager(
 			PartitionId:  partitionID,
 			SegmentId:    segmentID,
 			Vchannel:     vchannel,
-			State:        streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_PENDING,
+			State:        streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_UNKNOWN,
 			Stat:         nil,
 		},
 		immutableStat: nil, // immutable stat can be seen after sealed.
 		ackSem:        atomic.NewInt32(0),
 		dirtyBytes:    0,
 		txnSem:        atomic.NewInt32(0),
+		metrics:       metrics,
 	}
 }
 
@@ -92,6 +98,19 @@ type segmentAllocManager struct {
 	ackSem        *atomic.Int32       // the ackSem is increased when segment allocRows, decreased when the segment is acked.
 	dirtyBytes    uint64              // records the dirty bytes that didn't persist.
 	txnSem        *atomic.Int32       // the runnint txn count of the segment.
+	metrics       *metricsutil.SegmentAssignMetrics
+	sealPolicy    policy.PolicyName
+}
+
+// WithSealPolicy sets the seal policy of the segment assignment meta.
+func (s *segmentAllocManager) WithSealPolicy(policy policy.PolicyName) *segmentAllocManager {
+	s.sealPolicy = policy
+	return s
+}
+
+// SealPolicy returns the seal policy of the segment assignment meta.
+func (s *segmentAllocManager) SealPolicy() policy.PolicyName {
+	return s.sealPolicy
 }
 
 // GetCollectionID returns the collection id of the segment assignment meta.
@@ -210,6 +229,13 @@ type mutableSegmentAssignmentMeta struct {
 	modifiedCopy *streamingpb.SegmentAssignmentMeta
 }
 
+func (m *mutableSegmentAssignmentMeta) IntoPending() {
+	if m.modifiedCopy.State != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_UNKNOWN {
+		panic("tranfer state to pending from non-unknown state")
+	}
+	m.modifiedCopy.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_PENDING
+}
+
 // IntoGrowing transfers the segment assignment meta into growing state.
 func (m *mutableSegmentAssignmentMeta) IntoGrowing(limitation *policy.SegmentLimitation) {
 	if m.modifiedCopy.State != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_PENDING {
@@ -263,6 +289,7 @@ func (m *mutableSegmentAssignmentMeta) Commit(ctx context.Context) error {
 		// if the state transferred from growing into others, remove the stats from stats manager.
 		m.original.immutableStat = resource.Resource().SegmentAssignStatsManager().UnregisterSealedSegment(m.original.GetSegmentID())
 	}
+	m.original.metrics.UpdateGrowingSegmentState(m.original.GetState(), m.modifiedCopy.GetState())
 	m.original.inner = m.modifiedCopy
 	return nil
 }

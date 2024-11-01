@@ -10,9 +10,114 @@ import base64
 import requests
 from loguru import logger
 import datetime
+from sklearn.metrics import pairwise_distances
+from collections import Counter
+import bm25s
+import jieba
+
 
 fake = Faker()
+fake.seed_instance(19530)
 rng = np.random.default_rng()
+
+
+en_vocabularies_distribution = {
+    "hello": 0.01,
+    "milvus": 0.01,
+    "vector": 0.01,
+    "database": 0.01
+}
+
+zh_vocabularies_distribution = {
+    "你好": 0.01,
+    "向量": 0.01,
+    "数据": 0.01,
+    "库": 0.01
+}
+
+
+def patch_faker_text(fake_instance, vocabularies_distribution):
+    """
+    Monkey patch the text() method of a Faker instance to include custom vocabulary.
+    Each word in vocabularies_distribution has an independent chance to be inserted.
+    Args:
+        fake_instance: Faker instance to patch
+        vocabularies_distribution: Dictionary where:
+            - key: word to insert
+            - value: probability (0-1) of inserting this word into each sentence
+    Example:
+        vocabularies_distribution = {
+            "hello": 0.1,    # 10% chance to insert "hello" in each sentence
+            "milvus": 0.1,   # 10% chance to insert "milvus" in each sentence
+        }
+    """
+    original_text = fake_instance.text
+
+    def new_text(*args, **kwargs):
+        sentences = []
+        # Split original text into sentences
+        original_sentences = original_text(*args,**kwargs).split('.')
+        original_sentences = [s.strip() for s in original_sentences if s.strip()]
+
+        for base_sentence in original_sentences:
+            words = base_sentence.split()
+
+            # Independently decide whether to insert each word
+            for word, probability in vocabularies_distribution.items():
+                if random.random() < probability:
+                    # Choose random position to insert the word
+                    insert_pos = random.randint(0, len(words))
+                    words.insert(insert_pos, word)
+
+            # Reconstruct the sentence
+            base_sentence = ' '.join(words)
+
+            # Ensure proper capitalization
+            base_sentence = base_sentence[0].upper() + base_sentence[1:]
+            sentences.append(base_sentence)
+
+        return '. '.join(sentences) + '.'
+
+    # Replace the original text method with our custom one
+    fake_instance.text = new_text
+
+
+def analyze_documents(texts, language="en"):
+    stopwords = "en"
+    if language in ["en", "english"]:
+        stopwords = "en"
+    if language in ["zh", "cn", "chinese"]:
+        stopword = " "
+        new_texts = []
+        for doc in texts:
+            seg_list = jieba.cut(doc, cut_all=True)
+            new_texts.append(" ".join(seg_list))
+        texts = new_texts
+        stopwords = [stopword]
+    # Start timing
+    t0 = time.time()
+
+    # Tokenize the corpus
+    tokenized = bm25s.tokenize(texts, lower=True, stopwords=stopwords)
+    # log.info(f"Tokenized: {tokenized}")
+    # Create a frequency counter
+    freq = Counter()
+
+    # Count the frequency of each token
+    for doc_ids in tokenized.ids:
+        freq.update(doc_ids)
+    # Create a reverse vocabulary mapping
+    id_to_word = {id: word for word, id in tokenized.vocab.items()}
+
+    # Convert token ids back to words
+    word_freq = Counter({id_to_word[token_id]: count for token_id, count in freq.items()})
+
+    # End timing
+    tt = time.time() - t0
+    logger.info(f"Analyze document cost time: {tt}")
+
+    return word_freq
+
 
 def random_string(length=8):
     letters = string.ascii_letters
@@ -240,4 +345,28 @@ def get_all_fields_by_data(data, exclude_fields=None):
     return list(fields)
 
 
+def ip_distance(x, y):
+    return np.dot(x, y)
 
+
+def cosine_distance(u, v, epsilon=1e-8):
+    dot_product = np.dot(u, v)
+    norm_u = np.linalg.norm(u)
+    norm_v = np.linalg.norm(v)
+    return dot_product / (max(norm_u * norm_v, epsilon))
+
+
+def l2_distance(u, v):
+    return np.sum((u - v) ** 2)
+
+
+def get_sorted_distance(train_emb, test_emb, metric_type):
+    milvus_sklearn_metric_map = {
+        "L2": l2_distance,
+        "COSINE": cosine_distance,
+        "IP": ip_distance
+    }
+    distance = pairwise_distances(train_emb, Y=test_emb, metric=milvus_sklearn_metric_map[metric_type], n_jobs=-1)
+    distance = np.array(distance.T, order='C', dtype=np.float32)
+    distance_sorted = np.sort(distance, axis=1).tolist()
+    return distance_sorted

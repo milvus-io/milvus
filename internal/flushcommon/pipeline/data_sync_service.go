@@ -132,6 +132,10 @@ func (dsService *DataSyncService) GetMetaCache() metacache.MetaCache {
 	return dsService.metacache
 }
 
+func getMetaCacheForStreaming(initCtx context.Context, params *util.PipelineParams, info *datapb.ChannelWatchInfo, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
+	return initMetaCache(initCtx, params.ChunkManager, info, nil, unflushed, flushed)
+}
+
 func getMetaCacheWithTickler(initCtx context.Context, params *util.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
 	tickler.SetTotal(int32(len(unflushed) + len(flushed)))
 	return initMetaCache(initCtx, params.ChunkManager, info, tickler, unflushed, flushed)
@@ -142,6 +146,7 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 	futures := make([]*conc.Future[any], 0, len(unflushed)+len(flushed))
 	// segmentPks := typeutil.NewConcurrentMap[int64, []*storage.PkStatistics]()
 	segmentPks := typeutil.NewConcurrentMap[int64, pkoracle.PkStat]()
+	segmentBm25 := typeutil.NewConcurrentMap[int64, map[int64]*storage.BM25Stats]()
 
 	loadSegmentStats := func(segType string, segments []*datapb.SegmentInfo) {
 		for _, item := range segments {
@@ -160,8 +165,16 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 					return nil, err
 				}
 				segmentPks.Insert(segment.GetID(), pkoracle.NewBloomFilterSet(stats...))
-				if !streamingutil.IsStreamingServiceEnabled() {
+				if tickler != nil {
 					tickler.Inc()
+				}
+
+				if segType == "growing" && len(segment.GetBm25Statslogs()) > 0 {
+					bm25stats, err := compaction.LoadBM25Stats(initCtx, chunkManager, info.GetSchema(), segment.GetID(), segment.GetBm25Statslogs())
+					if err != nil {
+						return nil, err
+					}
+					segmentBm25.Insert(segment.GetID(), bm25stats)
 				}
 
 				return struct{}{}, nil
@@ -170,44 +183,10 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 			futures = append(futures, future)
 		}
 	}
-	lazyLoadSegmentStats := func(segType string, segments []*datapb.SegmentInfo) {
-		for _, item := range segments {
-			log.Info("lazy load pk stats for segment",
-				zap.String("vChannelName", item.GetInsertChannel()),
-				zap.Int64("segmentID", item.GetID()),
-				zap.Int64("numRows", item.GetNumOfRows()),
-				zap.String("segmentType", segType),
-			)
-			segment := item
 
-			lazy := pkoracle.NewLazyPkstats()
-
-			// ignore lazy load future
-			_ = io.GetOrCreateStatsPool().Submit(func() (any, error) {
-				var stats []*storage.PkStatistics
-				var err error
-				stats, err = compaction.LoadStats(context.Background(), chunkManager, info.GetSchema(), segment.GetID(), segment.GetStatslogs())
-				if err != nil {
-					return nil, err
-				}
-				pkStats := pkoracle.NewBloomFilterSet(stats...)
-				lazy.SetPkStats(pkStats)
-				return struct{}{}, nil
-			})
-			segmentPks.Insert(segment.GetID(), lazy)
-			if tickler != nil {
-				tickler.Inc()
-			}
-		}
-	}
-
-	// growing segment cannot use lazy mode
+	// growing segments's stats should always be loaded, for generating merged pk bf.
 	loadSegmentStats("growing", unflushed)
-	lazy := paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()
-	// check paramtable to decide whether skip load BF stage when initializing
-	if lazy {
-		lazyLoadSegmentStats("sealed", flushed)
-	} else {
+	if !(streamingutil.IsStreamingServiceEnabled() || paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()) {
 		loadSegmentStats("sealed", flushed)
 	}
 
@@ -220,10 +199,21 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 	}
 
 	// return channel, nil
-	metacache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) pkoracle.PkStat {
+	pkStatsFactory := func(segment *datapb.SegmentInfo) pkoracle.PkStat {
 		pkStat, _ := segmentPks.Get(segment.GetID())
 		return pkStat
-	})
+	}
+
+	bm25StatsFactor := func(segment *datapb.SegmentInfo) *metacache.SegmentBM25Stats {
+		stats, ok := segmentBm25.Get(segment.GetID())
+		if !ok {
+			return nil
+		}
+		segmentStats := metacache.NewSegmentBM25Stats(stats)
+		return segmentStats
+	}
+	// return channel, nil
+	metacache := metacache.NewMetaCache(info, pkStatsFactory, bm25StatsFactor)
 
 	return metacache, nil
 }
@@ -231,6 +221,7 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	info *datapb.ChannelWatchInfo, metacache metacache.MetaCache,
 	unflushed, flushed []*datapb.SegmentInfo, input <-chan *msgstream.MsgPack,
+	wbTaskObserverCallback writebuffer.TaskObserverCallback,
 ) (*DataSyncService, error) {
 	var (
 		channelName  = info.GetVchan().GetChannelName()
@@ -248,19 +239,6 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		metacache:    metacache,
 		serverID:     serverID,
 	}
-
-	err := params.WriteBufferManager.Register(channelName, metacache,
-		writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(params.Broker, config.serverID)),
-		writebuffer.WithIDAllocator(params.Allocator))
-	if err != nil {
-		log.Warn("failed to register channel buffer", zap.Error(err))
-		return nil, err
-	}
-	defer func() {
-		if err != nil {
-			defer params.WriteBufferManager.RemoveChannel(channelName)
-		}
-	}()
 
 	ctx, cancel := context.WithCancel(params.Ctx)
 	ds := &DataSyncService{
@@ -286,15 +264,15 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 
 	// init flowgraph
 	fg := flowgraph.NewTimeTickedFlowGraph(params.Ctx)
+	nodeList := []flowgraph.Node{}
 
-	var dmStreamNode *flowgraph.InputNode
-	dmStreamNode, err = newDmInputNode(initCtx, params.DispClient, info.GetVchan().GetSeekPosition(), config, input)
+	dmStreamNode, err := newDmInputNode(initCtx, params.DispClient, info.GetVchan().GetSeekPosition(), config, input)
 	if err != nil {
 		return nil, err
 	}
+	nodeList = append(nodeList, dmStreamNode)
 
-	var ddNode *ddNode
-	ddNode, err = newDDNode(
+	ddNode, err := newDDNode(
 		params.Ctx,
 		collectionID,
 		channelName,
@@ -307,18 +285,44 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	if err != nil {
 		return nil, err
 	}
+	nodeList = append(nodeList, ddNode)
 
-	writeNode := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
-	var ttNode *ttNode
-	ttNode, err = newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
+	if len(info.GetSchema().GetFunctions()) > 0 {
+		emNode, err := newEmbeddingNode(channelName, info.GetSchema())
+		if err != nil {
+			return nil, err
+		}
+		nodeList = append(nodeList, emNode)
+	}
+
+	writeNode, err := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
 	if err != nil {
 		return nil, err
 	}
+	nodeList = append(nodeList, writeNode)
 
-	if err := fg.AssembleNodes(dmStreamNode, ddNode, writeNode, ttNode); err != nil {
+	ttNode, err := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
+	if err != nil {
+		return nil, err
+	}
+	nodeList = append(nodeList, ttNode)
+
+	if err := fg.AssembleNodes(nodeList...); err != nil {
 		return nil, err
 	}
 	ds.fg = fg
+
+	// Register channel after channel pipeline is ready.
+	// This'll reject any FlushChannel and FlushSegments calls to prevent inconsistency between DN and DC over flushTs
+	// if fail to init flowgraph nodes.
+	err = params.WriteBufferManager.Register(channelName, metacache,
+		writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(params.Broker, config.serverID)),
+		writebuffer.WithIDAllocator(params.Allocator),
+		writebuffer.WithTaskObserverCallback(wbTaskObserverCallback))
+	if err != nil {
+		log.Warn("failed to register channel buffer", zap.String("channel", channelName), zap.Error(err))
+		return nil, err
+	}
 
 	return ds, nil
 }
@@ -328,28 +332,9 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 // NewDataSyncService stops and returns the initCtx.Err()
 func NewDataSyncService(initCtx context.Context, pipelineParams *util.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler) (*DataSyncService, error) {
 	// recover segment checkpoints
-	unflushedSegmentInfos, err := pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
-	if err != nil {
-		return nil, err
-	}
-	flushedSegmentInfos, err := pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetFlushedSegmentIds())
-	if err != nil {
-		return nil, err
-	}
-
-	// init metaCache meta
-	metaCache, err := getMetaCacheWithTickler(initCtx, pipelineParams, info, tickler, unflushedSegmentInfos, flushedSegmentInfos)
-	if err != nil {
-		return nil, err
-	}
-
-	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, nil)
-}
-
-func NewStreamingNodeDataSyncService(initCtx context.Context, pipelineParams *util.PipelineParams, info *datapb.ChannelWatchInfo, input <-chan *msgstream.MsgPack) (*DataSyncService, error) {
-	// recover segment checkpoints
 	var (
 		err                   error
+		metaCache             metacache.MetaCache
 		unflushedSegmentInfos []*datapb.SegmentInfo
 		flushedSegmentInfos   []*datapb.SegmentInfo
 	)
@@ -367,12 +352,44 @@ func NewStreamingNodeDataSyncService(initCtx context.Context, pipelineParams *ut
 	}
 
 	// init metaCache meta
-	metaCache, err := initMetaCache(initCtx, pipelineParams.ChunkManager, info, nil, unflushedSegmentInfos, flushedSegmentInfos)
-	if err != nil {
+	if metaCache, err = getMetaCacheWithTickler(initCtx, pipelineParams, info, tickler, unflushedSegmentInfos, flushedSegmentInfos); err != nil {
 		return nil, err
 	}
+	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, nil, nil)
+}
 
-	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, input)
+func NewStreamingNodeDataSyncService(
+	initCtx context.Context,
+	pipelineParams *util.PipelineParams,
+	info *datapb.ChannelWatchInfo,
+	input <-chan *msgstream.MsgPack,
+	wbTaskObserverCallback writebuffer.TaskObserverCallback,
+) (*DataSyncService, error) {
+	// recover segment checkpoints
+	var (
+		err                   error
+		metaCache             metacache.MetaCache
+		unflushedSegmentInfos []*datapb.SegmentInfo
+		flushedSegmentInfos   []*datapb.SegmentInfo
+	)
+	if len(info.GetVchan().GetUnflushedSegmentIds()) > 0 {
+		unflushedSegmentInfos, err = pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(info.GetVchan().GetFlushedSegmentIds()) > 0 {
+		flushedSegmentInfos, err = pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetFlushedSegmentIds())
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// init metaCache meta
+	if metaCache, err = getMetaCacheForStreaming(initCtx, pipelineParams, info, unflushedSegmentInfos, flushedSegmentInfos); err != nil {
+		return nil, err
+	}
+	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, input, wbTaskObserverCallback)
 }
 
 func NewDataSyncServiceWithMetaCache(metaCache metacache.MetaCache) *DataSyncService {

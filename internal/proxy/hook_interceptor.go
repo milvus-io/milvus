@@ -7,6 +7,8 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -36,6 +38,10 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 			zap.String("full method", fullMethod), zap.Error(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookMock, fullMethod).Inc()
 		updateProxyFunctionCallMetric(fullMethod)
+		if err != nil {
+			// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
+			err = status.Error(codes.InvalidArgument, "detail: "+err.Error())
+		}
 		return mockResp, err
 	}
 
@@ -44,7 +50,8 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 			zap.Any("request", req), zap.Error(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookBefore, fullMethod).Inc()
 		updateProxyFunctionCallMetric(fullMethod)
-		return nil, err
+		// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
+		return nil, status.Error(codes.InvalidArgument, "detail: "+err.Error())
 	}
 	realResp, realErr = handler(newCtx, req)
 	if err = hoo.After(newCtx, realResp, realErr, fullMethod); err != nil {
@@ -52,7 +59,8 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 			zap.Any("request", req), zap.Error(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookAfter, fullMethod).Inc()
 		updateProxyFunctionCallMetric(fullMethod)
-		return nil, err
+		// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
+		return nil, status.Error(codes.InvalidArgument, "detail: "+err.Error())
 	}
 	return realResp, realErr
 }

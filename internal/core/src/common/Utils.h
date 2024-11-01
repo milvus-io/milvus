@@ -160,13 +160,15 @@ inline bool
 IsFloatMetricType(const knowhere::MetricType& metric_type) {
     return IsMetricType(metric_type, knowhere::metric::L2) ||
            IsMetricType(metric_type, knowhere::metric::IP) ||
-           IsMetricType(metric_type, knowhere::metric::COSINE);
+           IsMetricType(metric_type, knowhere::metric::COSINE) ||
+           IsMetricType(metric_type, knowhere::metric::BM25);
 }
 
 inline bool
 PositivelyRelated(const knowhere::MetricType& metric_type) {
     return IsMetricType(metric_type, knowhere::metric::IP) ||
-           IsMetricType(metric_type, knowhere::metric::COSINE);
+           IsMetricType(metric_type, knowhere::metric::COSINE) ||
+           IsMetricType(metric_type, knowhere::metric::BM25);
 }
 
 inline std::string
@@ -285,5 +287,19 @@ inline void SparseRowsToProto(
     }
     proto->set_dim(max_dim);
 }
+
+class Defer {
+ public:
+    Defer(std::function<void()> fn) : fn_(fn) {
+    }
+    ~Defer() {
+        fn_();
+    }
+
+ private:
+    std::function<void()> fn_;
+};
+
+#define DeferLambda(fn) Defer Defer_##__COUNTER__(fn);
 
 }  // namespace milvus

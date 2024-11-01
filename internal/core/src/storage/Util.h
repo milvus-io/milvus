@@ -77,7 +77,20 @@ std::string
 GenIndexPathIdentifier(int64_t build_id, int64_t index_version);
 
 std::string
+GenTextIndexPathIdentifier(int64_t build_id,
+                           int64_t index_version,
+                           int64_t segment_id,
+                           int64_t field_id);
+
+std::string
 GenIndexPathPrefix(ChunkManagerPtr cm, int64_t build_id, int64_t index_version);
+
+std::string
+GenTextIndexPathPrefix(ChunkManagerPtr cm,
+                       int64_t build_id,
+                       int64_t index_version,
+                       int64_t segment_id,
+                       int64_t field_id);
 
 std::string
 GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
@@ -89,7 +102,8 @@ GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id);
 
 std::unique_ptr<DataCodec>
 DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
-                            const std::string& file);
+                            const std::string& file,
+                            bool is_field_data = true);
 
 std::pair<std::string, size_t>
 EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,

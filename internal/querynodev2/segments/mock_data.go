@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
@@ -220,6 +221,11 @@ func genConstantFieldSchema(param constFieldParam) *schemapb.FieldSchema {
 		DataType:     param.dataType,
 		ElementType:  schemapb.DataType_Int32,
 	}
+	if param.dataType == schemapb.DataType_VarChar {
+		field.TypeParams = []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "128"},
+		}
+	}
 	return field
 }
 
@@ -261,6 +267,35 @@ func genVectorFieldSchema(param vecFieldParam) *schemapb.FieldSchema {
 		}
 	}
 	return fieldVec
+}
+
+func GenTestBM25CollectionSchema(collectionName string) *schemapb.CollectionSchema {
+	fieldRowID := genConstantFieldSchema(rowIDField)
+	fieldTimestamp := genConstantFieldSchema(timestampField)
+	pkFieldSchema := genPKFieldSchema(simpleInt64Field)
+	textFieldSchema := genConstantFieldSchema(simpleVarCharField)
+	sparseFieldSchema := genVectorFieldSchema(simpleSparseFloatVectorField)
+	sparseFieldSchema.IsFunctionOutput = true
+
+	schema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			fieldRowID,
+			fieldTimestamp,
+			pkFieldSchema,
+			textFieldSchema,
+			sparseFieldSchema,
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name:             "BM25",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{textFieldSchema.GetName()},
+			InputFieldIds:    []int64{textFieldSchema.GetFieldID()},
+			OutputFieldNames: []string{sparseFieldSchema.GetName()},
+			OutputFieldIds:   []int64{sparseFieldSchema.GetFieldID()},
+		}},
+	}
+	return schema
 }
 
 // some tests do not yet support sparse float vector, see comments of
@@ -668,6 +703,32 @@ func SaveDeltaLog(collectionID int64,
 	})
 	log.Debug("[query node unittest] save delta log file to MinIO/S3")
 
+	return fieldBinlog, cm.MultiWrite(context.Background(), kvs)
+}
+
+func SaveBM25Log(collectionID int64, partitionID int64, segmentID int64, fieldID int64, msgLength int, cm storage.ChunkManager) (*datapb.FieldBinlog, error) {
+	stats := storage.NewBM25Stats()
+
+	for i := 0; i < msgLength; i++ {
+		stats.Append(map[uint32]float32{1: 1})
+	}
+
+	bytes, err := stats.Serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	kvs := make(map[string][]byte, 1)
+	key := path.Join(cm.RootPath(), common.SegmentBm25LogPath, metautil.JoinIDPath(collectionID, partitionID, segmentID, fieldID, 1001))
+	kvs[key] = bytes
+	fieldBinlog := &datapb.FieldBinlog{
+		FieldID: fieldID,
+		Binlogs: []*datapb.Binlog{{
+			LogPath:       key,
+			TimestampFrom: 100,
+			TimestampTo:   200,
+		}},
+	}
 	return fieldBinlog, cm.MultiWrite(context.Background(), kvs)
 }
 

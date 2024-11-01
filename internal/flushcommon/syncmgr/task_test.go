@@ -185,7 +185,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	}
 
 	bfs.UpdatePKRange(fd)
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
 	metacache.UpdateNumOfRows(1000)(seg)
 	seg.GetBloomFilterSet().Roll()
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
@@ -273,7 +273,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 	defer cancel()
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
 	bfs := pkoracle.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs, nil)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
@@ -314,7 +314,7 @@ func (s *SyncTaskSuite) TestRunError() {
 	})
 
 	s.metacache.ExpectedCalls = nil
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, pkoracle.NewBloomFilterSet())
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, pkoracle.NewBloomFilterSet(), nil)
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
@@ -380,6 +380,34 @@ func (s *SyncTaskSuite) TestNextID() {
 			task.nextID()
 		})
 	})
+}
+
+func (s *SyncTaskSuite) TestSyncTask_MarshalJSON() {
+	task := &SyncTask{
+		segmentID:     12345,
+		batchRows:     100,
+		level:         datapb.SegmentLevel_L0,
+		tsFrom:        1000,
+		tsTo:          2000,
+		deltaRowCount: 10,
+		flushedSize:   1024,
+		execTime:      2 * time.Second,
+	}
+
+	expectedJSON := `{
+        "segment_id": 12345,
+        "batch_rows": 100,
+        "segment_level": "L0",
+        "ts_from": 1000,
+        "ts_to": 2000,
+        "delta_row_count": 10,
+        "flush_size": 1024,
+        "running_time": 2000000000
+    }`
+
+	data, err := task.MarshalJSON()
+	s.NoError(err)
+	s.JSONEq(expectedJSON, string(data))
 }
 
 func TestSyncTask(t *testing.T) {

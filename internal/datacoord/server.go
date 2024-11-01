@@ -29,12 +29,15 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -102,14 +105,16 @@ type Server struct {
 	quitCh           chan struct{}
 	stateCode        atomic.Value
 
-	etcdCli          *clientv3.Client
-	tikvCli          *txnkv.Client
-	address          string
-	watchClient      kv.WatchKV
-	kv               kv.MetaKv
-	meta             *meta
-	segmentManager   Manager
-	allocator        allocator.Allocator
+	etcdCli        *clientv3.Client
+	tikvCli        *txnkv.Client
+	address        string
+	watchClient    kv.WatchKV
+	kv             kv.MetaKv
+	meta           *meta
+	segmentManager Manager
+	allocator      allocator.Allocator
+	// self host id allocator, to avoid get unique id from rootcoord
+	idAllocator      *globalIDAllocator.GlobalIDAllocator
 	cluster          Cluster
 	sessionManager   session.DataNodeManager
 	channelManager   ChannelManager
@@ -129,7 +134,6 @@ type Server struct {
 	metricsCacheManager   *metricsinfo.MetricsCacheManager
 
 	flushCh         chan UniqueID
-	buildIndexCh    chan UniqueID
 	notifyIndexChan chan UniqueID
 	factory         dependency.Factory
 
@@ -153,12 +157,15 @@ type Server struct {
 	indexEngineVersionManager IndexEngineVersionManager
 
 	taskScheduler *taskScheduler
+	jobManager    StatsJobManager
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
 
 	// streamingcoord server is embedding in datacoord now.
 	streamingCoord *streamingcoord.Server
+
+	metricsRequest *metricsinfo.MetricsRequest
 }
 
 type CollectionNameInfo struct {
@@ -205,13 +212,13 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		quitCh:                 make(chan struct{}),
 		factory:                factory,
 		flushCh:                make(chan UniqueID, 1024),
-		buildIndexCh:           make(chan UniqueID, 1024),
 		notifyIndexChan:        make(chan UniqueID),
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
 		indexNodeCreator:       defaultIndexNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
 		metricsCacheManager:    metricsinfo.NewMetricsCacheManager(),
 		enableActiveStandBy:    Params.DataCoordCfg.EnableActiveStandby.GetAsBool(),
+		metricsRequest:         metricsinfo.NewMetricsRequest(),
 	}
 
 	for _, opt := range opts {
@@ -294,6 +301,7 @@ func (s *Server) initSession() error {
 // Init change server state to Initializing
 func (s *Server) Init() error {
 	var err error
+	s.registerMetricsRequest()
 	s.factory.Init(Params)
 	if err = s.initSession(); err != nil {
 		return err
@@ -347,6 +355,14 @@ func (s *Server) initDataCoord() error {
 		return err
 	}
 
+	// init id allocator after init meta
+	s.idAllocator = globalIDAllocator.NewGlobalIDAllocator("idTimestamp", s.kv)
+	err = s.idAllocator.Initialize()
+	if err != nil {
+		log.Error("data coordinator id allocator initialize failed", zap.Error(err))
+		return err
+	}
+
 	// Initialize streaming coordinator.
 	if streamingutil.IsStreamingServiceEnabled() {
 		s.streamingCoord = streamingcoord.NewServerBuilder().
@@ -379,6 +395,9 @@ func (s *Server) initDataCoord() error {
 	s.initTaskScheduler(storageCli)
 	log.Info("init task scheduler done")
 
+	s.initJobManager()
+	log.Info("init statsJobManager done")
+
 	s.initCompaction()
 	log.Info("init compaction done")
 
@@ -393,8 +412,8 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
-	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta, s.buildIndexCh)
-	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.segmentManager, s.importMeta)
+	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta)
+	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.importMeta, s.jobManager)
 
 	s.syncSegmentsScheduler = newSyncSegmentsScheduler(s.meta, s.channelManager, s.sessionManager)
 
@@ -425,7 +444,7 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) startDataCoord() {
-	s.taskScheduler.Start()
+	s.startTaskScheduler()
 	s.startServerLoop()
 
 	// http.Register(&http.Handler{
@@ -487,7 +506,7 @@ func (s *Server) initCluster() error {
 	s.sessionManager = session.NewDataNodeManagerImpl(session.WithDataNodeCreator(s.dataNodeCreator))
 
 	var err error
-	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, s.sessionManager, s.allocator, withCheckerV2())
+	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, s.sessionManager, s.idAllocator, withCheckerV2())
 	if err != nil {
 		return err
 	}
@@ -669,7 +688,13 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 
 func (s *Server) initTaskScheduler(manager storage.ChunkManager) {
 	if s.taskScheduler == nil {
-		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler)
+		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler, s.allocator)
+	}
+}
+
+func (s *Server) initJobManager() {
+	if s.jobManager == nil {
+		s.jobManager = newJobManager(s.ctx, s.meta, s.taskScheduler, s.allocator)
 	}
 }
 
@@ -720,14 +745,20 @@ func (s *Server) startServerLoop() {
 	s.serverLoopWg.Add(2)
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
-	s.startIndexService(s.serverLoopCtx)
 	go s.importScheduler.Start()
 	go s.importChecker.Start()
 	s.garbageCollector.start()
 
-	if !streamingutil.IsStreamingServiceEnabled() {
+	if !(streamingutil.IsStreamingServiceEnabled() || paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()) {
 		s.syncSegmentsScheduler.Start()
 	}
+}
+
+func (s *Server) startTaskScheduler() {
+	s.taskScheduler.Start()
+	s.jobManager.Start()
+
+	s.startIndexService(s.serverLoopCtx)
 }
 
 func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
@@ -981,7 +1012,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return err
 	}
 	select {
-	case s.buildIndexCh <- segmentID:
+	case getStatsTaskChSingleton() <- segmentID:
 	default:
 	}
 
@@ -1057,6 +1088,9 @@ func (s *Server) Stop() error {
 	s.stopCompaction()
 	logutil.Logger(s.ctx).Info("datacoord compaction stopped")
 
+	s.jobManager.Stop()
+	logutil.Logger(s.ctx).Info("datacoord statsJobManager stopped")
+
 	s.taskScheduler.Stop()
 	logutil.Logger(s.ctx).Info("datacoord index builder stopped")
 
@@ -1097,20 +1131,33 @@ func (s *Server) stopServerLoop() {
 	s.serverLoopWg.Wait()
 }
 
-// func (s *Server) validateAllocRequest(collID UniqueID, partID UniqueID, channelName string) error {
-//	if !s.meta.HasCollection(collID) {
-//		return fmt.Errorf("can not find collection %d", collID)
-//	}
-//	if !s.meta.HasPartition(collID, partID) {
-//		return fmt.Errorf("can not find partition %d", partID)
-//	}
-//	for _, name := range s.insertChannels {
-//		if name == channelName {
-//			return nil
-//		}
-//	}
-//	return fmt.Errorf("can not find channel %s", channelName)
-// }
+func (s *Server) registerMetricsRequest() {
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SystemInfoMetrics,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.getSystemInfoMetrics(ctx, req)
+		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ImportTasks,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.importMeta.TaskStatsJSON(), nil
+		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.CompactionTasks,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.meta.compactionTaskMeta.TaskStatsJSON(), nil
+		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.BuildIndexTasks,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.meta.indexMeta.TaskStatsJSON(), nil
+		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTasks,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.GetSyncTaskMetrics(ctx, req)
+		})
+	log.Info("register metrics actions finished")
+}
 
 // loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
 // collection information will be added to server meta info.

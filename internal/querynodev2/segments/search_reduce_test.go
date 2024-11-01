@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -28,7 +29,7 @@ func (suite *SearchReduceSuite) TestResult_ReduceSearchResultData() {
 		dataArray := make([]*schemapb.SearchResultData, 0)
 		dataArray = append(dataArray, data1)
 		dataArray = append(dataArray, data2)
-		reduceInfo := &ReduceInfo{nq: nq, topK: topk}
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1)
 		searchReduce := InitSearchReducer(reduceInfo)
 		res, err := searchReduce.ReduceSearchResultData(context.TODO(), dataArray, reduceInfo)
 		suite.Nil(err)
@@ -47,7 +48,7 @@ func (suite *SearchReduceSuite) TestResult_ReduceSearchResultData() {
 		dataArray := make([]*schemapb.SearchResultData, 0)
 		dataArray = append(dataArray, data1)
 		dataArray = append(dataArray, data2)
-		reduceInfo := &ReduceInfo{nq: nq, topK: topk}
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1)
 		searchReduce := InitSearchReducer(reduceInfo)
 		res, err := searchReduce.ReduceSearchResultData(context.TODO(), dataArray, reduceInfo)
 		suite.Nil(err)
@@ -96,7 +97,7 @@ func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {
 		dataArray := make([]*schemapb.SearchResultData, 0)
 		dataArray = append(dataArray, data1)
 		dataArray = append(dataArray, data2)
-		reduceInfo := &ReduceInfo{nq: nq, topK: topk, groupByFieldID: 101}
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1).WithGroupByField(101)
 		searchReduce := InitSearchReducer(reduceInfo)
 		res, err := searchReduce.ReduceSearchResultData(context.TODO(), dataArray, reduceInfo)
 		suite.Nil(err)
@@ -140,7 +141,7 @@ func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {
 		dataArray := make([]*schemapb.SearchResultData, 0)
 		dataArray = append(dataArray, data1)
 		dataArray = append(dataArray, data2)
-		reduceInfo := &ReduceInfo{nq: nq, topK: topk, groupByFieldID: 101}
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1).WithGroupByField(101)
 		searchReduce := InitSearchReducer(reduceInfo)
 		res, err := searchReduce.ReduceSearchResultData(context.TODO(), dataArray, reduceInfo)
 		suite.Nil(err)
@@ -184,7 +185,7 @@ func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {
 		dataArray := make([]*schemapb.SearchResultData, 0)
 		dataArray = append(dataArray, data1)
 		dataArray = append(dataArray, data2)
-		reduceInfo := &ReduceInfo{nq: nq, topK: topk, groupByFieldID: 101}
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1).WithGroupByField(101)
 		searchReduce := InitSearchReducer(reduceInfo)
 		res, err := searchReduce.ReduceSearchResultData(context.TODO(), dataArray, reduceInfo)
 		suite.Nil(err)
@@ -228,7 +229,7 @@ func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {
 		dataArray := make([]*schemapb.SearchResultData, 0)
 		dataArray = append(dataArray, data1)
 		dataArray = append(dataArray, data2)
-		reduceInfo := &ReduceInfo{nq: nq, topK: topk, groupByFieldID: 101, groupSize: 3}
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(3).WithGroupByField(101)
 		searchReduce := InitSearchReducer(reduceInfo)
 		res, err := searchReduce.ReduceSearchResultData(context.TODO(), dataArray, reduceInfo)
 		suite.Nil(err)
@@ -239,7 +240,7 @@ func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {
 
 	suite.Run("reduce_group_by_empty_input", func() {
 		dataArray := make([]*schemapb.SearchResultData, 0)
-		reduceInfo := &ReduceInfo{nq: nq, topK: topk, groupByFieldID: 101, groupSize: 3}
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(3).WithGroupByField(101)
 		searchReduce := InitSearchReducer(reduceInfo)
 		res, err := searchReduce.ReduceSearchResultData(context.TODO(), dataArray, reduceInfo)
 		suite.Nil(err)

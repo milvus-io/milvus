@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -35,6 +36,34 @@ type ImportJobFilter func(job ImportJob) bool
 func WithCollectionID(collectionID int64) ImportJobFilter {
 	return func(job ImportJob) bool {
 		return job.GetCollectionID() == collectionID
+	}
+}
+
+func WithDbID(DbID int64) ImportJobFilter {
+	return func(job ImportJob) bool {
+		return job.GetDbID() == DbID
+	}
+}
+
+func WithJobStates(states ...internalpb.ImportJobState) ImportJobFilter {
+	return func(job ImportJob) bool {
+		for _, state := range states {
+			if job.GetState() == state {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func WithoutJobStates(states ...internalpb.ImportJobState) ImportJobFilter {
+	return func(job ImportJob) bool {
+		for _, state := range states {
+			if job.GetState() == state {
+				return false
+			}
+		}
+		return true
 	}
 }
 
@@ -77,6 +106,7 @@ func UpdateJobCompleteTime(completeTime string) UpdateJobAction {
 
 type ImportJob interface {
 	GetJobID() int64
+	GetDbID() int64
 	GetCollectionID() int64
 	GetCollectionName() string
 	GetPartitionIDs() []int64
@@ -91,15 +121,23 @@ type ImportJob interface {
 	GetCompleteTime() string
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
+	GetTR() *timerecord.TimeRecorder
 	Clone() ImportJob
 }
 
 type importJob struct {
 	*datapb.ImportJob
+
+	tr *timerecord.TimeRecorder
+}
+
+func (j *importJob) GetTR() *timerecord.TimeRecorder {
+	return j.tr
 }
 
 func (j *importJob) Clone() ImportJob {
 	return &importJob{
 		ImportJob: proto.Clone(j.ImportJob).(*datapb.ImportJob),
+		tr:        j.tr,
 	}
 }

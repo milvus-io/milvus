@@ -39,6 +39,8 @@ const (
 	IndexFileBinlog
 	// StatsBinlog BinlogType for stats data
 	StatsBinlog
+	// BM25 BinlogType for bm25 stats data
+	BM25Binlog
 )
 
 const (

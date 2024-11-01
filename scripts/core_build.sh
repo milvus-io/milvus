@@ -101,6 +101,7 @@ USE_ASAN="OFF"
 USE_DYNAMIC_SIMD="ON"
 USE_OPENDAL="OFF"
 INDEX_ENGINE="KNOWHERE"
+: "${ENABLE_GCP_NATIVE:="OFF"}"
 
 while getopts "p:d:t:s:f:n:i:y:a:x:o:ulrcghzmebZ" arg; do
   case $arg in
@@ -137,7 +138,6 @@ while getopts "p:d:t:s:f:n:i:y:a:x:o:ulrcghzmebZ" arg; do
     if [[ ${ENV_VAL} == 'ON' ]]; then
         echo "Set USE_ASAN to ON"
         USE_ASAN="ON"
-        BUILD_TYPE=Debug
     fi
     ;;
   y)
@@ -256,7 +256,8 @@ ${CMAKE_EXTRA_ARGS} \
 -DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
 -DCPU_ARCH=${CPU_ARCH} \
 -DUSE_OPENDAL=${USE_OPENDAL} \
--DINDEX_ENGINE=${INDEX_ENGINE} "
+-DINDEX_ENGINE=${INDEX_ENGINE} \
+-DENABLE_GCP_NATIVE=${ENABLE_GCP_NATIVE} "
 if [ -z "$BUILD_WITHOUT_AZURE" ]; then
 CMAKE_CMD=${CMAKE_CMD}"-DAZURE_BUILD_DIR=${AZURE_BUILD_DIR} \
 -DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} "

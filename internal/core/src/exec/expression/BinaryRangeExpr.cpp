@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "BinaryRangeExpr.h"
+#include <utility>
 
 #include "query/Utils.h"
 
@@ -146,12 +147,10 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
                                  ? active_count_ - overflow_check_pos_
                                  : batch_size_;
         overflow_check_pos_ += batch_size;
-        if (cached_overflow_res_ != nullptr &&
-            cached_overflow_res_->size() == batch_size) {
-            return cached_overflow_res_;
-        }
-        auto res = std::make_shared<ColumnVector>(TargetBitmap(batch_size));
-        return res;
+        auto valid_res = ProcessChunksForValid<T>(is_index_mode_);
+        auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
+                                                      std::move(valid_res));
+        return res_vec;
     };
 
     if constexpr (std::is_integral_v<T> && !std::is_same_v<bool, T>) {
@@ -207,12 +206,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
                 func(index_ptr, val1, val2, lower_inclusive, upper_inclusive));
         };
     auto res = ProcessIndexChunks<T>(execute_sub_batch, val1, val2);
-    AssertInfo(res.size() == real_batch_size,
+    AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
-               res.size(),
+               res->size(),
                real_batch_size);
-    return std::make_shared<ColumnVector>(std::move(res));
+    return res;
 }
 
 template <typename T>
@@ -240,14 +239,18 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData() {
             PreCheckOverflow<T>(val1, val2, lower_inclusive, upper_inclusive)) {
         return res;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     auto execute_sub_batch = [lower_inclusive, upper_inclusive](
                                  const T* data,
+                                 const bool* valid_data,
                                  const int size,
                                  TargetBitmapView res,
+                                 TargetBitmapView valid_res,
                                  HighPrecisionType val1,
                                  HighPrecisionType val2) {
         if (lower_inclusive && upper_inclusive) {
@@ -262,6 +265,16 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData() {
         } else {
             BinaryRangeElementFunc<T, false, false> func;
             func(val1, val2, data, size, res);
+        }
+        // there is a batch operation in BinaryRangeElementFunc,
+        // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
+        // but to mask res with valid_data after the batch operation.
+        if (valid_data != nullptr) {
+            for (int i = 0; i < size; i++) {
+                if (!valid_data[i]) {
+                    res[i] = valid_res[i] = false;
+                }
+            }
         }
     };
     auto skip_index_func =
@@ -282,7 +295,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData() {
             }
         };
     int64_t processed_size = ProcessDataChunks<T>(
-        execute_sub_batch, skip_index_func, res, val1, val2);
+        execute_sub_batch, skip_index_func, res, valid_res, val1, val2);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -301,9 +314,11 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     bool lower_inclusive = expr_->lower_inclusive_;
     bool upper_inclusive = expr_->upper_inclusive_;
@@ -313,26 +328,28 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson() {
 
     auto execute_sub_batch = [lower_inclusive, upper_inclusive, pointer](
                                  const milvus::Json* data,
+                                 const bool* valid_data,
                                  const int size,
                                  TargetBitmapView res,
+                                 TargetBitmapView valid_res,
                                  ValueType val1,
                                  ValueType val2) {
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForJson<ValueType, true, true> func;
-            func(val1, val2, pointer, data, size, res);
+            func(val1, val2, pointer, data, valid_data, size, res, valid_res);
         } else if (lower_inclusive && !upper_inclusive) {
             BinaryRangeElementFuncForJson<ValueType, true, false> func;
-            func(val1, val2, pointer, data, size, res);
+            func(val1, val2, pointer, data, valid_data, size, res, valid_res);
         } else if (!lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForJson<ValueType, false, true> func;
-            func(val1, val2, pointer, data, size, res);
+            func(val1, val2, pointer, data, valid_data, size, res, valid_res);
         } else {
             BinaryRangeElementFuncForJson<ValueType, false, false> func;
-            func(val1, val2, pointer, data, size, res);
+            func(val1, val2, pointer, data, valid_data, size, res, valid_res);
         }
     };
     int64_t processed_size = ProcessDataChunks<milvus::Json>(
-        execute_sub_batch, std::nullptr_t{}, res, val1, val2);
+        execute_sub_batch, std::nullptr_t{}, res, valid_res, val1, val2);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -351,9 +368,11 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     bool lower_inclusive = expr_->lower_inclusive_;
     bool upper_inclusive = expr_->upper_inclusive_;
@@ -366,27 +385,29 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray() {
 
     auto execute_sub_batch = [lower_inclusive, upper_inclusive](
                                  const milvus::ArrayView* data,
+                                 const bool* valid_data,
                                  const int size,
                                  TargetBitmapView res,
+                                 TargetBitmapView valid_res,
                                  ValueType val1,
                                  ValueType val2,
                                  int index) {
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, true, true> func;
-            func(val1, val2, index, data, size, res);
+            func(val1, val2, index, data, valid_data, size, res, valid_res);
         } else if (lower_inclusive && !upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, true, false> func;
-            func(val1, val2, index, data, size, res);
+            func(val1, val2, index, data, valid_data, size, res, valid_res);
         } else if (!lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, false, true> func;
-            func(val1, val2, index, data, size, res);
+            func(val1, val2, index, data, valid_data, size, res, valid_res);
         } else {
             BinaryRangeElementFuncForArray<ValueType, false, false> func;
-            func(val1, val2, index, data, size, res);
+            func(val1, val2, index, data, valid_data, size, res, valid_res);
         }
     };
     int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
-        execute_sub_batch, std::nullptr_t{}, res, val1, val2, index);
+        execute_sub_batch, std::nullptr_t{}, res, valid_res, val1, val2, index);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",

@@ -11,10 +11,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
@@ -37,6 +35,7 @@ func NewResumableConsumer(factory factory, opts *ConsumerOptions) ResumableConsu
 		},
 		factory:    factory,
 		consumeErr: syncutil.NewFuture[error](),
+		metrics:    newConsumerMetrics(opts.PChannel),
 	}
 	go consumer.resumeLoop()
 	return consumer
@@ -54,6 +53,7 @@ type resumableConsumerImpl struct {
 	mh         *timeTickOrderMessageHandler
 	factory    factory
 	consumeErr *syncutil.Future[error]
+	metrics    *consumerMetrics
 }
 
 type factory = func(ctx context.Context, opts *handler.ConsumerOptions) (consumer.Consumer, error)
@@ -63,6 +63,7 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 	defer func() {
 		// close the message handler.
 		rc.mh.Close()
+		rc.metrics.IntoUnavailable()
 		rc.logger.Info("resumable consumer is closed")
 		close(rc.resumingExitCh)
 	}()
@@ -71,11 +72,18 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 	deliverPolicy := rc.opts.DeliverPolicy
 	deliverFilters := rc.opts.DeliverFilters
 	// consumer need to resume when error occur, so message handler shouldn't close if the internal consumer encounter failure.
-	nopCloseMH := message.NopCloseHandler{
+	nopCloseMH := nopCloseHandler{
 		Handler: rc.mh,
+		HandleInterceptor: func(ctx context.Context, msg message.ImmutableMessage, handle handleFunc) (bool, error) {
+			g := rc.metrics.StartConsume(msg.EstimateSize())
+			ok, err := handle(ctx, msg)
+			g.Finish()
+			return ok, err
+		},
 	}
 
 	for {
+		rc.metrics.IntoUnavailable()
 		// Get last checkpoint sent.
 		// Consume ordering is always time tick order now.
 		if rc.mh.lastConfirmedMessageID != nil {
@@ -104,6 +112,7 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 			rc.consumeErr.Set(err)
 			return
 		}
+		rc.metrics.IntoAvailable()
 
 		// Wait until the consumer is unavailable or context canceled.
 		if err := rc.waitUntilUnavailable(consumer); err != nil {
@@ -114,10 +123,6 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 }
 
 func (rc *resumableConsumerImpl) createNewConsumer(opts *handler.ConsumerOptions) (consumer.Consumer, error) {
-	// Mark as unavailable.
-	metrics.StreamingServiceClientConsumerTotal.WithLabelValues(paramtable.GetStringNodeID(), metrics.StreamingServiceClientProducerUnAvailable).Inc()
-	defer metrics.StreamingServiceClientConsumerTotal.WithLabelValues(paramtable.GetStringNodeID(), metrics.StreamingServiceClientProducerUnAvailable).Dec()
-
 	logger := rc.logger.With(zap.Any("deliverPolicy", opts.DeliverPolicy))
 
 	backoff := backoff.NewExponentialBackOff()
@@ -145,14 +150,11 @@ func (rc *resumableConsumerImpl) createNewConsumer(opts *handler.ConsumerOptions
 
 // waitUntilUnavailable is used to wait until the consumer is unavailable or context canceled.
 func (rc *resumableConsumerImpl) waitUntilUnavailable(consumer handler.Consumer) error {
-	// Mark as available.
-	metrics.StreamingServiceClientConsumerTotal.WithLabelValues(paramtable.GetStringNodeID(), metrics.StreamingServiceClientProducerAvailable).Inc()
 	defer func() {
 		consumer.Close()
 		if consumer.Error() != nil {
 			rc.logger.Warn("consumer is closed with error", zap.Error(consumer.Error()))
 		}
-		metrics.StreamingServiceClientConsumerTotal.WithLabelValues(paramtable.GetStringNodeID(), metrics.StreamingServiceClientProducerAvailable).Dec()
 	}()
 
 	select {
@@ -191,6 +193,7 @@ func (rc *resumableConsumerImpl) Close() {
 	// force close is applied by cancel context if graceful close is failed.
 	rc.cancel()
 	<-rc.resumingExitCh
+	rc.metrics.Close()
 }
 
 // Done returns a channel which will be closed when scanner is finished or closed.

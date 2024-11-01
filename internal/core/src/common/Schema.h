@@ -113,6 +113,27 @@ class Schema {
         this->AddField(std::move(field_meta));
     }
 
+    // string type
+    void
+    AddField(const FieldName& name,
+             const FieldId id,
+             DataType data_type,
+             int64_t max_length,
+             bool nullable,
+             bool enable_match,
+             bool enable_tokenizer,
+             std::map<std::string, std::string>& params) {
+        auto field_meta = FieldMeta(name,
+                                    id,
+                                    data_type,
+                                    max_length,
+                                    nullable,
+                                    enable_match,
+                                    enable_tokenizer,
+                                    params);
+        this->AddField(std::move(field_meta));
+    }
+
     // vector type
     void
     AddField(const FieldName& name,

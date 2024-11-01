@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
@@ -19,8 +20,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -147,48 +150,74 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 // --------------------- collection details --------------------- //
 
 func printFields(fields []*schemapb.FieldSchema) []gin.H {
-	return printFieldDetails(fields, true)
+	var res []gin.H
+	for _, field := range fields {
+		fieldDetail := printFieldDetail(field, true)
+		res = append(res, fieldDetail)
+	}
+	return res
 }
 
 func printFieldsV2(fields []*schemapb.FieldSchema) []gin.H {
-	return printFieldDetails(fields, false)
-}
-
-func printFieldDetails(fields []*schemapb.FieldSchema, oldVersion bool) []gin.H {
 	var res []gin.H
 	for _, field := range fields {
-		fieldDetail := gin.H{
-			HTTPReturnFieldName:         field.Name,
-			HTTPReturnFieldPrimaryKey:   field.IsPrimaryKey,
-			HTTPReturnFieldPartitionKey: field.IsPartitionKey,
-			HTTPReturnFieldAutoID:       field.AutoID,
-			HTTPReturnDescription:       field.Description,
-		}
-		if typeutil.IsVectorType(field.DataType) {
-			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
-			if oldVersion {
-				dim, _ := getDim(field)
-				fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(dim, 10) + ")"
-			}
-		} else if field.DataType == schemapb.DataType_VarChar {
-			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
-			if oldVersion {
-				maxLength, _ := parameterutil.GetMaxLength(field)
-				fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(maxLength, 10) + ")"
-			}
-		} else {
-			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
-		}
-		if !oldVersion {
-			fieldDetail[HTTPReturnFieldID] = field.FieldID
-			if field.TypeParams != nil {
-				fieldDetail[Params] = field.TypeParams
-			}
-			if field.DataType == schemapb.DataType_Array {
-				fieldDetail[HTTPReturnFieldElementType] = field.GetElementType().String()
-			}
-		}
+		fieldDetail := printFieldDetail(field, false)
 		res = append(res, fieldDetail)
+	}
+	return res
+}
+
+func printFieldDetail(field *schemapb.FieldSchema, oldVersion bool) gin.H {
+	fieldDetail := gin.H{
+		HTTPReturnFieldName:          field.Name,
+		HTTPReturnFieldPrimaryKey:    field.IsPrimaryKey,
+		HTTPReturnFieldPartitionKey:  field.IsPartitionKey,
+		HTTPReturnFieldClusteringKey: field.IsClusteringKey,
+		HTTPReturnFieldAutoID:        field.AutoID,
+		HTTPReturnDescription:        field.Description,
+	}
+	if field.GetIsFunctionOutput() {
+		fieldDetail[HTTPReturnFieldIsFunctionOutput] = true
+	}
+	if typeutil.IsVectorType(field.DataType) {
+		fieldDetail[HTTPReturnFieldType] = field.DataType.String()
+		if oldVersion {
+			dim, _ := getDim(field)
+			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(dim, 10) + ")"
+		}
+	} else if field.DataType == schemapb.DataType_VarChar {
+		fieldDetail[HTTPReturnFieldType] = field.DataType.String()
+		if oldVersion {
+			maxLength, _ := parameterutil.GetMaxLength(field)
+			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(maxLength, 10) + ")"
+		}
+	} else {
+		fieldDetail[HTTPReturnFieldType] = field.DataType.String()
+	}
+	if !oldVersion {
+		fieldDetail[HTTPReturnFieldID] = field.FieldID
+		if field.TypeParams != nil {
+			fieldDetail[Params] = field.TypeParams
+		}
+		if field.DataType == schemapb.DataType_Array {
+			fieldDetail[HTTPReturnFieldElementType] = field.GetElementType().String()
+		}
+	}
+	return fieldDetail
+}
+
+func printFunctionDetails(functions []*schemapb.FunctionSchema) []gin.H {
+	var res []gin.H
+	for _, function := range functions {
+		res = append(res, gin.H{
+			HTTPReturnFunctionName:             function.Name,
+			HTTPReturnDescription:              function.Description,
+			HTTPReturnFunctionType:             function.Type,
+			HTTPReturnFunctionID:               function.Id,
+			HTTPReturnFunctionInputFieldNames:  function.InputFieldNames,
+			HTTPReturnFunctionOutputFieldNames: function.OutputFieldNames,
+			HTTPReturnFunctionParams:           function.Params,
+		})
 	}
 	return res
 }
@@ -218,12 +247,13 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 
 // --------------------- insert param --------------------- //
 
-func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error, []map[string]interface{}) {
+func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error, []map[string]interface{}, map[string][]bool) {
 	var reallyDataArray []map[string]interface{}
+	validDataMap := make(map[string][]bool)
 	dataResult := gjson.Get(body, HTTPRequestData)
 	dataResultArray := dataResult.Array()
 	if len(dataResultArray) == 0 {
-		return merr.ErrMissingRequiredParameters, reallyDataArray
+		return merr.ErrMissingRequiredParameters, reallyDataArray, validDataMap
 	}
 
 	var fieldNames []string
@@ -238,11 +268,26 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 				fieldType := field.DataType
 				fieldName := field.Name
 
+				if field.Nullable || field.DefaultValue != nil {
+					value := gjson.Get(data.Raw, fieldName)
+					if value.Type == gjson.Null {
+						validDataMap[fieldName] = append(validDataMap[fieldName], false)
+						continue
+					} else {
+						validDataMap[fieldName] = append(validDataMap[fieldName], true)
+					}
+				}
+
 				dataString := gjson.Get(data.Raw, fieldName).String()
 
 				if field.IsPrimaryKey && field.AutoID {
+					continue
+				}
+
+				// if field is a function output field, user must not provide data for it
+				if field.GetIsFunctionOutput() {
 					if dataString != "" {
-						return merr.WrapErrParameterInvalid("", "set primary key but autoID == true"), reallyDataArray
+						return merr.WrapErrParameterInvalid("", "not allowed to provide input data for function output field: "+fieldName), reallyDataArray, validDataMap
 					}
 					continue
 				}
@@ -250,84 +295,84 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 				switch fieldType {
 				case schemapb.DataType_FloatVector:
 					if dataString == "" {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray, validDataMap
 					}
 					var vectorArray []float32
 					err := json.Unmarshal([]byte(dataString), &vectorArray)
 					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = vectorArray
 				case schemapb.DataType_BinaryVector:
 					if dataString == "" {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray, validDataMap
 					}
 					vectorStr := gjson.Get(data.Raw, fieldName).Raw
 					var vectorArray []byte
 					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
 					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = vectorArray
 				case schemapb.DataType_SparseFloatVector:
 					if dataString == "" {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray, validDataMap
 					}
 					sparseVec, err := typeutil.CreateSparseFloatRowFromJSON([]byte(dataString))
 					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = sparseVec
 				case schemapb.DataType_Float16Vector:
 					if dataString == "" {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray, validDataMap
 					}
 					vectorStr := gjson.Get(data.Raw, fieldName).Raw
 					var vectorArray []byte
 					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
 					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = vectorArray
 				case schemapb.DataType_BFloat16Vector:
 					if dataString == "" {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray, validDataMap
 					}
 					vectorStr := gjson.Get(data.Raw, fieldName).Raw
 					var vectorArray []byte
 					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
 					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = vectorArray
 				case schemapb.DataType_Bool:
 					result, err := cast.ToBoolE(dataString)
 					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Int8:
 					result, err := cast.ToInt8E(dataString)
 					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Int16:
 					result, err := cast.ToInt16E(dataString)
 					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Int32:
 					result, err := cast.ToInt32E(dataString)
 					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Int64:
 					result, err := json.Number(dataString).Int64()
 					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Array:
@@ -337,7 +382,7 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
 							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray, validDataMap
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_BoolData{
@@ -351,7 +396,7 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
 							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray, validDataMap
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_IntData{
@@ -365,7 +410,7 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
 							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray, validDataMap
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_IntData{
@@ -379,7 +424,7 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
 							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray, validDataMap
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_IntData{
@@ -390,18 +435,10 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						}
 					case schemapb.DataType_Int64:
 						arr := make([]int64, 0)
-						numArr := make([]json.Number, 0)
-						err := json.Unmarshal([]byte(dataString), &numArr)
+						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
 							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
-						}
-						for _, num := range numArr {
-							intVal, err := num.Int64()
-							if err != nil {
-								return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
-							}
-							arr = append(arr, intVal)
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray, validDataMap
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_LongData{
@@ -415,7 +452,7 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
 							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray, validDataMap
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_FloatData{
@@ -429,7 +466,7 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
 							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray, validDataMap
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_DoubleData{
@@ -443,7 +480,7 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
 							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray, validDataMap
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_StringData{
@@ -458,13 +495,13 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 				case schemapb.DataType_Float:
 					result, err := cast.ToFloat32E(dataString)
 					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Double:
 					result, err := cast.ToFloat64E(dataString)
 					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_VarChar:
@@ -472,7 +509,7 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 				case schemapb.DataType_String:
 					reallyData[fieldName] = dataString
 				default:
-					return merr.WrapErrParameterInvalid("", schemapb.DataType_name[int32(fieldType)], "fieldName: "+fieldName), reallyDataArray
+					return merr.WrapErrParameterInvalid("", schemapb.DataType_name[int32(fieldType)], "fieldName: "+fieldName), reallyDataArray, validDataMap
 				}
 			}
 
@@ -505,10 +542,10 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 
 			reallyDataArray = append(reallyDataArray, reallyData)
 		} else {
-			return merr.WrapErrParameterInvalid(gjson.JSON, data.Type, "NULL:0, FALSE:1, NUMBER:2, STRING:3, TRUE:4, JSON:5"), reallyDataArray
+			return merr.WrapErrParameterInvalid(gjson.JSON, data.Type, "NULL:0, FALSE:1, NUMBER:2, STRING:3, TRUE:4, JSON:5"), reallyDataArray, validDataMap
 		}
 	}
-	return nil, reallyDataArray
+	return nil, reallyDataArray, validDataMap
 }
 
 func containsString(arr []string, s string) bool {
@@ -612,7 +649,7 @@ func convertToIntArray(dataType schemapb.DataType, arr interface{}) []int32 {
 	return res
 }
 
-func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema) ([]*schemapb.FieldData, error) {
+func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema) ([]*schemapb.FieldData, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
 		return []*schemapb.FieldData{}, fmt.Errorf("no row need to be convert to columns")
@@ -623,9 +660,14 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 	nameColumns := make(map[string]interface{})
 	nameDims := make(map[string]int64)
 	fieldData := make(map[string]*schemapb.FieldData)
+
 	for _, field := range sch.Fields {
 		// skip auto id pk field
 		if (field.IsPrimaryKey && field.AutoID) || field.IsDynamic {
+			continue
+		}
+		// skip function output field
+		if field.GetIsFunctionOutput() {
 			continue
 		}
 		var data interface{}
@@ -682,8 +724,8 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 			IsDynamic: field.IsDynamic,
 		}
 	}
-	if len(nameDims) == 0 {
-		return nil, fmt.Errorf("collection: %s has no vector field", sch.Name)
+	if len(nameDims) == 0 && len(sch.Functions) == 0 {
+		return nil, fmt.Errorf("collection: %s has no vector field or functions", sch.Name)
 	}
 
 	dynamicCol := make([][]byte, 0, rowsLen)
@@ -703,6 +745,15 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 				continue
 			}
 			candi, ok := set[field.Name]
+			if (field.Nullable || field.DefaultValue != nil) && !ok {
+				continue
+			}
+			if field.GetIsFunctionOutput() {
+				if ok {
+					return nil, fmt.Errorf("row %d has data provided for function output field %s", idx, field.Name)
+				}
+				continue
+			}
 			if !ok {
 				return nil, fmt.Errorf("row %d does not has field %s", idx, field.Name)
 			}
@@ -950,6 +1001,7 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 		default:
 			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", colData.Type, name)
 		}
+		colData.ValidData = validDataMap[name]
 		columns = append(columns, colData)
 	}
 	if isDynamic {
@@ -1028,7 +1080,7 @@ func serializeSparseFloatVectors(vectors []gjson.Result, dataType schemapb.DataT
 	return values, nil
 }
 
-func convertVectors2Placeholder(body string, dataType schemapb.DataType, dimension int64) (*commonpb.PlaceholderValue, error) {
+func convertQueries2Placeholder(body string, dataType schemapb.DataType, dimension int64) (*commonpb.PlaceholderValue, error) {
 	var valueType commonpb.PlaceholderType
 	var values [][]byte
 	var err error
@@ -1048,6 +1100,12 @@ func convertVectors2Placeholder(body string, dataType schemapb.DataType, dimensi
 	case schemapb.DataType_SparseFloatVector:
 		valueType = commonpb.PlaceholderType_SparseFloatVector
 		values, err = serializeSparseFloatVectors(gjson.Get(body, HTTPRequestData).Array(), dataType)
+	case schemapb.DataType_VarChar:
+		valueType = commonpb.PlaceholderType_VarChar
+		res := gjson.Get(body, HTTPRequestData).Array()
+		for _, v := range res {
+			values = append(values, []byte(v.String()))
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -1166,26 +1224,62 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			for j := 0; j < columnNum; j++ {
 				switch fieldDataList[j].Type {
 				case schemapb.DataType_Bool:
+					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
+						row[fieldDataList[j].FieldName] = nil
+						continue
+					}
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetBoolData().Data[i]
 				case schemapb.DataType_Int8:
+					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
+						row[fieldDataList[j].FieldName] = nil
+						continue
+					}
 					row[fieldDataList[j].FieldName] = int8(fieldDataList[j].GetScalars().GetIntData().Data[i])
 				case schemapb.DataType_Int16:
+					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
+						row[fieldDataList[j].FieldName] = nil
+						continue
+					}
 					row[fieldDataList[j].FieldName] = int16(fieldDataList[j].GetScalars().GetIntData().Data[i])
 				case schemapb.DataType_Int32:
+					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
+						row[fieldDataList[j].FieldName] = nil
+						continue
+					}
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetIntData().Data[i]
 				case schemapb.DataType_Int64:
+					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
+						row[fieldDataList[j].FieldName] = nil
+						continue
+					}
 					if enableInt64 {
 						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetLongData().Data[i]
 					} else {
 						row[fieldDataList[j].FieldName] = strconv.FormatInt(fieldDataList[j].GetScalars().GetLongData().Data[i], 10)
 					}
 				case schemapb.DataType_Float:
+					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
+						row[fieldDataList[j].FieldName] = nil
+						continue
+					}
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetFloatData().Data[i]
 				case schemapb.DataType_Double:
+					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
+						row[fieldDataList[j].FieldName] = nil
+						continue
+					}
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetDoubleData().Data[i]
 				case schemapb.DataType_String:
+					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
+						row[fieldDataList[j].FieldName] = nil
+						continue
+					}
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetStringData().Data[i]
 				case schemapb.DataType_VarChar:
+					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
+						row[fieldDataList[j].FieldName] = nil
+						continue
+					}
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetStringData().Data[i]
 				case schemapb.DataType_BinaryVector:
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetBinaryVector()[i*(fieldDataList[j].GetVectors().GetDim()/8) : (i+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
@@ -1198,8 +1292,16 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				case schemapb.DataType_SparseFloatVector:
 					row[fieldDataList[j].FieldName] = typeutil.SparseFloatBytesToMap(fieldDataList[j].GetVectors().GetSparseFloatVector().Contents[i])
 				case schemapb.DataType_Array:
+					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
+						row[fieldDataList[j].FieldName] = nil
+						continue
+					}
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetArrayData().Data[i]
 				case schemapb.DataType_JSON:
+					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
+						row[fieldDataList[j].FieldName] = nil
+						continue
+					}
 					data, ok := fieldDataList[j].GetScalars().Data.(*schemapb.ScalarField_JsonData)
 					if ok && !fieldDataList[j].IsDynamic {
 						row[fieldDataList[j].FieldName] = data.JsonData.Data[i]
@@ -1286,4 +1388,192 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 	}
 	metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.SuccessLabel).Inc()
 	return nil, nil
+}
+
+func convertConsistencyLevel(reqConsistencyLevel string) (commonpb.ConsistencyLevel, bool, error) {
+	if reqConsistencyLevel != "" {
+		level, ok := commonpb.ConsistencyLevel_value[reqConsistencyLevel]
+		if !ok {
+			return 0, false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("parameter:'%s' is incorrect, please check it", reqConsistencyLevel))
+		}
+		return commonpb.ConsistencyLevel(level), false, nil
+	}
+	// ConsistencyLevel_Bounded default in PyMilvus
+	return commonpb.ConsistencyLevel_Bounded, true, nil
+}
+
+func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schemapb.ValueField, error) {
+	if value == nil {
+		return nil, nil
+	}
+	switch dataType {
+	case schemapb.DataType_Bool:
+		v, ok := value.(bool)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalid("bool", value, "Wrong defaultValue type")
+		}
+		data := &schemapb.ValueField{
+			Data: &schemapb.ValueField_BoolData{
+				BoolData: v,
+			},
+		}
+		return data, nil
+
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		// all passed number is float64 type
+		v, ok := value.(float64)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalid("number", value, "Wrong defaultValue type")
+		}
+		data := &schemapb.ValueField{
+			Data: &schemapb.ValueField_IntData{
+				IntData: int32(v),
+			},
+		}
+		return data, nil
+
+	case schemapb.DataType_Int64:
+		v, ok := value.(float64)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalid("number", value, "Wrong defaultValue type")
+		}
+		data := &schemapb.ValueField{
+			Data: &schemapb.ValueField_LongData{
+				LongData: int64(v),
+			},
+		}
+		return data, nil
+
+	case schemapb.DataType_Float:
+		v, ok := value.(float64)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalid("number", value, "Wrong defaultValue type")
+		}
+		data := &schemapb.ValueField{
+			Data: &schemapb.ValueField_FloatData{
+				FloatData: float32(v),
+			},
+		}
+		return data, nil
+
+	case schemapb.DataType_Double:
+		v, ok := value.(float64)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalid("number", value, "Wrong defaultValue type")
+		}
+		data := &schemapb.ValueField{
+			Data: &schemapb.ValueField_DoubleData{
+				DoubleData: v,
+			},
+		}
+		return data, nil
+
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		v, ok := value.(string)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalid("string", value, "Wrong defaultValue type")
+		}
+		data := &schemapb.ValueField{
+			Data: &schemapb.ValueField_StringData{
+				StringData: v,
+			},
+		}
+		return data, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("Unexpected default value type: %d", dataType))
+	}
+}
+
+func convertToExtraParams(indexParam IndexParam) ([]*commonpb.KeyValuePair, error) {
+	var params []*commonpb.KeyValuePair
+	if indexParam.IndexType != "" {
+		params = append(params, &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: indexParam.IndexType})
+	}
+	if indexParam.MetricType != "" {
+		params = append(params, &commonpb.KeyValuePair{Key: common.MetricTypeKey, Value: indexParam.MetricType})
+	}
+	if len(indexParam.Params) != 0 {
+		v, err := json.Marshal(indexParam.Params)
+		if err != nil {
+			return nil, err
+		}
+		params = append(params, &commonpb.KeyValuePair{Key: common.IndexParamsKey, Value: string(v)})
+	}
+	return params, nil
+}
+
+func MetricsHandlerFunc(c *gin.Context) {
+	path := c.Request.URL.Path
+	metrics.RestfulFunctionCall.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+	).Inc()
+	if c.Request.ContentLength >= 0 {
+		metrics.RestfulReceiveBytes.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+		).Add(float64(c.Request.ContentLength))
+	}
+	start := time.Now()
+
+	// Process request
+	c.Next()
+
+	latency := time.Since(start)
+	metrics.RestfulReqLatency.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+	).Observe(float64(latency.Milliseconds()))
+
+	// see https://github.com/milvus-io/milvus/issues/35767, counter cannot add negative value
+	// when response is not written(say timeout/network broken), panicking may happen if not check
+	if size := c.Writer.Size(); size > 0 {
+		metrics.RestfulSendBytes.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+		).Add(float64(c.Writer.Size()))
+	}
+}
+
+func LoggerHandlerFunc() gin.HandlerFunc {
+	return gin.LoggerWithConfig(gin.LoggerConfig{
+		SkipPaths: proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings(),
+		Formatter: func(param gin.LogFormatterParams) string {
+			if param.Latency > time.Minute {
+				param.Latency = param.Latency.Truncate(time.Second)
+			}
+			traceID, ok := param.Keys["traceID"]
+			if !ok {
+				traceID = ""
+			}
+
+			accesslog.SetHTTPParams(&param)
+			return fmt.Sprintf("[%v] [GIN] [%s] [traceID=%s] [code=%3d] [latency=%v] [client=%s] [method=%s] [error=%s]\n",
+				param.TimeStamp.Format("2006/01/02 15:04:05.000 Z07:00"),
+				param.Path,
+				traceID,
+				param.StatusCode,
+				param.Latency,
+				param.ClientIP,
+				param.Method,
+				param.ErrorMessage,
+			)
+		},
+	})
+}
+
+func RequestHandlerFunc(c *gin.Context) {
+	_, err := strconv.ParseBool(c.Request.Header.Get(mhttp.HTTPHeaderAllowInt64))
+	if err != nil {
+		if paramtable.Get().HTTPCfg.AcceptTypeAllowInt64.GetAsBool() {
+			c.Request.Header.Set(mhttp.HTTPHeaderAllowInt64, "true")
+		} else {
+			c.Request.Header.Set(mhttp.HTTPHeaderAllowInt64, "false")
+		}
+	}
+	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+	c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+	c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+	c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH")
+	if c.Request.Method == "OPTIONS" {
+		c.AbortWithStatus(204)
+		return
+	}
+	c.Next()
 }

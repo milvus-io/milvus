@@ -28,12 +28,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
@@ -71,6 +72,7 @@ type createIndexTask struct {
 	newExtraParams []*commonpb.KeyValuePair
 
 	collectionID                     UniqueID
+	functionSchema                   *schemapb.FunctionSchema
 	fieldSchema                      *schemapb.FieldSchema
 	userAutoIndexMetricTypeSpecified bool
 }
@@ -127,6 +129,42 @@ func wrapUserIndexParams(metricType string) []*commonpb.KeyValuePair {
 			Value: metricType,
 		},
 	}
+}
+
+func (cit *createIndexTask) parseFunctionParamsToIndex(indexParamsMap map[string]string) error {
+	if !cit.fieldSchema.GetIsFunctionOutput() {
+		return nil
+	}
+
+	switch cit.functionSchema.GetType() {
+	case schemapb.FunctionType_Unknown:
+		return fmt.Errorf("unknown function type encountered")
+
+	case schemapb.FunctionType_BM25:
+		// set default BM25 params if not provided in index params
+		if _, ok := indexParamsMap["bm25_k1"]; !ok {
+			indexParamsMap["bm25_k1"] = "1.2"
+		}
+
+		if _, ok := indexParamsMap["bm25_b"]; !ok {
+			indexParamsMap["bm25_b"] = "0.75"
+		}
+
+		if _, ok := indexParamsMap["bm25_avgdl"]; !ok {
+			indexParamsMap["bm25_avgdl"] = "100"
+		}
+
+		if metricType, ok := indexParamsMap["metric_type"]; !ok {
+			indexParamsMap["metric_type"] = metric.BM25
+		} else if metricType != metric.BM25 {
+			return fmt.Errorf("index metric type of BM25 function output field must be BM25, got %s", metricType)
+		}
+
+	default:
+		return nil
+	}
+
+	return nil
 }
 
 func (cit *createIndexTask) parseIndexParams() error {
@@ -197,6 +235,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 			}
 
 			indexParamsMap[common.IndexTypeKey] = indexType
+			cit.isAutoIndex = true
 		}
 	} else {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
@@ -293,11 +332,24 @@ func (cit *createIndexTask) parseIndexParams() error {
 			}
 		}
 
+		// fill index param for Functions
+		if err := cit.parseFunctionParamsToIndex(indexParamsMap); err != nil {
+			return err
+		}
+
 		indexType, exist := indexParamsMap[common.IndexTypeKey]
 		if !exist {
 			return fmt.Errorf("IndexType not specified")
 		}
-		if indexType == indexparamcheck.IndexDISKANN {
+		//  index parameters defined in the YAML file are merged with the user-provided parameters during create stage
+		if Params.KnowhereConfig.Enable.GetAsBool() {
+			var err error
+			indexParamsMap, err = Params.KnowhereConfig.MergeIndexParams(indexType, paramtable.BuildStage, indexParamsMap)
+			if err != nil {
+				return err
+			}
+		}
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 			err := indexparams.FillDiskIndexParams(Params, indexParamsMap)
 			if err != nil {
 				return err
@@ -312,8 +364,12 @@ func (cit *createIndexTask) parseIndexParams() error {
 				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "float vector index does not support metric type: "+metricType)
 			}
 		} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) {
-			if metricType != metric.IP {
-				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "only IP is the supported metric type for sparse index")
+			if metricType != metric.IP && metricType != metric.BM25 {
+				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "only IP&BM25 is the supported metric type for sparse index")
+			}
+
+			if metricType == metric.BM25 && cit.functionSchema.GetType() != schemapb.FunctionType_BM25 {
+				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "only BM25 Function output field support BM25 metric type")
 			}
 		} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
 			if !funcutil.SliceContain(indexparamcheck.BinaryVectorMetrics, metricType) {
@@ -352,18 +408,29 @@ func (cit *createIndexTask) parseIndexParams() error {
 	return nil
 }
 
-func (cit *createIndexTask) getIndexedField(ctx context.Context) (*schemapb.FieldSchema, error) {
+func (cit *createIndexTask) getIndexedFieldAndFunction(ctx context.Context) error {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, cit.req.GetDbName(), cit.req.GetCollectionName())
 	if err != nil {
 		log.Error("failed to get collection schema", zap.Error(err))
-		return nil, fmt.Errorf("failed to get collection schema: %s", err)
+		return fmt.Errorf("failed to get collection schema: %s", err)
 	}
+
 	field, err := schema.schemaHelper.GetFieldFromName(cit.req.GetFieldName())
 	if err != nil {
 		log.Error("create index on non-exist field", zap.Error(err))
-		return nil, fmt.Errorf("cannot create index on non-exist field: %s", cit.req.GetFieldName())
+		return fmt.Errorf("cannot create index on non-exist field: %s", cit.req.GetFieldName())
 	}
-	return field, nil
+
+	if field.IsFunctionOutput {
+		function, err := schema.schemaHelper.GetFunctionByOutputField(field)
+		if err != nil {
+			log.Error("create index failed, cannot find function of function output field", zap.Error(err))
+			return fmt.Errorf("create index failed, cannot find function of function output field: %s", cit.req.GetFieldName())
+		}
+		cit.functionSchema = function
+	}
+	cit.fieldSchema = field
+	return nil
 }
 
 func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) error {
@@ -394,7 +461,7 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 	if indexType == indexparamcheck.IndexHybrid {
 		_, exist := indexParams[common.BitmapCardinalityLimitKey]
 		if !exist {
-			indexParams[common.BitmapCardinalityLimitKey] = paramtable.Get().CommonCfg.BitmapIndexCardinalityBound.GetValue()
+			indexParams[common.BitmapCardinalityLimitKey] = paramtable.Get().AutoIndexConfig.BitmapCardinalityLimit.GetValue()
 		}
 	}
 	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
@@ -416,23 +483,16 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 		if err := fillDimension(field, indexParams); err != nil {
 			return err
 		}
-	} else {
-		// used only for checker, should be deleted after checking
-		indexParams[IsSparseKey] = "true"
 	}
 
-	if err := checker.CheckValidDataType(field); err != nil {
+	if err := checker.CheckValidDataType(indexType, field); err != nil {
 		log.Info("create index with invalid data type", zap.Error(err), zap.String("data_type", field.GetDataType().String()))
 		return err
 	}
 
-	if err := checker.CheckTrain(indexParams); err != nil {
+	if err := checker.CheckTrain(field.DataType, indexParams); err != nil {
 		log.Info("create index with invalid parameters", zap.Error(err))
 		return err
-	}
-
-	if isSparse {
-		delete(indexParams, IsSparseKey)
 	}
 
 	return nil
@@ -451,11 +511,11 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	field, err := cit.getIndexedField(ctx)
+	err = cit.getIndexedFieldAndFunction(ctx)
 	if err != nil {
 		return err
 	}
-	cit.fieldSchema = field
+
 	// check index param, not accurate, only some static rules
 	err = cit.parseIndexParams()
 	if err != nil {

@@ -26,6 +26,8 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "pb/cgo_msg.pb.h"
+#include "knowhere/index/index_static.h"
+#include "knowhere/comp/knowhere_check.h"
 
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {
@@ -204,6 +206,35 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     }
 }
 
+LoadResourceRequest
+EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
+    try {
+        auto load_index_info =
+            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
+        auto field_type = load_index_info->field_type;
+        auto& index_params = load_index_info->index_params;
+        bool find_index_type =
+            index_params.count("index_type") > 0 ? true : false;
+        AssertInfo(find_index_type == true,
+                   "Can't find index type in index_params");
+
+        LoadResourceRequest request =
+            milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+                field_type,
+                load_index_info->index_engine_version,
+                load_index_info->index_size,
+                index_params,
+                load_index_info->enable_mmap);
+        return request;
+    } catch (std::exception& e) {
+        PanicInfo(milvus::UnexpectedError,
+                  fmt::format("failed to estimate index load resource, "
+                              "encounter exception : {}",
+                              e.what()));
+        return LoadResourceRequest{0, 0, 0, 0, false};
+    }
+}
+
 CStatus
 AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
@@ -284,10 +315,11 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
                        "mmap directory path is empty");
             auto filepath =
                 std::filesystem::path(load_index_info->mmap_dir_path) /
+                "index_files" / std::to_string(load_index_info->index_id) /
                 std::to_string(load_index_info->segment_id) /
-                std::to_string(load_index_info->field_id) /
-                std::to_string(load_index_info->index_id);
+                std::to_string(load_index_info->field_id);
 
+            config[milvus::index::ENABLE_MMAP] = "true";
             config[milvus::index::MMAP_FILE_PATH] = filepath.string();
         }
 
@@ -450,6 +482,7 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             load_index_info->index_engine_version =
                 info_proto->index_engine_version();
             load_index_info->schema = info_proto->field();
+            load_index_info->index_size = info_proto->index_file_size();
         }
         auto status = CStatus();
         status.error_code = milvus::Success;

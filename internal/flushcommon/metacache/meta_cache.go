@@ -37,7 +37,7 @@ type MetaCache interface {
 	// Schema returns collection schema.
 	Schema() *schemapb.CollectionSchema
 	// AddSegment adds a segment from segment info.
-	AddSegment(segInfo *datapb.SegmentInfo, factory PkStatsFactory, actions ...SegmentAction)
+	AddSegment(segInfo *datapb.SegmentInfo, pkFactory PkStatsFactory, bmFactory BM25StatsFactory, actions ...SegmentAction)
 	// UpdateSegments applies action to segment(s) satisfy the provided filters.
 	UpdateSegments(action SegmentAction, filters ...SegmentFilter)
 	// RemoveSegments removes segments matches the provided filter.
@@ -58,7 +58,18 @@ type MetaCache interface {
 
 var _ MetaCache = (*metaCacheImpl)(nil)
 
-type PkStatsFactory func(vchannel *datapb.SegmentInfo) pkoracle.PkStat
+type (
+	PkStatsFactory   func(vchannel *datapb.SegmentInfo) pkoracle.PkStat
+	BM25StatsFactory func(vchannel *datapb.SegmentInfo) *SegmentBM25Stats
+)
+
+func NoneBm25StatsFactory(vchannel *datapb.SegmentInfo) *SegmentBM25Stats {
+	return nil
+}
+
+func NewBM25StatsFactory(vchannel *datapb.SegmentInfo) *SegmentBM25Stats {
+	return NewEmptySegmentBM25Stats()
+}
 
 type metaCacheImpl struct {
 	collectionID int64
@@ -70,7 +81,7 @@ type metaCacheImpl struct {
 	stateSegments map[commonpb.SegmentState]map[int64]*SegmentInfo
 }
 
-func NewMetaCache(info *datapb.ChannelWatchInfo, factory PkStatsFactory) MetaCache {
+func NewMetaCache(info *datapb.ChannelWatchInfo, pkFactory PkStatsFactory, bmFactor BM25StatsFactory) MetaCache {
 	vchannel := info.GetVchan()
 	cache := &metaCacheImpl{
 		collectionID:  vchannel.GetCollectionID(),
@@ -91,19 +102,19 @@ func NewMetaCache(info *datapb.ChannelWatchInfo, factory PkStatsFactory) MetaCac
 		cache.stateSegments[state] = make(map[int64]*SegmentInfo)
 	}
 
-	cache.init(vchannel, factory)
+	cache.init(vchannel, pkFactory, bmFactor)
 	return cache
 }
 
-func (c *metaCacheImpl) init(vchannel *datapb.VchannelInfo, factory PkStatsFactory) {
+func (c *metaCacheImpl) init(vchannel *datapb.VchannelInfo, pkFactory PkStatsFactory, bmFactor BM25StatsFactory) {
 	for _, seg := range vchannel.FlushedSegments {
-		c.addSegment(NewSegmentInfo(seg, factory(seg)))
+		c.addSegment(NewSegmentInfo(seg, pkFactory(seg), bmFactor(seg)))
 	}
 
 	for _, seg := range vchannel.UnflushedSegments {
 		// segment state could be sealed for growing segment if flush request processed before datanode watch
 		seg.State = commonpb.SegmentState_Growing
-		c.addSegment(NewSegmentInfo(seg, factory(seg)))
+		c.addSegment(NewSegmentInfo(seg, pkFactory(seg), bmFactor(seg)))
 	}
 }
 
@@ -118,8 +129,8 @@ func (c *metaCacheImpl) Schema() *schemapb.CollectionSchema {
 }
 
 // AddSegment adds a segment from segment info.
-func (c *metaCacheImpl) AddSegment(segInfo *datapb.SegmentInfo, factory PkStatsFactory, actions ...SegmentAction) {
-	segment := NewSegmentInfo(segInfo, factory(segInfo))
+func (c *metaCacheImpl) AddSegment(segInfo *datapb.SegmentInfo, pkFactory PkStatsFactory, bmFactory BM25StatsFactory, actions ...SegmentAction) {
+	segment := NewSegmentInfo(segInfo, pkFactory(segInfo), bmFactory(segInfo))
 
 	for _, action := range actions {
 		action(segment)

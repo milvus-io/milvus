@@ -151,12 +151,14 @@ func (s *L0Segment) Delete(ctx context.Context, primaryKeys []storage.PrimaryKey
 	return merr.WrapErrIoFailedReason("delete not supported for L0 segment")
 }
 
-func (s *L0Segment) LoadDeltaData(ctx context.Context, deltaData *storage.DeleteData) error {
+func (s *L0Segment) LoadDeltaData(ctx context.Context, deltaData *storage.DeltaData) error {
 	s.dataGuard.Lock()
 	defer s.dataGuard.Unlock()
 
-	s.pks = append(s.pks, deltaData.Pks...)
-	s.tss = append(s.tss, deltaData.Tss...)
+	for i := 0; i < int(deltaData.DeleteRowCount()); i++ {
+		s.pks = append(s.pks, deltaData.DeletePks().Get(i))
+	}
+	s.tss = append(s.tss, deltaData.DeleteTimestamps()...)
 	return nil
 }
 
@@ -173,6 +175,13 @@ func (s *L0Segment) Release(ctx context.Context, opts ...releaseOption) {
 
 	s.pks = nil
 	s.tss = nil
+
+	log.Ctx(ctx).Info("release L0 segment from memory",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.String("segmentType", s.segmentType.String()),
+	)
 }
 
 func (s *L0Segment) RemoveUnusedFieldFiles() error {

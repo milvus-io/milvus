@@ -21,6 +21,101 @@ import (
 )
 
 func TestConsumer(t *testing.T) {
+	resultCh := make(message.ChanMessageHandler, 1)
+	c := newMockedConsumerImpl(t, context.Background(), resultCh)
+
+	mmsg, _ := message.NewInsertMessageBuilderV1().
+		WithHeader(&message.InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{}).
+		WithVChannel("test-1").
+		BuildMutable()
+	c.recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(1), mmsg)
+
+	msg := <-resultCh
+	assert.True(t, msg.MessageID().EQ(walimplstest.NewTestMessageID(1)))
+
+	txnCtx := message.TxnContext{
+		TxnID:     1,
+		Keepalive: time.Second,
+	}
+	mmsg, _ = message.NewBeginTxnMessageBuilderV2().
+		WithVChannel("test-1").
+		WithHeader(&message.BeginTxnMessageHeader{}).
+		WithBody(&message.BeginTxnMessageBody{}).
+		BuildMutable()
+	c.recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(2), mmsg.WithTxnContext(txnCtx))
+
+	mmsg, _ = message.NewInsertMessageBuilderV1().
+		WithVChannel("test-1").
+		WithHeader(&message.InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{}).
+		BuildMutable()
+	c.recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(3), mmsg.WithTxnContext(txnCtx))
+
+	mmsg, _ = message.NewCommitTxnMessageBuilderV2().
+		WithVChannel("test-1").
+		WithHeader(&message.CommitTxnMessageHeader{}).
+		WithBody(&message.CommitTxnMessageBody{}).
+		BuildMutable()
+	c.recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(4), mmsg.WithTxnContext(txnCtx))
+
+	msg = <-resultCh
+	assert.True(t, msg.MessageID().EQ(walimplstest.NewTestMessageID(4)))
+	assert.Equal(t, msg.TxnContext().TxnID, txnCtx.TxnID)
+	assert.Equal(t, message.MessageTypeTxn, msg.MessageType())
+
+	c.consumer.Close()
+	<-c.consumer.Done()
+	assert.NoError(t, c.consumer.Error())
+}
+
+func TestConsumerWithCancellation(t *testing.T) {
+	resultCh := make(message.ChanMessageHandler, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	c := newMockedConsumerImpl(t, ctx, resultCh)
+
+	mmsg, _ := message.NewInsertMessageBuilderV1().
+		WithHeader(&message.InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{}).
+		WithVChannel("test-1").
+		BuildMutable()
+	c.recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(1), mmsg)
+	// The recv goroutinue will be blocked until the context is canceled.
+	mmsg, _ = message.NewInsertMessageBuilderV1().
+		WithHeader(&message.InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{}).
+		WithVChannel("test-1").
+		BuildMutable()
+	c.recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(1), mmsg)
+
+	// The background recv loop should be started.
+	time.Sleep(20 * time.Millisecond)
+
+	go func() {
+		c.consumer.Close()
+	}()
+
+	select {
+	case <-c.consumer.Done():
+		panic("should not reach here")
+	case <-time.After(10 * time.Millisecond):
+	}
+
+	cancel()
+	select {
+	case <-c.consumer.Done():
+	case <-time.After(20 * time.Millisecond):
+		panic("should not reach here")
+	}
+	assert.ErrorIs(t, c.consumer.Error(), context.Canceled)
+}
+
+type mockedConsumer struct {
+	consumer Consumer
+	recvCh   chan *streamingpb.ConsumeResponse
+}
+
+func newMockedConsumerImpl(t *testing.T, ctx context.Context, h message.Handler) *mockedConsumer {
 	c := mock_streamingpb.NewMockStreamingNodeHandlerServiceClient(t)
 	cc := mock_streamingpb.NewMockStreamingNodeHandlerService_ConsumeClient(t)
 	recvCh := make(chan *streamingpb.ConsumeResponse, 10)
@@ -43,8 +138,6 @@ func TestConsumer(t *testing.T) {
 		return nil
 	})
 
-	ctx := context.Background()
-	resultCh := make(message.ChanMessageHandler, 1)
 	opts := &ConsumerOptions{
 		Assignment: &types.PChannelInfoAssigned{
 			Channel: types.PChannelInfo{Name: "test", Term: 1},
@@ -55,7 +148,7 @@ func TestConsumer(t *testing.T) {
 			options.DeliverFilterVChannel("test-1"),
 			options.DeliverFilterTimeTickGT(100),
 		},
-		MessageHandler: resultCh,
+		MessageHandler: h,
 	}
 
 	recvCh <- &streamingpb.ConsumeResponse{
@@ -65,53 +158,15 @@ func TestConsumer(t *testing.T) {
 			},
 		},
 	}
-
-	mmsg, _ := message.NewInsertMessageBuilderV1().
-		WithHeader(&message.InsertMessageHeader{}).
-		WithBody(&msgpb.InsertRequest{}).
-		WithVChannel("test-1").
-		BuildMutable()
-	recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(1), mmsg)
-
 	consumer, err := CreateConsumer(ctx, opts, c)
-	assert.NoError(t, err)
-	assert.NotNil(t, consumer)
-	msg := <-resultCh
-	assert.True(t, msg.MessageID().EQ(walimplstest.NewTestMessageID(1)))
-
-	txnCtx := message.TxnContext{
-		TxnID:     1,
-		Keepalive: time.Second,
+	if err != nil {
+		panic(err)
 	}
-	mmsg, _ = message.NewBeginTxnMessageBuilderV2().
-		WithVChannel("test-1").
-		WithHeader(&message.BeginTxnMessageHeader{}).
-		WithBody(&message.BeginTxnMessageBody{}).
-		BuildMutable()
-	recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(2), mmsg.WithTxnContext(txnCtx))
 
-	mmsg, _ = message.NewInsertMessageBuilderV1().
-		WithVChannel("test-1").
-		WithHeader(&message.InsertMessageHeader{}).
-		WithBody(&msgpb.InsertRequest{}).
-		BuildMutable()
-	recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(3), mmsg.WithTxnContext(txnCtx))
-
-	mmsg, _ = message.NewCommitTxnMessageBuilderV2().
-		WithVChannel("test-1").
-		WithHeader(&message.CommitTxnMessageHeader{}).
-		WithBody(&message.CommitTxnMessageBody{}).
-		BuildMutable()
-	recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(4), mmsg.WithTxnContext(txnCtx))
-
-	msg = <-resultCh
-	assert.True(t, msg.MessageID().EQ(walimplstest.NewTestMessageID(4)))
-	assert.Equal(t, msg.TxnContext().TxnID, txnCtx.TxnID)
-	assert.Equal(t, message.MessageTypeTxn, msg.MessageType())
-
-	consumer.Close()
-	<-consumer.Done()
-	assert.NoError(t, consumer.Error())
+	return &mockedConsumer{
+		consumer: consumer,
+		recvCh:   recvCh,
+	}
 }
 
 func newConsumeResponse(id message.MessageID, msg message.MutableMessage) *streamingpb.ConsumeResponse {

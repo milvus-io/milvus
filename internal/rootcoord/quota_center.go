@@ -109,6 +109,12 @@ var dqlRateTypes = typeutil.NewSet(
 	internalpb.RateType_DQLQuery,
 )
 
+type LimiterRange struct {
+	RateScope        internalpb.RateScope
+	OpType           opType
+	ExcludeRateTypes typeutil.Set[internalpb.RateType]
+}
+
 // QuotaCenter manages the quota and limitations of the whole cluster,
 // it receives metrics info from DataNodes, QueryNodes and Proxies, and
 // notifies Proxies to limit rate of requests from clients or reject
@@ -223,18 +229,19 @@ func initLimiter(limiterFunc func(internalpb.RateType) *ratelimitutil.Limiter, r
 	return rateLimiters
 }
 
-func updateLimiter(node *rlinternal.RateLimiterNode, limiter *ratelimitutil.Limiter, rateScope internalpb.RateScope, opType opType) {
+func updateLimiter(node *rlinternal.RateLimiterNode, limiter *ratelimitutil.Limiter, limiterRange *LimiterRange) {
 	if node == nil {
-		log.Warn("update limiter failed, node is nil", zap.Any("rateScope", rateScope), zap.Any("opType", opType))
+		log.Warn("update limiter failed, node is nil", zap.Any("rateScope", limiterRange.RateScope), zap.Any("opType", limiterRange.OpType))
 		return
 	}
 	limiters := node.GetLimiters()
-	getRateTypes(rateScope, opType).Range(func(rt internalpb.RateType) bool {
+	getRateTypes(limiterRange.RateScope, limiterRange.OpType).
+		Complement(limiterRange.ExcludeRateTypes).Range(func(rt internalpb.RateType) bool {
 		originLimiter, ok := limiters.Get(rt)
 		if !ok {
 			log.Warn("update limiter failed, limiter not found",
-				zap.Any("rateScope", rateScope),
-				zap.Any("opType", opType),
+				zap.Any("rateScope", limiterRange.RateScope),
+				zap.Any("opType", limiterRange.OpType),
 				zap.Any("rateType", rt))
 			return true
 		}
@@ -552,9 +559,17 @@ func (q *QuotaCenter) collectMetrics() error {
 // forceDenyWriting sets dml rates to 0 to reject all dml requests.
 func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster bool, dbIDs, collectionIDs []int64, col2partitionIDs map[int64][]int64) error {
 	log := log.Ctx(context.TODO()).WithRateGroup("quotaCenter.forceDenyWriting", 1.0, 60.0)
+	var excludeRange typeutil.Set[internalpb.RateType]
+	if errorCode == commonpb.ErrorCode_DiskQuotaExhausted {
+		excludeRange = typeutil.NewSet(internalpb.RateType_DMLDelete)
+	}
 	if cluster {
 		clusterLimiters := q.rateLimiter.GetRootLimiters()
-		updateLimiter(clusterLimiters, GetEarliestLimiter(), internalpb.RateScope_Cluster, dml)
+		updateLimiter(clusterLimiters, GetEarliestLimiter(), &LimiterRange{
+			RateScope:        internalpb.RateScope_Cluster,
+			OpType:           dml,
+			ExcludeRateTypes: excludeRange,
+		})
 		clusterLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, errorCode)
 	}
 
@@ -564,14 +579,19 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 			log.Warn("db limiter not found of db ID", zap.Int64("dbID", dbID))
 			continue
 		}
-		updateLimiter(dbLimiters, GetEarliestLimiter(), internalpb.RateScope_Database, dml)
+		updateLimiter(dbLimiters, GetEarliestLimiter(), &LimiterRange{
+			RateScope:        internalpb.RateScope_Database,
+			OpType:           dml,
+			ExcludeRateTypes: excludeRange,
+		})
 		dbLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, errorCode)
 	}
 
 	for _, collectionID := range collectionIDs {
 		dbID, ok := q.collectionIDToDBID.Get(collectionID)
 		if !ok {
-			return fmt.Errorf("db ID not found of collection ID: %d", collectionID)
+			log.Warn("cannot find db for collection", zap.Int64("collection", collectionID))
+			continue
 		}
 		collectionLimiter := q.rateLimiter.GetCollectionLimiters(dbID, collectionID)
 		if collectionLimiter == nil {
@@ -580,7 +600,11 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 				zap.Int64("collectionID", collectionID))
 			continue
 		}
-		updateLimiter(collectionLimiter, GetEarliestLimiter(), internalpb.RateScope_Collection, dml)
+		updateLimiter(collectionLimiter, GetEarliestLimiter(), &LimiterRange{
+			RateScope:        internalpb.RateScope_Collection,
+			OpType:           dml,
+			ExcludeRateTypes: excludeRange,
+		})
 		collectionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, errorCode)
 	}
 
@@ -588,7 +612,8 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 		for _, partitionID := range partitionIDs {
 			dbID, ok := q.collectionIDToDBID.Get(collectionID)
 			if !ok {
-				return fmt.Errorf("db ID not found of collection ID: %d", collectionID)
+				log.Warn("cannot find db for collection", zap.Int64("collection", collectionID))
+				continue
 			}
 			partitionLimiter := q.rateLimiter.GetPartitionLimiters(dbID, collectionID, partitionID)
 			if partitionLimiter == nil {
@@ -598,7 +623,11 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 					zap.Int64("partitionID", partitionID))
 				continue
 			}
-			updateLimiter(partitionLimiter, GetEarliestLimiter(), internalpb.RateScope_Partition, dml)
+			updateLimiter(partitionLimiter, GetEarliestLimiter(), &LimiterRange{
+				RateScope:        internalpb.RateScope_Partition,
+				OpType:           dml,
+				ExcludeRateTypes: excludeRange,
+			})
 			partitionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, errorCode)
 		}
 	}
@@ -622,7 +651,10 @@ func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode, cluster boo
 		for dbID, collectionIDToPartIDs := range q.readableCollections {
 			for collectionID := range collectionIDToPartIDs {
 				collectionLimiter := q.rateLimiter.GetCollectionLimiters(dbID, collectionID)
-				updateLimiter(collectionLimiter, GetEarliestLimiter(), internalpb.RateScope_Collection, dql)
+				updateLimiter(collectionLimiter, GetEarliestLimiter(), &LimiterRange{
+					RateScope: internalpb.RateScope_Collection,
+					OpType:    dql,
+				})
 				collectionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, errorCode)
 				collectionIDs = append(collectionIDs, collectionID)
 			}
@@ -640,7 +672,10 @@ func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode, cluster boo
 				log.Warn("db limiter not found of db ID", zap.Int64("dbID", dbID))
 				continue
 			}
-			updateLimiter(dbLimiters, GetEarliestLimiter(), internalpb.RateScope_Database, dql)
+			updateLimiter(dbLimiters, GetEarliestLimiter(), &LimiterRange{
+				RateScope: internalpb.RateScope_Database,
+				OpType:    dql,
+			})
 			dbLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, errorCode)
 			mlog.RatedWarn(10, "QuotaCenter force to deny reading",
 				zap.Int64s("dbIDs", dbIDs),
@@ -685,236 +720,6 @@ func (q *QuotaCenter) getDenyReadingDBs() map[int64]struct{} {
 	return dbIDs
 }
 
-// getReadRates get rate information of collections and databases from proxy metrics
-func (q *QuotaCenter) getReadRates() (map[string]float64, map[string]map[string]map[string]float64) {
-	// label metric
-	metricMap := make(map[string]float64)
-	// sub label metric, label -> db -> collection -> value
-	collectionMetricMap := make(map[string]map[string]map[string]float64)
-	for _, metric := range q.proxyMetrics {
-		for _, rm := range metric.Rms {
-			if !ratelimitutil.IsSubLabel(rm.Label) {
-				metricMap[rm.Label] += rm.Rate
-				continue
-			}
-			mainLabel, database, collection, ok := ratelimitutil.SplitCollectionSubLabel(rm.Label)
-			if !ok {
-				continue
-			}
-			labelMetric, ok := collectionMetricMap[mainLabel]
-			if !ok {
-				labelMetric = make(map[string]map[string]float64)
-				collectionMetricMap[mainLabel] = labelMetric
-			}
-			databaseMetric, ok := labelMetric[database]
-			if !ok {
-				databaseMetric = make(map[string]float64)
-				labelMetric[database] = databaseMetric
-			}
-			databaseMetric[collection] += rm.Rate
-		}
-	}
-	return metricMap, collectionMetricMap
-}
-
-func (q *QuotaCenter) getLimitedDBAndCollections(metricMap map[string]float64,
-	collectionMetricMap map[string]map[string]map[string]float64,
-) (bool, *typeutil.Set[string], *typeutil.Set[string]) {
-	limitDBNameSet := typeutil.NewSet[string]()
-	limitCollectionNameSet := typeutil.NewSet[string]()
-	clusterLimit := false
-
-	formatCollctionRateKey := func(dbName, collectionName string) string {
-		return fmt.Sprintf("%s.%s", dbName, collectionName)
-	}
-
-	enableResultProtection := Params.QuotaConfig.ResultProtectionEnabled.GetAsBool()
-	if enableResultProtection {
-		maxRate := Params.QuotaConfig.MaxReadResultRate.GetAsFloat()
-		maxDBRate := Params.QuotaConfig.MaxReadResultRatePerDB.GetAsFloat()
-		maxCollectionRate := Params.QuotaConfig.MaxReadResultRatePerCollection.GetAsFloat()
-
-		dbRateCount := make(map[string]float64)
-		collectionRateCount := make(map[string]float64)
-		rateCount := metricMap[metricsinfo.ReadResultThroughput]
-		for mainLabel, labelMetric := range collectionMetricMap {
-			if mainLabel != metricsinfo.ReadResultThroughput {
-				continue
-			}
-			for database, databaseMetric := range labelMetric {
-				for collection, metricValue := range databaseMetric {
-					dbRateCount[database] += metricValue
-					collectionRateCount[formatCollctionRateKey(database, collection)] = metricValue
-				}
-			}
-		}
-		if rateCount >= maxRate {
-			clusterLimit = true
-		}
-		for s, f := range dbRateCount {
-			if f >= maxDBRate {
-				limitDBNameSet.Insert(s)
-			}
-		}
-		for s, f := range collectionRateCount {
-			if f >= maxCollectionRate {
-				limitCollectionNameSet.Insert(s)
-			}
-		}
-	}
-	return clusterLimit, &limitDBNameSet, &limitCollectionNameSet
-}
-
-func (q *QuotaCenter) coolOffDatabaseReading(deniedDatabaseIDs map[int64]struct{}, limitDBNameSet *typeutil.Set[string],
-	collectionMetricMap map[string]map[string]map[string]float64, log *log.MLogger,
-) error {
-	if limitDBNameSet.Len() > 0 {
-		databaseSearchRate := make(map[string]float64)
-		databaseQueryRate := make(map[string]float64)
-		for mainLabel, labelMetric := range collectionMetricMap {
-			var databaseRate map[string]float64
-			if mainLabel == internalpb.RateType_DQLSearch.String() {
-				databaseRate = databaseSearchRate
-			} else if mainLabel == internalpb.RateType_DQLQuery.String() {
-				databaseRate = databaseQueryRate
-			} else {
-				continue
-			}
-			for database, databaseMetric := range labelMetric {
-				for _, metricValue := range databaseMetric {
-					databaseRate[database] += metricValue
-				}
-			}
-		}
-
-		coolOffSpeed := Params.QuotaConfig.CoolOffSpeed.GetAsFloat()
-		limitDBNameSet.Range(func(name string) bool {
-			dbID, ok := q.dbs.Get(name)
-			if !ok {
-				log.Warn("db not found", zap.String("dbName", name))
-				return true
-			}
-
-			// skip this database because it has been denied access for reading
-			_, ok = deniedDatabaseIDs[dbID]
-			if ok {
-				return true
-			}
-
-			dbLimiter := q.rateLimiter.GetDatabaseLimiters(dbID)
-			if dbLimiter == nil {
-				log.Warn("database limiter not found", zap.Int64("dbID", dbID))
-				return true
-			}
-
-			realTimeSearchRate := databaseSearchRate[name]
-			realTimeQueryRate := databaseQueryRate[name]
-			q.coolOffReading(realTimeSearchRate, realTimeQueryRate, coolOffSpeed, dbLimiter, log)
-			return true
-		})
-	}
-	return nil
-}
-
-func (q *QuotaCenter) coolOffCollectionReading(deniedDatabaseIDs map[int64]struct{}, limitCollectionSet *typeutil.UniqueSet, limitCollectionNameSet *typeutil.Set[string],
-	collectionMetricMap map[string]map[string]map[string]float64, log *log.MLogger,
-) error {
-	var updateLimitErr error
-	coolOffSpeed := Params.QuotaConfig.CoolOffSpeed.GetAsFloat()
-
-	splitCollctionRateKey := func(key string) (string, string) {
-		parts := strings.Split(key, ".")
-		return parts[0], parts[1]
-	}
-
-	dbIDs := make(map[int64]string, q.dbs.Len())
-	collectionIDs := make(map[int64]string, q.collections.Len())
-	q.dbs.Range(func(name string, id int64) bool {
-		dbIDs[id] = name
-		return true
-	})
-	q.collections.Range(func(name string, id int64) bool {
-		_, collectionName := SplitCollectionKey(name)
-		collectionIDs[id] = collectionName
-		return true
-	})
-
-	limitCollectionNameSet.Range(func(name string) bool {
-		dbName, collectionName := splitCollctionRateKey(name)
-		dbID, ok := q.dbs.Get(dbName)
-		if !ok {
-			log.Warn("db not found", zap.String("dbName", dbName))
-			updateLimitErr = fmt.Errorf("db not found: %s", dbName)
-			return true
-		}
-		collectionID, ok := q.collections.Get(FormatCollectionKey(dbID, collectionName))
-		if !ok {
-			log.Warn("collection not found", zap.String("collectionName", name))
-			updateLimitErr = fmt.Errorf("collection not found: %s", name)
-			return true
-		}
-		limitCollectionSet.Insert(collectionID)
-		return true
-	})
-	if updateLimitErr != nil {
-		return updateLimitErr
-	}
-
-	safeGetCollectionRate := func(label, dbName, collectionName string) float64 {
-		if labelMetric, ok := collectionMetricMap[label]; ok {
-			if dbMetric, ok := labelMetric[dbName]; ok {
-				if rate, ok := dbMetric[collectionName]; ok {
-					return rate
-				}
-			}
-		}
-		return 0
-	}
-
-	coolOffCollectionID := func(collections ...int64) error {
-		for _, collection := range collections {
-			dbID, ok := q.collectionIDToDBID.Get(collection)
-			if !ok {
-				return fmt.Errorf("db ID not found of collection ID: %d", collection)
-			}
-			// skip this database because it has been denied access for reading
-			_, ok = deniedDatabaseIDs[dbID]
-			if ok {
-				continue
-			}
-
-			collectionLimiter := q.rateLimiter.GetCollectionLimiters(dbID, collection)
-			if collectionLimiter == nil {
-				return fmt.Errorf("collection limiter not found: %d", collection)
-			}
-			dbName, ok := dbIDs[dbID]
-			if !ok {
-				return fmt.Errorf("db name not found of db ID: %d", dbID)
-			}
-			collectionName, ok := collectionIDs[collection]
-			if !ok {
-				return fmt.Errorf("collection name not found of collection ID: %d", collection)
-			}
-
-			realTimeSearchRate := safeGetCollectionRate(internalpb.RateType_DQLSearch.String(), dbName, collectionName)
-			realTimeQueryRate := safeGetCollectionRate(internalpb.RateType_DQLQuery.String(), dbName, collectionName)
-			q.coolOffReading(realTimeSearchRate, realTimeQueryRate, coolOffSpeed, collectionLimiter, log)
-
-			collectionProps := q.getCollectionLimitProperties(collection)
-			q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionSearchRateMinKey),
-				internalpb.RateType_DQLSearch, collectionLimiter)
-			q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionQueryRateMinKey),
-				internalpb.RateType_DQLQuery, collectionLimiter)
-		}
-		return nil
-	}
-
-	if updateLimitErr = coolOffCollectionID(limitCollectionSet.Collect()...); updateLimitErr != nil {
-		return updateLimitErr
-	}
-	return nil
-}
-
 // calculateReadRates calculates and sets dql rates.
 func (q *QuotaCenter) calculateReadRates() error {
 	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
@@ -927,84 +732,7 @@ func (q *QuotaCenter) calculateReadRates() error {
 	if len(deniedDatabaseIDs) != 0 {
 		q.forceDenyReading(commonpb.ErrorCode_ForceDeny, false, maps.Keys(deniedDatabaseIDs), log)
 	}
-
-	queueLatencyThreshold := Params.QuotaConfig.QueueLatencyThreshold.GetAsDuration(time.Second)
-	limitCollectionSet := typeutil.NewUniqueSet()
-
-	// enableQueueProtection && queueLatencyThreshold >= 0 means enable queue latency protection
-	if queueLatencyThreshold >= 0 {
-		for _, metric := range q.queryNodeMetrics {
-			searchLatency := metric.SearchQueue.AvgQueueDuration
-			queryLatency := metric.QueryQueue.AvgQueueDuration
-			if searchLatency >= queueLatencyThreshold || queryLatency >= queueLatencyThreshold {
-				limitCollectionSet.Insert(metric.Effect.CollectionIDs...)
-			}
-		}
-	}
-
-	// queue length
-	enableQueueProtection := Params.QuotaConfig.QueueProtectionEnabled.GetAsBool()
-	nqInQueueThreshold := Params.QuotaConfig.NQInQueueThreshold.GetAsInt64()
-	if enableQueueProtection && nqInQueueThreshold >= 0 {
-		// >= 0 means enable queue length protection
-		sum := func(ri metricsinfo.ReadInfoInQueue) int64 {
-			return ri.UnsolvedQueue + ri.ReadyQueue + ri.ReceiveChan + ri.ExecuteChan
-		}
-		for _, metric := range q.queryNodeMetrics {
-			// We think of the NQ of query request as 1.
-			// search use same queue length counter with query
-			if sum(metric.SearchQueue) >= nqInQueueThreshold {
-				limitCollectionSet.Insert(metric.Effect.CollectionIDs...)
-			}
-		}
-	}
-
-	metricMap, collectionMetricMap := q.getReadRates()
-	clusterLimit, limitDBNameSet, limitCollectionNameSet := q.getLimitedDBAndCollections(metricMap, collectionMetricMap)
-
-	coolOffSpeed := Params.QuotaConfig.CoolOffSpeed.GetAsFloat()
-
-	if clusterLimit {
-		realTimeClusterSearchRate := metricMap[internalpb.RateType_DQLSearch.String()]
-		realTimeClusterQueryRate := metricMap[internalpb.RateType_DQLQuery.String()]
-		q.coolOffReading(realTimeClusterSearchRate, realTimeClusterQueryRate, coolOffSpeed, q.rateLimiter.GetRootLimiters(), log)
-	}
-
-	if updateLimitErr := q.coolOffDatabaseReading(deniedDatabaseIDs, limitDBNameSet, collectionMetricMap,
-		log); updateLimitErr != nil {
-		return updateLimitErr
-	}
-
-	if updateLimitErr := q.coolOffCollectionReading(deniedDatabaseIDs, &limitCollectionSet, limitCollectionNameSet,
-		collectionMetricMap, log); updateLimitErr != nil {
-		return updateLimitErr
-	}
-
 	return nil
-}
-
-func (q *QuotaCenter) coolOffReading(realTimeSearchRate, realTimeQueryRate, coolOffSpeed float64,
-	node *rlinternal.RateLimiterNode, mlog *log.MLogger,
-) {
-	limiter := node.GetLimiters()
-
-	v, ok := limiter.Get(internalpb.RateType_DQLSearch)
-	if ok && v.Limit() != Inf && realTimeSearchRate > 0 {
-		v.SetLimit(Limit(realTimeSearchRate * coolOffSpeed))
-		mlog.RatedWarn(10, "QuotaCenter cool read rates off done",
-			zap.Any("level", node.Level()),
-			zap.Any("id", node.GetID()),
-			zap.Any("searchRate", v.Limit()))
-	}
-
-	v, ok = limiter.Get(internalpb.RateType_DQLQuery)
-	if ok && v.Limit() != Inf && realTimeQueryRate > 0 {
-		v.SetLimit(Limit(realTimeQueryRate * coolOffSpeed))
-		mlog.RatedWarn(10, "QuotaCenter cool read rates off done",
-			zap.Any("level", node.Level()),
-			zap.Any("id", node.GetID()),
-			zap.Any("queryRate", v.Limit()))
-	}
 }
 
 func (q *QuotaCenter) getDenyWritingDBs() map[int64]struct{} {
@@ -1064,6 +792,10 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	updateCollectionFactor(growingSegFactors)
 	l0Factors := q.getL0SegmentsSizeFactor()
 	updateCollectionFactor(l0Factors)
+	deleteBufferRowCountFactors := q.getDeleteBufferRowCountFactor()
+	updateCollectionFactor(deleteBufferRowCountFactors)
+	deleteBufferSizeFactors := q.getDeleteBufferSizeFactor()
+	updateCollectionFactor(deleteBufferSizeFactors)
 
 	ttCollections := make([]int64, 0)
 	memoryCollections := make([]int64, 0)
@@ -1081,7 +813,8 @@ func (q *QuotaCenter) calculateWriteRates() error {
 
 		dbID, ok := q.collectionIDToDBID.Get(collection)
 		if !ok {
-			return fmt.Errorf("db ID not found of collection ID: %d", collection)
+			log.Warn("cannot find db for collection", zap.Int64("collection", collection))
+			continue
 		}
 		collectionLimiter := q.rateLimiter.GetCollectionLimiters(dbID, collection)
 		if collectionLimiter == nil {
@@ -1327,16 +1060,86 @@ func (q *QuotaCenter) getL0SegmentsSizeFactor() map[int64]float64 {
 		return nil
 	}
 
-	l0segmentSizeLowWaterLevel := Params.QuotaConfig.L0SegmentRowCountLowWaterLevel.GetAsInt64()
-	l0SegmentSizeHighWaterLevel := Params.QuotaConfig.L0SegmentRowCountHighWaterLevel.GetAsInt64()
+	L0DeleteCountLowWaterLevel := Params.QuotaConfig.L0SegmentRowCountLowWaterLevel.GetAsInt64()
+	L0DeleteCountHighWaterLevel := Params.QuotaConfig.L0SegmentRowCountHighWaterLevel.GetAsInt64()
 
 	collectionFactor := make(map[int64]float64)
-	for collectionID, l0RowCount := range q.dataCoordMetrics.CollectionL0RowCount {
-		if l0RowCount < l0segmentSizeLowWaterLevel {
+	for collectionID, l0DeleteCount := range q.dataCoordMetrics.CollectionL0RowCount {
+		if l0DeleteCount < L0DeleteCountLowWaterLevel {
 			continue
 		}
-		factor := float64(l0SegmentSizeHighWaterLevel-l0RowCount) / float64(l0SegmentSizeHighWaterLevel-l0segmentSizeLowWaterLevel)
+		factor := float64(L0DeleteCountHighWaterLevel-l0DeleteCount) / float64(L0DeleteCountHighWaterLevel-L0DeleteCountLowWaterLevel)
 		collectionFactor[collectionID] = factor
+		log.RatedWarn(10, "QuotaCenter: DataCoord L0 segments deleted entries number exceeds watermark, limit writing rate",
+			zap.Int64("collection", collectionID),
+			zap.Int64("L0 delete count", l0DeleteCount),
+			zap.Int64("lowWatermark", L0DeleteCountLowWaterLevel),
+			zap.Int64("highWatermark", L0DeleteCountHighWaterLevel),
+			zap.Float64("factor", factor))
+	}
+	return collectionFactor
+}
+
+func (q *QuotaCenter) getDeleteBufferRowCountFactor() map[int64]float64 {
+	if !Params.QuotaConfig.DeleteBufferRowCountProtectionEnabled.GetAsBool() {
+		return nil
+	}
+
+	deleteBufferRowCountLowWaterLevel := Params.QuotaConfig.DeleteBufferRowCountLowWaterLevel.GetAsInt64()
+	deleteBufferRowCountHighWaterLevel := Params.QuotaConfig.DeleteBufferRowCountHighWaterLevel.GetAsInt64()
+
+	deleteBufferNum := make(map[int64]int64)
+	for _, queryNodeMetrics := range q.queryNodeMetrics {
+		for collectionID, num := range queryNodeMetrics.DeleteBufferInfo.CollectionDeleteBufferNum {
+			deleteBufferNum[collectionID] += num
+		}
+	}
+
+	collectionFactor := make(map[int64]float64)
+	for collID, rowCount := range deleteBufferNum {
+		if rowCount < deleteBufferRowCountLowWaterLevel {
+			continue
+		}
+		factor := float64(deleteBufferRowCountHighWaterLevel-rowCount) / float64(deleteBufferRowCountHighWaterLevel-deleteBufferRowCountLowWaterLevel)
+		collectionFactor[collID] = factor
+		log.RatedWarn(10, "QuotaCenter: QueryNode deleteBuffer entries number exceeds watermark, limit writing rate",
+			zap.Int64("collection", collID),
+			zap.Int64("deletebuffer entriesNum", rowCount),
+			zap.Int64("lowWatermark", deleteBufferRowCountLowWaterLevel),
+			zap.Int64("highWatermark", deleteBufferRowCountHighWaterLevel),
+			zap.Float64("factor", factor))
+	}
+	return collectionFactor
+}
+
+func (q *QuotaCenter) getDeleteBufferSizeFactor() map[int64]float64 {
+	if !Params.QuotaConfig.DeleteBufferSizeProtectionEnabled.GetAsBool() {
+		return nil
+	}
+
+	deleteBufferSizeLowWaterLevel := Params.QuotaConfig.DeleteBufferSizeLowWaterLevel.GetAsInt64()
+	deleteBufferSizeHighWaterLevel := Params.QuotaConfig.DeleteBufferSizeHighWaterLevel.GetAsInt64()
+
+	deleteBufferSize := make(map[int64]int64)
+	for _, queryNodeMetrics := range q.queryNodeMetrics {
+		for collectionID, size := range queryNodeMetrics.DeleteBufferInfo.CollectionDeleteBufferSize {
+			deleteBufferSize[collectionID] += size
+		}
+	}
+
+	collectionFactor := make(map[int64]float64)
+	for collID, bufferSize := range deleteBufferSize {
+		if bufferSize < deleteBufferSizeLowWaterLevel {
+			continue
+		}
+		factor := float64(deleteBufferSizeHighWaterLevel-bufferSize) / float64(deleteBufferSizeHighWaterLevel-deleteBufferSizeLowWaterLevel)
+		collectionFactor[collID] = factor
+		log.RatedWarn(10, "QuotaCenter: QueryNode deleteBuffer size exceeds watermark, limit writing rate",
+			zap.Int64("collection", collID),
+			zap.Int64("deletebuffer size", bufferSize),
+			zap.Int64("lowWatermark", deleteBufferSizeLowWaterLevel),
+			zap.Int64("highWatermark", deleteBufferSizeHighWaterLevel),
+			zap.Float64("factor", factor))
 	}
 	return collectionFactor
 }
@@ -1478,7 +1281,7 @@ func (q *QuotaCenter) checkDiskQuota(denyWritingDBs map[int64]struct{}) error {
 		}
 		dbID, ok := q.collectionIDToDBID.Get(collection)
 		if !ok {
-			log.Warn("cannot find db id for collection", zap.Int64("collection", collection))
+			log.Warn("cannot find db for collection", zap.Int64("collection", collection))
 			continue
 		}
 

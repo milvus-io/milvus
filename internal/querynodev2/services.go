@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
@@ -48,7 +47,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -366,10 +367,10 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 
 		node.pipelineManager.Remove(req.GetChannelName())
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
-		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
+		_, sealed := node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
 		node.tSafeManager.Remove(ctx, req.GetChannelName())
 
-		node.manager.Collection.Unref(req.GetCollectionID(), 1)
+		node.manager.Collection.Unref(req.GetCollectionID(), uint32(1+sealed))
 	}
 	log.Info("unsubscribed channel")
 
@@ -410,6 +411,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		zap.Int64("segmentID", segment.GetSegmentID()),
 		zap.String("level", segment.GetLevel().String()),
 		zap.Int64("currentNodeID", node.GetNodeID()),
+		zap.Int64("dstNodeID", req.GetDstNodeID()),
 	)
 
 	log.Info("received load segments request",
@@ -719,6 +721,9 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	resp = task.SearchResult()
 	resp.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	resp.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
+	if req.GetReq().GetIsTopkReduce() {
+		resp.IsTopkReduce = true
+	}
 	return resp, nil
 }
 
@@ -753,71 +758,41 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		return resp, nil
 	}
 
-	toReduceResults := make([]*internalpb.SearchResults, len(req.GetDmlChannels()))
-	runningGp, runningCtx := errgroup.WithContext(ctx)
-
-	for i, ch := range req.GetDmlChannels() {
-		ch := ch
-		req := &querypb.SearchRequest{
-			Req:             req.Req,
-			DmlChannels:     []string{ch},
-			SegmentIDs:      req.SegmentIDs,
-			Scope:           req.Scope,
-			TotalChannelNum: req.TotalChannelNum,
-		}
-
-		i := i
-		runningGp.Go(func() error {
-			ret, err := node.searchChannel(runningCtx, req, ch)
-			if err != nil {
-				return err
-			}
-			if err := merr.Error(ret.GetStatus()); err != nil {
-				return err
-			}
-			toReduceResults[i] = ret
-			return nil
-		})
+	if len(req.GetDmlChannels()) != 1 {
+		err := merr.WrapErrParameterInvalid(1, len(req.GetDmlChannels()), "count of channel to be searched should only be 1, wrong code")
+		resp.Status = merr.Status(err)
+		log.Warn("got wrong number of channels to be searched", zap.Error(err))
+		return resp, nil
 	}
-	if err := runningGp.Wait(); err != nil {
+
+	ch := req.GetDmlChannels()[0]
+	channelReq := &querypb.SearchRequest{
+		Req:             req.Req,
+		DmlChannels:     []string{ch},
+		SegmentIDs:      req.SegmentIDs,
+		Scope:           req.Scope,
+		TotalChannelNum: req.TotalChannelNum,
+	}
+	ret, err := node.searchChannel(ctx, channelReq, ch)
+	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
 	tr.RecordSpan()
-	var result *internalpb.SearchResults
-	var err2 error
-	if req.GetReq().GetIsAdvanced() {
-		result, err2 = segments.ReduceAdvancedSearchResults(ctx, toReduceResults, req.Req.GetNq())
-	} else {
-		result, err2 = segments.ReduceSearchResults(ctx, toReduceResults, segments.NewReduceInfo(req.Req.GetNq(),
-			req.Req.GetTopk(),
-			req.Req.GetExtraSearchParam().GetGroupByFieldId(),
-			req.Req.GetExtraSearchParam().GetGroupSize(),
-			req.Req.GetMetricType()))
-	}
-
-	if err2 != nil {
-		log.Warn("failed to reduce search results", zap.Error(err2))
-		resp.Status = merr.Status(err2)
-		return resp, nil
-	}
-	result.Status = merr.Success()
+	ret.Status = merr.Success()
 
 	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.
 		WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards, metrics.BatchReduce).
 		Observe(float64(reduceLatency.Milliseconds()))
-
-	collector.Rate.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
-	collector.Rate.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
 	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.SearchLabel).
 		Add(float64(proto.Size(req)))
 
-	if result.GetCostAggregation() != nil {
-		result.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
+	if ret.GetCostAggregation() != nil {
+		ret.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	}
-	return result, nil
+	return ret, nil
 }
 
 // only used for delegator query segments from worker
@@ -957,7 +932,6 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		metrics.QueryLabel, metrics.ReduceShards, metrics.BatchReduce).
 		Observe(float64(reduceLatency.Milliseconds()))
 
-	collector.Rate.Add(metricsinfo.NQPerSecond, 1)
 	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 	relatedDataSize := lo.Reduce(toMergeResults, func(acc int64, result *internalpb.RetrieveResults, _ int) int64 {
 		return acc + result.GetCostAggregation().GetTotalRelatedDataSize()
@@ -1020,7 +994,6 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 		return nil
 	}
 
-	collector.Rate.Add(metricsinfo.NQPerSecond, 1)
 	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 	return nil
 }
@@ -1128,47 +1101,19 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	}
 	defer node.lifetime.Done()
 
-	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	resp := &milvuspb.GetMetricsResponse{
+		Status:        merr.Success(),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, paramtable.GetNodeID()),
+	}
+
+	ret, err := node.metricsRequest.ExecuteMetricsRequest(ctx, req)
 	if err != nil {
-		log.Warn("QueryNode.GetMetrics failed to parse metric type",
-			zap.Int64("nodeId", node.GetNodeID()),
-			zap.String("req", req.Request),
-			zap.Error(err))
-
-		return &milvuspb.GetMetricsResponse{
-			Status: merr.Status(err),
-		}, nil
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 
-	if metricType == metricsinfo.SystemInfoMetrics {
-		queryNodeMetrics, err := getSystemInfoMetrics(ctx, req, node)
-		if err != nil {
-			log.Warn("QueryNode.GetMetrics failed",
-				zap.Int64("nodeId", node.GetNodeID()),
-				zap.String("req", req.Request),
-				zap.String("metricType", metricType),
-				zap.Error(err))
-			return &milvuspb.GetMetricsResponse{
-				Status: merr.Status(err),
-			}, nil
-		}
-		log.RatedDebug(50, "QueryNode.GetMetrics",
-			zap.Int64("nodeID", node.GetNodeID()),
-			zap.String("req", req.Request),
-			zap.String("metricType", metricType),
-			zap.Any("queryNodeMetrics", queryNodeMetrics))
-
-		return queryNodeMetrics, nil
-	}
-
-	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("nodeID", node.GetNodeID()),
-		zap.String("req", req.Request),
-		zap.String("metricType", metricType))
-
-	return &milvuspb.GetMetricsResponse{
-		Status: merr.Status(merr.WrapErrMetricNotFound(metricType)),
-	}, nil
+	resp.Response = ret
+	return resp, nil
 }
 
 func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error) {
@@ -1213,6 +1158,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			Channel:            s.Shard().VirtualName(),
 			Version:            s.Version(),
 			Level:              s.Level(),
+			IsSorted:           s.IsSorted(),
 			LastDeltaTimestamp: s.LastDeltaTimestamp(),
 			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
 				return info.IndexInfo.FieldID, info.IndexInfo
@@ -1270,12 +1216,13 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	})
 
 	return &querypb.GetDataDistributionResponse{
-		Status:       merr.Success(),
-		NodeID:       node.GetNodeID(),
-		Segments:     segmentVersionInfos,
-		Channels:     channelVersionInfos,
-		LeaderViews:  leaderViews,
-		LastModifyTs: lastModifyTs,
+		Status:          merr.Success(),
+		NodeID:          node.GetNodeID(),
+		Segments:        segmentVersionInfos,
+		Channels:        channelVersionInfos,
+		LeaderViews:     leaderViews,
+		LastModifyTs:    lastModifyTs,
+		MemCapacityInMB: float64(hardware.GetMemoryCount() / 1024 / 1024),
 	}, nil
 }
 
@@ -1344,6 +1291,13 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				return id, action.GetCheckpoint().Timestamp
 			})
 			shardDelegator.AddExcludedSegments(droppedInfos)
+			flushedInfo := lo.SliceToMap(action.GetSealedInTarget(), func(id int64) (int64, uint64) {
+				if action.GetCheckpoint() == nil {
+					return id, typeutil.MaxTimestamp
+				}
+				return id, action.GetCheckpoint().Timestamp
+			})
+			shardDelegator.AddExcludedSegments(flushedInfo)
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
 				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
 		case querypb.SyncType_UpdatePartitionStats:
@@ -1388,8 +1342,7 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 	}
 	defer node.lifetime.Done()
 
-	log.Info("QueryNode received worker delete request")
-	log.Debug("Worker delete detail", zap.Stringer("info", &deleteRequestStringer{DeleteRequest: req}))
+	log.Debug("QueryNode received worker delete detail", zap.Stringer("info", &deleteRequestStringer{DeleteRequest: req}))
 
 	filters := []segments.SegmentFilter{
 		segments.WithID(req.GetSegmentId()),
@@ -1420,6 +1373,84 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 	}
 
 	return merr.Success(), nil
+}
+
+// DeleteBatch is the API to apply same delete data into multiple segments.
+// it's basically same as `Delete` but cost less memory pressure.
+func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.String("channel", req.GetVchannelName()),
+		zap.Int64s("segmentIDs", req.GetSegmentIds()),
+		zap.String("scope", req.GetScope().String()),
+	)
+
+	// check node healthy
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return &querypb.DeleteBatchResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	defer node.lifetime.Done()
+
+	// log.Debug("QueryNode received worker delete detail", zap.Stringer("info", &deleteRequestStringer{DeleteRequest: req}))
+
+	filters := []segments.SegmentFilter{
+		segments.WithIDs(req.GetSegmentIds()...),
+	}
+
+	// do not add filter for Unknown & All scope, for backward cap
+	switch req.GetScope() {
+	case querypb.DataScope_Historical:
+		filters = append(filters, segments.WithType(segments.SegmentTypeSealed))
+	case querypb.DataScope_Streaming:
+		filters = append(filters, segments.WithType(segments.SegmentTypeGrowing))
+	}
+
+	segs := node.manager.Segment.GetBy(filters...)
+
+	hitIDs := lo.Map(segs, func(segment segments.Segment, _ int) int64 {
+		return segment.ID()
+	})
+	// calculate missing ids, continue to delete existing ones.
+	missingIDs := typeutil.NewSet(req.GetSegmentIds()...).Complement(typeutil.NewSet(hitIDs...))
+	if missingIDs.Len() > 0 {
+		log.Warn("Delete batch find missing ids", zap.Int64s("missing_ids", missingIDs.Collect()))
+	}
+
+	pks := storage.ParseIDs2PrimaryKeys(req.GetPrimaryKeys())
+
+	// control the execution batch parallel with P number
+	// maybe it shall be lower in case of heavy CPU usage may impacting search/query
+	pool := segments.GetDeletePool()
+	futures := make([]*conc.Future[struct{}], 0, len(segs))
+	errSet := typeutil.NewConcurrentSet[int64]()
+
+	for _, segment := range segs {
+		segment := segment
+		futures = append(futures, pool.Submit(func() (struct{}, error) {
+			// TODO @silverxia, add interface to use same data struct for segment delete
+			// current implementation still copys pks into protobuf(or arrow) struct
+			err := segment.Delete(ctx, pks, req.GetTimestamps())
+			if err != nil {
+				errSet.Insert(segment.ID())
+				log.Warn("segment delete failed",
+					zap.Int64("segmentID", segment.ID()),
+					zap.Error(err))
+				return struct{}{}, err
+			}
+			return struct{}{}, nil
+		}))
+	}
+
+	// ignore error returned, since error segment is recorded into error set
+	_ = conc.AwaitAll(futures...)
+
+	// return merr.Success(), nil
+	return &querypb.DeleteBatchResponse{
+		Status:    merr.Success(),
+		FailedIds: errSet.Collect(),
+	}, nil
 }
 
 type deleteRequestStringer struct {

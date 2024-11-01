@@ -19,41 +19,24 @@ package datacoord
 import (
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 type CompactionTask interface {
 	Process() bool
 	BuildCompactionRequest() (*datapb.CompactionPlan, error)
-
-	GetTriggerID() UniqueID
-	GetPlanID() UniqueID
-	GetState() datapb.CompactionTaskState
-	GetChannel() string
+	GetSlotUsage() int64
 	GetLabel() string
 
-	GetType() datapb.CompactionType
-	GetCollectionID() int64
-	GetPartitionID() int64
-	GetInputSegments() []int64
-	GetStartTime() int64
-	GetTimeoutInSeconds() int32
-	GetPos() *msgpb.MsgPosition
-
-	GetPlan() *datapb.CompactionPlan
-	GetResult() *datapb.CompactionPlanResult
-
-	GetNodeID() UniqueID
-	GetSpan() trace.Span
-	ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask
-	SetNodeID(UniqueID) error
 	SetTask(*datapb.CompactionTask)
-	SetSpan(trace.Span)
-	SetResult(*datapb.CompactionPlanResult)
-	EndSpan()
-	CleanLogPath()
+	GetTaskProto() *datapb.CompactionTask
+	SetPlan(plan *datapb.CompactionPlan)
+	ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask
+
+	SetNodeID(UniqueID) error
 	NeedReAssignNodeID() bool
+	GetSpan() trace.Span
+	SetSpan(trace.Span)
 	SaveTaskMeta() error
 }
 
@@ -89,6 +72,12 @@ func setResultSegments(segments []int64) compactionTaskOpt {
 	}
 }
 
+func setTmpSegments(segments []int64) compactionTaskOpt {
+	return func(task *datapb.CompactionTask) {
+		task.TmpSegments = segments
+	}
+}
+
 func setState(state datapb.CompactionTaskState) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
 		task.State = state
@@ -110,5 +99,11 @@ func setRetryTimes(retryTimes int32) compactionTaskOpt {
 func setLastStateStartTime(lastStateStartTime int64) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
 		task.LastStateStartTime = lastStateStartTime
+	}
+}
+
+func setAnalyzeTaskID(id int64) compactionTaskOpt {
+	return func(task *datapb.CompactionTask) {
+		task.AnalyzeTaskID = id
 	}
 }

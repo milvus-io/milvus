@@ -146,7 +146,8 @@ func (s *Server) balanceSegments(ctx context.Context,
 		err = s.taskScheduler.Add(t)
 		if err != nil {
 			t.Cancel(err)
-			return err
+			log.Info("skip balance segment task", zap.Int64("segmentID", plan.Segment.GetID()), zap.Error(err))
+			continue
 		}
 		tasks = append(tasks, t)
 	}
@@ -223,7 +224,8 @@ func (s *Server) balanceChannels(ctx context.Context,
 		err = s.taskScheduler.Add(t)
 		if err != nil {
 			t.Cancel(err)
-			return err
+			log.Info("skip balance channel task", zap.String("channel", plan.Channel.GetChannelName()), zap.Error(err))
+			continue
 		}
 		tasks = append(tasks, t)
 	}

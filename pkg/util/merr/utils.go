@@ -323,7 +323,6 @@ func WrapErrAsInputErrorWhen(err error, targets ...milvusError) error {
 			if target.errCode == merr.errCode {
 				log.Info("mark error as input error", zap.Error(err))
 				WithErrorType(InputError)(&merr)
-				log.Info("test--", zap.String("type", merr.errType.String()))
 				return merr
 			}
 		}
@@ -804,6 +803,14 @@ func WrapErrIndexNotSupported(indexType string, msg ...string) error {
 
 func WrapErrIndexDuplicate(indexName string, msg ...string) error {
 	err := wrapFields(ErrIndexDuplicate, value("indexName", indexName))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrTaskDuplicate(taskType string, msg ...string) error {
+	err := wrapFields(ErrTaskDuplicate, value("taskType", taskType))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}

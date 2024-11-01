@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TITLE_PASSED: "T"
+      ISSUE_TITLE: ${{ github.event.issue.title }}
     permissions:
       issues: write
     timeout-minutes: 20
@@ -19,7 +20,8 @@ jobs:
       - name: Check Issue
         shell: bash
         run: |
-          echo Issue title: ${{ github.event.issue.title }}
+          echo "Issue title: ${ISSUE_TITLE//\"/\\\"}"
+
           cat >> check_title.py << EOF
           import re
           import sys
@@ -32,7 +34,7 @@ jobs:
               print("TITLE_PASSED=T")
           EOF
           
-          python3 check_title.py "${{ github.event.issue.title }}" >> "$GITHUB_ENV"
+          python3 check_title.py "${ISSUE_TITLE//\"/\\\"}" >> "$GITHUB_ENV"
           cat $GITHUB_ENV
 
       - name: Check env

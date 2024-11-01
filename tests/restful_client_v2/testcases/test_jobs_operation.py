@@ -101,7 +101,6 @@ class TestCreateImportJob(TestBase):
                     assert False, "import job timeout"
         c = Collection(name)
         c.load(_refresh=True)
-        time.sleep(10)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
@@ -192,7 +191,6 @@ class TestCreateImportJob(TestBase):
                     assert False, "import job timeout"
         c = Collection(name)
         c.load(_refresh=True)
-        time.sleep(10)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
@@ -285,7 +283,6 @@ class TestCreateImportJob(TestBase):
                     assert False, "import job timeout"
         c = Collection(name)
         c.load(_refresh=True)
-        time.sleep(10)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
@@ -376,6 +373,7 @@ class TestCreateImportJob(TestBase):
         time.sleep(10)
         # assert data count
         c = Collection(name)
+        c.load(_refresh=True)
         assert c.num_entities == 2000
         # assert import data can be queried
         payload = {
@@ -456,6 +454,7 @@ class TestCreateImportJob(TestBase):
         time.sleep(10)
         # assert data count
         c = Collection(name)
+        c.load(_refresh=True)
         assert c.num_entities == 2000
         # assert import data can be queried
         payload = {
@@ -541,6 +540,7 @@ class TestCreateImportJob(TestBase):
         time.sleep(10)
         # assert data count
         c = Collection(name)
+        c.load(_refresh=True)
         assert c.num_entities == 2000
         # assert import data can be queried
         payload = {
@@ -665,6 +665,7 @@ class TestCreateImportJob(TestBase):
         time.sleep(10)
         # assert data count
         c = Collection(name)
+        c.load(_refresh=True)
         assert c.num_entities == 6000
         # assert import data can be queried
         payload = {
@@ -683,6 +684,8 @@ class TestCreateImportJob(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.skip("stats task will generate a new segment, "
+                      "using collectionID as prefix will import twice as much data")
     def test_job_import_binlog_file_type(self, nb, dim, insert_round, auto_id,
                                                       is_partition_key, enable_dynamic_schema, bucket_name, root_path):
         # todo: copy binlog file to backup bucket
@@ -913,6 +916,7 @@ class TestImportJobAdvance(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
         # assert data count
         c = Collection(name)
+        c.load(_refresh=True)
         assert c.num_entities == file_nums * batch_size
         # assert import data can be queried
         payload = {
@@ -1005,6 +1009,7 @@ class TestCreateImportJobAdvance(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
         # assert data count
         c = Collection(name)
+        c.load(_refresh=True)
         assert c.num_entities == file_nums * batch_size * task_num
         # assert import data can be queried
         payload = {
@@ -1094,6 +1099,7 @@ class TestCreateImportJobAdvance(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
         # assert data count
         c = Collection(name)
+        c.load(_refresh=True)
         assert c.num_entities == file_nums * batch_size * task_num
         # assert import data can be queried
         payload = {

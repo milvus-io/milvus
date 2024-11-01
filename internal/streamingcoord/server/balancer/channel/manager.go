@@ -7,7 +7,6 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -19,7 +18,7 @@ var ErrChannelNotExist = errors.New("channel not exist")
 
 // RecoverChannelManager creates a new channel manager.
 func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*ChannelManager, error) {
-	channels, err := recoverFromConfigurationAndMeta(ctx, incomingChannel...)
+	channels, metrics, err := recoverFromConfigurationAndMeta(ctx, incomingChannel...)
 	if err != nil {
 		return nil, err
 	}
@@ -31,19 +30,24 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 			Global: globalVersion, // global version should be keep increasing globally, it's ok to use node id.
 			Local:  0,
 		},
+		metrics: metrics,
 	}, nil
 }
 
 // recoverFromConfigurationAndMeta recovers the channel manager from configuration and meta.
-func recoverFromConfigurationAndMeta(ctx context.Context, incomingChannel ...string) (map[string]*PChannelMeta, error) {
+func recoverFromConfigurationAndMeta(ctx context.Context, incomingChannel ...string) (map[string]*PChannelMeta, *channelMetrics, error) {
+	// Recover metrics.
+	metrics := newPChannelMetrics()
+
 	// Get all channels from meta.
 	channelMetas, err := resource.Resource().StreamingCatalog().ListPChannel(ctx)
 	if err != nil {
-		return nil, err
+		return nil, metrics, err
 	}
 
 	channels := make(map[string]*PChannelMeta, len(channelMetas))
 	for _, channel := range channelMetas {
+		metrics.AssignPChannelStatus(channel)
 		channels[channel.GetChannel().GetName()] = newPChannelMetaFromProto(channel)
 	}
 
@@ -53,7 +57,7 @@ func recoverFromConfigurationAndMeta(ctx context.Context, incomingChannel ...str
 			channels[newChannel] = newPChannelMeta(newChannel)
 		}
 	}
-	return channels, nil
+	return channels, metrics, nil
 }
 
 // ChannelManager manages the channels.
@@ -63,6 +67,7 @@ type ChannelManager struct {
 	cond     *syncutil.ContextCond
 	channels map[string]*PChannelMeta
 	version  typeutil.VersionInt64Pair
+	metrics  *channelMetrics
 }
 
 // CurrentPChannelsView returns the current view of pchannels.
@@ -102,10 +107,10 @@ func (cm *ChannelManager) AssignPChannels(ctx context.Context, pChannelToStreami
 	if err != nil {
 		return nil, err
 	}
-
 	updates := make(map[string]*PChannelMeta, len(pChannelMetas))
 	for _, pchannel := range pChannelMetas {
 		updates[pchannel.GetChannel().GetName()] = newPChannelMetaFromProto(pchannel)
+		cm.metrics.AssignPChannelStatus(pchannel)
 	}
 	return updates, nil
 }
@@ -119,6 +124,7 @@ func (cm *ChannelManager) AssignPChannelsDone(ctx context.Context, pChannels []s
 	defer cm.cond.L.Unlock()
 
 	// modified channels.
+	histories := make([]types.PChannelInfoAssigned, 0, len(pChannels))
 	pChannelMetas := make([]*streamingpb.PChannelMeta, 0, len(pChannels))
 	for _, channelName := range pChannels {
 		pchannel, ok := cm.channels[channelName]
@@ -126,11 +132,22 @@ func (cm *ChannelManager) AssignPChannelsDone(ctx context.Context, pChannels []s
 			return ErrChannelNotExist
 		}
 		mutablePChannel := pchannel.CopyForWrite()
-		mutablePChannel.AssignToServerDone()
+		histories = append(histories, mutablePChannel.AssignToServerDone()...)
 		pChannelMetas = append(pChannelMetas, mutablePChannel.IntoRawMeta())
 	}
 
-	return cm.updatePChannelMeta(ctx, pChannelMetas)
+	if err := cm.updatePChannelMeta(ctx, pChannelMetas); err != nil {
+		return err
+	}
+
+	// Update metrics.
+	for _, history := range histories {
+		cm.metrics.RemovePChannelStatus(history)
+	}
+	for _, pchannel := range pChannelMetas {
+		cm.metrics.AssignPChannelStatus(pchannel)
+	}
+	return nil
 }
 
 // MarkAsUnavailable mark the pchannels as unavailable.
@@ -150,7 +167,13 @@ func (cm *ChannelManager) MarkAsUnavailable(ctx context.Context, pChannels []typ
 		pChannelMetas = append(pChannelMetas, mutablePChannel.IntoRawMeta())
 	}
 
-	return cm.updatePChannelMeta(ctx, pChannelMetas)
+	if err := cm.updatePChannelMeta(ctx, pChannelMetas); err != nil {
+		return err
+	}
+	for _, pchannel := range pChannelMetas {
+		cm.metrics.AssignPChannelStatus(pchannel)
+	}
+	return nil
 }
 
 // updatePChannelMeta updates the pchannel metas.
@@ -168,9 +191,7 @@ func (cm *ChannelManager) updatePChannelMeta(ctx context.Context, pChannelMetas 
 	}
 	cm.version.Local++
 	// update metrics.
-	metrics.StreamingCoordAssignmentVersion.WithLabelValues(
-		paramtable.GetStringNodeID(),
-	).Set(float64(cm.version.Local))
+	cm.metrics.UpdateAssignmentVersion(cm.version.Local)
 	return nil
 }
 

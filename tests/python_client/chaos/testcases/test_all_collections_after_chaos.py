@@ -50,7 +50,7 @@ class TestAllCollection(TestcaseBase):
 
         # insert
         offset = -3000
-        data = cf.get_column_data_by_schema(nb=ct.default_nb, schema=schema, start=offset)
+        data = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema, start=offset)
         t0 = time.time()
         _, res = collection_w.insert(data)
         tt = time.time() - t0
@@ -108,7 +108,7 @@ class TestAllCollection(TestcaseBase):
         collection_w.release()
 
         # insert data
-        d = cf.get_column_data_by_schema(nb=ct.default_nb, schema=schema)
+        d = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
         collection_w.insert(d)
 
         # load

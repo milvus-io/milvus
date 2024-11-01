@@ -17,6 +17,8 @@
 package http
 
 import (
+	"embed"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -42,6 +44,11 @@ var (
 	metricsServer *http.ServeMux
 	server        *http.Server
 )
+
+// Embedding all static files of webui folder to binary
+//
+//go:embed webui
+var staticFiles embed.FS
 
 // Provide alias for native http package
 // avoiding import alias when using http package
@@ -83,9 +90,16 @@ func registerDefaults() {
 				w.Write([]byte(fmt.Sprintf(`{"msg": "failed to execute expression, %s"}`, err.Error())))
 				return
 			}
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(fmt.Sprintf(`{"output": "%s"}`, output)))
+			resp := make(map[string]string)
+			resp["output"] = output
+			json.NewEncoder(w).Encode(resp)
 		}),
+	})
+	Register(&Handler{
+		Path:    StaticPath,
+		Handler: GetStaticHandler(),
 	})
 }
 
@@ -126,6 +140,10 @@ func RegisterCheckComponentReady(checkActive func(role string) error) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"msg": "OK"}`))
 		},
+	})
+	Register(&Handler{
+		Path:    RouteWebUI,
+		Handler: http.FileServer(http.FS(staticFiles)),
 	})
 }
 

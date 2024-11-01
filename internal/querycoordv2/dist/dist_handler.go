@@ -32,6 +32,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -122,8 +123,8 @@ func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse,
 		node.UpdateStats(
 			session.WithSegmentCnt(len(resp.GetSegments())),
 			session.WithChannelCnt(len(resp.GetChannels())),
+			session.WithMemCapacity(resp.GetMemCapacityInMB()),
 		)
-
 		dh.updateSegmentsDistribution(resp)
 		dh.updateChannelsDistribution(resp)
 		dh.updateLeaderView(resp)
@@ -145,6 +146,7 @@ func (dh *distHandler) updateSegmentsDistribution(resp *querypb.GetDataDistribut
 				PartitionID:   s.GetPartition(),
 				InsertChannel: s.GetChannel(),
 				Level:         s.GetLevel(),
+				IsSorted:      s.GetIsSorted(),
 			}
 		}
 		updates = append(updates, &meta.Segment{
@@ -219,6 +221,11 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 			TargetVersion:          lview.TargetVersion,
 			NumOfGrowingRows:       lview.GetNumOfGrowingRows(),
 			PartitionStatsVersions: lview.PartitionStatsVersions,
+		}
+		// check leader serviceable
+		// todo by weiliu1031: serviceable status should be maintained by delegator, to avoid heavy check here
+		if err := utils.CheckLeaderAvailable(dh.nodeManager, dh.target, view); err != nil {
+			view.UnServiceableError = err
 		}
 		updates = append(updates, view)
 	}

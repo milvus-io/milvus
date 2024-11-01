@@ -39,12 +39,20 @@ type DataCoord struct {
 
 // NewDataCoord creates a new DataCoord
 func NewDataCoord(ctx context.Context, factory dependency.Factory) (*DataCoord, error) {
-	s := grpcdatacoordclient.NewServer(ctx, factory)
+	s, err := grpcdatacoordclient.NewServer(ctx, factory)
+	if err != nil {
+		return nil, err
+	}
 
 	return &DataCoord{
 		ctx: ctx,
 		svr: s,
 	}, nil
+}
+
+// Prepare prepares service
+func (s *DataCoord) Prepare() error {
+	return s.svr.Prepare()
 }
 
 // Run starts service

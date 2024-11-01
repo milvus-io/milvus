@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -95,6 +96,8 @@ func Test_NewServer(t *testing.T) {
 	server.querynode = mockQN
 
 	t.Run("Run", func(t *testing.T) {
+		err = server.Prepare()
+		assert.NoError(t, err)
 		err = server.Run()
 		assert.NoError(t, err)
 	})
@@ -268,6 +271,15 @@ func Test_NewServer(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("DeleteBatch", func(t *testing.T) {
+		mockQN.EXPECT().DeleteBatch(mock.Anything, mock.Anything).Return(&querypb.DeleteBatchResponse{
+			Status: merr.Success(),
+		}, nil)
+
+		resp, err := server.DeleteBatch(ctx, &querypb.DeleteBatchRequest{})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+	})
+
 	err = server.Stop()
 	assert.NoError(t, err)
 }
@@ -288,6 +300,8 @@ func Test_Run(t *testing.T) {
 	mockQN.EXPECT().Init().Return(nil).Maybe()
 	mockQN.EXPECT().GetNodeID().Return(2).Maybe()
 	server.querynode = mockQN
+	err = server.Prepare()
+	assert.NoError(t, err)
 	err = server.Run()
 	assert.Error(t, err)
 

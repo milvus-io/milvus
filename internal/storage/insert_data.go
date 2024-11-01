@@ -50,10 +50,14 @@ type InsertData struct {
 }
 
 func NewInsertData(schema *schemapb.CollectionSchema) (*InsertData, error) {
-	return NewInsertDataWithCap(schema, 0)
+	return NewInsertDataWithCap(schema, 0, false)
 }
 
-func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int) (*InsertData, error) {
+func NewInsertDataWithFunctionOutputField(schema *schemapb.CollectionSchema) (*InsertData, error) {
+	return NewInsertDataWithCap(schema, 0, true)
+}
+
+func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFunctionOutput bool) (*InsertData, error) {
 	if schema == nil {
 		return nil, merr.WrapErrParameterMissing("collection schema")
 	}
@@ -64,10 +68,21 @@ func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int) (*InsertDa
 
 	for _, field := range schema.Fields {
 		if field.IsPrimaryKey && field.GetNullable() {
-			return nil, merr.WrapErrParameterInvalidMsg("primary key field not support nullable")
+			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("primary key field should not be nullable (field: %s)", field.Name))
 		}
 		if field.IsPartitionKey && field.GetNullable() {
-			return nil, merr.WrapErrParameterInvalidMsg("partition key field not support nullable")
+			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("partition key field should not be nullable (field: %s)", field.Name))
+		}
+		if field.IsFunctionOutput {
+			if field.IsPrimaryKey || field.IsPartitionKey {
+				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("function output field should not be primary key or partition key (field: %s)", field.Name))
+			}
+			if field.GetNullable() {
+				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("function output field should not be nullable (field: %s)", field.Name))
+			}
+			if !withFunctionOutput {
+				continue
+			}
 		}
 		fieldData, err := NewFieldData(field.DataType, field, cap)
 		if err != nil {
@@ -1152,7 +1167,13 @@ func (data *JSONFieldData) AppendValidDataRows(rows interface{}) error {
 // AppendValidDataRows appends FLATTEN vectors to field data.
 func (data *BinaryVectorFieldData) AppendValidDataRows(rows interface{}) error {
 	if rows != nil {
-		return merr.WrapErrParameterInvalidMsg("not support Nullable in vector")
+		v, ok := rows.([]bool)
+		if !ok {
+			return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+		}
+		if len(v) != 0 {
+			return merr.WrapErrParameterInvalidMsg("not support Nullable in vector")
+		}
 	}
 	return nil
 }
@@ -1160,7 +1181,13 @@ func (data *BinaryVectorFieldData) AppendValidDataRows(rows interface{}) error {
 // AppendValidDataRows appends FLATTEN vectors to field data.
 func (data *FloatVectorFieldData) AppendValidDataRows(rows interface{}) error {
 	if rows != nil {
-		return merr.WrapErrParameterInvalidMsg("not support Nullable in vector")
+		v, ok := rows.([]bool)
+		if !ok {
+			return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+		}
+		if len(v) != 0 {
+			return merr.WrapErrParameterInvalidMsg("not support Nullable in vector")
+		}
 	}
 	return nil
 }
@@ -1168,7 +1195,13 @@ func (data *FloatVectorFieldData) AppendValidDataRows(rows interface{}) error {
 // AppendValidDataRows appends FLATTEN vectors to field data.
 func (data *Float16VectorFieldData) AppendValidDataRows(rows interface{}) error {
 	if rows != nil {
-		return merr.WrapErrParameterInvalidMsg("not support Nullable in vector")
+		v, ok := rows.([]bool)
+		if !ok {
+			return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+		}
+		if len(v) != 0 {
+			return merr.WrapErrParameterInvalidMsg("not support Nullable in vector")
+		}
 	}
 	return nil
 }
@@ -1176,14 +1209,26 @@ func (data *Float16VectorFieldData) AppendValidDataRows(rows interface{}) error 
 // AppendValidDataRows appends FLATTEN vectors to field data.
 func (data *BFloat16VectorFieldData) AppendValidDataRows(rows interface{}) error {
 	if rows != nil {
-		return merr.WrapErrParameterInvalidMsg("not support Nullable in vector")
+		v, ok := rows.([]bool)
+		if !ok {
+			return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+		}
+		if len(v) != 0 {
+			return merr.WrapErrParameterInvalidMsg("not support Nullable in vector")
+		}
 	}
 	return nil
 }
 
 func (data *SparseFloatVectorFieldData) AppendValidDataRows(rows interface{}) error {
 	if rows != nil {
-		return merr.WrapErrParameterInvalidMsg("not support Nullable in vector")
+		v, ok := rows.([]bool)
+		if !ok {
+			return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+		}
+		if len(v) != 0 {
+			return merr.WrapErrParameterInvalidMsg("not support Nullable in vector")
+		}
 	}
 	return nil
 }

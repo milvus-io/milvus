@@ -18,7 +18,7 @@
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
-#include "query/generated/ExecPlanNodeVisitor.h"
+#include "query/ExecPlanNodeVisitor.h"
 
 namespace milvus::segcore {
 
@@ -97,7 +97,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    int64_t limit_size,
                                    bool ignore_non_pk) const {
     std::shared_lock lck(mutex_);
-    tracer::AutoSpan span("Retrieve", trace_ctx, false);
+    tracer::AutoSpan span("Retrieve", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(*this, timestamp);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
@@ -144,7 +144,7 @@ SegmentInternalInterface::FillTargetEntry(
     int64_t size,
     bool ignore_non_pk,
     bool fill_ids) const {
-    tracer::AutoSpan span("FillTargetEntry", trace_ctx, false);
+    tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
     auto fields_data = results->mutable_fields_data();
     auto ids = results->mutable_ids();
@@ -240,7 +240,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    const int64_t* offsets,
                                    int64_t size) const {
     std::shared_lock lck(mutex_);
-    tracer::AutoSpan span("RetrieveByOffsets", trace_ctx, false);
+    tracer::AutoSpan span("RetrieveByOffsets", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     FillTargetEntry(trace_ctx, Plan, results, offsets, size, false, false);
     return results;
@@ -257,6 +257,14 @@ SegmentInternalInterface::get_real_count() const {
 #endif
     auto plan = std::make_unique<query::RetrievePlan>(get_schema());
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    milvus::plan::PlanNodePtr plannode;
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    plannode = std::make_shared<milvus::plan::MvccNode>(
+        milvus::plan::GetNextPlanNodeId());
+    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+    plannode = std::make_shared<milvus::plan::CountNode>(
+        milvus::plan::GetNextPlanNodeId(), sources);
+    plan->plan_node_->plannodes_ = plannode;
     plan->plan_node_->is_count_ = true;
     auto res = Retrieve(nullptr, plan.get(), MAX_TIMESTAMP, INT64_MAX, false);
     AssertInfo(res->fields_data().size() == 1,
@@ -384,12 +392,13 @@ SegmentInternalInterface::LoadPrimitiveSkipIndex(milvus::FieldId field_id,
         field_id, chunk_id, data_type, chunk_data, valid_data, count);
 }
 
-void
-SegmentInternalInterface::LoadStringSkipIndex(
-    milvus::FieldId field_id,
-    int64_t chunk_id,
-    const milvus::VariableColumn<std::string>& var_column) {
-    skip_index_.LoadString(field_id, chunk_id, var_column);
+index::TextMatchIndex*
+SegmentInternalInterface::GetTextIndex(FieldId field_id) const {
+    std::shared_lock lock(mutex_);
+    auto iter = text_indexes_.find(field_id);
+    AssertInfo(iter != text_indexes_.end(),
+               "failed to get text index, text index not found");
+    return iter->second.get();
 }
 
 }  // namespace milvus::segcore

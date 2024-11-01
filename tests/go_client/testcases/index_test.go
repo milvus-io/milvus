@@ -212,7 +212,7 @@ func TestIndexAutoSparseVector(t *testing.T) {
 	for _, unsupportedMt := range hp.UnsupportedSparseVecMetricsType {
 		idx := index.NewAutoIndex(unsupportedMt)
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultSparseVecFieldName, idx))
-		common.CheckErr(t, err, false, "only IP is the supported metric type for sparse index")
+		common.CheckErr(t, err, false, "only IP&BM25 is the supported metric type for sparse index")
 	}
 
 	// auto index with different metric type on sparse vec
@@ -274,7 +274,7 @@ func TestCreateAutoIndexAllFields(t *testing.T) {
 	// load -> search and output all vector fields
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields([]string{"*"}))
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields("*"))
 	common.CheckErr(t, err, true)
 	common.CheckOutputFields(t, expFields, searchRes[0].Fields)
 }
@@ -483,7 +483,7 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 	expr := fmt.Sprintf("%s > 10", common.DefaultInt64FieldName)
-	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithFilter(expr).WithOutputFields([]string{"*"}))
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithFilter(expr).WithOutputFields("*"))
 	common.CheckErr(t, err, true)
 	expFields := make([]string, 0, len(schema.Fields))
 	for _, field := range schema.Fields {
@@ -526,7 +526,7 @@ func TestCreateInvertedScalarIndex(t *testing.T) {
 
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 	expr := fmt.Sprintf("%s > 10", common.DefaultInt64FieldName)
-	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithFilter(expr).WithOutputFields([]string{"*"}))
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithFilter(expr).WithOutputFields("*"))
 	common.CheckErr(t, err, true)
 	expFields := make([]string, 0, len(schema.Fields))
 	for _, field := range schema.Fields {
@@ -607,7 +607,7 @@ func TestCreateIndexJsonField(t *testing.T) {
 	// create vector index on json field
 	idx := index.NewSCANNIndex(entity.L2, 8, false)
 	_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultJSONFieldName, idx).WithIndexName("json_index"))
-	common.CheckErr(t, err, false, "data type should be FloatVector, Float16Vector or BFloat16Vector")
+	common.CheckErr(t, err, false, "index SCANN only supports vector data type")
 
 	// create scalar index on json field
 	type scalarIndexError struct {
@@ -653,7 +653,7 @@ func TestCreateUnsupportedIndexArrayField(t *testing.T) {
 			if field.DataType == entity.FieldTypeArray {
 				// create vector index
 				_, err1 := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, vectorIdx).WithIndexName("vector_index"))
-				common.CheckErr(t, err1, false, "data type should be FloatVector, Float16Vector or BFloat16Vector")
+				common.CheckErr(t, err1, false, "index SCANN only supports vector data type")
 
 				// create scalar index
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idxErr.idx))
@@ -691,7 +691,7 @@ func TestCreateInvertedIndexArrayField(t *testing.T) {
 	// load -> search and output all fields
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-	searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{"*"}))
+	searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).WithOutputFields("*"))
 	common.CheckErr(t, errSearch, true)
 	var expFields []string
 	for _, field := range schema.Fields {
@@ -829,22 +829,22 @@ func TestCreateSparseIndexInvalidParams(t *testing.T) {
 	for _, mt := range hp.UnsupportedSparseVecMetricsType {
 		idxInverted := index.NewSparseInvertedIndex(mt, 0.2)
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultSparseVecFieldName, idxInverted))
-		common.CheckErr(t, err, false, "only IP is the supported metric type for sparse index")
+		common.CheckErr(t, err, false, "only IP&BM25 is the supported metric type for sparse index")
 
 		idxWand := index.NewSparseWANDIndex(mt, 0.2)
 		_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultSparseVecFieldName, idxWand))
-		common.CheckErr(t, err, false, "only IP is the supported metric type for sparse index")
+		common.CheckErr(t, err, false, "only IP&BM25 is the supported metric type for sparse index")
 	}
 
 	// create index with invalid drop_ratio_build
 	for _, drb := range []float64{-0.3, 1.3} {
 		idxInverted := index.NewSparseInvertedIndex(entity.IP, drb)
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultSparseVecFieldName, idxInverted))
-		common.CheckErr(t, err, false, "must be in range [0, 1)")
+		common.CheckErr(t, err, false, "Out of range in json: param 'drop_ratio_build'")
 
 		idxWand := index.NewSparseWANDIndex(entity.IP, drb)
 		_, err1 := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultSparseVecFieldName, idxWand))
-		common.CheckErr(t, err1, false, "must be in range [0, 1)")
+		common.CheckErr(t, err1, false, "Out of range in json: param 'drop_ratio_build'")
 	}
 }
 
@@ -944,20 +944,22 @@ func TestCreateVectorIndexScalarField(t *testing.T) {
 			// create float vector index on scalar field
 			for _, idx := range hp.GenAllFloatIndex(entity.COSINE) {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
-				common.CheckErr(t, err, false, "can't build hnsw in not vector type",
-					"data type should be FloatVector, Float16Vector or BFloat16Vector")
+				expErrorMsg := fmt.Sprintf("index %s only supports vector data type", idx.IndexType())
+				common.CheckErr(t, err, false, expErrorMsg)
 			}
 
 			// create binary vector index on scalar field
 			for _, idxBinary := range []index.Index{index.NewBinFlatIndex(entity.IP), index.NewBinIvfFlatIndex(entity.COSINE, 64)} {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idxBinary))
-				common.CheckErr(t, err, false, "binary vector is only supported")
+				expErrorMsg := fmt.Sprintf("index %s only supports vector data type", idxBinary.IndexType())
+				common.CheckErr(t, err, false, expErrorMsg)
 			}
 
 			// create sparse vector index on scalar field
 			for _, idxSparse := range []index.Index{index.NewSparseInvertedIndex(entity.IP, 0.2), index.NewSparseWANDIndex(entity.IP, 0.3)} {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idxSparse))
-				common.CheckErr(t, err, false, "only sparse float vector is supported for the specified index")
+				expErrorMsg := fmt.Sprintf("index %s only supports vector data type", idxSparse.IndexType())
+				common.CheckErr(t, err, false, expErrorMsg)
 			}
 		}
 	}
@@ -972,7 +974,7 @@ func TestCreateIndexInvalidParams(t *testing.T) {
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 
 	// invalid IvfFlat nlist [1, 65536]
-	errMsg := "nlist out of range: [1, 65536]"
+	errMsg := "Out of range in json: param 'nlist'"
 	for _, invalidNlist := range []int{0, -1, 65536 + 1} {
 		// IvfFlat
 		idxIvfFlat := index.NewIvfFlatIndex(entity.L2, invalidNlist)
@@ -997,25 +999,25 @@ func TestCreateIndexInvalidParams(t *testing.T) {
 		// IvfFlat
 		idxIvfPq := index.NewIvfPQIndex(entity.L2, 128, 8, invalidNBits)
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idxIvfPq))
-		common.CheckErr(t, err, false, "parameter `nbits` out of range, expect range [1,64]")
+		common.CheckErr(t, err, false, "Out of range in json: param 'nbits'")
 	}
 
 	idxIvfPq := index.NewIvfPQIndex(entity.L2, 128, 7, 8)
 	_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idxIvfPq))
-	common.CheckErr(t, err, false, "dimension must be able to be divided by `m`")
+	common.CheckErr(t, err, false, "The dimension of a vector (dim) should be a multiple of the number of subquantizers (m)")
 
 	// invalid Hnsw M [1, 2048], efConstruction [1, 2147483647]
 	for _, invalidM := range []int{0, 2049} {
 		// IvfFlat
 		idxHnsw := index.NewHNSWIndex(entity.L2, invalidM, 96)
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idxHnsw))
-		common.CheckErr(t, err, false, "M out of range: [1, 2048]")
+		common.CheckErr(t, err, false, "Out of range in json: param 'M'")
 	}
 	for _, invalidEfConstruction := range []int{0, 2147483647 + 1} {
 		// IvfFlat
 		idxHnsw := index.NewHNSWIndex(entity.L2, 8, invalidEfConstruction)
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idxHnsw))
-		common.CheckErr(t, err, false, "efConstruction out of range: [1, 2147483647]")
+		common.CheckErr(t, err, false, "Out of range in json: param 'efConstruction'", "integer value out of range, key: 'efConstruction'")
 	}
 }
 

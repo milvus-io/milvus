@@ -2,7 +2,7 @@ version: '3.5'
 
 services:
   etcd:
-    image: quay.io/coreos/etcd:v3.5.5
+    image: quay.io/coreos/etcd:v3.5.14
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
@@ -101,6 +101,12 @@ services:
       - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
     depends_on:
       - zookeeper
+
+  gcpnative:
+    image: fsouza/fake-gcs-server
+    command: -scheme http -public-host storage.gcs.127.0.0.1.nip.io:4443
+    ports:
+      - "4443:4443"
 
 networks:
   default:

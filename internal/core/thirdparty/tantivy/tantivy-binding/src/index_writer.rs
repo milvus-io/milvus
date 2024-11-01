@@ -51,6 +51,9 @@ impl IndexWriterWrapper {
                 field = schema_builder.add_text_field(&field_name, text_options);
                 use_raw_tokenizer = true;
             }
+            TantivyDataType::Text => {
+                panic!("text should be indexed with analyzer");
+            }
         }
         let id_field = schema_builder.add_i64_field("doc_id", FAST);
         let schema = schema_builder.build();
@@ -69,6 +72,10 @@ impl IndexWriterWrapper {
             id_field,
             index: Arc::new(index),
         }
+    }
+
+    pub fn create_reader(&self) -> IndexReaderWrapper {
+        IndexReaderWrapper::from_index(self.index.clone())
     }
 
     pub fn add_i8(&mut self, data: i8, offset: i64) {

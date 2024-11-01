@@ -16,9 +16,12 @@
 
 #include "Expr.h"
 
+#include "common/EasyAssert.h"
 #include "exec/expression/AlwaysTrueExpr.h"
 #include "exec/expression/BinaryArithOpEvalRangeExpr.h"
 #include "exec/expression/BinaryRangeExpr.h"
+#include "exec/expression/CallExpr.h"
+#include "exec/expression/ColumnExpr.h"
 #include "exec/expression/CompareExpr.h"
 #include "exec/expression/ConjunctExpr.h"
 #include "exec/expression/ExistsExpr.h"
@@ -27,6 +30,10 @@
 #include "exec/expression/LogicalUnaryExpr.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
+#include "exec/expression/ValueExpr.h"
+
+#include <memory>
+
 namespace milvus {
 namespace exec {
 
@@ -156,8 +163,14 @@ CompileExpression(const expr::TypedExprPtr& expr,
     };
     auto input_types = GetTypes(compiled_inputs);
 
-    if (auto call = dynamic_cast<const expr::CallTypeExpr*>(expr.get())) {
-        // TODO: support function register and search mode
+    if (auto call = std::dynamic_pointer_cast<const expr::CallExpr>(expr)) {
+        result = std::make_shared<PhyCallExpr>(
+            compiled_inputs,
+            call,
+            "PhyCallExpr",
+            context->get_segment(),
+            context->get_active_count(),
+            context->query_config()->get_expr_batch_size());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::UnaryRangeFilterExpr>(expr)) {
         result = std::make_shared<PhyUnaryRangeFilterExpr>(
@@ -251,19 +264,37 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
+    } else if (auto value_expr =
+                   std::dynamic_pointer_cast<const milvus::expr::ValueExpr>(
+                       expr)) {
+        // used for function call arguments, may emit any type
+        result = std::make_shared<PhyValueExpr>(
+            compiled_inputs,
+            value_expr,
+            "PhyValueExpr",
+            context->get_segment(),
+            context->get_active_count(),
+            context->query_config()->get_expr_batch_size());
+    } else if (auto column_expr =
+                   std::dynamic_pointer_cast<const milvus::expr::ColumnExpr>(
+                       expr)) {
+        result = std::make_shared<PhyColumnExpr>(
+            compiled_inputs,
+            column_expr,
+            "PhyColumnExpr",
+            context->get_segment(),
+            context->get_active_count(),
+            context->query_config()->get_expr_batch_size());
+    } else {
+        PanicInfo(ExprInvalid, "unsupport expr: ", expr->ToString());
     }
     return result;
 }
 
 inline void
 OptimizeCompiledExprs(ExecContext* context, const std::vector<ExprPtr>& exprs) {
-    // For pk in [...] can use cache to accelate, but not for other exprs like expr1 && pk in [...]
-    if (exprs.size() == 1) {
-        if (auto casted_expr =
-                std::dynamic_pointer_cast<PhyTermFilterExpr>(exprs[0])) {
-            casted_expr->SetUseCacheOffsets();
-        }
-    }
+    //TODO: add optimization pattern
 }
+
 }  // namespace exec
 }  // namespace milvus

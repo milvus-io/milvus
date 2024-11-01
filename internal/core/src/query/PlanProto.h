@@ -24,42 +24,19 @@ namespace milvus::query {
 
 class ProtoParser {
  public:
-    explicit ProtoParser(const Schema& schema) : schema(schema) {
+    using TypeCheckFunction = std::function<bool(const DataType)>;
+    static bool
+    TypeIsBool(const DataType type) {
+        return type == DataType::BOOL;
+    }
+    static bool
+    TypeIsAny(const DataType) {
+        return true;
     }
 
-    // ExprPtr
-    // ExprFromProto(const proto::plan::Expr& expr_proto);
-
-    ExprPtr
-    ParseBinaryArithOpEvalRangeExpr(
-        const proto::plan::BinaryArithOpEvalRangeExpr& expr_pb);
-
-    ExprPtr
-    ParseUnaryRangeExpr(const proto::plan::UnaryRangeExpr& expr_pb);
-
-    ExprPtr
-    ParseBinaryRangeExpr(const proto::plan::BinaryRangeExpr& expr_pb);
-
-    ExprPtr
-    ParseCompareExpr(const proto::plan::CompareExpr& expr_pb);
-
-    ExprPtr
-    ParseTermExpr(const proto::plan::TermExpr& expr_pb);
-
-    ExprPtr
-    ParseUnaryExpr(const proto::plan::UnaryExpr& expr_pb);
-
-    ExprPtr
-    ParseBinaryExpr(const proto::plan::BinaryExpr& expr_pb);
-
-    ExprPtr
-    ParseExistExpr(const proto::plan::ExistsExpr& expr_pb);
-
-    ExprPtr
-    ParseJsonContainsExpr(const proto::plan::JSONContainsExpr& expr_pb);
-
-    ExprPtr
-    ParseExpr(const proto::plan::Expr& expr_pb);
+ public:
+    explicit ProtoParser(const Schema& schema) : schema(schema) {
+    }
 
     std::unique_ptr<VectorPlanNode>
     PlanNodeFromProto(const proto::plan::PlanNode& plan_node_proto);
@@ -74,10 +51,15 @@ class ProtoParser {
     CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto);
 
     expr::TypedExprPtr
-    ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb);
+    ParseExprs(const proto::plan::Expr& expr_pb,
+               TypeCheckFunction type_check = TypeIsBool);
+
+ private:
+    expr::TypedExprPtr
+    CreateAlwaysTrueExprs();
 
     expr::TypedExprPtr
-    ParseExprs(const proto::plan::Expr& expr_pb);
+    ParseBinaryExprs(const proto::plan::BinaryExpr& expr_pb);
 
     expr::TypedExprPtr
     ParseBinaryArithOpEvalRangeExprs(
@@ -87,16 +69,13 @@ class ProtoParser {
     ParseBinaryRangeExprs(const proto::plan::BinaryRangeExpr& expr_pb);
 
     expr::TypedExprPtr
+    ParseCallExprs(const proto::plan::CallExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseColumnExprs(const proto::plan::ColumnExpr& expr_pb);
+
+    expr::TypedExprPtr
     ParseCompareExprs(const proto::plan::CompareExpr& expr_pb);
-
-    expr::TypedExprPtr
-    ParseTermExprs(const proto::plan::TermExpr& expr_pb);
-
-    expr::TypedExprPtr
-    ParseUnaryExprs(const proto::plan::UnaryExpr& expr_pb);
-
-    expr::TypedExprPtr
-    ParseBinaryExprs(const proto::plan::BinaryExpr& expr_pb);
 
     expr::TypedExprPtr
     ParseExistExprs(const proto::plan::ExistsExpr& expr_pb);
@@ -105,14 +84,23 @@ class ProtoParser {
     ParseJsonContainsExprs(const proto::plan::JSONContainsExpr& expr_pb);
 
     expr::TypedExprPtr
-    CreateAlwaysTrueExprs();
+    ParseTermExprs(const proto::plan::TermExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseUnaryExprs(const proto::plan::UnaryExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseValueExprs(const proto::plan::ValueExpr& expr_pb);
 
  private:
     const Schema& schema;
 };
 
 }  // namespace milvus::query
-   //
+
 template <>
 struct fmt::formatter<milvus::proto::plan::GenericValue::ValCase>
     : formatter<string_view> {

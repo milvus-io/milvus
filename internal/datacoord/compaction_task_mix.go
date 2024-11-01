@@ -3,40 +3,63 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var _ CompactionTask = (*mixCompactionTask)(nil)
 
 type mixCompactionTask struct {
-	*datapb.CompactionTask
-	plan   *datapb.CompactionPlan
-	result *datapb.CompactionPlanResult
+	taskProto atomic.Value // *datapb.CompactionTask
+	plan      *datapb.CompactionPlan
+	result    *datapb.CompactionPlanResult
 
 	span          trace.Span
 	allocator     allocator.Allocator
 	sessions      session.DataNodeManager
 	meta          CompactionMeta
 	newSegmentIDs []int64
+	slotUsage     int64
+}
+
+func (t *mixCompactionTask) GetTaskProto() *datapb.CompactionTask {
+	task := t.taskProto.Load()
+	if task == nil {
+		return nil
+	}
+	return task.(*datapb.CompactionTask)
+}
+
+func newMixCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, session session.DataNodeManager) *mixCompactionTask {
+	task := &mixCompactionTask{
+		allocator: allocator,
+		meta:      meta,
+		sessions:  session,
+		slotUsage: paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
+	}
+	task.taskProto.Store(t)
+	return task
 }
 
 func (t *mixCompactionTask) processPipelining() bool {
+	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()), zap.Int64("nodeID", t.GetTaskProto().GetNodeID()))
 	if t.NeedReAssignNodeID() {
+		log.Info("mixCompactionTask need assign nodeID")
 		return false
 	}
 
-	log := log.With(zap.Int64("triggerID", t.GetTriggerID()), zap.Int64("nodeID", t.GetNodeID()))
 	var err error
 	t.plan, err = t.BuildCompactionRequest()
 	if err != nil {
@@ -49,18 +72,24 @@ func (t *mixCompactionTask) processPipelining() bool {
 		return t.processFailed()
 	}
 
-	err = t.sessions.Compaction(context.TODO(), t.GetNodeID(), t.GetPlan())
+	err = t.sessions.Compaction(context.TODO(), t.GetTaskProto().GetNodeID(), t.GetPlan())
 	if err != nil {
-		log.Warn("mixCompactionTask failed to notify compaction tasks to DataNode", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		log.Warn("mixCompactionTask failed to notify compaction tasks to DataNode", zap.Error(err))
 		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		return false
 	}
+	log.Warn("mixCompactionTask notify compaction tasks to DataNode")
 
-	t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
+	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
+	if err != nil {
+		log.Warn("mixCompactionTask update task state failed", zap.Error(err))
+		return false
+	}
 	return false
 }
 
 func (t *mixCompactionTask) processMetaSaved() bool {
+	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
 	if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)); err != nil {
 		log.Warn("mixCompactionTask failed to proccessMetaSaved", zap.Error(err))
 		return false
@@ -70,25 +99,18 @@ func (t *mixCompactionTask) processMetaSaved() bool {
 }
 
 func (t *mixCompactionTask) processExecuting() bool {
-	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.String("type", t.GetType().String()))
-	result, err := t.sessions.GetCompactionPlanResult(t.GetNodeID(), t.GetPlanID())
+	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
+	result, err := t.sessions.GetCompactionPlanResult(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetPlanID())
 	if err != nil || result == nil {
 		if errors.Is(err, merr.ErrNodeNotFound) {
-			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
+			if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID)); err != nil {
+				log.Warn("mixCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+			}
 		}
 		log.Warn("mixCompactionTask failed to get compaction result", zap.Error(err))
 		return false
 	}
 	switch result.GetState() {
-	case datapb.CompactionTaskState_executing:
-		if t.checkTimeout() {
-			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
-			if err != nil {
-				log.Warn("mixCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
-				return false
-			}
-			return t.processTimeout()
-		}
 	case datapb.CompactionTaskState_completed:
 		t.result = result
 		if len(result.GetSegments()) == 0 {
@@ -119,6 +141,7 @@ func (t *mixCompactionTask) processExecuting() bool {
 		}
 		return t.processMetaSaved()
 	case datapb.CompactionTaskState_failed:
+		log.Info("mixCompactionTask fail in datanode")
 		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
 		if err != nil {
 			log.Warn("fail to updateAndSaveTaskMeta")
@@ -133,13 +156,13 @@ func (t *mixCompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
 }
 
 func (t *mixCompactionTask) SaveTaskMeta() error {
-	return t.saveTaskMeta(t.CompactionTask)
+	return t.saveTaskMeta(t.GetTaskProto())
 }
 
 func (t *mixCompactionTask) saveSegmentMeta() error {
-	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.String("type", t.GetType().String()))
+	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
 	// Also prepare metric updates.
-	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(t.CompactionTask, t.result)
+	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(t.taskProto.Load().(*datapb.CompactionTask), t.result)
 	if err != nil {
 		return err
 	}
@@ -153,21 +176,30 @@ func (t *mixCompactionTask) saveSegmentMeta() error {
 // Note: return True means exit this state machine.
 // ONLY return True for processCompleted or processFailed
 func (t *mixCompactionTask) Process() bool {
-	switch t.GetState() {
+	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
+	lastState := t.GetTaskProto().GetState().String()
+	processResult := true
+	switch t.GetTaskProto().GetState() {
 	case datapb.CompactionTaskState_pipelining:
-		return t.processPipelining()
+		processResult = t.processPipelining()
 	case datapb.CompactionTaskState_executing:
-		return t.processExecuting()
-	case datapb.CompactionTaskState_timeout:
-		return t.processTimeout()
+		processResult = t.processExecuting()
 	case datapb.CompactionTaskState_meta_saved:
-		return t.processMetaSaved()
+		processResult = t.processMetaSaved()
 	case datapb.CompactionTaskState_completed:
-		return t.processCompleted()
+		processResult = t.processCompleted()
 	case datapb.CompactionTaskState_failed:
-		return t.processFailed()
+		processResult = t.processFailed()
 	}
-	return true
+	currentState := t.GetTaskProto().GetState().String()
+	if currentState != lastState {
+		log.Info("mix compaction task state changed", zap.String("lastState", lastState), zap.String("currentState", currentState))
+	}
+	return processResult
+}
+
+func (t *mixCompactionTask) SetPlan(plan *datapb.CompactionPlan) {
+	t.plan = plan
 }
 
 func (t *mixCompactionTask) GetResult() *datapb.CompactionPlanResult {
@@ -178,66 +210,35 @@ func (t *mixCompactionTask) GetPlan() *datapb.CompactionPlan {
 	return t.plan
 }
 
-/*
-func (t *mixCompactionTask) GetState() datapb.CompactionTaskState {
-	return t.CompactionTask.GetState()
-}
-*/
-
 func (t *mixCompactionTask) GetLabel() string {
-	return fmt.Sprintf("%d-%s", t.PartitionID, t.GetChannel())
+	return fmt.Sprintf("%d-%s", t.taskProto.Load().(*datapb.CompactionTask).PartitionID, t.GetTaskProto().GetChannel())
 }
 
 func (t *mixCompactionTask) NeedReAssignNodeID() bool {
-	return t.GetState() == datapb.CompactionTaskState_pipelining && (t.GetNodeID() == 0 || t.GetNodeID() == NullNodeID)
+	return t.GetTaskProto().GetState() == datapb.CompactionTaskState_pipelining && (t.GetTaskProto().GetNodeID() == 0 || t.GetTaskProto().GetNodeID() == NullNodeID)
 }
 
 func (t *mixCompactionTask) processCompleted() bool {
-	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
-		PlanID: t.GetPlanID(),
+	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
+	if err := t.sessions.DropCompactionPlan(t.GetTaskProto().GetNodeID(), &datapb.DropCompactionPlanRequest{
+		PlanID: t.GetTaskProto().GetPlanID(),
 	}); err != nil {
-		log.Warn("mixCompactionTask processCompleted unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()))
+		log.Warn("mixCompactionTask processCompleted unable to drop compaction plan")
 	}
 
 	t.resetSegmentCompacting()
 	UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
-	log.Info("mixCompactionTask processCompleted done", zap.Int64("planID", t.GetPlanID()))
+	log.Info("mixCompactionTask processCompleted done")
 
 	return true
 }
 
 func (t *mixCompactionTask) resetSegmentCompacting() {
-	t.meta.SetSegmentsCompacting(t.GetInputSegments(), false)
-}
-
-func (t *mixCompactionTask) processTimeout() bool {
-	t.resetSegmentCompacting()
-	return true
+	t.meta.SetSegmentsCompacting(t.taskProto.Load().(*datapb.CompactionTask).GetInputSegments(), false)
 }
 
 func (t *mixCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask {
-	taskClone := &datapb.CompactionTask{
-		PlanID:           t.GetPlanID(),
-		TriggerID:        t.GetTriggerID(),
-		State:            t.GetState(),
-		StartTime:        t.GetStartTime(),
-		EndTime:          t.GetEndTime(),
-		TimeoutInSeconds: t.GetTimeoutInSeconds(),
-		Type:             t.GetType(),
-		CollectionTtl:    t.CollectionTtl,
-		CollectionID:     t.GetCollectionID(),
-		PartitionID:      t.GetPartitionID(),
-		Channel:          t.GetChannel(),
-		InputSegments:    t.GetInputSegments(),
-		ResultSegments:   t.GetResultSegments(),
-		TotalRows:        t.TotalRows,
-		Schema:           t.Schema,
-		NodeID:           t.GetNodeID(),
-		FailReason:       t.GetFailReason(),
-		RetryTimes:       t.GetRetryTimes(),
-		Pos:              t.GetPos(),
-		MaxSize:          t.GetMaxSize(),
-	}
+	taskClone := proto.Clone(t.GetTaskProto()).(*datapb.CompactionTask)
 	for _, opt := range opts {
 		opt(taskClone)
 	}
@@ -245,29 +246,21 @@ func (t *mixCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compa
 }
 
 func (t *mixCompactionTask) processFailed() bool {
-	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
-		PlanID: t.GetPlanID(),
+	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
+	if err := t.sessions.DropCompactionPlan(t.GetTaskProto().GetNodeID(), &datapb.DropCompactionPlanRequest{
+		PlanID: t.GetTaskProto().GetPlanID(),
 	}); err != nil {
-		log.Warn("mixCompactionTask processFailed unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		log.Warn("mixCompactionTask processFailed unable to drop compaction plan", zap.Error(err))
 	}
 
-	log.Info("mixCompactionTask processFailed done", zap.Int64("planID", t.GetPlanID()))
+	log.Info("mixCompactionTask processFailed done")
 	t.resetSegmentCompacting()
-	return true
-}
-
-func (t *mixCompactionTask) checkTimeout() bool {
-	if t.GetTimeoutInSeconds() > 0 {
-		diff := time.Since(time.Unix(t.GetStartTime(), 0)).Seconds()
-		if diff > float64(t.GetTimeoutInSeconds()) {
-			log.Warn("compaction timeout",
-				zap.Int32("timeout in seconds", t.GetTimeoutInSeconds()),
-				zap.Int64("startTime", t.GetStartTime()),
-			)
-			return true
-		}
+	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
+	if err != nil {
+		log.Warn("mixCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+		return false
 	}
-	return false
+	return true
 }
 
 func (t *mixCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
@@ -276,7 +269,7 @@ func (t *mixCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) err
 	if err != nil {
 		return err
 	}
-	t.CompactionTask = task
+	t.SetTask(task)
 	return nil
 }
 
@@ -289,75 +282,37 @@ func (t *mixCompactionTask) GetSpan() trace.Span {
 }
 
 func (t *mixCompactionTask) SetTask(task *datapb.CompactionTask) {
-	t.CompactionTask = task
+	t.taskProto.Store(task)
 }
 
 func (t *mixCompactionTask) SetSpan(span trace.Span) {
 	t.span = span
 }
 
-/*
-func (t *mixCompactionTask) SetPlan(plan *datapb.CompactionPlan) {
-	t.plan = plan
-}
-*/
-
-func (t *mixCompactionTask) SetResult(result *datapb.CompactionPlanResult) {
-	t.result = result
-}
-
-func (t *mixCompactionTask) EndSpan() {
-	if t.span != nil {
-		t.span.End()
-	}
-}
-
-func (t *mixCompactionTask) CleanLogPath() {
-	if t.plan == nil {
-		return
-	}
-	if t.plan.GetSegmentBinlogs() != nil {
-		for _, binlogs := range t.plan.GetSegmentBinlogs() {
-			binlogs.FieldBinlogs = nil
-			binlogs.Field2StatslogPaths = nil
-			binlogs.Deltalogs = nil
-		}
-	}
-	if t.result.GetSegments() != nil {
-		for _, segment := range t.result.GetSegments() {
-			segment.InsertLogs = nil
-			segment.Deltalogs = nil
-			segment.Field2StatslogPaths = nil
-		}
-	}
-}
-
 func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
+	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
 	beginLogID, _, err := t.allocator.AllocN(1)
 	if err != nil {
 		return nil, err
 	}
+	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	plan := &datapb.CompactionPlan{
-		PlanID:           t.GetPlanID(),
-		StartTime:        t.GetStartTime(),
-		TimeoutInSeconds: t.GetTimeoutInSeconds(),
-		Type:             t.GetType(),
-		Channel:          t.GetChannel(),
-		CollectionTtl:    t.GetCollectionTtl(),
-		TotalRows:        t.GetTotalRows(),
-		Schema:           t.GetSchema(),
-		BeginLogID:       beginLogID,
-		PreAllocatedSegments: &datapb.IDRange{
-			Begin: t.GetResultSegments()[0],
-			End:   t.GetResultSegments()[1],
-		},
-		SlotUsage: Params.DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
-		MaxSize:   t.GetMaxSize(),
+		PlanID:                 taskProto.GetPlanID(),
+		StartTime:              taskProto.GetStartTime(),
+		TimeoutInSeconds:       taskProto.GetTimeoutInSeconds(),
+		Type:                   taskProto.GetType(),
+		Channel:                taskProto.GetChannel(),
+		CollectionTtl:          taskProto.GetCollectionTtl(),
+		TotalRows:              taskProto.GetTotalRows(),
+		Schema:                 taskProto.GetSchema(),
+		BeginLogID:             beginLogID,
+		PreAllocatedSegmentIDs: taskProto.GetPreAllocatedSegmentIDs(),
+		SlotUsage:              t.GetSlotUsage(),
+		MaxSize:                taskProto.GetMaxSize(),
 	}
-	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 
 	segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
-	for _, segID := range t.GetInputSegments() {
+	for _, segID := range taskProto.GetInputSegments() {
 		segInfo := t.meta.GetHealthySegment(segID)
 		if segInfo == nil {
 			return nil, merr.WrapErrSegmentNotFound(segID)
@@ -371,9 +326,14 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			FieldBinlogs:        segInfo.GetBinlogs(),
 			Field2StatslogPaths: segInfo.GetStatslogs(),
 			Deltalogs:           segInfo.GetDeltalogs(),
+			IsSorted:            segInfo.GetIsSorted(),
 		})
 		segIDMap[segID] = segInfo.GetDeltalogs()
 	}
 	log.Info("Compaction handler refreshed mix compaction plan", zap.Int64("maxSize", plan.GetMaxSize()), zap.Any("segID2DeltaLogs", segIDMap))
 	return plan, nil
+}
+
+func (t *mixCompactionTask) GetSlotUsage() int64 {
+	return t.slotUsage
 }

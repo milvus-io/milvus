@@ -32,11 +32,13 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -58,6 +60,7 @@ func loadL0Segments(ctx context.Context, delegator delegator.ShardDelegator, req
 				NumOfRows:     segmentInfo.NumOfRows,
 				Statslogs:     segmentInfo.Statslogs,
 				Deltalogs:     segmentInfo.Deltalogs,
+				Bm25Logs:      segmentInfo.Bm25Statslogs,
 				InsertChannel: segmentInfo.InsertChannel,
 				StartPosition: segmentInfo.GetStartPosition(),
 				Level:         segmentInfo.GetLevel(),
@@ -93,13 +96,16 @@ func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator
 			if len(segmentInfo.GetBinlogs()) > 0 {
 				growingSegments = append(growingSegments, &querypb.SegmentLoadInfo{
 					SegmentID:     segmentInfo.ID,
+					Level:         segmentInfo.GetLevel(),
 					PartitionID:   segmentInfo.PartitionID,
 					CollectionID:  segmentInfo.CollectionID,
 					BinlogPaths:   segmentInfo.Binlogs,
 					NumOfRows:     segmentInfo.NumOfRows,
 					Statslogs:     segmentInfo.Statslogs,
 					Deltalogs:     segmentInfo.Deltalogs,
+					Bm25Logs:      segmentInfo.Bm25Statslogs,
 					InsertChannel: segmentInfo.InsertChannel,
+					StartPosition: segmentInfo.GetStartPosition(),
 				})
 			} else {
 				log.Info("skip segment which binlog is empty", zap.Int64("segmentID", segmentInfo.ID))
@@ -317,7 +323,10 @@ func (node *QueryNode) queryStreamSegments(ctx context.Context, req *querypb.Que
 	}
 
 	// Send task to scheduler and wait until it finished.
-	task := tasks.NewQueryStreamTask(ctx, collection, node.manager, req, srv, node.streamBatchSzie)
+
+	task := tasks.NewQueryStreamTask(ctx, collection, node.manager, req, srv,
+		paramtable.Get().QueryNodeCfg.QueryStreamBatchSize.GetAsInt(),
+		paramtable.Get().QueryNodeCfg.QueryStreamMaxBatchSize.GetAsInt())
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to add query task into scheduler", zap.Error(err))
 		return err
@@ -384,16 +393,10 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		req.GetSegmentIDs(),
 	))
 
-	var resp *internalpb.SearchResults
-	if req.GetReq().GetIsAdvanced() {
-		resp, err = segments.ReduceAdvancedSearchResults(ctx, results, req.Req.GetNq())
-	} else {
-		resp, err = segments.ReduceSearchResults(ctx, results, segments.NewReduceInfo(req.Req.GetNq(),
-			req.Req.GetTopk(),
-			req.Req.GetExtraSearchParam().GetGroupByFieldId(),
-			req.Req.GetExtraSearchParam().GetGroupSize(),
-			req.Req.GetMetricType()))
-	}
+	resp, err := segments.ReduceSearchOnQueryNode(ctx, results,
+		reduce.NewReduceSearchResultInfo(req.GetReq().GetNq(),
+			req.GetReq().GetTopk()).WithMetricType(req.GetReq().GetMetricType()).WithGroupByField(req.GetReq().GetGroupByFieldId()).
+			WithGroupSize(req.GetReq().GetGroupByFieldId()).WithAdvance(req.GetReq().GetIsAdvanced()))
 	if err != nil {
 		return nil, err
 	}

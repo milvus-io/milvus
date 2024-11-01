@@ -68,7 +68,7 @@ func GenerateParquetFileAndReturnInsertData(filePath string, schema *schemapb.Co
 		return nil, err
 	}
 
-	pqSchema, err := pq.ConvertToArrowSchema(schema)
+	pqSchema, err := pq.ConvertToArrowSchema(schema, false)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func GenerateParquetFileAndReturnInsertData(filePath string, schema *schemapb.Co
 		return nil, err
 	}
 
-	columns, err := testutil.BuildArrayData(schema, insertData)
+	columns, err := testutil.BuildArrayData(schema, insertData, false)
 	if err != nil {
 		return nil, err
 	}
@@ -207,10 +207,12 @@ func GenerateCSVFile(t *testing.T, filePath string, schema *schemapb.CollectionS
 	insertData, err := testutil.CreateInsertData(schema, count)
 	assert.NoError(t, err)
 
-	csvData, err := testutil.CreateInsertDataForCSV(schema, insertData)
+	sep := ','
+	nullkey := ""
+
+	csvData, err := testutil.CreateInsertDataForCSV(schema, insertData, nullkey)
 	assert.NoError(t, err)
 
-	sep := ','
 	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
 	assert.NoError(t, err)
 

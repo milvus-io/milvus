@@ -28,6 +28,9 @@ const EventLogRouterPath = "/eventlog"
 // ExprPath is path for expression.
 const ExprPath = "/expr"
 
+// StaticPath is path for the static view.
+const StaticPath = "/static/"
+
 const RootPath = "/"
 
 // Prometheus restful api path
@@ -40,6 +43,7 @@ const (
 const (
 	RouteTriggerStopPath     = "/management/stop"
 	RouteCheckComponentReady = "/management/check/ready"
+	RouteWebUI               = "/webui/"
 )
 
 // proxy management restful api root path
@@ -57,4 +61,23 @@ const (
 	RouteListQueryNode              = "/management/querycoord/node/list"
 	RouteGetQueryNodeDistribution   = "/management/querycoord/distribution/get"
 	RouteCheckQueryNodeDistribution = "/management/querycoord/distribution/check"
+)
+
+// for WebUI restful api root path
+const (
+	ClusterInfoPath         = "/_cluster/info"
+	ClusterConfigsPath      = "/_cluster/configs"
+	ClusterClientsPath      = "/_cluster/clients"
+	ClusterDependenciesPath = "/_cluster/dependencies"
+	HookConfigsPath         = "/_hook/configs"
+	QCoordSegmentsPath      = "/_qcoord/segments"
+	QCoordChannelsPath      = "/_qcoord/channels"
+	QCoordAllTasksPath      = "/_qcoord/tasks/all"
+
+	DCoordAllTasksPath        = "/_dcoord/tasks/all"
+	DCoordImportTasksPath     = "/_dcoord/tasks/import"
+	DCoordCompactionTasksPath = "/_dcoord/tasks/compaction"
+	DCoordBuildIndexTasksPath = "/_dcoord/tasks/build_index"
+
+	DNodeSyncTasksPath = "/_dnode/tasks/sync"
 )

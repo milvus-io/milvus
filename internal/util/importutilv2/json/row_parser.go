@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -62,20 +63,17 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 	if err != nil {
 		return nil, err
 	}
+	dynamicField := typeutil.GetDynamicField(schema)
 
-	name2FieldID := lo.SliceToMap(schema.GetFields(),
+	name2FieldID := lo.SliceToMap(
+		lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+			return !field.GetIsFunctionOutput() && !typeutil.IsAutoPKField(field) && field.GetName() != dynamicField.GetName()
+		}),
 		func(field *schemapb.FieldSchema) (string, int64) {
 			return field.GetName(), field.GetFieldID()
-		})
+		},
+	)
 
-	if pkField.GetAutoID() {
-		delete(name2FieldID, pkField.GetName())
-	}
-
-	dynamicField := typeutil.GetDynamicField(schema)
-	if dynamicField != nil {
-		delete(name2FieldID, dynamicField.GetName())
-	}
 	return &rowParser{
 		id2Dim:       id2Dim,
 		id2Field:     id2Field,
@@ -198,6 +196,9 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]any, row Row) err
 }
 
 func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
+	if r.id2Field[fieldID].GetDefaultValue() != nil && obj == nil {
+		return nullutil.GetDefaultValue(r.id2Field[fieldID])
+	}
 	if r.id2Field[fieldID].GetNullable() {
 		return r.parseNullableEntity(fieldID, obj)
 	}
@@ -398,16 +399,15 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 		}
 	case schemapb.DataType_Array:
 		arr, ok := obj.([]interface{})
-
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
 		maxCapacity, err := parameterutil.GetMaxCapacity(r.id2Field[fieldID])
 		if err != nil {
 			return nil, err
 		}
 		if err = common.CheckArrayCapacity(len(arr), maxCapacity); err != nil {
 			return nil, err
-		}
-		if !ok {
-			return nil, r.wrapTypeError(obj, fieldID)
 		}
 		scalarFieldData, err := r.arrayToFieldData(arr, r.id2Field[fieldID].GetElementType())
 		if err != nil {

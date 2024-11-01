@@ -42,6 +42,8 @@ const (
 	// StartOfUserFieldID represents the starting ID of the user-defined field
 	StartOfUserFieldID = 100
 
+	// StartOfUserFunctionID represents the starting ID of the user-defined function
+	StartOfUserFunctionID = 100
 	// RowIDField is the ID of the RowID field reserved by the system
 	RowIDField = 0
 
@@ -96,6 +98,9 @@ const (
 	// SegmentIndexPath storage path const for segment index files.
 	SegmentIndexPath = `index_files`
 
+	// SegmentBm25LogPath storage path const for bm25 statistic
+	SegmentBm25LogPath = `bm25_stats`
+
 	// PartitionStatsPath storage path const for partition stats files
 	PartitionStatsPath = `part_stats`
 
@@ -103,6 +108,9 @@ const (
 	AnalyzeStatsPath = `analyze_stats`
 	OffsetMapping    = `offset_mapping`
 	Centroids        = "centroids"
+
+	// TextIndexPath storage path const for text index
+	TextIndexPath = "text_log"
 )
 
 // Search, Index parameter keys
@@ -128,6 +136,8 @@ const (
 	IsSparseKey               = "is_sparse"
 	AutoIndexName             = "AUTOINDEX"
 	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
+	IgnoreGrowing             = "ignore_growing"
+	ConsistencyLevel          = "consistency_level"
 )
 
 //  Collection properties key

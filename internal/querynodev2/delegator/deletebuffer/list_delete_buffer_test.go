@@ -29,7 +29,7 @@ type ListDeleteBufferSuite struct {
 }
 
 func (s *ListDeleteBufferSuite) TestNewBuffer() {
-	buffer := NewListDeleteBuffer[*Item](10, 1000)
+	buffer := NewListDeleteBuffer[*Item](10, 1000, []string{"1", "dml-1"})
 
 	s.EqualValues(10, buffer.SafeTs())
 
@@ -39,7 +39,7 @@ func (s *ListDeleteBufferSuite) TestNewBuffer() {
 }
 
 func (s *ListDeleteBufferSuite) TestCache() {
-	buffer := NewListDeleteBuffer[*Item](10, 1000)
+	buffer := NewListDeleteBuffer[*Item](10, 1000, []string{"1", "dml-1"})
 	buffer.Put(&Item{
 		Ts: 11,
 		Data: []BufferItem{
@@ -62,10 +62,13 @@ func (s *ListDeleteBufferSuite) TestCache() {
 
 	s.Equal(2, len(buffer.ListAfter(11)))
 	s.Equal(1, len(buffer.ListAfter(12)))
+	entryNum, memorySize := buffer.Size()
+	s.EqualValues(0, entryNum)
+	s.EqualValues(192, memorySize)
 }
 
 func (s *ListDeleteBufferSuite) TestTryDiscard() {
-	buffer := NewListDeleteBuffer[*Item](10, 1)
+	buffer := NewListDeleteBuffer[*Item](10, 1, []string{"1", "dml-1"})
 	buffer.Put(&Item{
 		Ts: 10,
 		Data: []BufferItem{
@@ -95,18 +98,32 @@ func (s *ListDeleteBufferSuite) TestTryDiscard() {
 	})
 
 	s.Equal(2, len(buffer.ListAfter(10)))
+	entryNum, memorySize := buffer.Size()
+	s.EqualValues(2, entryNum)
+	s.EqualValues(240, memorySize)
 
 	buffer.TryDiscard(10)
 	s.Equal(2, len(buffer.ListAfter(10)), "equal ts shall not discard block")
+	entryNum, memorySize = buffer.Size()
+	s.EqualValues(2, entryNum)
+	s.EqualValues(240, memorySize)
 
 	buffer.TryDiscard(9)
 	s.Equal(2, len(buffer.ListAfter(10)), "history ts shall not discard any block")
+	entryNum, memorySize = buffer.Size()
+	s.EqualValues(2, entryNum)
+	s.EqualValues(240, memorySize)
 
 	buffer.TryDiscard(20)
 	s.Equal(1, len(buffer.ListAfter(10)), "first block shall be discarded")
+	entryNum, memorySize = buffer.Size()
+	s.EqualValues(1, entryNum)
+	s.EqualValues(120, memorySize)
 
 	buffer.TryDiscard(20)
 	s.Equal(1, len(buffer.ListAfter(10)), "discard will not happen if there is only one block")
+	s.EqualValues(1, entryNum)
+	s.EqualValues(120, memorySize)
 }
 
 func TestListDeleteBuffer(t *testing.T) {

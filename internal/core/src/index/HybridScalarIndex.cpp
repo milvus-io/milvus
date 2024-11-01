@@ -32,7 +32,8 @@ HybridScalarIndex<T>::HybridScalarIndex(
     const storage::FileManagerContext& file_manager_context)
     : ScalarIndex<T>(HYBRID_INDEX_TYPE),
       is_built_(false),
-      bitmap_index_cardinality_limit_(DEFAULT_BITMAP_INDEX_CARDINALITY_BOUND),
+      bitmap_index_cardinality_limit_(
+          DEFAULT_HYBRID_INDEX_BITMAP_CARDINALITY_LIMIT),
       file_manager_context_(file_manager_context) {
     if (file_manager_context.Valid()) {
         mem_file_manager_ =

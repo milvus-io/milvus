@@ -29,11 +29,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -71,7 +72,7 @@ func VerifyResponse(response interface{}, err error) error {
 	}
 }
 
-func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo) []*SegmentInfo {
+func FilterInIndexedSegments(handler Handler, mt *meta, skipNoIndexCollection bool, segments ...*SegmentInfo) []*SegmentInfo {
 	if len(segments) == 0 {
 		return nil
 	}
@@ -82,6 +83,12 @@ func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo
 
 	ret := make([]*SegmentInfo, 0)
 	for collection, segmentList := range collectionSegments {
+		// No segments will be filtered if there are no indices in the collection.
+		if skipNoIndexCollection && !mt.indexMeta.HasIndex(collection) {
+			ret = append(ret, segmentList...)
+			continue
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 		coll, err := handler.GetCollection(ctx, collection)
 		cancel()
@@ -196,16 +203,16 @@ func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
 	return invalidIndex
 }
 
-func isFlatIndex(indexType string) bool {
-	return indexType == indexparamcheck.IndexFaissIDMap || indexType == indexparamcheck.IndexFaissBinIDMap
+func isNoTrainIndex(indexType string) bool {
+	return vecindexmgr.GetVecIndexMgrInstance().IsNoTrainIndex(indexType)
 }
 
 func isOptionalScalarFieldSupported(indexType string) bool {
-	return indexType == indexparamcheck.IndexHNSW
+	return vecindexmgr.GetVecIndexMgrInstance().IsMvSupported(indexType)
 }
 
 func isDiskANNIndex(indexType string) bool {
-	return indexType == indexparamcheck.IndexDISKANN
+	return vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType)
 }
 
 func parseBuildIDFromFilePath(key string) (UniqueID, error) {
@@ -317,4 +324,42 @@ func CheckAllChannelsWatched(meta *meta, channelManager ChannelManager) error {
 		}
 	}
 	return nil
+}
+
+func createStorageConfig() *indexpb.StorageConfig {
+	var storageConfig *indexpb.StorageConfig
+
+	if Params.CommonCfg.StorageType.GetValue() == "local" {
+		storageConfig = &indexpb.StorageConfig{
+			RootPath:    Params.LocalStorageCfg.Path.GetValue(),
+			StorageType: Params.CommonCfg.StorageType.GetValue(),
+		}
+	} else {
+		storageConfig = &indexpb.StorageConfig{
+			Address:           Params.MinioCfg.Address.GetValue(),
+			AccessKeyID:       Params.MinioCfg.AccessKeyID.GetValue(),
+			SecretAccessKey:   Params.MinioCfg.SecretAccessKey.GetValue(),
+			UseSSL:            Params.MinioCfg.UseSSL.GetAsBool(),
+			SslCACert:         Params.MinioCfg.SslCACert.GetValue(),
+			BucketName:        Params.MinioCfg.BucketName.GetValue(),
+			RootPath:          Params.MinioCfg.RootPath.GetValue(),
+			UseIAM:            Params.MinioCfg.UseIAM.GetAsBool(),
+			IAMEndpoint:       Params.MinioCfg.IAMEndpoint.GetValue(),
+			StorageType:       Params.CommonCfg.StorageType.GetValue(),
+			Region:            Params.MinioCfg.Region.GetValue(),
+			UseVirtualHost:    Params.MinioCfg.UseVirtualHost.GetAsBool(),
+			CloudProvider:     Params.MinioCfg.CloudProvider.GetValue(),
+			RequestTimeoutMs:  Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+			GcpCredentialJSON: Params.MinioCfg.GcpCredentialJSON.GetValue(),
+		}
+	}
+
+	return storageConfig
+}
+
+func getSortStatus(sorted bool) string {
+	if sorted {
+		return "sorted"
+	}
+	return "unsorted"
 }

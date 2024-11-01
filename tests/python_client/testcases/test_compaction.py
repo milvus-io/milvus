@@ -35,6 +35,8 @@ class TestCompactionParams(TestcaseBase):
         collection_w.compact(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("DataCoord: for A, B -> C, will not compact segment C before A, "
+                      "B GCed, no method to check whether a segment is GCed")
     def test_compact_twice(self):
         """
         target: test compact twice

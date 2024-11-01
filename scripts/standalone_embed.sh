@@ -47,7 +47,7 @@ EOF
         --health-start-period=90s \
         --health-timeout=20s \
         --health-retries=3 \
-        milvusdb/milvus:v2.4.5 \
+        milvusdb/milvus:v2.4.14 \
         milvus run standalone  1> /dev/null
 }
 
@@ -103,7 +103,7 @@ stop() {
 
 }
 
-delete() {
+delete_container() {
     res=`sudo docker ps|grep milvus-standalone|wc -l`
     if [ $res -eq 1 ]
     then
@@ -113,15 +113,38 @@ delete() {
     sudo docker rm milvus-standalone 1> /dev/null
     if [ $? -ne 0 ]
     then
-        echo "Delete failed."
+        echo "Delete milvus container failed."
         exit 1
     fi
+    echo "Delete milvus container successfully."
+}
+
+delete() {
+    delete_container
     sudo rm -rf $(pwd)/volumes
     sudo rm -rf $(pwd)/embedEtcd.yaml
     sudo rm -rf $(pwd)/user.yaml
     echo "Delete successfully."
 }
 
+upgrade() {
+    read -p "Please confirm if you'd like to proceed with the upgrade. The default will be to the latest version. Confirm with 'y' for yes or 'n' for no. > " check
+    if [ "$check" == "y" ] ||[ "$check" == "Y" ];then
+        res=`sudo docker ps -a|grep milvus-standalone|wc -l`
+        if [ $res -eq 1 ]
+        then
+            stop
+            delete_container
+        fi
+
+        curl -sfL https://raw.githubusercontent.com/milvus-io/milvus/master/scripts/standalone_embed.sh -o standalone_embed_latest.sh && \
+        bash standalone_embed_latest.sh start 1> /dev/null && \
+        echo "Upgrade successfully."
+    else
+        echo "Exit upgrade"
+        exit 0
+    fi
+}
 
 case $1 in
     restart)
@@ -134,10 +157,13 @@ case $1 in
     stop)
         stop
         ;;
+    upgrade)
+        upgrade
+        ;;
     delete)
         delete
         ;;
     *)
-        echo "please use bash standalone_embed.sh restart|start|stop|delete"
+        echo "please use bash standalone_embed.sh restart|start|stop|upgrade|delete"
         ;;
 esac

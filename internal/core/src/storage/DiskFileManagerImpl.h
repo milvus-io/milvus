@@ -33,31 +33,45 @@ class DiskFileManagerImpl : public FileManagerImpl {
  public:
     explicit DiskFileManagerImpl(const FileManagerContext& fileManagerContext);
 
-    virtual ~DiskFileManagerImpl();
+    ~DiskFileManagerImpl() override;
 
-    virtual bool
-    LoadFile(const std::string& filename) noexcept;
+    bool
+    LoadFile(const std::string& filename) noexcept override;
 
-    virtual bool
-    AddFile(const std::string& filename) noexcept;
+    bool
+    AddFile(const std::string& filename) noexcept override;
 
-    virtual std::optional<bool>
-    IsExisted(const std::string& filename) noexcept;
+    std::optional<bool>
+    IsExisted(const std::string& filename) noexcept override;
 
-    virtual bool
-    RemoveFile(const std::string& filename) noexcept;
+    bool
+    RemoveFile(const std::string& filename) noexcept override;
 
  public:
-    virtual std::string
-    GetName() const {
+    bool
+    AddTextLog(const std::string& filename) noexcept;
+
+ public:
+    std::string
+    GetName() const override {
         return "DiskFileManagerImpl";
     }
 
     std::string
     GetLocalIndexObjectPrefix();
 
+    // Similar to GetTextIndexIdentifier, segment_id and field_id is also required.
+    std::string
+    GetLocalTextIndexPrefix();
+
     std::string
     GetIndexIdentifier();
+
+    // Different from user index, a text index task may have multiple text fields sharing same build_id/task_id. So
+    // segment_id and field_id are required to identify a unique text index, in case that we support multiple index task
+    // in the same indexnode at the same time later.
+    std::string
+    GetTextIndexIdentifier();
 
     std::string
     GetLocalRawDataObjectPrefix();
@@ -74,6 +88,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     void
     CacheIndexToDisk(const std::vector<std::string>& remote_files);
+
+    void
+    CacheTextLogToDisk(const std::vector<std::string>& remote_files);
 
     void
     AddBatchIndexFiles(const std::string& local_file_name,
@@ -104,6 +121,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     std::string
     GetRemoteIndexPath(const std::string& file_name, int64_t slice_num) const;
+
+    std::string
+    GetRemoteTextLogPath(const std::string& file_name, int64_t slice_num) const;
 
  private:
     // local file path (abs path)

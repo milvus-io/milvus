@@ -99,6 +99,7 @@ func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 		}
 		task.binlogBlobs = binlogBlobs
 
+		actions := []metacache.SegmentAction{}
 		singlePKStats, batchStatsBlob, err := s.serializeStatslog(pack)
 		if err != nil {
 			log.Warn("failed to serialized statslog", zap.Error(err))
@@ -106,7 +107,19 @@ func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 		}
 
 		task.batchStatsBlob = batchStatsBlob
-		s.metacache.UpdateSegments(metacache.RollStats(singlePKStats), metacache.WithSegmentIDs(pack.segmentID))
+		actions = append(actions, metacache.RollStats(singlePKStats))
+
+		if len(pack.bm25Stats) > 0 {
+			statsBlobs, err := s.serializeBM25Stats(pack)
+			if err != nil {
+				return nil, err
+			}
+
+			task.bm25Blobs = statsBlobs
+			actions = append(actions, metacache.MergeBm25Stats(pack.bm25Stats))
+		}
+
+		s.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(pack.segmentID))
 	}
 
 	if pack.isFlush {
@@ -117,6 +130,15 @@ func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 				return nil, err
 			}
 			task.mergedStatsBlob = mergedStatsBlob
+
+			if hasBM25Function(s.schema) {
+				mergedBM25Blob, err := s.serializeMergedBM25Stats(pack)
+				if err != nil {
+					log.Warn("failed to serialize merged bm25 stats log", zap.Error(err))
+					return nil, err
+				}
+				task.mergedBm25Blob = mergedBM25Blob
+			}
 		}
 
 		task.WithFlush()
@@ -147,18 +169,16 @@ func (s *storageV1Serializer) setTaskMeta(task *SyncTask, pack *SyncPack) {
 		WithPartitionID(pack.partitionID).
 		WithChannelName(pack.channelName).
 		WithSegmentID(pack.segmentID).
-		WithBatchSize(pack.batchSize).
+		WithBatchRows(pack.batchRows).
 		WithSchema(s.metacache.Schema()).
 		WithStartPosition(pack.startPosition).
 		WithCheckpoint(pack.checkpoint).
 		WithLevel(pack.level).
+		WithDataSource(pack.dataSource).
 		WithTimeRange(pack.tsFrom, pack.tsTo).
 		WithMetaCache(s.metacache).
 		WithMetaWriter(s.metaWriter).
-		WithFailureCallback(func(err error) {
-			// TODO could change to unsub channel in the future
-			panic(err)
-		})
+		WithFailureCallback(pack.errHandler)
 }
 
 func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPack) (map[int64]*storage.Blob, error) {
@@ -181,6 +201,23 @@ func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPac
 	return result, nil
 }
 
+func (s *storageV1Serializer) serializeBM25Stats(pack *SyncPack) (map[int64]*storage.Blob, error) {
+	blobs := make(map[int64]*storage.Blob)
+	for fieldID, stats := range pack.bm25Stats {
+		bytes, err := stats.Serialize()
+		if err != nil {
+			return nil, err
+		}
+
+		blobs[fieldID] = &storage.Blob{
+			Value:      bytes,
+			MemorySize: int64(len(bytes)),
+			RowNum:     stats.NumRow(),
+		}
+	}
+	return blobs, nil
+}
+
 func (s *storageV1Serializer) serializeStatslog(pack *SyncPack) (*storage.PrimaryKeyStats, *storage.Blob, error) {
 	var rowNum int64
 	var pkFieldData []storage.FieldData
@@ -198,7 +235,7 @@ func (s *storageV1Serializer) serializeStatslog(pack *SyncPack) (*storage.Primar
 		stats.UpdateByMsgs(chunkPkData)
 	}
 
-	blob, err := s.inCodec.SerializePkStats(stats, pack.batchSize)
+	blob, err := s.inCodec.SerializePkStats(stats, pack.batchRows)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -221,6 +258,33 @@ func (s *storageV1Serializer) serializeMergedPkStats(pack *SyncPack) (*storage.B
 			PkType:  int64(s.pkField.GetDataType()),
 		}
 	}), segment.NumOfRows())
+}
+
+func (s *storageV1Serializer) serializeMergedBM25Stats(pack *SyncPack) (map[int64]*storage.Blob, error) {
+	segment, ok := s.metacache.GetSegmentByID(pack.segmentID)
+	if !ok {
+		return nil, merr.WrapErrSegmentNotFound(pack.segmentID)
+	}
+
+	stats := segment.GetBM25Stats()
+	if stats == nil {
+		return nil, fmt.Errorf("searalize empty bm25 stats")
+	}
+
+	fieldBytes, numRow, err := stats.Serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	blobs := make(map[int64]*storage.Blob)
+	for fieldID, bytes := range fieldBytes {
+		blobs[fieldID] = &storage.Blob{
+			Value:      bytes,
+			MemorySize: int64(len(bytes)),
+			RowNum:     numRow[fieldID],
+		}
+	}
+	return blobs, nil
 }
 
 func (s *storageV1Serializer) serializeDeltalog(pack *SyncPack) (*storage.Blob, error) {
@@ -246,4 +310,13 @@ func (s *storageV1Serializer) serializeDeltalog(pack *SyncPack) (*storage.Blob, 
 	}
 	writer.Close()
 	return finalizer()
+}
+
+func hasBM25Function(schema *schemapb.CollectionSchema) bool {
+	for _, function := range schema.GetFunctions() {
+		if function.GetType() == schemapb.FunctionType_BM25 {
+			return true
+		}
+	}
+	return false
 }

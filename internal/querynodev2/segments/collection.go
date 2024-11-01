@@ -37,16 +37,17 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type CollectionManager interface {
 	List() []int64
+	ListWithName() map[int64]string
 	Get(collectionID int64) *Collection
 	PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)
 	Ref(collectionID int64, count uint32) bool
@@ -72,6 +73,16 @@ func (m *collectionManager) List() []int64 {
 	defer m.mut.RUnlock()
 
 	return lo.Keys(m.collections)
+}
+
+// return all collections by map id --> name
+func (m *collectionManager) ListWithName() map[int64]string {
+	m.mut.RLock()
+	defer m.mut.RUnlock()
+
+	return lo.MapValues(m.collections, func(coll *Collection, _ int64) string {
+		return coll.Schema().GetName()
+	})
 }
 
 func (m *collectionManager) Get(collectionID int64) *Collection {
@@ -116,7 +127,8 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 
 	if collection, ok := m.collections[collectionID]; ok {
 		if collection.Unref(count) == 0 {
-			log.Info("release collection due to ref count to 0", zap.Int64("collectionID", collectionID))
+			log.Info("release collection due to ref count to 0",
+				zap.Int64("nodeID", paramtable.GetNodeID()), zap.Int64("collectionID", collectionID))
 			delete(m.collections, collectionID)
 			DeleteCollection(collection)
 
@@ -206,7 +218,8 @@ func (c *Collection) GetLoadType() querypb.LoadType {
 
 func (c *Collection) Ref(count uint32) uint32 {
 	refCount := c.refCount.Add(count)
-	log.Debug("collection ref increment",
+	log.Info("collection ref increment",
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.Int64("collectionID", c.ID()),
 		zap.Uint32("refCount", refCount),
 	)
@@ -215,7 +228,8 @@ func (c *Collection) Ref(count uint32) uint32 {
 
 func (c *Collection) Unref(count uint32) uint32 {
 	refCount := c.refCount.Sub(count)
-	log.Debug("collection ref decrement",
+	log.Info("collection ref decrement",
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.Int64("collectionID", c.ID()),
 		zap.Uint32("refCount", refCount),
 	)
@@ -236,10 +250,6 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	// otherwise use all fields for backward compatibility
 	if len(loadMetaInfo.GetLoadFields()) > 0 {
 		loadFieldIDs = typeutil.NewSet(loadMetaInfo.GetLoadFields()...)
-		loadSchema.Fields = lo.Filter(loadSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
-			// system field shall always be loaded for now
-			return loadFieldIDs.Contain(field.GetFieldID()) || common.IsSystemField(field.GetFieldID())
-		})
 	} else {
 		loadFieldIDs = typeutil.NewSet(lo.Map(loadSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })...)
 	}
@@ -263,7 +273,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 
 		for _, indexMeta := range indexMeta.GetIndexMetas() {
 			isGpuIndex = lo.ContainsBy(indexMeta.GetIndexParams(), func(param *commonpb.KeyValuePair) bool {
-				return param.Key == common.IndexTypeKey && indexparamcheck.IsGpuIndex(param.Value)
+				return param.Key == common.IndexTypeKey && vecindexmgr.GetVecIndexMgrInstance().IsGPUVecIndex(param.Value)
 			})
 			if isGpuIndex {
 				break
@@ -297,6 +307,18 @@ func NewCollectionWithoutSchema(collectionID int64, loadType querypb.LoadType) *
 		loadType:   loadType,
 		refCount:   atomic.NewUint32(0),
 	}
+}
+
+// new collection without segcore prepare
+// ONLY FOR TEST
+func NewCollectionWithoutSegcoreForTest(collectionID int64, schema *schemapb.CollectionSchema) *Collection {
+	coll := &Collection{
+		id:         collectionID,
+		partitions: typeutil.NewConcurrentSet[int64](),
+		refCount:   atomic.NewUint32(0),
+	}
+	coll.schema.Store(schema)
+	return coll
 }
 
 // deleteCollection delete collection and free the collection memory

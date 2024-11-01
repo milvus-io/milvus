@@ -27,11 +27,14 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -63,10 +66,12 @@ import (
 
 // InsertData
 type InsertData struct {
-	RowIDs        []int64
-	PrimaryKeys   []storage.PrimaryKey
-	Timestamps    []uint64
-	InsertRecord  *segcorepb.InsertRecord
+	RowIDs       []int64
+	PrimaryKeys  []storage.PrimaryKey
+	Timestamps   []uint64
+	InsertRecord *segcorepb.InsertRecord
+	BM25Stats    map[int64]*storage.BM25Stats
+
 	StartPosition *msgpb.MsgPosition
 	PartitionID   int64
 }
@@ -149,6 +154,9 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			if !sd.pkOracle.Exists(growing, paramtable.GetNodeID()) {
 				// register created growing segment after insert, avoid to add empty growing to delegator
 				sd.pkOracle.Register(growing, paramtable.GetNodeID())
+				if sd.idfOracle != nil {
+					sd.idfOracle.Register(segmentID, insertData.BM25Stats, segments.SegmentTypeGrowing)
+				}
 				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
 				sd.addGrowing(SegmentEntry{
 					NodeID:        paramtable.GetNodeID(),
@@ -158,10 +166,12 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					TargetVersion: initialTargetVersion,
 				})
 			}
-			sd.growingSegmentLock.Unlock()
-		}
 
-		log.Debug("insert into growing segment",
+			sd.growingSegmentLock.Unlock()
+		} else if sd.idfOracle != nil {
+			sd.idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
+		}
+		log.Info("insert into growing segment",
 			zap.Int64("collectionID", growing.Collection()),
 			zap.Int64("segmentID", segmentID),
 			zap.Int("rowCount", len(insertData.RowIDs)),
@@ -203,85 +213,10 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 		Data: cacheItems,
 	})
 
-	start := time.Now()
-	retMap := sd.applyBFInParallel(deleteData, segments.GetBFApplyPool())
-	// segment => delete data
-	delRecords := make(map[int64]DeleteData)
-	retMap.Range(func(key int, value *BatchApplyRet) bool {
-		startIdx := value.StartIdx
-		pk2SegmentIDs := value.Segment2Hits
-
-		pks := deleteData[value.DeleteDataIdx].PrimaryKeys
-		tss := deleteData[value.DeleteDataIdx].Timestamps
-
-		for segmentID, hits := range pk2SegmentIDs {
-			for i, hit := range hits {
-				if hit {
-					delRecord := delRecords[segmentID]
-					delRecord.PrimaryKeys = append(delRecord.PrimaryKeys, pks[startIdx+i])
-					delRecord.Timestamps = append(delRecord.Timestamps, tss[startIdx+i])
-					delRecord.RowCount++
-					delRecords[segmentID] = delRecord
-				}
-			}
-		}
-		return true
-	})
-	bfCost := time.Since(start)
-
-	offlineSegments := typeutil.NewConcurrentSet[int64]()
-
-	sealed, growing, version := sd.distribution.PinOnlineSegments()
-
-	start = time.Now()
-	eg, ctx := errgroup.WithContext(context.Background())
-	for _, entry := range sealed {
-		entry := entry
-		eg.Go(func() error {
-			worker, err := sd.workerManager.GetWorker(ctx, entry.NodeID)
-			if err != nil {
-				log.Warn("failed to get worker",
-					zap.Int64("nodeID", paramtable.GetNodeID()),
-					zap.Error(err),
-				)
-				// skip if node down
-				// delete will be processed after loaded again
-				return nil
-			}
-			offlineSegments.Upsert(sd.applyDelete(ctx, entry.NodeID, worker, delRecords, entry.Segments, querypb.DataScope_Historical)...)
-			return nil
-		})
-	}
-	if len(growing) > 0 {
-		eg.Go(func() error {
-			worker, err := sd.workerManager.GetWorker(ctx, paramtable.GetNodeID())
-			if err != nil {
-				log.Error("failed to get worker(local)",
-					zap.Int64("nodeID", paramtable.GetNodeID()),
-					zap.Error(err),
-				)
-				// panic here, local worker shall not have error
-				panic(err)
-			}
-			offlineSegments.Upsert(sd.applyDelete(ctx, paramtable.GetNodeID(), worker, delRecords, growing, querypb.DataScope_Streaming)...)
-			return nil
-		})
-	}
-	// not error return in apply delete
-	_ = eg.Wait()
-	forwardDeleteCost := time.Since(start)
-
-	sd.distribution.Unpin(version)
-	offlineSegIDs := offlineSegments.Collect()
-	if len(offlineSegIDs) > 0 {
-		log.Warn("failed to apply delete, mark segment offline", zap.Int64s("offlineSegments", offlineSegIDs))
-		sd.markSegmentOffline(offlineSegIDs...)
-	}
+	sd.forwardStreamingDeletion(context.Background(), deleteData)
 
 	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.QueryNodeApplyBFCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(bfCost.Milliseconds()))
-	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(forwardDeleteCost.Milliseconds()))
 }
 
 type BatchApplyRet = struct {
@@ -327,7 +262,13 @@ func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *con
 }
 
 // applyDelete handles delete record and apply them to corresponding workers.
-func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker cluster.Worker, delRecords map[int64]DeleteData, entries []SegmentEntry, scope querypb.DataScope) []int64 {
+func (sd *shardDelegator) applyDelete(ctx context.Context,
+	nodeID int64,
+	worker cluster.Worker,
+	delRecords func(segmentID int64) (DeleteData, bool),
+	entries []SegmentEntry,
+	scope querypb.DataScope,
+) []int64 {
 	offlineSegments := typeutil.NewConcurrentSet[int64]()
 	log := sd.getLogger(ctx)
 
@@ -340,7 +281,7 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 	var futures []*conc.Future[struct{}]
 	for _, segmentEntry := range entries {
 		segmentEntry := segmentEntry
-		delRecord, ok := delRecords[segmentEntry.SegmentID]
+		delRecord, ok := delRecords(segmentEntry.SegmentID)
 		log := log.With(
 			zap.Int64("segmentID", segmentEntry.SegmentID),
 			zap.Int64("workerID", nodeID),
@@ -444,8 +385,11 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	segmentIDs = lo.Map(loaded, func(segment segments.Segment, _ int) int64 { return segment.ID() })
 	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
 
-	for _, candidate := range loaded {
-		sd.pkOracle.Register(candidate, paramtable.GetNodeID())
+	for _, segment := range loaded {
+		sd.pkOracle.Register(segment, paramtable.GetNodeID())
+		if sd.idfOracle != nil {
+			sd.idfOracle.Register(segment.ID(), segment.GetBM25Stats(), segments.SegmentTypeGrowing)
+		}
 	}
 	sd.addGrowing(lo.Map(loaded, func(segment segments.Segment, _ int) SegmentEntry {
 		return SegmentEntry{
@@ -484,6 +428,17 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	log.Debug("worker loads segments...")
 
 	sLoad := func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+		info := req.GetInfos()[0]
+		// put meta l0, instead of load actual delta data
+		if info.GetLevel() == datapb.SegmentLevel_L0 && sd.l0ForwardPolicy == L0ForwardPolicyRemoteLoad {
+			l0Seg, err := segments.NewL0Segment(sd.collection, segments.SegmentTypeSealed, req.GetVersion(), info)
+			if err != nil {
+				return err
+			}
+			sd.collection.Ref(1)
+			sd.segmentManager.Put(ctx, segments.SegmentTypeSealed, l0Seg)
+			return nil
+		}
 		segmentID := req.GetInfos()[0].GetSegmentID()
 		nodeID := req.GetDstNodeID()
 		_, err, _ := sd.sf.Do(fmt.Sprintf("%d-%d", nodeID, segmentID), func() (struct{}, error) {
@@ -541,6 +496,16 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
 			return !sd.pkOracle.Exists(pkoracle.NewCandidateKey(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed), targetNodeID)
 		})
+
+		var bm25Stats *typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats]
+		if sd.idfOracle != nil {
+			bm25Stats, err = sd.loader.LoadBM25Stats(ctx, req.GetCollectionID(), infos...)
+			if err != nil {
+				log.Warn("failed to load bm25 stats for segment", zap.Error(err))
+				return err
+			}
+		}
+
 		candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), req.GetVersion(), infos...)
 		if err != nil {
 			log.Warn("failed to load bloom filter set for segment", zap.Error(err))
@@ -548,7 +513,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		}
 
 		log.Debug("load delete...")
-		err = sd.loadStreamDelete(ctx, candidates, infos, req.GetDeltaPositions(), targetNodeID, worker, entries)
+		err = sd.loadStreamDelete(ctx, candidates, bm25Stats, infos, req, targetNodeID, worker)
 		if err != nil {
 			log.Warn("load stream delete failed", zap.Error(err))
 			return err
@@ -621,17 +586,18 @@ func (sd *shardDelegator) RefreshLevel0DeletionStats() {
 
 func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	candidates []*pkoracle.BloomFilterSet,
+	bm25Stats *typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats],
 	infos []*querypb.SegmentLoadInfo,
-	deltaPositions []*msgpb.MsgPosition,
+	req *querypb.LoadSegmentsRequest,
 	targetNodeID int64,
 	worker cluster.Worker,
-	entries []SegmentEntry,
 ) error {
 	log := sd.getLogger(ctx)
 
 	idCandidates := lo.SliceToMap(candidates, func(candidate *pkoracle.BloomFilterSet) (int64, *pkoracle.BloomFilterSet) {
 		return candidate.ID(), candidate
 	})
+	deltaPositions := req.GetDeltaPositions()
 
 	sd.deleteMut.RLock()
 	defer sd.deleteMut.RUnlock()
@@ -662,29 +628,13 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			deleteScope = querypb.DataScope_Streaming
 		}
 
-		deletedPks, deletedTss := sd.GetLevel0Deletions(candidate.Partition(), candidate)
-		deleteData := &storage.DeleteData{}
-		deleteData.AppendBatch(deletedPks, deletedTss)
-		if deleteData.RowCount > 0 {
-			log.Info("forward L0 delete to worker...",
-				zap.Int64("deleteRowNum", deleteData.RowCount),
-			)
-			err := worker.Delete(ctx, &querypb.DeleteRequest{
-				Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(targetNodeID)),
-				CollectionId: info.GetCollectionID(),
-				PartitionId:  info.GetPartitionID(),
-				SegmentId:    info.GetSegmentID(),
-				PrimaryKeys:  storage.ParsePrimaryKeys2IDs(deleteData.Pks),
-				Timestamps:   deleteData.Tss,
-				Scope:        deleteScope,
-			})
-			if err != nil {
-				log.Warn("failed to apply delete when LoadSegment", zap.Error(err))
-				return err
-			}
+		// forward l0 deletion
+		err := sd.forwardL0Deletion(ctx, info, req, candidate, targetNodeID, worker)
+		if err != nil {
+			return err
 		}
 
-		deleteData = &storage.DeleteData{}
+		deleteData := &storage.DeleteData{}
 		// start position is dml position for segment
 		// if this position is before deleteBuffer's safe ts, it means some delete shall be read from msgstream
 		if position.GetTimestamp() < sd.deleteBuffer.SafeTs() {
@@ -750,6 +700,17 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		)
 		sd.pkOracle.Register(candidate, targetNodeID)
 	}
+
+	if sd.idfOracle != nil && bm25Stats != nil {
+		bm25Stats.Range(func(segmentID int64, stats map[int64]*storage.BM25Stats) bool {
+			log.Info("register sealed segment bm25 stats into idforacle",
+				zap.Int64("segmentID", segmentID),
+			)
+			sd.idfOracle.Register(segmentID, stats, segments.SegmentTypeSealed)
+			return false
+		})
+	}
+
 	log.Info("load delete done")
 
 	return nil
@@ -928,6 +889,9 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	case querypb.DataScope_Historical:
 		sealed = lo.Map(req.GetSegmentIDs(), convertSealed)
 	}
+	signal := sd.distribution.RemoveDistributions(sealed, growing)
+	// wait cleared signal
+	<-signal
 
 	if len(growing) > 0 {
 		sd.growingSegmentLock.Lock()
@@ -943,9 +907,6 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	})
 	sd.AddExcludedSegments(droppedInfos)
 
-	signal := sd.distribution.RemoveDistributions(sealed, growing)
-	// wait cleared signal
-	<-signal
 	if len(sealed) > 0 {
 		sd.pkOracle.Remove(
 			pkoracle.WithSegmentIDs(lo.Map(sealed, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })...),
@@ -1047,4 +1008,48 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 	if sd.excludedSegments.ShouldClean() {
 		sd.excludedSegments.CleanInvalid(ts)
 	}
+}
+
+func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, error) {
+	pb := &commonpb.PlaceholderGroup{}
+	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
+
+	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("please provide varchar for BM25 Function based search")
+	}
+
+	holder := pb.Placeholders[0]
+	if holder.Type != commonpb.PlaceholderType_VarChar {
+		return 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar for BM25 Function based search, got %s", holder.Type.String()))
+	}
+
+	str := funcutil.GetVarCharFromPlaceholder(holder)
+	functionRunner, ok := sd.functionRunners[req.GetFieldId()]
+	if !ok {
+		return 0, fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
+	}
+
+	// get search text term frequency
+	output, err := functionRunner.BatchRun(str)
+	if err != nil {
+		return 0, err
+	}
+
+	tfArray, ok := output[0].(*schemapb.SparseFloatArray)
+	if !ok {
+		return 0, fmt.Errorf("functionRunner return unknown data")
+	}
+
+	idfSparseVector, avgdl, err := sd.idfOracle.BuildIDF(req.GetFieldId(), tfArray)
+	if err != nil {
+		return 0, err
+	}
+
+	err = SetBM25Params(req, avgdl)
+	if err != nil {
+		return 0, err
+	}
+
+	req.PlaceholderGroup = funcutil.SparseVectorDataToPlaceholderGroupBytes(idfSparseVector)
+	return avgdl, nil
 }

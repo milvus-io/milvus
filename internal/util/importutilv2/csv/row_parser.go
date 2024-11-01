@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package csv
 
 import (
@@ -9,7 +25,9 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -17,6 +35,7 @@ type RowParser interface {
 	Parse(raw []string) (Row, error)
 }
 type rowParser struct {
+	nullkey      string
 	header       []string
 	name2Dim     map[string]int
 	name2Field   map[string]*schemapb.FieldSchema
@@ -24,11 +43,21 @@ type rowParser struct {
 	dynamicField *schemapb.FieldSchema
 }
 
-func NewRowParser(schema *schemapb.CollectionSchema, header []string) (RowParser, error) {
-	name2Field := lo.KeyBy(schema.GetFields(),
-		func(field *schemapb.FieldSchema) string {
-			return field.GetName()
-		})
+func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey string) (RowParser, error) {
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return nil, err
+	}
+	dynamicField := typeutil.GetDynamicField(schema)
+
+	name2Field := lo.SliceToMap(
+		lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+			return !field.GetIsFunctionOutput() && !typeutil.IsAutoPKField(field) && field.GetName() != dynamicField.GetName()
+		}),
+		func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
+			return field.GetName(), field
+		},
+	)
 
 	name2Dim := make(map[string]int)
 	for name, field := range name2Field {
@@ -39,20 +68,6 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string) (RowParser
 			}
 			name2Dim[name] = int(dim)
 		}
-	}
-
-	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return nil, err
-	}
-
-	if pkField.GetAutoID() {
-		delete(name2Field, pkField.GetName())
-	}
-
-	dynamicField := typeutil.GetDynamicField(schema)
-	if dynamicField != nil {
-		delete(name2Field, dynamicField.GetName())
 	}
 
 	// check if csv header provides the primary key while it should be auto-generated
@@ -74,6 +89,7 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string) (RowParser
 	}
 
 	return &rowParser{
+		nullkey:      nullkey,
 		name2Dim:     name2Dim,
 		header:       header,
 		name2Field:   name2Field,
@@ -157,52 +173,87 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]string, row Row) 
 }
 
 func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, error) {
+	nullable := field.GetNullable()
 	switch field.GetDataType() {
 	case schemapb.DataType_Bool:
+		if nullable && obj == r.nullkey {
+			return nil, nil
+		}
 		b, err := strconv.ParseBool(obj)
 		if err != nil {
 			return false, r.wrapTypeError(obj, field)
 		}
 		return b, nil
 	case schemapb.DataType_Int8:
+		if nullable && obj == r.nullkey {
+			return nil, nil
+		}
 		num, err := strconv.ParseInt(obj, 10, 8)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return int8(num), nil
 	case schemapb.DataType_Int16:
+		if nullable && obj == r.nullkey {
+			return nil, nil
+		}
 		num, err := strconv.ParseInt(obj, 10, 16)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return int16(num), nil
 	case schemapb.DataType_Int32:
+		if nullable && obj == r.nullkey {
+			return nil, nil
+		}
 		num, err := strconv.ParseInt(obj, 10, 32)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return int32(num), nil
 	case schemapb.DataType_Int64:
+		if nullable && obj == r.nullkey {
+			return nil, nil
+		}
 		num, err := strconv.ParseInt(obj, 10, 64)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return num, nil
 	case schemapb.DataType_Float:
+		if nullable && obj == r.nullkey {
+			return nil, nil
+		}
 		num, err := strconv.ParseFloat(obj, 32)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return float32(num), typeutil.VerifyFloats32([]float32{float32(num)})
 	case schemapb.DataType_Double:
+		if nullable && obj == r.nullkey {
+			return nil, nil
+		}
 		num, err := strconv.ParseFloat(obj, 64)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return num, typeutil.VerifyFloats64([]float64{num})
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		if nullable && obj == r.nullkey {
+			return nil, nil
+		}
+		maxLength, err := parameterutil.GetMaxLength(field)
+		if err != nil {
+			return nil, err
+		}
+		if err = common.CheckVarcharLength(obj, maxLength); err != nil {
+			return nil, err
+		}
 		return obj, nil
 	case schemapb.DataType_BinaryVector:
+		if nullable && obj == r.nullkey {
+			return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+		}
 		var vec []byte
 		err := json.Unmarshal([]byte(obj), &vec)
 		if err != nil {
@@ -213,6 +264,9 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		}
 		return vec, nil
 	case schemapb.DataType_JSON:
+		if nullable && obj == r.nullkey {
+			return nil, nil
+		}
 		var data interface{}
 		err := json.Unmarshal([]byte(obj), &data)
 		if err != nil {
@@ -220,6 +274,9 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		}
 		return []byte(obj), nil
 	case schemapb.DataType_FloatVector:
+		if nullable && obj == r.nullkey {
+			return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+		}
 		var vec []float32
 		err := json.Unmarshal([]byte(obj), &vec)
 		if err != nil {
@@ -230,6 +287,9 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		}
 		return vec, typeutil.VerifyFloats32(vec)
 	case schemapb.DataType_Float16Vector:
+		if nullable && obj == r.nullkey {
+			return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+		}
 		var vec []float32
 		err := json.Unmarshal([]byte(obj), &vec)
 		if err != nil {
@@ -244,6 +304,9 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		}
 		return vec2, typeutil.VerifyFloats16(vec2)
 	case schemapb.DataType_BFloat16Vector:
+		if nullable && obj == r.nullkey {
+			return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+		}
 		var vec []float32
 		err := json.Unmarshal([]byte(obj), &vec)
 		if err != nil {
@@ -258,6 +321,9 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		}
 		return vec2, typeutil.VerifyBFloats16(vec2)
 	case schemapb.DataType_SparseFloatVector:
+		if nullable && obj == r.nullkey {
+			return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+		}
 		// use dec.UseNumber() to avoid float64 precision loss
 		var vec map[string]interface{}
 		dec := json.NewDecoder(strings.NewReader(obj))
@@ -272,6 +338,9 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		}
 		return vec2, nil
 	case schemapb.DataType_Array:
+		if nullable && obj == r.nullkey {
+			return nil, nil
+		}
 		var vec []interface{}
 		desc := json.NewDecoder(strings.NewReader(obj))
 		desc.UseNumber()
@@ -279,6 +348,14 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		if err != nil {
 			return nil, r.wrapTypeError(obj, field)
 		}
+		maxCapacity, err := parameterutil.GetMaxCapacity(field)
+		if err != nil {
+			return nil, err
+		}
+		if err = common.CheckArrayCapacity(len(vec), maxCapacity); err != nil {
+			return nil, err
+		}
+		// elements in array not support null value
 		scalarFieldData, err := r.arrayToFieldData(vec, field.GetElementType())
 		if err != nil {
 			return nil, err

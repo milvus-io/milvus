@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type ImportSchedulerSuite struct {
@@ -62,6 +63,7 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 
 	s.cluster = NewMockCluster(s.T())
 	s.alloc = allocator.NewMockAllocator(s.T())
@@ -73,8 +75,7 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	})
 	s.imeta, err = NewImportMeta(s.catalog)
 	s.NoError(err)
-	buildIndexCh := make(chan UniqueID, 1024)
-	s.scheduler = NewImportScheduler(s.meta, s.cluster, s.alloc, s.imeta, buildIndexCh).(*importScheduler)
+	s.scheduler = NewImportScheduler(s.meta, s.cluster, s.alloc, s.imeta).(*importScheduler)
 }
 
 func (s *ImportSchedulerSuite) TestProcessPreImport() {
@@ -87,6 +88,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 			CollectionID: s.collectionID,
 			State:        datapb.ImportTaskStateV2_Pending,
 		},
+		tr: timerecord.NewTimeRecorder("preimport task"),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
@@ -97,6 +99,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 			TimeoutTs:    math.MaxUint64,
 			Schema:       &schemapb.CollectionSchema{},
 		},
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.imeta.AddJob(job)
 	s.NoError(err)
@@ -157,6 +160,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 				},
 			},
 		},
+		tr: timerecord.NewTimeRecorder("import task"),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
@@ -169,6 +173,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 			Schema:       &schemapb.CollectionSchema{},
 			TimeoutTs:    math.MaxUint64,
 		},
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.imeta.AddJob(job)
 	s.NoError(err)
@@ -215,13 +220,15 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 	s.catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	var task ImportTask = &importTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:        0,
-			TaskID:       1,
-			CollectionID: s.collectionID,
-			NodeID:       6,
-			SegmentIDs:   []int64{2, 3},
-			State:        datapb.ImportTaskStateV2_Failed,
+			JobID:           0,
+			TaskID:          1,
+			CollectionID:    s.collectionID,
+			NodeID:          6,
+			SegmentIDs:      []int64{2, 3},
+			StatsSegmentIDs: []int64{4, 5},
+			State:           datapb.ImportTaskStateV2_Failed,
 		},
+		tr: timerecord.NewTimeRecorder("import task"),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
@@ -234,6 +241,7 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 			Schema:       &schemapb.CollectionSchema{},
 			TimeoutTs:    math.MaxUint64,
 		},
+		tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.imeta.AddJob(job)
 	s.NoError(err)

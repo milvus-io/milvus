@@ -104,6 +104,10 @@ class ResponseChecker:
             # describe collection interface(high level api) response check
             result = self.check_describe_collection_property(self.response, self.func_name, self.check_items)
 
+        elif self.check_task == CheckTasks.check_insert_result:
+            # check `insert` interface response
+            result = self.check_insert_response(check_items=self.check_items)
+
         # Add check_items here if something new need verify
 
         return result
@@ -113,7 +117,7 @@ class ResponseChecker:
         return True
 
     def assert_exception(self, res, actual=True, error_dict=None):
-        assert actual is False
+        assert actual is False, f"Response of API {self.func_name} expect get error, but success"
         assert len(error_dict) > 0
         if isinstance(res, Error):
             error_code = error_dict[ct.err_code]
@@ -235,6 +239,14 @@ class ResponseChecker:
             assert res["fields"][1]["name"] == check_items.get("vector_name", "vector")
         if check_items.get("dim", None) is not None:
             assert res["fields"][1]["params"]["dim"] == check_items.get("dim")
+        if check_items.get("nullable_fields", None) is not None:
+            nullable_fields = check_items.get("nullable_fields")
+            if not isinstance(nullable_fields, list):
+                log.error("nullable_fields should be a list including all the nullable fields name")
+                assert False
+            for field in res["fields"]:
+                if field["name"] in nullable_fields:
+                    assert field["nullable"] is True
         assert res["fields"][0]["is_primary"] is True
         assert res["fields"][0]["field_id"] == 100 and (res["fields"][0]["type"] == 5 or 21)
         assert res["fields"][1]["field_id"] == 101 and res["fields"][1]["type"] == 101
@@ -293,7 +305,7 @@ class ResponseChecker:
         expected: check the search is ok
         """
         log.info("search_results_check: checking the searching results")
-        if func_name != 'search' or func_name != 'hybrid_search':
+        if func_name != 'search' and func_name != 'hybrid_search':
             log.warning("The function name is {} rather than {} or {}".format(func_name, "search", "hybrid_search"))
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
@@ -319,6 +331,7 @@ class ResponseChecker:
         for hits in search_res:
             searched_original_vectors = []
             ids = []
+            vector_id = 0
             if enable_milvus_client_api:
                 for hit in hits:
                     ids.append(hit['id'])
@@ -345,12 +358,13 @@ class ResponseChecker:
                         raise Exception("inserted vectors are needed for distance check")
                     for id in hits.ids:
                         searched_original_vectors.append(check_items["original_vectors"][id])
-                    cf.compare_distance_vector_and_vector_list(check_items["vector_nq"][i],
+                    cf.compare_distance_vector_and_vector_list(check_items["vector_nq"][vector_id],
                                                                searched_original_vectors,
                                                                check_items["metric"], hits.distances)
                     log.info("search_results_check: Checked the distances for one nq: OK")
                 else:
                     pass  # just check nq and topk, not specific ids need check
+            vector_id +=  1
         log.info("search_results_check: limit (topK) and "
                  "ids searched for %d queries are correct" % len(search_res))
 
@@ -451,8 +465,10 @@ class ResponseChecker:
                 log.info("search iteration finished, close")
                 query_iterator.close()
                 break
+            pk_name = ct.default_int64_field_name if res[0].get(ct.default_int64_field_name, None) is not None \
+                else ct.default_string_field_name
             for i in range(len(res)):
-                pk_list.append(res[i][ct.default_int64_field_name])
+                pk_list.append(res[i][pk_name])
             if check_items.get("limit", None):
                 assert len(res) <= check_items["limit"]
         assert len(pk_list) == len(set(pk_list))
@@ -601,4 +617,19 @@ class ResponseChecker:
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False
+        return True
+
+    def check_insert_response(self, check_items):
+        # check request successful
+        self.assert_succ(self.succ, True)
+
+        # get insert count
+        real = check_items.get("insert_count", None) if isinstance(check_items, dict) else None
+        if real is None:
+            real = len(self.kwargs_dict.get("data", [[]])[0])
+
+        # check insert count
+        error_message = "[CheckFunc] Insert count does not meet expectations, response:{0} != expected:{1}"
+        assert self.response.insert_count == real, error_message.format(self.response.insert_count, real)
+
         return True

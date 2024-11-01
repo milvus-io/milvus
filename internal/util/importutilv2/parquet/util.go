@@ -82,7 +82,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	}
 
 	for _, field := range nameToField {
-		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() {
+		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() {
 			continue
 		}
 		if _, ok := crs[field.GetFieldID()]; !ok {
@@ -115,7 +115,7 @@ func isArrowArithmeticType(dataType arrow.Type) bool {
 	return isArrowIntegerType(dataType) || isArrowFloatingType(dataType)
 }
 
-func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType) bool {
+func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, field *schemapb.FieldSchema) bool {
 	srcType := src.ID()
 	dstType := dst.ID()
 	switch srcType {
@@ -142,7 +142,10 @@ func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType) bool {
 	case arrow.BINARY:
 		return dstType == arrow.LIST && dst.(*arrow.ListType).Elem().ID() == arrow.UINT8
 	case arrow.LIST:
-		return dstType == arrow.LIST && isArrowDataTypeConvertible(src.(*arrow.ListType).Elem(), dst.(*arrow.ListType).Elem())
+		return dstType == arrow.LIST && isArrowDataTypeConvertible(src.(*arrow.ListType).Elem(), dst.(*arrow.ListType).Elem(), field)
+	case arrow.NULL:
+		// if nullable==true or has set default_value, can use null type
+		return field.GetNullable() || field.GetDefaultValue() != nil
 	default:
 		return false
 	}
@@ -204,20 +207,30 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 	}
 }
 
-func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, error) {
+// This method is used only by import util and related tests. Returned arrow.Schema
+// doesn't include function output fields.
+func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useNullType bool) (*arrow.Schema, error) {
 	arrFields := make([]arrow.Field, 0)
 	for _, field := range schema.GetFields() {
-		if typeutil.IsAutoPKField(field) {
+		if typeutil.IsAutoPKField(field) || field.GetIsFunctionOutput() {
 			continue
 		}
 		arrDataType, err := convertToArrowDataType(field, false)
 		if err != nil {
 			return nil, err
 		}
+		nullable := field.GetNullable()
+		if field.GetNullable() && useNullType {
+			arrDataType = arrow.Null
+		}
+		if field.GetDefaultValue() != nil && useNullType {
+			arrDataType = arrow.Null
+			nullable = true
+		}
 		arrFields = append(arrFields, arrow.Field{
 			Name:     field.GetName(),
 			Type:     arrDataType,
-			Nullable: true,
+			Nullable: nullable,
 			Metadata: arrow.Metadata{},
 		})
 	}
@@ -229,7 +242,7 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 		return field.Name
 	})
 	for _, field := range schema.GetFields() {
-		if typeutil.IsAutoPKField(field) {
+		if typeutil.IsAutoPKField(field) || field.GetIsFunctionOutput() {
 			continue
 		}
 		arrField, ok := arrNameToField[field.GetName()]
@@ -243,23 +256,12 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 		if err != nil {
 			return err
 		}
-		if !isArrowDataTypeConvertible(arrField.Type, toArrDataType) {
+		if !isArrowDataTypeConvertible(arrField.Type, toArrDataType, field) {
 			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' type mis-match, milvus data type '%s', arrow data type get '%s'",
 				field.Name, field.DataType.String(), arrField.Type.String()))
 		}
 	}
 	return nil
-}
-
-func estimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema) (int64, error) {
-	sizePerRecord, err := typeutil.EstimateMaxSizePerRecord(schema)
-	if err != nil {
-		return 0, err
-	}
-	if 1000*sizePerRecord <= bufferSize {
-		return 1000, nil
-	}
-	return int64(bufferSize) / int64(sizePerRecord), nil
 }
 
 // todo(smellthemoon): use byte to store valid_data

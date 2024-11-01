@@ -45,10 +45,15 @@ type reader struct {
 }
 
 func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string, bufferSize int) (*reader, error) {
+	for _, fieldSchema := range schema.Fields {
+		if fieldSchema.GetNullable() {
+			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support bulk insert numpy files in field(%s) which set nullable == true", fieldSchema.GetName()))
+		}
+	}
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
-	count, err := calcRowCount(bufferSize, schema)
+	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -127,24 +132,32 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 		return name, path
 	})
 	for _, field := range schema.GetFields() {
+		path, hasPath := nameToPath[field.GetName()]
 		if field.GetIsPrimaryKey() && field.GetAutoID() {
-			if _, ok := nameToPath[field.GetName()]; ok {
+			if hasPath {
 				return nil, merr.WrapErrImportFailed(
 					fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
 			}
 			continue
 		}
-		if _, ok := nameToPath[field.GetName()]; !ok {
+		if field.GetIsFunctionOutput() {
+			if hasPath {
+				return nil, merr.WrapErrImportFailed(
+					fmt.Sprintf("field %s is Function output, should not be provided. Provided files: %v", field.GetName(), lo.Values(nameToPath)))
+			}
+			continue
+		}
+		if !hasPath {
 			if field.GetIsDynamic() {
 				continue
 			}
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(nameToPath)))
 		}
-		reader, err := cm.Reader(ctx, nameToPath[field.GetName()])
+		reader, err := cm.Reader(ctx, path)
 		if err != nil {
 			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("failed to read the file '%s', error: %s", nameToPath[field.GetName()], err.Error()))
+				fmt.Sprintf("failed to read the file '%s', error: %s", path, err.Error()))
 		}
 		readers[field.GetFieldID()] = reader
 	}

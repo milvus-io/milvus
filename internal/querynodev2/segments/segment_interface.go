@@ -53,6 +53,7 @@ type Segment interface {
 	StartPosition() *msgpb.MsgPosition
 	Type() SegmentType
 	Level() datapb.SegmentLevel
+	IsSorted() bool
 	LoadInfo() *querypb.SegmentLoadInfo
 	// PinIfNotReleased the segment to prevent it from being released
 	PinIfNotReleased() error
@@ -77,7 +78,7 @@ type Segment interface {
 	// Modification related
 	Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error
 	Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error
-	LoadDeltaData(ctx context.Context, deltaData *storage.DeleteData) error
+	LoadDeltaData(ctx context.Context, deltaData *storage.DeltaData) error
 	LastDeltaTimestamp() uint64
 	Release(ctx context.Context, opts ...releaseOption)
 
@@ -85,6 +86,10 @@ type Segment interface {
 	UpdateBloomFilter(pks []storage.PrimaryKey)
 	MayPkExist(lc *storage.LocationsCache) bool
 	BatchPkExist(lc *storage.BatchLocationsCache) []bool
+
+	// BM25 stats
+	UpdateBM25Stats(stats map[int64]*storage.BM25Stats)
+	GetBM25Stats() map[int64]*storage.BM25Stats
 
 	// Read operations
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)

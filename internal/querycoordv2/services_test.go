@@ -213,8 +213,10 @@ func (suite *ServiceSuite) SetupTest() {
 		getBalancerFunc:     func() balance.Balance { return suite.balancer },
 		distController:      suite.distController,
 		ctx:                 context.Background(),
+		metricsRequest:      metricsinfo.NewMetricsRequest(),
 	}
 
+	suite.server.registerMetricsRequest()
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
@@ -869,7 +871,7 @@ func (suite *ServiceSuite) TestLoadCollectionFailed() {
 	}
 
 	req := &querypb.LoadCollectionRequest{
-		CollectionID:   0,
+		CollectionID:   1001,
 		ReplicaNumber:  2,
 		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
 	}
@@ -1356,8 +1358,8 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 			suite.Len(actions, 2)
 			growAction := actions[0].(*task.SegmentAction)
 			reduceAction := actions[1].(*task.SegmentAction)
-			suite.True(lo.Contains(segmentOnCollection[collection], growAction.SegmentID()))
-			suite.True(lo.Contains(segmentOnCollection[collection], reduceAction.SegmentID()))
+			suite.True(lo.Contains(segmentOnCollection[collection], growAction.GetSegmentID()))
+			suite.True(lo.Contains(segmentOnCollection[collection], reduceAction.GetSegmentID()))
 			suite.Equal(dstNode, growAction.Node())
 			suite.Equal(srcNode, reduceAction.Node())
 			t.Cancel(nil)
@@ -1511,7 +1513,7 @@ func (suite *ServiceSuite) TestGetMetrics() {
 		suite.cluster.EXPECT().GetMetrics(ctx, node, mock.Anything).Return(&milvuspb.GetMetricsResponse{
 			Status:        merr.Success(),
 			ComponentName: "QueryNode",
-		}, nil)
+		}, nil).Maybe()
 	}
 
 	metricReq := make(map[string]string)
@@ -2035,9 +2037,10 @@ func (suite *ServiceSuite) updateChannelDistWithoutSegment(collection int64) {
 				ChannelName:  channels[i],
 			}))
 			suite.dist.LeaderViewManager.Update(node, &meta.LeaderView{
-				ID:           node,
-				CollectionID: collection,
-				Channel:      channels[i],
+				ID:                 node,
+				CollectionID:       collection,
+				Channel:            channels[i],
+				UnServiceableError: merr.ErrSegmentLack,
 			})
 			i++
 			if i >= len(channels) {

@@ -40,10 +40,11 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -237,7 +238,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		s.indexNodeManager = nodeManager
 		mockNode := mocks.NewMockIndexNodeClient(t)
 		nodeManager.SetClient(1001, mockNode)
-		mockNode.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(&indexpb.GetJobStatsResponse{
+		mockNode.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(&workerpb.GetJobStatsResponse{
 			Status:     merr.Success(),
 			EnableDisk: true,
 		}, nil)
@@ -555,7 +556,7 @@ func TestServer_AlterIndex(t *testing.T) {
 			catalog:   catalog,
 			indexMeta: indexMeta,
 			segments: &SegmentsInfo{
-				compactionTo: make(map[int64]int64),
+				compactionTo: make(map[int64][]int64),
 				segments: map[UniqueID]*SegmentInfo{
 					invalidSegID: {
 						SegmentInfo: &datapb.SegmentInfo{
@@ -619,13 +620,13 @@ func TestServer_AlterIndex(t *testing.T) {
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 
 	t.Run("mmap_unsupported", func(t *testing.T) {
-		indexParams[0].Value = indexparamcheck.IndexRaftCagra
+		indexParams[0].Value = "GPU_CAGRA"
 
 		resp, err := s.AlterIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 
-		indexParams[0].Value = indexparamcheck.IndexFaissIvfFlat
+		indexParams[0].Value = "IVF_FLAT"
 	})
 
 	t.Run("param_value_invalied", func(t *testing.T) {
@@ -2340,8 +2341,8 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 	m := &meta{
 		segments: NewSegmentsInfo(),
 		indexMeta: &indexMeta{
-			buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
-			segmentIndexes:       map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			segmentIndexes:   map[UniqueID]map[UniqueID]*model.SegmentIndex{},
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
 					indexID: {

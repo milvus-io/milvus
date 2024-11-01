@@ -170,6 +170,10 @@ type DataCoordCatalog interface {
 	SaveCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string, currentVersion int64) error
 	GetCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) (int64, error)
 	DropCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) error
+
+	ListStatsTasks(ctx context.Context) ([]*indexpb.StatsTask, error)
+	SaveStatsTask(ctx context.Context, task *indexpb.StatsTask) error
+	DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) error
 }
 
 type QueryCoordCatalog interface {
@@ -182,7 +186,7 @@ type QueryCoordCatalog interface {
 	ReleaseCollection(collection int64) error
 	ReleasePartition(collection int64, partitions ...int64) error
 	ReleaseReplicas(collectionID int64) error
-	ReleaseReplica(collection, replica int64) error
+	ReleaseReplica(collection int64, replicas ...int64) error
 	SaveResourceGroup(rgs ...*querypb.ResourceGroup) error
 	RemoveResourceGroup(rgName string) error
 	GetResourceGroups() ([]*querypb.ResourceGroup, error)

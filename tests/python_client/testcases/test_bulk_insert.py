@@ -9,6 +9,7 @@ from pathlib import Path
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
+from common.common_params import DefaultVectorIndexParams, DefaultVectorSearchParams
 from common.milvus_sys import MilvusSys
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_log import test_log as log
@@ -748,7 +749,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("entities", [2000])
     @pytest.mark.parametrize("enable_dynamic_field", [True])
     @pytest.mark.parametrize("enable_partition_key", [True, False])
-    def test_bulk_insert_all_field_with_new_json_format(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key):
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_bulk_insert_all_field_with_new_json_format(self, auto_id, dim, entities, enable_dynamic_field,
+                                                        enable_partition_key, nullable):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -757,20 +760,23 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         2. import data
         3. verify
         """
+        if enable_partition_key is True and nullable is True:
+            pytest.skip("partition key field not support nullable")
         float_vec_field_dim = dim
         binary_vec_field_dim = ((dim+random.randint(-16, 32)) // 8) * 8
         bf16_vec_field_dim = dim+random.randint(-16, 32)
         fp16_vec_field_dim = dim+random.randint(-16, 32)
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
-            cf.gen_int64_field(name=df.int_field),
-            cf.gen_float_field(name=df.float_field),
-            cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key),
-            cf.gen_json_field(name=df.json_field),
-            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
-            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
-            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
+            cf.gen_int64_field(name=df.int_field, nullable=nullable),
+            cf.gen_float_field(name=df.float_field, nullable=nullable),
+            cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key, nullable=nullable),
+            cf.gen_string_field(name=df.text_field, enable_tokenizer=True, enable_match=True, nullable=nullable),
+            cf.gen_json_field(name=df.json_field, nullable=nullable),
+            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
+            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
+            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable),
+            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL, nullable=nullable),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=float_vec_field_dim),
             cf.gen_binary_vec_field(name=df.binary_vec_field, dim=binary_vec_field_dim),
             cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=bf16_vec_field_dim),
@@ -878,11 +884,26 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
         # query data
-        res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field])
+        if not nullable:
+            expr_field = df.string_field
+            expr = f"{expr_field} >= '0'"
+        else:
+            res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field, df.int_field])
+            assert len(res) == 0
+            expr_field = df.pk_field
+            expr = f"{expr_field} >= 0"
+
+        res, _ = self.collection_wrap.query(expr=f"{expr}", output_fields=[expr_field, df.int_field])
         assert len(res) == entities
-        query_data = [r[df.string_field] for r in res][:len(self.collection_wrap.partitions)]
-        res, _ = self.collection_wrap.query(expr=f"{df.string_field} in {query_data}", output_fields=[df.string_field])
+        log.info(res)
+        query_data = [r[expr_field] for r in res][:len(self.collection_wrap.partitions)]
+        res, _ = self.collection_wrap.query(expr=f"{expr_field} in {query_data}", output_fields=[expr_field])
         assert len(res) == len(query_data)
+        res, _ = self.collection_wrap.query(expr=f"TextMatch({df.text_field}, 'milvus')", output_fields=[df.text_field])
+        if nullable is False:
+            assert len(res) == entities
+        else:
+            assert 0 < len(res) < entities
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
 
@@ -893,7 +914,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("include_meta", [True, False])
-    def test_bulk_insert_all_field_with_numpy(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key, include_meta):
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_bulk_insert_all_field_with_numpy(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key, include_meta, nullable):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -905,15 +927,18 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         """
         if enable_dynamic_field is False and include_meta is True:
             pytest.skip("include_meta only works with enable_dynamic_field")
+        if nullable is True:
+            pytest.skip("not support bulk insert numpy files in field which set nullable == true")
         float_vec_field_dim = dim
         binary_vec_field_dim = ((dim+random.randint(-16, 32)) // 8) * 8
         bf16_vec_field_dim = dim+random.randint(-16, 32)
         fp16_vec_field_dim = dim+random.randint(-16, 32)
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
-            cf.gen_int64_field(name=df.int_field),
+            cf.gen_int64_field(name=df.int_field, nullable=nullable),
             cf.gen_float_field(name=df.float_field),
             cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key),
+            cf.gen_string_field(name=df.text_field, enable_tokenizer=True, enable_match=True, nullable=nullable),
             cf.gen_json_field(name=df.json_field),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=float_vec_field_dim),
             cf.gen_binary_vec_field(name=df.binary_vec_field, dim=binary_vec_field_dim),
@@ -1027,6 +1052,11 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         query_data = [r[df.string_field] for r in res][:len(self.collection_wrap.partitions)]
         res, _ = self.collection_wrap.query(expr=f"{df.string_field} in {query_data}", output_fields=[df.string_field])
         assert len(res) == len(query_data)
+        res, _ = self.collection_wrap.query(expr=f"TextMatch({df.text_field}, 'milvus')", output_fields=[df.text_field])
+        if nullable is False:
+            assert len(res) == entities
+        else:
+            assert 0 < len(res) < entities
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
 
@@ -1037,7 +1067,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("include_meta", [True, False])
-    def test_bulk_insert_all_field_with_parquet(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key, include_meta):
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_bulk_insert_all_field_with_parquet(self, auto_id, dim, entities, enable_dynamic_field,
+                                                enable_partition_key, include_meta, nullable):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.parquet and uid.parquet,
@@ -1048,20 +1080,23 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         """
         if enable_dynamic_field is False and include_meta is True:
             pytest.skip("include_meta only works with enable_dynamic_field")
+        if enable_partition_key is True and nullable is True:
+            pytest.skip("partition key field not support nullable")
         float_vec_field_dim = dim
         binary_vec_field_dim = ((dim+random.randint(-16, 32)) // 8) * 8
         bf16_vec_field_dim = dim+random.randint(-16, 32)
         fp16_vec_field_dim = dim+random.randint(-16, 32)
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
-            cf.gen_int64_field(name=df.int_field),
-            cf.gen_float_field(name=df.float_field),
-            cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key),
-            cf.gen_json_field(name=df.json_field),
-            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
-            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
-            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
+            cf.gen_int64_field(name=df.int_field, nullable=nullable),
+            cf.gen_float_field(name=df.float_field, nullable=nullable),
+            cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key, nullable=nullable),
+            cf.gen_string_field(name=df.text_field, enable_tokenizer=True, enable_match=True, nullable=nullable),
+            cf.gen_json_field(name=df.json_field, nullable=nullable),
+            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
+            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
+            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable),
+            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL, nullable=nullable),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=float_vec_field_dim),
             cf.gen_binary_vec_field(name=df.binary_vec_field, dim=binary_vec_field_dim),
             cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=bf16_vec_field_dim),
@@ -1169,11 +1204,26 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
         # query data
-        res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field])
+        if not nullable:
+            expr_field = df.string_field
+            expr = f"{expr_field} >= '0'"
+        else:
+            res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field])
+            assert len(res) == 0
+            expr_field = df.pk_field
+            expr = f"{expr_field} >= 0"
+
+        res, _ = self.collection_wrap.query(expr=f"{expr}", output_fields=[df.string_field])
         assert len(res) == entities
-        query_data = [r[df.string_field] for r in res][:len(self.collection_wrap.partitions)]
-        res, _ = self.collection_wrap.query(expr=f"{df.string_field} in {query_data}", output_fields=[df.string_field])
+        query_data = [r[expr_field] for r in res][:len(self.collection_wrap.partitions)]
+        res, _ = self.collection_wrap.query(expr=f"{expr_field} in {query_data}", output_fields=[expr_field])
         assert len(res) == len(query_data)
+        res, _ = self.collection_wrap.query(expr=f"TextMatch({df.text_field}, 'milvus')", output_fields=[df.text_field])
+        if not nullable:
+            assert len(res) == entities
+        else:
+            assert 0 < len(res) < entities
+
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
 
@@ -2111,3 +2161,77 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 empty_partition_num += 1
             num_entities += p.num_entities
         assert num_entities == entities * file_nums
+
+    @pytest.mark.parametrize("pk_field", [df.pk_field, df.string_field])
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_bulk_import_random_pk_stats_task(self, pk_field):
+        # connect -> prepare json data
+        self._connect()
+        collection_name = cf.gen_unique_str("stats_task")
+        nb = 3000
+        fields = []
+        files = ""
+
+        # prepare data: int64_pk -> json data; varchar_pk -> numpy data
+        if pk_field == df.pk_field:
+            fields = [
+                cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=False),
+                cf.gen_float_vec_field(name=df.float_vec_field, dim=ct.default_dim),
+            ]
+            data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+            files = prepare_bulk_insert_new_json_files(
+                minio_endpoint=self.minio_endpoint, bucket_name=self.bucket_name,
+                is_row_based=True, rows=nb, dim=ct.default_dim, auto_id=False, data_fields=data_fields, force=True,
+                shuffle=True
+            )
+        elif pk_field == df.string_field:
+            fields = [
+                cf.gen_string_field(name=df.string_field, is_primary=True, auto_id=False),
+                cf.gen_float_vec_field(name=df.float_vec_field, dim=ct.default_dim),
+            ]
+            data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+            files = prepare_bulk_insert_numpy_files(
+                minio_endpoint=self.minio_endpoint, bucket_name=self.bucket_name,
+                rows=nb, dim=ct.default_dim, data_fields=data_fields, enable_dynamic_field=False, force=True,
+                shuffle_pk=True
+            )
+        else:
+            log.error(f"pk_field name {pk_field} not supported now, [{df.pk_field}, {df.string_field}] expected~")
+
+        # create collection -> create vector index
+        schema = cf.gen_collection_schema(fields=fields)
+        self.collection_wrap.init_collection(collection_name, schema=schema)
+        self.build_multi_index(index_params=DefaultVectorIndexParams.IVF_SQ8(df.float_vec_field))
+
+        # bulk_insert data
+        t0 = time.time()
+        task_id, _ = self.utility_wrap.do_bulk_insert(
+            collection_name=collection_name, files=files
+        )
+        logging.info(f"bulk insert task ids:{task_id}")
+        completed, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+            task_ids=[task_id], timeout=300
+        )
+        tt = time.time() - t0
+        log.info(f"bulk insert state:{completed} with latency {tt}")
+        assert completed
+
+        # load -> get_segment_info -> verify stats task
+        self.collection_wrap.load()
+        res_segment_info, _ = self.utility_wrap.get_query_segment_info(collection_name)
+        assert len(res_segment_info) > 0  # maybe mix compaction to 1 segment
+        cnt = 0
+        for r in res_segment_info:
+            log.info(f"segmentID {r.segmentID}: state: {r.state}; num_rows: {r.num_rows}; is_sorted: {r.is_sorted} ")
+            cnt += r.num_rows
+            assert r.is_sorted is True
+        assert cnt == nb
+
+        # verify search
+        self.collection_wrap.search(
+            data=cf.gen_vectors(ct.default_nq, ct.default_dim, vector_data_type=DataType.FLOAT_VECTOR.name),
+            anns_field=df.float_vec_field, param=DefaultVectorSearchParams.IVF_SQ8(),
+            limit=ct.default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": ct.default_nq,
+                         "limit": ct.default_limit})

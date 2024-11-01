@@ -196,6 +196,8 @@ func CalcColumnSize(column *schemapb.FieldData) int {
 		for _, str := range column.GetScalars().GetJsonData().GetData() {
 			res += len(str)
 		}
+	default:
+		panic("Unknown data type:" + column.Type.String())
 	}
 	return res
 }
@@ -244,6 +246,8 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 			// counting only the size of the vector data, ignoring other
 			// bytes used in proto.
 			res += len(vec.Contents[rowOffset])
+		default:
+			panic("Unknown data type:" + fs.GetType().String())
 		}
 	}
 	return res, nil
@@ -251,20 +255,30 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 
 // SchemaHelper provides methods to get the schema of fields
 type SchemaHelper struct {
-	schema             *schemapb.CollectionSchema
-	nameOffset         map[string]int
-	idOffset           map[int64]int
-	primaryKeyOffset   int
-	partitionKeyOffset int
-	dynamicFieldOffset int
-	loadFields         Set[int64]
+	schema              *schemapb.CollectionSchema
+	nameOffset          map[string]int
+	idOffset            map[int64]int
+	primaryKeyOffset    int
+	partitionKeyOffset  int
+	clusteringKeyOffset int
+	dynamicFieldOffset  int
+	loadFields          Set[int64]
 }
 
 func CreateSchemaHelperWithLoadFields(schema *schemapb.CollectionSchema, loadFields []int64) (*SchemaHelper, error) {
 	if schema == nil {
 		return nil, errors.New("schema is nil")
 	}
-	schemaHelper := SchemaHelper{schema: schema, nameOffset: make(map[string]int), idOffset: make(map[int64]int), primaryKeyOffset: -1, partitionKeyOffset: -1, dynamicFieldOffset: -1, loadFields: NewSet(loadFields...)}
+	schemaHelper := SchemaHelper{
+		schema:              schema,
+		nameOffset:          make(map[string]int),
+		idOffset:            make(map[int64]int),
+		primaryKeyOffset:    -1,
+		partitionKeyOffset:  -1,
+		clusteringKeyOffset: -1,
+		dynamicFieldOffset:  -1,
+		loadFields:          NewSet(loadFields...),
+	}
 	for offset, field := range schema.Fields {
 		if _, ok := schemaHelper.nameOffset[field.Name]; ok {
 			return nil, fmt.Errorf("duplicated fieldName: %s", field.Name)
@@ -286,6 +300,13 @@ func CreateSchemaHelperWithLoadFields(schema *schemapb.CollectionSchema, loadFie
 				return nil, errors.New("partition key is not unique")
 			}
 			schemaHelper.partitionKeyOffset = offset
+		}
+
+		if field.IsClusteringKey {
+			if schemaHelper.clusteringKeyOffset != -1 {
+				return nil, errors.New("clustering key is not unique")
+			}
+			schemaHelper.clusteringKeyOffset = offset
 		}
 
 		if field.IsDynamic {
@@ -317,6 +338,15 @@ func (helper *SchemaHelper) GetPartitionKeyField() (*schemapb.FieldSchema, error
 		return nil, fmt.Errorf("failed to get partition key field: no partition key in schema")
 	}
 	return helper.schema.Fields[helper.partitionKeyOffset], nil
+}
+
+// GetClusteringKeyField returns the schema of the clustering key.
+// If not found, an error shall be returned.
+func (helper *SchemaHelper) GetClusteringKeyField() (*schemapb.FieldSchema, error) {
+	if helper.clusteringKeyOffset == -1 {
+		return nil, fmt.Errorf("failed to get clustering key field: not clustering key in schema")
+	}
+	return helper.schema.Fields[helper.clusteringKeyOffset], nil
 }
 
 // GetDynamicField returns the field schema of dynamic field if exists.
@@ -403,6 +433,21 @@ func (helper *SchemaHelper) GetVectorDimFromID(fieldID int64) (int, error) {
 	return 0, fmt.Errorf("fieldID(%d) not has dim", fieldID)
 }
 
+func (helper *SchemaHelper) GetFunctionByOutputField(field *schemapb.FieldSchema) (*schemapb.FunctionSchema, error) {
+	for _, function := range helper.schema.GetFunctions() {
+		for _, id := range function.GetOutputFieldIds() {
+			if field.GetFieldID() == id {
+				return function, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("function not exist")
+}
+
+func (helper *SchemaHelper) GetCollectionName() string {
+	return helper.schema.Name
+}
+
 func IsBinaryVectorType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_BinaryVector
 }
@@ -436,6 +481,10 @@ func IsSparseFloatVectorType(dataType schemapb.DataType) bool {
 
 func IsFloatVectorType(dataType schemapb.DataType) bool {
 	return IsDenseFloatVectorType(dataType) || IsSparseFloatVectorType(dataType)
+}
+
+func IsFixDimVectorType(dataType schemapb.DataType) bool {
+	return IsBinaryVectorType(dataType) || IsDenseFloatVectorType(dataType)
 }
 
 // IsVectorType returns true if input is a vector type, otherwise false
@@ -906,7 +955,9 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				dst = append(dst, scalarFieldData)
 				fieldID2Data[srcFieldData.FieldId] = scalarFieldData
 			}
-			dstScalar := fieldID2Data[srcFieldData.FieldId].GetScalars()
+			fieldData := fieldID2Data[srcFieldData.FieldId]
+			fieldData.ValidData = append(fieldData.ValidData, srcFieldData.GetValidData()...)
+			dstScalar := fieldData.GetScalars()
 			switch srcScalar := fieldType.Scalars.Data.(type) {
 			case *schemapb.ScalarField_BoolData:
 				if dstScalar.GetBoolData() == nil {
@@ -1220,6 +1271,44 @@ func AppendSystemFields(schema *schemapb.CollectionSchema) *schemapb.CollectionS
 		DataType:     schemapb.DataType_Int64,
 	})
 	return newSchema
+}
+
+func GetId(src *schemapb.IDs, idx int) (int, any) {
+	switch src.IdField.(type) {
+	case *schemapb.IDs_IntId:
+		return 8, src.GetIntId().Data[idx]
+	case *schemapb.IDs_StrId:
+		return len(src.GetStrId().Data[idx]), src.GetStrId().Data[idx]
+	default:
+		panic("unknown pk type")
+	}
+}
+
+func AppendID(dst *schemapb.IDs, src any) {
+	switch value := src.(type) {
+	case int64:
+		if dst.GetIdField() == nil {
+			dst.IdField = &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{value},
+				},
+			}
+		} else {
+			dst.GetIntId().Data = append(dst.GetIntId().Data, value)
+		}
+	case string:
+		if dst.GetIdField() == nil {
+			dst.IdField = &schemapb.IDs_StrId{
+				StrId: &schemapb.StringArray{
+					Data: []string{value},
+				},
+			}
+		} else {
+			dst.GetStrId().Data = append(dst.GetStrId().Data, value)
+		}
+	default:
+		// TODO
+	}
 }
 
 func AppendIDs(dst *schemapb.IDs, src *schemapb.IDs, idx int) {
@@ -1649,6 +1738,18 @@ func SortSparseFloatRow(indices []uint32, values []float32) ([]uint32, []float32
 	}
 
 	return sortedIndices, sortedValues
+}
+
+func CreateAndSortSparseFloatRow(sparse map[uint32]float32) []byte {
+	row := make([]byte, len(sparse)*8)
+	data := lo.MapToSlice(sparse, func(indices uint32, value float32) Pair[uint32, float32] {
+		return Pair[uint32, float32]{indices, value}
+	})
+	sort.Slice(data, func(i, j int) bool { return data[i].A < data[j].A })
+	for i := 0; i < len(data); i++ {
+		SparseFloatRowSetAt(row, i, data[i].A, data[i].B)
+	}
+	return row
 }
 
 func CreateSparseFloatRow(indices []uint32, values []float32) []byte {

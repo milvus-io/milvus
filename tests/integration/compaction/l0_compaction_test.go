@@ -125,7 +125,8 @@ func (s *CompactionSuite) TestL0Compaction() {
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
-	s.Equal(1, len(segments))
+	// stats task happened
+	s.Equal(2, len(segments))
 	s.Equal(int64(rowNum), segments[0].GetNumOfRows())
 
 	// load

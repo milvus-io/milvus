@@ -30,12 +30,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -51,7 +52,7 @@ type indexBuildTask struct {
 
 	cm             storage.ChunkManager
 	index          indexcgowrapper.CodecIndex
-	req            *indexpb.CreateJobRequest
+	req            *workerpb.CreateJobRequest
 	newTypeParams  map[string]string
 	newIndexParams map[string]string
 	tr             *timerecord.TimeRecorder
@@ -61,7 +62,7 @@ type indexBuildTask struct {
 
 func newIndexBuildTask(ctx context.Context,
 	cancel context.CancelFunc,
-	req *indexpb.CreateJobRequest,
+	req *workerpb.CreateJobRequest,
 	cm storage.ChunkManager,
 	node *IndexNode,
 ) *indexBuildTask {
@@ -198,7 +199,8 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	it.req.CurrentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
 
 	log.Ctx(ctx).Info("Successfully prepare indexBuildTask", zap.Int64("buildID", it.req.GetBuildID()),
-		zap.Int64("collectionID", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()))
+		zap.Int64("collectionID", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()),
+		zap.Int64("currentIndexVersion", it.req.GetIndexVersion()))
 	return nil
 }
 
@@ -208,7 +210,8 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		zap.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()))
 
 	indexType := it.newIndexParams[common.IndexTypeKey]
-	if indexType == indexparamcheck.IndexDISKANN {
+	var fieldDataSize uint64
+	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 		// check index node support disk index
 		if !Params.IndexNodeCfg.EnableDisk.GetAsBool() {
 			log.Warn("IndexNode don't support build disk index",
@@ -223,7 +226,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 			log.Warn("IndexNode get local used size failed")
 			return err
 		}
-		fieldDataSize, err := estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
+		fieldDataSize, err = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
 		if err != nil {
 			log.Warn("IndexNode get local used size failed")
 			return err
@@ -245,21 +248,27 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		}
 	}
 
+	// system resource-related parameters, such as memory limits, CPU limits, and disk limits, are appended here to the parameter list
+	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) && Params.KnowhereConfig.Enable.GetAsBool() {
+		it.newIndexParams, _ = Params.KnowhereConfig.MergeResourceParams(fieldDataSize, paramtable.BuildStage, it.newIndexParams)
+	}
+
 	storageConfig := &indexcgopb.StorageConfig{
-		Address:          it.req.GetStorageConfig().GetAddress(),
-		AccessKeyID:      it.req.GetStorageConfig().GetAccessKeyID(),
-		SecretAccessKey:  it.req.GetStorageConfig().GetSecretAccessKey(),
-		UseSSL:           it.req.GetStorageConfig().GetUseSSL(),
-		BucketName:       it.req.GetStorageConfig().GetBucketName(),
-		RootPath:         it.req.GetStorageConfig().GetRootPath(),
-		UseIAM:           it.req.GetStorageConfig().GetUseIAM(),
-		IAMEndpoint:      it.req.GetStorageConfig().GetIAMEndpoint(),
-		StorageType:      it.req.GetStorageConfig().GetStorageType(),
-		UseVirtualHost:   it.req.GetStorageConfig().GetUseVirtualHost(),
-		Region:           it.req.GetStorageConfig().GetRegion(),
-		CloudProvider:    it.req.GetStorageConfig().GetCloudProvider(),
-		RequestTimeoutMs: it.req.GetStorageConfig().GetRequestTimeoutMs(),
-		SslCACert:        it.req.GetStorageConfig().GetSslCACert(),
+		Address:           it.req.GetStorageConfig().GetAddress(),
+		AccessKeyID:       it.req.GetStorageConfig().GetAccessKeyID(),
+		SecretAccessKey:   it.req.GetStorageConfig().GetSecretAccessKey(),
+		UseSSL:            it.req.GetStorageConfig().GetUseSSL(),
+		BucketName:        it.req.GetStorageConfig().GetBucketName(),
+		RootPath:          it.req.GetStorageConfig().GetRootPath(),
+		UseIAM:            it.req.GetStorageConfig().GetUseIAM(),
+		IAMEndpoint:       it.req.GetStorageConfig().GetIAMEndpoint(),
+		StorageType:       it.req.GetStorageConfig().GetStorageType(),
+		UseVirtualHost:    it.req.GetStorageConfig().GetUseVirtualHost(),
+		Region:            it.req.GetStorageConfig().GetRegion(),
+		CloudProvider:     it.req.GetStorageConfig().GetCloudProvider(),
+		RequestTimeoutMs:  it.req.GetStorageConfig().GetRequestTimeoutMs(),
+		SslCACert:         it.req.GetStorageConfig().GetSslCACert(),
+		GcpCredentialJSON: it.req.GetStorageConfig().GetGcpCredentialJSON(),
 	}
 
 	optFields := make([]*indexcgopb.OptionalFieldInfo, 0, len(it.req.GetOptionalScalarFields()))
@@ -362,9 +371,6 @@ func (it *indexBuildTask) parseFieldMetaFromBinlog(ctx context.Context) error {
 	}
 	data, err := it.cm.Read(ctx, toLoadDataPaths[0])
 	if err != nil {
-		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return err
-		}
 		return err
 	}
 

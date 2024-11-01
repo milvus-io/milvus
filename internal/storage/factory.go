@@ -31,7 +31,8 @@ func NewChunkManagerFactoryWithParam(params *paramtable.ComponentParam) *ChunkMa
 		UseVirtualHost(params.MinioCfg.UseVirtualHost.GetAsBool()),
 		Region(params.MinioCfg.Region.GetValue()),
 		RequestTimeout(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
-		CreateBucket(true))
+		CreateBucket(true),
+		GcpCredentialJSON(params.MinioCfg.GcpCredentialJSON.GetValue()))
 }
 
 func NewChunkManagerFactory(persistentStorage string, opts ...Option) *ChunkManagerFactory {

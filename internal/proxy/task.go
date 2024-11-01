@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -43,16 +44,25 @@ import (
 )
 
 const (
+	SumScorer string = "sum"
+	MaxScorer string = "max"
+	AvgScorer string = "avg"
+)
+
+const (
 	IgnoreGrowingKey     = "ignore_growing"
 	ReduceStopForBestKey = "reduce_stop_for_best"
 	IteratorField        = "iterator"
 	GroupByFieldKey      = "group_by_field"
 	GroupSizeKey         = "group_size"
+	GroupStrictSize      = "group_strict_size"
+	RankGroupScorer      = "rank_group_scorer"
 	AnnsFieldKey         = "anns_field"
 	TopKKey              = "topk"
 	NQKey                = "nq"
 	MetricTypeKey        = common.MetricTypeKey
 	SearchParamsKey      = "params"
+	ExprParamsKey        = "expr_params"
 	RoundDecimalKey      = "round_decimal"
 	OffsetKey            = "offset"
 	LimitKey             = "limit"
@@ -210,6 +220,10 @@ func (t *createCollectionTask) validatePartitionKey() error {
 				return errors.New("the partition key field must not be primary field")
 			}
 
+			if field.GetNullable() {
+				return merr.WrapErrParameterInvalidMsg("partition key field not support nullable")
+			}
+
 			// The type of the partition key field can only be int64 and varchar
 			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar {
 				return errors.New("the data type of partition key should be Int64 or VarChar")
@@ -291,6 +305,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	t.schema.AutoID = false
+
+	if err := validateFunction(t.schema); err != nil {
+		return err
+	}
 
 	if t.ShardsNum > Params.ProxyCfg.MaxShardNum.GetAsInt32() {
 		return fmt.Errorf("maximum shards's number should be limited to %d", Params.ProxyCfg.MaxShardNum.GetAsInt())
@@ -386,6 +404,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		// TODO should remove the index params in the field schema
 		indexParams := funcutil.KeyValuePair2Map(field.GetIndexParams())
 		if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
+			return err
+		}
+
+		if err := ctokenizer.ValidateTextSchema(field); err != nil {
 			return err
 		}
 	}
@@ -543,9 +565,19 @@ func (t *hasCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *hasCollectionTask) Execute(ctx context.Context) error {
-	var err error
-	t.result, err = t.rootCoord.HasCollection(ctx, t.HasCollectionRequest)
-	return merr.CheckRPCCall(t.result, err)
+	t.result = &milvuspb.BoolResponse{
+		Status: merr.Success(),
+	}
+	_, err := globalMetaCache.GetCollectionID(ctx, t.HasCollectionRequest.GetDbName(), t.HasCollectionRequest.GetCollectionName())
+	// error other than
+	if err != nil && !errors.Is(err, merr.ErrCollectionNotFound) {
+		t.result.Status = merr.Status(err)
+		return err
+	}
+	// if collection not nil, means error is ErrCollectionNotFound, result is false
+	// otherwise, result is true
+	t.result.Value = (err == nil)
+	return nil
 }
 
 func (t *hasCollectionTask) PostExecute(ctx context.Context) error {
@@ -619,6 +651,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			Description: "",
 			AutoID:      false,
 			Fields:      make([]*schemapb.FieldSchema, 0),
+			Functions:   make([]*schemapb.FunctionSchema, 0),
 		},
 		CollectionID:         0,
 		VirtualChannelNames:  nil,
@@ -668,22 +701,27 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 		}
 		if field.FieldID >= common.StartOfUserFieldID {
 			t.result.Schema.Fields = append(t.result.Schema.Fields, &schemapb.FieldSchema{
-				FieldID:         field.FieldID,
-				Name:            field.Name,
-				IsPrimaryKey:    field.IsPrimaryKey,
-				AutoID:          field.AutoID,
-				Description:     field.Description,
-				DataType:        field.DataType,
-				TypeParams:      field.TypeParams,
-				IndexParams:     field.IndexParams,
-				IsDynamic:       field.IsDynamic,
-				IsPartitionKey:  field.IsPartitionKey,
-				IsClusteringKey: field.IsClusteringKey,
-				DefaultValue:    field.DefaultValue,
-				ElementType:     field.ElementType,
-				Nullable:        field.Nullable,
+				FieldID:          field.FieldID,
+				Name:             field.Name,
+				IsPrimaryKey:     field.IsPrimaryKey,
+				AutoID:           field.AutoID,
+				Description:      field.Description,
+				DataType:         field.DataType,
+				TypeParams:       field.TypeParams,
+				IndexParams:      field.IndexParams,
+				IsDynamic:        field.IsDynamic,
+				IsPartitionKey:   field.IsPartitionKey,
+				IsClusteringKey:  field.IsClusteringKey,
+				DefaultValue:     field.DefaultValue,
+				ElementType:      field.ElementType,
+				Nullable:         field.Nullable,
+				IsFunctionOutput: field.IsFunctionOutput,
 			})
 		}
+	}
+
+	for _, function := range result.Schema.Functions {
+		t.result.Schema.Functions = append(t.result.Schema.Functions, proto.Clone(function).(*schemapb.FunctionSchema))
 	}
 	return nil
 }
@@ -1521,7 +1559,6 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	// prepare load field list
-	// TODO use load collection load field list after proto merged
 	loadFields, err := collSchema.GetLoadFieldIDs(t.GetLoadFields(), t.GetSkipLoadDynamicField())
 	if err != nil {
 		return err
@@ -1548,9 +1585,10 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		fieldIndexIDs[index.FieldID] = index.IndexID
 	}
 
+	loadFieldsSet := typeutil.NewSet(loadFields...)
 	unindexedVecFields := make([]string, 0)
 	for _, field := range collSchema.GetFields() {
-		if typeutil.IsVectorType(field.GetDataType()) {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
@@ -1792,21 +1830,28 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	hasVecIndex := false
+	// not support multiple indexes on one field
 	fieldIndexIDs := make(map[int64]int64)
 	for _, index := range indexResponse.IndexInfos {
 		fieldIndexIDs[index.FieldID] = index.IndexID
-		for _, field := range collSchema.Fields {
-			if index.FieldID == field.FieldID && typeutil.IsVectorType(field.DataType) {
-				hasVecIndex = true
+	}
+
+	loadFieldsSet := typeutil.NewSet(loadFields...)
+	unindexedVecFields := make([]string, 0)
+	for _, field := range collSchema.GetFields() {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
+			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
+				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
 		}
 	}
-	if !hasVecIndex {
-		errMsg := fmt.Sprintf("there is no vector index on collection: %s, please create index firstly", t.LoadPartitionsRequest.CollectionName)
-		log.Ctx(ctx).Error(errMsg)
+
+	if len(unindexedVecFields) != 0 {
+		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)
+		log.Debug(errMsg)
 		return errors.New(errMsg)
 	}
+
 	for _, partitionName := range t.PartitionNames {
 		partitionID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), t.CollectionName, partitionName)
 		if err != nil {

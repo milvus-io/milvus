@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <pb/schema.pb.h>
 #include <vector>
@@ -61,7 +62,7 @@ ScalarIndexSort<T>::Build(const Config& config) {
 
 template <typename T>
 void
-ScalarIndexSort<T>::Build(size_t n, const T* values) {
+ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
     if (is_built_)
         return;
     if (n == 0) {
@@ -69,13 +70,17 @@ ScalarIndexSort<T>::Build(size_t n, const T* values) {
     }
     data_.reserve(n);
     total_num_rows_ = n;
-    valid_bitset = TargetBitmap(total_num_rows_, false);
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
     idx_to_offsets_.resize(n);
+
     T* p = const_cast<T*>(values);
-    for (size_t i = 0; i < n; ++i) {
-        data_.emplace_back(IndexStructure(*p++, i));
-        valid_bitset.set(i);
+    for (size_t i = 0; i < n; ++i, ++p) {
+        if (!valid_data || valid_data[i]) {
+            data_.emplace_back(IndexStructure(*p, i));
+            valid_bitset_.set(i);
+        }
     }
+
     std::sort(data_.begin(), data_.end());
     for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
@@ -92,12 +97,12 @@ ScalarIndexSort<T>::BuildWithFieldData(
         total_num_rows_ += data->get_num_rows();
         length += data->get_num_rows() - data->get_null_count();
     }
-    if (length == 0) {
+    if (total_num_rows_ == 0) {
         PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
     }
 
     data_.reserve(length);
-    valid_bitset = TargetBitmap(total_num_rows_, false);
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
     int64_t offset = 0;
     for (const auto& data : field_datas) {
         auto slice_num = data->get_num_rows();
@@ -105,7 +110,7 @@ ScalarIndexSort<T>::BuildWithFieldData(
             if (data->is_valid(i)) {
                 auto value = reinterpret_cast<const T*>(data->RawValue(i));
                 data_.emplace_back(IndexStructure(*value, offset));
-                valid_bitset.set(offset);
+                valid_bitset_.set(offset);
             }
             offset++;
         }
@@ -175,11 +180,11 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
            index_num_rows->data.get(),
            (size_t)index_num_rows->size);
     idx_to_offsets_.resize(total_num_rows_);
-    valid_bitset = TargetBitmap(total_num_rows_, false);
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
     memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
     for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
-        valid_bitset.set(data_[i].idx_);
+        valid_bitset_.set(data_[i].idx_);
     }
 
     is_built_ = true;
@@ -256,7 +261,7 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
         }
     }
     // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
-    bitset &= valid_bitset;
+    bitset &= valid_bitset_;
     return bitset;
 }
 
@@ -265,7 +270,7 @@ const TargetBitmap
 ScalarIndexSort<T>::IsNull() {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(total_num_rows_, true);
-    bitset &= valid_bitset;
+    bitset &= valid_bitset_;
     bitset.flip();
     return bitset;
 }
@@ -275,7 +280,7 @@ const TargetBitmap
 ScalarIndexSort<T>::IsNotNull() {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(total_num_rows_, true);
-    bitset &= valid_bitset;
+    bitset &= valid_bitset_;
     return bitset;
 }
 
@@ -355,11 +360,14 @@ ScalarIndexSort<T>::Range(T lower_bound_value,
 }
 
 template <typename T>
-T
+std::optional<T>
 ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
     AssertInfo(idx < idx_to_offsets_.size(), "out of range of total count");
     AssertInfo(is_built_, "index has not been built");
 
+    if (!valid_bitset_[idx]) {
+        return std::nullopt;
+    }
     auto offset = idx_to_offsets_[idx];
     return data_[offset].a_;
 }
