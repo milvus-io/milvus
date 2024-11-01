@@ -9,6 +9,7 @@ from faker import Faker
 from utils.util_log import test_log as log
 import bm25s
 from tqdm import tqdm
+tqdm.disable = True
 
 from pymilvus import (
     utility,
@@ -265,12 +266,11 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
                               "webis-touche2021"])
     def test_search_with_full_text_search(self, dataset, index_type, es_host, dataset_dir):
         self._connect()
-        dataset="climate-fever"
         BASE_URL = f"https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{dataset}.zip"
         data_path = beir.util.download_and_unzip(BASE_URL, out_dir=dataset_dir)
         split = "test" if dataset != "msmarco" else "dev"
         corpus, queries, qrels = GenericDataLoader(data_folder=data_path).load(split=split)
-        collection_name = dataset + "_full_text_search"
+        collection_name = dataset.replace("-", "_") + "_full_text_search" # collection name should not contain "-"
         top_k = 1000
         milvus_full_text_search_result = milvus_full_text_search(collection_name, corpus, queries, qrels,
                                                                  top_k=top_k, index_type=index_type)
