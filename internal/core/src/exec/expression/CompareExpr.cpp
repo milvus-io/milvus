@@ -174,6 +174,10 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForHybridSegment() {
             return ExecCompareExprDispatcher(
                 milvus::query::MatchOp<OpType::PrefixMatch>{});
         }
+        case OpType::PrefixNotMatch: {
+            return ExecCompareExprDispatcher(
+                milvus::query::MatchOp<OpType::PrefixNotMatch>{});
+        }
             // case OpType::PostfixMatch: {
             // }
         default: {

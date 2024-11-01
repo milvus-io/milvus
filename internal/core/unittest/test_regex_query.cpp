@@ -11,19 +11,14 @@
 
 #include <gtest/gtest.h>
 #include <boost/format.hpp>
-#include <regex>
 
 #include "pb/plan.pb.h"
-#include "segcore/segcore_init_c.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "pb/schema.pb.h"
 #include "test_utils/DataGen.h"
-#include "index/IndexFactory.h"
-#include "query/Plan.h"
-#include "knowhere/comp/brute_force.h"
 #include "test_utils/GenExprProto.h"
 #include "query/PlanProto.h"
 #include "query/ExecPlanNodeVisitor.h"
@@ -110,76 +105,97 @@ class GrowingSegmentRegexQueryTest : public ::testing::Test {
 };
 
 TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnNonStringField) {
-    int64_t operand = 120;
-    const auto& int_meta = schema->operator[](FieldName("int64"));
-    auto column_info = test::GenColumnInfo(
-        int_meta.get_id().get(), proto::schema::DataType::Int64, false, false);
-    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
-    unary_range_expr->set_allocated_column_info(column_info);
-    auto expr = test::GenExpr();
-    expr->set_allocated_unary_range_expr(unary_range_expr);
+    const int64_t operand = 120;
+    for (auto op : {OpType::Match, OpType::NotMatch}) {
+        const auto& int_meta = schema->operator[](FieldName("int64"));
+        auto* const column_info =
+            test::GenColumnInfo(int_meta.get_id().get(),
+                                proto::schema::DataType::Int64,
+                                false,
+                                false);
+        auto unary_range_expr = test::GenUnaryRangeExpr(op, operand);
+        unary_range_expr->set_allocated_column_info(column_info);
+        auto expr = test::GenExpr();
+        expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
-    auto typed_expr = parser.ParseExprs(*expr);
-    auto parsed =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
+        auto parser = ProtoParser(*schema);
+        auto typed_expr = parser.ParseExprs(*expr);
+        auto parsed = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID, typed_expr);
 
-    auto segpromote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    BitsetType final;
-    ASSERT_ANY_THROW(ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP));
+        auto segpromote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+        BitsetType final;
+        ASSERT_ANY_THROW(
+            ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP));
+    }
 }
 
 TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnStringField) {
-    std::string operand = "a%";
+    const std::string operand = "a%";
     const auto& str_meta = schema->operator[](FieldName("str"));
-    auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
-                                           proto::schema::DataType::VarChar,
-                                           false,
-                                           false);
-    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
-    unary_range_expr->set_allocated_column_info(column_info);
-    auto expr = test::GenExpr();
-    expr->set_allocated_unary_range_expr(unary_range_expr);
+    auto* const column_info =
+        test::GenColumnInfo(str_meta.get_id().get(),
+                            proto::schema::DataType::VarChar,
+                            false,
+                            false);
+    std::tuple<OpType, bool> testcases[] = {
+        {OpType::Match, true},
+        {OpType::NotMatch, false},
+    };
+    for (auto [op, expected] : testcases) {
+        auto unary_range_expr = test::GenUnaryRangeExpr(op, operand);
+        unary_range_expr->set_allocated_column_info(column_info);
+        auto expr = test::GenExpr();
+        expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
-    auto typed_expr = parser.ParseExprs(*expr);
-    auto parsed =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
+        auto parser = ProtoParser(*schema);
+        auto typed_expr = parser.ParseExprs(*expr);
+        auto parsed = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID, typed_expr);
 
-    auto segpromote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    BitsetType final;
-    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
-    ASSERT_FALSE(final[0]);
-    ASSERT_TRUE(final[1]);
-    ASSERT_TRUE(final[2]);
-    ASSERT_TRUE(final[3]);
-    ASSERT_TRUE(final[4]);
+        auto segpromote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+        BitsetType final;
+        final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
+        EXPECT_EQ(final[0], !expected) << "i: 0, op: " << op;
+        for (int i = 1; i <= 4; ++i) {
+            EXPECT_EQ(final[i], expected) << "i: " << i << ", op: " << op;
+        }
+    }
 }
 
 TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnJsonField) {
-    std::string operand = "a%";
-    const auto& str_meta = schema->operator[](FieldName("json"));
-    auto column_info = test::GenColumnInfo(
-        str_meta.get_id().get(), proto::schema::DataType::JSON, false, false);
-    column_info->add_nested_path("str");
-    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
-    unary_range_expr->set_allocated_column_info(column_info);
-    auto expr = test::GenExpr();
-    expr->set_allocated_unary_range_expr(unary_range_expr);
+    const std::string operand = "a%";
+    std::tuple<OpType, bool> testcases[] = {
+        {OpType::Match, true},
+        {OpType::NotMatch, false},
+    };
+    for (auto [op, expected] : testcases) {
+        const auto& str_meta = schema->operator[](FieldName("json"));
+        auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                               proto::schema::DataType::JSON,
+                                               false,
+                                               false);
+        column_info->add_nested_path("str");
+        auto unary_range_expr = test::GenUnaryRangeExpr(op, operand);
+        unary_range_expr->set_allocated_column_info(column_info);
+        auto expr = test::GenExpr();
+        expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
-    auto typed_expr = parser.ParseExprs(*expr);
-    auto parsed =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
+        auto parser = ProtoParser(*schema);
+        auto typed_expr = parser.ParseExprs(*expr);
+        auto parsed = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID, typed_expr);
 
-    auto segpromote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    BitsetType final;
-    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
-    ASSERT_FALSE(final[0]);
-    ASSERT_FALSE(final[1]);
-    ASSERT_TRUE(final[2]);
-    ASSERT_FALSE(final[3]);
-    ASSERT_TRUE(final[4]);
+        auto segpromote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+        BitsetType final;
+        final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
+        // the first two rows are not strings, so the result should be false
+        EXPECT_FALSE(final[0]) << "op: " << op << ", i: 0";
+        EXPECT_FALSE(final[1]) << "op: " << op << ", i: 1";
+        EXPECT_EQ(final[2], expected) << "op: " << op << ", i: 2";
+        EXPECT_EQ(final[3], !expected) << "op: " << op << ", i: 3";
+        EXPECT_EQ(final[4], expected) << "op: " << op << ", i: 4";
+    }
 }
 
 struct MockStringIndex : index::StringIndexSort {
@@ -303,6 +319,63 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
         seg->LoadIndex(info);
     }
 
+    void
+    RegexQueryStringField(std::function<void()> load_index) {
+        const std::string operand = "a%";
+        const auto& str_meta = schema->operator[](FieldName("str"));
+        auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                               proto::schema::DataType::VarChar,
+                                               false,
+                                               false);
+        auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
+        unary_range_expr->set_allocated_column_info(column_info);
+        auto expr = test::GenExpr();
+        expr->set_allocated_unary_range_expr(unary_range_expr);
+
+        auto parser = ProtoParser(*schema);
+        auto typed_expr = parser.ParseExprs(*expr);
+        auto parsed = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID, typed_expr);
+
+        load_index();
+        auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
+        BitsetType final;
+        // regex query under this index will be executed using raw data (brute force).
+        final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
+        ASSERT_FALSE(final[0]);
+        ASSERT_TRUE(final[1]);
+        ASSERT_TRUE(final[2]);
+        ASSERT_TRUE(final[3]);
+        ASSERT_TRUE(final[4]);
+    }
+
+    void
+    RegexQueryOnIndexedNonStringField(OpType op) {
+        const int64_t operand = 120;
+        const auto& int_meta = schema->operator[](FieldName("another_int64"));
+        auto column_info = test::GenColumnInfo(int_meta.get_id().get(),
+                                               proto::schema::DataType::Int64,
+                                               false,
+                                               false);
+        auto unary_range_expr = test::GenUnaryRangeExpr(op, operand);
+        unary_range_expr->set_allocated_column_info(column_info);
+        auto expr = test::GenExpr();
+        expr->set_allocated_unary_range_expr(unary_range_expr);
+
+        auto parser = ProtoParser(*schema);
+        auto typed_expr = parser.ParseExprs(*expr);
+        auto parsed = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID, typed_expr);
+
+        LoadStlSortIndex();
+
+        auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
+        query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
+        BitsetType final;
+        EXPECT_ANY_THROW(ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP))
+            << "op: " << op;
+    }
+
  public:
     SchemaPtr schema;
     SegmentSealedUPtr seg;
@@ -313,184 +386,113 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
 };
 
 TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnNonStringField) {
-    int64_t operand = 120;
-    const auto& int_meta = schema->operator[](FieldName("another_int64"));
-    auto column_info = test::GenColumnInfo(
-        int_meta.get_id().get(), proto::schema::DataType::Int64, false, false);
-    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
-    unary_range_expr->set_allocated_column_info(column_info);
-    auto expr = test::GenExpr();
-    expr->set_allocated_unary_range_expr(unary_range_expr);
+    const int64_t operand = 120;
+    for (auto op : {OpType::Match, OpType::NotMatch}) {
+        const auto& int_meta = schema->operator[](FieldName("another_int64"));
+        auto column_info = test::GenColumnInfo(int_meta.get_id().get(),
+                                               proto::schema::DataType::Int64,
+                                               false,
+                                               false);
+        auto unary_range_expr = test::GenUnaryRangeExpr(op, operand);
+        unary_range_expr->set_allocated_column_info(column_info);
+        auto expr = test::GenExpr();
+        expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
-    auto typed_expr = parser.ParseExprs(*expr);
-    auto parsed =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
+        auto parser = ProtoParser(*schema);
+        auto typed_expr = parser.ParseExprs(*expr);
+        auto parsed = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID, typed_expr);
 
-    auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    ASSERT_ANY_THROW(ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP));
+        auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
+        ASSERT_ANY_THROW(
+            ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP));
+    }
 }
 
 TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnStringField) {
-    std::string operand = "a%";
+    const std::string operand = "a%";
     const auto& str_meta = schema->operator[](FieldName("str"));
     auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
                                            proto::schema::DataType::VarChar,
                                            false,
                                            false);
-    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
-    unary_range_expr->set_allocated_column_info(column_info);
-    auto expr = test::GenExpr();
-    expr->set_allocated_unary_range_expr(unary_range_expr);
+    std::tuple<OpType, bool> testcases[] = {
+        {OpType::Match, true},
+        {OpType::NotMatch, false},
+    };
+    for (auto [op, expected] : testcases) {
+        auto unary_range_expr = test::GenUnaryRangeExpr(op, operand);
+        unary_range_expr->set_allocated_column_info(column_info);
+        auto expr = test::GenExpr();
+        expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
-    auto typed_expr = parser.ParseExprs(*expr);
-    auto parsed =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
+        auto parser = ProtoParser(*schema);
+        auto typed_expr = parser.ParseExprs(*expr);
+        auto parsed = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID, typed_expr);
 
-    auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    BitsetType final;
-    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
-    ASSERT_FALSE(final[0]);
-    ASSERT_TRUE(final[1]);
-    ASSERT_TRUE(final[2]);
-    ASSERT_TRUE(final[3]);
-    ASSERT_TRUE(final[4]);
+        auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
+        BitsetType final;
+        final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
+        EXPECT_EQ(final[0], !expected) << "i: 0, op: " << op;
+        for (int i = 1; i <= 4; ++i) {
+            EXPECT_EQ(final[i], expected) << "i: " << i << ", op: " << op;
+        }
+    }
 }
 
 TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnJsonField) {
-    std::string operand = "a%";
-    const auto& str_meta = schema->operator[](FieldName("json"));
-    auto column_info = test::GenColumnInfo(
-        str_meta.get_id().get(), proto::schema::DataType::JSON, false, false);
-    column_info->add_nested_path("str");
-    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
-    unary_range_expr->set_allocated_column_info(column_info);
-    auto expr = test::GenExpr();
-    expr->set_allocated_unary_range_expr(unary_range_expr);
+    const std::string operand = "a%";
+    std::tuple<OpType, bool> testcases[] = {
+        {OpType::Match, true},
+        {OpType::NotMatch, false},
+    };
+    for (auto [op, expected] : testcases) {
+        const auto& str_meta = schema->operator[](FieldName("json"));
+        auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                               proto::schema::DataType::JSON,
+                                               false,
+                                               false);
+        column_info->add_nested_path("str");
+        auto unary_range_expr = test::GenUnaryRangeExpr(op, operand);
+        unary_range_expr->set_allocated_column_info(column_info);
+        auto expr = test::GenExpr();
+        expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
-    auto typed_expr = parser.ParseExprs(*expr);
-    auto parsed =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
+        auto parser = ProtoParser(*schema);
+        auto typed_expr = parser.ParseExprs(*expr);
+        auto parsed = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID, typed_expr);
 
-    auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    BitsetType final;
-    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
-    ASSERT_FALSE(final[0]);
-    ASSERT_FALSE(final[1]);
-    ASSERT_TRUE(final[2]);
-    ASSERT_FALSE(final[3]);
-    ASSERT_TRUE(final[4]);
+        auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
+        BitsetType final;
+        final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
+        // the first two rows are not strings, so the result should be false
+        EXPECT_FALSE(final[0]) << "op: " << op << ", i: 0";
+        EXPECT_FALSE(final[1]) << "op: " << op << ", i: 1";
+        EXPECT_EQ(final[2], expected) << "op: " << op << ", i: 2";
+        EXPECT_EQ(final[3], !expected) << "op: " << op << ", i: 3";
+        EXPECT_EQ(final[4], expected) << "op: " << op << ", i: 4";
+    }
 }
 
-TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnIndexedNonStringField) {
-    int64_t operand = 120;
-    const auto& int_meta = schema->operator[](FieldName("another_int64"));
-    auto column_info = test::GenColumnInfo(
-        int_meta.get_id().get(), proto::schema::DataType::Int64, false, false);
-    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
-    unary_range_expr->set_allocated_column_info(column_info);
-    auto expr = test::GenExpr();
-    expr->set_allocated_unary_range_expr(unary_range_expr);
+TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnIndexedNonStringFieldOpMatch) {
+    RegexQueryOnIndexedNonStringField(OpType::Match);
+}
 
-    auto parser = ProtoParser(*schema);
-    auto typed_expr = parser.ParseExprs(*expr);
-    auto parsed =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
-
-    LoadStlSortIndex();
-
-    auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
-    BitsetType final;
-    ASSERT_ANY_THROW(ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP));
+TEST_F(SealedSegmentRegexQueryTest,
+       RegexQueryOnIndexedNonStringFieldOpNotMatch) {
+    RegexQueryOnIndexedNonStringField(OpType::NotMatch);
 }
 
 TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnStlSortStringField) {
-    std::string operand = "a%";
-    const auto& str_meta = schema->operator[](FieldName("str"));
-    auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
-                                           proto::schema::DataType::VarChar,
-                                           false,
-                                           false);
-    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
-    unary_range_expr->set_allocated_column_info(column_info);
-    auto expr = test::GenExpr();
-    expr->set_allocated_unary_range_expr(unary_range_expr);
-
-    auto parser = ProtoParser(*schema);
-    auto typed_expr = parser.ParseExprs(*expr);
-    auto parsed =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
-
-    LoadStlSortIndex();
-
-    auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    BitsetType final;
-    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
-    ASSERT_FALSE(final[0]);
-    ASSERT_TRUE(final[1]);
-    ASSERT_TRUE(final[2]);
-    ASSERT_TRUE(final[3]);
-    ASSERT_TRUE(final[4]);
+    RegexQueryStringField([this] { LoadStlSortIndex(); });
 }
 
 TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnInvertedIndexStringField) {
-    std::string operand = "a%";
-    const auto& str_meta = schema->operator[](FieldName("str"));
-    auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
-                                           proto::schema::DataType::VarChar,
-                                           false,
-                                           false);
-    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
-    unary_range_expr->set_allocated_column_info(column_info);
-    auto expr = test::GenExpr();
-    expr->set_allocated_unary_range_expr(unary_range_expr);
-
-    auto parser = ProtoParser(*schema);
-    auto typed_expr = parser.ParseExprs(*expr);
-    auto parsed =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
-
-    LoadInvertedIndex();
-
-    auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    BitsetType final;
-    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
-    ASSERT_FALSE(final[0]);
-    ASSERT_TRUE(final[1]);
-    ASSERT_TRUE(final[2]);
-    ASSERT_TRUE(final[3]);
-    ASSERT_TRUE(final[4]);
+    RegexQueryStringField([this] { LoadInvertedIndex(); });
 }
 
 TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnUnsupportedIndex) {
-    std::string operand = "a%";
-    const auto& str_meta = schema->operator[](FieldName("str"));
-    auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
-                                           proto::schema::DataType::VarChar,
-                                           false,
-                                           false);
-    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
-    unary_range_expr->set_allocated_column_info(column_info);
-    auto expr = test::GenExpr();
-    expr->set_allocated_unary_range_expr(unary_range_expr);
-
-    auto parser = ProtoParser(*schema);
-    auto typed_expr = parser.ParseExprs(*expr);
-    auto parsed =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
-
-    LoadMockIndex();
-
-    auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    BitsetType final;
-    // regex query under this index will be executed using raw data (brute force).
-    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
-    ASSERT_FALSE(final[0]);
-    ASSERT_TRUE(final[1]);
-    ASSERT_TRUE(final[2]);
-    ASSERT_TRUE(final[3]);
-    ASSERT_TRUE(final[4]);
+    RegexQueryStringField([this] { LoadMockIndex(); });
 }

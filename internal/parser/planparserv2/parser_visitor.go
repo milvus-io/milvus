@@ -460,7 +460,7 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 		return err
 	}
 
-	op, operand, err := translatePatternMatch(pattern)
+	op, operand, err := translatePatternMatch(pattern, ctx.GetOp() != nil)
 	if err != nil {
 		return err
 	}

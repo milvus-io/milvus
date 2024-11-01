@@ -128,8 +128,12 @@ class ScalarIndex : public IndexBase {
         return false;
     }
 
+    /**
+     * reverse_result: support both `like` and `not like`.
+     * If reverse_result is true, return the result of `not like`.
+     */
     virtual const TargetBitmap
-    PatternMatch(const std::string& pattern) {
+    PatternMatch(const std::string& pattern, bool reverse_result) {
         PanicInfo(Unsupported, "pattern match is not supported");
     }
 
@@ -147,8 +151,12 @@ class ScalarIndex : public IndexBase {
         return false;
     }
 
+    /**
+     * reverse_result: support both `like` and `not like`.
+     * If reverse_result is true, return the result of `not like`.
+     */
     virtual const TargetBitmap
-    RegexQuery(const std::string& pattern) {
+    RegexQuery(const std::string& pattern, bool reverse_result) {
         PanicInfo(Unsupported, "regex query is not supported");
     }
 

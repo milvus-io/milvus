@@ -164,9 +164,11 @@ TEST_F(StringIndexMarisaTest, PrefixMatch) {
 
     for (size_t i = 0; i < strs.size(); i++) {
         auto str = strs[i];
-        auto bitset = index->PrefixMatch(str);
-        ASSERT_EQ(bitset.size(), strs.size());
-        ASSERT_TRUE(bitset[i]);
+        for (bool reverse_result : {true, false}) {
+            auto bitset = index->PrefixMatch(str, reverse_result);
+            ASSERT_EQ(bitset.size(), strs.size());
+            ASSERT_EQ(bitset[i], !reverse_result);
+        }
     }
 }
 
@@ -214,14 +216,17 @@ TEST_F(StringIndexMarisaTest, Query) {
 
     {
         for (size_t i = 0; i < strs.size(); i++) {
-            auto ds = std::make_shared<knowhere::DataSet>();
-            ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
-                                    milvus::OpType::PrefixMatch);
-            ds->Set<std::string>(milvus::index::PREFIX_VALUE,
-                                 std::move(strs[i]));
-            auto bitset = index->Query(ds);
-            ASSERT_EQ(bitset.size(), strs.size());
-            ASSERT_TRUE(bitset[i]);
+            for (auto op : {milvus::OpType::PrefixMatch,
+                            milvus::OpType::PrefixNotMatch}) {
+                auto ds = std::make_shared<knowhere::DataSet>();
+                ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
+                                        std::move(op));
+                ds->Set<std::string>(milvus::index::PREFIX_VALUE,
+                                     std::move(strs[i]));
+                auto bitset = index->Query(ds);
+                ASSERT_EQ(bitset.size(), strs.size());
+                ASSERT_EQ(bitset[i], op == milvus::OpType::PrefixMatch);
+            }
         }
     }
 }
@@ -294,9 +299,11 @@ TEST_F(StringIndexMarisaTest, Codec) {
     {
         for (size_t i = 0; i < nb; i++) {
             auto str = strings[i];
-            auto bitset = copy_index->PrefixMatch(str);
-            ASSERT_EQ(bitset.size(), nb);
-            ASSERT_TRUE(bitset[i]);
+            for (bool reverse_result : {true, false}) {
+                auto bitset = copy_index->PrefixMatch(str, reverse_result);
+                ASSERT_EQ(bitset.size(), nb);
+                ASSERT_EQ(bitset[i], !reverse_result);
+            }
         }
     }
 }
@@ -372,9 +379,11 @@ TEST_F(StringIndexMarisaTest, BaseIndexCodec) {
     {
         for (size_t i = 0; i < nb; i++) {
             auto str = strings[i];
-            auto bitset = copy_index->PrefixMatch(str);
-            ASSERT_EQ(bitset.size(), nb);
-            ASSERT_TRUE(bitset[i]);
+            for (bool reverse_result : {true, false}) {
+                auto bitset = copy_index->PrefixMatch(str, reverse_result);
+                ASSERT_EQ(bitset.size(), nb);
+                ASSERT_EQ(bitset[i], !reverse_result);
+            }
         }
     }
 }

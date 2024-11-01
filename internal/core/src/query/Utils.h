@@ -32,6 +32,10 @@ Match<std::string>(const std::string& str, const std::string& val, OpType op) {
             return PrefixMatch(str, val);
         case OpType::PostfixMatch:
             return PostfixMatch(str, val);
+        case OpType::PrefixNotMatch:
+            return !PrefixMatch(str, val);
+        case OpType::PostfixNotMatch:
+            return !PostfixMatch(str, val);
         default:
             PanicInfo(OpTypeInvalid, "not supported");
     }
@@ -47,6 +51,10 @@ Match<std::string_view>(const std::string_view& str,
             return PrefixMatch(str, val);
         case OpType::PostfixMatch:
             return PostfixMatch(str, val);
+        case OpType::PrefixNotMatch:
+            return !PrefixMatch(str, val);
+        case OpType::PostfixNotMatch:
+            return !PostfixMatch(str, val);
         default:
             PanicInfo(OpTypeInvalid, "not supported");
     }

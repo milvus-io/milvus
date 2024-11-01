@@ -330,11 +330,12 @@ InvertedIndexTantivy<T>::Range(T lower_bound_value,
 
 template <typename T>
 const TargetBitmap
-InvertedIndexTantivy<T>::PrefixMatch(const std::string_view prefix) {
-    TargetBitmap bitset(Count());
+InvertedIndexTantivy<T>::PrefixMatch(const std::string_view prefix,
+                                     bool reverse_result) {
+    TargetBitmap bitset(Count(), reverse_result);
     std::string s(prefix);
     auto array = wrapper_->prefix_query(s);
-    apply_hits(bitset, array, true);
+    apply_hits(bitset, array, !reverse_result);
     return bitset;
 }
 
@@ -350,17 +351,22 @@ InvertedIndexTantivy<std::string>::Query(const DatasetPtr& dataset) {
     auto op = dataset->Get<OpType>(OPERATOR_TYPE);
     if (op == OpType::PrefixMatch) {
         auto prefix = dataset->Get<std::string>(PREFIX_VALUE);
-        return PrefixMatch(prefix);
+        return PrefixMatch(prefix, false);
+    }
+    if (op == OpType::PrefixNotMatch) {
+        auto prefix = dataset->Get<std::string>(PREFIX_VALUE);
+        return PrefixMatch(prefix, true);
     }
     return ScalarIndex<std::string>::Query(dataset);
 }
 
 template <typename T>
 const TargetBitmap
-InvertedIndexTantivy<T>::RegexQuery(const std::string& regex_pattern) {
-    TargetBitmap bitset(Count());
+InvertedIndexTantivy<T>::RegexQuery(const std::string& regex_pattern,
+                                    bool reverse_result) {
+    TargetBitmap bitset(Count(), reverse_result);
     auto array = wrapper_->regex_query(regex_pattern);
-    apply_hits(bitset, array, true);
+    apply_hits(bitset, array, !reverse_result);
     return bitset;
 }
 

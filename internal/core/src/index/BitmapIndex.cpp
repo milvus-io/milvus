@@ -1267,13 +1267,15 @@ BitmapIndex<std::string>::Query(const DatasetPtr& dataset) {
 
 template <typename T>
 const TargetBitmap
-BitmapIndex<T>::RegexQuery(const std::string& regex_pattern) {
-    return ScalarIndex<T>::RegexQuery(regex_pattern);
+BitmapIndex<T>::RegexQuery(const std::string& regex_pattern,
+                           bool reverse_result) {
+    return ScalarIndex<T>::RegexQuery(regex_pattern, reverse_result);
 }
 
 template <>
 const TargetBitmap
-BitmapIndex<std::string>::RegexQuery(const std::string& regex_pattern) {
+BitmapIndex<std::string>::RegexQuery(const std::string& regex_pattern,
+                                     bool reverse_result) {
     AssertInfo(is_built_, "index has not been built");
     RegexMatcher matcher(regex_pattern);
     TargetBitmap res(total_num_rows_, false);
@@ -1281,7 +1283,7 @@ BitmapIndex<std::string>::RegexQuery(const std::string& regex_pattern) {
         for (auto it = bitmap_info_map_.begin(); it != bitmap_info_map_.end();
              ++it) {
             const auto& key = it->first;
-            if (matcher(key)) {
+            if (matcher(key) == !reverse_result) {
                 for (const auto& v : AccessBitmap(it->second)) {
                     res.set(v);
                 }
@@ -1292,7 +1294,7 @@ BitmapIndex<std::string>::RegexQuery(const std::string& regex_pattern) {
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         for (auto it = data_.begin(); it != data_.end(); ++it) {
             const auto& key = it->first;
-            if (matcher(key)) {
+            if (matcher(key) == !reverse_result) {
                 for (const auto& v : it->second) {
                     res.set(v);
                 }
@@ -1301,7 +1303,7 @@ BitmapIndex<std::string>::RegexQuery(const std::string& regex_pattern) {
     } else {
         for (auto it = bitsets_.begin(); it != bitsets_.end(); ++it) {
             const auto& key = it->first;
-            if (matcher(key)) {
+            if (matcher(key) == !reverse_result) {
                 res |= it->second;
             }
         }

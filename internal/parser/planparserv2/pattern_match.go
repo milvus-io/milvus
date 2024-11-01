@@ -46,24 +46,37 @@ func findLastNotOfWildcards(pattern string) int {
 }
 
 // translatePatternMatch translates pattern to related op type and operand.
-func translatePatternMatch(pattern string) (op planpb.OpType, operand string, err error) {
+func translatePatternMatch(pattern string, hasNotOp bool) (op planpb.OpType, operand string, err error) {
+	// TODO: support OpType_PostfixMatch
 	l := len(pattern)
 	loc := findLastNotOfWildcards(pattern)
 
 	if loc < 0 {
 		// always match.
+		if hasNotOp {
+			return planpb.OpType_PrefixNotMatch, "", nil
+		}
 		return planpb.OpType_PrefixMatch, "", nil
 	}
 
 	exist := hasWildcards(pattern[:loc+1])
 	if loc >= l-1 && !exist {
 		// equal match.
+		if hasNotOp {
+			return planpb.OpType_NotEqual, pattern, nil
+		}
 		return planpb.OpType_Equal, pattern, nil
 	}
 	if !exist {
 		// prefix match.
+		if hasNotOp {
+			return planpb.OpType_PrefixNotMatch, pattern[:loc+1], nil
+		}
 		return planpb.OpType_PrefixMatch, pattern[:loc+1], nil
 	}
 
+	if hasNotOp {
+		return planpb.OpType_NotMatch, pattern, nil
+	}
 	return planpb.OpType_Match, pattern, nil
 }
