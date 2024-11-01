@@ -39,3 +39,11 @@ func (t *createAliasTask) Execute(ctx context.Context) error {
 	// create alias is atomic enough.
 	return t.core.meta.CreateAlias(ctx, t.Req.GetDbName(), t.Req.GetAlias(), t.Req.GetCollectionName(), t.GetTs())
 }
+
+func (t *createAliasTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(t.Req.GetDbName(), false),
+		NewCollectionLockerKey(t.Req.GetCollectionName(), true),
+	)
+}

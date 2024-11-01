@@ -118,6 +118,13 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 	return redoTask.Execute(ctx)
 }
 
+func (a *alterDatabaseTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(a.Req.GetDbName(), true),
+	)
+}
+
 func MergeProperties(oldProps []*commonpb.KeyValuePair, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
 	props := make(map[string]string)
 	for _, prop := range oldProps {

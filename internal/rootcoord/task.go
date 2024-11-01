@@ -20,8 +20,26 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
+
+type LockLevel int
+
+const (
+	ClusterLock LockLevel = iota
+	DatabaseLock
+	CollectionLock
+)
+
+type LockerKey interface {
+	LockKey() string
+	Level() LockLevel
+	IsWLock() bool
+	Next() LockerKey
+}
 
 type task interface {
 	GetCtx() context.Context
@@ -35,6 +53,7 @@ type task interface {
 	WaitToFinish() error
 	NotifyDone(err error)
 	SetInQueueDuration()
+	GetLockerKey() LockerKey
 }
 
 type baseTask struct {
@@ -100,4 +119,75 @@ func (b *baseTask) NotifyDone(err error) {
 
 func (b *baseTask) SetInQueueDuration() {
 	b.queueDur = b.tr.ElapseSpan()
+}
+
+func (b *baseTask) GetLockerKey() LockerKey {
+	return nil
+}
+
+type taskLockerKey struct {
+	key   string
+	rw    bool
+	level LockLevel
+	next  LockerKey
+}
+
+func (t *taskLockerKey) LockKey() string {
+	return t.key
+}
+
+func (t *taskLockerKey) Level() LockLevel {
+	return t.level
+}
+
+func (t *taskLockerKey) IsWLock() bool {
+	return t.rw
+}
+
+func (t *taskLockerKey) Next() LockerKey {
+	return t.next
+}
+
+func NewClusterLockerKey(rw bool) LockerKey {
+	return &taskLockerKey{
+		key:   "$",
+		rw:    rw,
+		level: ClusterLock,
+	}
+}
+
+func NewDatabaseLockerKey(db string, rw bool) LockerKey {
+	return &taskLockerKey{
+		key:   db,
+		rw:    rw,
+		level: DatabaseLock,
+	}
+}
+
+func NewCollectionLockerKey(collection string, rw bool) LockerKey {
+	return &taskLockerKey{
+		key:   collection,
+		rw:    rw,
+		level: CollectionLock,
+	}
+}
+
+func NewLockerKeyChain(lockerKeys ...LockerKey) LockerKey {
+	log.Info("NewLockerKeyChain", zap.Any("lockerKeys", len(lockerKeys)))
+	if len(lockerKeys) == 0 {
+		return nil
+	}
+	if lockerKeys[0] == nil || lockerKeys[0].Level() != ClusterLock {
+		log.Warn("Invalid locker key chain", zap.Stack("stack"))
+		return nil
+	}
+
+	for i := 0; i < len(lockerKeys)-1; i++ {
+		if lockerKeys[i] == nil || lockerKeys[i].Level() >= lockerKeys[i+1].Level() {
+			log.Warn("Invalid locker key chain", zap.Stack("stack"))
+			return nil
+		}
+		lockerKeys[i].(*taskLockerKey).next = lockerKeys[i+1]
+	}
+	return lockerKeys[0]
 }
