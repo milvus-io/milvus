@@ -66,33 +66,28 @@ res = client.search(
 
 Milvus is designed to handle vectors, which are numerical representations of unstructured data, together with other scalar data types such as integers, strings, and JSON objects. Users can store scalar data with vectors to conduct vector search with metadata filtering.
 
-* **High performance and horizontal scalability**
-  *  Milvus provides sub-ten millisecond search latency at scale. For detailed performance, checkout [VectorDBBench](https://zilliz.com/vector-database-benchmark-tool).
+* **High Performance and Horizontal Scalability**
+  * Milvus’s microservice and distributed architecture decouples compute and storage, allowing it to manage diverse traffic patterns and independently scale components like query nodes and data nodes. This flexible setup enables resource allocation tailored to read-heavy or write-heavy workloads, optimizing performance. For a detailed performance evaluation, see [VectorDBBench](https://zilliz.com/vector-database-benchmark-tool).
 
-* **Intuitive API and rich SDK support**
-  * Milvus implements easy-to-use API for vector search, data query, ingestion, update and collection management.
-In addition to RESTful and gRPC API, Milvus also provides SDK in [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java), [Go](https://github.com/milvus-io/milvus-sdk-go), [C++](https://github.com/milvus-io/milvus-sdk-cpp), [Node.js](https://github.com/milvus-io/milvus-sdk-node), [Rust](https://github.com/milvus-io/milvus-sdk-rust), [C#](https://github.com/milvus-io/milvus-sdk-csharp)
+* **Intuitive API and SDKs**
+  * Milvus implements easy-to-use RESTful and gRPC API for vector search, data query and data management. Milvus also provides SDKs for [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java), [Go](https://github.com/milvus-io/milvus-sdk-go), [C++](https://github.com/milvus-io/milvus-sdk-cpp), [Node.js](https://github.com/milvus-io/milvus-sdk-node), [Rust](https://github.com/milvus-io/milvus-sdk-rust), and [C#](https://github.com/milvus-io/milvus-sdk-csharp) languages.
 
+* **High Availability**
+  * Milvus is highly available and fault tolerant through [built-in replication](https://milvus.io/docs/replica.md), [coordinator failover](https://milvus.io/docs/coordinator_ha.md#Coordinator-HA), and a multi-layer architecture with [storage-compute disaggregation](https://milvus.io/docs/data_processing.md#Data-insertion) and reliable [data persistence](https://milvus.io/docs/four_layers.md#Storage) using etcd, log broker, and object storage.
 
-* **High availability**
-  * Milvus is highly available thanks to its fully-distributed architecture. To learn more, check [Milvus Architecture Overview](https://milvus.io/docs/architecture_overview.md).
-
-* **Various Index Types Support**
-  * Milvus supports all major vector index types, including IVF, HNSW, FLAT (brute-force), DiskANN, GPU Index and quantization-based variations.
+* **Various Vector Index Types and Hardware Acceleration**
+  * Milvus supports all major vector index types, including IVF, HNSW, FLAT (brute-force), DiskANN, GPU Index and quantization-based variations, optimized for different scenarios. Milvus also implements instruction-level acceleration to speed up vector search performance, and supports GPU index such as NVIDIA [CAGRA](https://github.com/rapidsai/raft).
 
 * **Efficient Metadata Filtering**
   * Milvus has various optimizations to make vector search efficient when combined with metadata filtering, especially at high filtering rate, where post-filtering doesn't work, [VectorDBBench](https://zilliz.com/vector-database-benchmark-tool) shows the performance.
 
-* **Hardware Acceleration**
-  * Milvus implements instruction-level acceleration to speed up vector search performance, and supports GPU index such as NVIDIA [CAGRA](https://github.com/rapidsai/raft).
+* **Sparse Vector for Full Text Search and Hybrid Search**
+  * In addition to semantic search via dense vector embeddings, Milvus also supports full text search with sparse vector. User can also combine dense vector and sparse vector through multi-vector feature and perform hybrid search. Milvus supports up to 10 vector fields in a single collection. Milvus supports hybrid search on dense and sparse vector columns, or multiple dense vector columns. The data from multi-path retrieval can be merge and rerank with Reciprocal Rank Fusion (RRF) and Weighted Scoring. For details, refer to [Hybrid Search](https://milvus.io/docs/multi-vector-search.md).
 
-* **Hybrid Search**
-  * Users can define up to 10 vector fields in a single collection. Milvus supports hybrid search on multiple vector columns, merge and rerank with Reciprocal Rank Fusion (RRF) and Weighted Scoring. For details, refer to [Hybrid Search](https://milvus.io/docs/multi-vector-search.md).
-
-Milvus is trusted by AI developers in startups and enterprises to develop applications such as text and image search, Retrieval-Augmented Generation (RAG), and recommendation systems. Milvus powers mission-critical business for users including Salesforce, PayPal, Shopee, Airbnb, eBay, NVIDIA, IBM, AT&T, LINE, and ROBLOX.
+Milvus is trusted by AI developers in startups and enterprises to develop applications such as text and image search, Retrieval-Augmented Generation (RAG), and recommendation systems. Milvus powers mission-critical business for many users, including [Salesforce, PayPal, Shopee, Airbnb, eBay, NVIDIA, IBM, AT&T, LINE, and ROBLOX](https://milvus.io/use-cases).
 
 ## Demos and Tutorials 
-
+Here is a selection of demos and tutorials to show how to build various types of AI applications made with Milvus:
 
 | Tutorial | Use Case | Related Milvus Features | 
 | -------- | -------- | --------- |
@@ -141,6 +136,13 @@ Milvus is trusted by AI developers in startups and enterprises to develop applic
     </th>
   </tr>
 </table>
+
+## Integration
+
+
+Milvus integrates with popular AI development stacks such as LangChain, LlamaIndex, and OpenAI, providing a robust vector database foundation that supports a variety of Retrieval-Augmented Generation (RAG), semantic search, multi-modal and agent-based applications. Milvus works for both open-source embedding models and embedding service, in text, image and video modalities. Milvus has connectors with third-party tools and data sources like Fivetran, Airbyte, Apify, Apache Spark and Apache Kafka that allows developers to create advanced data pipelines. Milvus can also work with tools for orchestrating, evaluating, and optimizing RAG workflows.
+
+Check out https://milvus.io/docs/integrations_overview.md for more details.
 
 ## Documentation
 
