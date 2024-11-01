@@ -8,23 +8,35 @@
 
 ## What is Milvus?
 
-Milvus is an open-source vector database built to power embedding similarity search and AI applications. Milvus makes unstructured data search more accessible, and provides a consistent user experience regardless of the deployment environment.
+[Milvus](https://milvus.io/) is a high-performance vector database built for scale. It is used by AI applications to organize and search through large amounts of unstructured data, such as text and images.
 
-Milvus 2.0 is a cloud-native vector database with storage and computation separated by design. All components in this refactored version of Milvus are stateless to enhance elasticity and flexibility. For more architecture details, see [Milvus Architecture Overview](https://milvus.io/docs/architecture_overview.md).
+Milvus is implemented with Go and C++ and employs CPU/GPU instruction-level optimization for vector search efficiency. It has a [fully-distributed architecture on K8s](https://milvus.io/docs/overview.md#What-Makes-Milvus-so-Scalable) to handle tens of thousands of search queries on billions of vectors, scale horizontally and maintain data freshness by processing streaming data updates in real-time. For smaller use cases, Milvus also supports [Standalone mode](https://milvus.io/docs/install_standalone-docker.md) that can run on Docker. In addition, [Milvus Lite](https://milvus.io/docs/milvus_lite.md) is a lightweight version suitable for quickstart in python with simply `pip install`.
 
-Milvus was released under the [open-source Apache License 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) in October 2019. It is currently a graduate project under [LF AI & Data Foundation](https://lfaidata.foundation/).
+Milvus is also available as a hosted service on [Zilliz Cloud with free trial](https://cloud.zilliz.com/signup).
 
-## Key features
+The Milvus open-source project is
+under [LF AI & Data Foundation](https://lfaidata.foundation/projects/milvus/), distributed with [Apache 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) License.
 
-<details>
-  <summary><b>Millisecond search on trillion vector datasets</b></summary>
-  Average latency measured in milliseconds on trillion vector datasets.
-  </details>
+## Why Milvus
 
-<details>
-  <summary><b>Simplified unstructured data management</b></summary>
-  <li>Rich APIs designed for data science workflows.</li><li>Consistent user experience across laptop, local cluster, and cloud.</li><li>Embed real-time search and analytics into virtually any application.</li>
-  </details>
+Milvus is designed to handle vectors, which are numerical representations of unstructured data, together with other scalar data types such as integers, strings, and JSON objects. Users can store scalar data with vectors to conduct vector search with metadata filtering.
+
+
+Features
+Milvus offers a variety of features, including:
+Diverse index support 
+Versatile search capabilities 
+Tunable consistency 
+Hardware-accelerated compute support 
+Reusable code 
+Metadata filtering 
+Hybrid search 
+Availability
+
+
+**High performance and scalability**: Milvus provides sub-ten millisecond search latency at scale. For detailed performance, checkout [VectorDBBench](https://zilliz.com/vector-database-benchmark-tool).
+
+**Intuitive API and rich SDK support**: 
 
 <details>
   <summary><b>Reliable, always on vector database</b></summary>
@@ -52,6 +64,9 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
   <summary><b>Community supported, industry recognized</b></summary>
   With over 1,000 enterprise users, 27,000+ stars on GitHub, and an active open-source community, you’re not alone when you use Milvus. As a graduate project under the <a href="https://lfaidata.foundation/">LF AI & Data Foundation</a>, Milvus has institutional support.
   </details>
+
+
+Milvus is trusted by AI developers in startups and enterprises to develop applications such as text and image search, Retrieval-Augmented Generation (RAG), and recommendation systems. Milvus powers mission-critical business for users including Salesforce, PayPal, Shopee, Airbnb, eBay, NVIDIA, IBM, AT&T, LINE, and ROBLOX.
 
 ## Quick start
 
