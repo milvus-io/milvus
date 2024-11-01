@@ -511,7 +511,7 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 // L1 segment deltaCount changes in any state
 // L0 segment deltaCount won't change
 func (s *SegmentInfo) getDeltaCount() int64 {
-	if s.deltaRowcount.Load() <= 0 || s.GetLevel() != datapb.SegmentLevel_L0 {
+	if s.deltaRowcount.Load() < 0 || s.GetLevel() != datapb.SegmentLevel_L0 {
 		var rc int64
 		for _, deltaLogs := range s.GetDeltalogs() {
 			for _, l := range deltaLogs.GetBinlogs() {
