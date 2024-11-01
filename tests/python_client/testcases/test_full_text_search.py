@@ -15,6 +15,11 @@ from faker import Faker
 Faker.seed(19530)
 fake_en = Faker("en_US")
 fake_zh = Faker("zh_CN")
+
+# patch faker to generate text with specific distribution
+cf.patch_faker_text(fake_en, cf.en_vocabularies_distribution)
+cf.patch_faker_text(fake_zh, cf.zh_vocabularies_distribution)
+
 pd.set_option("expand_frame_repr", False)
 
 prefix = "full_text_search_collection"
@@ -2214,6 +2219,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
+        collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -2429,9 +2435,10 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             collection_w.create_index("text", {"index_type": "INVERTED"})
         collection_w.load()
         limit = 100
-        search_data = [fake.text().lower() + " " + random.choice(tokens) for _ in range(nq)]
+        token = random.choice(tokens)
+        search_data = [fake.text().lower() + " " + token for _ in range(nq)]
         if expr == "text_match":
-            filter = f"text_match(text, '{tokens[0]}')"
+            filter = f"text_match(text, '{token}')"
             res, _ = collection_w.query(
                 expr=filter,
             )
@@ -2488,7 +2495,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 result_text = r.text
                 # verify search result satisfies the filter
                 if expr == "text_match":
-                    assert tokens[0] in result_text
+                    assert token in result_text
                 if expr == "id_range":
                     assert _id < data_size // 2
                 # verify search result has overlap with search text
@@ -2496,7 +2503,6 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 log.info(f"overlap {overlap}")
                 assert len(
                     overlap) > 0, f"query text: {search_text}, \ntext: {result_text} \n overlap: {overlap} \n word freq a: {word_freq_a} \n word freq b: {word_freq_b}\n result: {r}"
-
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nq", [2])

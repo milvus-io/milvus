@@ -29,6 +29,11 @@ Faker.seed(19530)
 fake_en = Faker("en_US")
 fake_zh = Faker("zh_CN")
 fake_de = Faker("de_DE")
+
+# patch faker to generate text with specific distribution
+cf.patch_faker_text(fake_en, cf.en_vocabularies_distribution)
+cf.patch_faker_text(fake_zh, cf.zh_vocabularies_distribution)
+
 pd.set_option("expand_frame_repr", False)
 
 
@@ -4787,6 +4792,7 @@ class TestQueryTextMatch(TestcaseBase):
             wf_map[field] = cf.analyze_documents(df[field].tolist(), language=language)
 
         df_new = cf.split_dataframes(df, fields=text_fields)
+        log.info(f"df \n{df}")
         log.info(f"new df \n{df_new}")
         for field in text_fields:
             expr_list = []
@@ -4796,16 +4802,15 @@ class TestQueryTextMatch(TestcaseBase):
                 tmp = f"text_match({field}, '{word}')"
                 log.info(f"tmp expr {tmp}")
                 expr_list.append(tmp)
-                manual_result = df_new[
-                    df_new.apply(lambda row: word in row[field], axis=1)
-                ]
-                tmp_res = set(manual_result["id"].tolist())
-                log.info(f"manual check result for  {tmp} {len(manual_result)}")
+                tmp_res = cf.manual_check_text_match(df_new, word, field)
+                log.info(f"manual check result for  {tmp} {len(tmp_res)}")
                 pd_tmp_res_list.append(tmp_res)
+            log.info(f"manual res {len(pd_tmp_res_list)}, {pd_tmp_res_list}")
             final_res = set(pd_tmp_res_list[0])
             for i in range(1, len(pd_tmp_res_list)):
                 final_res = final_res.intersection(set(pd_tmp_res_list[i]))
             log.info(f"intersection res {len(final_res)}")
+            log.info(f"final res {final_res}")
             and_expr = " and ".join(expr_list)
             log.info(f"expr: {and_expr}")
             res, _ = collection_w.query(expr=and_expr, output_fields=text_fields)
