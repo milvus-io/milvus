@@ -264,25 +264,9 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
-    @pytest.mark.parametrize("dataset",
-                             [
-                                 "msmarco",
-                                 "trec-covid",
-                                 "nfcorpus",
-                                 "nq",
-                                 "hotpotqa",
-                                 "fiqa",
-                                 "arguana",
-                                 "webis-touche2020",
-                                 "quora",
-                                 "dbpedia-entity",
-                                 "scidocs",
-                                 "fever",
-                                 "climate-fever",
-                                 "scifact"
-                             ])
-    def test_search_with_full_text_search(self, dataset, index_type, es_host, dataset_dir):
+    def test_search_with_full_text_search(self, dataset_name, index_type, es_host, dataset_dir):
         self._connect()
+        dataset = dataset_name
         BASE_URL = f"https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{dataset}.zip"
         data_path = beir.util.download_and_unzip(BASE_URL, out_dir=dataset_dir)
         split = "test" if dataset != "msmarco" else "dev"
