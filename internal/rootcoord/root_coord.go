@@ -1118,6 +1118,15 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	return t.Rsp, nil
 }
 
+// getRealCollectionName get origin collection name to avoid the alias name
+func (c *Core) getRealCollectionName(ctx context.Context, db, collection string) string {
+	realName, err := c.meta.DescribeAlias(ctx, db, collection, 0)
+	if err != nil {
+		return collection
+	}
+	return realName
+}
+
 func (c *Core) describeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest, allowUnavailable bool) (*model.Collection, error) {
 	ts := getTravelTs(in)
 	if in.GetCollectionName() != "" {

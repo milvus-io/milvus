@@ -20,13 +20,19 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/allocator"
+	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -241,4 +247,91 @@ func Test_scheduler_updateDdlMinTsLoop(t *testing.T) {
 		assert.Zero(t, s.GetMinDdlTs())
 		s.Stop()
 	})
+}
+
+type WithLockKeyTask struct {
+	baseTask
+	lockKey      LockerKey
+	workDuration time.Duration
+	newTime      time.Time
+	name         string
+}
+
+func NewWithLockKeyTask(lockKey LockerKey, duration time.Duration, name string) *WithLockKeyTask {
+	task := &WithLockKeyTask{
+		baseTask:     newBaseTask(context.Background(), nil),
+		lockKey:      lockKey,
+		workDuration: duration,
+		newTime:      time.Now(),
+		name:         name,
+	}
+	return task
+}
+
+func (t *WithLockKeyTask) GetLockerKey() LockerKey {
+	return t.lockKey
+}
+
+func (t *WithLockKeyTask) Execute(ctx context.Context) error {
+	log.Info("execute task", zap.String("name", t.name), zap.Duration("duration", time.Since(t.newTime)))
+	time.Sleep(t.workDuration)
+	return nil
+}
+
+func TestExecuteTaskWithLock(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.RootCoordCfg.UseLockScheduler.Key, "true")
+	defer Params.Reset(Params.RootCoordCfg.UseLockScheduler.Key)
+	idMock := allocator.NewMockAllocator(t)
+	tsMock := mocktso.NewAllocator(t)
+	idMock.EXPECT().AllocOne().Return(1000, nil)
+	tsMock.EXPECT().GenerateTSO(mock.Anything).Return(10000, nil)
+	s := newScheduler(context.Background(), idMock, tsMock)
+	w := &sync.WaitGroup{}
+	w.Add(4)
+	{
+		go func() {
+			defer w.Done()
+			time.Sleep(1500 * time.Millisecond)
+			lockKey := NewLockerKeyChain(NewClusterLockerKey(false), NewDatabaseLockerKey("test", false))
+			t1 := NewWithLockKeyTask(lockKey, time.Second*2, "t1-1")
+			err := s.AddTask(t1)
+			assert.NoError(t, err)
+		}()
+	}
+	{
+		go func() {
+			defer w.Done()
+			time.Sleep(1500 * time.Millisecond)
+			lockKey := NewLockerKeyChain(NewClusterLockerKey(false), NewDatabaseLockerKey("test", false))
+			t1 := NewWithLockKeyTask(lockKey, time.Second*3, "t1-2")
+			err := s.AddTask(t1)
+			assert.NoError(t, err)
+		}()
+	}
+	{
+		go func() {
+			defer w.Done()
+			time.Sleep(500 * time.Millisecond)
+			lockKey := NewLockerKeyChain(NewClusterLockerKey(false), NewDatabaseLockerKey("test", true))
+			t2 := NewWithLockKeyTask(lockKey, time.Second*2, "t2")
+			err := s.AddTask(t2)
+			assert.NoError(t, err)
+		}()
+	}
+	{
+		go func() {
+			defer w.Done()
+			lockKey := NewLockerKeyChain(NewClusterLockerKey(true))
+			t3 := NewWithLockKeyTask(lockKey, time.Second, "t3")
+			err := s.AddTask(t3)
+			assert.NoError(t, err)
+		}()
+	}
+
+	startTime := time.Now()
+	w.Wait()
+	delta := time.Since(startTime)
+	assert.True(t, delta > 6*time.Second)
+	assert.True(t, delta < 8*time.Second)
 }

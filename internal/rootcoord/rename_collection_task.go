@@ -42,3 +42,9 @@ func (t *renameCollectionTask) Execute(ctx context.Context) error {
 	}
 	return t.core.meta.RenameCollection(ctx, t.Req.GetDbName(), t.Req.GetOldName(), t.Req.GetNewDBName(), t.Req.GetNewName(), t.GetTs())
 }
+
+func (t *renameCollectionTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(
+		NewClusterLockerKey(true),
+	)
+}
