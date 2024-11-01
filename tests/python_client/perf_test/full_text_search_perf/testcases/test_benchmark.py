@@ -9,6 +9,7 @@ from faker import Faker
 from utils.util_log import test_log as log
 import bm25s
 from tqdm import tqdm
+
 tqdm.disable = True
 
 from pymilvus import (
@@ -37,7 +38,10 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
     corpus_ids, corpus_lst = [], []
     for key, val in corpus.items():
         corpus_ids.append(key)
-        corpus_lst.append(val["title"] + " " + val["text"])
+        doc = val["title"] + " " + val["text"]
+        if len(doc) > 25536:
+            doc = doc[:25000]
+        corpus_lst.append(doc)
     qids, queries_lst = [], []
     for key, val in queries.items():
         qids.append(key)
@@ -261,20 +265,34 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("dataset",
-                             ["arguana", "climate-fever", "cqadupstack", "dbpedia-entity", "fever", "fiqa", "hotpotqa",
-                              "msmarco", "nfcorpus", "nq", "quora", "scidocs", "scifact", "trec-covid",
-                              "webis-touche2021"])
+                             [
+                                 "msmarco",
+                                 "trec-covid",
+                                 "nfcorpus",
+                                 "nq",
+                                 "hotpotqa",
+                                 "fiqa",
+                                 "arguana",
+                                 "webis-touche2020",
+                                 "quora",
+                                 "dbpedia-entity",
+                                 "scidocs",
+                                 "fever",
+                                 "climate-fever",
+                                 "scifact"
+                             ])
     def test_search_with_full_text_search(self, dataset, index_type, es_host, dataset_dir):
         self._connect()
         BASE_URL = f"https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{dataset}.zip"
         data_path = beir.util.download_and_unzip(BASE_URL, out_dir=dataset_dir)
         split = "test" if dataset != "msmarco" else "dev"
         corpus, queries, qrels = GenericDataLoader(data_folder=data_path).load(split=split)
-        collection_name = dataset.replace("-", "_") + "_full_text_search" # collection name should not contain "-"
+        collection_name = dataset.replace("-", "_") + "_full_text_search"  # collection name should not contain "-"
         top_k = 1000
         milvus_full_text_search_result = milvus_full_text_search(collection_name, corpus, queries, qrels,
                                                                  top_k=top_k, index_type=index_type)
-        es_full_text_search_result = es_full_text_search(corpus, queries, qrels, top_k=top_k, index_name=collection_name, hostname=es_host)
+        es_full_text_search_result = es_full_text_search(corpus, queries, qrels, top_k=top_k,
+                                                         index_name=collection_name, hostname=es_host)
         log.info(f"result for dataset {dataset}")
         log.info(f"milvus full text search result {milvus_full_text_search_result}")
         log.info(f"es full text search result {es_full_text_search_result}")

@@ -45,7 +45,7 @@ def setup_collection(environment):
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
             FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=25536,
-                        enable_tokenizer=True, tokenizer_params=tokenizer_params, ),
+                        enable_tokenizer=True, tokenizer_params=tokenizer_params, enable_match=True),
             FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="beir test collection")
@@ -58,7 +58,7 @@ def setup_collection(environment):
         )
         schema.add_function(bm25_function)
         collection = Collection(collection_name, schema)
-
+        collection.flush()
         # 创建索引
         collection.create_index(
             "sparse",
@@ -110,7 +110,7 @@ def on_test_start(environment, **_kwargs):
 
 def wait_for_setup(environment):
     """等待setup完成"""
-    timeout = 60  # 30秒超时
+    timeout = 30  #
     connections.connect(uri=environment.host)
     collection = Collection(environment.parsed_options.milvus_collection)
     is_loaded = len(collection.get_replicas().groups) > 0
@@ -167,21 +167,21 @@ class MilvusBaseUser(User):
     def wait_time(self):
         if self.target_throughput > 0:
             return constant_throughput(self.target_throughput)(self)
-        return 0
+        return 0.01
 
 
 class MilvusUser(MilvusBaseUser):
     """Main Milvus user class that defines the test tasks"""
 
     @tag('insert')
-    @task(4)
+    @task(2)
     def insert(self):
         """Insert random vectors"""
         batch_size = 1000
         data = [
             {
                 "id": int(time.time()*(10**6)),
-                "text": faker.text(max_nb_chars=25536),
+                "text": faker.text(max_nb_chars=300),
             }
             for _ in range(batch_size)
         ]
@@ -189,17 +189,27 @@ class MilvusUser(MilvusBaseUser):
         self.client.insert(data)
 
     @tag('search')
-    @task(2)
+    @task(0)
     def search(self):
         """Search for similar vectors"""
-        search_data = [faker.text(max_nb_chars=25536)]
+        search_data = [faker.text(max_nb_chars=300)]
         logger.debug("Performing vector search")
         self.client.search(data=search_data,
                            anns_field="sparse",
                            top_k=self.top_k)
 
+    @tag('query')
+    @task(2)
+    def query(self):
+        """Search for similar vectors"""
+        query_data = faker.sentence()
+        logger.debug("Performing  query")
+        expr = f"TextMatch(text, '{query_data}')"
+        # expr = f"id > 0"
+        self.client.query(expr=expr)
+
     @tag('delete')
-    @task(1)
+    @task(0)
     def delete(self):
         """delete random vectors"""
         _min = int((time.time()-60)*(10**6))
@@ -248,7 +258,7 @@ class MilvusORMClient:
             output_fields = ["id"]
         start = time.time()
         try:
-            self.collection.search(
+            res = self.collection.search(
                 data=data,
                 anns_field=anns_field,
                 param=param,
@@ -256,6 +266,10 @@ class MilvusORMClient:
                 output_fields=output_fields
             )
             total_time = (time.time() - start) * 1000
+            for r in res:
+                logger.info(f"Search result: {r}")
+                if len(r) == 0:
+                    raise Exception("Search result is empty")
             events.request.fire(
                 request_type=self.request_type,
                 name="Search",
@@ -268,6 +282,36 @@ class MilvusORMClient:
             events.request.fire(
                 request_type=self.request_type,
                 name="Search",
+                response_time=(time.time() - start) * 1000,
+                response_length=0,
+                exception=e
+            )
+
+    def query(self, expr, output_fields=None):
+        if output_fields is None:
+            output_fields = ["id"]
+        start = time.time()
+        try:
+            res = self.collection.query(
+                expr=expr,
+                output_fields=output_fields
+            )
+            total_time = (time.time() - start) * 1000
+            logger.debug(f"query result: {res}")
+            if len(res) == 0:
+                raise Exception("Query result is empty")
+            events.request.fire(
+                request_type=self.request_type,
+                name="Query",
+                response_time=total_time,
+                response_length=0,
+                exception=None
+            )
+        except Exception as e:
+            logger.error(f"Query error: {str(e)}")
+            events.request.fire(
+                request_type=self.request_type,
+                name="Query",
                 response_time=(time.time() - start) * 1000,
                 response_length=0,
                 exception=e
