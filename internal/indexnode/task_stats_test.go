@@ -66,7 +66,7 @@ func (s *TaskStatsSuite) SetupSubTest() {
 }
 
 func (s *TaskStatsSuite) GenSegmentWriterWithBM25(magic int64) {
-	segWriter, err := compaction.NewSegmentWriter(s.schema, 100, magic, s.partitionID, s.collectionID, []int64{102})
+	segWriter, err := compaction.NewSegmentWriter(s.schema, 100, statsBatchSize, magic, s.partitionID, s.collectionID, []int64{102})
 	s.Require().NoError(err)
 
 	v := storage.Value{

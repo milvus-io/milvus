@@ -651,7 +651,7 @@ func getRow(magic int64) map[int64]interface{} {
 }
 
 func (s *MixCompactionTaskSuite) initMultiRowsSegBuffer(magic, numRows, step int64) {
-	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 65535, magic, PartitionID, CollectionID, []int64{})
+	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 65535, compactionBatchSize, magic, PartitionID, CollectionID, []int64{})
 	s.Require().NoError(err)
 
 	for i := int64(0); i < numRows; i++ {
@@ -670,7 +670,7 @@ func (s *MixCompactionTaskSuite) initMultiRowsSegBuffer(magic, numRows, step int
 }
 
 func (s *MixCompactionTaskSuite) initSegBufferWithBM25(magic int64) {
-	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 100, magic, PartitionID, CollectionID, []int64{102})
+	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 100, compactionBatchSize, magic, PartitionID, CollectionID, []int64{102})
 	s.Require().NoError(err)
 
 	v := storage.Value{
@@ -686,7 +686,7 @@ func (s *MixCompactionTaskSuite) initSegBufferWithBM25(magic int64) {
 }
 
 func (s *MixCompactionTaskSuite) initSegBuffer(size int, seed int64) {
-	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 100, seed, PartitionID, CollectionID, []int64{})
+	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 100, compactionBatchSize, seed, PartitionID, CollectionID, []int64{})
 	s.Require().NoError(err)
 
 	for i := 0; i < size; i++ {
