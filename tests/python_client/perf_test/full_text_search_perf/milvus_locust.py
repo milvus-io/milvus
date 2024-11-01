@@ -35,7 +35,7 @@ def setup_collection(environment):
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
             FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=25536,
-                        enable_tokenizer=True, tokenizer_params=tokenizer_params),
+                        enable_tokenizer=True, tokenizer_params=tokenizer_params, enable_match=True),
             FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="beir test collection")
