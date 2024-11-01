@@ -148,16 +148,16 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     }
 
     const TargetBitmap
-    PrefixMatch(const std::string_view prefix);
+    PrefixMatch(const std::string_view prefix, bool reverse_result);
 
     const TargetBitmap
     Query(const DatasetPtr& dataset) override;
 
     const TargetBitmap
-    PatternMatch(const std::string& pattern) override {
+    PatternMatch(const std::string& pattern, bool reverse_result) override {
         PatternMatchTranslator translator;
         auto regex_pattern = translator(pattern);
-        return RegexQuery(regex_pattern);
+        return RegexQuery(regex_pattern, reverse_result);
     }
 
     bool
@@ -171,7 +171,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     }
 
     const TargetBitmap
-    RegexQuery(const std::string& regex_pattern) override;
+    RegexQuery(const std::string& regex_pattern, bool reverse_result) override;
 
  protected:
     void

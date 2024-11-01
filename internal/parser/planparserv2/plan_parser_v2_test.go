@@ -189,14 +189,44 @@ func TestExpr_Like(t *testing.T) {
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
-	exprStrs := []string{
-		`VarCharField like "prefix%"`,
-		`VarCharField like "equal"`,
-		`JSONField["A"] like "name*"`,
-		`$meta["A"] like "name*"`,
+	testcases := []struct {
+		exprStr string
+		opType  planpb.OpType
+	}{
+		// like
+		{`VarCharField like "prefix%"`, planpb.OpType_PrefixMatch},
+		{`VarCharField like "prefix_"`, planpb.OpType_PrefixMatch},
+		// currently suffix is translated to `OpType_Match`
+		{`VarCharField like "%suffix"`, planpb.OpType_Match},
+		{`VarCharField like "_suffix"`, planpb.OpType_Match},
+		{`VarCharField like "equal"`, planpb.OpType_Equal},
+		{`JSONField["A"] like "name*"`, planpb.OpType_Equal},
+		// `*` is not wildcard character
+		{`JSONField["A"] like "*"`, planpb.OpType_Equal},
+		{`$meta["A"] like "name*"`, planpb.OpType_Equal},
+
+		// not like
+		{`VarCharField not like "prefix%"`, planpb.OpType_PrefixNotMatch},
+		{`VarCharField not like "prefix_"`, planpb.OpType_PrefixNotMatch},
+		// currently suffix is translated to `OpType_Match`
+		{`VarCharField !like "%suffix"`, planpb.OpType_NotMatch},
+		{`VarCharField ! LIKE "_suffix"`, planpb.OpType_NotMatch},
+		{`VarCharField not LIKE "equal"`, planpb.OpType_NotEqual},
+		{`JSONField["A"] not like "name*"`, planpb.OpType_NotEqual},
+		{`$meta["A"] not   like "name*"`, planpb.OpType_NotEqual},
+
+		// actually always true
+		{`$meta["A"] like "%"`, planpb.OpType_PrefixMatch},
+		{`$meta["A"] like "%%%"`, planpb.OpType_PrefixMatch},
+		{`$meta["A"] like "_"`, planpb.OpType_PrefixMatch},
 	}
-	for _, exprStr := range exprStrs {
-		assertValidExpr(t, helper, exprStr)
+	for _, testcase := range testcases {
+		expr, err := ParseExpr(helper, testcase.exprStr, nil)
+		assert.NoError(t, err, testcase.exprStr)
+		assert.NotNil(t, expr, testcase.exprStr)
+		unaryRangeExpr := expr.GetUnaryRangeExpr()
+		assert.NotNil(t, unaryRangeExpr, testcase.exprStr)
+		assert.Equal(t, testcase.opType, unaryRangeExpr.GetOp(), testcase.exprStr)
 	}
 
 	// TODO: enable these after regex-match is supported.
@@ -464,9 +494,24 @@ func TestExpr_Combinations(t *testing.T) {
 		`Int64Field > 0 && VarCharField > "0"`,
 		`Int64Field < 0 && VarCharField < "0"`,
 		`A > 50 or B < 40`,
+		`not VarCharField like "xxx"`,
+		`not VarCharField not like "%"`,
+		`not not not VarCharField not like "xxx"`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
+	}
+
+	for _, exprStr := range []string{`not VarCharField not like "xxx"`, `not (VarCharField not like "xxx")`} {
+		expr, err := ParseExpr(helper, exprStr, nil)
+		assert.NoError(t, err, exprStr)
+		assert.NotNil(t, expr, exprStr)
+		unaryExpr := expr.GetUnaryExpr()
+		assert.NotNil(t, unaryExpr, exprStr)
+		assert.Equal(t, planpb.UnaryExpr_Not, unaryExpr.GetOp())
+		likeExpr := unaryExpr.GetChild().GetUnaryRangeExpr()
+		assert.NotNil(t, likeExpr, exprStr)
+		assert.Equal(t, planpb.OpType_NotEqual, likeExpr.GetOp())
 	}
 }
 

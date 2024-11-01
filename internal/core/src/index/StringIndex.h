@@ -38,13 +38,21 @@ class StringIndex : public ScalarIndex<std::string> {
         auto op = dataset->Get<OpType>(OPERATOR_TYPE);
         if (op == OpType::PrefixMatch) {
             auto prefix = dataset->Get<std::string>(PREFIX_VALUE);
-            return PrefixMatch(prefix);
+            return PrefixMatch(prefix, false);
+        }
+        if (op == OpType::PrefixNotMatch) {
+            auto prefix = dataset->Get<std::string>(PREFIX_VALUE);
+            return PrefixMatch(prefix, true);
         }
         return ScalarIndex<std::string>::Query(dataset);
     }
 
+    /**
+     * reverse_result: support both `like` and `not like`.
+     * If reverse_result is true, return the result of `not like`.
+     */
     virtual const TargetBitmap
-    PrefixMatch(const std::string_view prefix) = 0;
+    PrefixMatch(const std::string_view prefix, bool reverse_result) = 0;
 };
 using StringIndexPtr = std::unique_ptr<StringIndex>;
 }  // namespace milvus::index

@@ -629,14 +629,17 @@ test_string() {
         {
             ASSERT_TRUE(real_index->SupportRegexQuery());
             auto prefix = data[0];
-            auto bitset = real_index->RegexQuery(prefix + "(.|\n)*");
-            ASSERT_EQ(cnt, bitset.size());
-            for (size_t i = 0; i < bitset.size(); i++) {
-                auto should = boost::starts_with(data[i], prefix);
-                if (nullable && !valid_data[i]) {
-                    should = false;
+            for (bool reverse_result : {true, false}) {
+                auto bitset =
+                    real_index->RegexQuery(prefix + "(.|\n)*", reverse_result);
+                ASSERT_EQ(cnt, bitset.size());
+                for (size_t i = 0; i < bitset.size(); i++) {
+                    auto should = boost::starts_with(data[i], prefix);
+                    if (nullable && !valid_data[i]) {
+                        should = false;
+                    }
+                    ASSERT_EQ(bitset[i], should == !reverse_result);
                 }
-                ASSERT_EQ(bitset[i], should);
             }
         }
     }

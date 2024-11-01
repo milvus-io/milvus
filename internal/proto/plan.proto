@@ -18,7 +18,10 @@ enum OpType {
   Range = 10;       // for case 1 < a < b
   In = 11;          // TODO:: used for term expr
   NotIn = 12;
-  TextMatch = 13;   // text match
+  TextMatch = 13;       // text match
+  PrefixNotMatch = 14;  // not startsWith
+  PostfixNotMatch = 15; // not endsWith
+  NotMatch = 16;        // not like
 };
 
 enum ArithOpType {

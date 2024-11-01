@@ -24,7 +24,7 @@ If you want to run single test case, you could execute command like this example
 cd [milvus-folder]
 source scripts/setenv.sh
 cd tests/integration/[testcase-folder]/
-go test -run "$testCaseName^" -testify.m "$subTestifyCaseName^" -race -v
+go test -run "$testCaseName^" -testify.m "$subTestifyCaseName^" -race -v -tags dynamic,test
 ```
 
 ## Recommended coding style for add new cases
@@ -32,7 +32,7 @@ go test -run "$testCaseName^" -testify.m "$subTestifyCaseName^" -race -v
 
 ### Using `suite`
 
-MiniCluster` and `MiniClusterSuite` provides lots of comment preset tool function to execute intergration test.
+`MiniCluster` and `MiniClusterSuite` provides lots of comment preset tool function to execute intergration test.
 
 It is recommend to add a new test with `testify/suite`
 

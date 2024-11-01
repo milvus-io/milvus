@@ -589,34 +589,40 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("nested path expression run successfully")
 
-	expr = `D like "name-%"`
-	checkFunc = func(result *milvuspb.SearchResults) {
-		s.Equal(1, len(result.Results.FieldsData))
-		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
-		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
-	}
-	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("like expression run successfully")
-
-	expr = `D like "name-11"`
-	checkFunc = func(result *milvuspb.SearchResults) {
-		s.Equal(1, len(result.Results.FieldsData))
-		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
-		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		s.Equal(1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
-	}
-	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("like expression run successfully")
-
-	expr = `A like "10"`
-	checkFunc = func(result *milvuspb.SearchResults) {
-		for _, topk := range result.GetResults().GetTopks() {
-			s.Zero(topk)
+	for _, testcase := range []struct {
+		expr     string
+		expected int
+	}{
+		{`D like "name-%"`, 10},
+		{`D not like "name-%"`, 0},
+		{`not D like "name-%"`, 0},
+		{`not D not like "name-%"`, 10},
+		{`D like "name-11"`, 1},
+		{`D not like "name-11"`, 10},
+		{`not D like "name-11"`, 10},
+		// for json field, `not ... like ...` is not equal to `... not like ...`
+		{`not A like "13"`, 10},
+		{`A not like "13"`, 0},
+	} {
+		checkFunc = func(result *milvuspb.SearchResults) {
+			s.Equal(1, len(result.Results.FieldsData), testcase.expr)
+			s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName(), testcase.expr)
+			s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType(), testcase.expr)
+			s.Equal(testcase.expected, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()), testcase.expr)
 		}
+		s.doSearch(collectionName, []string{fieldName}, testcase.expr, dim, checkFunc)
+		log.Info("like expression run successfully", zap.String("expr", testcase.expr))
 	}
-	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("like expression run successfully")
+
+	for _, expr := range []string{`A like "10"`, `A not like "10"`} {
+		checkFunc = func(result *milvuspb.SearchResults) {
+			for _, topk := range result.GetResults().GetTopks() {
+				s.Zero(topk, expr)
+			}
+		}
+		s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
+		log.Info("like expression run successfully", zap.String("expr", expr))
+	}
 
 	expr = `str1 like 'abc\\"def-%'`
 	checkFunc = func(result *milvuspb.SearchResults) {

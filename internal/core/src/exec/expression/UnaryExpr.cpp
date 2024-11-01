@@ -15,8 +15,17 @@
 // limitations under the License.
 
 #include "UnaryExpr.h"
-#include <optional>
+#include <cstdint>
+#include <functional>
+#include <string>
+
+#include "common/EasyAssert.h"
+#include "common/Types.h"
 #include "common/Json.h"
+#include "common/RegexQuery.h"
+#include "index/Meta.h"
+#include "index/ScalarIndex.h"
+#include "query/Utils.h"
 
 namespace milvus {
 namespace exec {
@@ -251,6 +260,81 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
 }
 
+#define UnaryArrayCompare(cmp)                                          \
+    do {                                                                \
+        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {    \
+            res[i] = false;                                             \
+        } else {                                                        \
+            if (index >= src[i].length()) {                             \
+                res[i] = false;                                         \
+                continue;                                               \
+            }                                                           \
+            auto array_data = src[i].template get_data<GetType>(index); \
+            res[i] = (cmp);                                             \
+        }                                                               \
+    } while (false)
+
+template <typename ValueType, proto::plan::OpType op>
+struct UnaryElementFuncForArray {
+    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
+                                       std::string_view,
+                                       ValueType>;
+    void
+    operator()(const ArrayView* src,
+               const bool* valid_data,
+               size_t size,
+               ValueType val,
+               int index,
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
+        for (int i = 0; i < size; ++i) {
+            if (valid_data != nullptr && !valid_data[i]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if constexpr (op == proto::plan::OpType::Equal) {
+                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                    res[i] = src[i].is_same_array(val);
+                } else {
+                    if (index >= src[i].length()) {
+                        res[i] = false;
+                        continue;
+                    }
+                    auto array_data = src[i].template get_data<GetType>(index);
+                    res[i] = array_data == val;
+                }
+            } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                    res[i] = !src[i].is_same_array(val);
+                } else {
+                    if (index >= src[i].length()) {
+                        res[i] = false;
+                        continue;
+                    }
+                    auto array_data = src[i].template get_data<GetType>(index);
+                    res[i] = array_data != val;
+                }
+            } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+                UnaryArrayCompare(array_data > val);
+            } else if constexpr (op == proto::plan::OpType::LessThan) {
+                UnaryArrayCompare(array_data < val);
+            } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+                UnaryArrayCompare(array_data >= val);
+            } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                UnaryArrayCompare(array_data <= val);
+            } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
+                                 op == proto::plan::OpType::PrefixNotMatch) {
+                UnaryArrayCompare(milvus::query::Match(array_data, val, op));
+            } else {
+                PanicInfo(OpTypeInvalid,
+                          "unsupported op_type:{} for "
+                          "UnaryElementFuncForArray",
+                          op);
+            }
+        }
+    }
+};
+
 template <typename ValueType>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray() {
@@ -320,6 +404,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray() {
                 func(data, valid_data, size, val, index, res, valid_res);
                 break;
             }
+            case proto::plan::PrefixNotMatch: {
+                UnaryElementFuncForArray<ValueType, proto::plan::PrefixNotMatch>
+                    func;
+                func(data, valid_data, size, val, index, res, valid_res);
+                break;
+            }
             default:
                 PanicInfo(
                     OpTypeInvalid,
@@ -380,7 +470,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(bool reverse) {
                 };
             } else {
                 auto size_per_chunk = segment_->size_per_chunk();
-                retrieve = [ size_per_chunk, this ](int64_t offset) -> auto {
+                retrieve = [size_per_chunk, this](int64_t offset) -> auto {
                     auto chunk_idx = offset / size_per_chunk;
                     auto chunk_offset = offset % size_per_chunk;
                     const auto& chunk =
@@ -447,6 +537,88 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(bool reverse) {
     return batch_res;
 }
 
+#define UnaryRangeJSONCompare(cmp)                             \
+    do {                                                       \
+        auto x = data[i].template at<GetType>(pointer);        \
+        if (x.error()) {                                       \
+            if constexpr (std::is_same_v<GetType, int64_t>) {  \
+                auto x = data[i].template at<double>(pointer); \
+                res[i] = !x.error() && (cmp);                  \
+                break;                                         \
+            }                                                  \
+            res[i] = false;                                    \
+            break;                                             \
+        }                                                      \
+        res[i] = (cmp);                                        \
+    } while (false)
+
+// If the types are different, then the comparison
+// is always false (NotEqual is true).
+#define UnaryRangeJSONCompareNotEqual(cmp)                     \
+    do {                                                       \
+        auto x = data[i].template at<GetType>(pointer);        \
+        if (x.error()) {                                       \
+            if constexpr (std::is_same_v<GetType, int64_t>) {  \
+                auto x = data[i].template at<double>(pointer); \
+                res[i] = x.error() || (cmp);                   \
+                break;                                         \
+            }                                                  \
+            res[i] = true;                                     \
+            break;                                             \
+        }                                                      \
+        res[i] = (cmp);                                        \
+    } while (false)
+
+template <typename ValueType, proto::plan::OpType op>
+struct UnaryElementFuncForJson {
+    static_assert(op == proto::plan::OpType::GreaterThan ||
+                      op == proto::plan::OpType::LessThan ||
+                      op == proto::plan::OpType::GreaterEqual ||
+                      op == proto::plan::OpType::LessEqual ||
+                      op == proto::plan::OpType::PrefixMatch,
+                  "unsupported op_type for UnaryElementFuncForJson");
+
+    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
+                                       std::string_view,
+                                       ValueType>;
+    void
+    operator()(const milvus::Json* data,
+               const bool* valid_data,
+               std::string pointer,
+               size_t size,
+               ValueType val,
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
+        for (size_t i = 0; i < size; ++i) {
+            if (valid_data != nullptr && !valid_data[i]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                res[i] = false;
+            } else {
+                if constexpr (op == proto::plan::OpType::GreaterThan) {
+                    UnaryRangeJSONCompare(x.value() > val);
+                } else if constexpr (op == proto::plan::OpType::LessThan) {
+                    UnaryRangeJSONCompare(x.value() < val);
+                } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+                    UnaryRangeJSONCompare(x.value() >= val);
+                } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                    UnaryRangeJSONCompare(x.value() <= val);
+                } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
+                    UnaryRangeJSONCompare(
+                        milvus::query::Match(ValueType(x.value()), val, op));
+                } else {
+                    PanicInfo(OpTypeInvalid,
+                              "unsupported op_type:{} for "
+                              "UnaryElementFuncForJson",
+                              op);
+                }
+            }
+        }
+    }
+};
+
 template <typename ExprValueType>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
@@ -468,97 +640,37 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
     auto op_type = expr_->op_type_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
-#define UnaryRangeJSONCompare(cmp)                             \
-    do {                                                       \
-        auto x = data[i].template at<GetType>(pointer);        \
-        if (x.error()) {                                       \
-            if constexpr (std::is_same_v<GetType, int64_t>) {  \
-                auto x = data[i].template at<double>(pointer); \
-                res[i] = !x.error() && (cmp);                  \
-                break;                                         \
-            }                                                  \
-            res[i] = false;                                    \
-            break;                                             \
-        }                                                      \
-        res[i] = (cmp);                                        \
-    } while (false)
-
-#define UnaryRangeJSONCompareNotEqual(cmp)                     \
-    do {                                                       \
-        auto x = data[i].template at<GetType>(pointer);        \
-        if (x.error()) {                                       \
-            if constexpr (std::is_same_v<GetType, int64_t>) {  \
-                auto x = data[i].template at<double>(pointer); \
-                res[i] = x.error() || (cmp);                   \
-                break;                                         \
-            }                                                  \
-            res[i] = true;                                     \
-            break;                                             \
-        }                                                      \
-        res[i] = (cmp);                                        \
-    } while (false)
-
-    auto execute_sub_batch = [op_type, pointer](const milvus::Json* data,
-                                                const bool* valid_data,
-                                                const int size,
-                                                TargetBitmapView res,
-                                                TargetBitmapView valid_res,
-                                                ExprValueType val) {
+    auto execute_sub_batch = [op_type, pointer = std::move(pointer)](
+                                 const milvus::Json* data,
+                                 const bool* valid_data,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 ExprValueType val) {
         switch (op_type) {
             case proto::plan::GreaterThan: {
-                for (size_t i = 0; i < size; ++i) {
-                    if (valid_data != nullptr && !valid_data[i]) {
-                        res[i] = valid_res[i] = false;
-                        continue;
-                    }
-                    if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                        res[i] = false;
-                    } else {
-                        UnaryRangeJSONCompare(x.value() > val);
-                    }
-                }
+                UnaryElementFuncForJson<ExprValueType, proto::plan::GreaterThan>
+                    func;
+                func(data, valid_data, pointer, size, val, res, valid_res);
                 break;
             }
             case proto::plan::GreaterEqual: {
-                for (size_t i = 0; i < size; ++i) {
-                    if (valid_data != nullptr && !valid_data[i]) {
-                        res[i] = valid_res[i] = false;
-                        continue;
-                    }
-                    if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                        res[i] = false;
-                    } else {
-                        UnaryRangeJSONCompare(x.value() >= val);
-                    }
-                }
+                UnaryElementFuncForJson<ExprValueType,
+                                        proto::plan::GreaterEqual>
+                    func;
+                func(data, valid_data, pointer, size, val, res, valid_res);
                 break;
             }
             case proto::plan::LessThan: {
-                for (size_t i = 0; i < size; ++i) {
-                    if (valid_data != nullptr && !valid_data[i]) {
-                        res[i] = valid_res[i] = false;
-                        continue;
-                    }
-                    if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                        res[i] = false;
-                    } else {
-                        UnaryRangeJSONCompare(x.value() < val);
-                    }
-                }
+                UnaryElementFuncForJson<ExprValueType, proto::plan::LessThan>
+                    func;
+                func(data, valid_data, pointer, size, val, res, valid_res);
                 break;
             }
             case proto::plan::LessEqual: {
-                for (size_t i = 0; i < size; ++i) {
-                    if (valid_data != nullptr && !valid_data[i]) {
-                        res[i] = valid_res[i] = false;
-                        continue;
-                    }
-                    if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                        res[i] = false;
-                    } else {
-                        UnaryRangeJSONCompare(x.value() <= val);
-                    }
-                }
+                UnaryElementFuncForJson<ExprValueType, proto::plan::LessEqual>
+                    func;
+                func(data, valid_data, pointer, size, val, res, valid_res);
                 break;
             }
             case proto::plan::Equal: {
@@ -591,7 +703,9 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
                         auto doc = data[i].doc();
                         auto array = doc.at_pointer(pointer).get_array();
                         if (array.error()) {
-                            res[i] = false;
+                            // If the types are different, then the comparison
+                            // is always false (NotEqual is true).
+                            res[i] = true;
                             continue;
                         }
                         res[i] = !CompareTwoJsonArray(array, val);
@@ -602,15 +716,23 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
                 break;
             }
             case proto::plan::PrefixMatch: {
+                UnaryElementFuncForJson<ExprValueType, proto::plan::PrefixMatch>
+                    func;
+                func(data, valid_data, pointer, size, val, res, valid_res);
+                break;
+            }
+            case proto::plan::PrefixNotMatch: {
                 for (size_t i = 0; i < size; ++i) {
                     if (valid_data != nullptr && !valid_data[i]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                        res[i] = false;
+                        // If the types are different, then the comparison
+                        // is always false (PrefixNotMatch is true).
+                        res[i] = true;
                     } else {
-                        UnaryRangeJSONCompare(milvus::query::Match(
+                        UnaryRangeJSONCompareNotEqual(!milvus::query::Match(
                             ExprValueType(x.value()), val, op_type));
                     }
                 }
@@ -630,6 +752,26 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
                     } else {
                         UnaryRangeJSONCompare(
                             matcher(ExprValueType(x.value())));
+                    }
+                }
+                break;
+            }
+            case proto::plan::NotMatch: {
+                PatternMatchTranslator translator;
+                auto regex_pattern = translator(val);
+                RegexMatcher matcher(regex_pattern);
+                for (size_t i = 0; i < size; ++i) {
+                    if (valid_data != nullptr && !valid_data[i]) {
+                        res[i] = valid_res[i] = false;
+                        continue;
+                    }
+                    if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                        // If the types are different, then the comparison
+                        // is always false (NotMatch is true).
+                        res[i] = true;
+                    } else {
+                        UnaryRangeJSONCompareNotEqual(
+                            !matcher(ExprValueType(x.value())));
                     }
                 }
                 break;
@@ -664,6 +806,88 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl() {
         return ExecRangeVisitorImplForData<T>();
     }
 }
+
+template <typename T, proto::plan::OpType op>
+struct UnaryIndexFuncForMatch {
+    static_assert(op == proto::plan::OpType::Match ||
+                      op == proto::plan::OpType::NotMatch,
+                  "unsupported op_type for UnaryIndexFuncForMatch");
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
+    using Index = index::ScalarIndex<IndexInnerType>;
+    TargetBitmap
+    operator()(Index* index, IndexInnerType val) {
+        if constexpr (!std::is_same_v<T, std::string_view> &&
+                      !std::is_same_v<T, std::string>) {
+            PanicInfo(Unsupported, "regex query is only supported on string");
+        } else {
+            if (index->SupportRegexQuery()) {
+                return index->PatternMatch(val, op == proto::plan::NotMatch);
+            }
+            if (!index->HasRawData()) {
+                PanicInfo(Unsupported,
+                          "index don't support regex query and don't have "
+                          "raw data");
+            }
+
+            // retrieve raw data to do brute force query, may be very slow.
+            auto cnt = index->Count();
+            TargetBitmap res(cnt);
+            PatternMatchTranslator translator;
+            auto regex_pattern = translator(val);
+            RegexMatcher matcher(regex_pattern);
+            for (int64_t i = 0; i < cnt; i++) {
+                auto raw = index->Reverse_Lookup(i);
+                if (!raw.has_value()) {
+                    res[i] = false;
+                    continue;
+                }
+                if constexpr (op == proto::plan::Match) {
+                    res[i] = matcher(raw.value());
+                } else {  // op == proto::plan::NotMatch
+                    res[i] = !matcher(raw.value());
+                }
+            }
+            return res;
+        }
+    }
+};
+
+template <typename T, proto::plan::OpType op>
+struct UnaryIndexFunc {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
+    using Index = index::ScalarIndex<IndexInnerType>;
+    TargetBitmap
+    operator()(Index* index, IndexInnerType val) {
+        if constexpr (op == proto::plan::OpType::Equal) {
+            return index->In(1, &val);
+        } else if constexpr (op == proto::plan::OpType::NotEqual) {
+            return index->NotIn(1, &val);
+        } else if constexpr (op == proto::plan::OpType::GreaterThan ||
+                             op == proto::plan::OpType::LessThan ||
+                             op == proto::plan::OpType::GreaterEqual ||
+                             op == proto::plan::OpType::LessEqual) {
+            return index->Range(val, op);
+        } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
+                             op == proto::plan::OpType::PrefixNotMatch) {
+            auto dataset = std::make_unique<Dataset>();
+            dataset->Set(milvus::index::OPERATOR_TYPE, op);
+            dataset->Set(milvus::index::PREFIX_VALUE, val);
+            return index->Query(std::move(dataset));
+        } else if constexpr (op == proto::plan::OpType::Match ||
+                             op == proto::plan::OpType::NotMatch) {
+            UnaryIndexFuncForMatch<T, op> func;
+            return func(index, val);
+        } else {
+            PanicInfo(
+                OpTypeInvalid,
+                fmt::format("unsupported op_type:{} for UnaryIndexFunc", op));
+        }
+    }
+};
 
 template <typename T>
 VectorPtr
@@ -716,6 +940,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
             }
             case proto::plan::PrefixMatch: {
                 UnaryIndexFunc<T, proto::plan::PrefixMatch> func;
+                res = std::move(func(index_ptr, val));
+                break;
+            }
+            case proto::plan::PrefixNotMatch: {
+                UnaryIndexFunc<T, proto::plan::PrefixNotMatch> func;
                 res = std::move(func(index_ptr, val));
                 break;
             }
@@ -798,6 +1027,115 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow() {
     return nullptr;
 }
 
+template <typename T, proto::plan::OpType op>
+struct UnaryElementFuncForMatch {
+    static_assert(op == proto::plan::OpType::Match ||
+                      op == proto::plan::OpType::NotMatch,
+                  "unsupported op_type for UnaryElementFuncForMatch");
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
+
+    void
+    operator()(const T* src,
+               size_t size,
+               IndexInnerType val,
+               TargetBitmapView res) {
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(val);
+        RegexMatcher matcher(regex_pattern);
+        for (int i = 0; i < size; ++i) {
+            if constexpr (op == proto::plan::OpType::Match) {
+                res[i] = matcher(src[i]);
+            } else if constexpr (op == proto::plan::OpType::NotMatch) {
+                res[i] = !matcher(src[i]);
+            } else {
+                PanicInfo(
+                    OpTypeInvalid,
+                    fmt::format(
+                        "unsupported op_type:{} for UnaryElementFuncForMatch",
+                        op));
+            }
+        }
+    }
+};
+
+template <typename T, proto::plan::OpType op>
+struct UnaryElementFunc {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
+    void
+    operator()(const T* src,
+               size_t size,
+               IndexInnerType val,
+               TargetBitmapView res) {
+        if constexpr (op == proto::plan::OpType::Match ||
+                      op == proto::plan::OpType::NotMatch) {
+            UnaryElementFuncForMatch<T, op> func;
+            func(src, size, val, res);
+            return;
+        }
+
+        /*
+        // This is the original code, keep it for the documentation purposes
+        for (int i = 0; i < size; ++i) {
+            if constexpr (op == proto::plan::OpType::Equal) {
+                res[i] = src[i] == val;
+            } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                res[i] = src[i] != val;
+            } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+                res[i] = src[i] > val;
+            } else if constexpr (op == proto::plan::OpType::LessThan) {
+                res[i] = src[i] < val;
+            } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+                res[i] = src[i] >= val;
+            } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                res[i] = src[i] <= val;
+            } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
+                res[i] = milvus::query::Match(
+                    src[i], val, proto::plan::OpType::PrefixMatch);
+            } else {
+                PanicInfo(
+                    OpTypeInvalid,
+                    fmt::format("unsupported op_type:{} for UnaryElementFunc",
+                                op));
+            }
+        }
+        */
+
+        // TODO: OpType::PostMatch
+        if constexpr (op == proto::plan::OpType::PrefixMatch ||
+                      op == proto::plan::OpType::PrefixNotMatch) {
+            for (int i = 0; i < size; ++i) {
+                res[i] = milvus::query::Match(src[i], val, op);
+            }
+        } else if constexpr (op == proto::plan::OpType::Equal) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::EQ>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::NotEqual) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::NE>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::GT>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::LessThan) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::LT>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::GE>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::LessEqual) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::LE>(
+                src, size, val);
+        } else {
+            PanicInfo(
+                OpTypeInvalid,
+                fmt::format("unsupported op_type:{} for UnaryElementFunc", op));
+        }
+    }
+};
+
 template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData() {
@@ -863,6 +1201,16 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData() {
             }
             case proto::plan::Match: {
                 UnaryElementFunc<T, proto::plan::Match> func;
+                func(data, size, val, res);
+                break;
+            }
+            case proto::plan::PrefixNotMatch: {
+                UnaryElementFunc<T, proto::plan::PrefixNotMatch> func;
+                func(data, size, val, res);
+                break;
+            }
+            case proto::plan::NotMatch: {
+                UnaryElementFunc<T, proto::plan::NotMatch> func;
                 func(data, size, val, res);
                 break;
             }

@@ -2709,10 +2709,10 @@ class TestQueryString(TestcaseBase):
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
                                                              primary_field=ct.default_string_field_name)[0:2]
         res = vectors[0].iloc[:1, :3].to_dict('records')
-        expression = 'varchar like "0%"'
-        output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
-        collection_w.query(expression, output_fields=output_fields,
-                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+        for expression in ['varchar like "0%"', 'not varchar not like "0%"']:
+            output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
+            collection_w.query(expression, output_fields=output_fields,
+                               check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_bitmap_alter_offset_cache_param(self):
