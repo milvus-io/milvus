@@ -66,17 +66,19 @@ res = client.search(
 
 Milvus is designed to handle vectors, which are numerical representations of unstructured data, together with other scalar data types such as integers, strings, and JSON objects. Users can store scalar data with vectors to conduct vector search with metadata filtering.
 
-* **High performance and horizontal scalability**:
+* **High performance and horizontal scalability**
   *  Milvus provides sub-ten millisecond search latency at scale. For detailed performance, checkout [VectorDBBench](https://zilliz.com/vector-database-benchmark-tool).
 
-* **Intuitive API and rich SDK support**:
+* **Intuitive API and rich SDK support**
   * Milvus implements easy-to-use API for vector search, data query, ingestion, update and collection management.
 In addition to RESTful and gRPC API, Milvus also provides SDK in [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java), [Go](https://github.com/milvus-io/milvus-sdk-go), [C++](https://github.com/milvus-io/milvus-sdk-cpp), [Node.js](https://github.com/milvus-io/milvus-sdk-node), [Rust](https://github.com/milvus-io/milvus-sdk-rust), [C#](https://github.com/milvus-io/milvus-sdk-csharp)
 
 
-* **High availability**:
+* **High availability**
   * Milvus is highly available thanks to its fully-distributed architecture. To learn more, check [Milvus Architecture Overview](https://milvus.io/docs/architecture_overview.md).
-**Various Index Types Support**
+
+* **Various Index Types Support**
+  * Milvus supports all major vector index types, including IVF, HNSW, FLAT (brute-force), DiskANN, GPU Index and quantization-based variations.
 
 * **Efficient Metadata Filtering**
   * Milvus has various optimizations to make vector search efficient when combined with metadata filtering, especially at high filtering rate, where post-filtering doesn't work, [VectorDBBench](https://zilliz.com/vector-database-benchmark-tool) shows the performance.
