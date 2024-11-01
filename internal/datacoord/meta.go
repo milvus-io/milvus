@@ -727,17 +727,14 @@ func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID))
 
-			modPack.segments[segmentID] = &SegmentInfo{
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:            segmentID,
-					CollectionID:  collectionID,
-					PartitionID:   partitionID,
-					InsertChannel: channel,
-					NumOfRows:     0,
-					State:         commonpb.SegmentState_Flushed,
-					Level:         datapb.SegmentLevel_L0,
-				},
-			}
+			modPack.segments[segmentID] = NewSegmentInfo(&datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  collectionID,
+				PartitionID:   partitionID,
+				InsertChannel: channel,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L0,
+			})
 			modPack.metricMutation.addNewSeg(commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0, false, 0)
 		}
 		return true
