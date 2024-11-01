@@ -106,7 +106,7 @@ func (s *ReplicaTestSuit) TestNodeDownOnSingleReplica() {
 			case <-stopSearchCh:
 				log.Info("stop search")
 				return
-			case <-time.After(time.Second):
+			default:
 				expr := fmt.Sprintf("%s > 0", integration.Int64Field)
 				nq := 10
 				topk := 10
@@ -131,9 +131,8 @@ func (s *ReplicaTestSuit) TestNodeDownOnSingleReplica() {
 
 	// stop qn in single replica expected got search failures
 	qn.Stop()
-	s.Eventually(func() bool {
-		return failCounter.Load() > 0
-	}, 30*time.Second, 1*time.Second)
+	time.Sleep(10 * time.Second)
+	s.True(failCounter.Load() > 0)
 
 	close(stopSearchCh)
 }
@@ -176,7 +175,7 @@ func (s *ReplicaTestSuit) TestNodeDownOnMultiReplica() {
 			case <-stopSearchCh:
 				log.Info("stop search")
 				return
-			case <-time.After(time.Second):
+			default:
 				expr := fmt.Sprintf("%s > 0", integration.Int64Field)
 				nq := 10
 				topk := 10

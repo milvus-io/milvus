@@ -569,6 +569,15 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	})
 	deltaPositions := req.GetDeltaPositions()
 
+	for _, info := range infos {
+		candidate := idCandidates[info.GetSegmentID()]
+		// forward l0 deletion
+		err := sd.forwardL0Deletion(ctx, info, req, candidate, targetNodeID, worker)
+		if err != nil {
+			return err
+		}
+	}
+
 	sd.deleteMut.RLock()
 	defer sd.deleteMut.RUnlock()
 	// apply buffered delete for new segments
@@ -596,12 +605,6 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			deleteScope = querypb.DataScope_Historical
 		case commonpb.SegmentState_Growing:
 			deleteScope = querypb.DataScope_Streaming
-		}
-
-		// forward l0 deletion
-		err := sd.forwardL0Deletion(ctx, info, req, candidate, targetNodeID, worker)
-		if err != nil {
-			return err
 		}
 
 		deleteData := &storage.DeleteData{}
