@@ -7,12 +7,16 @@ grpc_gevent.init_gevent()
 from locust import User, FastHttpUser, events, task, constant_throughput, tag
 from locust.runners import MasterRunner, WorkerRunner
 from locust.env import Environment
-from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility, MilvusClient
+from pymilvus import (connections, Collection, FieldSchema, CollectionSchema, DataType, FunctionType,
+                      Function, utility, MilvusClient)
 import numpy as np
 import random
 import time
 import logging
 import os
+from faker import Faker
+faker = Faker()
+
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -31,35 +35,44 @@ def setup_collection(environment):
         # 建立连接
         connections.connect(uri=environment.host)
 
-        # 定义 collection schema
+        has = utility.has_collection(collection_name)
+        if has:
+            logger.info(f"Collection {collection_name} already exists, will drop it")
+            utility.drop_collection(collection_name)
+        tokenizer_params = {
+            "tokenizer": "default"
+        }
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=dim)
+            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=25536,
+                        enable_tokenizer=True, tokenizer_params=tokenizer_params, ),
+            FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
-        schema = CollectionSchema(fields=fields, description="test collection")
-
-        # 如果collection已存在则删除
-        if utility.has_collection(collection_name):
-            logger.info(f"Dropping existing collection: {collection_name}")
-            utility.drop_collection(collection_name)
-
-        # 创建collection
-        logger.info(f"Creating new collection: {collection_name}")
-        collection = Collection(name=collection_name, schema=schema)
+        schema = CollectionSchema(fields=fields, description="beir test collection")
+        bm25_function = Function(
+            name="text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["sparse"],
+            params={},
+        )
+        schema.add_function(bm25_function)
+        collection = Collection(collection_name, schema)
 
         # 创建索引
-        index_params = {
-            "metric_type": "L2",
-            "index_type": "IVF_FLAT",
-            "params": {"nlist": nlist}
-        }
-        logger.info("Creating index...")
-        collection.create_index("vector", index_params)
+        collection.create_index(
+            "sparse",
+            {
+                "index_type": "SPARSE_INVERTED_INDEX",
+                "metric_type": "BM25",
+                "params": {
+                    "bm25_k1": 1.5,
+                    "bm25_b": 0.75,
+                }
+            }
+        )
         collection.load()
         logger.info("Collection setup completed successfully")
-
-        # 存储setup状态
-        environment.setup_completed = True
 
     except Exception as e:
         logger.error(f"Failed to setup collection: {str(e)}")
@@ -136,7 +149,6 @@ class MilvusBaseUser(User):
         logger.debug("Starting MilvusBaseUser setup")
         connections.connect(uri=self.environment.host)
         self._init_client()
-        # self._setup_collection()
 
     def _init_client(self):
         """Initialize the appropriate client based on mode"""
@@ -147,39 +159,7 @@ class MilvusBaseUser(User):
         self.client = MilvusORMClient(self.environment)
         # else:
         #     self.client = MilvusClientWrapper(self.environment)
-
-    def _setup_collection(self):
-        """Setup the collection with fields and index"""
-        logger.debug(f"Setting up collection: {self.collection_name}")
-
-        # Setup connection first
-        connections.connect(uri=self.environment.host)
-
-        # Define fields and schema
-        self.fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=self.dim)
-        ]
-        self.schema = CollectionSchema(fields=self.fields, description="test collection")
-
-        # Create or recreate collection
-        if utility.has_collection(self.collection_name):
-            logger.debug(f"Dropping existing collection: {self.collection_name}")
-            utility.drop_collection(self.collection_name)
-
-        logger.debug(f"Creating new collection: {self.collection_name}")
-        self.collection = Collection(name=self.collection_name, schema=self.schema)
-
-        # Create IVF_FLAT index
-        index_params = {
-            "metric_type": "L2",
-            "index_type": "IVF_FLAT",
-            "params": {"nlist": self.nlist}
-        }
-        logger.debug("Creating index")
-        self.collection.create_index("vector", index_params)
-        self.collection.load()
-        logger.debug("Collection setup complete")
+        self.collection = Collection(self.collection_name)
 
     def _random_vector(self):
         return np.random.random([self.dim]).tolist()
@@ -195,22 +175,39 @@ class MilvusUser(MilvusBaseUser):
 
     @tag('insert')
     @task(4)
-    def insert_vectors(self):
+    def insert(self):
         """Insert random vectors"""
-        num_vectors = 100
-        vectors = [self._random_vector() for _ in range(num_vectors)]
-        ids = [random.randint(0, 1000000) for _ in range(num_vectors)]
+        batch_size = 1000
+        data = [
+            {
+                "id": int(time.time()*(10**6)),
+                "text": faker.text(max_nb_chars=25536),
+            }
+            for _ in range(batch_size)
+        ]
 
-        logger.debug(f"Inserting {num_vectors} vectors")
-        self.client.insert(vectors=vectors, ids=ids)
+        self.client.insert(data)
 
     @tag('search')
     @task(2)
-    def search_vectors(self):
+    def search(self):
         """Search for similar vectors"""
-        search_vector = self._random_vector()
+        search_data = [faker.text(max_nb_chars=25536)]
         logger.debug("Performing vector search")
-        self.client.search(vector=search_vector, top_k=self.top_k)
+        self.client.search(data=search_data,
+                           anns_field="sparse",
+                           top_k=self.top_k)
+
+    @tag('delete')
+    @task(1)
+    def delete(self):
+        """delete random vectors"""
+        _min = int((time.time()-60)*(10**6))
+        _max = int((time.time()-30)*(10**6))
+
+        expr = f"id >= {_min} and id <= {_max}"
+
+        self.client.delete(expr)
 
 
 class MilvusORMClient:
@@ -220,19 +217,18 @@ class MilvusORMClient:
         logger.debug("Initializing MilvusORMClient")
         self.request_type = "ORM"
         self.collection_name = environment.parsed_options.milvus_collection
+        self.collection = Collection(self.collection_name)
 
-    def insert(self, vectors, ids):
+    def insert(self, data):
         start = time.time()
         try:
-            logger.debug(f"ORM Insert: {len(vectors)} vectors")
-            collection = Collection(self.collection_name)
-            collection.insert([ids, vectors])
+            self.collection.insert(data)
             total_time = (time.time() - start) * 1000
             events.request.fire(
                 request_type=self.request_type,
                 name="Insert",
                 response_time=total_time,
-                response_length=len(vectors),
+                response_length=0,
                 exception=None
             )
         except Exception as e:
@@ -245,24 +241,26 @@ class MilvusORMClient:
                 exception=e
             )
 
-    def search(self, vector, top_k):
+    def search(self, data, anns_field, top_k, param=None, output_fields=None):
+        if param is None:
+            param = {}
+        if output_fields is None:
+            output_fields = ["id"]
         start = time.time()
         try:
-            logger.debug(f"ORM Search: top_k={top_k}")
-            collection = Collection(self.collection_name)
-            result = collection.search(
-                data=[vector],
-                anns_field="vector",
-                param={"metric_type": "L2", "params": {"nprobe": 10}},
+            self.collection.search(
+                data=data,
+                anns_field=anns_field,
+                param=param,
                 limit=top_k,
-                output_fields=["id"]
+                output_fields=output_fields
             )
             total_time = (time.time() - start) * 1000
             events.request.fire(
                 request_type=self.request_type,
                 name="Search",
                 response_time=total_time,
-                response_length=len(result[0]),
+                response_length=0,
                 exception=None
             )
         except Exception as e:
@@ -270,6 +268,28 @@ class MilvusORMClient:
             events.request.fire(
                 request_type=self.request_type,
                 name="Search",
+                response_time=(time.time() - start) * 1000,
+                response_length=0,
+                exception=e
+            )
+
+    def delete(self, expr):
+        start = time.time()
+        try:
+            self.collection.delete(expr)
+            total_time = (time.time() - start) * 1000
+            events.request.fire(
+                request_type=self.request_type,
+                name="Delete",
+                response_time=total_time,
+                response_length=0,
+                exception=None
+            )
+        except Exception as e:
+            logger.error(f"Delete error: {str(e)}")
+            events.request.fire(
+                request_type=self.request_type,
+                name="Delete",
                 response_time=(time.time() - start) * 1000,
                 response_length=0,
                 exception=e
