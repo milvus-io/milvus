@@ -997,7 +997,6 @@ func Test_JSONContains(t *testing.T) {
 		`JSON_contains(JSONField, 5)`,
 		`json_contains(A, [1,2,3])`,
 		`array_contains(A, [1,2,3])`,
-		`array_contains(ArrayField, [1,2,3])`,
 		`array_contains(ArrayField, 1)`,
 		`json_contains(JSONField, 5)`,
 		`json_contains($meta, 1)`,
@@ -1030,6 +1029,8 @@ func Test_InvalidJSONContains(t *testing.T) {
 		`json_contains(A, StringField > 5)`,
 		`json_contains(A)`,
 		`json_contains(A, 5, C)`,
+		`json_contains(ArrayField, "abc")`,
+		`json_contains(ArrayField, [1,2])`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -1135,7 +1136,7 @@ func Test_JSONContainsAll(t *testing.T) {
 		`JSON_CONTAINS_ALL(A, [1,"2",3.0])`,
 		`array_contains_all(ArrayField, [1,2,3])`,
 		`array_contains_all(ArrayField, [1])`,
-		`json_contains_all(ArrayField, [1,2,3])`,
+		`array_contains_all(ArrayField, [1,2,3])`,
 	}
 	for _, expr = range exprs {
 		plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -1179,8 +1180,6 @@ func Test_JSONContainsAny(t *testing.T) {
 		`json_contains_any(A, [1,2,3])`,
 		`json_contains_any(A, [1,"2",3.0])`,
 		`JSON_CONTAINS_ANY(A, [1,"2",3.0])`,
-		`JSON_CONTAINS_ANY(ArrayField, [1,2,3])`,
-		`JSON_CONTAINS_ANY(ArrayField, [3,4,5])`,
 		`JSON_CONTAINS_ANY(ArrayField, [1,2,3])`,
 	}
 	for _, expr = range exprs {

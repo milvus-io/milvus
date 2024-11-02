@@ -665,7 +665,11 @@ func checkContainsElement(columnExpr *ExprWithType, op planpb.JSONContainsExpr_J
 	if typeutil.IsArrayType(columnExpr.expr.GetColumnExpr().GetInfo().GetDataType()) {
 		var elements []*planpb.GenericValue
 		if op == planpb.JSONContainsExpr_Contains {
-			elements = []*planpb.GenericValue{elementValue}
+			castedValue, err := castValue(columnExpr.expr.GetColumnExpr().GetInfo().GetElementType(), elementValue)
+			if err != nil {
+				return err
+			}
+			elements = []*planpb.GenericValue{castedValue}
 		} else {
 			elements = elementValue.GetArrayVal().GetArray()
 		}
