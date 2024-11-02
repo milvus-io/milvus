@@ -572,13 +572,13 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		//    |     |  |  |          |     |
 		//    \     |  /  \          /     |
 		//     \    | /    \        /      |
-		//       [13u]      [14i, 15u]    12i
-		//        |         |     |        |
-		//        \         /     \        /
-		//         \       /       \      /
-		//           [16u]          [17u]
+		//       [13u]      [14i, 15u]    12i                       [19u](unsorted)
+		//        |         |     |        |                              |
+		//        \         /     \        /                              |
+		//         \       /       \      /                               |
+		//           [16u]          [17u]       [18u](unsorted)     [20u](sorted)      [21i](unsorted)
 		// all leaf nodes are [1,2,3,4,5,6,7], but because segment3 has been gced, the leaf node becomes [7,8,9,10,4,5,6]
-		// should be returned: flushed: [7, 8, 9, 10, 4, 5, 6]
+		// should be returned: flushed: [7, 8, 9, 10, 4, 5, 6, 20, 21], growing: [18]
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
@@ -860,10 +860,91 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg17))
 		assert.NoError(t, err)
+		seg18 := &datapb.SegmentInfo{
+			ID:            18,
+			CollectionID:  0,
+			PartitionID:   0,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+			DmlPosition: &msgpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+			NumOfRows:      2048,
+			CompactionFrom: []int64{},
+			IsInvisible:    true,
+			IsSorted:       false,
+		}
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg18))
+		assert.NoError(t, err)
+		seg19 := &datapb.SegmentInfo{
+			ID:            19,
+			CollectionID:  0,
+			PartitionID:   0,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Dropped,
+			Level:         datapb.SegmentLevel_L1,
+			DmlPosition: &msgpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+			NumOfRows:      2048,
+			CompactionFrom: []int64{},
+			IsInvisible:    true,
+			IsSorted:       false,
+		}
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg19))
+		assert.NoError(t, err)
+		seg20 := &datapb.SegmentInfo{
+			ID:            20,
+			CollectionID:  0,
+			PartitionID:   0,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+			DmlPosition: &msgpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+			NumOfRows:      2048,
+			CompactionFrom: []int64{19},
+			IsInvisible:    false,
+			IsSorted:       true,
+		}
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg20))
+		assert.NoError(t, err)
+		seg21 := &datapb.SegmentInfo{
+			ID:            21,
+			CollectionID:  0,
+			PartitionID:   0,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+			DmlPosition: &msgpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+			NumOfRows:      100,
+			CompactionFrom: []int64{},
+			IsInvisible:    false,
+			IsSorted:       false,
+		}
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg21))
+		assert.NoError(t, err)
 
 		vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
-		assert.ElementsMatch(t, []int64{7, 8, 9, 10, 4, 5, 6}, vchan.FlushedSegmentIds)
-		assert.ElementsMatch(t, []int64{1, 2}, vchan.DroppedSegmentIds)
+		assert.ElementsMatch(t, []int64{7, 8, 9, 10, 4, 5, 6, 20, 21}, vchan.FlushedSegmentIds)
+		assert.ElementsMatch(t, []int64{18}, vchan.UnflushedSegmentIds)
+		assert.ElementsMatch(t, []int64{1, 2, 19}, vchan.DroppedSegmentIds)
 	})
 }
 

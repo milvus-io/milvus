@@ -791,7 +791,7 @@ func UpdateCompactedOperator(segmentID int64) UpdateOperator {
 	}
 }
 
-func UpdateSegmentVisible(segmentID int64) UpdateOperator {
+func SetSegmentInvisible(segmentID int64, invisible bool) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
@@ -799,7 +799,7 @@ func UpdateSegmentVisible(segmentID int64) UpdateOperator {
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
-		segment.IsInvisible = false
+		segment.IsInvisible = invisible
 		return true
 	}
 }
@@ -1979,6 +1979,11 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 	// metrics mutation for compaction from segments
 	updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 
+	resultInvisible := oldSegment.GetIsInvisible()
+	if oldSegment.GetLevel() == datapb.SegmentLevel_L1 {
+		resultInvisible = false
+	}
+
 	segmentInfo := &datapb.SegmentInfo{
 		CollectionID:              oldSegment.GetCollectionID(),
 		PartitionID:               oldSegment.GetPartitionID(),
@@ -1994,7 +1999,7 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 		LastLevel:                 oldSegment.GetLastLevel(),
 		PartitionStatsVersion:     oldSegment.GetPartitionStatsVersion(),
 		LastPartitionStatsVersion: oldSegment.GetLastPartitionStatsVersion(),
-		IsInvisible:               oldSegment.GetIsInvisible(),
+		IsInvisible:               resultInvisible,
 		ID:                        result.GetSegmentID(),
 		NumOfRows:                 result.GetNumRows(),
 		Binlogs:                   result.GetInsertLogs(),

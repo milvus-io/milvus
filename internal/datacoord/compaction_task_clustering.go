@@ -431,7 +431,7 @@ func (t *clusteringCompactionTask) processIndexing() error {
 func (t *clusteringCompactionTask) markResultSegmentsVisible() error {
 	var operators []UpdateOperator
 	for _, segID := range t.GetTaskProto().GetResultSegments() {
-		operators = append(operators, UpdateSegmentVisible(segID))
+		operators = append(operators, SetSegmentInvisible(segID, false))
 		operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(segID, t.GetTaskProto().GetPlanID()))
 	}
 
