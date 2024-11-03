@@ -927,7 +927,7 @@ func TestIndexNotExistName(t *testing.T) {
 
 	// drop index with not exist field name
 	errDrop := mc.DropIndex(ctx, client.NewDropIndexOption(schema.CollectionName, "aaa"))
-	common.CheckErr(t, errDrop, true)
+	common.CheckErr(t, errDrop, false, "index not found")
 }
 
 // test create float / binary / sparse vector index on non-vector field
@@ -1117,7 +1117,7 @@ func TestDropIndex(t *testing.T) {
 
 	// drop index with field name
 	errDrop := mc.DropIndex(ctx, client.NewDropIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName))
-	common.CheckErr(t, errDrop, true)
+	common.CheckErr(t, errDrop, false, "index not found")
 	descIdx, err = mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, idxName))
 	common.CheckErr(t, err, true)
 	common.CheckIndex(t, descIdx, index.NewGenericIndex(idxName, idx.Params()), common.TNewCheckIndexOpt(common.DefaultNb))

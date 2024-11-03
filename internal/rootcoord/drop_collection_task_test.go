@@ -111,7 +111,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 			},
 		}
 		err := task.Execute(context.Background())
-		assert.NoError(t, err)
+		assert.Equal(t, merr.ErrCollectionNotFound, err)
 		task.Req.CollectionName = collectionName + "_test"
 		err = task.Execute(context.Background())
 		assert.Error(t, err)

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func Test_dropPartitionTask_Prepare(t *testing.T) {
@@ -105,7 +106,7 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 			collMeta: coll.Clone(),
 		}
 		err := task.Execute(context.Background())
-		assert.NoError(t, err)
+		assert.Equal(t, merr.ErrPartitionNotFound, err)
 	})
 
 	t.Run("failed to expire cache", func(t *testing.T) {

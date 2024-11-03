@@ -123,8 +123,11 @@ func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *tes
 	common.CheckErr(t, err, true)
 
 	t.Cleanup(func() {
-		err := mc.DropCollection(ctx, clientv2.NewDropCollectionOption(schema.CollectionName))
-		common.CheckErr(t, err, true)
+		exists, _ := mc.HasCollection(ctx, clientv2.NewHasCollectionOption(schema.CollectionName))
+		if exists {
+			err = mc.DropCollection(ctx, clientv2.NewDropCollectionOption(schema.CollectionName))
+			common.CheckErr(t, err, true)
+		}
 	})
 	return chainTask, schema
 }

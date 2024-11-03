@@ -138,7 +138,7 @@ func TestDropPartitionInvalid(t *testing.T) {
 	common.CheckErr(t, errDrop, false, "collection not found")
 
 	errDrop1 := mc.DropPartition(ctx, client.NewDropPartitionOption(schema.CollectionName, "aaa"))
-	common.CheckErr(t, errDrop1, true)
+	common.CheckErr(t, errDrop1, false, "partition not found")
 
 	err := mc.DropPartition(ctx, client.NewDropPartitionOption(schema.CollectionName, common.DefaultPartition))
 	common.CheckErr(t, err, false, "default partition cannot be deleted")

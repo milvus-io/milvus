@@ -1089,7 +1089,7 @@ class TestDropCollectionNegative(TestBase):
             "collectionName": invalid_name,
         }
         rsp = client.collection_drop(payload)
-        assert rsp['code'] == 0
+        assert rsp['code'] == 100
 
 
 @pytest.mark.L0
