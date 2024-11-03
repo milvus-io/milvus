@@ -1894,7 +1894,7 @@ class TestSearchVector(TestBase):
         # create a collection
         dim = 128
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         name = gen_collection_name()
         fields = [
@@ -2731,7 +2731,7 @@ class TestQueryVector(TestBase):
         # create a collection
         dim = 128
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         name = gen_collection_name()
         fields = [

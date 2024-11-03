@@ -11,14 +11,12 @@ use crate::{
 #[no_mangle]
 pub extern "C" fn tantivy_create_tokenizer(tokenizer_params: *const c_char) -> *mut c_void {
     init_log();
-    let analyzer = unsafe {
-        let params = c_str_to_str(tokenizer_params).to_string();
-        create_tokenizer(&params)
-    };
+    let params = unsafe{c_str_to_str(tokenizer_params).to_string()};
+    let analyzer = create_tokenizer(&params);
     match analyzer {
         Ok(text_analyzer) => create_binding(text_analyzer),
         Err(err) => {
-            log::warn!("create tokenizer failed with error: {}", err.to_string());
+            log::warn!("create tokenizer failed with error: {} param: {}", err.to_string(), params);
             std::ptr::null_mut()
         },
     }

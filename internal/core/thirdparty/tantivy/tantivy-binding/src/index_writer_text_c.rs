@@ -22,10 +22,8 @@ pub extern "C" fn tantivy_create_text_writer(
     let field_name_str = unsafe { CStr::from_ptr(field_name).to_str().unwrap() };
     let path_str = unsafe { CStr::from_ptr(path).to_str().unwrap() };
     let tokenizer_name_str = unsafe { CStr::from_ptr(tokenizer_name).to_str().unwrap() };
-    let analyzer = unsafe {
-        let params = c_str_to_str(tokenizer_params).to_string();
-        create_tokenizer(&params)
-    };
+    let params = unsafe{c_str_to_str(tokenizer_params).to_string()};
+    let analyzer = create_tokenizer(&params);
     match analyzer {
         Ok(text_analyzer) => {
             let wrapper = IndexWriterWrapper::create_text_writer(
@@ -40,7 +38,7 @@ pub extern "C" fn tantivy_create_text_writer(
             create_binding(wrapper)
         }
         Err(err) => {
-            log::warn!("create tokenizer failed with error: {} param: {}", err.to_string(), unsafe{c_str_to_str(tokenizer_params).to_string()});
+            log::warn!("create tokenizer failed with error: {} param: {}", err.to_string(), params);
             std::ptr::null_mut()
         },
     }

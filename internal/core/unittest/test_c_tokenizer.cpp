@@ -47,7 +47,7 @@ set_cmap(CMap m, const std::string& key, const std::string& value) {
 }
 
 TEST(CTokenizer, Default) {
-    auto tokenizer_params = R"({"analyzer":{"tokenizer": "standard"}})";
+    auto tokenizer_params = R"({"tokenizer": "standard"})";
     CTokenizer tokenizer;
     {
         auto status = create_tokenizer(tokenizer_params, &tokenizer);

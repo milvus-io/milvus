@@ -10,7 +10,7 @@ import (
 func TestTokenizer(t *testing.T) {
 	// default tokenizer.
 	{
-		m := "{\"analyzer\":{\"tokenizer\": \"standard\"}}"
+		m := "{\"tokenizer\": \"standard\"}"
 		tokenizer, err := NewTokenizer(m)
 		assert.NoError(t, err)
 		defer tokenizer.Destroy()
@@ -24,7 +24,7 @@ func TestTokenizer(t *testing.T) {
 
 	// jieba tokenizer.
 	{
-		m := "{\"analyzer\":{\"tokenizer\": \"jieba\"}}"
+		m := "{\"tokenizer\": \"jieba\"}"
 		tokenizer, err := NewTokenizer(m)
 		assert.NoError(t, err)
 		defer tokenizer.Destroy()

@@ -4453,7 +4453,7 @@ class TestQueryTextMatch(TestcaseBase):
         expected: text match successfully and result is correct
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -4724,21 +4724,16 @@ class TestQueryTextMatch(TestcaseBase):
         expected: get the correct token, text match successfully and result is correct
         """
         tokenizer_params = {
-            "analyzer": {
                 "tokenizer": "standard",
                 # "lowercase", "asciifolding", "alphanumonly" was system filter
-                "filter":["lowercase", "asciifolding", "alphanumonly", "my_stop_filter", "my_stemmer"],
-            },
-            "filter": {
-                "my_stop_filter":{
+                "filter":["lowercase", "asciifolding", "alphanumonly",
+                {
                     "type": "stop",
                     "stop_words": ["in", "of"],
-                },
-                "my_stemmer":{
+                }, {
                     "type": "stemmer",
                     "language": "english",
-                }
-            }
+                }],
         }
         dim = 128
         fields = [
@@ -4849,7 +4844,7 @@ class TestQueryTextMatch(TestcaseBase):
         expected: query successfully and result is correct
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": "standard"},
+            "tokenizer": "standard",
         }
         # 1. initialize with data
         dim = 128
@@ -4963,7 +4958,7 @@ class TestQueryTextMatch(TestcaseBase):
         expected: query successfully and result is correct
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": "standard"},
+            "tokenizer": "standard",
         }
         # 1. initialize with data
         dim = 128
@@ -5106,7 +5101,7 @@ class TestQueryTextMatch(TestcaseBase):
 
         # 1. initialize with data
         tokenizer_params = {
-            "analyzer":{"tokenizer": "standard"},
+            "tokenizer": "standard",
         }
         # 1. initialize with data
         dim = 128
@@ -5251,7 +5246,7 @@ class TestQueryTextMatch(TestcaseBase):
         # 1. initialize with data
         fake_en = Faker("en_US")
         tokenizer_params = {
-            "analyzer":{"tokenizer": "standard"},
+            "tokenizer": "standard",
         }
         dim = 128
         default_fields = [
@@ -5478,7 +5473,7 @@ class TestQueryTextMatch(TestcaseBase):
         """
         # 1. initialize with data
         tokenizer_params = {
-            "analyzer":{"tokenizer": "standard"},
+            "tokenizer": "standard",
         }
         # 1. initialize with data
         dim = 128
@@ -5737,7 +5732,7 @@ class TestQueryTextMatchNegative(TestcaseBase):
         expected: create collection failed and return error
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": "Unsupported"},
+            "tokenizer": "Unsupported",
         }
         dim = 128
         default_fields = [

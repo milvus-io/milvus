@@ -29,10 +29,8 @@ pub extern "C" fn tantivy_register_tokenizer(
     init_log();
     let real = ptr as *mut IndexReaderWrapper;
     let tokenizer_name_str = unsafe { CStr::from_ptr(tokenizer_name) };
-    let analyzer = unsafe {
-        let params = c_str_to_str(tokenizer_params).to_string();
-        create_tokenizer(&params)
-    };
+    let params = unsafe{c_str_to_str(tokenizer_params).to_string()};
+    let analyzer = create_tokenizer(&params);
     match analyzer {
         Ok(text_analyzer) => unsafe {
             (*real).register_tokenizer(
@@ -41,7 +39,7 @@ pub extern "C" fn tantivy_register_tokenizer(
             );
         },
         Err(err) => {
-            panic!("create tokenizer failed with error: {}", err.to_string());
+            panic!("create tokenizer failed with error: {} param: {}", err.to_string(), params);
         },
     }
 }

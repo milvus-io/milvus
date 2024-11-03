@@ -2,6 +2,7 @@ use tantivy::tokenizer::*;
 use serde_json as json;
 
 use crate::error::TantivyError;
+use crate::util::*;
 
 pub(crate) enum SystemFilter{
     Invalid,
@@ -44,20 +45,12 @@ fn get_length_filter(params: &json::Map<String, json::Value>) -> Result<SystemFi
     Ok(SystemFilter::Length(RemoveLongFilter::limit(limit)))
 }
 
-fn get_stop_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, TantivyError>{
+fn get_stop_words_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, TantivyError>{
     let value = params.get("stop_words");
-    if value.is_none() || !value.unwrap().is_array(){
-        return Err("stop_words should be array".into())
+    if value.is_none(){
+        return Err("stop filter stop_words can't be empty".into());
     }
-
-    let stop_words= value.unwrap().as_array().unwrap();
-    let mut str_list = Vec::<String>::new();
-    for element in stop_words{
-        match element.as_str(){
-            Some(word) => str_list.push(word.to_string()),
-            None => return Err("stop words item should be string".into())
-        }
-    };
+    let str_list = get_string_list(value.unwrap(), "stop_words filter")?;
     Ok(SystemFilter::Stop(StopWordFilter::remove(str_list)))
 }
 
@@ -67,7 +60,7 @@ fn get_decompounder_filter(params: &json::Map<String, json::Value>)-> Result<Sys
         return Err("decompounder word list should be array".into())
     }
 
-    let stop_words= value.unwrap().as_array().unwrap();
+    let stop_words = value.unwrap().as_array().unwrap();
     let mut str_list = Vec::<String>::new();
     for element in stop_words{
         match element.as_str(){
@@ -149,7 +142,7 @@ impl TryFrom<&json::Map<String, json::Value>> for SystemFilter {
 
                 match value.as_str().unwrap(){
                     "length" => get_length_filter(params),
-                    "stop" => get_stop_filter(params),
+                    "stop" => get_stop_words_filter(params),
                     "decompounder" => get_decompounder_filter(params),
                     "stemmer" => get_stemmer_filter(params),
                     other=> Err(format!("unsupport filter type: {}", other).into()),

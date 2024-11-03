@@ -33,7 +33,7 @@ func TestValidateTextSchema(t *testing.T) {
 			DataType: schemapb.DataType_VarChar,
 			TypeParams: []*commonpb.KeyValuePair{
 				{Key: "enable_match", Value: "true"},
-				{Key: "tokenizer_params", Value: `{"analyzer":{"tokenizer": "standard"}}`},
+				{Key: "tokenizer_params", Value: `{"tokenizer": "standard"}`},
 			},
 		},
 		{
@@ -41,7 +41,7 @@ func TestValidateTextSchema(t *testing.T) {
 			DataType: schemapb.DataType_VarChar,
 			TypeParams: []*commonpb.KeyValuePair{
 				{Key: "enable_match", Value: "true"},
-				{Key: "tokenizer_params", Value: `{"analyzer":{"tokenizer": "standard"}}`},
+				{Key: "tokenizer_params", Value: `{"tokenizer": "standard"}`},
 			},
 		},
 	}

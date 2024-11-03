@@ -5,9 +5,20 @@ use serde_json as json;
 
 use crate::tokenizer_filter::*;
 use crate::error::TantivyError;
+use crate::util::*;
 
-pub(crate) fn standard_analyzer() -> TextAnalyzer {
-    standard_builder().build()
+
+// default build-in analyzer
+pub(crate) fn standard_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
+    let builder = standard_builder()
+        .filter(LowerCaser)
+        .filter(RemoveLongFilter::limit(40));
+
+    if stop_words.len() > 0{
+        return builder.filter(StopWordFilter::remove(stop_words)).build();
+    }
+
+    builder.build()
 }
 
 fn standard_builder() -> TextAnalyzerBuilder{
@@ -122,14 +133,44 @@ impl AnalyzerBuilder<'_>{
                     }
                     builder = builder.filter_dynamic(RemoveLongFilter::limit(value.as_u64().unwrap() as usize));
                 }
-                other => return Err(format!("unknown key of tokenizer option: {}", other).into()),
+                other => return Err(format!("unknown analyzer option key: {}", other).into()),
             }
         }
         Ok(builder)
     }
 
+    fn build_template(self, type_: &str)-> Result<TextAnalyzer, TantivyError>{
+        match type_{
+            "standard" => {
+                let value = self.params.get("stop_words");
+                match value{
+                    Some(value)=>{
+                        let str_list = get_string_list(value, "filter stop_words")?;
+                        Ok(standard_analyzer(str_list))
+                    }
+                    None => Ok(standard_analyzer(vec![]))
+                }                
+            },
+            other_ => Err(format!("unknown build-in analyzer type: {}", other_).into())
+        }
+    } 
+
     fn build(mut self) -> Result<TextAnalyzer, TantivyError>{
-        let tokenizer_name = self.get_tokenizer_name()?;      
+        // build base build-in analyzer
+        match self.params.get("type"){
+            Some(type_) =>{
+                if !type_.is_string(){
+                    return Err(format!("analyzer type shoud be string").into())
+                }
+                return self.build_template(type_.as_str().unwrap());
+            },
+            None => {}
+        };
+
+        //build custom analyzer
+        let tokenizer_name = self.get_tokenizer_name()?; 
+
+        // jieba analyzer can't add filter.     
         if tokenizer_name == "jieba"{
             return Ok(tantivy_jieba::JiebaTokenizer{}.into());
         }
@@ -142,15 +183,11 @@ impl AnalyzerBuilder<'_>{
     }
 }
 
-pub(crate) fn create_tokenizer(params: &String) -> Result<TextAnalyzer, TantivyError> {
-    if params.len()==0{
-        return Ok(standard_analyzer());
-    }
-
+pub(crate) fn create_tokenizer_with_filter(params: &String) -> Result<TextAnalyzer, TantivyError> {
     match json::from_str::<json::Value>(&params){
         Ok(value) =>{
             if value.is_null(){
-                return Ok(standard_analyzer());
+                return Ok(standard_analyzer(vec![]));
             }
             if !value.is_object(){
                 return Err("tokenizer params should be a json map".into());
@@ -160,7 +197,7 @@ pub(crate) fn create_tokenizer(params: &String) -> Result<TextAnalyzer, TantivyE
             // create builder
             let analyzer_params=json_params.get("analyzer");
             if analyzer_params.is_none(){
-                return Ok(standard_analyzer());
+                return Ok(standard_analyzer(vec![]));
             }
             if !analyzer_params.unwrap().is_object(){
                 return Err("analyzer params should be a json map".into());
@@ -180,13 +217,20 @@ pub(crate) fn create_tokenizer(params: &String) -> Result<TextAnalyzer, TantivyE
     }
 }
 
+pub(crate) fn create_tokenizer(params: &String) -> Result<TextAnalyzer, TantivyError> {
+    if params.len()==0{
+        return Ok(standard_analyzer(vec![]));
+    }
+    create_tokenizer_with_filter(&format!("{{\"analyzer\":{}}}", params))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::tokenizer::create_tokenizer;
 
     #[test]
     fn test_create_tokenizer() {
-        let params = r#"{"analyzer": {"tokenizer": "standard"}}"#;
+        let params = r#"{"tokenizer": "standard"}"#;
 
         let tokenizer = create_tokenizer(&params.to_string());
         assert!(tokenizer.is_ok());
@@ -194,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_jieba_tokenizer() {
-        let params = r#"{"analyzer": {"tokenizer": "jieba"}}"#;
+        let params = r#"{"tokenizer": "jieba"}"#;
 
         let tokenizer = create_tokenizer(&params.to_string());
         assert!(tokenizer.is_ok());

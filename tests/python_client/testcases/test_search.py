@@ -13302,7 +13302,7 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
         expected: text match successfully and result is correct
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [

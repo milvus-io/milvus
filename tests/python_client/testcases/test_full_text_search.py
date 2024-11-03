@@ -41,7 +41,7 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
         expected: create collection successfully
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -105,7 +105,7 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
         expected: create collection successfully and create again successfully
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -183,7 +183,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         expected: create collection failed
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -249,7 +249,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         expected: create collection failed
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": "standard"},
+            "tokenizer": "standard",
         }
         dim = 128
         fields = [
@@ -327,7 +327,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         expected: create collection failed
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": "standard"},
+            "tokenizer": "standard",
         }
         dim = 128
         fields = [
@@ -406,7 +406,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         expected: insert successfully and count is correct
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -552,7 +552,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         expected: insert successfully and count is correct
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -700,7 +700,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 2. query count and verify the result
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -842,7 +842,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         """
 
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -999,7 +999,7 @@ class TestInsertWithFullTextSearchNegative(TestcaseBase):
         """
 
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -1100,7 +1100,7 @@ class TestUpsertWithFullTextSearch(TestcaseBase):
         expected: upsert successfully and data is updated
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -1270,7 +1270,7 @@ class TestUpsertWithFullTextSearchNegative(TestcaseBase):
         expected: upsert failed
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -1412,7 +1412,7 @@ class TestDeleteWithFullTextSearch(TestcaseBase):
         expected: delete successfully and data is deleted
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -1576,7 +1576,7 @@ class TestCreateIndexWithFullTextSearch(TestcaseBase):
         expected: create index successfully and index info is correct
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         empty_percent = 0.0
         dim = 128
@@ -1699,7 +1699,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         expected: create index failed
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         empty_percent = 0.0
         dim = 128
@@ -1807,7 +1807,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         expected: create index failed
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         empty_percent = 0.0
         dim = 128
@@ -1915,7 +1915,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         expected: create index failed
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         empty_percent = 0.0
         dim = 128
@@ -2011,7 +2011,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         expected: create index failed
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         empty_percent = 0.0
         dim = 128
@@ -2134,7 +2134,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         expected: full text search successfully and result is correct
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -2328,9 +2328,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         expected: full text search successfully and result is correct
         """
         tokenizer_params = {
-            "analyzer":{
                 "tokenizer": tokenizer,
-            }
         }
         dim = 128
         fields = [
@@ -2524,7 +2522,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         expected: full text search successfully and result is correct
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -2689,7 +2687,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         expected: full text search successfully and result is correct
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -2843,7 +2841,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
         expected: full text search successfully but result is empty
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -2972,7 +2970,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
         expected: full text search failed and return error
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -3119,7 +3117,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
         expected: hybrid search successfully and result is correct
         """
         tokenizer_params = {
-            "analyzer":{"tokenizer": tokenizer},
+            "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
