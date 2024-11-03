@@ -1397,7 +1397,7 @@ class TextMatchChecker(Checker):
         self.c_wrap.load(replica_number=replica_number)  # do load before query
         self.insert_data()
         key_word = self.word_freq.most_common(1)[0][0]
-        self.term_expr = f"TextMatch({self.text_field_name}, '{key_word}')"
+        self.term_expr = f"TEXT_MATCH({self.text_field_name}, '{key_word}')"
 
     @trace()
     def query(self):
@@ -1408,7 +1408,7 @@ class TextMatchChecker(Checker):
     @exception_handler()
     def run_task(self):
         key_word = self.word_freq.most_common(1)[0][0]
-        self.term_expr = f"TextMatch({self.text_field_name}, '{key_word}')"
+        self.term_expr = f"TEXT_MATCH({self.text_field_name}, '{key_word}')"
         res, result = self.query()
         return res, result
 
