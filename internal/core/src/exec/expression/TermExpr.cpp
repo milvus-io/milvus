@@ -17,6 +17,7 @@
 #include "TermExpr.h"
 #include <memory>
 #include <utility>
+#include "log/Log.h"
 #include "query/Utils.h"
 namespace milvus {
 namespace exec {
@@ -137,9 +138,18 @@ PhyTermFilterExpr::CanSkipSegment() {
         max = i == 0 ? val : std::max(val, max);
         min = i == 0 ? val : std::min(val, min);
     }
+    auto can_skip = [&]() -> bool {
+        for (int i = 0; i < num_data_chunk_; ++i) {
+            if (!skip_index.CanSkipBinaryRange<T>(
+                    field_id_, i, min, max, true, true)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
     // using skip index to help skipping this segment
-    if (segment_->type() == SegmentType::Sealed &&
-        skip_index.CanSkipBinaryRange<T>(field_id_, 0, min, max, true, true)) {
+    if (segment_->type() == SegmentType::Sealed && can_skip()) {
         cached_bits_.resize(active_count_, false);
         cached_bits_inited_ = true;
         return true;

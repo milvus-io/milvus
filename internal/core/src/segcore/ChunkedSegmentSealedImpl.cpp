@@ -776,11 +776,13 @@ ChunkedSegmentSealedImpl::get_chunk_buffer(FieldId field_id,
         if (field_data->IsNullable()) {
             valid_data.reserve(length);
             for (int i = 0; i < length; i++) {
-                valid_data.push_back(field_data->IsValid(start_offset + i));
+                valid_data.push_back(
+                    field_data->IsValid(chunk_id, start_offset + i));
             }
         }
-        return std::make_pair(field_data->GetBatchBuffer(start_offset, length),
-                              valid_data);
+        return std::make_pair(
+            field_data->GetBatchBuffer(chunk_id, start_offset, length),
+            valid_data);
     }
     PanicInfo(ErrorCode::UnexpectedError,
               "get_chunk_buffer only used for  variable column field");
@@ -1227,9 +1229,10 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
                     [](const int64_t& elem, const int64_t& value) {
                         return elem < value;
                     });
+                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
                 for (; it != src + pk_column->NumRows() && *it == target;
                      ++it) {
-                    auto offset = it - src;
+                    auto offset = it - src + num_rows_until_chunk;
                     if (condition(offset)) {
                         pk_offsets.emplace_back(offset);
                     }
@@ -1248,14 +1251,16 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
             auto num_chunk = var_column->num_chunks();
             for (int i = 0; i < num_chunk; ++i) {
                 // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
+                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
                 auto string_chunk = std::dynamic_pointer_cast<StringChunk>(
                     var_column->GetChunk(i));
                 auto offset = string_chunk->binary_search_string(target);
                 for (; offset != -1 && offset < var_column->NumRows() &&
                        var_column->RawAt(offset) == target;
                      ++offset) {
-                    if (condition(offset)) {
-                        pk_offsets.emplace_back(offset);
+                    auto segment_offset = offset + num_rows_until_chunk;
+                    if (condition(segment_offset)) {
+                        pk_offsets.emplace_back(segment_offset);
                     }
                 }
             }

@@ -96,6 +96,14 @@ class ChunkedColumnBase : public ColumnBase {
     }
 
     bool
+    IsValid(int64_t chunk_id, int64_t offset) const {
+        if (nullable_) {
+            return chunks_[chunk_id]->isValid(offset);
+        }
+        return true;
+    }
+
+    bool
     IsNullable() const {
         return nullable_;
     }
@@ -136,7 +144,7 @@ class ChunkedColumnBase : public ColumnBase {
 
     // used for sequential access for search
     virtual BufferView
-    GetBatchBuffer(int64_t start_offset, int64_t length) {
+    GetBatchBuffer(int64_t chunk_id, int64_t start_offset, int64_t length) {
         PanicInfo(ErrorCode::Unsupported,
                   "GetBatchBuffer only supported for VariableColumn");
     }
@@ -323,33 +331,17 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     }
 
     BufferView
-    GetBatchBuffer(int64_t start_offset, int64_t length) override {
-        if (start_offset < 0 || start_offset > num_rows_ ||
-            start_offset + length > num_rows_) {
-            PanicInfo(ErrorCode::OutOfRange, "index out of range");
-        }
-
-        int chunk_num = chunks_.size();
-
-        auto [start_chunk_id, start_offset_in_chunk] =
-            GetChunkIDByOffset(start_offset);
+    GetBatchBuffer(int64_t chunk_id,
+                   int64_t start_offset,
+                   int64_t length) override {
         BufferView buffer_view;
-
         std::vector<BufferView::Element> elements;
-        for (; start_chunk_id < chunk_num && length > 0; ++start_chunk_id) {
-            int chunk_size = chunks_[start_chunk_id]->RowNums();
-            int len =
-                std::min(int64_t(chunk_size - start_offset_in_chunk), length);
-            elements.push_back(
-                {chunks_[start_chunk_id]->Data(),
-                 std::dynamic_pointer_cast<StringChunk>(chunks_[start_chunk_id])
-                     ->Offsets(),
-                 static_cast<int>(start_offset_in_chunk),
-                 static_cast<int>(start_offset_in_chunk + len)});
-
-            start_offset_in_chunk = 0;
-            length -= len;
-        }
+        elements.push_back(
+            {chunks_[chunk_id]->Data(),
+             std::dynamic_pointer_cast<StringChunk>(chunks_[chunk_id])
+                 ->Offsets(),
+             static_cast<int>(start_offset),
+             static_cast<int>(start_offset + length)});
 
         buffer_view.data_ = elements;
         return buffer_view;
