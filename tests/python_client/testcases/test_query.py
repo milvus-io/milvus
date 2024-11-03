@@ -4538,7 +4538,7 @@ class TestQueryTextMatch(TestcaseBase):
         # query single field for one token
         for field in text_fields:
             token = wf_map[field].most_common()[0][0]
-            expr = f"TextMatch({field}, '{token}')"
+            expr = f"text_match({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             assert len(res) > 0
@@ -4562,7 +4562,7 @@ class TestQueryTextMatch(TestcaseBase):
             for word, count in wf_map[field].most_common(10):
                 top_10_tokens.append(word)
             string_of_top_10_words = " ".join(top_10_tokens)
-            expr = f"TextMatch({field}, '{string_of_top_10_words}')"
+            expr = f"text_match({field}, '{string_of_top_10_words}')"
             log.info(f"expr {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
@@ -4677,7 +4677,7 @@ class TestQueryTextMatch(TestcaseBase):
         # query single field for one word
         for field in text_fields:
             token = list(wf_map[field].keys())[0]
-            expr = f"TextMatch({field}, '{token}')"
+            expr = f"text_match({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
@@ -4691,7 +4691,7 @@ class TestQueryTextMatch(TestcaseBase):
             for word, count in wf_map[field].most_common(10):
                 top_10_tokens.append(word)
             string_of_top_10_words = " ".join(top_10_tokens)
-            expr = f"TextMatch({field}, '{string_of_top_10_words}')"
+            expr = f"text_match({field}, '{string_of_top_10_words}')"
             log.info(f"expr {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
@@ -4793,7 +4793,7 @@ class TestQueryTextMatch(TestcaseBase):
             wf_counter = Counter(wf_map[field])
             pd_tmp_res_list = []
             for word, count in wf_counter.most_common(2):
-                tmp = f"TextMatch({field}, '{word}')"
+                tmp = f"text_match({field}, '{word}')"
                 log.info(f"tmp expr {tmp}")
                 expr_list.append(tmp)
                 manual_result = df_new[
@@ -5074,7 +5074,7 @@ class TestQueryTextMatch(TestcaseBase):
         # query single field for one word
         for field in text_fields:
             token = wf_map[field].most_common()[-1][0]
-            expr = f"TextMatch({field}, '{token}')"
+            expr = f"text_match({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
@@ -5089,7 +5089,7 @@ class TestQueryTextMatch(TestcaseBase):
             for word, count in wf_map[field].most_common(3):
                 multi_words.append(word)
             string_of_multi_words = " ".join(multi_words)
-            expr = f"TextMatch({field}, '{string_of_multi_words}')"
+            expr = f"text_match({field}, '{string_of_multi_words}')"
             log.info(f"expr {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
@@ -5194,7 +5194,7 @@ class TestQueryTextMatch(TestcaseBase):
         # query single field for one word
         for field in text_fields:
             token = wf_map[field].most_common()[-1][0]
-            expr = f"TextMatch({field}, '{token}')"
+            expr = f"text_match({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             pandas_res = df_split[df_split.apply(lambda row: token in row[field], axis=1)]
@@ -5311,7 +5311,7 @@ class TestQueryTextMatch(TestcaseBase):
         # query single field for one word
         for field in text_fields:
             token = wf_map[field].most_common()[0][0]
-            tm_expr = f"TextMatch({field}, '{token}')"
+            tm_expr = f"text_match({field}, '{token}')"
             int_expr = "age > 10"
             combined_expr = f"{tm_expr} {combine_op} {int_expr}"
             log.info(f"expr: {combined_expr}")
@@ -5445,7 +5445,7 @@ class TestQueryTextMatch(TestcaseBase):
         # query single field for one word
         for field in text_fields:
             token = wf_map[field].most_common()[-1][0]
-            expr = f"TextMatch({field}, '{token}')"
+            expr = f"text_match({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
@@ -5459,7 +5459,7 @@ class TestQueryTextMatch(TestcaseBase):
             for word, count in wf_map[field].most_common(3):
                 multi_words.append(word)
             string_of_multi_words = " ".join(multi_words)
-            expr = f"TextMatch({field}, '{string_of_multi_words}')"
+            expr = f"text_match({field}, '{string_of_multi_words}')"
             log.info(f"expr {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
@@ -5563,7 +5563,7 @@ class TestQueryTextMatch(TestcaseBase):
         # query single field for one word
         for field in text_fields:
             token = wf_map[field].most_common()[-1][0]
-            expr = f"TextMatch({field}, '{token}')"
+            expr = f"text_match({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=text_fields)
             log.info(f"res len {len(res)}, \n{res}")
@@ -5577,7 +5577,7 @@ class TestQueryTextMatch(TestcaseBase):
             for word, count in wf_map[field].most_common(3):
                 multi_words.append(word)
             string_of_multi_words = " ".join(multi_words)
-            expr = f"TextMatch({field}, '{string_of_multi_words}')"
+            expr = f"text_match({field}, '{string_of_multi_words}')"
             log.info(f"expr {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=text_fields)
             log.info(f"res len {len(res)}, {res}")
