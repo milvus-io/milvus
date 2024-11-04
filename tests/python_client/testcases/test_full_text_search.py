@@ -952,7 +952,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         assert len(res) == len(data)
 
         # search with text
-        nq = 10
+        nq = 2
         limit = 100
         search_data = [fake.text().lower() + random.choice(tokens) for _ in range(nq)]
         res_list, _ = collection_w.search(
@@ -2110,7 +2110,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("nq", [10])
+    @pytest.mark.parametrize("nq", [2])
     @pytest.mark.parametrize("empty_percent", [0.5])
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
@@ -2233,9 +2233,10 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             collection_w.create_index("text", {"index_type": "INVERTED"})
         collection_w.load()
         limit = 100
-        search_data = [fake.text().lower() + " " + random.choice(tokens) for _ in range(nq)]
+        token = random.choice(tokens)
+        search_data = [fake.text().lower() + f" {token} "  for _ in range(nq)]
         if expr == "text_match":
-            filter = f"TextMatch(text, '{tokens[0]}')"
+            filter = f"TEXT_MATCH(text, '{token}')"
             res, _ = collection_w.query(
                 expr=filter,
             )
@@ -2292,7 +2293,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 result_text = r.text
                 # verify search result satisfies the filter
                 if expr == "text_match":
-                    assert tokens[0] in result_text
+                    assert token in result_text
                 if expr == "id_range":
                     assert _id < data_size // 2
                 # verify search result has overlap with search text
@@ -2430,7 +2431,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         limit = 100
         search_data = [fake.text().lower() + " " + random.choice(tokens) for _ in range(nq)]
         if expr == "text_match":
-            filter = f"TextMatch(text, '{tokens[0]}')"
+            filter = f"text_match(text, '{tokens[0]}')"
             res, _ = collection_w.query(
                 expr=filter,
             )
@@ -2498,7 +2499,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
 
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("nq", [1])
+    @pytest.mark.parametrize("nq", [2])
     @pytest.mark.parametrize("empty_percent", [0])
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])

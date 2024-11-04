@@ -17,28 +17,14 @@
 package indexparamcheck
 
 import (
-	"fmt"
-	"math"
-
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type baseChecker struct{}
 
 func (c baseChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
-	if typeutil.IsSparseFloatVectorType(dataType) {
-		if !CheckStrByValues(params, Metric, SparseMetrics) {
-			return fmt.Errorf("metric type not found or not supported for sparse float vectors, supported: %v", SparseMetrics)
-		}
-	} else {
-		// we do not check dim for sparse
-		if !CheckIntByRange(params, DIM, 1, math.MaxInt) {
-			return fmt.Errorf("failed to check vector dimension, should be larger than 0 and smaller than math.MaxInt")
-		}
-	}
 	return nil
 }
 

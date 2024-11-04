@@ -103,7 +103,7 @@ class TestCreateCollection(TestBase):
             "collectionName": name,
             "dimension": dim,
             "metricType": metric_type,
-            "params":{
+            "params": {
                 "enableDynamicField": enable_dynamic_field,
                 "shardsNum": request_shards_num,
                 "consistencyLevel": f"{consistency_level}",
@@ -147,7 +147,7 @@ class TestCreateCollection(TestBase):
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
     @pytest.mark.parametrize("consistency_level", ["Strong", "Bounded"])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    @pytest.mark.parametrize("index_type", ["AUTOINDEX","IVF_SQ8", "HNSW"])
+    @pytest.mark.parametrize("index_type", ["AUTOINDEX", "IVF_SQ8", "HNSW"])
     @pytest.mark.parametrize("dim", [128])
     def test_create_collections_with_all_params(self,
                                                 dim,
@@ -179,6 +179,7 @@ class TestCreateCollection(TestBase):
             "FLAT": {},
             "IVF_SQ8": {"nlist": 16384},
             "HNSW": {"M": 16, "efConstruction": 500},
+            "BM25_SPARSE_INVERTED_INDEX": {"bm25_k1": 0.5, "bm25_b": 0.5},
             "AUTOINDEX": {}
         }
 
@@ -197,15 +198,32 @@ class TestCreateCollection(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64",
                      "isPrimary": primary_key_field == "book_id", "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64",
-                     "isPartitionKey": partition_key_field == "word_count", "isClusteringKey": clustering_key_field == "word_count", "elementTypeParams": {}},
+                     "isPartitionKey": partition_key_field == "word_count",
+                     "isClusteringKey": clustering_key_field == "word_count", "elementTypeParams": {}},
                     {"fieldName": "book_category", "dataType": "Int64",
                      "isPartitionKey": partition_key_field == "book_category",
                      "isClusteringKey": clustering_key_field == "book_category", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "document_content", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "1000", "enable_tokenizer": True,
+                                           "analyzer_params": {
+                                               "tokenizer": "default"
+                                           },
+                                           "enable_match": True}},
                     {"fieldName": "json", "dataType": "JSON", "elementTypeParams": {}},
                     {"fieldName": "int_array", "dataType": "Array", "elementDataType": "Int64",
                      "elementTypeParams": {"max_capacity": "1024"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"}
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_fn",
+                        "type": "BM25",
+                        "inputFieldNames": ["document_content"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
                 ]
             },
             "indexParams": [
@@ -214,7 +232,14 @@ class TestCreateCollection(TestBase):
                  "metricType": f"{metric_type}",
                  "indexType": index_type,
                  "params": index_param_map[index_type]
-                 }]
+                 },
+                {"fieldName": "sparse_vector",
+                 "indexName": "sparse_vector_index",
+                 "metricType": "BM25",
+                 "indexType": "SPARSE_INVERTED_INDEX",
+                 "params": index_param_map["BM25_SPARSE_INVERTED_INDEX"]
+                }
+            ]
         }
 
         logging.info(f"create collection {name} with payload: {payload}")
@@ -244,6 +269,7 @@ class TestCreateCollection(TestBase):
         assert rsp['data']['partitionsNum'] == num_partitions
         assert rsp['data']['consistencyLevel'] == consistency_level
         assert ttl_seconds_actual == ttl_seconds
+        assert len(rsp['data']["functions"]) == len(payload["schema"]["functions"])
         #
         # # check fields properties
         fields = rsp['data']['fields']
@@ -259,11 +285,16 @@ class TestCreateCollection(TestBase):
         # check index
         index_info = [index.to_dict() for index in c.indexes]
         logger.info(f"index_info: {index_info}")
-        assert len(index_info) == 1
-        assert index_info[0]["index_param"]['metric_type'] == metric_type
-        assert index_info[0]["index_param"]['index_type'] == index_type
-        assert index_info[0]["index_param"].get("params", {}) == index_param_map[index_type]
-
+        assert len(index_info) == 2
+        for index in index_info:
+            index_param = index["index_param"]
+            if index_param["index_type"] == "SPARSE_INVERTED_INDEX":
+                assert index_param["metric_type"] == "BM25"
+                assert index_param.get("params", {}) == index_param_map["BM25_SPARSE_INVERTED_INDEX"]
+            else:
+                assert index_param["metric_type"] == metric_type
+                assert index_param["index_type"] == index_type
+                assert index_param.get("params", {}) == index_param_map[index_type]
 
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
@@ -686,9 +717,6 @@ class TestCreateCollectionNegative(TestBase):
         rsp = client.collection_create(payload)
         assert rsp['code'] == 1801
 
-
-
-
     @pytest.mark.parametrize("name",
                              [" ", "test_collection_" * 100, "test collection", "test/collection", "test\collection"])
     def test_create_collections_with_invalid_collection_name(self, name):
@@ -797,6 +825,7 @@ class TestGetCollectionStats(TestBase):
         rsp = client.collection_stats(collection_name=name)
         assert rsp['data']['rowCount'] == nb
 
+
 @pytest.mark.L0
 class TestLoadReleaseCollection(TestBase):
 
@@ -844,6 +873,7 @@ class TestLoadReleaseCollection(TestBase):
         time.sleep(5)
         rsp = client.collection_load_state(collection_name=name)
         assert rsp['data']['loadState'] == "LoadStateNotLoad"
+
 
 @pytest.mark.L0
 class TestGetCollectionLoadState(TestBase):
@@ -1125,6 +1155,7 @@ class TestRenameCollection(TestBase):
         all_collections = rsp['data']
         assert new_name in all_collections
         assert name not in all_collections
+
 
 @pytest.mark.L1
 class TestCollectionWithAuth(TestBase):
