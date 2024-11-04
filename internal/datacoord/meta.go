@@ -1551,13 +1551,12 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 				IsSorted: compactToSegment.GetIsSorted(),
 			})
 
-		// L1 segment with NumRows=0 will be discarded, so no need to change the metric
-		if compactToSegmentInfo.GetNumOfRows() > 0 {
-			// metrics mutation for compactTo segments
-			metricMutation.addNewSeg(compactToSegmentInfo.GetState(), compactToSegmentInfo.GetLevel(), compactToSegmentInfo.GetIsSorted(), compactToSegmentInfo.GetNumOfRows())
-		} else {
+		if compactToSegmentInfo.GetNumOfRows() == 0 {
 			compactToSegmentInfo.State = commonpb.SegmentState_Dropped
 		}
+
+		// metrics mutation for compactTo segments
+		metricMutation.addNewSeg(compactToSegmentInfo.GetState(), compactToSegmentInfo.GetLevel(), compactToSegmentInfo.GetIsSorted(), compactToSegmentInfo.GetNumOfRows())
 
 		log.Info("Add a new compactTo segment",
 			zap.Int64("compactTo", compactToSegmentInfo.GetID()),
@@ -1582,6 +1581,7 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 	for _, seg := range compactToInfos {
 		binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
 	}
+
 	// alter compactTo before compactFrom segments to avoid data lost if service crash during AlterSegments
 	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
 		log.Warn("fail to alter compactTo segments", zap.Error(err))
