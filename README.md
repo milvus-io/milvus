@@ -64,12 +64,11 @@ res = client.search(
     limit=2,  # how many results to return (topK)
     output_fields=["vector", "text", "subject"],  # what fields to return
 )
-
 ```
 
 ## Why Milvus
 
-Milvus is designed to handle vectors, which are numerical representations of unstructured data, together with other scalar data types such as integers, strings, and JSON objects. Users can store scalar data with vectors to conduct vector search with metadata filtering. Users trust Milvus for:
+Milvus is designed to handle vector search at scale. Users can store vectors, which are numerical representations of unstructured data, together with other scalar data types such as integers, strings, and JSON objects, to conduct efficient vector search with metadata filtering or hybrid search. Here are why users choose Milvus as vector database:
 
 **High Performance at Scale and High Availability**  
   * Milvus features a [distributed architecture](https://milvus.io/docs/architecture_overview.md ) that separates [compute](https://milvus.io/docs/data_processing.md#Data-query) and [storage](https://milvus.io/docs/data_processing.md#Data-insertion). Milvus can horizontally scale and adapt to diverse traffic patterns, by independent scaling worker nodes for optimized performance in read-heavy or write-heavy workloads. The stateless microservices on K8s allow [quick recovery](https://milvus.io/docs/coordinator_ha.md#Coordinator-HA) from failure, ensuring high availability. [Replication](https://milvus.io/docs/replica.md) further enhances fault tolerance and throughput by loading data segments on multiple query nodes. Milvus also optimizes vector search at high metadata filtering rate. See [performance benchmark](https://zilliz.com/vector-database-benchmark-tool).
