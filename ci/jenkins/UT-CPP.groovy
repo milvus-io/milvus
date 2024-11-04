@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.63.0') _
+@Library('jenkins-shared-library@v0.67.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 def milvus_helm_chart_version = '4.2.8'
@@ -10,6 +10,7 @@ pipeline {
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         preserveStashes(buildCount: 5)
         disableConcurrentBuilds(abortPrevious: true)
+        timeout(time: 6, unit: 'HOURS')
     }
     agent {
         kubernetes {
@@ -29,7 +30,7 @@ pipeline {
                 }
             }
         }
-        stage('build') {
+        stage('build & test') {
             steps {
                 container('tkn') {
                     script {
@@ -40,7 +41,9 @@ pipeline {
                                               pullRequestNumber: "$env.CHANGE_ID",
                                               make_cmd: "make clean && make USE_ASAN=ON build-cpp-with-coverage",
                                               test_entrypoint: "./scripts/run_cpp_codecov.sh",
-                                              codecov_files: "./lcov_output.info"
+                                              codecov_report_name: "cpp-unit-test",
+                                              codecov_files: "./lcov_output.info",
+                                              tekton_pipeline_timeout: '3h'
                     }
                 }
             }
