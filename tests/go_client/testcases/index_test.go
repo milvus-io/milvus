@@ -864,7 +864,7 @@ func TestCreateSparseUnsupportedIndex(t *testing.T) {
 	// create unsupported vector index on sparse field
 	for _, idx := range hp.GenAllFloatIndex(entity.IP) {
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultSparseVecFieldName, idx))
-		common.CheckErr(t, err, false, fmt.Sprintf("data type 104 can't build with this index %v", idx.IndexType()))
+		common.CheckErr(t, err, false, fmt.Sprintf("data type SparseFloatVector can't build with this index %v", idx.IndexType()))
 	}
 
 	// create scalar index on sparse vector
@@ -1004,7 +1004,7 @@ func TestCreateIndexInvalidParams(t *testing.T) {
 
 	idxIvfPq := index.NewIvfPQIndex(entity.L2, 128, 7, 8)
 	_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idxIvfPq))
-	common.CheckErr(t, err, false, "dimension must be able to be divided by `m`")
+	common.CheckErr(t, err, false, "The dimension of a vector (dim) should be a multiple of the number of subquantizers")
 
 	// invalid Hnsw M [1, 2048], efConstruction [1, 2147483647]
 	for _, invalidM := range []int{0, 2049} {

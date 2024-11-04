@@ -13402,7 +13402,7 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
                 search_data = [[random.random() for _ in range(dim)]]
             for field in text_fields:
                 token = wf_map[field].most_common()[0][0]
-                expr = f"TextMatch({field}, '{token}')"
+                expr = f"text_match({field}, '{token}')"
                 manual_result = df_split[
                     df_split.apply(lambda row: token in row[field], axis=1)
                 ]
@@ -13427,7 +13427,7 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
                 for word, count in wf_map[field].most_common(10):
                     top_10_tokens.append(word)
                 string_of_top_10_words = " ".join(top_10_tokens)
-                expr = f"TextMatch({field}, '{string_of_top_10_words}')"
+                expr = f"text_match({field}, '{string_of_top_10_words}')"
                 log.info(f"expr {expr}")
                 res_list, _ = collection_w.search(
                     data=search_data,

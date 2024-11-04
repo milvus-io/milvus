@@ -2235,7 +2235,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         limit = 100
         search_data = [fake.text().lower() + " " + random.choice(tokens) for _ in range(nq)]
         if expr == "text_match":
-            filter = f"TextMatch(text, '{tokens[0]}')"
+            filter = f"TEXT_MATCH(text, '{tokens[0]}')"
             res, _ = collection_w.query(
                 expr=filter,
             )
@@ -2430,7 +2430,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         limit = 100
         search_data = [fake.text().lower() + " " + random.choice(tokens) for _ in range(nq)]
         if expr == "text_match":
-            filter = f"TextMatch(text, '{tokens[0]}')"
+            filter = f"text_match(text, '{tokens[0]}')"
             res, _ = collection_w.query(
                 expr=filter,
             )

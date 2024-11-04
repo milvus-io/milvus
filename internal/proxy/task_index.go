@@ -473,7 +473,7 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 	if typeutil.IsVectorType(field.DataType) && indexType != indexparamcheck.AutoIndex {
 		exist := CheckVecIndexWithDataTypeExist(indexType, field.DataType)
 		if !exist {
-			return fmt.Errorf("data type %d can't build with this index %s", field.DataType, indexType)
+			return fmt.Errorf("data type %s can't build with this index %s", schemapb.DataType_name[int32(field.GetDataType())], indexType)
 		}
 	}
 
