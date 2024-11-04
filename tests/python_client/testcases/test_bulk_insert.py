@@ -899,7 +899,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         query_data = [r[expr_field] for r in res][:len(self.collection_wrap.partitions)]
         res, _ = self.collection_wrap.query(expr=f"{expr_field} in {query_data}", output_fields=[expr_field])
         assert len(res) == len(query_data)
-        res, _ = self.collection_wrap.query(expr=f"TextMatch({df.text_field}, 'milvus')", output_fields=[df.text_field])
+        res, _ = self.collection_wrap.query(expr=f"text_match({df.text_field}, 'milvus')", output_fields=[df.text_field])
         if nullable is False:
             assert len(res) == entities
         else:
@@ -1052,7 +1052,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         query_data = [r[df.string_field] for r in res][:len(self.collection_wrap.partitions)]
         res, _ = self.collection_wrap.query(expr=f"{df.string_field} in {query_data}", output_fields=[df.string_field])
         assert len(res) == len(query_data)
-        res, _ = self.collection_wrap.query(expr=f"TextMatch({df.text_field}, 'milvus')", output_fields=[df.text_field])
+        res, _ = self.collection_wrap.query(expr=f"TEXT_MATCH({df.text_field}, 'milvus')", output_fields=[df.text_field])
         if nullable is False:
             assert len(res) == entities
         else:
@@ -1218,7 +1218,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         query_data = [r[expr_field] for r in res][:len(self.collection_wrap.partitions)]
         res, _ = self.collection_wrap.query(expr=f"{expr_field} in {query_data}", output_fields=[expr_field])
         assert len(res) == len(query_data)
-        res, _ = self.collection_wrap.query(expr=f"TextMatch({df.text_field}, 'milvus')", output_fields=[df.text_field])
+        res, _ = self.collection_wrap.query(expr=f"TEXT_MATCH({df.text_field}, 'milvus')", output_fields=[df.text_field])
         if not nullable:
             assert len(res) == entities
         else:

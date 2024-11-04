@@ -133,6 +133,9 @@ class Json {
 
     value_result<document>
     doc() const {
+        if (data_.size() == 0) {
+            return {};
+        }
         thread_local simdjson::ondemand::parser parser;
 
         // it's always safe to add the padding,
@@ -148,6 +151,9 @@ class Json {
 
     value_result<simdjson::dom::element>
     dom_doc() const {
+        if (data_.size() == 0) {
+            return {};
+        }
         thread_local simdjson::dom::parser parser;
 
         // it's always safe to add the padding,
