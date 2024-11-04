@@ -1711,10 +1711,9 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
 
-		// db does not exist
+		// normal case
 		var job ImportJob = &importJob{
 			ImportJob: &datapb.ImportJob{
-				DbID:   1,
 				JobID:  0,
 				Schema: &schemapb.CollectionSchema{},
 				State:  internalpb.ImportJobState_Failed,
@@ -1723,31 +1722,12 @@ func TestImportV2(t *testing.T) {
 		err = s.importMeta.AddJob(job)
 		assert.NoError(t, err)
 		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
-			DbID:  2,
-			JobID: "0",
-		})
-		assert.NoError(t, err)
-		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-
-		// normal case
-		job = &importJob{
-			ImportJob: &datapb.ImportJob{
-				DbID:   1,
-				JobID:  0,
-				Schema: &schemapb.CollectionSchema{},
-				State:  internalpb.ImportJobState_Pending,
-			},
-		}
-		err = s.importMeta.AddJob(job)
-		assert.NoError(t, err)
-		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
-			DbID:  1,
 			JobID: "0",
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
-		assert.Equal(t, int64(10), resp.GetProgress())
-		assert.Equal(t, internalpb.ImportJobState_Pending, resp.GetState())
+		assert.Equal(t, int64(0), resp.GetProgress())
+		assert.Equal(t, internalpb.ImportJobState_Failed, resp.GetState())
 	})
 
 	t.Run("ListImports", func(t *testing.T) {
@@ -1770,7 +1750,6 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		var job ImportJob = &importJob{
 			ImportJob: &datapb.ImportJob{
-				DbID:         2,
 				JobID:        0,
 				CollectionID: 1,
 				Schema:       &schemapb.CollectionSchema{},
@@ -1787,20 +1766,7 @@ func TestImportV2(t *testing.T) {
 		}
 		err = s.importMeta.AddTask(task)
 		assert.NoError(t, err)
-		// db id not match
 		resp, err = s.ListImports(ctx, &internalpb.ListImportsRequestInternal{
-			DbID:         3,
-			CollectionID: 1,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
-		assert.Equal(t, 0, len(resp.GetJobIDs()))
-		assert.Equal(t, 0, len(resp.GetStates()))
-		assert.Equal(t, 0, len(resp.GetReasons()))
-		assert.Equal(t, 0, len(resp.GetProgresses()))
-		// db id match
-		resp, err = s.ListImports(ctx, &internalpb.ListImportsRequestInternal{
-			DbID:         2,
 			CollectionID: 1,
 		})
 		assert.NoError(t, err)
