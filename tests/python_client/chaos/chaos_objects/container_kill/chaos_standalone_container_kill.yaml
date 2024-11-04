@@ -5,15 +5,13 @@ metadata:
   namespace: chaos-testing
 spec:
   action: container-kill
-  mode: one
-  containerName: 'standalone'
+  mode: all
+  containerNames: ['standalone']
   selector:
     namespaces:
-      - chaos-testing         # target namespace of milvus deployment
+      - chaos-testing
     labelSelectors:
-      app.kubernetes.io/instance: milvus-6868
+      app.kubernetes.io/instance: milvus-chaos
       app.kubernetes.io/name: milvus
       component: standalone
-  scheduler:
-    cron: '@every 8s'
 

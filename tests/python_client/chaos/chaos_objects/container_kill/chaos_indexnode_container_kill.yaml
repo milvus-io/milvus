@@ -1,16 +1,17 @@
 apiVersion: chaos-mesh.org/v1alpha1
 kind: PodChaos
 metadata:
-  name: test-datanode-container-kill
+  name: test-indexnode-container-kill
   namespace: chaos-testing
 spec:
   action: container-kill
   mode: all
-  containerNames: ['datanode']
+  containerNames: ['indexnode']
   selector:
     namespaces:
       - chaos-testing
     labelSelectors:
       app.kubernetes.io/instance: milvus-chaos
       app.kubernetes.io/name: milvus
-      component: datanode
+      component: indexnode
+
