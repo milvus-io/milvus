@@ -3,7 +3,7 @@ import sys
 import pytest
 import time
 import uuid
-from pymilvus import connections, db
+from pymilvus import connections, db, MilvusClient
 from utils.util_log import test_log as logger
 from api.milvus import (VectorClient, CollectionClient, PartitionClient, IndexClient, AliasClient,
                         UserClient, RoleClient, ImportJobClient, StorageClient, Requests)
@@ -33,6 +33,7 @@ class Base:
     role_client = None
     import_job_client = None
     storage_client = None
+    milvus_client = None
 
 
 class TestBase(Base):
@@ -171,5 +172,11 @@ class TestBase(Base):
         self.vector_client.db_name = db_name
         self.import_job_client.db_name = db_name
 
-
-
+    def wait_load_completed(self, collection_name, db_name="default", timeout=60):
+        t0 = time.time()
+        while True and time.time() - t0 < timeout:
+            rsp = self.collection_client.collection_describe(collection_name, db_name=db_name)
+            if "data" in rsp and "load" in rsp["data"] and rsp["data"]["load"] == "LoadStateLoaded":
+                break
+            else:
+                time.sleep(5)
