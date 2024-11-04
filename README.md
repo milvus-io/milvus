@@ -8,7 +8,7 @@
 
 ## What is Milvus?
 
-[Milvus](https://milvus.io/) is a [high-performance](https://zilliz.com/vector-database-benchmark-tool) vector database built for scale. It is used by AI applications to organize and search through large amounts of unstructured data, such as text and images.
+[Milvus](https://milvus.io/) is a high-performance vector database built for scale. It is used by AI applications to organize and search through large amounts of unstructured data, such as text and images.
 
 Milvus is implemented with Go and C++ and employs CPU/GPU instruction-level optimization for vector search efficiency. It has a [fully-distributed architecture on K8s](https://milvus.io/docs/overview.md#What-Makes-Milvus-so-Scalable) to handle tens of thousands of search queries on billions of vectors, scale horizontally and maintain data freshness by processing streaming data updates in real-time. For smaller use cases, Milvus also supports [Standalone mode](https://milvus.io/docs/install_standalone-docker.md) that can run on Docker. In addition, [Milvus Lite](https://milvus.io/docs/milvus_lite.md) is a lightweight version suitable for quickstart in python with simply `pip install`.
 
