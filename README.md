@@ -1,4 +1,4 @@
-<img src="https://repository-images.githubusercontent.com/208728772/998c09ca-cfa6-4c01-ac75-3dfad7f4862b" alt="milvus banner">
+<img src="https://github.com/user-attachments/assets/51e33300-7f85-43ff-a05a-3a0317a961f3" alt="milvus banner">
 
 <div class="column" align="middle">
   <a href="https://github.com/milvus-io/milvus/blob/master/LICENSE"><img height="20" src="https://img.shields.io/github/license/milvus-io/milvus" alt="license"/></a>
@@ -8,11 +8,11 @@
 
 ## What is Milvus?
 
-[Milvus](https://milvus.io/) is a high-performance vector database built for scale. It is used by AI applications to organize and search through large amounts of unstructured data, such as text and images.
+[Milvus](https://milvus.io/) is a [high-performance](https://zilliz.com/vector-database-benchmark-tool) vector database built for scale. It is used by AI applications to organize and search through large amounts of unstructured data, such as text and images.
 
 Milvus is implemented with Go and C++ and employs CPU/GPU instruction-level optimization for vector search efficiency. It has a [fully-distributed architecture on K8s](https://milvus.io/docs/overview.md#What-Makes-Milvus-so-Scalable) to handle tens of thousands of search queries on billions of vectors, scale horizontally and maintain data freshness by processing streaming data updates in real-time. For smaller use cases, Milvus also supports [Standalone mode](https://milvus.io/docs/install_standalone-docker.md) that can run on Docker. In addition, [Milvus Lite](https://milvus.io/docs/milvus_lite.md) is a lightweight version suitable for quickstart in python with simply `pip install`.
 
-Milvus is also available as a hosted service on [Zilliz Cloud with free trial](https://cloud.zilliz.com/signup).
+Milvus is also available as a fully managed service on [Zilliz Cloud with free trial](https://cloud.zilliz.com/signup).
 
 The Milvus open-source project is
 under [LF AI & Data Foundation](https://lfaidata.foundation/projects/milvus/), distributed with [Apache 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) License.
@@ -30,7 +30,7 @@ from pymilvus import MilvusClient
 client = MilvusClient("milvus_demo.db")
 ```
 
-For [Milvus Standalone on Docker](https://milvus.io/docs/install_standalone-docker.md) and [Milvus Distributed on Kubernetes](https://milvus.io/docs/install_cluster-milvusoperator.md), specify the [URI and Token](https://milvus.io/api-reference/pymilvus/v2.4.x/MilvusClient/Client/MilvusClient.md) instead to connect to the Milvus server:
+For Milvus Standalone on Docker, Milvus Distributed on Kubernetes, and Zilliz Cloud, specify the [URI and Token](https://milvus.io/api-reference/pymilvus/v2.4.x/MilvusClient/Client/MilvusClient.md) instead to connect to the Milvus server:
 
 ```python
 client = MilvusClient(uri="http://localhost:19530", token="root:Milvus")
@@ -64,33 +64,31 @@ res = client.search(
 
 ## Why Milvus
 
-Milvus is designed to handle vectors, which are numerical representations of unstructured data, together with other scalar data types such as integers, strings, and JSON objects. Users can store scalar data with vectors to conduct vector search with metadata filtering.
+Milvus is designed to handle vectors, which are numerical representations of unstructured data, together with other scalar data types such as integers, strings, and JSON objects. Users can store scalar data with vectors to conduct vector search with metadata filtering. Users trust Milvus for:
 
-* **High performance and horizontal scalability**:
-  *  Milvus provides sub-ten millisecond search latency at scale. For detailed performance, checkout [VectorDBBench](https://zilliz.com/vector-database-benchmark-tool).
-
-* **Intuitive API and rich SDK support**:
-  * Milvus implements easy-to-use API for vector search, data query, ingestion, update and collection management.
-In addition to RESTful and gRPC API, Milvus also provides SDK in [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java), [Go](https://github.com/milvus-io/milvus-sdk-go), [C++](https://github.com/milvus-io/milvus-sdk-cpp), [Node.js](https://github.com/milvus-io/milvus-sdk-node), [Rust](https://github.com/milvus-io/milvus-sdk-rust), [C#](https://github.com/milvus-io/milvus-sdk-csharp)
+**High Performance at Scale and High Availability**  
+  * Milvus features a [distributed architecture](https://milvus.io/docs/architecture_overview.md ) that separates [compute](https://milvus.io/docs/data_processing.md#Data-query) and [storage](https://milvus.io/docs/data_processing.md#Data-insertion). Milvus can horizontally scale and adapt to diverse traffic patterns, by independent scaling worker nodes for optimized performance in read-heavy or write-heavy workloads. The stateless microservices on K8s allow [quick recovery](https://milvus.io/docs/coordinator_ha.md#Coordinator-HA) from failure, ensuring high availability. [Replication](https://milvus.io/docs/replica.md) further enhances fault tolerance and throughput by loading data segments on multiple query nodes. Milvus also optimizes vector search at high metadata filtering rate. See [performance benchmark](https://zilliz.com/vector-database-benchmark-tool).
 
 
-* **High availability**:
-  * Milvus is highly available thanks to its fully-distributed architecture. To learn more, check [Milvus Architecture Overview](https://milvus.io/docs/architecture_overview.md).
-**Various Index Types Support**
+**Support for Various Vector Index Types and Hardware Acceleration**  
+  * Milvus supports vector index types that are optimized for different scenarios, including HNSW, IVF, FLAT (brute-force), and DiskANN, with [quantization-based](https://milvus.io/docs/index.md?tab=floating#IVFPQ) variations and [mmap](https://milvus.io/docs/mmap.md). Additionally, Milvus implements instruction-level acceleration to enhance vector search performance and supports GPU indexing, such as NVIDIA's [CAGRA](https://github.com/rapidsai/raft).
 
-* **Efficient Metadata Filtering**
-  * Milvus has various optimizations to make vector search efficient when combined with metadata filtering, especially at high filtering rate, where post-filtering doesn't work, [VectorDBBench](https://zilliz.com/vector-database-benchmark-tool) shows the performance.
+**Sparse Vector for Full Text Search and Hybrid Search**
+  * In addition to semantic search via dense vector embeddings, Milvus also supports full text search with [sparse vector](https://milvus.io/docs/sparse_vector.md). User can also combine dense vector and sparse vector through multi-vector feature and perform hybrid search. Milvus supports up to 10 vector fields in a single collection. Milvus supports hybrid search on dense and sparse vector columns, or multiple dense vector columns. The data from multi-path retrieval can be merge and rerank with Reciprocal Rank Fusion (RRF) and Weighted Scoring. For details, refer to [Hybrid Search](https://milvus.io/docs/multi-vector-search.md).
 
-* **Hardware Acceleration**
-  * Milvus implements instruction-level acceleration to speed up vector search performance, and supports GPU index such as NVIDIA [CAGRA](https://github.com/rapidsai/raft).
+**Flexible Strategies for Multi-tenancy**
+  * Milvus supports [multi-tenancy](https://milvus.io/docs/multi_tenancy.md#Multi-tenancy-strategies) with flexible strategies to provide a robust solution for organizing data in AI applications, particularly in Retrieval-Augmented Generation (RAG) systems for both enterprise use cases and consumer apps. By leveraging database, collection, and partition key structures, Milvus allows businesses to allocate specific resources to each tenant, enabling flexible data isolation, optimized search performance, and scalable access management. This approach suits large-scale knowledge bases for enterprises, with strong isolation at the database level, and high user capacity for consumer applications by partitioning data within shared collections.
 
-* **Hybrid Search**
-  * Users can define up to 10 vector fields in a single collection. Milvus supports hybrid search on multiple vector columns, merge and rerank with Reciprocal Rank Fusion (RRF) and Weighted Scoring. For details, refer to [Hybrid Search](https://milvus.io/docs/multi-vector-search.md).
+**Intuitive API and SDKs**
+  * Milvus implements easy-to-use RESTful and gRPC API for vector search, data query and data management. Milvus also provides SDKs for [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java), [Go](https://github.com/milvus-io/milvus-sdk-go), [C++](https://github.com/milvus-io/milvus-sdk-cpp), [Node.js](https://github.com/milvus-io/milvus-sdk-node), [Rust](https://github.com/milvus-io/milvus-sdk-rust), and [C#](https://github.com/milvus-io/milvus-sdk-csharp) languages. In addition, Milvus also provides bulk insert API for large scale batch [data import](https://milvus.io/docs/import-data.md) and [data backup](https://milvus.io/docs/milvus_backup_overview.md).
 
-Milvus is trusted by AI developers in startups and enterprises to develop applications such as text and image search, Retrieval-Augmented Generation (RAG), and recommendation systems. Milvus powers mission-critical business for users including Salesforce, PayPal, Shopee, Airbnb, eBay, NVIDIA, IBM, AT&T, LINE, and ROBLOX.
+**Rich Ecosystem and Tools**
+  * Milvus integrates with a comprehensive suite of [AI development tools](](https://milvus.io/docs/integrations_overview.md)), such as LangChain, LlamaIndex, Haystack, Ragas, making it an ideal vector store for GenAI applications such as Retrieval-Augmented Generation (RAG). Through the [`pymilvus` library](https://milvus.io/docs/embeddings.md), users can easily transform unstructured data into vector embeddings and leverage reranking models for optimized search results. The Milvus ecosystem also includes [Attu](https://github.com/zilliztech/attu?tab=readme-ov-file#attu) for GUI-based administration, [Birdwatcher](https://milvus.io/docs/birdwatcher_overview.md) for system debugging, [Prometheus/Grafana](https://milvus.io/docs/monitor_overview.md) for monitoring, [Milvus CDC](https://milvus.io/docs/milvus-cdc-overview.md) for data synchronization, and data connectors for [Spark](https://milvus.io/docs/integrate_with_spark.md#Spark-Milvus-Connector-User-Guide), [Kafka](https://github.com/zilliztech/kafka-connect-milvus?tab=readme-ov-file#kafka-connect-milvus-connector), [Fivetran](https://fivetran.com/docs/destinations/milvus), and [Airbyte](https://milvus.io/docs/integrate_with_airbyte.md) to streamline AI and search pipelines.
+
+Milvus is trusted by AI developers to build applications such as text and image search, Retrieval-Augmented Generation (RAG), and recommendation systems. Milvus powers [many mission-critical business]((https://milvus.io/use-cases)) for startups and enterprises.
 
 ## Demos and Tutorials 
-
+Here is a selection of demos and tutorials to show how to build various types of AI applications made with Milvus:
 
 | Tutorial | Use Case | Related Milvus Features | 
 | -------- | -------- | --------- |
@@ -140,37 +138,47 @@ Milvus is trusted by AI developers in startups and enterprises to develop applic
   </tr>
 </table>
 
+## Integration
+
+Milvus integrates with popular AI development stacks such as LangChain, LlamaIndex, and OpenAI, providing a robust vector database foundation that supports a variety of Retrieval-Augmented Generation (RAG), semantic search, multi-modal and agent-based applications. Milvus works for both open-source embedding models and embedding service, in text, image and video modalities. Milvus has connectors with third-party tools and data sources like Fivetran, Airbyte, Apify, Apache Spark and Apache Kafka that allows developers to create advanced data pipelines. Milvus can also work with tools for orchestrating, evaluating, and optimizing RAG workflows.
+
+Check out https://milvus.io/docs/integrations_overview.md for more details.
+
 ## Documentation
 
-For guidance on installation, development, deployment, and administration, check out [Milvus Docs](https://milvus.io/docs). For technical milestones and enhancement proposals, check out [milvus confluence](https://wiki.lfaidata.foundation/display/MIL/Milvus+Home)
+For guidance on installation, usage, deployment, and administration, check out [Milvus Docs](https://milvus.io/docs). For technical milestones and enhancement proposals, check out [issues on GitHub](https://github.com/milvus-io/milvus/issues).
 
-## Build Milvus from Source Code
+## Contributing
 
-Check the requirements first.
+The Milvus open-source project accepts contribution from everyone. See [Guidelines for Contributing](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md) for details on submitting patches and the development workflow. See our [community repository](https://github.com/milvus-io/community) to learn about project governance and access more community resources.
 
-Linux systems (Ubuntu 20.04 or later recommended):
-```bash
-go: >= 1.21
-cmake: >= 3.26.4
-gcc: 9.5
-python: > 3.8 and  <= 3.11
-```
+### Build Milvus from Source Code
 
-MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
-```bash
-go: >= 1.21
-cmake: >= 3.26.4
-llvm: >= 15
-python: > 3.8 and  <= 3.11
-```
+Requirements:
 
-MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
-```bash
-go: >= 1.21 (Arch=ARM64)
-cmake: >= 3.26.4
-llvm: >= 15
-python: > 3.8 and  <= 3.11
-```
+* Linux systems (Ubuntu 20.04 or later recommended):
+  ```bash
+  go: >= 1.21
+  cmake: >= 3.26.4
+  gcc: 9.5
+  python: > 3.8 and  <= 3.11
+  ```
+
+* MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
+  ```bash
+  go: >= 1.21
+  cmake: >= 3.26.4
+  llvm: >= 15
+  python: > 3.8 and  <= 3.11
+  ```
+
+* MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
+  ```bash
+  go: >= 1.21 (Arch=ARM64)
+  cmake: >= 3.26.4
+  llvm: >= 15
+  python: > 3.8 and  <= 3.11
+  ```
 
 Clone Milvus repo and build.
 
@@ -186,33 +194,7 @@ $ ./scripts/install_deps.sh
 $ make
 ```
 
-For the full story, see [developer's documentation](https://github.com/milvus-io/milvus/blob/master/DEVELOPMENT.md).
-
-## Contributing
-
-Contributions to Milvus are welcome from everyone. See [Guidelines for Contributing](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md) for details on submitting patches and the contribution workflow. See our [community repository](https://github.com/milvus-io/community) to learn about our governance and access more community resources.
-
-## Documentation
-
-For guidance on installation, development, deployment, and administration, check out [Milvus Docs](https://milvus.io/docs). For technical milestones and enhancement proposals, check out [milvus confluence](https://wiki.lfaidata.foundation/display/MIL/Milvus+Home)
-
-### SDK
-
-The implemented SDK and its API documentation are listed below:
-
-- [PyMilvus SDK](https://github.com/milvus-io/pymilvus)
-- [Java SDK](https://github.com/milvus-io/milvus-sdk-java)
-- [Go SDK](https://github.com/milvus-io/milvus-sdk-go)
-- [Cpp SDK](https://github.com/milvus-io/milvus-sdk-cpp)(under development)
-- [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
-- [Rust SDK](https://github.com/milvus-io/milvus-sdk-rust)(under development)
-- [CSharp SDK](https://github.com/milvus-io/milvus-sdk-csharp)(under development)
-
-### Attu
-
-Attu provides an intuitive and efficient GUI for Milvus.
-
-- [Quick start](https://github.com/zilliztech/milvus-insight#quick-start)
+For full instructions, see [developer's documentation](https://github.com/milvus-io/milvus/blob/master/DEVELOPMENT.md).
 
 ## Community
 
@@ -228,9 +210,10 @@ Subscribe to Milvus mailing lists:
 
 Follow Milvus on social media:
 
-- [Medium](https://medium.com/@milvusio)
 - [X](https://twitter.com/milvusio)
+- [LinkedIn](https://www.linkedin.com/company/the-milvus-project)
 - [Youtube](https://www.youtube.com/channel/UCMCo_F7pKjMHBlfyxwOPw-g)
+- [Medium](https://medium.com/@milvusio)
 
 ## Reference
 
@@ -256,15 +239,3 @@ Reference to cite when you use Milvus in a research paper:
   publisher={VLDB Endowment}
 }
 ```
-
-## Acknowledgments
-
-Milvus adopts dependencies from the following:
-
-- Thanks to [FAISS](https://github.com/facebookresearch/faiss) for the excellent search library.
-- Thanks to [etcd](https://github.com/coreos/etcd) for providing great open-source key-value store tools.
-- Thanks to [Pulsar](https://github.com/apache/pulsar) for its wonderful distributed pub-sub messaging system.
-- Thanks to [Tantivy](https://github.com/quickwit-oss/tantivy) for its full-text search engine library written in Rust.
-- Thanks to [RocksDB](https://github.com/facebook/rocksdb) for the powerful storage engines.
-
-
