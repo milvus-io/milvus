@@ -57,6 +57,18 @@ func GetIP(ip string) string {
 	if len(ip) == 0 {
 		return GetLocalIP()
 	}
+	netIP := net.ParseIP(ip)
+	// not a valid ip addr
+	if netIP == nil {
+		panic(errors.Newf(`"%s" in param table is not a valid IP address`, ip))
+	}
+	// only localhost or unicast is acceptable
+	if netIP.IsUnspecified() {
+		panic(errors.Newf(`"%s" in param table is Unspecified IP address and cannot be used`))
+	}
+	if netIP.IsMulticast() || netIP.IsLinkLocalMulticast() || netIP.IsInterfaceLocalMulticast() {
+		panic(errors.Newf(`"%s" in param table is Multicast IP address and cannot be used`))
+	}
 	return ip
 }
 
