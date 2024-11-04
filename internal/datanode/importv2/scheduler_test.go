@@ -476,10 +476,11 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 		Functions: []*schemapb.FunctionSchema{
 			{
 				Name:           "test",
-				Type:           schemapb.FunctionType_OpenAIEmbedding,
+				Type:           schemapb.FunctionType_TextEmbedding,
 				InputFieldIds:  []int64{100},
 				OutputFieldIds: []int64{101},
 				Params: []*commonpb.KeyValuePair{
+					{Key: function.Provider, Value: function.OpenAIProvider},
 					{Key: function.ModelNameParamKey, Value: "text-embedding-ada-002"},
 					{Key: function.OpenaiApiKeyParamKey, Value: "mock"},
 					{Key: function.OpenaiEmbeddingUrlParamKey, Value: ts.URL},

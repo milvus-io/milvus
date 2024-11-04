@@ -29,6 +29,7 @@ func HasFunctions(functions []*schemapb.FunctionSchema, outputIDs []int64) bool 
 	for _, f_schema := range functions {
 		switch f_schema.GetType() {
 		case schemapb.FunctionType_BM25:
+		case schemapb.FunctionType_Unknown:
 		default:
 			if len(outputIDs) == 0 {
 				return true

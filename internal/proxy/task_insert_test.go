@@ -347,15 +347,17 @@ func TestInsertTask_Function(t *testing.T) {
 			{FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "4"},
-				}},
+				}, IsFunctionOutput: true},
 		},
 		Functions: []*schemapb.FunctionSchema{
 			{
-				Name:           "test_function",
-				Type:           schemapb.FunctionType_OpenAIEmbedding,
-				InputFieldIds:  []int64{101},
-				OutputFieldIds: []int64{102},
+				Name:            "test_function",
+				Type:            schemapb.FunctionType_TextEmbedding,
+				InputFieldIds:   []int64{101},
+				InputFieldNames: []string{"text"},
+				OutputFieldIds:  []int64{102},
 				Params: []*commonpb.KeyValuePair{
+					{Key: function.Provider, Value: function.OpenAIProvider},
 					{Key: function.ModelNameParamKey, Value: "text-embedding-ada-002"},
 					{Key: function.OpenaiApiKeyParamKey, Value: "mock"},
 					{Key: function.OpenaiEmbeddingUrlParamKey, Value: ts.URL},
