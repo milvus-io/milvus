@@ -241,13 +241,21 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 	return nil, fmt.Errorf("cannot cast value to %s, value: %s", dataType.String(), value)
 }
 
-func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, columnInfo *planpb.ColumnInfo, arithExprDataType schemapb.DataType, operandExpr, valueExpr *planpb.ValueExpr) *planpb.Expr {
+func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithExprDataType schemapb.DataType, columnInfo *planpb.ColumnInfo, operandExpr, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
+	var err error
+	operand := operandExpr.GetValue()
+	if !isTemplateExpr(operandExpr) {
+		operand, err = castValue(arithExprDataType, operand)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &planpb.Expr{
 		Expr: &planpb.Expr_BinaryArithOpEvalRangeExpr{
 			BinaryArithOpEvalRangeExpr: &planpb.BinaryArithOpEvalRangeExpr{
 				ColumnInfo:                  columnInfo,
 				ArithOp:                     arithOp,
-				RightOperand:                operandExpr.GetValue(),
+				RightOperand:                operand,
 				Op:                          op,
 				Value:                       valueExpr.GetValue(),
 				OperandTemplateVariableName: operandExpr.GetTemplateVariableName(),
@@ -255,7 +263,7 @@ func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, column
 			},
 		},
 		IsTemplate: isTemplateExpr(operandExpr) || isTemplateExpr(valueExpr),
-	}
+	}, nil
 }
 
 func combineArrayLengthExpr(op planpb.OpType, arithOp planpb.ArithOpType, columnInfo *planpb.ColumnInfo, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
@@ -297,7 +305,7 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 		// a * 2 == 3
 		// a / 2 == 3
 		// a % 2 == 3
-		return combineBinaryArithExpr(op, arithOp, leftExpr.GetInfo(), arithExprDataType, rightValue, valueExpr), nil
+		return combineBinaryArithExpr(op, arithOp, arithExprDataType, leftExpr.GetInfo(), rightValue, valueExpr)
 	} else if rightExpr != nil && leftValue != nil {
 		// 2 + a == 3
 		// 2 - a == 3
@@ -307,7 +315,7 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 
 		switch arithExpr.GetOp() {
 		case planpb.ArithOpType_Add, planpb.ArithOpType_Mul:
-			return combineBinaryArithExpr(op, arithOp, rightExpr.GetInfo(), arithExprDataType, leftValue, valueExpr), nil
+			return combineBinaryArithExpr(op, arithOp, arithExprDataType, rightExpr.GetInfo(), leftValue, valueExpr)
 		default:
 			return nil, fmt.Errorf("module field is not yet supported")
 		}
@@ -625,24 +633,27 @@ func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType,
 	return nil
 }
 
-func checkRangeCompared(dataType schemapb.DataType, value *planpb.GenericValue) error {
+func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
 	switch dataType {
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		if !IsString(value) {
-			return fmt.Errorf("invalid range operations")
+			return nil, fmt.Errorf("invalid range operations")
 		}
 	case schemapb.DataType_Bool:
-		return fmt.Errorf("invalid range operations on boolean expr")
+		return nil, fmt.Errorf("invalid range operations on boolean expr")
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
 		if !IsInteger(value) {
-			return fmt.Errorf("invalid range operations")
+			return nil, fmt.Errorf("invalid range operations")
 		}
 	case schemapb.DataType_Float, schemapb.DataType_Double:
 		if !IsNumber(value) {
-			return fmt.Errorf("invalid range operations")
+			return nil, fmt.Errorf("invalid range operations")
+		}
+		if IsInteger(value) {
+			return NewFloat(float64(value.GetInt64Val())), nil
 		}
 	}
-	return nil
+	return value, nil
 }
 
 func checkContainsElement(columnExpr *ExprWithType, op planpb.JSONContainsExpr_JSONOp, elementValue *planpb.GenericValue) error {
