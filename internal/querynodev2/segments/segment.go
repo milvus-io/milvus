@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -747,6 +748,14 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 	var status C.CStatus
 
 	GetDynamicPool().Submit(func() (any, error) {
+		start := time.Now()
+		defer func() {
+			metrics.QueryNodeCGOCallLatency.WithLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				"Delete",
+				"Sync",
+			).Observe(float64(time.Since(start).Milliseconds()))
+		}()
 		status = C.Insert(s.ptr,
 			cOffset,
 			cNumOfRows,
@@ -822,6 +831,14 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 	}
 	var status C.CStatus
 	GetDynamicPool().Submit(func() (any, error) {
+		start := time.Now()
+		defer func() {
+			metrics.QueryNodeCGOCallLatency.WithLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				"Delete",
+				"Sync",
+			).Observe(float64(time.Since(start).Milliseconds()))
+		}()
 		status = C.Delete(s.ptr,
 			cOffset,
 			cSize,
@@ -884,6 +901,14 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 
 	var status C.CStatus
 	GetLoadPool().Submit(func() (any, error) {
+		start := time.Now()
+		defer func() {
+			metrics.QueryNodeCGOCallLatency.WithLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				"LoadFieldData",
+				"Sync",
+			).Observe(float64(time.Since(start).Milliseconds()))
+		}()
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
@@ -951,6 +976,14 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 
 	var status C.CStatus
 	GetLoadPool().Submit(func() (any, error) {
+		start := time.Now()
+		defer func() {
+			metrics.QueryNodeCGOCallLatency.WithLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				"LoadFieldData",
+				"Sync",
+			).Observe(float64(time.Since(start).Milliseconds()))
+		}()
 		log.Info("submitted loadFieldData task to load pool")
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
@@ -1055,6 +1088,14 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	*/
 	var status C.CStatus
 	GetDynamicPool().Submit(func() (any, error) {
+		start := time.Now()
+		defer func() {
+			metrics.QueryNodeCGOCallLatency.WithLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				"LoadFieldData",
+				"Sync",
+			).Observe(float64(time.Since(start).Milliseconds()))
+		}()
 		status = C.LoadDeletedRecord(s.ptr, loadInfo)
 		return nil, nil
 	}).Await()
