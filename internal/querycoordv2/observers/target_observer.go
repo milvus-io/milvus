@@ -351,7 +351,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		zap.Int64("collectionID", collectionID),
 		zap.Int32("replicaNum", replicaNum),
 	)
-
+	log.Info("shouldUpdateCurrentTarget")
 	// check channel first
 	channelNames := ob.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
 	if len(channelNames) == 0 {
@@ -406,6 +406,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			if updateVersionAction != nil {
 				actions = append(actions, updateVersionAction)
 			}
+			log.Info("begin to sync", zap.Any("actions", actions))
 			if !ob.sync(ctx, replica, leaderView, actions) {
 				return false
 			}
@@ -502,6 +503,13 @@ func (ob *TargetObserver) checkCollectionLeaderVersionIsCurrent(ctx context.Cont
 func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, leaderView *meta.LeaderView) *querypb.SyncAction {
 	log.Ctx(ctx).WithRateGroup("qcv2.LeaderObserver", 1, 60)
 	targetVersion := ob.targetMgr.GetCollectionTargetVersion(leaderView.CollectionID, meta.NextTarget)
+
+	log.Info("checkNeedUpdateTargetVersion",
+		zap.Int64("collectionID", leaderView.CollectionID),
+		zap.String("channelName", leaderView.Channel),
+		zap.Int64("nodeID", leaderView.ID),
+		zap.Int64("oldVersion", leaderView.TargetVersion),
+		zap.Int64("newVersion", targetVersion))
 
 	if targetVersion <= leaderView.TargetVersion {
 		return nil
