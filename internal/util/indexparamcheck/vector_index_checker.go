@@ -10,6 +10,7 @@ import "C"
 
 import (
 	"fmt"
+	"math"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
@@ -90,6 +91,13 @@ func (c vecIndexChecker) CheckTrain(dataType schemapb.DataType, params map[strin
 	if err := c.StaticCheck(dataType, params); err != nil {
 		return err
 	}
+
+	if typeutil.IsFixDimVectorType(dataType) {
+		if !CheckIntByRange(params, DIM, 1, math.MaxInt) {
+			return fmt.Errorf("failed to check vector dimension, should be larger than 0 and smaller than math.MaxInt")
+		}
+	}
+
 	return c.baseChecker.CheckTrain(dataType, params)
 }
 
