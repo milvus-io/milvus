@@ -326,7 +326,7 @@ func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
 	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.TargetObserver", 1, 60).
 		With(zap.Int64("collectionID", collectionID))
 
-	log.RatedInfo(10, "observer trigger update next target")
+	log.Info("observer trigger update next target")
 	err := ob.targetMgr.UpdateCollectionNextTarget(collectionID)
 	if err != nil {
 		log.Warn("failed to update next target for collection",
@@ -356,7 +356,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 	channelNames := ob.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
 	if len(channelNames) == 0 {
 		// next target is empty, no need to update
-		log.RatedInfo(10, "next target is empty, no need to update")
+		log.Info("next target is empty, no need to update")
 		return false
 	}
 
@@ -365,7 +365,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		nodes := lo.Map(views, func(v *meta.LeaderView, _ int) int64 { return v.ID })
 		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager, collectionID, nodes)
 		if int32(len(group)) < replicaNum {
-			log.RatedInfo(10, "channel not ready",
+			log.Info("channel not ready",
 				zap.Int("readyReplicaNum", len(group)),
 				zap.String("channelName", channel.GetChannelName()),
 			)
@@ -380,7 +380,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		nodes := lo.Map(views, func(view *meta.LeaderView, _ int) int64 { return view.ID })
 		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager, collectionID, nodes)
 		if int32(len(group)) < replicaNum {
-			log.RatedInfo(10, "segment not ready",
+			log.Info("segment not ready",
 				zap.Int("readyReplicaNum", len(group)),
 				zap.Int64("segmentID", segment.GetID()),
 			)
@@ -396,7 +396,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			actions = actions[:0]
 			leaderView := ob.distMgr.LeaderViewManager.GetLeaderShardView(leaderID, ch)
 			if leaderView == nil {
-				log.RatedInfo(10, "leader view not ready",
+				log.Info("leader view not ready",
 					zap.Int64("nodeID", leaderID),
 					zap.String("channel", ch),
 				)
@@ -507,7 +507,7 @@ func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, lead
 		return nil
 	}
 
-	log.RatedInfo(10, "Update readable segment version",
+	log.Info("Update readable segment version",
 		zap.Int64("collectionID", leaderView.CollectionID),
 		zap.String("channelName", leaderView.Channel),
 		zap.Int64("nodeID", leaderView.ID),
@@ -537,7 +537,7 @@ func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, lead
 
 func (ob *TargetObserver) updateCurrentTarget(collectionID int64) {
 	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.TargetObserver", 1, 60)
-	log.RatedInfo(10, "observer trigger update current target", zap.Int64("collectionID", collectionID))
+	log.Info("observer trigger update current target", zap.Int64("collectionID", collectionID))
 	if ob.targetMgr.UpdateCollectionCurrentTarget(collectionID) {
 		ob.mut.Lock()
 		defer ob.mut.Unlock()

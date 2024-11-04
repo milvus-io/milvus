@@ -1215,7 +1215,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		return true
 	})
 
-	return &querypb.GetDataDistributionResponse{
+	resp := &querypb.GetDataDistributionResponse{
 		Status:          merr.Success(),
 		NodeID:          node.GetNodeID(),
 		Segments:        segmentVersionInfos,
@@ -1223,14 +1223,16 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		LeaderViews:     leaderViews,
 		LastModifyTs:    lastModifyTs,
 		MemCapacityInMB: float64(hardware.GetMemoryCount() / 1024 / 1024),
-	}, nil
+	}
+	log.Info("GetDataDistribution done", zap.Any("resp", resp))
+	return resp, nil
 }
 
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	defer node.updateDistributionModifyTS()
 
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()),
-		zap.String("channel", req.GetChannel()), zap.Int64("currentNodeID", node.GetNodeID()))
+		zap.String("channel", req.GetChannel()), zap.Int64("currentNodeID", node.GetNodeID()), zap.Any("req", req))
 	// check node healthy
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil

@@ -308,7 +308,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 		return
 	}
 
-	log.RatedInfo(10, "partition targets",
+	log.Info("partition targets",
 		zap.Int("segmentTargetNum", len(segmentTargets)),
 		zap.Int("channelTargetNum", len(channelTargets)),
 		zap.Int("totalTargetNum", targetNum),
