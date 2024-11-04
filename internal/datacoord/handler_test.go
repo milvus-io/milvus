@@ -702,8 +702,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				MsgGroup:    "",
 				Timestamp:   1,
 			},
-			NumOfRows:      100,
-			CompactionFrom: []int64{1, 2, 3},
+			NumOfRows:           100,
+			CompactionFrom:      []int64{1, 2, 3},
+			CreatedByCompaction: true,
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg8))
 		assert.NoError(t, err)
@@ -719,8 +720,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				MsgGroup:    "",
 				Timestamp:   1,
 			},
-			NumOfRows:      100,
-			CompactionFrom: []int64{1, 2, 3},
+			NumOfRows:           100,
+			CompactionFrom:      []int64{1, 2, 3},
+			CreatedByCompaction: true,
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg9))
 		assert.NoError(t, err)
@@ -736,8 +738,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				MsgGroup:    "",
 				Timestamp:   1,
 			},
-			NumOfRows:      100,
-			CompactionFrom: []int64{1, 2, 3},
+			NumOfRows:           100,
+			CompactionFrom:      []int64{1, 2, 3},
+			CreatedByCompaction: true,
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg10))
 		assert.NoError(t, err)
@@ -753,8 +756,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				MsgGroup:    "",
 				Timestamp:   1,
 			},
-			NumOfRows:      2048,
-			CompactionFrom: []int64{4, 5, 6},
+			NumOfRows:           2048,
+			CompactionFrom:      []int64{4, 5, 6},
+			CreatedByCompaction: true,
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg11))
 		assert.NoError(t, err)
@@ -770,8 +774,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				MsgGroup:    "",
 				Timestamp:   1,
 			},
-			NumOfRows:      100,
-			CompactionFrom: []int64{4, 5, 6},
+			NumOfRows:           100,
+			CompactionFrom:      []int64{4, 5, 6},
+			CreatedByCompaction: true,
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg12))
 		assert.NoError(t, err)
@@ -787,8 +792,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				MsgGroup:    "",
 				Timestamp:   1,
 			},
-			NumOfRows:      2047,
-			CompactionFrom: []int64{7, 8, 9},
+			NumOfRows:           2047,
+			CompactionFrom:      []int64{7, 8, 9},
+			CreatedByCompaction: true,
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg13))
 		assert.NoError(t, err)
@@ -804,8 +810,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				MsgGroup:    "",
 				Timestamp:   1,
 			},
-			NumOfRows:      100,
-			CompactionFrom: []int64{10, 11},
+			NumOfRows:           100,
+			CompactionFrom:      []int64{10, 11},
+			CreatedByCompaction: true,
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg14))
 		assert.NoError(t, err)
@@ -821,8 +828,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				MsgGroup:    "",
 				Timestamp:   1,
 			},
-			NumOfRows:      2048,
-			CompactionFrom: []int64{10, 11},
+			NumOfRows:           2048,
+			CompactionFrom:      []int64{10, 11},
+			CreatedByCompaction: true,
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg15))
 		assert.NoError(t, err)
@@ -838,8 +846,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				MsgGroup:    "",
 				Timestamp:   1,
 			},
-			NumOfRows:      2048,
-			CompactionFrom: []int64{13, 14},
+			NumOfRows:           2048,
+			CompactionFrom:      []int64{13, 14},
+			CreatedByCompaction: true,
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg16))
 		assert.NoError(t, err)
@@ -855,8 +864,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				MsgGroup:    "",
 				Timestamp:   1,
 			},
-			NumOfRows:      2048,
-			CompactionFrom: []int64{12, 15},
+			NumOfRows:           2048,
+			CompactionFrom:      []int64{12, 15},
+			CreatedByCompaction: true,
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg17))
 		assert.NoError(t, err)
@@ -913,10 +923,11 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				MsgGroup:    "",
 				Timestamp:   1,
 			},
-			NumOfRows:      2048,
-			CompactionFrom: []int64{19},
-			IsInvisible:    false,
-			IsSorted:       true,
+			NumOfRows:           2048,
+			CompactionFrom:      []int64{19},
+			CreatedByCompaction: true,
+			IsInvisible:         false,
+			IsSorted:            true,
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg20))
 		assert.NoError(t, err)

@@ -145,8 +145,8 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 			// Skip bulk insert segments.
 			continue
 		}
-		if s.GetIsInvisible() && s.GetLevel() != datapb.SegmentLevel_L1 {
-			// skip invisible segments
+		if s.GetIsInvisible() && s.GetCreatedByCompaction() {
+			// skip invisible compaction segments
 			continue
 		}
 
