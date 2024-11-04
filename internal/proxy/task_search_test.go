@@ -384,10 +384,11 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		Functions: []*schemapb.FunctionSchema{
 			{
 				Name:           "func1",
-				Type:           schemapb.FunctionType_OpenAIEmbedding,
+				Type:           schemapb.FunctionType_TextEmbedding,
 				InputFieldIds:  []int64{101},
 				OutputFieldIds: []int64{102},
 				Params: []*commonpb.KeyValuePair{
+					{Key: function.Provider, Value: function.OpenAIProvider},
 					{Key: function.ModelNameParamKey, Value: "text-embedding-ada-002"},
 					{Key: function.OpenaiApiKeyParamKey, Value: "mock"},
 					{Key: function.OpenaiEmbeddingUrlParamKey, Value: ts.URL},
@@ -396,10 +397,11 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 			},
 			{
 				Name:           "func2",
-				Type:           schemapb.FunctionType_OpenAIEmbedding,
+				Type:           schemapb.FunctionType_TextEmbedding,
 				InputFieldIds:  []int64{101},
 				OutputFieldIds: []int64{103},
 				Params: []*commonpb.KeyValuePair{
+					{Key: function.Provider, Value: function.OpenAIProvider},
 					{Key: function.ModelNameParamKey, Value: "text-embedding-ada-002"},
 					{Key: function.OpenaiApiKeyParamKey, Value: "mock"},
 					{Key: function.OpenaiEmbeddingUrlParamKey, Value: ts.URL},

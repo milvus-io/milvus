@@ -20,6 +20,7 @@ package function
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -51,19 +52,23 @@ func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSch
 			{FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "4"},
-				}},
+				},
+				IsFunctionOutput: true,
+			},
 			{FieldID: 103, Name: "vector2", DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "8"},
-				}},
+				}, IsFunctionOutput: true},
 		},
 		Functions: []*schemapb.FunctionSchema{
 			{
-				Name:           "test",
-				Type:           schemapb.FunctionType_OpenAIEmbedding,
-				InputFieldIds:  []int64{101},
-				OutputFieldIds: []int64{102},
+				Name:            "test",
+				Type:            schemapb.FunctionType_TextEmbedding,
+				InputFieldIds:   []int64{101},
+				InputFieldNames: []string{"text"},
+				OutputFieldIds:  []int64{102},
 				Params: []*commonpb.KeyValuePair{
+					{Key: Provider, Value: OpenAIProvider},
 					{Key: ModelNameParamKey, Value: "text-embedding-ada-002"},
 					{Key: OpenaiApiKeyParamKey, Value: "mock"},
 					{Key: OpenaiEmbeddingUrlParamKey, Value: url},
@@ -71,11 +76,13 @@ func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSch
 				},
 			},
 			{
-				Name:           "test",
-				Type:           schemapb.FunctionType_OpenAIEmbedding,
-				InputFieldIds:  []int64{101},
-				OutputFieldIds: []int64{103},
+				Name:            "test",
+				Type:            schemapb.FunctionType_TextEmbedding,
+				InputFieldIds:   []int64{101},
+				InputFieldNames: []string{"text"},
+				OutputFieldIds:  []int64{103},
 				Params: []*commonpb.KeyValuePair{
+					{Key: Provider, Value: OpenAIProvider},
 					{Key: ModelNameParamKey, Value: "text-embedding-ada-002"},
 					{Key: OpenaiApiKeyParamKey, Value: "mock"},
 					{Key: OpenaiEmbeddingUrlParamKey, Value: url},
@@ -93,6 +100,7 @@ func (s *FunctionExecutorSuite) createMsg(texts []string) *msgstream.InsertMsg {
 	f := schemapb.FieldData{
 		Type:      schemapb.DataType_VarChar,
 		FieldId:   101,
+		FieldName: "text",
 		IsDynamic: false,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
@@ -168,6 +176,7 @@ func (s *FunctionExecutorSuite) TestErrorEmbedding() {
 	defer ts.Close()
 	schema := s.creataSchema(ts.URL)
 	exec, err := NewFunctionExecutor(schema)
+	fmt.Println(err)
 	s.NoError(err)
 	msg := s.createMsg([]string{"sentence", "sentence"})
 	err = exec.ProcessInsert(msg)

@@ -185,7 +185,7 @@ func (c *OpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", c.apiKey)
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
 
 	var res EmbeddingResponse
 	err = c.sendWithRetry(client, req, &res, 3)

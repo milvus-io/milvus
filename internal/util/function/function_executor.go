@@ -50,8 +50,8 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 	switch schema.GetType() {
 	case schemapb.FunctionType_BM25: // ignore bm25 function
 		return nil, nil
-	case schemapb.FunctionType_OpenAIEmbedding:
-		f, err := NewOpenAIEmbeddingFunction(coll, schema)
+	case schemapb.FunctionType_TextEmbedding:
+		f, err := NewTextEmbeddingFunction(coll, schema)
 		if err != nil {
 			return nil, err
 		}
@@ -81,15 +81,14 @@ func NewFunctionExecutor(schema *schemapb.CollectionSchema) (*FunctionExecutor, 
 }
 
 func (executor *FunctionExecutor) processSingleFunction(runner Runner, msg *msgstream.InsertMsg) ([]*schemapb.FieldData, error) {
-	inputs := make([]*schemapb.FieldData, 0, len(runner.GetSchema().InputFieldIds))
-	for _, id := range runner.GetSchema().InputFieldIds {
+	inputs := make([]*schemapb.FieldData, 0, len(runner.GetSchema().GetInputFieldNames()))
+	for _, name := range runner.GetSchema().GetInputFieldNames() {
 		for _, field := range msg.FieldsData {
-			if field.FieldId == id {
+			if field.GetFieldName() == name {
 				inputs = append(inputs, field)
 			}
 		}
 	}
-
 	if len(inputs) != len(runner.GetSchema().InputFieldIds) {
 		return nil, fmt.Errorf("Input field not found")
 	}
