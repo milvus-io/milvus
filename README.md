@@ -8,11 +8,11 @@
 
 ## What is Milvus?
 
-[Milvus](https://milvus.io/) is a high-performance vector database built for scale. It is used by AI applications to organize and search through large amounts of unstructured data, such as text and images.
+[Milvus](https://milvus.io/) is a high-performance vector database built for scale. It is used by AI applications to organize and search through large amount of unstructured data, such as text, images, and multi-modal information.
 
-Milvus is implemented with Go and C++ and employs CPU/GPU instruction-level optimization for vector search efficiency. It has a [fully-distributed architecture on K8s](https://milvus.io/docs/overview.md#What-Makes-Milvus-so-Scalable) to handle tens of thousands of search queries on billions of vectors, scale horizontally and maintain data freshness by processing streaming data updates in real-time. For smaller use cases, Milvus also supports [Standalone mode](https://milvus.io/docs/install_standalone-docker.md) that can run on Docker. In addition, [Milvus Lite](https://milvus.io/docs/milvus_lite.md) is a lightweight version suitable for quickstart in python with simply `pip install`.
+Milvus is implemented with Go and C++ and employs CPU/GPU instruction-level optimization for best vector search performance. With [fully-distributed architecture on K8s](https://milvus.io/docs/overview.md#What-Makes-Milvus-so-Scalable), it can handle tens of thousands of search queries on billions of vectors, scale horizontally and maintain data freshness by processing streaming updates in real-time. For smaller use cases, Milvus supports [Standalone mode](https://milvus.io/docs/install_standalone-docker.md) that can run on Docker. In addition, [Milvus Lite](https://milvus.io/docs/milvus_lite.md) is a lightweight version suitable for quickstart in python, with simply `pip install`.
 
-Milvus is also available as a fully managed service on [Zilliz Cloud with free trial](https://cloud.zilliz.com/signup).
+The easiest way to try out Milvus is to use [Zilliz Cloud with free trial](https://cloud.zilliz.com/signup). Milvus is available as a fully managed service on Zilliz Cloud.
 
 The Milvus open-source project is
 under [LF AI & Data Foundation](https://lfaidata.foundation/projects/milvus/), distributed with [Apache 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) License.
@@ -22,19 +22,24 @@ under [LF AI & Data Foundation](https://lfaidata.foundation/projects/milvus/), d
 ```python
 $ pip install -U pymilvus
 ```
-
-This installs `pymilvus`, a Python SDK for Milvus. It also includes Milvus Lite for quickstart with a local vector database. Simply instantiate a client with a local file name to persist all data:
-
+This installs `pymilvus`, the Python SDK for Milvus. Use `MilvusClient` to create a client:
 ```python
 from pymilvus import MilvusClient
-client = MilvusClient("milvus_demo.db")
 ```
 
-For Milvus Standalone on Docker, Milvus Distributed on Kubernetes, and Zilliz Cloud, specify the [URI and Token](https://milvus.io/api-reference/pymilvus/v2.4.x/MilvusClient/Client/MilvusClient.md) instead to connect to the Milvus server:
+* `pymilvus` also includes Milvus Lite for quickstart. To create a local vector database, simply instantiate a client with a local file name for persisting data:
 
-```python
-client = MilvusClient(uri="http://localhost:19530", token="root:Milvus")
-```
+  ```python
+  client = MilvusClient("milvus_demo.db")
+  ```
+
+* You can also specify the credentials to connect to your deployed [Milvus server](https://milvus.io/docs/authenticate.md?tab=docker) or [Zilliz Cloud](https://docs.zilliz.com/docs/quick-start):
+
+  ```python
+  client = MilvusClient(
+    uri="<endpoint_of_self_hosted_milvus_or_zilliz_cloud>",
+    token="<username_and_password_or_zilliz_cloud_api_key>")
+  ```
 
 With the client, you can create collection:
 ```python
@@ -44,20 +49,20 @@ client.create_collection(
 )
 ```
 
- ingest data:
+Ingest data:
 ```python
 res = client.insert(collection_name="demo_collection", data=data)
 ```
 
-and perform vector search:
+Perform vector search:
 
 ```python
 query_vectors = embedding_fn.encode_queries(["Who is Alan Turing?", "What is AI?"])
 res = client.search(
     collection_name="demo_collection",  # target collection
-    data=query_vectors,  # a list of query vectors, supports batch search req
-    limit=2,  # number of returned results (topK)
-    output_fields=["vector", "text", "subject"],  # specifies fields to return
+    data=query_vectors,  # a list of one or more query vectors, supports batch
+    limit=2,  # how many results to return (topK)
+    output_fields=["vector", "text", "subject"],  # what fields to return
 )
 
 ```
