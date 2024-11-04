@@ -553,6 +553,15 @@ dataCoord:
     taskQueueCapacity: 256 # compaction task queue size
     rpcTimeout: 10
     maxParallelTaskNum: 10
+    mix:
+      triggerInterval: 60 # The time interval in seconds to trigger mix compaction
+    levelzero:
+      triggerInterval: 10 # The time interval in seconds for trigger L0 compaction
+      forceTrigger:
+        minSize: 8388608 # The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB
+        maxSize: 67108864 # The maxmum size in bytes to force trigger a LevelZero Compaction, default as 64MB
+        deltalogMinNum: 10 # The minimum number of deltalog files to force trigger a LevelZero Compaction
+        deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
     single:
       ratio:
         threshold: 0.2 # The ratio threshold of a segment to trigger a single compaction, default as 0.2
@@ -576,12 +585,6 @@ dataCoord:
       minClusterSizeRatio: 0.01 # minimum cluster size / avg size in Kmeans train
       maxClusterSizeRatio: 10 # maximum cluster size / avg size in Kmeans train
       maxClusterSize: 5g # maximum cluster size in Kmeans train
-    levelzero:
-      forceTrigger:
-        minSize: 8388608 # The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB
-        maxSize: 67108864 # The maxmum size in bytes to force trigger a LevelZero Compaction, default as 64MB
-        deltalogMinNum: 10 # The minimum number of deltalog files to force trigger a LevelZero Compaction
-        deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
   syncSegmentsInterval: 300 # The time interval for regularly syncing segments
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:

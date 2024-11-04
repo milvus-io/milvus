@@ -3581,22 +3581,25 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.global.interval",
 		Version:      "2.0.0",
 		DefaultValue: "60",
+		Doc:          "deprecated",
 	}
 	p.GlobalCompactionInterval.Init(base.mgr)
 
 	p.MixCompactionTriggerInterval = ParamItem{
 		Key:          "dataCoord.compaction.mix.triggerInterval",
 		Version:      "2.4.15",
-		Doc:          "The time interval in seconds for trigger mix compaction, default as 60s",
+		Doc:          "The time interval in seconds to trigger mix compaction",
 		DefaultValue: "60",
+		Export:       true,
 	}
 	p.MixCompactionTriggerInterval.Init(base.mgr)
 
 	p.L0CompactionTriggerInterval = ParamItem{
 		Key:          "dataCoord.compaction.levelzero.triggerInterval",
 		Version:      "2.4.15",
-		Doc:          "The time interval in seconds for trigger L0 compaction, default as 10s",
+		Doc:          "The time interval in seconds for trigger L0 compaction",
 		DefaultValue: "10",
+		Export:       true,
 	}
 	p.L0CompactionTriggerInterval.Init(base.mgr)
 
