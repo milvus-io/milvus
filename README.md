@@ -1,74 +1,150 @@
 <img src="https://repository-images.githubusercontent.com/208728772/998c09ca-cfa6-4c01-ac75-3dfad7f4862b" alt="milvus banner">
 
 <div class="column" align="middle">
-  <a href="https://discord.com/invite/8uyFbECzPX"><img height="20" src="https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white" alt="license"/></a>
-  <img src="https://img.shields.io/github/license/milvus-io/milvus" alt="license"/>
-  <img src="https://img.shields.io/docker/pulls/milvusdb/milvus" alt="docker-pull-count" />
+  <a href="https://github.com/milvus-io/milvus/blob/master/LICENSE"><img height="20" src="https://img.shields.io/github/license/milvus-io/milvus" alt="license"/></a>
+  <a href="https://milvus.io/docs/install_standalone-docker.md"><img src="https://img.shields.io/docker/pulls/milvusdb/milvus" alt="docker-pull-count"/></a>
+  <a href="https://discord.com/invite/8uyFbECzPX"><img height="20" src="https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white" alt="discord"/></a>
 </div>
 
 ## What is Milvus?
 
-<img src="https://github.com/milvus-io/artwork/blob/master/horizontal/color/milvus-horizontal-color.png" alt="milvus-logo"/>
+[Milvus](https://milvus.io/) is a high-performance vector database built for scale. It is used by AI applications to organize and search through large amounts of unstructured data, such as text and images.
 
-Milvus is an open-source vector database built to power embedding similarity search and AI applications. Milvus makes unstructured data search more accessible, and provides a consistent user experience regardless of the deployment environment.
+Milvus is implemented with Go and C++ and employs CPU/GPU instruction-level optimization for vector search efficiency. It has a [fully-distributed architecture on K8s](https://milvus.io/docs/overview.md#What-Makes-Milvus-so-Scalable) to handle tens of thousands of search queries on billions of vectors, scale horizontally and maintain data freshness by processing streaming data updates in real-time. For smaller use cases, Milvus also supports [Standalone mode](https://milvus.io/docs/install_standalone-docker.md) that can run on Docker. In addition, [Milvus Lite](https://milvus.io/docs/milvus_lite.md) is a lightweight version suitable for quickstart in python with simply `pip install`.
 
-Milvus 2.0 is a cloud-native vector database with storage and computation separated by design. All components in this refactored version of Milvus are stateless to enhance elasticity and flexibility. For more architecture details, see [Milvus Architecture Overview](https://milvus.io/docs/architecture_overview.md).
+Milvus is also available as a hosted service on [Zilliz Cloud with free trial](https://cloud.zilliz.com/signup).
 
-Milvus was released under the [open-source Apache License 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) in October 2019. It is currently a graduate project under [LF AI & Data Foundation](https://lfaidata.foundation/).
+The Milvus open-source project is
+under [LF AI & Data Foundation](https://lfaidata.foundation/projects/milvus/), distributed with [Apache 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) License.
 
-## Key features
+## Quickstart
 
-<details>
-  <summary><b>Millisecond search on trillion vector datasets</b></summary>
-  Average latency measured in milliseconds on trillion vector datasets.
-  </details>
+```python
+$ pip install -U pymilvus
+```
 
-<details>
-  <summary><b>Simplified unstructured data management</b></summary>
-  <li>Rich APIs designed for data science workflows.</li><li>Consistent user experience across laptop, local cluster, and cloud.</li><li>Embed real-time search and analytics into virtually any application.</li>
-  </details>
+This installs `pymilvus`, a Python SDK for Milvus. It also includes Milvus Lite for quickstart with a local vector database. Simply instantiate a client with a local file name to persist all data:
 
-<details>
-  <summary><b>Reliable, always on vector database</b></summary>
-  Milvus’ built-in replication and failover/failback features ensure data and applications can maintain business continuity in the event of a disruption.
-  </details>
+```python
+from pymilvus import MilvusClient
+client = MilvusClient("milvus_demo.db")
+```
 
-<details>
-  <summary><b>Highly scalable and elastic</b></summary>
-  Component-level scalability makes it possible to scale up and down on demand. Milvus can autoscale at a component level according to the load type, making resource scheduling much more efficient.
-  </details>
+For [Milvus Standalone on Docker](https://milvus.io/docs/install_standalone-docker.md) and [Milvus Distributed on Kubernetes](https://milvus.io/docs/install_cluster-milvusoperator.md), specify the [URI and Token](https://milvus.io/api-reference/pymilvus/v2.4.x/MilvusClient/Client/MilvusClient.md) instead to connect to the Milvus server:
 
-<details>
-  <summary><b>Hybrid search</b></summary>
-  Since Milvus 2.4, we introduced multi-vector support and a hybrid search framework, which means users can bring in several vector fields (up to 10) into a single collection. These vectors in different columns represent diverse facets of data, originating from different embedding models or undergoing distinct processing methods. The results of hybrid searches are integrated using reranking strategies, such as Reciprocal Rank Fusion (RRF) and Weighted Scoring.
+```python
+client = MilvusClient(uri="http://localhost:19530", token="root:Milvus")
+```
 
-  This feature is particularly useful in comprehensive search scenarios, such as identifying the most similar person in a vector library based on various attributes like pictures, voice, fingerprints, etc. For details, refer to [Hybrid Search](https://milvus.io/docs/multi-vector-search.md) for more.
-  </details>
+With the client, you can create collection:
+```python
+client.create_collection(
+    collection_name="demo_collection",
+    dimension=768,  # The vectors we will use in this demo has 768 dimensions
+)
+```
 
-<details>
-  <summary><b>Unified Lambda structure</b></summary>
-  Milvus combines stream and batch processing for data storage to balance timeliness and efficiency. Its unified interface makes vector similarity search a breeze.
-  </details>
+ ingest data:
+```python
+res = client.insert(collection_name="demo_collection", data=data)
+```
 
-<details>
-  <summary><b>Community supported, industry recognized</b></summary>
-  With over 1,000 enterprise users, 27,000+ stars on GitHub, and an active open-source community, you’re not alone when you use Milvus. As a graduate project under the <a href="https://lfaidata.foundation/">LF AI & Data Foundation</a>, Milvus has institutional support.
-  </details>
+and perform vector search:
 
-## Quick start
+```python
+query_vectors = embedding_fn.encode_queries(["Who is Alan Turing?", "What is AI?"])
+res = client.search(
+    collection_name="demo_collection",  # target collection
+    data=query_vectors,  # a list of query vectors, supports batch search req
+    limit=2,  # number of returned results (topK)
+    output_fields=["vector", "text", "subject"],  # specifies fields to return
+)
 
-### Start with Zilliz Cloud
-Zilliz Cloud is a fully managed service on cloud and the simplest way to deploy LF AI Milvus®, See [Zilliz Cloud](https://zilliz.com/) and start your [free trial](https://cloud.zilliz.com/signup). 
+```
 
-### Install Milvus
+## Why Milvus
 
-- [Standalone Quick Start Guide](https://milvus.io/docs/install_standalone-docker.md)
+Milvus is designed to handle vectors, which are numerical representations of unstructured data, together with other scalar data types such as integers, strings, and JSON objects. Users can store scalar data with vectors to conduct vector search with metadata filtering.
 
-- [Cluster Quick Start Guide](https://milvus.io/docs/install_cluster-docker.md)
+* **High performance and horizontal scalability**:
+  *  Milvus provides sub-ten millisecond search latency at scale. For detailed performance, checkout [VectorDBBench](https://zilliz.com/vector-database-benchmark-tool).
 
-- [Advanced Deployment](https://github.com/milvus-io/milvus/wiki)
+* **Intuitive API and rich SDK support**:
+  * Milvus implements easy-to-use API for vector search, data query, ingestion, update and collection management.
+In addition to RESTful and gRPC API, Milvus also provides SDK in [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java), [Go](https://github.com/milvus-io/milvus-sdk-go), [C++](https://github.com/milvus-io/milvus-sdk-cpp), [Node.js](https://github.com/milvus-io/milvus-sdk-node), [Rust](https://github.com/milvus-io/milvus-sdk-rust), [C#](https://github.com/milvus-io/milvus-sdk-csharp)
 
-### Build Milvus from source code
+
+* **High availability**:
+  * Milvus is highly available thanks to its fully-distributed architecture. To learn more, check [Milvus Architecture Overview](https://milvus.io/docs/architecture_overview.md).
+**Various Index Types Support**
+
+* **Efficient Metadata Filtering**
+  * Milvus has various optimizations to make vector search efficient when combined with metadata filtering, especially at high filtering rate, where post-filtering doesn't work, [VectorDBBench](https://zilliz.com/vector-database-benchmark-tool) shows the performance.
+
+* **Hardware Acceleration**
+  * Milvus implements instruction-level acceleration to speed up vector search performance, and supports GPU index such as NVIDIA [CAGRA](https://github.com/rapidsai/raft).
+
+* **Hybrid Search**
+  * Users can define up to 10 vector fields in a single collection. Milvus supports hybrid search on multiple vector columns, merge and rerank with Reciprocal Rank Fusion (RRF) and Weighted Scoring. For details, refer to [Hybrid Search](https://milvus.io/docs/multi-vector-search.md).
+
+Milvus is trusted by AI developers in startups and enterprises to develop applications such as text and image search, Retrieval-Augmented Generation (RAG), and recommendation systems. Milvus powers mission-critical business for users including Salesforce, PayPal, Shopee, Airbnb, eBay, NVIDIA, IBM, AT&T, LINE, and ROBLOX.
+
+## Demos and Tutorials 
+
+
+| Tutorial | Use Case | Related Milvus Features | 
+| -------- | -------- | --------- |
+| [Build RAG with Milvus](build-rag-with-milvus.md) |  RAG | vector search |
+| [Multimodal RAG with Milvus](multimodal_rag_with_milvus.md) | RAG | vector search, dynamic field |
+| [Image Search with Milvus](image_similarity_search.md) | Semantic Search | vector search, dynamic field |
+| [Hybrid Search with Milvus](hybrid_search_with_milvus.md) | Hybrid Search | hybrid search, multi vector, dense embedding, sparse embedding |
+| [Multimodal Search using Multi Vectors](multimodal_rag_with_milvus.md) | Semantic Search | multi vector, hybrid search |
+| [Recommender System](recommendation_system.md) | Recommendation System | vector search |
+| [Video Similarity Search](video_similarity_search.md) | Semantic Search | vector search |
+| [Audio Similarity Search](audio_similarity_search.md) | Semantic Search | vector search |
+| [DNA Classification](dna_sequence_classification.md) | Classification | vector search |
+| [Graph RAG with Milvus](graph_rag_with_milvus.md) | RAG | vector search |
+| [Contextual Retrieval with Milvus](contextual_retrieval_with_milvus.md) | RAG, Semantic Search | vector search |
+| [HDBSCAN Clustering with Milvus](hdbscan_clustering_with_milvus.md) | Clustering | vector search |
+| [Use ColPali for Multi-Modal Retrieval with Milvus](use_ColPali_with_milvus.md) | RAG, Semantic Search | vector search |
+| [Vector Visualization](vector_visualization.md) | Data Visualization | vector search |
+
+<table>
+  <tr>
+    <td width="30%">
+      <a href="https://milvus.io/milvus-demos">
+        <img src="https://assets.zilliz.com/image_search_59a64e4f22.gif" />
+      </a>
+    </td>
+    <td width="30%">
+<a href="https://milvus.io/milvus-demos">
+<img src="https://assets.zilliz.com/qa_df5ee7bd83.gif" />
+</a>
+    </td>
+    <td width="30%">
+<a href="https://milvus.io/milvus-demos">
+<img src="https://assets.zilliz.com/mole_search_76f8340572.gif" />
+</a>
+    </td>
+  </tr>
+  <tr>
+    <th>
+      <a href="https://milvus.io/milvus-demos">Image Search</a>
+    </th>
+    <th>
+      <a href="https://milvus.io/milvus-demos">RAG</a>
+    </th>
+    <th>
+      <a href="https://milvus.io/milvus-demos">Drug Discovery</a>
+    </th>
+  </tr>
+</table>
+
+## Documentation
+
+For guidance on installation, development, deployment, and administration, check out [Milvus Docs](https://milvus.io/docs). For technical milestones and enhancement proposals, check out [milvus confluence](https://wiki.lfaidata.foundation/display/MIL/Milvus+Home)
+
+## Build Milvus from Source Code
 
 Check the requirements first.
 
@@ -112,69 +188,16 @@ $ make
 
 For the full story, see [developer's documentation](https://github.com/milvus-io/milvus/blob/master/DEVELOPMENT.md).
 
-> **IMPORTANT** The master branch is for the development of Milvus v2.0. On March 9th, 2021, we released Milvus v1.0, the first stable version of Milvus with long-term support. To use Milvus v1.0, switch to [branch 1.0](https://github.com/milvus-io/milvus/tree/1.0).
-
-## Milvus 2.0 vs. 1.x: Cloud-native, distributed architecture, highly scalable, and more
-
-See [Milvus 2.0 vs. 1.x](https://github.com/milvus-io/milvus/blob/master/milvus20vs1x.md) for more information.
-
-## Real world demos
-
-<table>
-  <tr>
-    <td width="30%">
-      <a href="https://milvus.io/milvus-demos">
-        <img src="https://assets.zilliz.com/image_search_59a64e4f22.gif" />
-      </a>
-    </td>
-    <td width="30%">
-<a href="https://milvus.io/milvus-demos">
-<img src="https://assets.zilliz.com/qa_df5ee7bd83.gif" />
-</a>
-    </td>
-    <td width="30%">
-<a href="https://milvus.io/milvus-demos">
-<img src="https://assets.zilliz.com/mole_search_76f8340572.gif" />
-</a>
-    </td>
-  </tr>
-  <tr>
-    <th>
-      <a href="https://milvus.io/milvus-demos">Image search</a>
-    </th>
-    <th>
-      <a href="https://milvus.io/milvus-demos">Chatbots</a>
-    </th>
-    <th>
-      <a href="https://milvus.io/milvus-demos">Chemical structure search</a>
-    </th>
-  </tr>
-</table>
-
-#### Image Search
-
-Images made searchable. Instantaneously return the most similar images from a massive database.
-
-#### Chatbots
-
-Interactive digital customer service that saves users time and businesses money.
-
-#### Chemical Structure Search
-
-Blazing fast similarity search, substructure search, or superstructure search for a specified molecule.
-
-## Bootcamps
-
-Milvus [bootcamp](https://github.com/milvus-io/bootcamp) is designed to expose users to both the simplicity and depth of the vector database. Discover how to run benchmark tests as well as build similarity search applications spanning chatbots, recommendation systems, reverse image search, molecular search, and much more.
-
 ## Contributing
 
 Contributions to Milvus are welcome from everyone. See [Guidelines for Contributing](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md) for details on submitting patches and the contribution workflow. See our [community repository](https://github.com/milvus-io/community) to learn about our governance and access more community resources.
 
+<<<<<<< HEAD
+=======
 ### All contributors
 
 <br><!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-412-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-401-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
@@ -185,7 +208,6 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/AnthonyTsu1984"><img src="https://avatars.githubusercontent.com/u/115786031?v=4" width="30px" /></a>
 <a href="https://github.com/Aredcap"><img src="https://avatars.githubusercontent.com/u/40494761?v=4" width="30px" /></a>
 <a href="https://github.com/ArenaSu"><img src="https://avatars.githubusercontent.com/u/21214629?v=4" width="30px" /></a>
-<a href="https://github.com/Armaggheddon"><img src="https://avatars.githubusercontent.com/u/47779194?v=4" width="30px" /></a>
 <a href="https://github.com/Arya0812"><img src="https://avatars.githubusercontent.com/u/114047052?v=4" width="30px" /></a>
 <a href="https://github.com/BUPTAnderson"><img src="https://avatars.githubusercontent.com/u/13449703?v=4" width="30px" /></a>
 <a href="https://github.com/Ben-Aaron-Bio-Rad"><img src="https://avatars.githubusercontent.com/u/54123439?v=4" width="30px" /></a>
@@ -231,7 +253,6 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/Leslie-Wong-H"><img src="https://avatars.githubusercontent.com/u/27696701?v=4" width="30px" /></a>
 <a href="https://github.com/Light-City"><img src="https://avatars.githubusercontent.com/u/25699850?v=4" width="30px" /></a>
 <a href="https://github.com/Lin-gh-Saint"><img src="https://avatars.githubusercontent.com/u/64019322?v=4" width="30px" /></a>
-<a href="https://github.com/Linkwei"><img src="https://avatars.githubusercontent.com/u/30227152?v=4" width="30px" /></a>
 <a href="https://github.com/LionelDong"><img src="https://avatars.githubusercontent.com/u/7533395?v=4" width="30px" /></a>
 <a href="https://github.com/LocoRichard"><img src="https://avatars.githubusercontent.com/u/81553353?v=4" width="30px" /></a>
 <a href="https://github.com/LoveEachDay"><img src="https://avatars.githubusercontent.com/u/1573213?v=4" width="30px" /></a>
@@ -251,7 +272,6 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/Raysilience"><img src="https://avatars.githubusercontent.com/u/45241093?v=4" width="30px" /></a>
 <a href="https://github.com/Reidddddd"><img src="https://avatars.githubusercontent.com/u/5352837?v=4" width="30px" /></a>
 <a href="https://github.com/ReigenAraka"><img src="https://avatars.githubusercontent.com/u/57280231?v=4" width="30px" /></a>
-<a href="https://github.com/Rijin-N"><img src="https://avatars.githubusercontent.com/u/181319057?v=4" width="30px" /></a>
 <a href="https://github.com/RosieZhang12"><img src="https://avatars.githubusercontent.com/u/106942883?v=4" width="30px" /></a>
 <a href="https://github.com/RyanWei"><img src="https://avatars.githubusercontent.com/u/9876551?v=4" width="30px" /></a>
 <a href="https://github.com/SCKCZJ2018"><img src="https://avatars.githubusercontent.com/u/29282370?v=4" width="30px" /></a>
@@ -358,7 +378,6 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/eltociear"><img src="https://avatars.githubusercontent.com/u/22633385?v=4" width="30px" /></a>
 <a href="https://github.com/eolivelli"><img src="https://avatars.githubusercontent.com/u/9469110?v=4" width="30px" /></a>
 <a href="https://github.com/erdustiggen"><img src="https://avatars.githubusercontent.com/u/25433850?v=4" width="30px" /></a>
-<a href="https://github.com/ericljx2020-gmail"><img src="https://avatars.githubusercontent.com/u/68884486?v=4" width="30px" /></a>
 <a href="https://github.com/feisiyicl"><img src="https://avatars.githubusercontent.com/u/64510805?v=4" width="30px" /></a>
 <a href="https://github.com/fengjun2016"><img src="https://avatars.githubusercontent.com/u/23044049?v=4" width="30px" /></a>
 <a href="https://github.com/filip-halt"><img src="https://avatars.githubusercontent.com/u/81822489?v=4" width="30px" /></a>
@@ -404,10 +423,8 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/jiaoew1991"><img src="https://avatars.githubusercontent.com/u/2297455?v=4" width="30px" /></a>
 <a href="https://github.com/jielinxu"><img src="https://avatars.githubusercontent.com/u/52057195?v=4" width="30px" /></a>
 <a href="https://github.com/jingkl"><img src="https://avatars.githubusercontent.com/u/34296482?v=4" width="30px" /></a>
-<a href="https://github.com/jinhonglin-ryan"><img src="https://avatars.githubusercontent.com/u/123346659?v=4" width="30px" /></a>
 <a href="https://github.com/jjyaoao"><img src="https://avatars.githubusercontent.com/u/88936287?v=4" width="30px" /></a>
 <a href="https://github.com/jkx8fc"><img src="https://avatars.githubusercontent.com/u/31717785?v=4" width="30px" /></a>
-<a href="https://github.com/joeyjooste"><img src="https://avatars.githubusercontent.com/u/72280325?v=4" width="30px" /></a>
 <a href="https://github.com/john-h-luo"><img src="https://avatars.githubusercontent.com/u/67673717?v=4" width="30px" /></a>
 <a href="https://github.com/junjiejiangjjj"><img src="https://avatars.githubusercontent.com/u/14136703?v=4" width="30px" /></a>
 <a href="https://github.com/jxdv"><img src="https://avatars.githubusercontent.com/u/138708600?v=4" width="30px" /></a>
@@ -415,7 +432,6 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/kartikcho"><img src="https://avatars.githubusercontent.com/u/48270786?v=4" width="30px" /></a>
 <a href="https://github.com/kateshaowanjou"><img src="https://avatars.githubusercontent.com/u/58837504?v=4" width="30px" /></a>
 <a href="https://github.com/klboke"><img src="https://avatars.githubusercontent.com/u/18591662?v=4" width="30px" /></a>
-<a href="https://github.com/laipz8200"><img src="https://avatars.githubusercontent.com/u/16485841?v=4" width="30px" /></a>
 <a href="https://github.com/lee-eve"><img src="https://avatars.githubusercontent.com/u/9720105?v=4" width="30px" /></a>
 <a href="https://github.com/lentitude2tk"><img src="https://avatars.githubusercontent.com/u/108672767?v=4" width="30px" /></a>
 <a href="https://github.com/leonardokidd"><img src="https://avatars.githubusercontent.com/u/14940941?v=4" width="30px" /></a>
@@ -437,7 +453,6 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/madogar"><img src="https://avatars.githubusercontent.com/u/36537062?v=4" width="30px" /></a>
 <a href="https://github.com/maksspace"><img src="https://avatars.githubusercontent.com/u/9841409?v=4" width="30px" /></a>
 <a href="https://github.com/manifoldhiker"><img src="https://avatars.githubusercontent.com/u/22048793?v=4" width="30px" /></a>
-<a href="https://github.com/manoj9896"><img src="https://avatars.githubusercontent.com/u/51627080?v=4" width="30px" /></a>
 <a href="https://github.com/matchyc"><img src="https://avatars.githubusercontent.com/u/57976772?v=4" width="30px" /></a>
 <a href="https://github.com/matrixji"><img src="https://avatars.githubusercontent.com/u/183388?v=4" width="30px" /></a>
 <a href="https://github.com/mausch"><img src="https://avatars.githubusercontent.com/u/95194?v=4" width="30px" /></a>
@@ -448,7 +463,6 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/mohitreddy1996"><img src="https://avatars.githubusercontent.com/u/11742913?v=4" width="30px" /></a>
 <a href="https://github.com/nameczz"><img src="https://avatars.githubusercontent.com/u/20559208?v=4" width="30px" /></a>
 <a href="https://github.com/natoka"><img src="https://avatars.githubusercontent.com/u/1751024?v=4" width="30px" /></a>
-<a href="https://github.com/ncover21"><img src="https://avatars.githubusercontent.com/u/30241297?v=4" width="30px" /></a>
 <a href="https://github.com/nexttonever"><img src="https://avatars.githubusercontent.com/u/31059690?v=4" width="30px" /></a>
 <a href="https://github.com/neza2017"><img src="https://avatars.githubusercontent.com/u/34152706?v=4" width="30px" /></a>
 <a href="https://github.com/nianliuu"><img src="https://avatars.githubusercontent.com/u/136299351?v=4" width="30px" /></a>
@@ -512,7 +526,6 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/sutcalag"><img src="https://avatars.githubusercontent.com/u/83750738?v=4" width="30px" /></a>
 <a href="https://github.com/sworddish"><img src="https://avatars.githubusercontent.com/u/219938?v=4" width="30px" /></a>
 <a href="https://github.com/talentAN"><img src="https://avatars.githubusercontent.com/u/17634030?v=4" width="30px" /></a>
-<a href="https://github.com/tasty-gumi"><img src="https://avatars.githubusercontent.com/u/95212988?v=4" width="30px" /></a>
 <a href="https://github.com/taydy"><img src="https://avatars.githubusercontent.com/u/24822588?v=4" width="30px" /></a>
 <a href="https://github.com/tbickford"><img src="https://avatars.githubusercontent.com/u/814232?v=4" width="30px" /></a>
 <a href="https://github.com/tedxu"><img src="https://avatars.githubusercontent.com/u/152654?v=4" width="30px" /></a>
@@ -551,7 +564,6 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/xiyichan"><img src="https://avatars.githubusercontent.com/u/34647972?v=4" width="30px" /></a>
 <a href="https://github.com/xudalin0609"><img src="https://avatars.githubusercontent.com/u/35444753?v=4" width="30px" /></a>
 <a href="https://github.com/xuqiwe"><img src="https://avatars.githubusercontent.com/u/57252655?v=4" width="30px" /></a>
-<a href="https://github.com/xzshinan"><img src="https://avatars.githubusercontent.com/u/7299894?v=4" width="30px" /></a>
 <a href="https://github.com/yah01"><img src="https://avatars.githubusercontent.com/u/12216890?v=4" width="30px" /></a>
 <a href="https://github.com/yahorbarkouski"><img src="https://avatars.githubusercontent.com/u/94449298?v=4" width="30px" /></a>
 <a href="https://github.com/yamasite"><img src="https://avatars.githubusercontent.com/u/10089260?v=4" width="30px" /></a>
@@ -589,6 +601,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/zxf2017"><img src="https://avatars.githubusercontent.com/u/29620478?v=4" width="30px" /></a>
 <!-- Do not remove end of hero-bot --><br>
 
+>>>>>>> 9a8ed9af5 (Update all contributors)
 ## Documentation
 
 For guidance on installation, development, deployment, and administration, check out [Milvus Docs](https://milvus.io/docs). For technical milestones and enhancement proposals, check out [milvus confluence](https://wiki.lfaidata.foundation/display/MIL/Milvus+Home)
@@ -664,9 +677,4 @@ Milvus adopts dependencies from the following:
 - Thanks to [Tantivy](https://github.com/quickwit-oss/tantivy) for its full-text search engine library written in Rust.
 - Thanks to [RocksDB](https://github.com/facebook/rocksdb) for the powerful storage engines.
 
-Milvus is adopted by following opensource project:
-- [Towhee](https://github.com/towhee-io/towhee) a flexible, application-oriented framework for computing embedding vectors over unstructured data.
-- [Haystack](https://github.com/deepset-ai/haystack) an open source NLP framework that leverages Transformer models
-- [Langchain](https://github.com/hwchase17/langchain) Building applications with LLMs through composability
-- [LLamaIndex](https://github.com/run-llama/llama_index) a data framework for your LLM applications
-- [GPTCache](https://github.com/zilliztech/GPTCache) a library for creating semantic cache to store responses from LLM queries.
+
