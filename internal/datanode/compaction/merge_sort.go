@@ -105,6 +105,12 @@ func mergeSortMultipleSegments(ctx context.Context,
 				deletedRowCount++
 				continue
 			}
+
+			// Filtering expired entity
+			if isExpiredEntity(collectionTtl, currentTs, typeutil.Timestamp(v.Timestamp)) {
+				expiredRowCount++
+				continue
+			}
 			return v, nil
 		}
 	}
@@ -124,12 +130,6 @@ func mergeSortMultipleSegments(ctx context.Context,
 	for pq.Len() > 0 {
 		smallest := heap.Pop(&pq).(*PQItem)
 		v := smallest.Value
-
-		// Filtering expired entity
-		if isExpiredEntity(collectionTtl, currentTs, typeutil.Timestamp(v.Timestamp)) {
-			expiredRowCount++
-			continue
-		}
 
 		err := mWriter.Write(v)
 		if err != nil {
