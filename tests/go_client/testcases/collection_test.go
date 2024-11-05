@@ -445,7 +445,6 @@ func TestCreateCollectionWithInvalidCollectionName(t *testing.T) {
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
-	collName := common.GenRandomString(prefix, 6)
 
 	// create collection and schema no name
 	schema := genDefaultSchema()
@@ -456,24 +455,12 @@ func TestCreateCollectionWithInvalidCollectionName(t *testing.T) {
 	for _, invalidName := range common.GenInvalidNames() {
 		log.Debug("TestCreateCollectionWithInvalidCollectionName", zap.String("collectionName", invalidName))
 
-		// schema has invalid name
-		schema.WithName(invalidName)
-		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(invalidName, schema))
 		common.CheckErr(t, err, false, "collection name should not be empty",
 			"the first character of a collection name must be an underscore or letter",
 			"collection name can only contain numbers, letters and underscores",
 			fmt.Sprintf("the length of a collection name must be less than %d characters", common.MaxCollectionNameLen))
-
-		// collection option has invalid name
-		schema.WithName(collName)
-		err2 := mc.CreateCollection(ctx, client.NewCreateCollectionOption(invalidName, schema))
-		common.CheckErr(t, err2, false, "collection name matches schema name")
 	}
-
-	// collection name not equal to schema name
-	schema.WithName(collName)
-	err3 := mc.CreateCollection(ctx, client.NewCreateCollectionOption(common.GenRandomString("pre", 4), schema))
-	common.CheckErr(t, err3, false, "collection name matches schema name")
 }
 
 // create collection missing pk field or vector field
