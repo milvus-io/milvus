@@ -414,7 +414,7 @@ class Checker:
             self.insert_data(nb=constants.ENTITIES_FOR_SEARCH, partition_name=self.p_name)
             log.info(f"insert data for collection {c_name} cost {time.perf_counter() - t0}s")
 
-        self.initial_entities = self.c_wrap.num_entities  # do as a flush
+        self.initial_entities = self.c_wrap.collection.num_entities
         self.scale = 100000  # timestamp scale to make time.time() as int64
 
     def insert_data(self, nb=constants.DELTA_PER_INS, partition_name=None):
@@ -759,8 +759,7 @@ class InsertFlushChecker(Checker):
     def __init__(self, collection_name=None, flush=False, shards_num=2, schema=None):
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         self._flush = flush
-        self.initial_entities = self.c_wrap.num_entities
-
+        self.initial_entities = self.c_wrap.collection.num_entities
     def keep_running(self):
         while True:
             t0 = time.time()
@@ -803,17 +802,12 @@ class FlushChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("FlushChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        self.initial_entities = self.c_wrap.num_entities
+        self.initial_entities = self.c_wrap.collection.num_entities
 
     @trace()
     def flush(self):
-        num_entities = self.c_wrap.num_entities
-        if num_entities >= (self.initial_entities + constants.DELTA_PER_INS):
-            result = True
-            self.initial_entities += constants.DELTA_PER_INS
-        else:
-            result = False
-        return num_entities, result
+        res, result = self.c_wrap.flush()
+        return res, result
 
     @exception_handler()
     def run_task(self):
@@ -839,7 +833,7 @@ class InsertChecker(Checker):
             collection_name = cf.gen_unique_str("InsertChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         self._flush = flush
-        self.initial_entities = self.c_wrap.num_entities
+        self.initial_entities = self.c_wrap.collection.num_entities
         self.inserted_data = []
         self.scale = 1 * 10 ** 6
         self.start_time_stamp = int(time.time() * self.scale)  # us
@@ -917,7 +911,7 @@ class InsertFreshnessChecker(Checker):
             collection_name = cf.gen_unique_str("InsertChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         self._flush = flush
-        self.initial_entities = self.c_wrap.num_entities
+        self.initial_entities = self.c_wrap.collection.num_entities
         self.inserted_data = []
         self.scale = 1 * 10 ** 6
         self.start_time_stamp = int(time.time() * self.scale)  # us
