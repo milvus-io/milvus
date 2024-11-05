@@ -80,6 +80,72 @@ class ParamInfo:
 
 param_info = ParamInfo()
 
+en_vocabularies_distribution = {
+    "hello": 0.01,
+    "milvus": 0.01,
+    "vector": 0.01,
+    "database": 0.01
+}
+
+zh_vocabularies_distribution = {
+    "你好": 0.01,
+    "向量": 0.01,
+    "数据": 0.01,
+    "库": 0.01
+}
+
+def patch_faker_text(fake_instance, vocabularies_distribution):
+    """
+    Monkey patch the text() method of a Faker instance to include custom vocabulary.
+    Each word in vocabularies_distribution has an independent chance to be inserted.
+
+    Args:
+        fake_instance: Faker instance to patch
+        vocabularies_distribution: Dictionary where:
+            - key: word to insert
+            - value: probability (0-1) of inserting this word into each sentence
+
+    Example:
+        vocabularies_distribution = {
+            "hello": 0.1,    # 10% chance to insert "hello" in each sentence
+            "milvus": 0.1,   # 10% chance to insert "milvus" in each sentence
+        }
+    """
+    original_text = fake_instance.text
+
+    def new_text(nb_sentences=100, *args, **kwargs):
+        sentences = []
+        # Split original text into sentences
+        original_sentences = original_text(nb_sentences).split('.')
+        original_sentences = [s.strip() for s in original_sentences if s.strip()]
+
+        for base_sentence in original_sentences:
+            words = base_sentence.split()
+
+            # Independently decide whether to insert each word
+            for word, probability in vocabularies_distribution.items():
+                if random.random() < probability:
+                    # Choose random position to insert the word
+                    insert_pos = random.randint(0, len(words))
+                    words.insert(insert_pos, word)
+
+            # Reconstruct the sentence
+            base_sentence = ' '.join(words)
+
+            # Ensure proper capitalization
+            base_sentence = base_sentence[0].upper() + base_sentence[1:]
+            sentences.append(base_sentence)
+
+        return '. '.join(sentences) + '.'
+
+
+
+    # Replace the original text method with our custom one
+    fake_instance.text = new_text
+
+
+
+
 
 def get_bm25_ground_truth(corpus, queries, top_k=100, language="en"):
     """
@@ -147,6 +213,14 @@ def custom_tokenizer(language="en"):
         )
     return tokenizer
 
+def manual_check_text_match(df, word, col):
+    id_list = []
+    for i in range(len(df)):
+        row = df.iloc[i]
+        # log.info(f"word :{word}, row: {row[col]}")
+        if word in row[col]:
+            id_list.append(row["id"])
+    return id_list
 
 def analyze_documents(texts, language="en"):
 
@@ -188,8 +262,8 @@ def check_token_overlap(text_a, text_b, language="en"):
 
 def split_dataframes(df, fields, language="en"):
     df_copy = df.copy()
-    tokenizer = custom_tokenizer(language)
     for col in fields:
+        tokenizer = custom_tokenizer(language)
         texts = df[col].to_list()
         tokenized = tokenizer.tokenize(texts, return_as="tuple")
         new_texts = []
@@ -227,7 +301,7 @@ def generate_text_match_expr(query_dict):
 
     def process_node(node):
         if isinstance(node, dict) and 'field' in node and 'value' in node:
-            return f"TextMatch({node['field']}, '{node['value']}')"
+            return f"TEXT_MATCH({node['field']}, '{node['value']}')"
         elif isinstance(node, dict) and 'not' in node:
             return f"not {process_node(node['not'])}"
         elif isinstance(node, list):

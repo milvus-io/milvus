@@ -864,7 +864,7 @@ func TestCreateSparseUnsupportedIndex(t *testing.T) {
 	// create unsupported vector index on sparse field
 	for _, idx := range hp.GenAllFloatIndex(entity.IP) {
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultSparseVecFieldName, idx))
-		common.CheckErr(t, err, false, fmt.Sprintf("data type 104 can't build with this index %v", idx.IndexType()))
+		common.CheckErr(t, err, false, fmt.Sprintf("data type SparseFloatVector can't build with this index %v", idx.IndexType()))
 	}
 
 	// create scalar index on sparse vector
