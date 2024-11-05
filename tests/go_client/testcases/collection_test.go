@@ -449,7 +449,7 @@ func TestCreateCollectionWithInvalidCollectionName(t *testing.T) {
 
 	// create collection and schema no name
 	schema := genDefaultSchema()
-	err2 := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	err2 := mc.CreateCollection(ctx, client.NewCreateCollectionOption("", schema))
 	common.CheckErr(t, err2, false, "collection name should not be empty")
 
 	// create collection with invalid schema name
@@ -937,11 +937,10 @@ func TestCreateCollectionInvalid(t *testing.T) {
 	vecField := entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(8)
 	mSchemaErrs := []mSchemaErr{
 		{schema: nil, errMsg: "schema does not contain vector field"},
-		{schema: entity.NewSchema().WithField(vecField), errMsg: "collection name should not be empty"},          // no collection name
-		{schema: entity.NewSchema().WithName("aaa").WithField(vecField), errMsg: "primary key is not specified"}, // no pk field
-		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField()), errMsg: "primary key is not specified"},
-		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true)), errMsg: "the data type of primary key should be Int64 or VarChar"},
-		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true).WithDataType(entity.FieldTypeVarChar)), errMsg: "field name should not be empty"},
+		{schema: entity.NewSchema().WithField(vecField), errMsg: "primary key is not specified"}, // no pk field
+		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField()), errMsg: "primary key is not specified"},
+		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true)), errMsg: "the data type of primary key should be Int64 or VarChar"},
+		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true).WithDataType(entity.FieldTypeVarChar)), errMsg: "field name should not be empty"},
 	}
 	for _, mSchema := range mSchemaErrs {
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, mSchema.schema))
