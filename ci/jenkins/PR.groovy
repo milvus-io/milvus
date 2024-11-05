@@ -11,6 +11,12 @@ pipeline {
         preserveStashes(buildCount: 5)
         disableConcurrentBuilds(abortPrevious: true)
         timeout(time: 6, unit: 'HOURS')
+        throttleJobProperty(
+            categories: ['cpu-e2e'],
+            throttleEnabled: true,
+            throttleOption: 'category'
+
+        )
     }
     agent {
         kubernetes {
