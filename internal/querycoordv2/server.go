@@ -481,9 +481,12 @@ func (s *Server) startQueryCoord() error {
 			s.nodeMgr.Stopping(node.ServerID)
 		}
 	}
+
 	s.checkNodeStateInRG()
 	for _, node := range sessions {
-		s.handleNodeUp(node.ServerID)
+		if !node.Stopping {
+			s.handleNodeUp(node.ServerID)
+		}
 	}
 
 	s.wg.Add(2)
