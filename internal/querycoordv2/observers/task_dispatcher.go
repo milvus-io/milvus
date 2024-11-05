@@ -18,6 +18,8 @@ package observers
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/pkg/log"
+	"go.uber.org/zap"
 	"sync"
 
 	"github.com/milvus-io/milvus/pkg/util/conc"
@@ -76,6 +78,7 @@ func (d *taskDispatcher[K]) AddTask(keys ...K) {
 		_, loaded := d.tasks.GetOrInsert(key, false)
 		added = added || !loaded
 	}
+	log.Info("taskDispatcher add tasks", zap.Bool("added", added), zap.Any("keys", keys))
 	if added {
 		d.notify()
 	}
@@ -95,9 +98,11 @@ func (d *taskDispatcher[K]) schedule(ctx context.Context) {
 			return
 		case <-d.notifyCh:
 			d.tasks.Range(func(k K, submitted bool) bool {
+				log.Info("taskDispatcher schedule", zap.Bool("submitted", submitted), zap.Any("k", k))
 				if !submitted {
 					d.tasks.Insert(k, true)
 					d.pool.Submit(func() (any, error) {
+						log.Info("taskDispatcher begin to run", zap.Bool("submitted", submitted), zap.Any("k", k))
 						d.taskRunner(ctx, k)
 						d.tasks.Remove(k)
 						return struct{}{}, nil

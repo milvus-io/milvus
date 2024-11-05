@@ -214,6 +214,7 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 // If not, submit an async task into dispatcher.
 func (ob *TargetObserver) Check(ctx context.Context, collectionID int64, partitionID int64) bool {
 	result := ob.targetMgr.IsCurrentTargetExist(collectionID, partitionID)
+	log.Info("check aaaa", zap.Int64("collection", collectionID), zap.Int64("partition", partitionID), zap.Bool("result", result))
 	if !result {
 		ob.dispatcher.AddTask(collectionID)
 	}
