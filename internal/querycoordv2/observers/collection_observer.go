@@ -343,6 +343,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 	}
 
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
+	
 	if loadPercentage == 100 {
 		if !ob.targetObserver.Check(ctx, partition.GetCollectionID(), partition.PartitionID) {
 			log.Warn("failed to manual check current target, skip update load status")
