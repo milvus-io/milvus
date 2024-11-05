@@ -106,17 +106,13 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
         "metric_type": "BM25",
         "params": {},
     }
-    start_time = time.time()
     result_list = []
-    q_batch_size = 1000
+    q_batch_size = 1
+    start_time = time.time()
     for i in range(0, len(texts_to_search), q_batch_size):
         log.info(f"Searching {i} to {i + q_batch_size}")
-        t0 = time.time()
         result = hello_bm25.search(texts_to_search[i:i + q_batch_size], "sparse", search_params, limit=top_k,
-                                   output_fields=["id"],
-                                   consistency_level="Strong")
-        tt = time.time() - t0
-        log.info(f"Search time: {tt}")
+                                   output_fields=["id"])
         result_list.extend(result)
     end_time = time.time()
     log.info(f"Search finished, cost time: {end_time - start_time}")
@@ -237,7 +233,10 @@ def es_full_text_search(corpus, queries, qrels, top_k=1000, index_name="hello", 
         }
     }
     model.initialise()
+    t0 = time.time()
     model.index(corpus)
+    tt = time.time() - t0
+    log.info(f"ES Insert time: {tt}")
     model.es.es.indices.close(index=index_name)
     model.es.es.indices.put_settings(index=index_name, body=es_bm25_settings)
     model.es.es.indices.open(index=index_name)
