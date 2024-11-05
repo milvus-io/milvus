@@ -18,15 +18,20 @@ package observers
 
 import (
 	"context"
+	"sort"
 	"sync"
+
+	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+const prioritizeSchedulingTaskNum = 3
+
 // taskDispatcher is the utility to provide task dedup and dispatch feature
-type taskDispatcher[K comparable] struct {
+type taskDispatcher[K constraints.Ordered] struct {
 	// tasks is the map for registered task
 	// key is the task identifier
 	// value is the flag stands for whether task is submitted to task pool
@@ -39,9 +44,9 @@ type taskDispatcher[K comparable] struct {
 	stopOnce   sync.Once
 }
 
-type task[K comparable] func(context.Context, K)
+type task[K constraints.Ordered] func(context.Context, K)
 
-func newTaskDispatcher[K comparable](runner task[K]) *taskDispatcher[K] {
+func newTaskDispatcher[K constraints.Ordered](runner task[K]) *taskDispatcher[K] {
 	return &taskDispatcher[K]{
 		tasks:      typeutil.NewConcurrentMap[K, bool](),
 		pool:       conc.NewPool[any](paramtable.Get().QueryCoordCfg.ObserverTaskParallel.GetAsInt()),
@@ -94,7 +99,7 @@ func (d *taskDispatcher[K]) schedule(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-d.notifyCh:
-			d.tasks.Range(func(k K, submitted bool) bool {
+			submit := func(k K, submitted bool) {
 				if !submitted {
 					d.tasks.Insert(k, true)
 					d.pool.Submit(func() (any, error) {
@@ -103,6 +108,21 @@ func (d *taskDispatcher[K]) schedule(ctx context.Context) {
 						return struct{}{}, nil
 					})
 				}
+			}
+
+			keys := d.tasks.Keys()
+			sort.Slice(keys, func(i, j int) bool {
+				return keys[i] > keys[j]
+			})
+			// submit the top N tasks first
+			for i := 0; i < prioritizeSchedulingTaskNum && i < len(keys); i++ {
+				if submitted, ok := d.tasks.Get(keys[i]); ok {
+					submit(keys[i], submitted)
+				}
+			}
+			// then randomly schedule the remaining tasks
+			d.tasks.Range(func(k K, submitted bool) bool {
+				submit(k, submitted)
 				return true
 			})
 		}
