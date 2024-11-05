@@ -19,6 +19,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -146,7 +147,7 @@ func (fs *FileSource) loadFromFile() error {
 
 		var node yaml.Node
 		decoder := yaml.NewDecoder(bytes.NewReader(data))
-		if err := decoder.Decode(&node); err != nil {
+		if err := decoder.Decode(&node); err != nil && !errors.Is(err, io.EOF) {
 			return errors.Wrap(err, "YAML unmarshal failed: "+configFile)
 		}
 
