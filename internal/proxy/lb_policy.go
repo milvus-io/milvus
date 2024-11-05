@@ -98,6 +98,7 @@ func (lb *LBPolicyImpl) Start(ctx context.Context) {
 	}
 }
 
+// GetShardLeaders should always retry until ctx done, except the collection is not loaded.
 func (lb *LBPolicyImpl) GetShardLeaders(ctx context.Context, dbName string, collName string, collectionID int64, withCache bool) (map[string][]nodeInfo, error) {
 	var shardLeaders map[string][]nodeInfo
 	// use retry to handle query coord service not ready
@@ -105,7 +106,7 @@ func (lb *LBPolicyImpl) GetShardLeaders(ctx context.Context, dbName string, coll
 		var err error
 		shardLeaders, err = globalMetaCache.GetShards(ctx, withCache, dbName, collName, collectionID)
 		if err != nil {
-			return true, err
+			return !errors.Is(err, merr.ErrCollectionLoaded), err
 		}
 
 		return false, nil
