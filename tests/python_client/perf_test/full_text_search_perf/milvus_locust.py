@@ -193,7 +193,7 @@ class MilvusUser(MilvusBaseUser):
     def query(self):
         """Text Match"""
         search_data = faker.sentence()
-        expr = f"TextMatch(text, '{search_data}')"
+        expr = f"TEXT_MATCH(text, '{search_data}')"
         logger.debug("Performing query")
         self.client.query(expr=expr)
 
