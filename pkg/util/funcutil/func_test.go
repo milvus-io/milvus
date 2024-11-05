@@ -105,9 +105,10 @@ func Test_GetIP(t *testing.T) {
 	})
 
 	t.Run("invalid_ip", func(t *testing.T) {
-		assert.Panics(t, func() {
-			GetIP("null")
-		}, "null is invalid ip address, panicking")
+		assert.NotPanics(t, func() {
+			ip := GetIP("null")
+			assert.Equal(t, "null", ip)
+		}, "non ip format, could be hostname or service name")
 
 		assert.Panics(t, func() {
 			GetIP("0.0.0.0")
