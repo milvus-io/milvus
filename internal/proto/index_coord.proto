@@ -138,6 +138,7 @@ message AlterIndexRequest {
     int64 collectionID = 1;
     string index_name = 2;
     repeated common.KeyValuePair params = 3;
+    repeated string delete_keys = 4;
 }
 
 message GetIndexInfoRequest {
