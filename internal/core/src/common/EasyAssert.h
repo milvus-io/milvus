@@ -68,7 +68,7 @@ enum ErrorCode {
     FollyOtherException = 2037,
     FollyCancel = 2038,
     OutOfRange = 2037,
-    KnowhereError = 2100,
+    KnowhereError = 2099,
 };
 namespace impl {
 void
