@@ -12,6 +12,12 @@ pipeline {
         preserveStashes(buildCount: 5)
         disableConcurrentBuilds(abortPrevious: true)
         timeout(time: 6, unit: 'HOURS')
+        throttleJobProperty(
+            categories: ['go-sdk'],
+            throttleEnabled: true,
+            throttleOption: 'category'
+
+        )
     }
     agent {
         kubernetes {
