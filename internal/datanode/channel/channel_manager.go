@@ -402,6 +402,12 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 
 			case <-tickler.GetProgressSig():
 				log.Info("Reset timer for tickler updated", zap.Int32("current progress", tickler.Progress()))
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
 				timer.Reset(watchTimeout)
 
 			case <-successSig:
