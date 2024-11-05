@@ -164,7 +164,7 @@ class MilvusUser(MilvusBaseUser):
     """Main Milvus user class that defines the test tasks"""
 
     @tag('insert')
-    @task(4)
+    @task(2)
     def insert(self):
         """Insert random vectors"""
         batch_size = 1000
