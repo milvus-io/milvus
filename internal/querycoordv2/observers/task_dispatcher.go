@@ -97,6 +97,7 @@ func (d *taskDispatcher[K]) schedule(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-d.notifyCh:
+			log.Info("taskDispatcher dddddd", zap.Int("len", d.tasks.Len()), zap.Any("keys", d.tasks.Keys()))
 			d.tasks.Range(func(k K, submitted bool) bool {
 				log.Info("taskDispatcher schedule", zap.Bool("submitted", submitted), zap.Any("k", k))
 				if !submitted {

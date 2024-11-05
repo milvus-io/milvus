@@ -165,7 +165,9 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 
 		case <-ticker.C:
 			ob.clean()
-			ob.dispatcher.AddTask(ob.meta.GetAll()...)
+			all := ob.meta.GetAll()
+			log.Info("TargetObserver ticker all", zap.Int("len(all)", len(all)), zap.Any("all", all))
+			ob.dispatcher.AddTask(all...)
 
 		case req := <-ob.updateChan:
 			log.Info("manually trigger update target",

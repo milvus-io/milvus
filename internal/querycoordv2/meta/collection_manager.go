@@ -606,6 +606,7 @@ func (m *CollectionManager) RemoveCollection(collectionID typeutil.UniqueID) err
 			delete(m.partitions, partition)
 		}
 		delete(m.collectionPartitions, collectionID)
+		log.Info("collection removed", zap.Int64("collectionID", collectionID))
 	}
 	metrics.CleanQueryCoordMetricsWithCollectionID(collectionID)
 	return nil
