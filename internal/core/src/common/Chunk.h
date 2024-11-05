@@ -133,13 +133,46 @@ class StringChunk : public Chunk {
         offsets_ = reinterpret_cast<uint64_t*>(data + null_bitmap_bytes_num);
     }
 
+    std::string_view
+    operator[](const int i) const {
+        if (i < 0 || i > row_nums_) {
+            PanicInfo(ErrorCode::OutOfRange, "index out of range");
+        }
+
+        return {data_ + offsets_[i], offsets_[i + 1] - offsets_[i]};
+    }
+
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
     StringViews();
 
+    int
+    binary_search_string(std::string_view target) {
+        // only supported sorted pk
+        int left = 0;
+        int right = row_nums_ - 1;  // `right` should be num_rows_ - 1
+        int result =
+            -1;  // Initialize result to store the first occurrence index
+
+        while (left <= right) {
+            int mid = left + (right - left) / 2;
+            std::string_view midString = (*this)[mid];
+            if (midString == target) {
+                result = mid;     // Store the index of match
+                right = mid - 1;  // Continue searching in the left half
+            } else if (midString < target) {
+                // midString < target
+                left = mid + 1;
+            } else {
+                // midString > target
+                right = mid - 1;
+            }
+        }
+        return result;
+    }
+
     const char*
     ValueAt(int64_t idx) const override {
-        PanicInfo(ErrorCode::Unsupported,
-                  "StringChunk::ValueAt is not supported");
+        return (*this)[idx].data();
     }
 
     uint64_t*
