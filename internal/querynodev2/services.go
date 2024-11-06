@@ -1233,6 +1233,13 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("channel", req.GetChannel()), zap.Int64("currentNodeID", node.GetNodeID()), zap.Any("req", req))
+
+	start := time.Now()
+	log.Info("querynode receive SyncDistribution")
+	defer func() {
+		log.Info("querynode SyncDistribution done", zap.Duration("dur", time.Since(start)))
+	}()
+
 	// check node healthy
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil

@@ -329,7 +329,12 @@ func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
 	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.TargetObserver", 1, 60).
 		With(zap.Int64("collectionID", collectionID))
 
-	log.Info("observer trigger update next target")
+	log.Info("observer updateNextTarget start")
+	start := time.Now()
+	defer func() {
+		log.Info("observer updateNextTarget done", zap.Duration("dur", time.Since(start)))
+	}()
+
 	err := ob.targetMgr.UpdateCollectionNextTarget(collectionID)
 	if err != nil {
 		log.Warn("failed to update next target for collection",
@@ -344,7 +349,7 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 	ob.nextTargetLastUpdate.Insert(collectionID, time.Now())
 }
 
-func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
+func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) (ok bool) {
 	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(collectionID)
 	log := log.Ctx(ctx).WithRateGroup(
 		fmt.Sprintf("qcv2.TargetObserver-%d", collectionID),
@@ -354,7 +359,11 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		zap.Int64("collectionID", collectionID),
 		zap.Int32("replicaNum", replicaNum),
 	)
+	start := time.Now()
 	log.Info("shouldUpdateCurrentTarget")
+	defer func() {
+		log.Info("shouldUpdateCurrentTarget done", zap.Duration("dur", time.Since(start)))
+	}()
 	// check channel first
 	channelNames := ob.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
 	if len(channelNames) == 0 {
@@ -409,7 +418,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			if updateVersionAction != nil {
 				actions = append(actions, updateVersionAction)
 			}
-			log.Info("begin to sync", zap.Any("actions", actions))
+			log.Info("shouldUpdateCurrentTarget begin to sync", zap.Any("actions", actions))
 			if !ob.sync(ctx, replica, leaderView, actions) {
 				return false
 			}
@@ -419,17 +428,23 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 	return true
 }
 
-func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, diffs []*querypb.SyncAction) bool {
-	if len(diffs) == 0 {
-		return true
-	}
-	replicaID := replica.GetID()
-
+func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, diffs []*querypb.SyncAction) (ok bool) {
 	log := log.With(
 		zap.Int64("leaderID", leaderView.ID),
 		zap.Int64("collectionID", leaderView.CollectionID),
 		zap.String("channel", leaderView.Channel),
 	)
+
+	log.Info("TargetObserver begin to sync", zap.Any("actions", diffs))
+	start := time.Now()
+	defer func() {
+		log.Info("TargetObserver sync done", zap.Any("actions", diffs), zap.Duration("dur", time.Since(start)))
+	}()
+
+	if len(diffs) == 0 {
+		return true
+	}
+	replicaID := replica.GetID()
 
 	collectionInfo, err := ob.broker.DescribeCollection(ctx, leaderView.CollectionID)
 	if err != nil {
@@ -548,7 +563,11 @@ func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, lead
 
 func (ob *TargetObserver) updateCurrentTarget(collectionID int64) {
 	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.TargetObserver", 1, 60)
-	log.Info("observer trigger update current target", zap.Int64("collectionID", collectionID))
+	log.Info("observer updateCurrentTarget start", zap.Int64("collectionID", collectionID))
+	start := time.Now()
+	defer func() {
+		log.Info("observer updateCurrentTarget done", zap.Int64("collectionID", collectionID), zap.Duration("dur", time.Since(start)))
+	}()
 	if ob.targetMgr.UpdateCollectionCurrentTarget(collectionID) {
 		ob.mut.Lock()
 		defer ob.mut.Unlock()

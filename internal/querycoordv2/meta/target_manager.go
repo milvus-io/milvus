@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -136,6 +137,7 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64) bool
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
+	start := time.Now()
 	var vChannelInfos []*datapb.VchannelInfo
 	var segmentInfos []*datapb.SegmentInfo
 	err := retry.Handle(context.TODO(), func() (bool, error) {
@@ -197,7 +199,8 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("PartitionIDs", partitionIDs),
 		zap.Int64s("segments", allocatedTarget.GetAllSegmentIDs()),
-		zap.Strings("channels", allocatedTarget.GetAllDmChannelNames()))
+		zap.Strings("channels", allocatedTarget.GetAllDmChannelNames()),
+		zap.Duration("dur", time.Since(start)))
 
 	return nil
 }

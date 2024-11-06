@@ -849,6 +849,10 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		zap.Int64s("partitionIDs", partitionIDs),
 	)
 	log.Info("get recovery info request received")
+	start := time.Now()
+	defer func() {
+		log.Info("datacoord GetRecoveryInfoV2 done", zap.Duration("dur", time.Since(start)))
+	}()
 	resp := &datapb.GetRecoveryInfoResponseV2{
 		Status: merr.Success(),
 	}
