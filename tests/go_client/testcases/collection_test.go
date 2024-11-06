@@ -445,35 +445,22 @@ func TestCreateCollectionWithInvalidCollectionName(t *testing.T) {
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
-	collName := common.GenRandomString(prefix, 6)
 
 	// create collection and schema no name
 	schema := genDefaultSchema()
-	err2 := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	err2 := mc.CreateCollection(ctx, client.NewCreateCollectionOption("", schema))
 	common.CheckErr(t, err2, false, "collection name should not be empty")
 
 	// create collection with invalid schema name
 	for _, invalidName := range common.GenInvalidNames() {
 		log.Debug("TestCreateCollectionWithInvalidCollectionName", zap.String("collectionName", invalidName))
 
-		// schema has invalid name
-		schema.WithName(invalidName)
-		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(invalidName, schema))
 		common.CheckErr(t, err, false, "collection name should not be empty",
 			"the first character of a collection name must be an underscore or letter",
 			"collection name can only contain numbers, letters and underscores",
 			fmt.Sprintf("the length of a collection name must be less than %d characters", common.MaxCollectionNameLen))
-
-		// collection option has invalid name
-		schema.WithName(collName)
-		err2 := mc.CreateCollection(ctx, client.NewCreateCollectionOption(invalidName, schema))
-		common.CheckErr(t, err2, false, "collection name matches schema name")
 	}
-
-	// collection name not equal to schema name
-	schema.WithName(collName)
-	err3 := mc.CreateCollection(ctx, client.NewCreateCollectionOption(common.GenRandomString("pre", 4), schema))
-	common.CheckErr(t, err3, false, "collection name matches schema name")
 }
 
 // create collection missing pk field or vector field
@@ -937,11 +924,10 @@ func TestCreateCollectionInvalid(t *testing.T) {
 	vecField := entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(8)
 	mSchemaErrs := []mSchemaErr{
 		{schema: nil, errMsg: "schema does not contain vector field"},
-		{schema: entity.NewSchema().WithField(vecField), errMsg: "collection name should not be empty"},          // no collection name
-		{schema: entity.NewSchema().WithName("aaa").WithField(vecField), errMsg: "primary key is not specified"}, // no pk field
-		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField()), errMsg: "primary key is not specified"},
-		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true)), errMsg: "the data type of primary key should be Int64 or VarChar"},
-		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true).WithDataType(entity.FieldTypeVarChar)), errMsg: "field name should not be empty"},
+		{schema: entity.NewSchema().WithField(vecField), errMsg: "primary key is not specified"}, // no pk field
+		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField()), errMsg: "primary key is not specified"},
+		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true)), errMsg: "the data type of primary key should be Int64 or VarChar"},
+		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true).WithDataType(entity.FieldTypeVarChar)), errMsg: "field name should not be empty"},
 	}
 	for _, mSchema := range mSchemaErrs {
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, mSchema.schema))
