@@ -1,3 +1,5 @@
+import os
+
 from common.common_type import CaseLabel
 from common import common_func as cf
 from base.client_base import TestcaseBase
@@ -8,6 +10,7 @@ import pandas as pd
 from faker import Faker
 from utils.util_log import test_log as log
 import bm25s
+import json
 from tqdm import tqdm
 
 tqdm.disable = True
@@ -40,7 +43,7 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
         corpus_ids.append(key)
         doc = val["title"] + " " + val["text"]
         if len(doc) > 25536:
-            doc = doc[:25000]
+            doc = doc[:25536]
         corpus_lst.append(doc)
     qids, queries_lst = [], []
     for key, val in queries.items():
@@ -81,7 +84,7 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
         params={},
     )
     schema.add_function(bm25_function)
-    hello_bm25 = Collection(collection_name, schema, consistency_level="Strong")
+    hello_bm25 = Collection(collection_name, schema)
     log.info(f"Collection {collection_name} created successfully, start to insert data")
     batch_size = 5000
     for i in tqdm(range(0, len(corpus_data), batch_size), desc="Inserting data"):
@@ -110,7 +113,6 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
     q_batch_size = 1
     start_time = time.time()
     for i in range(0, len(texts_to_search), q_batch_size):
-        log.info(f"Searching {i} to {i + q_batch_size}")
         result = hello_bm25.search(texts_to_search[i:i + q_batch_size], "sparse", search_params, limit=top_k,
                                    output_fields=["id"])
         result_list.extend(result)
@@ -153,7 +155,7 @@ def postprocess_results_for_eval(results, scores, query_ids):
     return result_dict_for_eval
 
 
-def Lucene_full_text_search(corpus, queries, qrels, top_k=1000):
+def lucene_full_text_search(corpus, queries, qrels, top_k=1000):
     corpus_ids, corpus_lst = [], []
     for key, val in corpus.items():
         corpus_ids.append(key)
@@ -214,22 +216,22 @@ def es_full_text_search(corpus, queries, qrels, top_k=1000, index_name="hello", 
                     }
                 }
             },
-            "analysis": {
-                "analyzer": {
-                    "custom_analyzer": {
-                        "type": "standard",
-                        "max_token_length": 1_000_000,
-                        "stopwords": "_english_",
-                        "filter": ["lowercase", "custom_snowball"]
-                    }
-                },
-                "filter": {
-                    "custom_snowball": {
-                        "type": "snowball",
-                        "language": "English"
-                    }
-                }
-            }
+            # "analysis": {
+            #     "analyzer": {
+            #         "custom_analyzer": {
+            #             "type": "standard",
+            #             "max_token_length": 1_000_000,
+            #             "stopwords": "_english_",
+            #             "filter": ["lowercase", "custom_snowball"]
+            #         }
+            #     },
+            #     "filter": {
+            #         "custom_snowball": {
+            #             "type": "snowball",
+            #             "language": "English"
+            #         }
+            #     }
+            # }
         }
     }
     model.initialise()
@@ -265,17 +267,37 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     def test_search_with_full_text_search(self, dataset_name, index_type, es_host, dataset_dir):
         self._connect()
+        result = []
+        os.makedirs('/tmp/ci_logs', exist_ok=True)
         dataset = dataset_name
-        BASE_URL = f"https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{dataset}.zip"
-        data_path = beir.util.download_and_unzip(BASE_URL, out_dir=dataset_dir)
-        split = "test" if dataset != "msmarco" else "dev"
-        corpus, queries, qrels = GenericDataLoader(data_folder=data_path).load(split=split)
-        collection_name = dataset.replace("-", "_") + "_full_text_search"  # collection name should not contain "-"
-        top_k = 1000
-        milvus_full_text_search_result = milvus_full_text_search(collection_name, corpus, queries, qrels,
-                                                                 top_k=top_k, index_type=index_type)
-        es_full_text_search_result = es_full_text_search(corpus, queries, qrels, top_k=top_k,
-                                                         index_name=collection_name, hostname=es_host)
-        log.info(f"result for dataset {dataset}")
-        log.info(f"milvus full text search result {milvus_full_text_search_result}")
-        log.info(f"es full text search result {es_full_text_search_result}")
+        if dataset == "all":
+            datasets = ['msmarco', 'trec-covid', 'nfcorpus', 'nq', 'hotpotqa', 'fiqa', 'arguana', 'webis-touche2020',
+                        'quora', 'dbpedia-entity', 'scidocs', 'fever', 'climate-fever', 'scifact']
+        else:
+            datasets = [dataset]
+        for dataset in datasets:
+            BASE_URL = f"https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{dataset}.zip"
+            data_path = beir.util.download_and_unzip(BASE_URL, out_dir=dataset_dir)
+            split = "test" if dataset != "msmarco" else "dev"
+            corpus, queries, qrels = GenericDataLoader(data_folder=data_path).load(split=split)
+            collection_name = dataset.replace("-", "_") + "_full_text_search"  # collection name should not contain "-"
+            top_k = 1000
+            milvus_full_text_search_result = milvus_full_text_search(collection_name, corpus, queries, qrels,
+                                                                     top_k=top_k, index_type=index_type)
+            es_full_text_search_result = es_full_text_search(corpus, queries, qrels, top_k=top_k,
+                                                             index_name=collection_name, hostname=es_host)
+            log.info(f"result for dataset {dataset}")
+            log.info(f"milvus full text search result {milvus_full_text_search_result}")
+            log.info(f"es full text search result {es_full_text_search_result}")
+            tmp = {
+                "dataset": dataset,
+                "milvus_full_text_search_result": milvus_full_text_search_result,
+                "es_full_text_search_result": es_full_text_search_result
+            }
+            result.append(tmp)
+            with open(f'/tmp/ci_logs/{dataset}_data.json', 'w') as json_file:
+                json.dump(tmp, json_file, indent=4)
+        # save result
+        with open('/tmp/ci_logs/full_data.json', 'w') as json_file:
+            json.dump(result, json_file, indent=4)
+
