@@ -777,15 +777,15 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
 
 def gen_all_datatype_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                        auto_id=False, dim=ct.default_dim, enable_dynamic_field=True, **kwargs):
-    tokenizer_params = {
+    analyzer_params = {
         "tokenizer": "standard",
     }
     fields = [
         gen_int64_field(),
         gen_float_field(),
         gen_string_field(),
-        gen_string_field(name="text", max_length=2000, enable_tokenizer=True, enable_match=True,
-                         tokenizer_params=tokenizer_params),
+        gen_string_field(name="text", max_length=2000, enable_analyzer=True, enable_match=True,
+                         analyzer_params=analyzer_params),
         gen_json_field(),
         gen_array_field(name="array_int", element_type=DataType.INT64),
         gen_array_field(name="array_float", element_type=DataType.FLOAT),
@@ -1799,7 +1799,7 @@ def get_text_field_name(schema=None):
         schema = gen_default_collection_schema()
     fields = schema.fields
     for field in fields:
-        if field.dtype == DataType.VARCHAR and field.params.get("enable_tokenizer", False):
+        if field.dtype == DataType.VARCHAR and field.params.get("enable_analyzer", False):
             return field.name
     return None
 
@@ -1900,7 +1900,7 @@ def gen_varchar_data(length: int, nb: int, text_mode=False):
 def gen_data_by_collection_field(field, nb=None, start=None):
     # if nb is None, return one data, else return a list of data
     data_type = field.dtype
-    enable_tokenizer = field.params.get("enable_tokenizer", False)
+    enable_analyzer = field.params.get("enable_analyzer", False)
     if data_type == DataType.BOOL:
         if nb is None:
             return random.choice([True, False])
@@ -1936,8 +1936,8 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         max_length = min(20, max_length-1)
         length = random.randint(0, max_length)
         if nb is None:
-            return gen_varchar_data(length=length, nb=1, text_mode=enable_tokenizer)[0]
-        return gen_varchar_data(length=length, nb=nb, text_mode=enable_tokenizer)
+            return gen_varchar_data(length=length, nb=1, text_mode=enable_analyzer)[0]
+        return gen_varchar_data(length=length, nb=nb, text_mode=enable_analyzer)
     if data_type == DataType.JSON:
         if nb is None:
             return {"name": fake.name(), "address": fake.address()}

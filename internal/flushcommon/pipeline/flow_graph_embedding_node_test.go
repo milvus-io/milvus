@@ -47,7 +47,7 @@ func TestEmbeddingNode_BM25_Operator(t *testing.T) {
 				DataType: schemapb.DataType_VarChar,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
-						Key:   "enable_tokenizer",
+						Key:   "enable_analyzer",
 						Value: "true",
 					},
 				},

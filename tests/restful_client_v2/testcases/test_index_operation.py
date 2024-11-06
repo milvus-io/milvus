@@ -279,7 +279,7 @@ class TestCreateIndex(TestBase):
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
                     {"fieldName": "document_content", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "1000", "enable_tokenizer": True,
+                     "elementTypeParams": {"max_length": "1000", "enable_analyzer": True,
                                            "analyzer_params": {
                                                "tokenizer": tokenizer,
                                            },

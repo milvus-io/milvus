@@ -53,11 +53,11 @@ func (h *FieldSchemaHelper) EnableMatch() bool {
 	return err == nil && enable
 }
 
-func (h *FieldSchemaHelper) EnableTokenizer() bool {
+func (h *FieldSchemaHelper) EnableAnalyzer() bool {
 	if !IsStringType(h.schema.GetDataType()) {
 		return false
 	}
-	s, err := h.typeParams.Get("enable_tokenizer")
+	s, err := h.typeParams.Get("enable_analyzer")
 	if err != nil {
 		return false
 	}

@@ -4452,7 +4452,7 @@ class TestQueryTextMatch(TestcaseBase):
                 3. verify the result
         expected: text match successfully and result is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -4462,34 +4462,34 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
                 is_partition_key=enable_partition_key,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -4589,7 +4589,7 @@ class TestQueryTextMatch(TestcaseBase):
                 3. verify the result
         expected: text match successfully and result is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -4599,34 +4599,34 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
                 is_partition_key=enable_partition_key,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -4723,7 +4723,7 @@ class TestQueryTextMatch(TestcaseBase):
                 3. verify the result
         expected: get the correct token, text match successfully and result is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
                 "tokenizer": "standard",
                 # "lowercase", "asciifolding", "alphanumonly" was system filter
                 "filter":["lowercase", "asciifolding", "alphanumonly",
@@ -4742,33 +4742,33 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -4843,7 +4843,7 @@ class TestQueryTextMatch(TestcaseBase):
                 3. verify the result
         expected: query successfully and result is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": "standard",
         }
         # 1. initialize with data
@@ -4854,33 +4854,33 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -4957,7 +4957,7 @@ class TestQueryTextMatch(TestcaseBase):
                 3. verify the result
         expected: query successfully and result is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": "standard",
         }
         # 1. initialize with data
@@ -4968,33 +4968,33 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -5100,7 +5100,7 @@ class TestQueryTextMatch(TestcaseBase):
         """
 
         # 1. initialize with data
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": "standard",
         }
         # 1. initialize with data
@@ -5111,33 +5111,33 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -5245,7 +5245,7 @@ class TestQueryTextMatch(TestcaseBase):
         """
         # 1. initialize with data
         fake_en = Faker("en_US")
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": "standard",
         }
         dim = 128
@@ -5255,33 +5255,33 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -5362,7 +5362,7 @@ class TestQueryTextMatch(TestcaseBase):
         # 1. initialize with data
         fake_en = Faker("en_US")
         analyzer_params = {
-            "tokenizer": "default",
+            "tokenizer": "standard",
         }
         dim = 128
         default_fields = [
@@ -5375,7 +5375,7 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
             ),
@@ -5383,7 +5383,7 @@ class TestQueryTextMatch(TestcaseBase):
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
             ),
@@ -5391,7 +5391,7 @@ class TestQueryTextMatch(TestcaseBase):
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
             ),
@@ -5399,7 +5399,7 @@ class TestQueryTextMatch(TestcaseBase):
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
             ),
@@ -5472,7 +5472,7 @@ class TestQueryTextMatch(TestcaseBase):
         expected: text match successfully and result is correct
         """
         # 1. initialize with data
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": "standard",
         }
         # 1. initialize with data
@@ -5483,33 +5483,33 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -5614,7 +5614,7 @@ class TestQueryTextMatch(TestcaseBase):
         """
         # 1. initialize with data
         analyzer_params = {
-            "tokenizer": "default",
+            "tokenizer": "standard",
         }
         # 1. initialize with data
         dim = 128
@@ -5624,7 +5624,7 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
                 nullable=True,
@@ -5633,7 +5633,7 @@ class TestQueryTextMatch(TestcaseBase):
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
                 nullable=True,
@@ -5642,7 +5642,7 @@ class TestQueryTextMatch(TestcaseBase):
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
                 nullable=True,
@@ -5651,7 +5651,7 @@ class TestQueryTextMatch(TestcaseBase):
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
                 nullable=True,
@@ -5731,7 +5731,7 @@ class TestQueryTextMatchNegative(TestcaseBase):
                 2. create collection
         expected: create collection failed and return error
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": "Unsupported",
         }
         dim = 128
@@ -5741,41 +5741,41 @@ class TestQueryTextMatchNegative(TestcaseBase):
                 name="title",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="overview",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="genres",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="producer",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="cast",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -5856,7 +5856,7 @@ class TestQueryFunction(TestcaseBase):
         expected: create collection failed and return error
         """
         analyzer_params = {
-            "tokenizer": "default",
+            "tokenizer": "standard",
         }
         dim = 128
         default_fields = [
@@ -5865,7 +5865,7 @@ class TestQueryFunction(TestcaseBase):
                 name="title",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
             ),
@@ -5873,14 +5873,14 @@ class TestQueryFunction(TestcaseBase):
                 name="overview",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="age",
                 dtype=DataType.INT64,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
             ),

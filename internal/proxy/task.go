@@ -407,7 +407,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 
-		if err := ctokenizer.ValidateTextSchema(field); err != nil {
+		if err := ctokenizer.ValidateTextSchema(field, wasBm25FunctionInputField(t.schema, field)); err != nil {
 			return err
 		}
 	}

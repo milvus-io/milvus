@@ -16,11 +16,11 @@ to_set(const RustArrayWrapper& w) {
 int
 main(int argc, char* argv[]) {
     std::string tokenizer_name = "jieba";
-    std::map<std::string, std::string> tokenizer_params;
-    tokenizer_params["tokenizer"] = tokenizer_name;
+    std::map<std::string, std::string> analyzer_params;
+    analyzer_params["tokenizer"] = tokenizer_name;
 
     auto text_index = TantivyIndexWrapper(
-        "text_demo", true, "", tokenizer_name.c_str(), tokenizer_params);
+        "text_demo", true, "", tokenizer_name.c_str(), analyzer_params);
     auto write_single_text = [&text_index](const std::string& s,
                                            int64_t offset) {
         text_index.add_data(&s, 1, offset);
@@ -38,7 +38,7 @@ main(int argc, char* argv[]) {
     }
 
     text_index.create_reader();
-    text_index.register_tokenizer(tokenizer_name.c_str(), tokenizer_params);
+    text_index.register_tokenizer(tokenizer_name.c_str(), analyzer_params);
 
     {
         auto result = to_set(text_index.match_query("北京"));
