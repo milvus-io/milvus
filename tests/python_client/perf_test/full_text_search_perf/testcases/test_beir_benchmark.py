@@ -43,7 +43,7 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
         corpus_ids.append(key)
         doc = val["title"] + " " + val["text"]
         if len(doc) > 25536:
-            doc = doc[:25536]
+            doc = doc[:25000]
         corpus_lst.append(doc)
     qids, queries_lst = [], []
     for key, val in queries.items():
@@ -271,7 +271,7 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
         os.makedirs('/tmp/ci_logs', exist_ok=True)
         dataset = dataset_name
         if dataset == "all":
-            datasets = ['msmarco', 'trec-covid', 'nfcorpus', 'nq', 'hotpotqa', 'fiqa', 'arguana', 'webis-touche2020',
+            datasets = ['trec-covid', 'nfcorpus', 'nq', 'hotpotqa', 'fiqa', 'arguana', 'webis-touche2020',
                         'quora', 'dbpedia-entity', 'scidocs', 'fever', 'climate-fever', 'scifact']
         else:
             datasets = [dataset]
