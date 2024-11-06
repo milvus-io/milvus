@@ -142,6 +142,11 @@ func (opt *searchOption) WithPartitions(partitionNames ...string) *searchOption 
 	return opt
 }
 
+func (opt *searchOption) WithGroupByField(groupByField string) *searchOption {
+	opt.request.groupByField = groupByField
+	return opt
+}
+
 func NewSearchOption(collectionName string, limit int, vectors []entity.Vector) *searchOption {
 	return &searchOption{
 		collectionName: collectionName,
