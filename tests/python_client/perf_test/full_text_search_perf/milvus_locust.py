@@ -180,6 +180,7 @@ class MilvusUser(MilvusBaseUser):
             {
                 "id": int(time.time()*(10**6)),
                 "text": faker.text(max_nb_chars=300),
+                "dense_emb": self._random_vector(),
             }
             for _ in range(batch_size)
         ]
