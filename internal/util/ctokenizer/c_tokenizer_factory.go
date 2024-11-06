@@ -9,16 +9,17 @@ package ctokenizer
 import "C"
 
 import (
+	"unsafe"
+
 	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
 )
 
-func NewTokenizer(m map[string]string) (tokenizerapi.Tokenizer, error) {
-	mm := NewCMap()
-	defer mm.Destroy()
-	mm.From(m)
+func NewTokenizer(param string) (tokenizerapi.Tokenizer, error) {
+	paramPtr := C.CString(param)
+	defer C.free(unsafe.Pointer(paramPtr))
 
 	var ptr C.CTokenizer
-	status := C.create_tokenizer(mm.GetPointer(), &ptr)
+	status := C.create_tokenizer(paramPtr, &ptr)
 	if err := HandleCStatus(&status, "failed to create tokenizer"); err != nil {
 		return nil, err
 	}
