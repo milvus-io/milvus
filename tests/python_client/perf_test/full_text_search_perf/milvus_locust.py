@@ -186,7 +186,7 @@ class MilvusUser(MilvusBaseUser):
 
         self.client.insert(data)
 
-    @tag('full_text_search')
+    @tag('sparse')
     @task(4)
     def full_text_search(self):
         """full text search"""
@@ -196,7 +196,7 @@ class MilvusUser(MilvusBaseUser):
                            anns_field="sparse",
                            top_k=self.top_k)
 
-    @tag('dense_search')
+    @tag('dense')
     @task(4)
     def dense_search(self):
         """full text search"""
