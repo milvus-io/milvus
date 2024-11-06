@@ -43,7 +43,7 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
         corpus_ids.append(key)
         doc = val["title"] + " " + val["text"]
         if len(doc) > 25536:
-            doc = doc[:25000]
+            doc = doc[:20000]
         corpus_lst.append(doc)
     qids, queries_lst = [], []
     for key, val in queries.items():
