@@ -285,7 +285,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 				dstNode = action.Node()
 				req.NeedTransfer = false
 			} else {
-				view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard()))
+				view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard()), meta.WithServiceable())
 				if view == nil {
 					msg := "no shard leader for the segment to execute releasing"
 					err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
