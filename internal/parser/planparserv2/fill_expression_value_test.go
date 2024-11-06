@@ -39,57 +39,35 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 	s.Run("normal case", func() {
 		testcases := []testcase{
 			{`Int64Field in {age}`, map[string]*schemapb.TemplateValue{
-				"age": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(2)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(4)),
-				}),
+				"age": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3), int64(4)})),
 			}},
 			{`FloatField in {age}`, map[string]*schemapb.TemplateValue{
-				"age": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Float, 1.1),
-					generateExpressionFieldData(schemapb.DataType_Float, 2.2),
-					generateExpressionFieldData(schemapb.DataType_Float, 3.3),
-					generateExpressionFieldData(schemapb.DataType_Float, 4.4),
-				}),
+				"age": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Double, []float64{1.1, 2.2, 3.3, 4.4})),
 			}},
 			{`A in {list}`, map[string]*schemapb.TemplateValue{
-				"list": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_Float, 2.2),
-					generateExpressionFieldData(schemapb.DataType_String, "abc"),
-					generateExpressionFieldData(schemapb.DataType_Bool, false),
-				}),
+				"list": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{
+						generateJSONData(int64(1)),
+						generateJSONData(2.2),
+						generateJSONData("abc"),
+						generateJSONData(false),
+					})),
 			}},
+
 			{`ArrayField in {list}`, map[string]*schemapb.TemplateValue{
-				"list": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(2)),
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
-					}),
-					generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(4)),
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(5)),
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(6)),
-					}),
-					generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(7)),
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(8)),
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(9)),
-					}),
-				}),
+				"list": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Array,
+						[]*schemapb.TemplateArrayValue{
+							generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)}),
+							generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(4), int64(5), int64(6)}),
+							generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(7), int64(8), int64(9)}),
+						})),
 			}},
 			{`ArrayField[0] in {list}`, map[string]*schemapb.TemplateValue{
-				"list": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(2)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
-				}),
-			}},
-			{`Int64Field in {empty_list}`, map[string]*schemapb.TemplateValue{
-				"empty_list": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{}),
+				"list": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)})),
 			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
@@ -101,30 +79,37 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 	s.Run("failed case", func() {
 		testcases := []testcase{
 			{`Int64Field in {age}`, map[string]*schemapb.TemplateValue{
-				"age": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_String, "abc"),
-					generateExpressionFieldData(schemapb.DataType_String, "def"),
-				}),
+				"age": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_String, []string{"abc", "def"})),
 			}},
 			{`StringField in {list}`, map[string]*schemapb.TemplateValue{
-				"list": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_String, "abc"),
-					generateExpressionFieldData(schemapb.DataType_Float, 2.2),
-					generateExpressionFieldData(schemapb.DataType_Bool, false),
-				}),
+				"list": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{
+						generateJSONData(int64(1)),
+						generateJSONData("abc"),
+						generateJSONData(2.2),
+						generateJSONData(false),
+					})),
 			}},
 			{"ArrayField[0] in {list}", map[string]*schemapb.TemplateValue{
-				"list": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_String, "abc"),
-					generateExpressionFieldData(schemapb.DataType_Float, 3.2),
-				}),
+				"list": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{
+						generateJSONData(int64(1)),
+						generateJSONData("abc"),
+						generateJSONData(3.2),
+					})),
 			}},
 			{"Int64Field not in {not_list}", map[string]*schemapb.TemplateValue{
-				"not_list": generateExpressionFieldData(schemapb.DataType_Int64, int64(33)),
+				"not_list": generateTemplateValue(schemapb.DataType_Int64, int64(33)),
+			}},
+			{"Int64Field not in {not_list}", map[string]*schemapb.TemplateValue{
+				"age": generateTemplateValue(schemapb.DataType_Int64, int64(33)),
+			}},
+			{`Int64Field in {empty_list}`, map[string]*schemapb.TemplateValue{
+				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
 			}},
 		}
+
 		schemaH := newTestSchemaHelper(s.T())
 		for _, c := range testcases {
 			s.assertInvalidExpr(schemaH, c.expr, c.values)
@@ -137,27 +122,28 @@ func (s *FillExpressionValueSuite) TestUnaryRange() {
 		testcases := []testcase{
 			{`Int64Field == 10`, nil},
 			{`Int64Field > {target}`, map[string]*schemapb.TemplateValue{
-				"target": generateExpressionFieldData(schemapb.DataType_Int64, int64(11)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(11)),
 			}},
 			{`FloatField < {target}`, map[string]*schemapb.TemplateValue{
-				"target": generateExpressionFieldData(schemapb.DataType_Float, float64(12.3)),
+				"target": generateTemplateValue(schemapb.DataType_Double, float64(12.3)),
 			}},
 			{`DoubleField != {target}`, map[string]*schemapb.TemplateValue{
-				"target": generateExpressionFieldData(schemapb.DataType_Double, 3.5),
+				"target": generateTemplateValue(schemapb.DataType_Double, float64(3.5)),
 			}},
 			{`ArrayField[0] >= {target}`, map[string]*schemapb.TemplateValue{
-				"target": generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(3)),
 			}},
 			{`BoolField == {bool}`, map[string]*schemapb.TemplateValue{
-				"bool": generateExpressionFieldData(schemapb.DataType_Bool, false),
+				"bool": generateTemplateValue(schemapb.DataType_Bool, false),
 			}},
 			{`{str} != StringField`, map[string]*schemapb.TemplateValue{
-				"str": generateExpressionFieldData(schemapb.DataType_String, "abc"),
+				"str": generateTemplateValue(schemapb.DataType_String, "abc"),
 			}},
 			{`{target} > Int64Field`, map[string]*schemapb.TemplateValue{
-				"target": generateExpressionFieldData(schemapb.DataType_Int64, int64(11)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(11)),
 			}},
 		}
+
 		schemaH := newTestSchemaHelper(s.T())
 		for _, c := range testcases {
 			s.assertValidExpr(schemaH, c.expr, c.values)
@@ -168,25 +154,28 @@ func (s *FillExpressionValueSuite) TestUnaryRange() {
 		testcases := []testcase{
 			{`Int64Field == 10.5`, nil},
 			{`Int64Field > {target}`, map[string]*schemapb.TemplateValue{
-				"target": generateExpressionFieldData(schemapb.DataType_Double, 11.2),
+				"target": generateTemplateValue(schemapb.DataType_Double, 11.2),
 			}},
 			{`FloatField < {target}`, map[string]*schemapb.TemplateValue{
-				"target": generateExpressionFieldData(schemapb.DataType_String, "abc"),
+				"target": generateTemplateValue(schemapb.DataType_String, "abc"),
 			}},
 			{`DoubleField != {target}`, map[string]*schemapb.TemplateValue{
-				"target": generateExpressionFieldData(schemapb.DataType_Bool, false),
+				"target": generateTemplateValue(schemapb.DataType_Bool, false),
 			}},
 			{`ArrayField[0] >= {target}`, map[string]*schemapb.TemplateValue{
-				"target": generateExpressionFieldData(schemapb.DataType_Double, 3.5),
+				"target": generateTemplateValue(schemapb.DataType_Double, 3.5),
 			}},
 			{`BoolField == {bool}`, map[string]*schemapb.TemplateValue{
-				"bool": generateExpressionFieldData(schemapb.DataType_String, "abc"),
+				"bool": generateTemplateValue(schemapb.DataType_String, "abc"),
 			}},
 			{`{str} != StringField`, map[string]*schemapb.TemplateValue{
-				"str": generateExpressionFieldData(schemapb.DataType_Int64, int64(5)),
+				"str": generateTemplateValue(schemapb.DataType_Int64, int64(5)),
 			}},
 			{`{int} != StringField`, map[string]*schemapb.TemplateValue{
-				"int": generateExpressionFieldData(schemapb.DataType_Int64, int64(5)),
+				"int": generateTemplateValue(schemapb.DataType_Int64, int64(5)),
+			}},
+			{`{str} != StringField`, map[string]*schemapb.TemplateValue{
+				"int": generateTemplateValue(schemapb.DataType_Int64, int64(5)),
 			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
@@ -201,32 +190,32 @@ func (s *FillExpressionValueSuite) TestBinaryRange() {
 		testcases := []testcase{
 			{`10 < Int64Field < 20`, nil},
 			{`{max} > Int64Field > {min}`, map[string]*schemapb.TemplateValue{
-				"min": generateExpressionFieldData(schemapb.DataType_Int64, int64(11)),
-				"max": generateExpressionFieldData(schemapb.DataType_Int64, int64(22)),
+				"min": generateTemplateValue(schemapb.DataType_Int64, int64(11)),
+				"max": generateTemplateValue(schemapb.DataType_Int64, int64(22)),
 			}},
 			{`{min} <= FloatField <= {max}`, map[string]*schemapb.TemplateValue{
-				"min": generateExpressionFieldData(schemapb.DataType_Float, float64(11)),
-				"max": generateExpressionFieldData(schemapb.DataType_Float, float64(22)),
+				"min": generateTemplateValue(schemapb.DataType_Float, float64(11)),
+				"max": generateTemplateValue(schemapb.DataType_Float, float64(22)),
 			}},
 			{`{min} < DoubleField < {max}`, map[string]*schemapb.TemplateValue{
-				"min": generateExpressionFieldData(schemapb.DataType_Double, float64(11)),
-				"max": generateExpressionFieldData(schemapb.DataType_Double, float64(22)),
+				"min": generateTemplateValue(schemapb.DataType_Double, float64(11)),
+				"max": generateTemplateValue(schemapb.DataType_Double, float64(22)),
 			}},
 			{`{max} >= ArrayField[0] >= {min}`, map[string]*schemapb.TemplateValue{
-				"min": generateExpressionFieldData(schemapb.DataType_Int64, int64(11)),
-				"max": generateExpressionFieldData(schemapb.DataType_Int64, int64(22)),
+				"min": generateTemplateValue(schemapb.DataType_Int64, int64(11)),
+				"max": generateTemplateValue(schemapb.DataType_Int64, int64(22)),
 			}},
 			{`{max} > Int64Field >= 10`, map[string]*schemapb.TemplateValue{
-				"max": generateExpressionFieldData(schemapb.DataType_Int64, int64(22)),
+				"max": generateTemplateValue(schemapb.DataType_Int64, int64(22)),
 			}},
 			{`30 >= Int64Field > {min}`, map[string]*schemapb.TemplateValue{
-				"min": generateExpressionFieldData(schemapb.DataType_Int64, int64(11)),
+				"min": generateTemplateValue(schemapb.DataType_Int64, int64(11)),
 			}},
 			{`10 < Int64Field <= {max}`, map[string]*schemapb.TemplateValue{
-				"max": generateExpressionFieldData(schemapb.DataType_Int64, int64(22)),
+				"max": generateTemplateValue(schemapb.DataType_Int64, int64(22)),
 			}},
 			{`{min} <= Int64Field < 20`, map[string]*schemapb.TemplateValue{
-				"min": generateExpressionFieldData(schemapb.DataType_Int64, int64(11)),
+				"min": generateTemplateValue(schemapb.DataType_Int64, int64(11)),
 			}},
 		}
 
@@ -240,29 +229,29 @@ func (s *FillExpressionValueSuite) TestBinaryRange() {
 		testcases := []testcase{
 			{`10 < Int64Field < 20.5`, nil},
 			{`{max} > Int64Field > {min}`, map[string]*schemapb.TemplateValue{
-				"min": generateExpressionFieldData(schemapb.DataType_Int64, int64(11)),
-				"max": generateExpressionFieldData(schemapb.DataType_Double, 22.5),
+				"min": generateTemplateValue(schemapb.DataType_Int64, int64(11)),
+				"max": generateTemplateValue(schemapb.DataType_Double, 22.5),
 			}},
 			{`{min} <= FloatField <= {max}`, map[string]*schemapb.TemplateValue{
-				"min": generateExpressionFieldData(schemapb.DataType_String, "abc"),
-				"max": generateExpressionFieldData(schemapb.DataType_Int64, int64(11)),
+				"min": generateTemplateValue(schemapb.DataType_String, "abc"),
+				"max": generateTemplateValue(schemapb.DataType_Int64, int64(11)),
 			}},
 			{`{min} < DoubleField < {max}`, map[string]*schemapb.TemplateValue{
-				"min": generateExpressionFieldData(schemapb.DataType_Int64, int64(33)),
-				"max": generateExpressionFieldData(schemapb.DataType_Int64, int64(22)),
+				"min": generateTemplateValue(schemapb.DataType_Int64, int64(33)),
+				"max": generateTemplateValue(schemapb.DataType_Int64, int64(22)),
 			}},
 			{`{max} >= ArrayField[0] >= {min}`, map[string]*schemapb.TemplateValue{
-				"min": generateExpressionFieldData(schemapb.DataType_Double, 11.5),
-				"max": generateExpressionFieldData(schemapb.DataType_Int64, int64(22)),
+				"min": generateTemplateValue(schemapb.DataType_Double, 11.5),
+				"max": generateTemplateValue(schemapb.DataType_Int64, int64(22)),
 			}},
 			{`{max} >= Int64Field >= {min}`, map[string]*schemapb.TemplateValue{
-				"max": generateExpressionFieldData(schemapb.DataType_Int64, int64(22)),
+				"max": generateTemplateValue(schemapb.DataType_Int64, int64(22)),
 			}},
 			{`{max} > Int64Field`, map[string]*schemapb.TemplateValue{
-				"max": generateExpressionFieldData(schemapb.DataType_Bool, false),
+				"max": generateTemplateValue(schemapb.DataType_Bool, false),
 			}},
 			{`{$meta} > Int64Field`, map[string]*schemapb.TemplateValue{
-				"$meta": generateExpressionFieldData(schemapb.DataType_Int64, int64(22)),
+				"$meta": generateTemplateValue(schemapb.DataType_Int64, int64(22)),
 			}},
 		}
 
@@ -278,23 +267,23 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 		testcases := []testcase{
 			{`Int64Field + 5.5 == 10.5`, nil},
 			{`Int64Field - {offset} >= {target}`, map[string]*schemapb.TemplateValue{
-				"offset": generateExpressionFieldData(schemapb.DataType_Double, 3.5),
-				"target": generateExpressionFieldData(schemapb.DataType_Double, 11.5),
+				"offset": generateTemplateValue(schemapb.DataType_Double, 3.5),
+				"target": generateTemplateValue(schemapb.DataType_Double, 11.5),
 			}},
 			{`Int64Field * 3.5 <= {target}`, map[string]*schemapb.TemplateValue{
-				"target": generateExpressionFieldData(schemapb.DataType_Double, 11.5),
+				"target": generateTemplateValue(schemapb.DataType_Double, 11.5),
 			}},
 			{`Int64Field / {offset} > 11.5`, map[string]*schemapb.TemplateValue{
-				"offset": generateExpressionFieldData(schemapb.DataType_Double, 3.5),
+				"offset": generateTemplateValue(schemapb.DataType_Double, 3.5),
 			}},
 			{`ArrayField[0] % {offset} < 11`, map[string]*schemapb.TemplateValue{
-				"offset": generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
+				"offset": generateTemplateValue(schemapb.DataType_Int64, int64(3)),
 			}},
 			{`array_length(ArrayField) == {length}`, map[string]*schemapb.TemplateValue{
-				"length": generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
+				"length": generateTemplateValue(schemapb.DataType_Int64, int64(3)),
 			}},
 			{`array_length(ArrayField) > {length}`, map[string]*schemapb.TemplateValue{
-				"length": generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
+				"length": generateTemplateValue(schemapb.DataType_Int64, int64(3)),
 			}},
 		}
 
@@ -308,43 +297,40 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 		testcases := []testcase{
 			{`Int64Field + 6 == 12.5`, nil},
 			{`Int64Field - {offset} == {target}`, map[string]*schemapb.TemplateValue{
-				"offset": generateExpressionFieldData(schemapb.DataType_Int64, int64(4)),
-				"target": generateExpressionFieldData(schemapb.DataType_Double, 13.5),
+				"offset": generateTemplateValue(schemapb.DataType_Int64, int64(4)),
+				"target": generateTemplateValue(schemapb.DataType_Double, 13.5),
 			}},
 			{`Int64Field * 6 == {target}`, map[string]*schemapb.TemplateValue{
-				"target": generateExpressionFieldData(schemapb.DataType_Double, 13.5),
+				"target": generateTemplateValue(schemapb.DataType_Double, 13.5),
 			}},
 			{`Int64Field / {offset} == 11.5`, map[string]*schemapb.TemplateValue{
-				"offset": generateExpressionFieldData(schemapb.DataType_Int64, int64(6)),
+				"offset": generateTemplateValue(schemapb.DataType_Int64, int64(6)),
 			}},
 			{`Int64Field % {offset} < 11`, map[string]*schemapb.TemplateValue{
-				"offset": generateExpressionFieldData(schemapb.DataType_Double, 3.5),
+				"offset": generateTemplateValue(schemapb.DataType_Double, 3.5),
 			}},
 			{`Int64Field + {offset} < {target}`, map[string]*schemapb.TemplateValue{
-				"target": generateExpressionFieldData(schemapb.DataType_Double, 3.5),
+				"target": generateTemplateValue(schemapb.DataType_Double, 3.5),
 			}},
 			{`Int64Field + {offset} < {target}`, map[string]*schemapb.TemplateValue{
-				"offset": generateExpressionFieldData(schemapb.DataType_String, "abc"),
-				"target": generateExpressionFieldData(schemapb.DataType_Int64, int64(15)),
+				"offset": generateTemplateValue(schemapb.DataType_String, "abc"),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(15)),
 			}},
 			{`Int64Field + {offset} < {target}`, map[string]*schemapb.TemplateValue{
-				"offset": generateExpressionFieldData(schemapb.DataType_Int64, int64(15)),
-				"target": generateExpressionFieldData(schemapb.DataType_String, "def"),
+				"offset": generateTemplateValue(schemapb.DataType_Int64, int64(15)),
+				"target": generateTemplateValue(schemapb.DataType_String, "def"),
 			}},
 			{`ArrayField + {offset} < {target}`, map[string]*schemapb.TemplateValue{
-				"offset": generateExpressionFieldData(schemapb.DataType_Double, 3.5),
-				"target": generateExpressionFieldData(schemapb.DataType_Int64, int64(5)),
+				"offset": generateTemplateValue(schemapb.DataType_Double, 3.5),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(5)),
 			}},
 			{`ArrayField[0] + {offset} < {target}`, map[string]*schemapb.TemplateValue{
-				"offset": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(2)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
-				}),
-				"target": generateExpressionFieldData(schemapb.DataType_Int64, int64(5)),
+				"offset": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)})),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(5)),
 			}},
 			{`array_length(ArrayField) == {length}`, map[string]*schemapb.TemplateValue{
-				"length": generateExpressionFieldData(schemapb.DataType_String, "abc"),
+				"length": generateTemplateValue(schemapb.DataType_String, "abc"),
 			}},
 		}
 
@@ -360,70 +346,53 @@ func (s *FillExpressionValueSuite) TestJSONContainsExpression() {
 		testcases := []testcase{
 			{`json_contains(A, 5)`, nil},
 			{`json_contains(A, {age})`, map[string]*schemapb.TemplateValue{
-				"age": generateExpressionFieldData(schemapb.DataType_Int64, int64(18)),
+				"age": generateTemplateValue(schemapb.DataType_Int64, int64(18)),
 			}},
 			{`json_contains(A, {str})`, map[string]*schemapb.TemplateValue{
-				"str": generateExpressionFieldData(schemapb.DataType_String, "abc"),
+				"str": generateTemplateValue(schemapb.DataType_String, "abc"),
 			}},
 			{`json_contains(A, {bool})`, map[string]*schemapb.TemplateValue{
-				"bool": generateExpressionFieldData(schemapb.DataType_Bool, false),
+				"bool": generateTemplateValue(schemapb.DataType_Bool, false),
 			}},
 			{`json_contains_any(JSONField, {array})`, map[string]*schemapb.TemplateValue{
-				"array": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_String, "abc"),
-					generateExpressionFieldData(schemapb.DataType_Double, 2.2),
-					generateExpressionFieldData(schemapb.DataType_Bool, false),
-				}),
+				"array": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{
+						generateJSONData(int64(1)),
+						generateJSONData("abc"),
+						generateJSONData(2.2),
+						generateJSONData(false),
+					})),
 			}},
 			{`json_contains_any(JSONField, {array})`, map[string]*schemapb.TemplateValue{
-				"array": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(2)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(4)),
-				}),
+				"array": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3), int64(4)})),
 			}},
 			{`json_contains_any(JSONField["A"], {array})`, map[string]*schemapb.TemplateValue{
-				"array": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(2)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(4)),
-				}),
+				"array": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3), int64(4)})),
 			}},
 			{`json_contains_all(JSONField["A"], {array})`, map[string]*schemapb.TemplateValue{
-				"array": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_String, "abc"),
-					generateExpressionFieldData(schemapb.DataType_Double, 2.2),
-					generateExpressionFieldData(schemapb.DataType_Bool, false),
-				}),
+				"array": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{
+						generateJSONData(int64(1)),
+						generateJSONData("abc"),
+						generateJSONData(2.2),
+						generateJSONData(false),
+					})),
 			}},
 			{`json_contains_all(JSONField["A"], {array})`, map[string]*schemapb.TemplateValue{
-				"array": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(2)),
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
-					}),
-					generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(4)),
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(5)),
-						generateExpressionFieldData(schemapb.DataType_Int64, int64(6)),
-					}),
-				}),
+				"array": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Array, []*schemapb.TemplateArrayValue{
+						generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)}),
+						generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(4), int64(5), int64(6)}),
+					})),
 			}},
 			{`json_contains(ArrayField, {int})`, map[string]*schemapb.TemplateValue{
-				"int": generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
+				"int": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
 			}},
 			{`json_contains_any(ArrayField, {list})`, map[string]*schemapb.TemplateValue{
-				"list": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(2)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(4)),
-				}),
+				"list": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3), int64(4)})),
 			}},
 		}
 
@@ -437,43 +406,39 @@ func (s *FillExpressionValueSuite) TestJSONContainsExpression() {
 	s.Run("failed case", func() {
 		testcases := []testcase{
 			{`json_contains(ArrayField[0], {str})`, map[string]*schemapb.TemplateValue{
-				"str": generateExpressionFieldData(schemapb.DataType_String, "abc"),
+				"str": generateTemplateValue(schemapb.DataType_String, "abc"),
 			}},
 			{`json_contains_any(JSONField, {not_array})`, map[string]*schemapb.TemplateValue{
-				"not_array": generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
+				"not_array": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
 			}},
 			{`json_contains_all(JSONField, {not_array})`, map[string]*schemapb.TemplateValue{
-				"not_array": generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
+				"not_array": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
 			}},
 			{`json_contains_all(JSONField, {not_array})`, map[string]*schemapb.TemplateValue{
-				"array": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(2)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
-				}),
+				"array": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)})),
 			}},
 			{`json_contains_all(ArrayField, {array})`, map[string]*schemapb.TemplateValue{
-				"array": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_String, "abc"),
-					generateExpressionFieldData(schemapb.DataType_Double, 2.2),
-					generateExpressionFieldData(schemapb.DataType_Bool, false),
-				}),
+				"array": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{
+						generateJSONData(int64(1)),
+						generateJSONData("abc"),
+						generateJSONData(2.2),
+						generateJSONData(false),
+					})),
 			}},
 			{`json_contains(ArrayField, {array})`, map[string]*schemapb.TemplateValue{
-				"array": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(2)),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(3)),
-				}),
+				"array": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)})),
 			}},
 			{`json_contains_any(ArrayField, {array})`, map[string]*schemapb.TemplateValue{
-				"array": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(1)),
-					generateExpressionFieldData(schemapb.DataType_String, "abc"),
-					generateExpressionFieldData(schemapb.DataType_Double, 2.2),
-					generateExpressionFieldData(schemapb.DataType_Bool, false),
-				}),
+				"array": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{
+						generateJSONData(int64(1)),
+						generateJSONData("abc"),
+						generateJSONData(2.2),
+						generateJSONData(false),
+					})),
 			}},
 		}
 
@@ -489,17 +454,14 @@ func (s *FillExpressionValueSuite) TestBinaryExpression() {
 	s.Run("normal case", func() {
 		testcases := []testcase{
 			{`Int64Field > {int} && StringField in {list}`, map[string]*schemapb.TemplateValue{
-				"int": generateExpressionFieldData(schemapb.DataType_Int64, int64(10)),
-				"list": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_VarChar, "abc"),
-					generateExpressionFieldData(schemapb.DataType_VarChar, "def"),
-					generateExpressionFieldData(schemapb.DataType_VarChar, "ghi"),
-				}),
+				"int": generateTemplateValue(schemapb.DataType_Int64, int64(10)),
+				"list": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_String, []string{"abc", "def", "ghi"})),
 			}},
 			{`{max} > FloatField >= {min} or BoolField == {bool}`, map[string]*schemapb.TemplateValue{
-				"min":  generateExpressionFieldData(schemapb.DataType_Int64, int64(10)),
-				"max":  generateExpressionFieldData(schemapb.DataType_Float, 22.22),
-				"bool": generateExpressionFieldData(schemapb.DataType_Bool, true),
+				"min":  generateTemplateValue(schemapb.DataType_Int64, int64(10)),
+				"max":  generateTemplateValue(schemapb.DataType_Float, 22.22),
+				"bool": generateTemplateValue(schemapb.DataType_Bool, true),
 			}},
 		}
 
@@ -513,16 +475,17 @@ func (s *FillExpressionValueSuite) TestBinaryExpression() {
 	s.Run("failed case", func() {
 		testcases := []testcase{
 			{`Int64Field > {int} && StringField in {list}`, map[string]*schemapb.TemplateValue{
-				"int": generateExpressionFieldData(schemapb.DataType_String, "abc"),
-				"list": generateExpressionFieldData(schemapb.DataType_Array, []interface{}{
-					generateExpressionFieldData(schemapb.DataType_VarChar, "abc"),
-					generateExpressionFieldData(schemapb.DataType_Int64, int64(10)),
-					generateExpressionFieldData(schemapb.DataType_VarChar, "ghi"),
-				}),
+				"int": generateTemplateValue(schemapb.DataType_String, "abc"),
+				"list": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{
+						generateJSONData("abc"),
+						generateJSONData(int64(10)),
+						generateJSONData("ghi"),
+					})),
 			}},
 			{`{max} > FloatField >= {min} or BoolField == {bool}`, map[string]*schemapb.TemplateValue{
-				"min":  generateExpressionFieldData(schemapb.DataType_Int64, int64(10)),
-				"bool": generateExpressionFieldData(schemapb.DataType_Bool, true),
+				"min":  generateTemplateValue(schemapb.DataType_Int64, int64(10)),
+				"bool": generateTemplateValue(schemapb.DataType_Bool, true),
 			}},
 		}
 
