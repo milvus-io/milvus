@@ -111,3 +111,12 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 
 	return redoTask.Execute(ctx)
 }
+
+func (t *dropPartitionTask) GetLockerKey() LockerKey {
+	collectionName := t.core.getRealCollectionName(t.ctx, t.Req.GetDbName(), t.Req.GetCollectionName())
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(t.Req.GetDbName(), false),
+		NewCollectionLockerKey(collectionName, true),
+	)
+}
