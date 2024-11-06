@@ -112,11 +112,11 @@ func Test_GetIP(t *testing.T) {
 
 		assert.Panics(t, func() {
 			GetIP("0.0.0.0")
-		}, "null is unspecified ip address, panicking")
+		}, "input is unspecified ip address, panicking")
 
 		assert.Panics(t, func() {
 			GetIP("224.0.0.1")
-		}, "null is multicast ip address, panicking")
+		}, "input is multicast ip address, panicking")
 	})
 }
 
