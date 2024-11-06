@@ -483,13 +483,17 @@ func (s *Server) startQueryCoord() error {
 	}
 	s.checkNodeStateInRG()
 	for _, node := range sessions {
-		s.handleNodeUp(node.ServerID)
+		if !node.Stopping {
+			s.handleNodeUp(node.ServerID)
+		}
 	}
 
 	s.wg.Add(2)
 	go s.handleNodeUpLoop()
 	go s.watchNodes(revision)
 
+	// check replica changes after restart
+	s.checkLoadConfigChanges(s.ctx)
 	// watch load config changes
 	s.watchLoadConfigChanges()
 
@@ -802,7 +806,6 @@ func (s *Server) handleNodeDown(node int64) {
 
 	// Clear tasks
 	s.taskScheduler.RemoveByNode(node)
-
 	s.meta.ResourceManager.HandleNodeDown(node)
 }
 
@@ -866,6 +869,15 @@ func (s *Server) updateBalanceConfig() bool {
 	Params.Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
 	log.RatedDebug(10, "old query node exist", zap.Strings("sessions", lo.Keys(sessions)))
 	return false
+}
+
+func (s *Server) checkLoadConfigChanges(ctx context.Context) {
+	// try to check load config changes after restart, and try to update replicas
+	s.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
+		CollectionIDs:  s.meta.GetAll(),
+		ReplicaNumber:  int32(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsUint32()),
+		ResourceGroups: paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings(),
+	})
 }
 
 func (s *Server) watchLoadConfigChanges() {
