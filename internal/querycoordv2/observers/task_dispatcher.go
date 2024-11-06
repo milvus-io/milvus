@@ -102,10 +102,11 @@ func (d *taskDispatcher[K]) schedule(ctx context.Context) {
 			d.tasks.Range(func(k K, submitted bool) bool {
 				log.Info("taskDispatcher schedule", zap.Bool("submitted", submitted), zap.Any("k", k))
 				if !submitted {
+					queueStart := time.Now()
 					d.tasks.Insert(k, true)
 					d.pool.Submit(func() (any, error) {
 						start := time.Now()
-						log.Info("taskDispatcher begin to run", zap.Bool("submitted", submitted), zap.Any("k", k))
+						log.Info("taskDispatcher begin to run", zap.Bool("submitted", submitted), zap.Any("k", k), zap.Duration("queueDur", time.Since(queueStart)))
 						d.taskRunner(ctx, k)
 						d.tasks.Remove(k)
 						log.Info("taskDispatcher task done", zap.Any("k", k), zap.Duration("dur", time.Since(start)))
