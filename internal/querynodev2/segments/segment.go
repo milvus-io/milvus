@@ -752,7 +752,7 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
 				fmt.Sprint(paramtable.GetNodeID()),
-				"Delete",
+				"Insert",
 				"Sync",
 			).Observe(float64(time.Since(start).Milliseconds()))
 		}()
@@ -1092,7 +1092,7 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
 				fmt.Sprint(paramtable.GetNodeID()),
-				"LoadFieldData",
+				"LoadDeletedRecord",
 				"Sync",
 			).Observe(float64(time.Since(start).Milliseconds()))
 		}()
