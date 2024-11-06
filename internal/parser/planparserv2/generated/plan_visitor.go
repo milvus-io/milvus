@@ -37,6 +37,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#LogicalAnd.
 	VisitLogicalAnd(ctx *LogicalAndContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#TemplateVariable.
+	VisitTemplateVariable(ctx *TemplateVariableContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Equality.
 	VisitEquality(ctx *EqualityContext) interface{}
 

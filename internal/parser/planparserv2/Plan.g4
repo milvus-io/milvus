@@ -5,8 +5,9 @@ expr:
 	| FloatingConstant										                     # Floating
 	| BooleanConstant										                     # Boolean
 	| StringLiteral											                     # String
-	| Identifier											                     # Identifier
+	| (Identifier|Meta)           			      							     # Identifier
 	| JSONIdentifier                                                             # JSONIdentifier
+	| LBRACE Identifier RBRACE                                                   # TemplateVariable
 	| '(' expr ')'											                     # Parens
 	| '[' expr (',' expr)* ','? ']'                                              # Array
 	| EmptyArray                                                                 # EmptyArray
@@ -19,7 +20,6 @@ expr:
 	| expr op = (ADD | SUB) expr							                     # AddSub
 	| expr op = (SHL | SHR) expr							                     # Shift
 	| expr op = NOT? IN expr                                                     # Term
-//	| EmptyTerm                                                                  # EmptyTerm
 	| (JSONContains | ArrayContains)'('expr',' expr')'                           # JSONContains
 	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                     # JSONContainsAll
 	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                     # JSONContainsAny
@@ -45,6 +45,8 @@ expr:
 // INT64: 'int64';
 // FLOAT: 'float';
 // DOUBLE: 'double';
+LBRACE: '{';
+RBRACE: '}';
 
 LT: '<';
 LE: '<=';
@@ -55,7 +57,7 @@ NE: '!=';
 
 LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
-TEXTMATCH: 'TextMatch'|'textmatch'|'TEXTMATCH';
+TEXTMATCH: 'text_match'|'TEXT_MATCH';
 
 ADD: '+';
 SUB: '-';
@@ -99,10 +101,11 @@ FloatingConstant:
 	DecimalFloatingConstant
 	| HexadecimalFloatingConstant;
 
-Identifier: Nondigit (Nondigit | Digit)* | '$meta';
+Identifier: Nondigit (Nondigit | Digit)*;
+Meta: '$meta';
 
 StringLiteral: EncodingPrefix? ('"' DoubleSCharSequence? '"' | '\'' SingleSCharSequence? '\'');
-JSONIdentifier: Identifier('[' (StringLiteral | DecimalConstant) ']')+;
+JSONIdentifier: (Identifier | Meta)('[' (StringLiteral | DecimalConstant) ']')+;
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
 const initialTargetVersion = int64(0)
@@ -203,6 +204,12 @@ func (c *SegmentChecker) getGrowingSegmentDiff(collectionID int64,
 				if channel, ok := currentTargetChannelMap[segment.InsertChannel]; ok {
 					timestampInSegment := segment.GetStartPosition().GetTimestamp()
 					timestampInTarget := channel.GetSeekPosition().GetTimestamp()
+					// release growing segment if in dropped segment list
+					if funcutil.SliceContain(channel.GetDroppedSegmentIds(), segment.GetID()) {
+						log.Info("growing segment exists in dropped segment list, release it", zap.Int64("segmentID", segment.GetID()))
+						toRelease = append(toRelease, segment)
+						continue
+					}
 					// filter toRelease which seekPosition is newer than next target dmChannel
 					if timestampInSegment < timestampInTarget {
 						log.Info("growing segment not exist in target, so release it",

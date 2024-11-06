@@ -17,7 +17,7 @@ class TestGetCollections(TestcaseBase):
     def test_get_collections_by_prefix(self,):
         self._connect()
         all_collections = self.utility_wrap.list_collections()[0]
-        all_collections = [c_name for c_name in all_collections if "Checker" in c_name]
+        all_collections = [c_name for c_name in all_collections if c_name.startswith("Checker")]
         selected_collections_map = {}
         for c_name in all_collections:
             if Collection(name=c_name).num_entities < constants.ENTITIES_FOR_SEARCH:

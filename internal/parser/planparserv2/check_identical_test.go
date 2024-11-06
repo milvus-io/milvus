@@ -26,9 +26,9 @@ func TestCheckIdentical(t *testing.T) {
 		exprStr1 := exprStr1Arr[i]
 		exprStr2 := exprStr2Arr[i]
 
-		expr1, err := ParseExpr(helper, exprStr1)
+		expr1, err := ParseExpr(helper, exprStr1, nil)
 		assert.NoError(t, err)
-		expr2, err := ParseExpr(helper, exprStr2)
+		expr2, err := ParseExpr(helper, exprStr2, nil)
 		assert.NoError(t, err)
 
 		assert.True(t, CheckPredicatesIdentical(expr1, expr1))

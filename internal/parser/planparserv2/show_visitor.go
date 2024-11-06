@@ -21,6 +21,9 @@ func extractColumnInfo(info *planpb.ColumnInfo) interface{} {
 }
 
 func extractGenericValue(value *planpb.GenericValue) interface{} {
+	if value == nil {
+		return nil
+	}
 	switch realValue := value.Val.(type) {
 	case *planpb.GenericValue_BoolVal:
 		return realValue.BoolVal

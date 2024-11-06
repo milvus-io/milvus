@@ -1,6 +1,7 @@
 package planparserv2
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -86,6 +87,19 @@ func NewString(value string) *planpb.GenericValue {
 	}
 }
 
+func toColumnExpr(info *planpb.ColumnInfo) *ExprWithType {
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ColumnExpr{
+				ColumnExpr: &planpb.ColumnExpr{
+					Info: info,
+				},
+			},
+		},
+		dataType: info.GetDataType(),
+	}
+}
+
 func toValueExpr(n *planpb.GenericValue) *ExprWithType {
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_ValueExpr{
@@ -126,14 +140,7 @@ func toValueExpr(n *planpb.GenericValue) *ExprWithType {
 	}
 }
 
-func getSameType(left, right *ExprWithType) (schemapb.DataType, error) {
-	lDataType, rDataType := left.dataType, right.dataType
-	if typeutil.IsArrayType(lDataType) {
-		lDataType = toColumnInfo(left).GetElementType()
-	}
-	if typeutil.IsArrayType(rDataType) {
-		rDataType = toColumnInfo(right).GetElementType()
-	}
+func getTargetType(lDataType, rDataType schemapb.DataType) (schemapb.DataType, error) {
 	if typeutil.IsJSONType(lDataType) {
 		if typeutil.IsJSONType(rDataType) {
 			return schemapb.DataType_JSON, nil
@@ -160,6 +167,17 @@ func getSameType(left, right *ExprWithType) (schemapb.DataType, error) {
 	}
 
 	return schemapb.DataType_None, fmt.Errorf("incompatible data type, %s, %s", lDataType.String(), rDataType.String())
+}
+
+func getSameType(left, right *ExprWithType) (schemapb.DataType, error) {
+	lDataType, rDataType := left.dataType, right.dataType
+	if typeutil.IsArrayType(lDataType) {
+		lDataType = toColumnInfo(left).GetElementType()
+	}
+	if typeutil.IsArrayType(rDataType) {
+		rDataType = toColumnInfo(right).GetElementType()
+	}
+	return getTargetType(lDataType, rDataType)
 }
 
 func calcDataType(left, right *ExprWithType, reverse bool) (schemapb.DataType, error) {
@@ -223,47 +241,53 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 	return nil, fmt.Errorf("cannot cast value to %s, value: %s", dataType.String(), value)
 }
 
-func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, columnInfo *planpb.ColumnInfo, operand *planpb.GenericValue, value *planpb.GenericValue) (*planpb.Expr, error) {
-	dataType := columnInfo.GetDataType()
-	if typeutil.IsArrayType(dataType) && len(columnInfo.GetNestedPath()) != 0 {
-		dataType = columnInfo.GetElementType()
+func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithExprDataType schemapb.DataType, columnInfo *planpb.ColumnInfo, operandExpr, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
+	var err error
+	operand := operandExpr.GetValue()
+	if !isTemplateExpr(operandExpr) {
+		operand, err = castValue(arithExprDataType, operand)
+		if err != nil {
+			return nil, err
+		}
 	}
-	castedValue, err := castValue(dataType, operand)
-	if err != nil {
-		return nil, err
-	}
+
 	return &planpb.Expr{
 		Expr: &planpb.Expr_BinaryArithOpEvalRangeExpr{
 			BinaryArithOpEvalRangeExpr: &planpb.BinaryArithOpEvalRangeExpr{
-				ColumnInfo:   columnInfo,
-				ArithOp:      arithOp,
-				RightOperand: castedValue,
-				Op:           op,
-				Value:        value,
+				ColumnInfo:                  columnInfo,
+				ArithOp:                     arithOp,
+				RightOperand:                operand,
+				Op:                          op,
+				Value:                       valueExpr.GetValue(),
+				OperandTemplateVariableName: operandExpr.GetTemplateVariableName(),
+				ValueTemplateVariableName:   valueExpr.GetTemplateVariableName(),
 			},
 		},
+		IsTemplate: isTemplateExpr(operandExpr) || isTemplateExpr(valueExpr),
 	}, nil
 }
 
-func combineArrayLengthExpr(op planpb.OpType, arithOp planpb.ArithOpType, columnInfo *planpb.ColumnInfo, value *planpb.GenericValue) (*planpb.Expr, error) {
+func combineArrayLengthExpr(op planpb.OpType, arithOp planpb.ArithOpType, columnInfo *planpb.ColumnInfo, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
 	return &planpb.Expr{
 		Expr: &planpb.Expr_BinaryArithOpEvalRangeExpr{
 			BinaryArithOpEvalRangeExpr: &planpb.BinaryArithOpEvalRangeExpr{
-				ColumnInfo: columnInfo,
-				ArithOp:    arithOp,
-				Op:         op,
-				Value:      value,
+				ColumnInfo:                columnInfo,
+				ArithOp:                   arithOp,
+				Op:                        op,
+				Value:                     valueExpr.GetValue(),
+				ValueTemplateVariableName: valueExpr.GetTemplateVariableName(),
 			},
 		},
+		IsTemplate: isTemplateExpr(valueExpr),
 	}, nil
 }
 
-func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
+func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, arithExprDataType schemapb.DataType, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
 	leftExpr, leftValue := arithExpr.Left.GetColumnExpr(), arithExpr.Left.GetValueExpr()
 	rightExpr, rightValue := arithExpr.Right.GetColumnExpr(), arithExpr.Right.GetValueExpr()
 	arithOp := arithExpr.GetOp()
 	if arithOp == planpb.ArithOpType_ArrayLength {
-		return combineArrayLengthExpr(op, arithOp, leftExpr.GetInfo(), valueExpr.GetValue())
+		return combineArrayLengthExpr(op, arithOp, leftExpr.GetInfo(), valueExpr)
 	}
 
 	if leftExpr != nil && rightExpr != nil {
@@ -282,7 +306,7 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 		// a * 2 == 3
 		// a / 2 == 3
 		// a % 2 == 3
-		return combineBinaryArithExpr(op, arithOp, leftExpr.GetInfo(), rightValue.GetValue(), valueExpr.GetValue())
+		return combineBinaryArithExpr(op, arithOp, arithExprDataType, leftExpr.GetInfo(), rightValue, valueExpr)
 	} else if rightExpr != nil && leftValue != nil {
 		// 2 + a == 3
 		// 2 - a == 3
@@ -292,7 +316,7 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 
 		switch arithExpr.GetOp() {
 		case planpb.ArithOpType_Add, planpb.ArithOpType_Mul:
-			return combineBinaryArithExpr(op, arithOp, rightExpr.GetInfo(), leftValue.GetValue(), valueExpr.GetValue())
+			return combineBinaryArithExpr(op, arithOp, arithExprDataType, rightExpr.GetInfo(), leftValue, valueExpr)
 		default:
 			return nil, fmt.Errorf("module field is not yet supported")
 		}
@@ -307,13 +331,17 @@ func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb
 	if typeutil.IsArrayType(dataType) && len(toColumnInfo(left).GetNestedPath()) != 0 {
 		dataType = toColumnInfo(left).GetElementType()
 	}
-	castedValue, err := castValue(dataType, right.GetValue())
-	if err != nil {
-		return nil, err
+
+	if !left.expr.GetIsTemplate() && !isTemplateExpr(right) {
+		castedValue, err := castValue(dataType, right.GetValue())
+		if err != nil {
+			return nil, err
+		}
+		right = &planpb.ValueExpr{Value: castedValue}
 	}
 
 	if leftArithExpr := left.expr.GetBinaryArithExpr(); leftArithExpr != nil {
-		return handleBinaryArithExpr(op, leftArithExpr, &planpb.ValueExpr{Value: castedValue})
+		return handleBinaryArithExpr(op, leftArithExpr, left.dataType, right)
 	}
 
 	columnInfo := toColumnInfo(left)
@@ -323,11 +351,13 @@ func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_UnaryRangeExpr{
 			UnaryRangeExpr: &planpb.UnaryRangeExpr{
-				ColumnInfo: columnInfo,
-				Op:         op,
-				Value:      castedValue,
+				ColumnInfo:           columnInfo,
+				Op:                   op,
+				Value:                right.GetValue(),
+				TemplateVariableName: right.GetTemplateVariableName(),
 			},
 		},
+		IsTemplate: isTemplateExpr(right),
 	}
 
 	switch op {
@@ -341,6 +371,19 @@ func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb
 func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*planpb.Expr, error) {
 	leftColumnInfo := toColumnInfo(left)
 	rightColumnInfo := toColumnInfo(right)
+
+	if left.expr.GetIsTemplate() {
+		return &planpb.Expr{
+			Expr: &planpb.Expr_UnaryRangeExpr{
+				UnaryRangeExpr: &planpb.UnaryRangeExpr{
+					ColumnInfo:           rightColumnInfo,
+					Op:                   op,
+					Value:                left.expr.GetValueExpr().GetValue(),
+					TemplateVariableName: left.expr.GetValueExpr().GetTemplateVariableName(),
+				},
+			},
+		}, nil
+	}
 
 	if leftColumnInfo == nil || rightColumnInfo == nil {
 		return nil, fmt.Errorf("only comparison between two fields is supported")
@@ -417,9 +460,11 @@ func getDataType(expr *ExprWithType) string {
 }
 
 func HandleCompare(op int, left, right *ExprWithType) (*planpb.Expr, error) {
-	if !canBeCompared(left, right) {
-		return nil, fmt.Errorf("comparisons between %s and %s are not supported",
-			getDataType(left), getDataType(right))
+	if !left.expr.GetIsTemplate() && !right.expr.GetIsTemplate() {
+		if !canBeCompared(left, right) {
+			return nil, fmt.Errorf("comparisons between %s and %s are not supported",
+				getDataType(left), getDataType(right))
+		}
 	}
 
 	cmpOp := cmpOpMap[op]
@@ -521,23 +566,39 @@ func canArithmeticDataType(left, right schemapb.DataType) bool {
 	}
 }
 
-func canArithmetic(left *ExprWithType, right *ExprWithType) bool {
-	if !typeutil.IsArrayType(left.dataType) && !typeutil.IsArrayType(right.dataType) {
-		return canArithmeticDataType(left.dataType, right.dataType)
+//func canArithmetic(left *ExprWithType, right *ExprWithType) bool {
+//	if !typeutil.IsArrayType(left.dataType) && !typeutil.IsArrayType(right.dataType) {
+//		return canArithmeticDataType(left.dataType, right.dataType)
+//	}
+//	if typeutil.IsArrayType(left.dataType) && typeutil.IsArrayType(right.dataType) {
+//		return canArithmeticDataType(getArrayElementType(left), getArrayElementType(right))
+//	}
+//	if typeutil.IsArrayType(left.dataType) {
+//		return canArithmeticDataType(getArrayElementType(left), right.dataType)
+//	}
+//	return canArithmeticDataType(left.dataType, getArrayElementType(right))
+//}
+
+func canArithmetic(left, leftElement, right, rightElement schemapb.DataType) bool {
+	if !typeutil.IsArrayType(left) && !typeutil.IsArrayType(right) {
+		return canArithmeticDataType(left, right)
 	}
-	if typeutil.IsArrayType(left.dataType) && typeutil.IsArrayType(right.dataType) {
-		return canArithmeticDataType(getArrayElementType(left), getArrayElementType(right))
+	if typeutil.IsArrayType(left) && typeutil.IsArrayType(right) {
+		return canArithmeticDataType(leftElement, rightElement)
 	}
-	if typeutil.IsArrayType(left.dataType) {
-		return canArithmeticDataType(getArrayElementType(left), right.dataType)
+	if typeutil.IsArrayType(left) {
+		return canArithmeticDataType(leftElement, right)
 	}
-	return canArithmeticDataType(left.dataType, getArrayElementType(right))
+	return canArithmeticDataType(left, rightElement)
+}
+
+func canConvertToIntegerType(dataType, elementType schemapb.DataType) bool {
+	return typeutil.IsIntegerType(dataType) || typeutil.IsJSONType(dataType) ||
+		(typeutil.IsArrayType(dataType) && typeutil.IsIntegerType(elementType))
 }
 
 func isIntegerColumn(col *planpb.ColumnInfo) bool {
-	return typeutil.IsIntegerType(col.GetDataType()) ||
-		(typeutil.IsArrayType(col.GetDataType()) && typeutil.IsIntegerType(col.GetElementType())) ||
-		typeutil.IsJSONType(col.GetDataType())
+	return canConvertToIntegerType(col.GetDataType(), col.GetElementType())
 }
 
 func isEscapeCh(ch uint8) bool {
@@ -560,4 +621,107 @@ func hexDigit(n uint32) byte {
 		return byte(n) + '0'
 	}
 	return byte(n-10) + 'a'
+}
+
+func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType, rightType, rightElementType schemapb.DataType) error {
+	switch tokenType {
+	case planpb.ArithOpType_Mod:
+		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
+			return fmt.Errorf("modulo can only apply on integer types")
+		}
+	default:
+	}
+	return nil
+}
+
+func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
+	switch dataType {
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		if !IsString(value) {
+			return nil, fmt.Errorf("invalid range operations")
+		}
+	case schemapb.DataType_Bool:
+		return nil, fmt.Errorf("invalid range operations on boolean expr")
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
+		if !IsInteger(value) {
+			return nil, fmt.Errorf("invalid range operations")
+		}
+	case schemapb.DataType_Float, schemapb.DataType_Double:
+		if !IsNumber(value) {
+			return nil, fmt.Errorf("invalid range operations")
+		}
+		if IsInteger(value) {
+			return NewFloat(float64(value.GetInt64Val())), nil
+		}
+	}
+	return value, nil
+}
+
+func checkContainsElement(columnExpr *ExprWithType, op planpb.JSONContainsExpr_JSONOp, elementValue *planpb.GenericValue) error {
+	if op != planpb.JSONContainsExpr_Contains && elementValue.GetArrayVal() == nil {
+		return fmt.Errorf("%s operation element must be an array", op.String())
+	}
+
+	if typeutil.IsArrayType(columnExpr.expr.GetColumnExpr().GetInfo().GetDataType()) {
+		var elements []*planpb.GenericValue
+		if op == planpb.JSONContainsExpr_Contains {
+			elements = []*planpb.GenericValue{elementValue}
+		} else {
+			elements = elementValue.GetArrayVal().GetArray()
+		}
+		for _, value := range elements {
+			valExpr := toValueExpr(value)
+			if !canBeCompared(columnExpr, valExpr) {
+				return fmt.Errorf("%s operation can't compare between array element type: %s and %s",
+					op.String(),
+					columnExpr.expr.GetColumnExpr().GetInfo().GetElementType(),
+					valExpr.dataType)
+			}
+		}
+	}
+	return nil
+}
+
+func parseJSONValue(value interface{}) (*planpb.GenericValue, schemapb.DataType, error) {
+	switch v := value.(type) {
+	case json.Number:
+		if intValue, err := v.Int64(); err == nil {
+			return NewInt(intValue), schemapb.DataType_Int64, nil
+		} else if floatValue, err := v.Float64(); err == nil {
+			return NewFloat(floatValue), schemapb.DataType_Double, nil
+		} else {
+			return nil, schemapb.DataType_None, fmt.Errorf("%v is a number, but couldn't convert it", value)
+		}
+	case string:
+		return NewString(v), schemapb.DataType_String, nil
+	case bool:
+		return NewBool(v), schemapb.DataType_Bool, nil
+	case []interface{}:
+		arrayElements := make([]*planpb.GenericValue, len(v))
+		dataType := schemapb.DataType_None
+		sameType := true
+		for i, elem := range v {
+			ev, dt, err := parseJSONValue(elem)
+			if err != nil {
+				return nil, schemapb.DataType_None, err
+			}
+			if dataType == schemapb.DataType_None {
+				dataType = dt
+			} else if dataType != dt {
+				sameType = false
+			}
+			arrayElements[i] = ev
+		}
+		return &planpb.GenericValue{
+			Val: &planpb.GenericValue_ArrayVal{
+				ArrayVal: &planpb.Array{
+					Array:       arrayElements,
+					SameType:    sameType,
+					ElementType: dataType,
+				},
+			},
+		}, schemapb.DataType_Array, nil
+	default:
+		return nil, schemapb.DataType_None, fmt.Errorf("%v is of unknown type: %T\n", value, v)
+	}
 }

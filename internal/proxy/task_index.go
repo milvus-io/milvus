@@ -341,6 +341,14 @@ func (cit *createIndexTask) parseIndexParams() error {
 		if !exist {
 			return fmt.Errorf("IndexType not specified")
 		}
+		//  index parameters defined in the YAML file are merged with the user-provided parameters during create stage
+		if Params.KnowhereConfig.Enable.GetAsBool() {
+			var err error
+			indexParamsMap, err = Params.KnowhereConfig.MergeIndexParams(indexType, paramtable.BuildStage, indexParamsMap)
+			if err != nil {
+				return err
+			}
+		}
 		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 			err := indexparams.FillDiskIndexParams(Params, indexParamsMap)
 			if err != nil {
@@ -465,7 +473,7 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 	if typeutil.IsVectorType(field.DataType) && indexType != indexparamcheck.AutoIndex {
 		exist := CheckVecIndexWithDataTypeExist(indexType, field.DataType)
 		if !exist {
-			return fmt.Errorf("data type %d can't build with this index %s", field.DataType, indexType)
+			return fmt.Errorf("data type %s can't build with this index %s", schemapb.DataType_name[int32(field.GetDataType())], indexType)
 		}
 	}
 
