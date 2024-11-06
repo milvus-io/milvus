@@ -118,18 +118,24 @@ func (executor *FunctionExecutor) ProcessInsert(msg *msgstream.InsertMsg) error 
 			data, err := executor.processSingleFunction(runner, msg)
 			if err != nil {
 				errChan <- err
-			} else {
-				outputs <- data
+				return
 			}
-
+			outputs <- data
 		}(runner)
 	}
 	wg.Wait()
 	close(errChan)
 	close(outputs)
+
+	// Collect all errors
+	var errs []error
 	for err := range errChan {
-		return err
+		errs = append(errs, err)
 	}
+	if len(errs) > 0 {
+		return fmt.Errorf("multiple errors occurred: %v", errs)
+	}
+
 	for output := range outputs {
 		msg.FieldsData = append(msg.FieldsData, output...)
 	}
