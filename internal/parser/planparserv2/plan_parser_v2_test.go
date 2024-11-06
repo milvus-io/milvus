@@ -1458,12 +1458,12 @@ func BenchmarkTemplateWithString(b *testing.B) {
 
 	elements := make([]interface{}, 100)
 	for i := 0; i < 100; i++ {
-		elements[i] = generateExpressionFieldData(schemapb.DataType_String, fmt.Sprintf(`"%s",`, randomChineseString(rand.Intn(100))))
+		elements[i] = generateTemplateValue(schemapb.DataType_String, fmt.Sprintf(`"%s",`, randomChineseString(rand.Intn(100))))
 	}
 	expr := "StringField in {list}"
 
 	mv := map[string]*schemapb.TemplateValue{
-		"list": generateExpressionFieldData(schemapb.DataType_Array, elements),
+		"list": generateTemplateValue(schemapb.DataType_Array, elements),
 	}
 
 	for i := 0; i < b.N; i++ {
