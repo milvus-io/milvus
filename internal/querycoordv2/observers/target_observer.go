@@ -446,11 +446,13 @@ func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leade
 	}
 	replicaID := replica.GetID()
 
+	t1 := time.Now()
 	collectionInfo, err := ob.broker.DescribeCollection(ctx, leaderView.CollectionID)
 	if err != nil {
 		log.Warn("failed to get collection info", zap.Error(err))
 		return false
 	}
+	log.Info("TargetObserver sync DescribeCollection done", zap.Any("dur", time.Since(t1)))
 	partitions, err := utils.GetPartitions(ob.meta.CollectionManager, leaderView.CollectionID)
 	if err != nil {
 		log.Warn("failed to get partitions", zap.Error(err))
@@ -458,11 +460,13 @@ func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leade
 	}
 
 	// Get collection index info
+	t2 := time.Now()
 	indexInfo, err := ob.broker.ListIndexes(ctx, collectionInfo.GetCollectionID())
 	if err != nil {
 		log.Warn("fail to get index info of collection", zap.Error(err))
 		return false
 	}
+	log.Info("TargetObserver sync ListIndexes done", zap.Any("dur", time.Since(t2)))
 
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -483,6 +487,7 @@ func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leade
 		Version:       time.Now().UnixNano(),
 		IndexInfoList: indexInfo,
 	}
+	t3 := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	resp, err := ob.cluster.SyncDistribution(ctx, leaderView.ID, req)
@@ -490,6 +495,7 @@ func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leade
 		log.Warn("failed to sync distribution", zap.Error(err))
 		return false
 	}
+	log.Info("TargetObserver sync SyncDistribution done", zap.Any("dur", time.Since(t3)))
 
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
 		log.Warn("failed to sync distribution", zap.String("reason", resp.GetReason()))
