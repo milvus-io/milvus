@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -20,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -101,7 +103,7 @@ func (w *MultiSegmentWriter) finishCurrent() error {
 		allBinlogs = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
 	}
 
-	if !writer.FlushAndIsEmpty() {
+	if !writer.IsEmpty() {
 		kvs, partialBinlogs, err := serializeWrite(context.TODO(), w.allocator.getLogIDAllocator(), writer)
 		if err != nil {
 			return err
@@ -183,12 +185,7 @@ func (w *MultiSegmentWriter) getWriter() (*SegmentWriter, error) {
 	return w.writers[w.current], nil
 }
 
-func (w *MultiSegmentWriter) Write(v *storage.Value) error {
-	writer, err := w.getWriter()
-	if err != nil {
-		return err
-	}
-
+func (w *MultiSegmentWriter) writeInternal(writer *SegmentWriter) error {
 	if writer.IsFull() {
 		// init segment fieldBinlogs if it is not exist
 		if _, ok := w.cachedMeta[writer.segmentID]; !ok {
@@ -205,6 +202,29 @@ func (w *MultiSegmentWriter) Write(v *storage.Value) error {
 		}
 
 		mergeFieldBinlogs(w.cachedMeta[writer.segmentID], partialBinlogs)
+	}
+	return nil
+}
+
+func (w *MultiSegmentWriter) WriteRecord(r storage.Record) error {
+	writer, err := w.getWriter()
+	if err != nil {
+		return err
+	}
+	if err := w.writeInternal(writer); err != nil {
+		return err
+	}
+
+	return writer.WriteRecord(r)
+}
+
+func (w *MultiSegmentWriter) Write(v *storage.Value) error {
+	writer, err := w.getWriter()
+	if err != nil {
+		return err
+	}
+	if err := w.writeInternal(writer); err != nil {
+		return err
 	}
 
 	return writer.Write(v)
@@ -234,7 +254,7 @@ func (w *MultiSegmentWriter) Finish() ([]*datapb.CompactionSegment, error) {
 		return w.res, nil
 	}
 
-	if !w.writers[w.current].FlushAndIsEmpty() {
+	if !w.writers[w.current].IsEmpty() {
 		if err := w.finishCurrent(); err != nil {
 			return nil, err
 		}
@@ -358,6 +378,48 @@ func (w *SegmentWriter) WrittenMemorySize() uint64 {
 	return w.writer.WrittenMemorySize()
 }
 
+func (w *SegmentWriter) WriteRecord(r storage.Record) error {
+	tsArray := r.Column(common.TimeStampField).(*array.Int64)
+	rows := r.Len()
+	for i := 0; i < rows; i++ {
+		ts := typeutil.Timestamp(tsArray.Value(i))
+		if ts < w.tsFrom {
+			w.tsFrom = ts
+		}
+		if ts > w.tsTo {
+			w.tsTo = ts
+		}
+
+		switch schemapb.DataType(w.pkstats.PkType) {
+		case schemapb.DataType_Int64:
+			pkArray := r.Column(w.GetPkID()).(*array.Int64)
+			pk := &storage.Int64PrimaryKey{
+				Value: pkArray.Value(i),
+			}
+			w.pkstats.Update(pk)
+		case schemapb.DataType_VarChar:
+			pkArray := r.Column(w.GetPkID()).(*array.String)
+			pk := &storage.VarCharPrimaryKey{
+				Value: pkArray.Value(i),
+			}
+			w.pkstats.Update(pk)
+		default:
+			panic("invalid data type")
+		}
+
+		for fieldID, stats := range w.bm25Stats {
+			field, ok := r.Column(fieldID).(*array.Binary)
+			if !ok {
+				return fmt.Errorf("bm25 field value not found")
+			}
+			stats.AppendBytes(field.Value(i))
+		}
+
+		w.rowCount.Inc()
+	}
+	return w.writer.WriteRecord(r)
+}
+
 func (w *SegmentWriter) Write(v *storage.Value) error {
 	ts := typeutil.Timestamp(v.Timestamp)
 	if ts < w.tsFrom {
@@ -386,7 +448,7 @@ func (w *SegmentWriter) Write(v *storage.Value) error {
 }
 
 func (w *SegmentWriter) Finish() (*storage.Blob, error) {
-	w.writer.Flush()
+	w.writer.Close()
 	codec := storage.NewInsertCodecWithSchema(&etcdpb.CollectionMeta{ID: w.collectionID, Schema: w.sch})
 	return codec.SerializePkStats(w.pkstats, w.GetRowNum())
 }
@@ -441,7 +503,6 @@ func (w *SegmentWriter) GetTimeRange() *writebuffer.TimeRange {
 }
 
 func (w *SegmentWriter) SerializeYield() ([]*storage.Blob, *writebuffer.TimeRange, error) {
-	w.writer.Flush()
 	w.writer.Close()
 
 	fieldData := make([]*storage.Blob, len(w.closers))
