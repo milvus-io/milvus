@@ -36,6 +36,7 @@ def setup_collection(environment):
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
             FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=25536,
                         enable_tokenizer=True, tokenizer_params=tokenizer_params, enable_match=True),
+            FieldSchema(name="dense_emb", dtype=DataType.FLOAT_VECTOR, dim=environment.parsed_options.milvus_dim),
             FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="beir test collection")
@@ -59,6 +60,13 @@ def setup_collection(environment):
                     "bm25_k1": 1.5,
                     "bm25_b": 0.75,
                 }
+            }
+        )
+        collection.create_index(
+            "dense_emb",
+            {
+                "index_type": "HNSW",
+                "metric_type": "COSINE"
             }
         )
         collection.load()
@@ -178,9 +186,9 @@ class MilvusUser(MilvusBaseUser):
 
         self.client.insert(data)
 
-    @tag('search')
+    @tag('full_text_search')
     @task(4)
-    def search(self):
+    def full_text_search(self):
         """full text search"""
         search_data = [faker.text(max_nb_chars=300)]
         logger.debug("Performing vector search")
@@ -188,9 +196,18 @@ class MilvusUser(MilvusBaseUser):
                            anns_field="sparse",
                            top_k=self.top_k)
 
-    @tag('query')
+    @tag('dense_search')
+    @task(4)
+    def dense_search(self):
+        """full text search"""
+        search_data = [self._random_vector()]
+        self.client.search(data=search_data,
+                           anns_field="dense_emb",
+                           top_k=self.top_k)
+
+    @tag('text_match')
     @task(2)
-    def query(self):
+    def text_match(self):
         """Text Match"""
         search_data = faker.sentence()
         expr = f"TEXT_MATCH(text, '{search_data}')"
