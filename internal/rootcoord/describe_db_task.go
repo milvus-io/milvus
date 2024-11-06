@@ -55,3 +55,10 @@ func (t *describeDBTask) Execute(ctx context.Context) (err error) {
 	}
 	return nil
 }
+
+func (t *describeDBTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(t.Req.GetDbName(), false),
+	)
+}

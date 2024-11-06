@@ -53,3 +53,7 @@ func (t *createDatabaseTask) Execute(ctx context.Context) error {
 	db := model.NewDatabase(t.dbID, t.Req.GetDbName(), etcdpb.DatabaseState_DatabaseCreated, t.Req.GetProperties())
 	return t.core.meta.CreateDatabase(ctx, db, t.GetTs())
 }
+
+func (t *createDatabaseTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(NewClusterLockerKey(true))
+}

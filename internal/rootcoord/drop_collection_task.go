@@ -119,3 +119,7 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 
 	return redoTask.Execute(ctx)
 }
+
+func (t *dropCollectionTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(NewClusterLockerKey(false), NewDatabaseLockerKey(t.Req.GetDbName(), true))
+}

@@ -128,3 +128,12 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 
 	return undoTask.Execute(ctx)
 }
+
+func (t *createPartitionTask) GetLockerKey() LockerKey {
+	collectionName := t.core.getRealCollectionName(t.ctx, t.Req.GetDbName(), t.Req.GetCollectionName())
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(t.Req.GetDbName(), false),
+		NewCollectionLockerKey(collectionName, true),
+	)
+}
