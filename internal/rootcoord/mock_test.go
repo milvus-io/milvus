@@ -97,6 +97,10 @@ type mockMetaTable struct {
 	ListPolicyFunc                   func(tenant string) ([]string, error)
 	ListUserRoleFunc                 func(tenant string) ([]string, error)
 	DescribeDatabaseFunc             func(ctx context.Context, dbName string) (*model.Database, error)
+	CreatePrivilegeGroupFunc         func(groupName string) error
+	DropPrivilegeGroupFunc           func(groupName string) error
+	ListPrivilegeGroupsFunc          func() ([]*milvuspb.PrivilegeGroupInfo, error)
+	OperatePrivilegeGroupFunc        func(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error
 }
 
 func (m mockMetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error) {
@@ -249,6 +253,22 @@ func (m mockMetaTable) ListPolicy(tenant string) ([]string, error) {
 
 func (m mockMetaTable) ListUserRole(tenant string) ([]string, error) {
 	return m.ListUserRoleFunc(tenant)
+}
+
+func (m mockMetaTable) CreatePrivilegeGroup(groupName string) error {
+	return m.CreatePrivilegeGroupFunc(groupName)
+}
+
+func (m mockMetaTable) DropPrivilegeGroup(groupName string) error {
+	return m.DropPrivilegeGroupFunc(groupName)
+}
+
+func (m mockMetaTable) ListPrivilegeGroups() ([]*milvuspb.PrivilegeGroupInfo, error) {
+	return m.ListPrivilegeGroupsFunc()
+}
+
+func (m mockMetaTable) OperatePrivilegeGroup(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
+	return m.OperatePrivilegeGroupFunc(groupName, privileges, operateType)
 }
 
 func newMockMetaTable() *mockMetaTable {
@@ -526,6 +546,18 @@ func withInvalidMeta() Opt {
 	}
 	meta.DescribeDatabaseFunc = func(ctx context.Context, dbName string) (*model.Database, error) {
 		return nil, errors.New("error mock DescribeDatabase")
+	}
+	meta.CreatePrivilegeGroupFunc = func(groupName string) error {
+		return errors.New("error mock CreatePrivilegeGroup")
+	}
+	meta.DropPrivilegeGroupFunc = func(groupName string) error {
+		return errors.New("error mock DropPrivilegeGroup")
+	}
+	meta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+		return nil, errors.New("error mock ListPrivilegeGroups")
+	}
+	meta.OperatePrivilegeGroupFunc = func(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
+		return errors.New("error mock OperatePrivilegeGroup")
 	}
 	return withMeta(meta)
 }

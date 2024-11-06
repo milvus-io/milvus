@@ -32,6 +32,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -635,7 +636,11 @@ func (c *Core) initBuiltinRoles() error {
 		for _, privilege := range privilegesJSON[util.RoleConfigPrivileges] {
 			privilegeName := privilege[util.RoleConfigPrivilege]
 			if !util.IsAnyWord(privilege[util.RoleConfigPrivilege]) {
-				privilegeName = util.PrivilegeNameForMetastore(privilege[util.RoleConfigPrivilege])
+				dbPrivName, err := c.getMetastorePrivilegeName(privilege[util.RoleConfigPrivilege])
+				if err != nil {
+					return errors.Wrapf(err, "failed to get metastore privilege name for: %s", privilege[util.RoleConfigPrivilege])
+				}
+				privilegeName = dbPrivName
 			}
 			err := c.meta.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: role},
@@ -2503,11 +2508,8 @@ func (c *Core) isValidGrantor(entity *milvuspb.GrantorEntity, object string) err
 	if entity == nil {
 		return errors.New("the grantor entity is nil")
 	}
-	if entity.User == nil {
-		return errors.New("the user entity in the grantor entity is nil")
-	}
-	if entity.User.Name == "" {
-		return errors.New("the name in the user entity of the grantor entity is empty")
+	if entity.User == nil || entity.User.Name == "" {
+		return errors.New("the user entity in the grantor entity is nil or empty")
 	}
 	if _, err := c.meta.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: entity.User.Name}, false); err != nil {
 		log.Warn("fail to select the user", zap.String("username", entity.User.Name), zap.Error(err))
@@ -2519,17 +2521,25 @@ func (c *Core) isValidGrantor(entity *milvuspb.GrantorEntity, object string) err
 	if util.IsAnyWord(entity.Privilege.Name) {
 		return nil
 	}
-	if privilegeName := util.PrivilegeNameForMetastore(entity.Privilege.Name); privilegeName == "" {
-		return fmt.Errorf("not found the privilege name[%s]", entity.Privilege.Name)
-	}
-	privileges, ok := util.ObjectPrivileges[object]
-	if !ok {
-		return fmt.Errorf("not found the object type[name: %s], supported the object types: %v", object, lo.Keys(commonpb.ObjectType_value))
-	}
-	for _, privilege := range privileges {
-		if privilege == entity.Privilege.Name {
-			return nil
+	// check object privileges for built-in privileges
+	if util.IsPrivilegeNameDefined(entity.Privilege.Name) {
+		privileges, ok := util.ObjectPrivileges[object]
+		if !ok {
+			return fmt.Errorf("not found the object type[name: %s], supported the object types: %v", object, lo.Keys(commonpb.ObjectType_value))
 		}
+		for _, privilege := range privileges {
+			if privilege == entity.Privilege.Name {
+				return nil
+			}
+		}
+	}
+	// check if it is a custom privilege group
+	customPrivGroup, err := c.meta.IsCustomPrivilegeGroup(entity.Privilege.Name)
+	if err != nil {
+		return err
+	}
+	if customPrivGroup {
+		return nil
 	}
 	return fmt.Errorf("not found the privilege name[%s] in object[%s]", entity.Privilege.Name, object)
 }
@@ -2574,11 +2584,18 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
 	}
 
-	ctxLog.Debug("before PrivilegeNameForMetastore", zap.String("privilege", in.Entity.Grantor.Privilege.Name))
-	if !util.IsAnyWord(in.Entity.Grantor.Privilege.Name) {
-		in.Entity.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(in.Entity.Grantor.Privilege.Name)
+	// set up privilege name for metastore
+	privName := in.Entity.Grantor.Privilege.Name
+	ctxLog.Debug("before PrivilegeNameForMetastore", zap.String("privilege", privName))
+	if !util.IsAnyWord(privName) {
+		dbPrivName, err := c.getMetastorePrivilegeName(privName)
+		if err != nil {
+			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
+		}
+		in.Entity.Grantor.Privilege.Name = dbPrivName
 	}
-	ctxLog.Debug("after PrivilegeNameForMetastore", zap.String("privilege", in.Entity.Grantor.Privilege.Name))
+	ctxLog.Debug("after PrivilegeNameForMetastore", zap.String("privilege", privName))
+
 	if in.Entity.Object.Name == commonpb.ObjectType_Global.String() {
 		in.Entity.ObjectName = util.AnyWord
 	}
@@ -2624,6 +2641,22 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return merr.Success(), nil
+}
+
+func (c *Core) getMetastorePrivilegeName(privName string) (string, error) {
+	// if it is built-in privilege, return the privilege name directly
+	if util.IsPrivilegeNameDefined(privName) {
+		return util.PrivilegeNameForMetastore(privName), nil
+	}
+	// return the privilege group name if it is a custom privilege group
+	customGroup, err := c.meta.IsCustomPrivilegeGroup(privName)
+	if err != nil {
+		return "", err
+	}
+	if customGroup {
+		return util.PrivilegeGroupNameForMetastore(privName), nil
+	}
+	return "", errors.New("not found the privilege name")
 }
 
 // SelectGrant select grant
@@ -2718,14 +2751,23 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
+	privGroups, err := c.meta.ListPrivilegeGroups()
+	if err != nil {
+		errMsg := "fail to list privilege groups"
+		ctxLog.Warn(errMsg, zap.Error(err))
+		return &internalpb.ListPolicyResponse{
+			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
+		}, nil
+	}
 
 	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &internalpb.ListPolicyResponse{
-		Status:      merr.Success(),
-		PolicyInfos: policies,
-		UserRoles:   userRoles,
+		Status:          merr.Success(),
+		PolicyInfos:     policies,
+		UserRoles:       userRoles,
+		PrivilegeGroups: privGroups,
 	}, nil
 }
 
@@ -2925,4 +2967,162 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 	}
 
 	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}, nil
+}
+
+func (c *Core) CreatePrivilegeGroup(ctx context.Context, in *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {
+	method := "CreatePrivilegeGroup"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
+	ctxLog.Debug(method)
+
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	if err := c.meta.CreatePrivilegeGroup(in.GroupName); err != nil {
+		ctxLog.Warn("fail to create privilege group", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	ctxLog.Debug(method + " success")
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordNumOfPrivilegeGroups.Inc()
+	return merr.Success(), nil
+}
+
+func (c *Core) DropPrivilegeGroup(ctx context.Context, in *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error) {
+	method := "DropPrivilegeGroup"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
+	ctxLog.Debug(method)
+
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	redoTask := newBaseRedoTask(c.stepExecutor)
+	redoTask.AddSyncStep(NewSimpleStep("drop privilege group meta data", func(ctx context.Context) ([]nestedStep, error) {
+		if err := c.meta.DropPrivilegeGroup(in.GroupName); err != nil {
+			ctxLog.Warn("fail to drop privilege group", zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+	}))
+
+	redoTask.AddAsyncStep(NewSimpleStep("drop privilege group cache", func(ctx context.Context) ([]nestedStep, error) {
+		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType: int32(typeutil.CacheDropPrivilegeGroup),
+			OpKey:  in.GroupName,
+		}); err != nil {
+			log.Warn("drop privilege group cache failed", zap.Any("in", in), zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+	}))
+
+	err := redoTask.Execute(ctx)
+	if err != nil {
+		errMsg := "fail to execute task when dropping the privilege group"
+		log.Warn(errMsg, zap.Error(err))
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_DropPrivilegeGroupFailure), nil
+	}
+
+	ctxLog.Debug(method + " success")
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordNumOfPrivilegeGroups.Desc()
+	return merr.Success(), nil
+}
+
+func (c *Core) ListPrivilegeGroups(ctx context.Context, in *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error) {
+	method := "ListPrivilegeGroups"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
+	ctxLog.Debug(method)
+
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &milvuspb.ListPrivilegeGroupsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	privGroups, err := c.meta.ListPrivilegeGroups()
+	if err != nil {
+		ctxLog.Warn("fail to list privilege group", zap.Error(err))
+		return &milvuspb.ListPrivilegeGroupsResponse{
+			Status: merr.StatusWithErrorCode(err, commonpb.ErrorCode_ListPrivilegeGroupsFailure),
+		}, nil
+	}
+
+	ctxLog.Debug(method + " success")
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.ListPrivilegeGroupsResponse{
+		Status:          merr.Success(),
+		PrivilegeGroups: privGroups,
+	}, nil
+}
+
+func (c *Core) OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
+	method := "OperatePrivilegeGroup-" + in.Type.String()
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
+	ctxLog.Debug(method)
+
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	redoTask := newBaseRedoTask(c.stepExecutor)
+	redoTask.AddSyncStep(NewSimpleStep("operate privilege group meta data", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.meta.OperatePrivilegeGroup(in.GroupName, in.Privileges, in.Type)
+		if err != nil && !common.IsIgnorableError(err) {
+			log.Warn("fail to operate privilege group", zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+	}))
+	redoTask.AddAsyncStep(NewSimpleStep("operate privilege group cache", func(ctx context.Context) ([]nestedStep, error) {
+		var opType int32
+		switch in.Type {
+		case milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup:
+			opType = int32(typeutil.CacheAddPrivilegesToGroup)
+		case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
+			opType = int32(typeutil.CacheRemovePrivilegesFromGroup)
+		default:
+			errMsg := "invalid operate type for the OperatePrivilegeGroup api"
+			log.Warn(errMsg, zap.Any("in", in))
+			return nil, nil
+		}
+		groupInfo := &milvuspb.PrivilegeGroupInfo{GroupName: in.GroupName, Privileges: in.Privileges}
+		v, err := proto.Marshal(groupInfo)
+		if err != nil {
+			log.Error("failed to marshal privilege group info during operate privilege group", zap.Error(err))
+			return nil, err
+		}
+		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType: opType,
+			OpKey:  string(v),
+		}); err != nil {
+			log.Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+	}))
+	err := redoTask.Execute(ctx)
+	if err != nil {
+		errMsg := "fail to execute task when operate privilege group"
+		log.Warn(errMsg, zap.Error(err))
+		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperatePrivilegeGroupFailure), nil
+	}
+
+	ctxLog.Debug(method + " success")
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return merr.Success(), nil
 }

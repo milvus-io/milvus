@@ -2071,3 +2071,32 @@ func TestMetaTable_RestoreRBAC(t *testing.T) {
 	err = mt.RestoreRBAC(context.TODO(), util.DefaultTenant, &milvuspb.RBACMeta{})
 	assert.Error(t, err)
 }
+
+func TestMetaTable_PrivilegeGroup(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.EXPECT().ListPrivilegeGroups(mock.Anything).Return([]*milvuspb.PrivilegeGroupInfo{
+		{
+			GroupName:  "pg1",
+			Privileges: []*milvuspb.PrivilegeEntity{{Name: "CreateCollection"}, {Name: "DescribeCollection"}},
+		},
+	}, nil)
+	catalog.EXPECT().ListRole(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SavePrivilegeGroup(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().DropPrivilegeGroup(mock.Anything, mock.Anything).Return(nil)
+	mt := &MetaTable{
+		dbName2Meta: map[string]*model.Database{
+			"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated, nil),
+		},
+		names:   newNameDb(),
+		aliases: newNameDb(),
+		catalog: catalog,
+	}
+	err := mt.CreatePrivilegeGroup("pg1")
+	assert.Error(t, err)
+	err = mt.CreatePrivilegeGroup("pg2")
+	assert.NoError(t, err)
+	err = mt.DropPrivilegeGroup("pg1")
+	assert.NoError(t, err)
+	_, err = mt.ListPrivilegeGroups()
+	assert.NoError(t, err)
+}

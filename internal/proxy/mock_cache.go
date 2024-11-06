@@ -5,6 +5,7 @@ package proxy
 import (
 	context "context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
 
@@ -914,9 +915,22 @@ func (_c *MockCache_HasDatabase_Call) RunAndReturn(run func(context.Context, str
 	return _c
 }
 
-// InitPolicyInfo provides a mock function with given fields: info, userRoles
-func (_m *MockCache) InitPolicyInfo(info []string, userRoles []string) {
-	_m.Called(info, userRoles)
+// InitPolicyInfo provides a mock function with given fields: info, userRoles, privilegeGroups
+func (_m *MockCache) InitPolicyInfo(info []string, userRoles []string, privilegeGroups []*milvuspb.PrivilegeGroupInfo) error {
+	ret := _m.Called(info, userRoles, privilegeGroups)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InitPolicyInfo")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func([]string, []string, []*milvuspb.PrivilegeGroupInfo) error); ok {
+		r0 = rf(info, userRoles, privilegeGroups)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
 // MockCache_InitPolicyInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InitPolicyInfo'
@@ -927,23 +941,23 @@ type MockCache_InitPolicyInfo_Call struct {
 // InitPolicyInfo is a helper method to define mock.On call
 //   - info []string
 //   - userRoles []string
-func (_e *MockCache_Expecter) InitPolicyInfo(info interface{}, userRoles interface{}) *MockCache_InitPolicyInfo_Call {
-	return &MockCache_InitPolicyInfo_Call{Call: _e.mock.On("InitPolicyInfo", info, userRoles)}
+func (_e *MockCache_Expecter) InitPolicyInfo(info interface{}, userRoles interface{}, privilegeGroups interface{}) *MockCache_InitPolicyInfo_Call {
+	return &MockCache_InitPolicyInfo_Call{Call: _e.mock.On("InitPolicyInfo", info, userRoles, privilegeGroups)}
 }
 
-func (_c *MockCache_InitPolicyInfo_Call) Run(run func(info []string, userRoles []string)) *MockCache_InitPolicyInfo_Call {
+func (_c *MockCache_InitPolicyInfo_Call) Run(run func(info []string, userRoles []string, privilegeGroups []*milvuspb.PrivilegeGroupInfo)) *MockCache_InitPolicyInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]string), args[1].([]string))
+		run(args[0].([]string), args[1].([]string), args[2].([]*milvuspb.PrivilegeGroupInfo))
 	})
 	return _c
 }
 
-func (_c *MockCache_InitPolicyInfo_Call) Return() *MockCache_InitPolicyInfo_Call {
-	_c.Call.Return()
+func (_c *MockCache_InitPolicyInfo_Call) Return(_a0 error) *MockCache_InitPolicyInfo_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockCache_InitPolicyInfo_Call) RunAndReturn(run func([]string, []string)) *MockCache_InitPolicyInfo_Call {
+func (_c *MockCache_InitPolicyInfo_Call) RunAndReturn(run func([]string, []string, []*milvuspb.PrivilegeGroupInfo) error) *MockCache_InitPolicyInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1243,6 +1257,54 @@ func (_c *MockCache_UpdateCredential_Call) Return() *MockCache_UpdateCredential_
 }
 
 func (_c *MockCache_UpdateCredential_Call) RunAndReturn(run func(*internalpb.CredentialInfo)) *MockCache_UpdateCredential_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetGroupPrivileges provides a mock function with given fields: groupName
+func (_m *MockCache) GetGroupPrivileges(groupName string) map[string]struct{} {
+	ret := _m.Called(groupName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetGroupPrivileges")
+	}
+
+	var r0 map[string]struct{}
+	if rf, ok := ret.Get(0).(func(string) map[string]struct{}); ok {
+		r0 = rf(groupName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]struct{})
+		}
+	}
+
+	return r0
+}
+
+// MockCache_GetGroupPrivileges_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetGroupPrivileges'
+type MockCache_GetGroupPrivileges_Call struct {
+	*mock.Call
+}
+
+// GetGroupPrivileges is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockCache_Expecter) GetGroupPrivileges(groupName interface{}) *MockCache_GetGroupPrivileges_Call {
+	return &MockCache_GetGroupPrivileges_Call{Call: _e.mock.On("GetGroupPrivileges", groupName)}
+}
+
+func (_c *MockCache_GetGroupPrivileges_Call) Run(run func(groupName string)) *MockCache_GetGroupPrivileges_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockCache_GetGroupPrivileges_Call) Return(_a0 map[string]struct{}) *MockCache_GetGroupPrivileges_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCache_GetGroupPrivileges_Call) RunAndReturn(run func(string) map[string]struct{}) *MockCache_GetGroupPrivileges_Call {
 	_c.Call.Return(run)
 	return _c
 }

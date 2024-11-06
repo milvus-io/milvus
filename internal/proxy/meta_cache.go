@@ -28,6 +28,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -82,9 +83,10 @@ type Cache interface {
 	UpdateCredential(credInfo *internalpb.CredentialInfo)
 
 	GetPrivilegeInfo(ctx context.Context) []string
+	GetGroupPrivileges(groupName string) map[string]struct{}
 	GetUserRole(username string) []string
 	RefreshPolicyInfo(op typeutil.CacheOp) error
-	InitPolicyInfo(info []string, userRoles []string)
+	InitPolicyInfo(info []string, userRoles []string, privilegeGroups []*milvuspb.PrivilegeGroupInfo) error
 
 	RemoveDatabase(ctx context.Context, database string)
 	HasDatabase(ctx context.Context, database string) bool
@@ -340,18 +342,19 @@ type MetaCache struct {
 	rootCoord  types.RootCoordClient
 	queryCoord types.QueryCoordClient
 
-	dbInfo         map[string]*databaseInfo              // database -> db_info
-	collInfo       map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
-	collLeader     map[string]map[string]*shardLeaders   // database -> collectionName -> collection_leaders
-	credMap        map[string]*internalpb.CredentialInfo // cache for credential, lazy load
-	privilegeInfos map[string]struct{}                   // privileges cache
-	userToRoles    map[string]map[string]struct{}        // user to role cache
-	mu             sync.RWMutex
-	credMut        sync.RWMutex
-	leaderMut      sync.RWMutex
-	shardMgr       shardClientMgr
-	sfGlobal       conc.Singleflight[*collectionInfo]
-	sfDB           conc.Singleflight[*databaseInfo]
+	dbInfo          map[string]*databaseInfo              // database -> db_info
+	collInfo        map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
+	collLeader      map[string]map[string]*shardLeaders   // database -> collectionName -> collection_leaders
+	credMap         map[string]*internalpb.CredentialInfo // cache for credential, lazy load
+	privilegeInfos  map[string]struct{}                   // privileges cache
+	privilegeGroups map[string]map[string]struct{}        // privilege group -> privileges
+	userToRoles     map[string]map[string]struct{}        // user to role cache
+	mu              sync.RWMutex
+	credMut         sync.RWMutex
+	leaderMut       sync.RWMutex
+	shardMgr        shardClientMgr
+	sfGlobal        conc.Singleflight[*collectionInfo]
+	sfDB            conc.Singleflight[*databaseInfo]
 
 	IDStart int64
 	IDCount int64
@@ -376,7 +379,10 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 		log.Error("fail to init meta cache", zap.Error(err))
 		return err
 	}
-	globalMetaCache.InitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
+	err = globalMetaCache.InitPolicyInfo(resp.PolicyInfos, resp.UserRoles, resp.PrivilegeGroups)
+	if err != nil {
+		return err
+	}
 	log.Info("success to init meta cache", zap.Strings("policy_infos", resp.PolicyInfos))
 	return nil
 }
@@ -384,15 +390,16 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 // NewMetaCache creates a MetaCache with provided RootCoord and QueryNode
 func NewMetaCache(rootCoord types.RootCoordClient, queryCoord types.QueryCoordClient, shardMgr shardClientMgr) (*MetaCache, error) {
 	return &MetaCache{
-		rootCoord:      rootCoord,
-		queryCoord:     queryCoord,
-		dbInfo:         map[string]*databaseInfo{},
-		collInfo:       map[string]map[string]*collectionInfo{},
-		collLeader:     map[string]map[string]*shardLeaders{},
-		credMap:        map[string]*internalpb.CredentialInfo{},
-		shardMgr:       shardMgr,
-		privilegeInfos: map[string]struct{}{},
-		userToRoles:    map[string]map[string]struct{}{},
+		rootCoord:       rootCoord,
+		queryCoord:      queryCoord,
+		dbInfo:          map[string]*databaseInfo{},
+		collInfo:        map[string]map[string]*collectionInfo{},
+		collLeader:      map[string]map[string]*shardLeaders{},
+		credMap:         map[string]*internalpb.CredentialInfo{},
+		shardMgr:        shardMgr,
+		privilegeInfos:  map[string]struct{}{},
+		privilegeGroups: map[string]map[string]struct{}{},
+		userToRoles:     map[string]map[string]struct{}{},
 	}, nil
 }
 
@@ -1062,7 +1069,7 @@ func (m *MetaCache) InvalidateShardLeaderCache(collections []int64) {
 	}
 }
 
-func (m *MetaCache) InitPolicyInfo(info []string, userRoles []string) {
+func (m *MetaCache) InitPolicyInfo(info []string, userRoles []string, privilegeGroups []*milvuspb.PrivilegeGroupInfo) error {
 	defer func() {
 		err := getEnforcer().LoadPolicy()
 		if err != nil {
@@ -1071,10 +1078,13 @@ func (m *MetaCache) InitPolicyInfo(info []string, userRoles []string) {
 	}()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.unsafeInitPolicyInfo(info, userRoles)
+	if err := m.unsafeInitPolicyInfo(info, userRoles, privilegeGroups); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (m *MetaCache) unsafeInitPolicyInfo(info []string, userRoles []string) {
+func (m *MetaCache) unsafeInitPolicyInfo(info []string, userRoles []string, privilegeGroups []*milvuspb.PrivilegeGroupInfo) error {
 	m.privilegeInfos = util.StringSet(info)
 	for _, userRole := range userRoles {
 		user, role, err := funcutil.DecodeUserRoleCache(userRole)
@@ -1087,6 +1097,16 @@ func (m *MetaCache) unsafeInitPolicyInfo(info []string, userRoles []string) {
 		}
 		m.userToRoles[user][role] = struct{}{}
 	}
+	for _, g := range privilegeGroups {
+		if m.privilegeGroups[g.GroupName] == nil {
+			m.privilegeGroups[g.GroupName] = make(map[string]struct{})
+		}
+		for _, priv := range g.Privileges {
+			dbPrivName := util.PrivilegeNameForMetastore(priv.Name)
+			m.privilegeGroups[g.GroupName][dbPrivName] = struct{}{}
+		}
+	}
+	return nil
 }
 
 func (m *MetaCache) GetPrivilegeInfo(ctx context.Context) []string {
@@ -1094,6 +1114,12 @@ func (m *MetaCache) GetPrivilegeInfo(ctx context.Context) []string {
 	defer m.mu.RUnlock()
 
 	return util.StringList(m.privilegeInfos)
+}
+
+func (m *MetaCache) GetGroupPrivileges(groupName string) map[string]struct{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.privilegeGroups[groupName]
 }
 
 func (m *MetaCache) GetUserRole(user string) []string {
@@ -1143,6 +1169,33 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 		if m.userToRoles[user] != nil {
 			delete(m.userToRoles[user], role)
 		}
+	case typeutil.CacheDropPrivilegeGroup:
+		delete(m.privilegeGroups, op.OpKey)
+	case typeutil.CacheAddPrivilegesToGroup:
+		groupInfo := &milvuspb.PrivilegeGroupInfo{}
+		err = proto.Unmarshal([]byte(op.OpKey), groupInfo)
+		if err != nil {
+			log.Error("failed to unmarshal privilege group info", zap.Error(err))
+			return err
+		}
+		if m.privilegeGroups[groupInfo.GroupName] == nil {
+			m.privilegeGroups[groupInfo.GroupName] = make(map[string]struct{})
+		}
+		for _, p := range groupInfo.Privileges {
+			m.privilegeGroups[groupInfo.GroupName][p.Name] = struct{}{}
+		}
+	case typeutil.CacheRemovePrivilegesFromGroup:
+		groupInfo := &milvuspb.PrivilegeGroupInfo{}
+		err = proto.Unmarshal([]byte(op.OpKey), groupInfo)
+		if err != nil {
+			log.Error("failed to unmarshal privilege group info", zap.Error(err))
+			return err
+		}
+		if m.privilegeGroups[groupInfo.GroupName] != nil {
+			for _, p := range groupInfo.Privileges {
+				delete(m.privilegeGroups[groupInfo.GroupName], p.Name)
+			}
+		}
 	case typeutil.CacheDeleteUser:
 		delete(m.userToRoles, op.OpKey)
 	case typeutil.CacheDropRole:
@@ -1172,8 +1225,9 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		m.userToRoles = make(map[string]map[string]struct{})
+		m.privilegeGroups = make(map[string]map[string]struct{})
 		m.privilegeInfos = make(map[string]struct{})
-		m.unsafeInitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
+		m.unsafeInitPolicyInfo(resp.PolicyInfos, resp.UserRoles, resp.PrivilegeGroups)
 	default:
 		return fmt.Errorf("invalid opType, op_type: %d, op_key: %s", int(op.OpType), op.OpKey)
 	}

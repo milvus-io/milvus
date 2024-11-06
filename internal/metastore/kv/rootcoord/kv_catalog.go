@@ -1332,10 +1332,16 @@ func (kc *Catalog) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBA
 		grantsEntity = append(grantsEntity, grants...)
 	}
 
+	privGroups, err := kc.ListPrivilegeGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	return &milvuspb.RBACMeta{
-		Users:  userInfos,
-		Roles:  roleEntity,
-		Grants: grantsEntity,
+		Users:           userInfos,
+		Roles:           roleEntity,
+		Grants:          grantsEntity,
+		PrivilegeGroups: privGroups,
 	}, nil
 }
 
@@ -1344,6 +1350,7 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 	needRollbackUser := make([]*milvuspb.UserInfo, 0)
 	needRollbackRole := make([]*milvuspb.RoleEntity, 0)
 	needRollbackGrants := make([]*milvuspb.GrantEntity, 0)
+	needRollbackPrivilegeGroups := make([]*milvuspb.PrivilegeGroupInfo, 0)
 	defer func() {
 		if err != nil {
 			log.Warn("failed to restore rbac, try to rollback", zap.Error(err))
@@ -1370,6 +1377,14 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 					log.Warn("failed to rollback users after restore failed", zap.Error(err))
 				}
 			}
+
+			// roll back privilege group
+			for _, group := range needRollbackPrivilegeGroups {
+				err = kc.DropPrivilegeGroup(ctx, group.GroupName)
+				if err != nil {
+					log.Warn("failed to rollback privilege groups after restore failed", zap.Error(err))
+				}
+			}
 		}
 	}()
 
@@ -1392,9 +1407,42 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 		needRollbackRole = append(needRollbackRole, role)
 	}
 
-	// restore grant
+	// restore privilege group
+	existPrivGroups, err := kc.ListPrivilegeGroups(ctx)
+	if err != nil {
+		return err
+	}
+	existPrivGroupMap := lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GroupName, struct{}{} })
+	for _, group := range meta.PrivilegeGroups {
+		if _, ok := existPrivGroupMap[group.GroupName]; ok {
+			log.Warn("failed to restore, privilege group already exists", zap.String("group", group.GroupName))
+			err = errors.Newf("privilege group [%s] already exists", group.GroupName)
+			return err
+		}
+		err = kc.SavePrivilegeGroup(ctx, group)
+		if err != nil {
+			return err
+		}
+		needRollbackPrivilegeGroups = append(needRollbackPrivilegeGroups, group)
+	}
+
+	// restore grant, list latest privilege group first
+	existPrivGroups, err = kc.ListPrivilegeGroups(ctx)
+	if err != nil {
+		return err
+	}
+	existPrivGroupMap = lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GroupName, struct{}{} })
 	for _, grant := range meta.Grants {
-		grant.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(grant.Grantor.Privilege.Name)
+		privName := grant.Grantor.Privilege.Name
+		if util.IsPrivilegeNameDefined(privName) {
+			grant.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(privName)
+		} else if _, ok := existPrivGroupMap[privName]; ok {
+			grant.Grantor.Privilege.Name = util.PrivilegeGroupNameForMetastore(privName)
+		} else {
+			log.Warn("failed to restore, privilege group does not exist", zap.String("group", privName))
+			err = errors.Newf("privilege group [%s] does not exist", privName)
+			return err
+		}
 		err = kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Grant)
 		if err != nil {
 			return err
@@ -1437,6 +1485,78 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 	}
 
 	return err
+}
+
+func (kc *Catalog) GetPrivilegeGroup(ctx context.Context, groupName string) (*milvuspb.PrivilegeGroupInfo, error) {
+	k := BuildPrivilegeGroupkey(groupName)
+	val, err := kc.Txn.Load(k)
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, fmt.Errorf("privilege group [%s] does not exist", groupName)
+		}
+		log.Error("failed to load privilege group", zap.String("group", groupName), zap.Error(err))
+		return nil, err
+	}
+	privGroupInfo := &milvuspb.PrivilegeGroupInfo{}
+	err = proto.Unmarshal([]byte(val), privGroupInfo)
+	if err != nil {
+		log.Error("failed to unmarshal privilege group info", zap.Error(err))
+		return nil, err
+	}
+	return privGroupInfo, nil
+}
+
+func (kc *Catalog) DropPrivilegeGroup(ctx context.Context, groupName string) error {
+	k := BuildPrivilegeGroupkey(groupName)
+	err := kc.Txn.Remove(k)
+	if err != nil {
+		log.Warn("fail to drop privilege group", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) SavePrivilegeGroup(ctx context.Context, data *milvuspb.PrivilegeGroupInfo) error {
+	// dedup privileges
+	dedupedMap := lo.SliceToMap(data.Privileges, func(p *milvuspb.PrivilegeEntity) (string, *milvuspb.PrivilegeEntity) {
+		return p.Name, p
+	})
+	dedupedPrivileges := lo.Values(dedupedMap)
+
+	k := BuildPrivilegeGroupkey(data.GroupName)
+	groupInfo := &milvuspb.PrivilegeGroupInfo{
+		GroupName:  data.GroupName,
+		Privileges: dedupedPrivileges,
+	}
+	v, err := proto.Marshal(groupInfo)
+	if err != nil {
+		log.Error("failed to marshal privilege group info", zap.Error(err))
+		return err
+	}
+	if err = kc.Txn.Save(k, string(v)); err != nil {
+		log.Warn("fail to put privilege group", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
+	_, vals, err := kc.Txn.LoadWithPrefix(PrivilegeGroupPrefix)
+	if err != nil {
+		log.Error("failed to list privilege groups", zap.String("prefix", PrivilegeGroupPrefix), zap.Error(err))
+		return nil, err
+	}
+	privGroups := make([]*milvuspb.PrivilegeGroupInfo, 0, len(vals))
+	for _, val := range vals {
+		privGroupInfo := &milvuspb.PrivilegeGroupInfo{}
+		err = proto.Unmarshal([]byte(val), privGroupInfo)
+		if err != nil {
+			log.Error("failed to unmarshal privilege group info", zap.Error(err))
+			return nil, err
+		}
+		privGroups = append(privGroups, privGroupInfo)
+	}
+	return privGroups, nil
 }
 
 func (kc *Catalog) Close() {

@@ -804,8 +804,6 @@ func TestValidateName(t *testing.T) {
 		assert.Nil(t, ValidateRoleName(name))
 		assert.Nil(t, ValidateObjectName(name))
 		assert.Nil(t, ValidateObjectType(name))
-		assert.Nil(t, ValidatePrincipalName(name))
-		assert.Nil(t, ValidatePrincipalType(name))
 		assert.Nil(t, ValidatePrivilege(name))
 	}
 
@@ -828,8 +826,6 @@ func TestValidateName(t *testing.T) {
 		assert.NotNil(t, validateName(name, nameType))
 		assert.NotNil(t, ValidateRoleName(name))
 		assert.NotNil(t, ValidateObjectType(name))
-		assert.NotNil(t, ValidatePrincipalName(name))
-		assert.NotNil(t, ValidatePrincipalType(name))
 		assert.NotNil(t, ValidatePrivilege(name))
 	}
 	assert.NotNil(t, ValidateObjectName(" "))
@@ -921,6 +917,25 @@ func TestGetRole(t *testing.T) {
 	roles, err = GetRole("foo")
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(roles))
+}
+
+func TestGetGroupPrivileges(t *testing.T) {
+	globalMetaCache = nil
+	_, err := GetGroupPrivileges("foo")
+	assert.Error(t, err)
+	mockCache := NewMockCache(t)
+	mockCache.On("GetGroupPrivileges",
+		mock.AnythingOfType("string"),
+	).Return(func(groupName string) map[string]struct{} {
+		return map[string]struct{}{
+			"CreateCollection":   {},
+			"DescribeCollection": {},
+		}
+	})
+	globalMetaCache = mockCache
+	privileges, err := GetGroupPrivileges("group1")
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(privileges))
 }
 
 func TestPasswordVerify(t *testing.T) {

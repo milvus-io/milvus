@@ -1071,14 +1071,6 @@ func ValidateObjectType(entity string) error {
 	return validateName(entity, "ObjectType")
 }
 
-func ValidatePrincipalName(entity string) error {
-	return validateName(entity, "PrincipalName")
-}
-
-func ValidatePrincipalType(entity string) error {
-	return validateName(entity, "PrincipalType")
-}
-
 func ValidatePrivilege(entity string) error {
 	if util.IsAnyWord(entity) {
 		return nil
@@ -1127,6 +1119,13 @@ func AppendUserInfoForRPC(ctx context.Context) context.Context {
 		ctx = metadata.AppendToOutgoingContext(ctx, authKey, authValue)
 	}
 	return ctx
+}
+
+func GetGroupPrivileges(groupName string) (map[string]struct{}, error) {
+	if globalMetaCache == nil {
+		return map[string]struct{}{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
+	}
+	return globalMetaCache.GetGroupPrivileges(groupName), nil
 }
 
 func GetRole(username string) ([]string, error) {

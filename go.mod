@@ -138,6 +138,7 @@ require (
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
+	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/flatbuffers v2.0.8+incompatible // indirect
 	github.com/google/s2a-go v0.1.7 // indirect
@@ -274,3 +275,5 @@ replace (
 )
 
 exclude github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b
+
+replace github.com/milvus-io/milvus-proto/go-api/v2 => github.com/shaoting-huang/milvus-proto/go-api/v2 v2.0.0-20241106070152-9f16b6314bc5
