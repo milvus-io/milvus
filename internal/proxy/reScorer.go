@@ -85,6 +85,7 @@ func (ws *weightedScorer) getActivateFunc() activateFunc {
 	mUpper := strings.ToUpper(ws.getMetricType())
 	isCosine := mUpper == strings.ToUpper(metric.COSINE)
 	isIP := mUpper == strings.ToUpper(metric.IP)
+	isBM25 := mUpper == strings.ToUpper(metric.BM25)
 	if isCosine {
 		f := func(distance float32) float32 {
 			return (1 + distance) * 0.5
@@ -95,6 +96,13 @@ func (ws *weightedScorer) getActivateFunc() activateFunc {
 	if isIP {
 		f := func(distance float32) float32 {
 			return 0.5 + float32(math.Atan(float64(distance)))/math.Pi
+		}
+		return f
+	}
+
+	if isBM25 {
+		f := func(distance float32) float32 {
+			return 2 * float32(math.Atan(float64(distance))) / math.Pi
 		}
 		return f
 	}
