@@ -462,13 +462,22 @@ func (c *Core) initInternal() error {
 	c.garbageCollector = newBgGarbageCollector(c)
 	c.stepExecutor = newBgStepExecutor(c.ctx)
 
-	c.proxyWatcher = proxyutil.NewProxyWatcher(
-		c.etcdCli,
-		c.chanTimeTick.initSessions,
-		c.proxyClientManager.AddProxyClients,
-	)
-	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
-	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
+	if !streamingutil.IsStreamingServiceEnabled() {
+		c.proxyWatcher = proxyutil.NewProxyWatcher(
+			c.etcdCli,
+			c.chanTimeTick.initSessions,
+			c.proxyClientManager.AddProxyClients,
+		)
+		c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+		c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
+	} else {
+		c.proxyWatcher = proxyutil.NewProxyWatcher(
+			c.etcdCli,
+			c.proxyClientManager.AddProxyClients,
+		)
+		c.proxyWatcher.AddSessionFunc(c.proxyClientManager.AddProxyClient)
+		c.proxyWatcher.DelSessionFunc(c.proxyClientManager.DelProxyClient)
+	}
 	log.Info("init proxy manager done")
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
@@ -730,11 +739,11 @@ func (c *Core) startInternal() error {
 }
 
 func (c *Core) startServerLoop() {
-	c.wg.Add(2)
-	go c.startTimeTickLoop()
+	c.wg.Add(1)
 	go c.tsLoop()
 	if !streamingutil.IsStreamingServiceEnabled() {
-		c.wg.Add(1)
+		c.wg.Add(2)
+		go c.startTimeTickLoop()
 		go c.chanTimeTick.startWatch(&c.wg)
 	}
 }
