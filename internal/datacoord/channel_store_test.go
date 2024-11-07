@@ -37,7 +37,8 @@ func (s *StateChannelStoreSuite) SetupTest() {
 func generateWatchInfo(name string, state datapb.ChannelWatchState) *datapb.ChannelWatchInfo {
 	return &datapb.ChannelWatchInfo{
 		Vchan: &datapb.VchannelInfo{
-			ChannelName: name,
+			CollectionID: 1,
+			ChannelName:  name,
 		},
 		Schema: &schemapb.CollectionSchema{},
 		State:  state,

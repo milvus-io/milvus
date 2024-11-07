@@ -90,6 +90,9 @@ type Manager interface {
 	ExpireAllocations(channel string, ts Timestamp) error
 	// DropSegmentsOfChannel drops all segments in a channel
 	DropSegmentsOfChannel(ctx context.Context, channel string)
+
+	// DropSegmentsOfPartition drops all segments in a partition
+	DropSegmentsOfPartition(ctx context.Context, partitionID UniqueID)
 }
 
 // Allocation records the allocation info
@@ -618,5 +621,27 @@ func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel stri
 		}
 	}
 
+	s.segments = validSegments
+}
+
+func (s *SegmentManager) DropSegmentsOfPartition(ctx context.Context, partitionID UniqueID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	validSegments := make([]int64, 0, len(s.segments))
+	for _, sid := range s.segments {
+		segment := s.meta.GetHealthySegment(sid)
+		if segment == nil {
+			continue
+		}
+		if segment.PartitionID != partitionID {
+			validSegments = append(validSegments, sid)
+			continue
+		}
+		s.meta.SetAllocations(sid, nil)
+		for _, allocation := range segment.allocations {
+			putAllocation(allocation)
+		}
+	}
 	s.segments = validSegments
 }

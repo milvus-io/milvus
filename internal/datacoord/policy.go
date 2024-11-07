@@ -145,6 +145,10 @@ func AvgBalanceChannelPolicy(cluster Assignments) *ChannelOpSet {
 // ExclusiveNodes means donot assign channels to these nodes.
 type AssignPolicy func(currentCluster Assignments, toAssign *NodeChannelInfo, exclusiveNodes []int64) *ChannelOpSet
 
+func EmptyAssignPolicy(currentCluster Assignments, toAssign *NodeChannelInfo, execlusiveNodes []int64) *ChannelOpSet {
+	return nil
+}
+
 func AvgAssignByCountPolicy(currentCluster Assignments, toAssign *NodeChannelInfo, execlusiveNodes []int64) *ChannelOpSet {
 	var (
 		toCluster   Assignments

@@ -20,7 +20,6 @@ import (
 // MetaWriter is the interface for SyncManager to write segment sync meta.
 type MetaWriter interface {
 	UpdateSync(context.Context, *SyncTask) error
-	DropChannel(context.Context, string) error
 }
 
 type brokerMetaWriter struct {
@@ -141,26 +140,4 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 	pack.metacache.UpdateSegments(metacache.SetStartPosRecorded(true), metacache.WithSegmentIDs(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) int64 { return pos.GetSegmentID() })...))
 
 	return nil
-}
-
-func (b *brokerMetaWriter) DropChannel(ctx context.Context, channelName string) error {
-	err := retry.Handle(ctx, func() (bool, error) {
-		status, err := b.broker.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithSourceID(b.serverID),
-			),
-			ChannelName: channelName,
-		})
-		err = merr.CheckRPCCall(status, err)
-		if err != nil {
-			return !merr.IsCanceledOrTimeout(err), err
-		}
-		return false, nil
-	}, b.opts...)
-	if err != nil {
-		log.Warn("failed to DropChannel",
-			zap.String("channel", channelName),
-			zap.Error(err))
-	}
-	return err
 }

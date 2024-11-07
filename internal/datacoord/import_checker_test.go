@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/tombstone"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -60,6 +61,9 @@ func (s *ImportCheckerSuite) SetupTest() {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCollectionTombstone(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveCollectionTombstone(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().DropCollectionTombstone(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	cluster := NewMockCluster(s.T())
 	s.alloc = allocator.NewMockAllocator(s.T())
@@ -67,6 +71,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 	imeta, err := NewImportMeta(catalog)
 	s.NoError(err)
 	s.imeta = imeta
+	tombstone.RecoverCollectionTombstoneForTest(context.Background(), catalog)
 
 	meta, err := newMeta(context.TODO(), catalog, nil)
 	s.NoError(err)
@@ -464,32 +469,23 @@ func (s *ImportCheckerSuite) TestCheckCollection() {
 	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(s.jobID).GetState())
 
 	// collection exist
-	broker := s.checker.broker.(*broker2.MockBroker)
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil)
-	s.checker.checkCollection(1, []ImportJob{s.imeta.GetJob(s.jobID)})
-	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(s.jobID).GetState())
-
-	// HasCollection failed
-	s.checker.broker = broker2.NewMockBroker(s.T())
-	broker = s.checker.broker.(*broker2.MockBroker)
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, mockErr)
 	s.checker.checkCollection(1, []ImportJob{s.imeta.GetJob(s.jobID)})
 	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(s.jobID).GetState())
 
 	// SaveImportJob failed
 	s.checker.broker = broker2.NewMockBroker(s.T())
-	broker = s.checker.broker.(*broker2.MockBroker)
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
-	catalog.ExpectedCalls = nil
+	catalog.EXPECT().SaveImportJob(mock.Anything).Unset()
 	catalog.EXPECT().SaveImportJob(mock.Anything).Return(mockErr)
 	s.checker.checkCollection(1, []ImportJob{s.imeta.GetJob(s.jobID)})
 	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(s.jobID).GetState())
 
 	// collection dropped
 	s.checker.broker = broker2.NewMockBroker(s.T())
-	broker = s.checker.broker.(*broker2.MockBroker)
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
-	catalog.ExpectedCalls = nil
+	tombstone.CollectionTombstone().MarkCollectionAsDropping(context.Background(), &tombstone.DroppingCollection{
+		CollectionId: 1,
+		Vchannels:    []string{"ch0"},
+	})
+	catalog.EXPECT().SaveImportJob(mock.Anything).Unset()
 	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
 	s.checker.checkCollection(1, []ImportJob{s.imeta.GetJob(s.jobID)})
 	s.Equal(internalpb.ImportJobState_Failed, s.imeta.GetJob(s.jobID).GetState())

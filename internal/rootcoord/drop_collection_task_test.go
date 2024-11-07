@@ -122,6 +122,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		coll := &model.Collection{Name: collectionName}
 
 		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ChangeCollectionState(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		meta.On("GetCollectionByName",
 			mock.Anything, // context.Context
 			mock.Anything,
@@ -238,6 +239,9 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		}
 		broker.GCConfirmFunc = func(ctx context.Context, collectionID, partitionID UniqueID) bool {
 			return true
+		}
+		broker.DropCollectionFunc = func(ctx context.Context, collectionID UniqueID, vchannel []string) error {
+			return nil
 		}
 
 		gc := mockrootcoord.NewGarbageCollector(t)

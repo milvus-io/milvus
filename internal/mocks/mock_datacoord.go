@@ -451,6 +451,65 @@ func (_c *MockDataCoord_DescribeIndex_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// DropCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) DropCollection(_a0 context.Context, _a1 *datapb.DropCollectionRequest) (*datapb.DropCollectionResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropCollection")
+	}
+
+	var r0 *datapb.DropCollectionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropCollectionRequest) (*datapb.DropCollectionResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropCollectionRequest) *datapb.DropCollectionResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.DropCollectionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.DropCollectionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_DropCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCollection'
+type MockDataCoord_DropCollection_Call struct {
+	*mock.Call
+}
+
+// DropCollection is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.DropCollectionRequest
+func (_e *MockDataCoord_Expecter) DropCollection(_a0 interface{}, _a1 interface{}) *MockDataCoord_DropCollection_Call {
+	return &MockDataCoord_DropCollection_Call{Call: _e.mock.On("DropCollection", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_DropCollection_Call) Run(run func(_a0 context.Context, _a1 *datapb.DropCollectionRequest)) *MockDataCoord_DropCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.DropCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_DropCollection_Call) Return(_a0 *datapb.DropCollectionResponse, _a1 error) *MockDataCoord_DropCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_DropCollection_Call) RunAndReturn(run func(context.Context, *datapb.DropCollectionRequest) (*datapb.DropCollectionResponse, error)) *MockDataCoord_DropCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropIndex provides a mock function with given fields: _a0, _a1
 func (_m *MockDataCoord) DropIndex(_a0 context.Context, _a1 *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -506,6 +565,65 @@ func (_c *MockDataCoord_DropIndex_Call) Return(_a0 *commonpb.Status, _a1 error) 
 }
 
 func (_c *MockDataCoord_DropIndex_Call) RunAndReturn(run func(context.Context, *indexpb.DropIndexRequest) (*commonpb.Status, error)) *MockDataCoord_DropIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropPartition provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) DropPartition(_a0 context.Context, _a1 *datapb.DropPartitionRequest) (*datapb.DropPartitionResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropPartition")
+	}
+
+	var r0 *datapb.DropPartitionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropPartitionRequest) (*datapb.DropPartitionResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropPartitionRequest) *datapb.DropPartitionResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.DropPartitionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.DropPartitionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_DropPartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropPartition'
+type MockDataCoord_DropPartition_Call struct {
+	*mock.Call
+}
+
+// DropPartition is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.DropPartitionRequest
+func (_e *MockDataCoord_Expecter) DropPartition(_a0 interface{}, _a1 interface{}) *MockDataCoord_DropPartition_Call {
+	return &MockDataCoord_DropPartition_Call{Call: _e.mock.On("DropPartition", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_DropPartition_Call) Run(run func(_a0 context.Context, _a1 *datapb.DropPartitionRequest)) *MockDataCoord_DropPartition_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.DropPartitionRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_DropPartition_Call) Return(_a0 *datapb.DropPartitionResponse, _a1 error) *MockDataCoord_DropPartition_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_DropPartition_Call) RunAndReturn(run func(context.Context, *datapb.DropPartitionRequest) (*datapb.DropPartitionResponse, error)) *MockDataCoord_DropPartition_Call {
 	_c.Call.Return(run)
 	return _c
 }

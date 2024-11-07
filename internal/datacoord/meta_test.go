@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/tombstone"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -151,6 +152,7 @@ func (suite *MetaBasicSuite) SetupTest() {
 
 	suite.Require().NoError(err)
 	suite.meta = meta
+	tombstone.RecoverCollectionTombstoneForTest(context.Background(), suite.meta.catalog)
 }
 
 func (suite *MetaBasicSuite) getCollectionInfo(partIDs ...int64) *collectionInfo {
@@ -332,6 +334,69 @@ func (suite *MetaBasicSuite) TestSetSegment() {
 		suite.NoError(err)
 	})
 
+	suite.Run("partition_dropped", func() {
+		segmentID := int64(10086)
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:            segmentID,
+			MaxRowNum:     30000,
+			CollectionID:  suite.collID,
+			PartitionID:   100,
+			InsertChannel: suite.channelName,
+			State:         commonpb.SegmentState_Flushed,
+		})
+		err := tombstone.CollectionTombstone().MarkPartitionAsDropping(context.Background(), &tombstone.DroppingPartition{
+			CollectionId: suite.collID,
+			PartitionId:  100,
+		})
+		suite.NoError(err)
+		err = meta.AddSegment(ctx, segment)
+		suite.Require().Error(err)
+
+		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Twice()
+		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Twice()
+		segment.PartitionID = 101
+		err = meta.AddSegment(ctx, segment)
+		suite.Require().NoError(err)
+
+		err = tombstone.CollectionTombstone().MarkPartitionAsDropping(context.Background(), &tombstone.DroppingPartition{
+			CollectionId: suite.collID,
+			PartitionId:  101,
+		})
+		suite.NoError(err)
+
+		/// Test UpdateSegment
+
+		// Can only update segment to sealed state if partition is dropped.
+		err = meta.UpdateSegment(segmentID, func(segment *SegmentInfo) bool {
+			segment.State = commonpb.SegmentState_Dropped
+			return true
+		})
+		suite.Require().NoError(err)
+		err = meta.UpdateSegment(segmentID, func(segment *SegmentInfo) bool {
+			segment.State = commonpb.SegmentState_Flushed
+			return true
+		})
+		suite.Require().Error(err)
+
+		/// Test SetState
+		segmentID = 10087
+		segment.ID = segmentID
+		segment.PartitionID = 102
+		err = meta.AddSegment(ctx, segment)
+		suite.Require().NoError(err)
+
+		err = tombstone.CollectionTombstone().MarkPartitionAsDropping(context.Background(), &tombstone.DroppingPartition{
+			CollectionId: suite.collID,
+			PartitionId:  102,
+		})
+		suite.NoError(err)
+
+		err = meta.SetState(segmentID, commonpb.SegmentState_Dropped)
+		suite.Require().NoError(err)
+		err = meta.SetState(segmentID, commonpb.SegmentState_Flushed)
+		suite.Require().Error(err)
+	})
+
 	suite.Run("catalog_error", func() {
 		segmentID := int64(1002)
 		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
@@ -381,6 +446,7 @@ func TestMeta_Basic(t *testing.T) {
 
 	// mockAllocator := newMockAllocator(t)
 	meta, err := newMemoryMeta()
+	tombstone.RecoverCollectionTombstoneForTest(context.Background(), meta.catalog)
 	assert.NoError(t, err)
 
 	testSchema := newTestSchema()
@@ -831,6 +897,39 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Nil(t, segmentInfo.Binlogs)
 		assert.Nil(t, segmentInfo.StartPosition)
 	})
+
+	t.Run("update dropped partition", func(t *testing.T) {
+		meta, err := newMemoryMeta()
+		tombstone.RecoverCollectionTombstoneForTest(context.Background(), meta.catalog)
+		assert.NoError(t, err)
+
+		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1,
+			PartitionID:  1,
+			State:        commonpb.SegmentState_Growing,
+			Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
+			Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
+		}}
+		err = meta.AddSegment(context.TODO(), segment1)
+		assert.NoError(t, err)
+
+		err = tombstone.CollectionTombstone().MarkPartitionAsDropping(context.Background(), &tombstone.DroppingPartition{
+			CollectionId: 1,
+			PartitionId:  1,
+		})
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
+		)
+		assert.Error(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateStatusOperator(1, commonpb.SegmentState_Dropped),
+		)
+		assert.NoError(t, err)
+	})
 }
 
 func Test_meta_SetSegmentsCompacting(t *testing.T) {
@@ -1245,4 +1344,39 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 		c := m.GetCollection(UniqueID(1000))
 		assert.NotNil(t, c)
 	})
+}
+
+func Test_meta_DropSegmentsOfPartition(t *testing.T) {
+	meta, err := newMemoryMeta()
+	assert.NoError(t, err)
+	tombstone.RecoverCollectionTombstoneForTest(context.Background(), meta.catalog)
+
+	err = meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           1,
+		PartitionID:  1,
+		CollectionID: 1,
+	}))
+	assert.NoError(t, err)
+	err = meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           2,
+		PartitionID:  1,
+		CollectionID: 1,
+	}))
+	assert.NoError(t, err)
+	err = meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           3,
+		PartitionID:  2,
+		CollectionID: 1,
+	}))
+	assert.NoError(t, err)
+
+	err = meta.DropSegmentsOfPartition(context.Background(), 1)
+	assert.NoError(t, err)
+
+	segment := meta.GetSegment(1)
+	assert.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+	segment = meta.GetSegment(2)
+	assert.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+	segment = meta.GetSegment(3)
+	assert.NotEqual(t, commonpb.SegmentState_Dropped, segment.GetState())
 }

@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/mocks/mock_kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -1858,4 +1859,61 @@ func Test_StatsTasks(t *testing.T) {
 		err = kc.DropStatsTask(context.Background(), 1)
 		assert.NoError(t, err)
 	})
+}
+
+func TestCollectionTombstone(t *testing.T) {
+	tombstones := []*model.CollectionTombstone{
+		model.NewCollectionTombstone(&datapb.CollectionTombstoneImpl{
+			CollectionId: 1,
+			Vchannels:    []string{"1", "2"},
+		}),
+		model.NewParititionTombstone(&datapb.PartitionTombstoneImpl{
+			CollectionId: 1,
+			PartitionId:  1,
+		}),
+	}
+	mockErr := errors.New("mock error")
+	kv := mock_kv.NewMockMetaKv(t)
+	kv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, mockErr)
+	kv.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
+	kv.EXPECT().Remove(mock.Anything).Return(mockErr)
+	catalog := &Catalog{
+		MetaKv: kv,
+	}
+	tombstone, err := catalog.ListCollectionTombstone(context.Background())
+	assert.Empty(t, tombstone)
+	assert.ErrorIs(t, err, mockErr)
+
+	err = catalog.SaveCollectionTombstone(context.Background(), tombstones[0])
+	assert.ErrorIs(t, err, mockErr)
+	err = catalog.DropCollectionTombstone(context.Background(), tombstones[0])
+	assert.ErrorIs(t, err, mockErr)
+
+	kv.EXPECT().LoadWithPrefix(mock.Anything).Unset()
+	kv.EXPECT().LoadWithPrefix(mock.Anything).RunAndReturn(func(s string) ([]string, []string, error) {
+		keys := make([]string, 0, len(tombstones))
+		vals := make([]string, 0, len(tombstones))
+		for _, tombstone := range tombstones {
+			keys = append(keys, tombstone.Key())
+			vals = append(vals, tombstone.Value())
+		}
+		return keys, vals, nil
+	})
+	kv.EXPECT().Save(mock.Anything, mock.Anything).Unset()
+	kv.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+	kv.EXPECT().Remove(mock.Anything).Unset()
+	kv.EXPECT().Remove(mock.Anything).Return(nil)
+
+	tombstone, err = catalog.ListCollectionTombstone(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, len(tombstones), len(tombstone))
+
+	err = catalog.SaveCollectionTombstone(context.Background(), tombstones[0])
+	assert.NoError(t, err)
+	err = catalog.SaveCollectionTombstone(context.Background(), tombstones[1])
+	assert.NoError(t, err)
+	err = catalog.DropCollectionTombstone(context.Background(), tombstones[0])
+	assert.NoError(t, err)
+	err = catalog.DropCollectionTombstone(context.Background(), tombstones[1])
+	assert.NoError(t, err)
 }

@@ -57,7 +57,7 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockCm = NewMockChannelManager(s.T())
 	s.mockSessMgr = session.NewMockDataNodeManager(s.T())
 	s.cluster = NewMockCluster(s.T())
-	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc, nil, nil)
+	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil, nil)
 }
 
 func (s *CompactionPlanHandlerSuite) TestScheduleEmpty() {
@@ -449,54 +449,6 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNodeForClusteringTask() {
 	s.Equal(int64(NullNodeID), node)
 }
 
-func (s *CompactionPlanHandlerSuite) TestPickShardNode() {
-	s.SetupTest()
-	nodeSlots := map[int64]int64{
-		100: 2,
-		101: 6,
-	}
-
-	t1 := newMixCompactionTask(&datapb.CompactionTask{
-		PlanID:  19530,
-		Type:    datapb.CompactionType_MixCompaction,
-		Channel: "ch-01",
-		NodeID:  1,
-	}, nil, s.mockMeta, s.mockSessMgr)
-	t1.plan = &datapb.CompactionPlan{
-		PlanID:  19530,
-		Channel: "ch-01",
-		Type:    datapb.CompactionType_MixCompaction,
-	}
-
-	t2 := newMixCompactionTask(&datapb.CompactionTask{
-		PlanID:  19531,
-		Type:    datapb.CompactionType_MixCompaction,
-		Channel: "ch-02",
-		NodeID:  1,
-	}, nil, s.mockMeta, s.mockSessMgr)
-	t2.plan = &datapb.CompactionPlan{
-		PlanID:  19531,
-		Channel: "ch-02",
-		Type:    datapb.CompactionType_Level0DeleteCompaction,
-	}
-
-	s.mockCm.EXPECT().FindWatcher(mock.Anything).RunAndReturn(func(channel string) (int64, error) {
-		if channel == "ch-01" {
-			return 100, nil
-		}
-		if channel == "ch-02" {
-			return 101, nil
-		}
-		return 1, nil
-	}).Twice()
-
-	node := s.handler.pickShardNode(nodeSlots, t1)
-	s.Equal(int64(100), node)
-
-	node = s.handler.pickShardNode(nodeSlots, t2)
-	s.Equal(int64(101), node)
-}
-
 func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	s.SetupTest()
 	ch := "ch1"
@@ -604,7 +556,7 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.SetupTest()
 	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything).Return(true, true).Maybe()
 	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
-	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc, nil, nil)
+	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil, nil)
 
 	task := &datapb.CompactionTask{
 		TriggerID: 1,

@@ -39,3 +39,17 @@ func (f *ChannelPolicyFactoryV1) NewBalancePolicy() BalanceChannelPolicy {
 func (f *ChannelPolicyFactoryV1) NewAssignPolicy() AssignPolicy {
 	return AvgAssignByCountPolicy
 }
+
+func NewEmptyChannelPolicyFactory() *EmptyChannelPolicyFactory {
+	return &EmptyChannelPolicyFactory{}
+}
+
+type EmptyChannelPolicyFactory struct{}
+
+func (f *EmptyChannelPolicyFactory) NewBalancePolicy() BalanceChannelPolicy {
+	return EmptyBalancePolicy
+}
+
+func (f *EmptyChannelPolicyFactory) NewAssignPolicy() AssignPolicy {
+	return EmptyAssignPolicy
+}
