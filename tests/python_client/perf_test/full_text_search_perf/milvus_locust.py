@@ -25,58 +25,49 @@ def setup_collection(environment):
 
     # 获取配置参数
     collection_name = environment.parsed_options.milvus_collection
+    connections.connect(uri=environment.host)
+    tokenizer_params = {
+        "tokenizer": "standard"
+    }
+    fields = [
+        FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+        FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=25536,
+                    enable_tokenizer=True, tokenizer_params=tokenizer_params, enable_match=True),
+        FieldSchema(name="dense_emb", dtype=DataType.FLOAT_VECTOR, dim=environment.parsed_options.milvus_dim),
+        FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
+    ]
+    schema = CollectionSchema(fields=fields, description="beir test collection")
+    bm25_function = Function(
+        name="text_bm25_emb",
+        function_type=FunctionType.BM25,
+        input_field_names=["text"],
+        output_field_names=["sparse"],
+        params={},
+    )
+    schema.add_function(bm25_function)
+    collection = Collection(collection_name, schema)
 
-    try:
-        # 建立连接
-        connections.connect(uri=environment.host)
-        tokenizer_params = {
-            "tokenizer": "default"
+    # 创建索引
+    collection.create_index(
+        "sparse",
+        {
+            "index_type": "SPARSE_INVERTED_INDEX",
+            "metric_type": "BM25",
+            "params": {
+                "bm25_k1": 1.5,
+                "bm25_b": 0.75,
+            }
         }
-        fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=25536,
-                        enable_tokenizer=True, tokenizer_params=tokenizer_params, enable_match=True),
-            FieldSchema(name="dense_emb", dtype=DataType.FLOAT_VECTOR, dim=environment.parsed_options.milvus_dim),
-            FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
-        ]
-        schema = CollectionSchema(fields=fields, description="beir test collection")
-        bm25_function = Function(
-            name="text_bm25_emb",
-            function_type=FunctionType.BM25,
-            input_field_names=["text"],
-            output_field_names=["sparse"],
-            params={},
-        )
-        schema.add_function(bm25_function)
-        collection = Collection(collection_name, schema)
-
-        # 创建索引
-        collection.create_index(
-            "sparse",
-            {
-                "index_type": "SPARSE_INVERTED_INDEX",
-                "metric_type": "BM25",
-                "params": {
-                    "bm25_k1": 1.5,
-                    "bm25_b": 0.75,
-                }
-            }
-        )
-        collection.create_index(
-            "dense_emb",
-            {
-                "index_type": "HNSW",
-                "metric_type": "COSINE"
-            }
-        )
-        collection.load()
-        logger.info("Collection setup completed successfully")
-
-    except Exception as e:
-        logger.error(f"Failed to setup collection: {str(e)}")
-        raise
-    finally:
-        connections.disconnect("default")
+    )
+    collection.create_index(
+        "dense_emb",
+        {
+            "index_type": "HNSW",
+            "metric_type": "COSINE"
+        }
+    )
+    collection.load()
+    logger.info("Collection setup completed successfully")
 
 
 @events.init.add_listener
