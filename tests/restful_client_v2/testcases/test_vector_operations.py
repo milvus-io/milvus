@@ -1204,7 +1204,7 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("groupingField", ['user_id', None])
-    @pytest.mark.parametrize("tokenizer", ['default'])
+    @pytest.mark.parametrize("tokenizer", ['standard'])
     def test_search_vector_for_en_full_text_search(self, nb, dim, insert_round, auto_id,
                                                       is_partition_key, enable_dynamic_schema, groupingField, tokenizer):
         """
@@ -1252,7 +1252,7 @@ class TestSearchVector(TestBase):
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
         assert rsp['code'] == 0
-        if tokenizer == 'default':
+        if tokenizer == 'standard':
             fake = fake_en
         elif tokenizer == 'jieba':
             fake = fake_zh
@@ -1367,7 +1367,7 @@ class TestSearchVector(TestBase):
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
         assert rsp['code'] == 0
-        if tokenizer == 'default':
+        if tokenizer == 'standard':
             fake = fake_en
         elif tokenizer == 'jieba':
             fake = fake_zh

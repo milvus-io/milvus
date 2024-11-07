@@ -1325,7 +1325,6 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				if err != nil {
 					return nil, err
 				}
-				log.Info("test--- ", zap.String("key", key), zap.String("value", value))
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: key, Value: value})
 			}
 			if lo.Contains(allOutputFields, field.FieldName) {

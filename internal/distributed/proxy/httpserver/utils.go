@@ -1517,7 +1517,7 @@ func getElementTypeParams(param interface{}) (string, error) {
 
 	jsonBytes, err := json.Marshal(param)
 	if err != nil {
-		return "nil", err
+		return "", err
 	}
 	return string(jsonBytes), nil
 }
