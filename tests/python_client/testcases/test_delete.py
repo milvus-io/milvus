@@ -1934,9 +1934,9 @@ class TestDeleteComplexExpr(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("expression", cf.gen_normal_expressions()[1:])
+    @pytest.mark.parametrize("expressions", cf.gen_normal_expressions_and_templates()[1:])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_delete_normal_expressions(self, expression, enable_dynamic_field):
+    def test_delete_normal_expressions(self, expressions, enable_dynamic_field):
         """
         target: test delete entities using normal expression
         method: delete using normal expression
@@ -1948,7 +1948,7 @@ class TestDeleteComplexExpr(TestcaseBase):
 
         # filter result with expression in collection
         _vectors = _vectors[0]
-        expression = expression.replace("&&", "and").replace("||", "or")
+        expression = expressions[0].replace("&&", "and").replace("||", "or")
         filter_ids = []
         for i, _id in enumerate(insert_ids):
             if enable_dynamic_field:
@@ -1967,10 +1967,46 @@ class TestDeleteComplexExpr(TestcaseBase):
         # query to check
         collection_w.query(f"int64 in {filter_ids}", check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("expression", cf.gen_array_field_expressions())
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("expressions", cf.gen_normal_expressions_and_templates()[1:])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_delete_array_expressions(self, expression, enable_dynamic_field):
+    def test_delete_normal_expressions_templates(self, expressions, enable_dynamic_field):
+        """
+        target: test delete entities using normal expression
+        method: delete using normal expression
+        expected: delete successfully
+        """
+        # init collection with nb default data
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field)[0:4]
+
+        # filter result with expression in collection
+        _vectors = _vectors[0]
+        expr = expressions[0].replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i, _id in enumerate(insert_ids):
+            if enable_dynamic_field:
+                int64 = _vectors[i][ct.default_int64_field_name]
+                float = _vectors[i][ct.default_float_field_name]
+            else:
+                int64 = _vectors.int64[i]
+                float = _vectors.float[i]
+            if not expr or eval(expr):
+                filter_ids.append(_id)
+
+        # delete with expressions templates
+        expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+        expr_params = cf.get_expr_params_from_template(expressions[1])
+        res = collection_w.delete(expr=expr, expr_params=expr_params)[0]
+        assert res.delete_count == len(filter_ids)
+
+        # query to check
+        collection_w.query(f"int64 in {filter_ids}", check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expressions", cf.gen_array_field_expressions_and_templates())
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_delete_array_expressions(self, expressions, enable_dynamic_field):
         """
         target: test delete entities using normal expression
         method: delete using normal expression
@@ -1993,25 +2029,73 @@ class TestDeleteComplexExpr(TestcaseBase):
             data.append(arr)
         collection_w.insert(data)
         collection_w.flush()
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+        collection_w.load()
 
         # 3. filter result with expression in collection
-        expression = expression.replace("&&", "and").replace("||", "or")
+        expr = expressions[0].replace("&&", "and").replace("||", "or")
         filter_ids = []
         for i in range(nb):
             int32_array = data[i][ct.default_int32_array_field_name]
             float_array = data[i][ct.default_float_array_field_name]
             string_array = data[i][ct.default_string_array_field_name]
-            if not expression or eval(expression):
+            if not expr or eval(expr):
                 filter_ids.append(i)
 
         # 4. delete by array expression
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
-        collection_w.load()
-        res = collection_w.delete(expression)[0]
+        res = collection_w.delete(expr)[0]
         assert res.delete_count == len(filter_ids)
 
         # 5. query to check
-        collection_w.query(expression, check_task=CheckTasks.check_query_empty)
+        collection_w.query(expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expressions", cf.gen_array_field_expressions_and_templates())
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_delete_array_expressions_templates(self, expressions, enable_dynamic_field):
+        """
+        target: test delete entities using normal expression
+        method: delete using normal expression
+        expected: delete successfully
+        """
+        # 1. create a collection
+        nb = ct.default_nb
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema, enable_dynamic_field=enable_dynamic_field)
+
+        # 2. insert data
+        array_length = 100
+        data = []
+        for i in range(nb):
+            arr = {ct.default_int64_field_name: i,
+                   ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0],
+                   ct.default_int32_array_field_name: [np.int32(i) for i in range(array_length)],
+                   ct.default_float_array_field_name: [np.float32(i) for i in range(array_length)],
+                   ct.default_string_array_field_name: [str(i) for i in range(array_length)]}
+            data.append(arr)
+        collection_w.insert(data)
+        collection_w.flush()
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+        collection_w.load()
+
+        # 3. filter result with expression in collection
+        expr = expressions[0].replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i in range(nb):
+            int32_array = data[i][ct.default_int32_array_field_name]
+            float_array = data[i][ct.default_float_array_field_name]
+            string_array = data[i][ct.default_string_array_field_name]
+            if not expr or eval(expr):
+                filter_ids.append(i)
+
+        # 4. delete by array expression
+        expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+        expr_params = cf.get_expr_params_from_template(expressions[1])
+        res = collection_w.delete(expr=expr, expr_params=expr_params)[0]
+        assert res.delete_count == len(filter_ids)
+
+        # 5. query to check
+        collection_w.query(expr=expr, expr_params=expr_params, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("field_name", ["varchar", "json_field['string']", "NewStr"])
@@ -2206,9 +2290,9 @@ class TestDeleteComplexExpr(TestcaseBase):
         collection_w.delete(expressions, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("expression", cf.gen_json_field_expressions())
+    @pytest.mark.parametrize("expressions", cf.gen_json_field_expressions_and_templates())
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_delete_expr_json_field(self, expression, enable_dynamic_field):
+    def test_delete_expr_json_field(self, expressions, enable_dynamic_field):
         """
         target: test delete entities using normal expression
         method: delete using normal expression
@@ -2220,7 +2304,7 @@ class TestDeleteComplexExpr(TestcaseBase):
 
         # filter result with expression in collection
         _vectors = _vectors[0]
-        expression = expression.replace("&&", "and").replace("||", "or")
+        expr = expressions[0].replace("&&", "and").replace("||", "or")
         filter_ids = []
         json_field = {}
         for i, _id in enumerate(insert_ids):
@@ -2230,21 +2314,20 @@ class TestDeleteComplexExpr(TestcaseBase):
             else:
                 json_field['number'] = _vectors[ct.default_json_field_name][i]['number']
                 json_field['float'] = _vectors[ct.default_json_field_name][i]['float']
-            if not expression or eval(expression):
+            if not expr or eval(expr):
                 filter_ids.append(_id)
 
         # delete with expressions
-        res = collection_w.delete(expression)[0]
+        res = collection_w.delete(expr)[0]
         assert res.delete_count == len(filter_ids)
 
         # query to check
         collection_w.query(f"int64 in {filter_ids}", check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("normal_expression, json_expression", zip(cf.gen_normal_expressions()[1:4],
-                                                                       cf.gen_json_field_expressions()[6:9]))
+    @pytest.mark.parametrize("expressions", cf.gen_json_field_expressions_and_templates())
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_delete_expr_complex_mixed(self, normal_expression, json_expression, enable_dynamic_field):
+    def test_delete_expr_templtes_json_field(self, expressions, enable_dynamic_field):
         """
         target: test delete entities using normal expression
         method: delete using normal expression
@@ -2255,9 +2338,47 @@ class TestDeleteComplexExpr(TestcaseBase):
             self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field)[0:4]
 
         # filter result with expression in collection
-        expression = normal_expression + ' and ' + json_expression
         _vectors = _vectors[0]
-        expression = expression.replace("&&", "and").replace("||", "or")
+        expr = expressions[0].replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        json_field = {}
+        for i, _id in enumerate(insert_ids):
+            if enable_dynamic_field:
+                json_field['number'] = _vectors[i][ct.default_json_field_name]['number']
+                json_field['float'] = _vectors[i][ct.default_json_field_name]['float']
+            else:
+                json_field['number'] = _vectors[ct.default_json_field_name][i]['number']
+                json_field['float'] = _vectors[ct.default_json_field_name][i]['float']
+            if not expr or eval(expr):
+                filter_ids.append(_id)
+
+        # delete with expressions template
+        expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+        expr_params = cf.get_expr_params_from_template(expressions[1])
+        res = collection_w.delete(expr=expr, expr_params=expr_params)[0]
+        assert res.delete_count == len(filter_ids)
+
+        # query to check
+        collection_w.query(f"int64 in {filter_ids}", check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("normal_expressions, json_expressions", zip(cf.gen_normal_expressions_and_templates()[1:4],
+                                                                         cf.gen_json_field_expressions_and_templates()[6:9]))
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_delete_expr_complex_mixed(self, normal_expressions, json_expressions, enable_dynamic_field):
+        """
+        target: test delete entities using normal expression
+        method: delete using normal expression
+        expected: delete successfully
+        """
+        # init collection with nb default data
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field)[0:4]
+
+        # filter result with expression in collection
+        expr = normal_expressions[0] + ' and ' + json_expressions[0]
+        _vectors = _vectors[0]
+        expr = expr.replace("&&", "and").replace("||", "or")
         filter_ids = []
         json_field = {}
         for i, _id in enumerate(insert_ids):
@@ -2271,11 +2392,14 @@ class TestDeleteComplexExpr(TestcaseBase):
                 json_field['float'] = _vectors[ct.default_json_field_name][i]['float']
                 int64 = _vectors.int64[i]
                 float = _vectors.float[i]
-            if not expression or eval(expression):
+            if not expr or eval(expr):
                 filter_ids.append(_id)
 
-        # delete with expressions
-        res = collection_w.delete(expression)[0]
+        # delete with expressions and template mixed
+        json_expr = cf.get_expr_from_template(json_expressions[1]).replace("&&", "and").replace("||", "or")
+        expr = normal_expressions[0] + ' and ' + json_expr
+        json_expr_params = cf.get_expr_params_from_template(json_expressions[1])
+        res = collection_w.delete(expr=expr, expr_params=json_expr_params)[0]
         assert res.delete_count == len(filter_ids)
 
         # query to check
