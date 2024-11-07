@@ -103,7 +103,7 @@ func (w *MultiSegmentWriter) finishCurrent() error {
 		allBinlogs = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
 	}
 
-	if !writer.IsEmpty() {
+	if !writer.FlushAndIsEmpty() {
 		kvs, partialBinlogs, err := serializeWrite(context.TODO(), w.allocator.getLogIDAllocator(), writer)
 		if err != nil {
 			return err
@@ -254,7 +254,7 @@ func (w *MultiSegmentWriter) Finish() ([]*datapb.CompactionSegment, error) {
 		return w.res, nil
 	}
 
-	if !w.writers[w.current].IsEmpty() {
+	if !w.writers[w.current].FlushAndIsEmpty() {
 		if err := w.finishCurrent(); err != nil {
 			return nil, err
 		}
@@ -448,7 +448,7 @@ func (w *SegmentWriter) Write(v *storage.Value) error {
 }
 
 func (w *SegmentWriter) Finish() (*storage.Blob, error) {
-	w.writer.Close()
+	w.writer.Flush()
 	codec := storage.NewInsertCodecWithSchema(&etcdpb.CollectionMeta{ID: w.collectionID, Schema: w.sch})
 	return codec.SerializePkStats(w.pkstats, w.GetRowNum())
 }
@@ -503,6 +503,7 @@ func (w *SegmentWriter) GetTimeRange() *writebuffer.TimeRange {
 }
 
 func (w *SegmentWriter) SerializeYield() ([]*storage.Blob, *writebuffer.TimeRange, error) {
+	w.writer.Flush()
 	w.writer.Close()
 
 	fieldData := make([]*storage.Blob, len(w.closers))
