@@ -139,13 +139,16 @@ PhyTermFilterExpr::CanSkipSegment() {
         min = i == 0 ? val : std::min(val, min);
     }
     auto can_skip = [&]() -> bool {
+        bool res = false;
         for (int i = 0; i < num_data_chunk_; ++i) {
             if (!skip_index.CanSkipBinaryRange<T>(
                     field_id_, i, min, max, true, true)) {
                 return false;
+            } else {
+                res = true;
             }
         }
-        return true;
+        return res;
     };
 
     // using skip index to help skipping this segment
