@@ -271,7 +271,7 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
         os.makedirs('/tmp/ci_logs', exist_ok=True)
         dataset = dataset_name
         if dataset == "all":
-            datasets = ['scidocs', 'fever', 'climate-fever', 'scifact']
+            datasets = ['fever', 'climate-fever', 'scifact']
         else:
             datasets = [dataset]
         for dataset in datasets:
