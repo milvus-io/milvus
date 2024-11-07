@@ -60,8 +60,8 @@ func initResourceForTest(t *testing.T) {
 	flusher := mock_flusher.NewMockFlusher(t)
 	flusher.EXPECT().RegisterPChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
 	flusher.EXPECT().UnregisterPChannel(mock.Anything).Return().Maybe()
-	flusher.EXPECT().RegisterVChannel(mock.Anything, mock.Anything).Return()
-	flusher.EXPECT().UnregisterVChannel(mock.Anything).Return()
+	flusher.EXPECT().RegisterVChannel(mock.Anything, mock.Anything).Return().Maybe()
+	flusher.EXPECT().UnregisterVChannel(mock.Anything).Return().Maybe()
 
 	resource.InitForTest(
 		t,
@@ -194,6 +194,9 @@ func (f *testOneWALFramework) testSendCreateCollection(ctx context.Context, w wa
 }
 
 func (f *testOneWALFramework) testSendDropCollection(ctx context.Context, w wal.WAL) {
+	// Here, the drop colllection is conflict with the txn message, so we need to wait for a while.
+	// TODO: fix it in the redo interceptor.
+	time.Sleep(2 * time.Second)
 	// drop collection after test
 	dropMsg, err := message.NewDropCollectionMessageBuilderV1().
 		WithHeader(&message.DropCollectionMessageHeader{

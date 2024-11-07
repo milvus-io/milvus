@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.62.0') _
+@Library('jenkins-shared-library@v0.67.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
@@ -8,7 +8,7 @@ String cron_string = BRANCH_NAME == 'master' ? '50 1 * * * ' : ''
 // Make timeout 4 hours so that we can run two nightly during the ci
 int total_timeout_minutes = 7 * 60
 
-def milvus_helm_chart_version = '4.2.8'
+def milvus_helm_chart_version = '4.2.18'
 
 pipeline {
     triggers {

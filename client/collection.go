@@ -138,3 +138,12 @@ func (c *Client) RenameCollection(ctx context.Context, option RenameCollectionOp
 		return merr.CheckRPCCall(resp, err)
 	})
 }
+
+func (c *Client) AlterCollection(ctx context.Context, option AlterCollectionOption, callOptions ...grpc.CallOption) error {
+	req := option.Request()
+
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AlterCollection(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}

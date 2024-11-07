@@ -88,8 +88,8 @@ type ChannelBGChecker func(ctx context.Context)
 // ChannelmanagerOpt is to set optional parameters in channel manager.
 type ChannelmanagerOpt func(c *ChannelManagerImpl)
 
-func withFactoryV2(f ChannelPolicyFactory) ChannelmanagerOpt {
-	return func(c *ChannelManagerImpl) { c.factory = f }
+func withEmptyPolicyFactory() ChannelmanagerOpt {
+	return func(c *ChannelManagerImpl) { c.factory = NewEmptyChannelPolicyFactory() }
 }
 
 func withCheckerV2() ChannelmanagerOpt {
@@ -161,7 +161,7 @@ func (m *ChannelManagerImpl) Startup(ctx context.Context, legacyNodes, allNodes 
 		m.finishRemoveChannel(info.NodeID, lo.Values(info.Channels)...)
 	}
 
-	if m.balanceCheckLoop != nil && !streamingutil.IsStreamingServiceEnabled() {
+	if m.balanceCheckLoop != nil {
 		log.Info("starting channel balance loop")
 		m.wg.Add(1)
 		go func() {
@@ -330,20 +330,19 @@ func (m *ChannelManagerImpl) Balance() {
 }
 
 func (m *ChannelManagerImpl) Match(nodeID UniqueID, channel string) bool {
-	if streamingutil.IsStreamingServiceEnabled() {
-		// Skip the channel matching check since the
-		// channel manager no longer manages channels in streaming mode.
-		return true
-	}
-
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	if streamingutil.IsStreamingServiceEnabled() {
+		// Skip the channel matching check since the
+		// channel manager no longer manages channels in streaming mode.
+		// Only check if the channel exists.
+		return m.store.HasChannel(channel)
+	}
 	info := m.store.GetNode(nodeID)
 	if info == nil {
 		return false
 	}
-
 	_, ok := info.Channels[channel]
 	return ok
 }
@@ -413,6 +412,7 @@ func (m *ChannelManagerImpl) FindWatcher(channel string) (UniqueID, error) {
 func (m *ChannelManagerImpl) removeChannel(nodeID int64, ch RWChannel) error {
 	op := NewChannelOpSet(NewChannelOp(nodeID, Delete, ch))
 	log.Info("remove channel assignment",
+		zap.Int64("nodeID", nodeID),
 		zap.String("channel", ch.GetName()),
 		zap.Int64("assignment", nodeID),
 		zap.Int64("collectionID", ch.GetCollectionID()))
@@ -448,7 +448,8 @@ func (m *ChannelManagerImpl) AdvanceChannelState(ctx context.Context) {
 	m.mu.RUnlock()
 
 	// Processing standby channels
-	updatedStandbys := m.advanceStandbys(ctx, standbys)
+	updatedStandbys := false
+	updatedStandbys = m.advanceStandbys(ctx, standbys)
 	updatedToCheckes := m.advanceToChecks(ctx, toChecks)
 	updatedToNotifies := m.advanceToNotifies(ctx, toNotifies)
 
@@ -485,8 +486,15 @@ func (m *ChannelManagerImpl) advanceStandbys(_ context.Context, standbys []*Node
 			}
 			validChannels[chName] = ch
 		}
-		nodeAssign.Channels = validChannels
+		// If streaming service is enabled, the channel manager no longer manages channels.
+		// So the standby channels shouldn't be processed by channel manager,
+		// but the remove channel operation should be executed.
+		// TODO: ChannelManager can be removed in future at 3.0.0.
+		if streamingutil.IsStreamingServiceEnabled() {
+			continue
+		}
 
+		nodeAssign.Channels = validChannels
 		if len(nodeAssign.Channels) == 0 {
 			continue
 		}
@@ -496,6 +504,7 @@ func (m *ChannelManagerImpl) advanceStandbys(_ context.Context, standbys []*Node
 			log.Warn("Reassign channels fail",
 				zap.Int64("nodeID", nodeAssign.NodeID),
 				zap.Strings("channels", chNames),
+				zap.Error(err),
 			)
 			continue
 		}

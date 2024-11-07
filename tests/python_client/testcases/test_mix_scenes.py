@@ -889,11 +889,11 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         # query
         self.collection_wrap.query(
             expr=Expr.array_contains_any('ARRAY_VARCHAR', [['a', 'b']]).value, limit=1, check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 65535, ct.err_msg: "fail to Query on QueryNode"})
+            check_items={ct.err_code: 1100, ct.err_msg: qem.ParseExpressionFailed})
 
         self.collection_wrap.query(
             expr=Expr.array_contains_all('ARRAY_VARCHAR', [['a', 'b']]).value, limit=1, check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 65535, ct.err_msg: "fail to Query on QueryNode"})
+            check_items={ct.err_code: 1100, ct.err_msg: qem.ParseExpressionFailed})
 
         self.collection_wrap.query(
             expr=Expr.array_contains('ARRAY_VARCHAR', [['a', 'b']]).value, limit=1, check_task=CheckTasks.err_res,

@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.62.0') _
+@Library('jenkins-shared-library@v0.67.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
@@ -11,6 +11,13 @@ pipeline {
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         preserveStashes(buildCount: 5)
         disableConcurrentBuilds(abortPrevious: true)
+        timeout(time: 6, unit: 'HOURS')
+        throttleJobProperty(
+            categories: ['go-sdk'],
+            throttleEnabled: true,
+            throttleOption: 'category'
+
+        )
     }
     agent {
         kubernetes {
