@@ -1004,9 +1004,7 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 	if _, ok := m.collLeader[database]; !ok {
 		m.collLeader[database] = make(map[string]*shardLeaders)
 	}
-
 	m.collLeader[database][collectionName] = newShardLeaders
-	m.leaderMut.Unlock()
 
 	iterator := newShardLeaders.GetReader()
 	ret := iterator.Shuffle()
@@ -1016,8 +1014,10 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		oldLeaders = cacheShardLeaders.shardLeaders
 	}
 	// update refcnt in shardClientMgr
-	// and create new client for new leaders
+	// update shard leader's just create a empty client pool
+	// and init new client will be execute in getClient
 	_ = m.shardMgr.UpdateShardLeaders(oldLeaders, ret)
+	m.leaderMut.Unlock()
 
 	metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return ret, nil

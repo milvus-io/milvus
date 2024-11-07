@@ -45,6 +45,7 @@ type ttNode struct {
 	lastUpdateTime     *atomic.Time
 	cpUpdater          *util.ChannelCheckpointUpdater
 	dropMode           *atomic.Bool
+	dropCallback       func()
 }
 
 // Name returns node name, implementing flowgraph.Node
@@ -72,6 +73,13 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 	fgMsg := in[0].(*FlowGraphMsg)
 	if fgMsg.dropCollection {
 		ttn.dropMode.Store(true)
+		if ttn.dropCallback != nil {
+			defer func() {
+				// if drop collection setup, call drop callback
+				// For streaming node to cleanup the resources.
+				ttn.dropCallback()
+			}()
+		}
 	}
 
 	// skip updating checkpoint for drop collection
@@ -83,6 +91,10 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 
 	curTs, _ := tsoutil.ParseTS(fgMsg.TimeRange.TimestampMax)
 	if fgMsg.IsCloseMsg() {
+		if ttn.dropMode.Load() {
+			// if drop collection setup, skip update checkpoint to avoid update dirty checkpoint.
+			return in
+		}
 		if len(fgMsg.EndPositions) > 0 {
 			channelPos, _, err := ttn.writeBufferManager.GetCheckpoint(ttn.vChannelName)
 			if err != nil {
@@ -141,6 +153,7 @@ func newTTNode(config *nodeConfig, wbManager writebuffer.BufferManager, cpUpdate
 		lastUpdateTime:     atomic.NewTime(time.Time{}), // set to Zero to update channel checkpoint immediately after fg started
 		cpUpdater:          cpUpdater,
 		dropMode:           atomic.NewBool(false),
+		dropCallback:       config.dropCallback,
 	}
 
 	return tt, nil

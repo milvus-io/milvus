@@ -2947,6 +2947,7 @@ class TestBitmapIndex(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("bitmap_cardinality_limit", [-10, 0, 1001])
+    # @pytest.mark.skip("valid now")
     def test_bitmap_cardinality_limit_invalid(self, request, bitmap_cardinality_limit):
         """
         target:
@@ -2973,8 +2974,9 @@ class TestBitmapIndex(TestcaseBase):
         # build scalar index and check failed
         self.collection_wrap.create_index(
             field_name=DataType.INT64.name, index_name=DataType.INT64.name,
-            index_params={"index_type": IndexName.AUTOINDEX, "bitmap_cardinality_limit": bitmap_cardinality_limit},
-            check_task=CheckTasks.err_res, check_items={ct.err_code: 1100, ct.err_msg: iem.CheckBitmapCardinality})
+            index_params={"index_type": IndexName.AUTOINDEX, "bitmap_cardinality_limit": bitmap_cardinality_limit})
+        assert self.collection_wrap.index()[0].params == {'bitmap_cardinality_limit': str(bitmap_cardinality_limit),
+                                                          'index_type': IndexName.AUTOINDEX}
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index_params, name", [({"index_type": IndexName.AUTOINDEX}, "AUTOINDEX"), ({}, "None")])

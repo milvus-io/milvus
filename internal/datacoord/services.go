@@ -637,10 +637,14 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		return resp, nil
 	}
 
-	log.Info("DropVChannel plan to remove", zap.String("channel", channel))
-	err = s.channelManager.Release(nodeID, channel)
-	if err != nil {
-		log.Warn("DropVChannel failed to ReleaseAndRemove", zap.String("channel", channel), zap.Error(err))
+	if !streamingutil.IsStreamingServiceEnabled() {
+		// if streaming service is enabled, the channel manager will never manage the channel.
+		// so we don't need to release the channel anymore.
+		log.Info("DropVChannel plan to remove", zap.String("channel", channel))
+		err = s.channelManager.Release(nodeID, channel)
+		if err != nil {
+			log.Warn("DropVChannel failed to ReleaseAndRemove", zap.String("channel", channel), zap.Error(err))
+		}
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
 	s.compactionHandler.removeTasksByChannel(channel)
@@ -937,11 +941,14 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		return resp, nil
 	}
 	collectionID := funcutil.GetCollectionIDFromVChannel(req.GetVchannel())
-	collection, err := s.handler.GetCollection(ctx, collectionID)
-	if err != nil {
+	// `handler.GetCollection` cannot fetch dropping collection,
+	// so we use `broker.DescribeCollectionInternal` to get collection info to help fetch dropping collection to get the recovery info.
+	collection, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err := merr.CheckRPCCall(collection, err); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
+
 	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, collection.Schema, 0) // TODO: remove RWChannel, just use vchannel + collectionID
 	channelInfo := s.handler.GetDataVChanPositions(channel, allPartitionID)
 	log.Info("datacoord get channel recovery info",

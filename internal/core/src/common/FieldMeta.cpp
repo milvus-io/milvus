@@ -22,18 +22,9 @@ TokenizerParams
 ParseTokenizerParams(const TypeParams& params) {
     auto iter = params.find("tokenizer_params");
     if (iter == params.end()) {
-        return {};
+        return "{}";
     }
-    nlohmann::json j = nlohmann::json::parse(iter->second);
-    std::map<std::string, std::string> ret;
-    for (const auto& [k, v] : j.items()) {
-        try {
-            ret[k] = v.get<std::string>();
-        } catch (std::exception& e) {
-            ret[k] = v.dump();
-        }
-    }
-    return ret;
+    return iter->second;
 }
 
 bool

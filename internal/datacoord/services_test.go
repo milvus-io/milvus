@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -1491,11 +1492,9 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 
 	// get collection failed
-	handler := NewNMockHandler(t)
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).
-		Return(nil, errors.New("mock err"))
-	s.handler = handler
-	assert.NoError(t, err)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
+	s.broker = broker
 	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{
 		Vchannel: "ch-1",
 	})
@@ -1513,9 +1512,13 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 		IndexedSegmentIds:   []int64{4},
 	}
 
-	handler = NewNMockHandler(t)
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).
-		Return(&collectionInfo{Schema: &schemapb.CollectionSchema{}}, nil)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Unset()
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Schema: &schemapb.CollectionSchema{},
+		}, nil)
+	handler := NewNMockHandler(t)
 	handler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).Return(channelInfo)
 	s.handler = handler
 

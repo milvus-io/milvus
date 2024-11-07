@@ -550,13 +550,6 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	vchanNames := t.channels.virtualChannels
 	chanNames := t.channels.physicalChannels
 
-	startPositions, err := t.addChannelsAndGetStartPositions(ctx, ts)
-	if err != nil {
-		// ugly here, since we must get start positions first.
-		t.core.chanTimeTick.removeDmlChannels(t.channels.physicalChannels...)
-		return err
-	}
-
 	partitions := make([]*model.Partition, len(partIDs))
 	for i, partID := range partIDs {
 		partitions[i] = &model.Partition{
@@ -580,7 +573,6 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		PhysicalChannelNames: chanNames,
 		ShardsNum:            t.Req.ShardsNum,
 		ConsistencyLevel:     t.Req.ConsistencyLevel,
-		StartPositions:       toKeyDataPairs(startPositions),
 		CreateTime:           ts,
 		State:                pb.CollectionState_CollectionCreating,
 		Partitions:           partitions,
@@ -603,6 +595,16 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		log.Warn("add duplicate collection", zap.String("collection", t.Req.GetCollectionName()), zap.Uint64("ts", ts))
 		return nil
 	}
+
+	// TODO: The create collection is not idempotent for other component, such as wal.
+	// we need to make the create collection operation must success after some persistent operation, refactor it in future.
+	startPositions, err := t.addChannelsAndGetStartPositions(ctx, ts)
+	if err != nil {
+		// ugly here, since we must get start positions first.
+		t.core.chanTimeTick.removeDmlChannels(t.channels.physicalChannels...)
+		return err
+	}
+	collInfo.StartPositions = toKeyDataPairs(startPositions)
 
 	undoTask := newBaseUndoTask(t.core.stepExecutor)
 	undoTask.AddStep(&expireCacheStep{
@@ -657,4 +659,11 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	}, &nullStep{}) // We'll remove the whole collection anyway.
 
 	return undoTask.Execute(ctx)
+}
+
+func (t *createCollectionTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(t.Req.GetDbName(), true),
+	)
 }

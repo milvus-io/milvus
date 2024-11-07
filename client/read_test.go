@@ -45,6 +45,7 @@ func (s *ReadSuite) TestSearch() {
 		s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			s.Equal(collectionName, sr.GetCollectionName())
 			s.ElementsMatch([]string{partitionName}, sr.GetPartitionNames())
+			// s.Equal(s)
 
 			return &milvuspb.SearchResults{
 				Status: merr.Success(),
@@ -71,7 +72,7 @@ func (s *ReadSuite) TestSearch() {
 			entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 				return rand.Float32()
 			})),
-		}).WithPartitions(partitionName))
+		}).WithPartitions(partitionName).WithGroupByField("group_by"))
 		s.NoError(err)
 	})
 

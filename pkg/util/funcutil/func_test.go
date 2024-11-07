@@ -91,11 +91,33 @@ func Test_GetLocalIP(t *testing.T) {
 }
 
 func Test_GetIP(t *testing.T) {
-	ip := GetIP("")
-	assert.NotNil(t, ip)
-	assert.NotZero(t, len(ip))
-	ip = GetIP("127.0.0")
-	assert.Equal(t, ip, "127.0.0")
+	t.Run("empty_fallback_auto", func(t *testing.T) {
+		ip := GetIP("")
+		assert.NotNil(t, ip)
+		assert.NotZero(t, len(ip))
+	})
+
+	t.Run("valid_ip", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			ip := GetIP("8.8.8.8")
+			assert.Equal(t, "8.8.8.8", ip)
+		})
+	})
+
+	t.Run("invalid_ip", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			ip := GetIP("null")
+			assert.Equal(t, "null", ip)
+		}, "non ip format, could be hostname or service name")
+
+		assert.Panics(t, func() {
+			GetIP("0.0.0.0")
+		}, "input is unspecified ip address, panicking")
+
+		assert.Panics(t, func() {
+			GetIP("224.0.0.1")
+		}, "input is multicast ip address, panicking")
+	})
 }
 
 func Test_ParseIndexParamsMap(t *testing.T) {

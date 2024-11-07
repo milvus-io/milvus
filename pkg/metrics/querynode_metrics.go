@@ -790,6 +790,19 @@ var (
 			channelNameLabelName,
 		},
 	)
+
+	QueryNodeCGOCallLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "cgo_latency",
+			Help:      "latency of each cgo call",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			cgoNameLabelName,
+			cgoTypeLabelName,
+		})
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -859,6 +872,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSearchHitSegmentNum)
 	registry.MustRegister(QueryNodeDeleteBufferSize)
 	registry.MustRegister(QueryNodeDeleteBufferRowNum)
+	registry.MustRegister(QueryNodeCGOCallLatency)
 	// Add cgo metrics
 	RegisterCGOMetrics(registry)
 
