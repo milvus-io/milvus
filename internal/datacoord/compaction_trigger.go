@@ -534,6 +534,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	// TODO add low priority candidates, for example if the segment is smaller than full 0.9 * max segment size but larger than small segment boundary, we only execute compaction when there are no compaction running actively
 	var prioritizedCandidates []*SegmentInfo
 	var smallCandidates []*SegmentInfo
+	var tinyCandidates []*SegmentInfo
 	var nonPlannedSegments []*SegmentInfo
 
 	// TODO, currently we lack of the measurement of data distribution, there should be another compaction help on redistributing segment based on scalar/vector field distribution
@@ -544,12 +545,66 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 			prioritizedCandidates = append(prioritizedCandidates, segment)
 		} else if t.isSmallSegment(segment, expectedSize) {
 			smallCandidates = append(smallCandidates, segment)
+			if t.isTinySegment(segment, expectedSize) {
+				tinyCandidates = append(tinyCandidates, segment)
+			}
 		} else {
 			nonPlannedSegments = append(nonPlannedSegments, segment)
 		}
 	}
 
 	buckets := [][]*SegmentInfo{}
+
+	// sort tiny segment from large to small
+	sort.Slice(tinyCandidates, func(i, j int) bool {
+		if tinyCandidates[i].getSegmentSize() != tinyCandidates[j].getSegmentSize() {
+			return tinyCandidates[i].getSegmentSize() > tinyCandidates[j].getSegmentSize()
+		}
+		return tinyCandidates[i].GetID() < tinyCandidates[j].GetID()
+	})
+
+	// if there are still many tiny segments, merge them into large segments is the priority
+	for len(tinyCandidates) > Params.DataCoordCfg.TinyCompactionThreshold.GetAsInt() {
+		var bucket []*SegmentInfo
+		// pop out the first element
+		segment := tinyCandidates[0]
+		bucket = append(bucket, segment)
+		tinyCandidates = tinyCandidates[1:]
+
+		var result []*SegmentInfo
+		free := expectedSize - segment.getSegmentSize()
+		// for tiny segment merge, we pick one largest segment and merge as much as small segment together with it
+		// Why reverse?	 try to merge as many segments as expected.
+		// for instance, if a 255M and 255M is the largest small candidates, they will never be merged because of the MinSegmentToMerge limit.
+		tinyCandidates, result, _ = reverseGreedySelect(tinyCandidates, free, Params.DataCoordCfg.MaxSegmentToMerge.GetAsInt()-1)
+		bucket = append(bucket, result...)
+		buckets = append(buckets, bucket)
+
+		log.Info("pick tiny candidates for compaction", zap.Int64("collectionID", signal.collectionID),
+			zap.Int64s("picked segmentIDs", lo.Map(bucket, func(s *SegmentInfo, _ int) int64 { return s.GetID() })),
+			zap.Int64("target size", lo.SumBy(bucket, func(s *SegmentInfo) int64 { return s.getSegmentSize() })),
+			zap.Int64("target count", lo.SumBy(bucket, func(s *SegmentInfo) int64 { return s.GetNumOfRows() })),
+		)
+	}
+
+	// if there are tiny segment compactions, execute tiny compaction first to make sure segment number is under control
+	// TODO: change the priority of compaction: Tiny compaction > L0 compaction > Priority compaction > Small compaction
+	if len(buckets) > 0 {
+		tasks := make([]*typeutil.Pair[int64, []int64], len(buckets))
+		for i, b := range buckets {
+			segmentIDs := make([]int64, 0)
+			var totalRows int64
+			for _, s := range b {
+				totalRows += s.GetNumOfRows()
+				segmentIDs = append(segmentIDs, s.GetID())
+			}
+			pair := typeutil.NewPair(totalRows, segmentIDs)
+			tasks[i] = &pair
+		}
+		log.Info("generatePlans", zap.Int64("collectionID", signal.collectionID), zap.Int("plan_num", len(tasks)))
+		return tasks
+	}
+
 	// sort segment from large to small
 	sort.Slice(prioritizedCandidates, func(i, j int) bool {
 		if prioritizedCandidates[i].getSegmentSize() != prioritizedCandidates[j].getSegmentSize() {
@@ -725,6 +780,10 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 
 func (t *compactionTrigger) isSmallSegment(segment *SegmentInfo, expectedSize int64) bool {
 	return segment.getSegmentSize() < int64(float64(expectedSize)*Params.DataCoordCfg.SegmentSmallProportion.GetAsFloat())
+}
+
+func (t *compactionTrigger) isTinySegment(segment *SegmentInfo, expectedSize int64) bool {
+	return segment.getSegmentSize() < int64(float64(expectedSize)*Params.DataCoordCfg.SegmentTinyProportion.GetAsFloat())
 }
 
 func (t *compactionTrigger) isCompactableSegment(targetSize, expectedSize int64) bool {

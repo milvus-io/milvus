@@ -3208,6 +3208,8 @@ type dataCoordConfig struct {
 	MinSegmentToMerge                 ParamItem `refreshable:"true"`
 	MaxSegmentToMerge                 ParamItem `refreshable:"true"`
 	SegmentSmallProportion            ParamItem `refreshable:"true"`
+	SegmentTinyProportion             ParamItem `refreshable:"true"`
+	TinyCompactionThreshold           ParamItem `refreshable:"true"`
 	SegmentCompactableProportion      ParamItem `refreshable:"true"`
 	SegmentExpansionRate              ParamItem `refreshable:"true"`
 	CompactionTimeoutInSeconds        ParamItem `refreshable:"true"`
@@ -3534,6 +3536,25 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Export:       true,
 	}
 	p.SegmentSmallProportion.Init(base.mgr)
+
+	// Tiny proportion should usually a little bit larger than sealed proportion
+	p.SegmentTinyProportion = ParamItem{
+		Key:          "dataCoord.segment.tinyProportion",
+		Version:      "2.5.0",
+		DefaultValue: "0.15",
+		Doc:          "The segment is considered as \"tiny segment\" when its # of rows is smaller than",
+		Export:       true,
+	}
+	p.SegmentTinyProportion.Init(base.mgr)
+
+	p.TinyCompactionThreshold = ParamItem{
+		Key:          "dataCoord.segment.tiny.compaction.threshold",
+		Version:      "2.5.0",
+		DefaultValue: "8",
+		Doc:          "if too many tiny segments(> this threshold), then tiny compaction is gain better priority",
+		Export:       true,
+	}
+	p.TinyCompactionThreshold.Init(base.mgr)
 
 	p.SegmentCompactableProportion = ParamItem{
 		Key:          "dataCoord.segment.compactableProportion",
