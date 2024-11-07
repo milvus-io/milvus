@@ -1881,7 +1881,7 @@ class TestSearchVector(TestBase):
             assert len(res) == limit
 
 
-    @pytest.mark.parametrize("tokenizer", ["jieba", "default"])
+    @pytest.mark.parametrize("tokenizer", ["jieba", "standard"])
     def test_search_vector_with_text_match_filter(self, tokenizer):
         """
         Query a vector with a simple payload
@@ -1977,7 +1977,7 @@ class TestSearchVector(TestBase):
         vector_to_search = [[random.random() for _ in range(dim)]]
         for field in text_fields:
             token = wf_map[field].most_common()[0][0]
-            expr = f"TextMatch({field}, '{token}')"
+            expr = f"text_match({field}, '{token}')"
             logger.info(f"expr: {expr}")
             rsp = self.vector_client.vector_search({"collectionName": name, "data":vector_to_search, "filter": f"{expr}", "outputFields": ["*"]})
             assert rsp['code'] == 0, rsp
@@ -2718,7 +2718,7 @@ class TestQueryVector(TestBase):
             if "like" in filter_expr:
                 assert name.startswith(prefix)
 
-    @pytest.mark.parametrize("tokenizer", ["jieba", "default"])
+    @pytest.mark.parametrize("tokenizer", ["jieba", "standard"])
     def test_query_vector_with_text_match_filter(self, tokenizer):
         """
         Query a vector with a simple payload
@@ -2813,7 +2813,7 @@ class TestQueryVector(TestBase):
         time.sleep(5)
         for field in text_fields:
             token = wf_map[field].most_common()[0][0]
-            expr = f"TextMatch({field}, '{token}')"
+            expr = f"text_match({field}, '{token}')"
             logger.info(f"expr: {expr}")
             rsp = self.vector_client.vector_query({"collectionName": name, "filter": f"{expr}", "outputFields": ["*"]})
             assert rsp['code'] == 0, rsp

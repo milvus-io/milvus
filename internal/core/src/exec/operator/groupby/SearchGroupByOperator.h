@@ -140,7 +140,7 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                     index.VectorIterators(dataset, search_conf, bitset);
             if (iterators_val.has_value()) {
                 search_result.AssembleChunkVectorIterators(
-                    nq, 1, -1, iterators_val.value());
+                    nq, 1, {0}, iterators_val.value());
             } else {
                 LOG_ERROR(
                     "Returned knowhere iterator has non-ready iterators "

@@ -17,6 +17,8 @@
 package client
 
 import (
+	"fmt"
+
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -56,6 +58,8 @@ type createCollectionOption struct {
 	// partition key
 	numPartitions int64
 
+	indexOptions []CreateIndexOption
+
 	// is fast create collection
 	isFast bool
 	// fast creation with index
@@ -83,6 +87,21 @@ func (opt *createCollectionOption) WithVarcharPK(varcharPK bool, maxLen int) *cr
 	return opt
 }
 
+func (opt *createCollectionOption) WithIndexOptions(indexOpts ...CreateIndexOption) *createCollectionOption {
+	opt.indexOptions = append(opt.indexOptions, indexOpts...)
+	return opt
+}
+
+func (opt *createCollectionOption) WithProperty(key string, value any) *createCollectionOption {
+	opt.properties[key] = fmt.Sprintf("%v", value)
+	return opt
+}
+
+func (opt *createCollectionOption) WithConsistencyLevel(cl entity.ConsistencyLevel) *createCollectionOption {
+	opt.consistencyLevel = cl
+	return opt
+}
+
 func (opt *createCollectionOption) Request() *milvuspb.CreateCollectionRequest {
 	// fast create collection
 	if opt.isFast {
@@ -103,6 +122,7 @@ func (opt *createCollectionOption) Request() *milvuspb.CreateCollectionRequest {
 
 	var schemaBytes []byte
 	if opt.schema != nil {
+		opt.schema.WithName(opt.name)
 		schemaProto := opt.schema.ProtoMessage()
 		schemaBytes, _ = proto.Marshal(schemaProto)
 	}
@@ -144,6 +164,7 @@ func SimpleCreateCollectionOptions(name string, dim int64) *createCollectionOpti
 		dim:                  dim,
 		enabledDynamicSchema: true,
 		consistencyLevel:     entity.DefaultConsistencyLevel,
+		properties:           make(map[string]string),
 
 		isFast:     true,
 		metricType: entity.COSINE,
@@ -157,6 +178,7 @@ func NewCreateCollectionOption(name string, collectionSchema *entity.Schema) *cr
 		shardNum:         1,
 		schema:           collectionSchema,
 		consistencyLevel: entity.DefaultConsistencyLevel,
+		properties:       make(map[string]string),
 
 		metricType: entity.COSINE,
 	}
@@ -262,4 +284,29 @@ func NewRenameCollectionOption(oldName, newName string) *renameCollectionOption 
 		oldCollectionName: oldName,
 		newCollectionName: newName,
 	}
+}
+
+type AlterCollectionOption interface {
+	Request() *milvuspb.AlterCollectionRequest
+}
+
+type alterCollectionOption struct {
+	collectionName string
+	properties     map[string]string
+}
+
+func (opt *alterCollectionOption) WithProperty(key string, value any) *alterCollectionOption {
+	opt.properties[key] = fmt.Sprintf("%v", value)
+	return opt
+}
+
+func (opt *alterCollectionOption) Request() *milvuspb.AlterCollectionRequest {
+	return &milvuspb.AlterCollectionRequest{
+		CollectionName: opt.collectionName,
+		Properties:     entity.MapKvPairs(opt.properties),
+	}
+}
+
+func NewAlterCollectionOption(collection string) *alterCollectionOption {
+	return &alterCollectionOption{collectionName: collection, properties: make(map[string]string)}
 }

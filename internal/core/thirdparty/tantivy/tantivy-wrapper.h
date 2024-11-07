@@ -14,7 +14,7 @@ namespace milvus::tantivy {
 using Map = std::map<std::string, std::string>;
 
 static constexpr const char* DEFAULT_TOKENIZER_NAME = "milvus_tokenizer";
-static Map DEFAULT_TOKENIZER_PARAMS = {};
+static const char* DEFAULT_TOKENIZER_PARAMS = "{}";
 static constexpr uintptr_t DEFAULT_NUM_THREADS = 4;
 static constexpr uintptr_t DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES =
     DEFAULT_NUM_THREADS * 15 * 1024 * 1024;
@@ -101,17 +101,14 @@ struct TantivyIndexWrapper {
                         bool in_ram,
                         const char* path,
                         const char* tokenizer_name = DEFAULT_TOKENIZER_NAME,
-                        const std::map<std::string, std::string>&
-                            tokenizer_params = DEFAULT_TOKENIZER_PARAMS,
+                        const char* tokenizer_params = DEFAULT_TOKENIZER_PARAMS,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
-        RustHashMap m;
-        m.from(tokenizer_params);
         writer_ = tantivy_create_text_writer(field_name,
                                              path,
                                              tokenizer_name,
-                                             m.get_pointer(),
+                                             tokenizer_params,
                                              num_threads,
                                              overall_memory_budget_in_bytes,
                                              in_ram);
@@ -134,14 +131,11 @@ struct TantivyIndexWrapper {
     }
 
     void
-    register_tokenizer(
-        const char* tokenizer_name,
-        const std::map<std::string, std::string>& tokenizer_params) {
-        RustHashMap m;
-        m.from(tokenizer_params);
+    register_tokenizer(const char* tokenizer_name,
+                       const char* tokenizer_params) {
         if (reader_ != nullptr) {
             tantivy_register_tokenizer(
-                reader_, tokenizer_name, m.get_pointer());
+                reader_, tokenizer_name, tokenizer_params);
         }
     }
 
