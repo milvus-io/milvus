@@ -565,6 +565,52 @@ func (_c *MockTargetManager_GetSealedSegmentsByPartition_Call) RunAndReturn(run 
 	return _c
 }
 
+// GetTargetJSON provides a mock function with given fields: scope
+func (_m *MockTargetManager) GetTargetJSON(scope int32) string {
+	ret := _m.Called(scope)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTargetJSON")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(int32) string); ok {
+		r0 = rf(scope)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockTargetManager_GetTargetJSON_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTargetJSON'
+type MockTargetManager_GetTargetJSON_Call struct {
+	*mock.Call
+}
+
+// GetTargetJSON is a helper method to define mock.On call
+//   - scope int32
+func (_e *MockTargetManager_Expecter) GetTargetJSON(scope interface{}) *MockTargetManager_GetTargetJSON_Call {
+	return &MockTargetManager_GetTargetJSON_Call{Call: _e.mock.On("GetTargetJSON", scope)}
+}
+
+func (_c *MockTargetManager_GetTargetJSON_Call) Run(run func(scope int32)) *MockTargetManager_GetTargetJSON_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int32))
+	})
+	return _c
+}
+
+func (_c *MockTargetManager_GetTargetJSON_Call) Return(_a0 string) *MockTargetManager_GetTargetJSON_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTargetManager_GetTargetJSON_Call) RunAndReturn(run func(int32) string) *MockTargetManager_GetTargetJSON_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsCurrentTargetExist provides a mock function with given fields: collectionID, partitionID
 func (_m *MockTargetManager) IsCurrentTargetExist(collectionID int64, partitionID int64) bool {
 	ret := _m.Called(collectionID, partitionID)

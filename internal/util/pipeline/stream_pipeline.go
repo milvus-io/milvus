@@ -18,9 +18,11 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -39,6 +41,7 @@ import (
 type StreamPipeline interface {
 	Pipeline
 	ConsumeMsgStream(position *msgpb.MsgPosition) error
+	Status() string
 }
 
 type streamPipeline struct {
@@ -52,6 +55,8 @@ type streamPipeline struct {
 	closeCh   chan struct{} // notify work to exit
 	closeWg   sync.WaitGroup
 	closeOnce sync.Once
+
+	lastAccessTime *atomic.Time
 }
 
 func (p *streamPipeline) work() {
@@ -62,11 +67,22 @@ func (p *streamPipeline) work() {
 			log.Debug("stream pipeline input closed")
 			return
 		case msg := <-p.input:
+			p.lastAccessTime.Store(time.Now())
 			log.RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
 			p.pipeline.inputChannel <- msg
 			p.pipeline.process()
 		}
 	}
+}
+
+// Status returns the status of the pipeline, it will return "Healthy" if the input node
+// has received any msg in the last nodeTtInterval
+func (p *streamPipeline) Status() string {
+	diff := time.Since(p.lastAccessTime.Load())
+	if diff > p.pipeline.nodeTtInterval {
+		return fmt.Sprintf("input node hasn't received any msg in the last %s", diff.String())
+	}
+	return "Healthy"
 }
 
 func (p *streamPipeline) ConsumeMsgStream(position *msgpb.MsgPosition) error {
@@ -150,10 +166,11 @@ func NewPipelineWithStream(dispatcher msgdispatcher.Client, nodeTtInterval time.
 			nodeTtInterval:  nodeTtInterval,
 			enableTtChecker: enableTtChecker,
 		},
-		dispatcher: dispatcher,
-		vChannel:   vChannel,
-		closeCh:    make(chan struct{}),
-		closeWg:    sync.WaitGroup{},
+		dispatcher:     dispatcher,
+		vChannel:       vChannel,
+		closeCh:        make(chan struct{}),
+		closeWg:        sync.WaitGroup{},
+		lastAccessTime: atomic.NewTime(time.Now()),
 	}
 
 	return pipeline

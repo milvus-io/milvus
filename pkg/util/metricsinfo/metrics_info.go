@@ -13,8 +13,8 @@ package metricsinfo
 
 import (
 	"encoding/json"
-	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -69,6 +69,105 @@ const (
 	// MilvusUsedGoVersion used go version
 	MilvusUsedGoVersion = "MILVUS_USED_GO_VERSION"
 )
+
+type DmChannel struct {
+	NodeID                 int64           `json:"node_id,omitempty"`
+	Version                int64           `json:"version,omitempty"`
+	CollectionID           int64           `json:"collection_id,omitempty"`
+	ChannelName            string          `json:"channel_name,omitempty"`
+	UnflushedSegmentIds    []int64         `json:"unflushed_segment_ids,omitempty"`
+	FlushedSegmentIds      []int64         `json:"flushed_segment_ids,omitempty"`
+	DroppedSegmentIds      []int64         `json:"dropped_segment_ids,omitempty"`
+	LevelZeroSegmentIds    []int64         `json:"level_zero_segment_ids,omitempty"`
+	PartitionStatsVersions map[int64]int64 `json:"partition_stats_versions,omitempty"`
+	WatchState             string          `json:"watch_state,omitempty"`
+	StartWatchTS           int64           `json:"start_watch_ts,omitempty"`
+}
+
+type Segment struct {
+	SegmentID    int64  `json:"segment_id,omitempty"`
+	CollectionID int64  `json:"collection_id,omitempty"`
+	PartitionID  int64  `json:"partition_id,omitempty"`
+	Channel      string `json:"channel,omitempty"`
+	NumOfRows    int64  `json:"num_of_rows,omitempty"`
+	State        string `json:"state,omitempty"`
+	IsImporting  bool   `json:"is_importing,omitempty"`
+	Compacted    bool   `json:"compacted,omitempty"`
+	Level        string `json:"level,omitempty"`
+	IsSorted     bool   `json:"is_sorted,omitempty"`
+	NodeID       int64  `json:"node_id,omitempty"`
+
+	// load related
+	IsInvisible          bool            `json:"is_invisible,omitempty"`
+	LoadedTimestamp      int64           `json:"loaded_timestamp,omitempty"`
+	Index                []*SegmentIndex `json:"index,omitempty"`
+	ResourceGroup        string          `json:"resource_group,omitempty"`
+	LoadedInsertRowCount int64           `json:"loaded_insert_row_count,omitempty"` // inert row count for growing segment that excludes the deleted row count in QueryNode
+	MemSize              int64           `json:"mem_size,omitempty"`                // memory size of segment in QueryNode
+
+	// flush related
+	FlushedRows    int64 `json:"flushed_rows,omitempty"`
+	SyncBufferRows int64 `json:"sync_buffer_rows,omitempty"`
+	SyncingRows    int64 `json:"syncing_rows,omitempty"`
+	// TODO add checkpoints
+}
+
+type SegmentIndex struct {
+	IndexFieldID int64 `json:"field_id,omitempty"`
+	IndexID      int64 `json:"index_id,omitempty"`
+	BuildID      int64 `json:"build_id,omitempty"`
+	IndexSize    int64 `json:"index_size,omitempty"`
+	IsLoaded     bool  `json:"is_loaded,omitempty"`
+}
+
+type QueryCoordTarget struct {
+	CollectionID int64        `json:"collection_id,omitempty"`
+	Segments     []*Segment   `json:"segments,omitempty"`
+	DMChannels   []*DmChannel `json:"dm_channels,omitempty"`
+}
+
+type LeaderView struct {
+	LeaderID           int64      `json:"leader_id"`
+	CollectionID       int64      `json:"collection_id"`
+	Channel            string     `json:"channel"`
+	Version            int64      `json:"version"`
+	SealedSegments     []*Segment `json:"sealed_segments"`
+	GrowingSegments    []*Segment `json:"growing_segments"`
+	TargetVersion      int64      `json:"target_version"`
+	NumOfGrowingRows   int64      `json:"num_of_growing_rows"`
+	UnServiceableError string     `json:"unserviceable_error"`
+}
+
+type QueryCoordDist struct {
+	Segments    []*Segment    `json:"segments,omitempty"`
+	DMChannels  []*DmChannel  `json:"dm_channels,omitempty"`
+	LeaderViews []*LeaderView `json:"leader_views,omitempty"`
+}
+
+type ResourceGroup struct {
+	Name  string                    `json:"name,omitempty"`
+	Nodes []int64                   `json:"nodes,omitempty"`
+	Cfg   *rgpb.ResourceGroupConfig `json:"cfg,omitempty"`
+}
+
+type Replica struct {
+	ID               int64              `json:"ID,omitempty"`
+	CollectionID     int64              `json:"collectionID,omitempty"`
+	RWNodes          []int64            `json:"rw_nodes,omitempty"`
+	ResourceGroup    string             `json:"resource_group,omitempty"`
+	RONodes          []int64            `json:"ro_nodes,omitempty"`
+	ChannelToRWNodes map[string][]int64 `json:"channel_to_rw_nodes,omitempty"`
+}
+
+// Channel is a subscribed channel of in querynode or datanode.
+type Channel struct {
+	Name           string `json:"name,omitempty"`
+	WatchState     string `json:"watch_state,omitempty"`
+	LatestTimeTick string `json:"latest_time_tick,omitempty"` // a time string that indicates the latest time tick of the channel is received
+	NodeID         int64  `json:"node_id,omitempty"`
+	CollectionID   int64  `json:"collection_id,omitempty"`
+	CheckpointTS   string `json:"check_point_ts,omitempty"` // a time string, format like "2006-01-02 15:04:05"
+}
 
 // DeployMetrics records the deploy information of nodes.
 type DeployMetrics struct {
@@ -167,11 +266,12 @@ type SyncTask struct {
 	SegmentID     int64              `json:"segment_id,omitempty"`
 	BatchRows     int64              `json:"batch_rows,omitempty"`
 	SegmentLevel  string             `json:"segment_level,omitempty"`
-	TsFrom        typeutil.Timestamp `json:"ts_from,omitempty"`
-	TsTo          typeutil.Timestamp `json:"ts_to,omitempty"`
+	TSFrom        typeutil.Timestamp `json:"ts_from,omitempty"`
+	TSTo          typeutil.Timestamp `json:"ts_to,omitempty"`
 	DeltaRowCount int64              `json:"delta_row_count,omitempty"`
 	FlushSize     int64              `json:"flush_size,omitempty"`
-	RunningTime   time.Duration      `json:"running_time,omitempty"`
+	RunningTime   string             `json:"running_time,omitempty"`
+	NodeID        int64              `json:"node_id,omitempty"`
 }
 
 // DataNodeInfos implements ComponentInfos
@@ -179,6 +279,11 @@ type DataNodeInfos struct {
 	BaseComponentInfos
 	SystemConfigurations DataNodeConfiguration `json:"system_configurations"`
 	QuotaMetrics         *DataNodeQuotaMetrics `json:"quota_metrics"`
+}
+
+type DataCoordDist struct {
+	Segments   []*Segment   `json:"segments,omitempty"`
+	DMChannels []*DmChannel `json:"dm_channels,omitempty"`
 }
 
 // DataCoordConfiguration records the configuration of DataCoord.

@@ -2025,3 +2025,28 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 
 	return metricMutation, nil
 }
+
+func (m *meta) getSegmentsMetrics() []*metricsinfo.Segment {
+	m.RLock()
+	defer m.RUnlock()
+
+	segments := make([]*metricsinfo.Segment, 0, len(m.segments.segments))
+	for _, s := range m.segments.segments {
+		segments = append(segments, &metricsinfo.Segment{
+			SegmentID:    s.ID,
+			CollectionID: s.CollectionID,
+			PartitionID:  s.PartitionID,
+			Channel:      s.InsertChannel,
+			NumOfRows:    s.NumOfRows,
+			State:        s.State.String(),
+			MemSize:      s.size.Load(),
+			Level:        s.Level.String(),
+			IsImporting:  s.IsImporting,
+			Compacted:    s.Compacted,
+			IsSorted:     s.IsSorted,
+			NodeID:       paramtable.GetNodeID(),
+		})
+	}
+
+	return segments
+}

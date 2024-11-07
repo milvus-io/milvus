@@ -18,14 +18,17 @@ package querynodev2
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -168,6 +171,54 @@ func getCollectionMetrics(node *QueryNode) (*metricsinfo.QueryNodeCollectionMetr
 		ret.CollectionRows[collectionID] += segment.RowNum()
 	}
 	return ret, nil
+}
+
+// getChannelJSON returns the JSON string of channels
+func getChannelJSON(node *QueryNode) string {
+	stats := node.pipelineManager.GetChannelStats()
+	ret, err := json.Marshal(stats)
+	if err != nil {
+		log.Warn("failed to marshal channels", zap.Error(err))
+		return ""
+	}
+	return string(ret)
+}
+
+// getSegmentJSON returns the JSON string of segments
+func getSegmentJSON(node *QueryNode) string {
+	allSegments := node.manager.Segment.GetBy()
+	var ms []*metricsinfo.Segment
+	for _, s := range allSegments {
+		indexes := make([]*metricsinfo.SegmentIndex, 0, len(s.Indexes()))
+		for _, index := range s.Indexes() {
+			indexes = append(indexes, &metricsinfo.SegmentIndex{
+				IndexFieldID: index.IndexInfo.FieldID,
+				IndexID:      index.IndexInfo.IndexID,
+				IndexSize:    index.IndexInfo.IndexSize,
+				BuildID:      index.IndexInfo.BuildID,
+				IsLoaded:     index.IsLoaded,
+			})
+		}
+
+		ms = append(ms, &metricsinfo.Segment{
+			SegmentID:            s.ID(),
+			CollectionID:         s.Collection(),
+			PartitionID:          s.Partition(),
+			MemSize:              s.MemSize(),
+			Index:                indexes,
+			State:                s.Type().String(),
+			ResourceGroup:        s.ResourceGroup(),
+			LoadedInsertRowCount: s.InsertCount(),
+			NodeID:               node.GetNodeID(),
+		})
+	}
+
+	ret, err := json.Marshal(ms)
+	if err != nil {
+		log.Warn("failed to marshal segments", zap.Error(err))
+		return ""
+	}
+	return string(ret)
 }
 
 // getSystemInfoMetrics returns metrics info of QueryNode

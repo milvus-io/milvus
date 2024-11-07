@@ -6503,26 +6503,34 @@ func DeregisterSubLabel(subLabel string) {
 
 // RegisterRestRouter registers the router for the proxy
 func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
-	// Cluster request
+	// Cluster request that executed by proxy
 	router.GET(http.ClusterInfoPath, getClusterInfo(node))
 	router.GET(http.ClusterConfigsPath, getConfigs(paramtable.Get().GetAll()))
 	router.GET(http.ClusterClientsPath, getConnectedClients)
 	router.GET(http.ClusterDependenciesPath, getDependencies)
 
-	// Hook request
+	// Hook request that executed by proxy
 	router.GET(http.HookConfigsPath, getConfigs(paramtable.GetHookParams().GetAll()))
 
-	// QueryCoord request
-	router.GET(http.QCoordSegmentsPath, getQueryComponentMetrics(node, metricsinfo.QuerySegmentDist))
-	router.GET(http.QCoordChannelsPath, getQueryComponentMetrics(node, metricsinfo.QueryChannelDist))
-	router.GET(http.QCoordAllTasksPath, getQueryComponentMetrics(node, metricsinfo.QueryCoordAllTasks))
+	// QueryCoord requests that are forwarded from proxy
+	router.GET(http.QCTargetPath, getQueryComponentMetrics(node, metricsinfo.QueryTarget))
+	router.GET(http.QCDistPath, getQueryComponentMetrics(node, metricsinfo.QueryDist))
+	router.GET(http.QCReplicaPath, getQueryComponentMetrics(node, metricsinfo.QueryReplicas))
+	router.GET(http.QCResourceGroupPath, getQueryComponentMetrics(node, metricsinfo.QueryResourceGroups))
+	router.GET(http.QCAllTasksPath, getQueryComponentMetrics(node, metricsinfo.QueryCoordAllTasks))
 
-	// DataCoord request
-	router.GET(http.DCoordAllTasksPath, getDataComponentMetrics(node, metricsinfo.DataCoordAllTasks))
-	router.GET(http.DCoordCompactionTasksPath, getDataComponentMetrics(node, metricsinfo.CompactionTasks))
-	router.GET(http.DCoordImportTasksPath, getDataComponentMetrics(node, metricsinfo.ImportTasks))
-	router.GET(http.DCoordBuildIndexTasksPath, getDataComponentMetrics(node, metricsinfo.BuildIndexTasks))
+	// QueryNode requests that are forwarded from querycoord
+	router.GET(http.QNSegmentsPath, getQueryComponentMetrics(node, metricsinfo.QuerySegments))
+	router.GET(http.QNChannelsPath, getQueryComponentMetrics(node, metricsinfo.QueryChannels))
 
-	// Datanode request
-	router.GET(http.DNodeSyncTasksPath, getDataComponentMetrics(node, metricsinfo.SyncTasks))
+	// DataCoord requests that are forwarded from proxy
+	router.GET(http.DCDistPath, getDataComponentMetrics(node, metricsinfo.DataDist))
+	router.GET(http.DCCompactionTasksPath, getDataComponentMetrics(node, metricsinfo.CompactionTasks))
+	router.GET(http.DCImportTasksPath, getDataComponentMetrics(node, metricsinfo.ImportTasks))
+	router.GET(http.DCBuildIndexTasksPath, getDataComponentMetrics(node, metricsinfo.BuildIndexTasks))
+
+	// Datanode requests that are forwarded from datacoord
+	router.GET(http.DNSyncTasksPath, getDataComponentMetrics(node, metricsinfo.SyncTasks))
+	router.GET(http.DNSegmentsPath, getDataComponentMetrics(node, metricsinfo.DataSegments))
+	router.GET(http.DNChannelsPath, getDataComponentMetrics(node, metricsinfo.DataChannels))
 }

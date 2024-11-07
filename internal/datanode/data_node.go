@@ -284,9 +284,20 @@ func (node *DataNode) registerMetricsRequest() {
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return node.getSystemInfoMetrics(ctx, req)
 		})
+
 	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTasks,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return node.syncMgr.TaskStatsJSON(), nil
+		})
+
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.DataSegments,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return node.flowgraphManager.GetSegmentsJSON(), nil
+		})
+
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.DataChannels,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return node.flowgraphManager.GetChannelsJSON(), nil
 		})
 	log.Info("register metrics actions finished")
 }

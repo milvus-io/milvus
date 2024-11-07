@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -43,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
@@ -1318,4 +1320,63 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 		c := m.GetCollection(UniqueID(1000))
 		assert.NotNil(t, c)
 	})
+}
+
+func TestMeta_GetSegmentsJSON(t *testing.T) {
+	// Create a mock meta object
+	m := &meta{
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{
+				1: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:            1,
+						CollectionID:  1,
+						PartitionID:   1,
+						InsertChannel: "channel1",
+						NumOfRows:     100,
+						State:         commonpb.SegmentState_Growing,
+						MaxRowNum:     1000,
+						Compacted:     false,
+					},
+				},
+				2: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:            2,
+						CollectionID:  2,
+						PartitionID:   2,
+						InsertChannel: "channel2",
+						NumOfRows:     200,
+						State:         commonpb.SegmentState_Sealed,
+						MaxRowNum:     2000,
+						Compacted:     true,
+					},
+				},
+			},
+		},
+	}
+
+	segments := m.getSegmentsMetrics()
+
+	// Check the length of the segments
+	assert.Equal(t, 2, len(segments))
+
+	slices.SortFunc(segments, func(i, j *metricsinfo.Segment) int { return int(i.SegmentID - j.SegmentID) })
+
+	// Check the first segment
+	assert.Equal(t, int64(1), segments[0].SegmentID)
+	assert.Equal(t, int64(1), segments[0].CollectionID)
+	assert.Equal(t, int64(1), segments[0].PartitionID)
+	assert.Equal(t, "channel1", segments[0].Channel)
+	assert.Equal(t, int64(100), segments[0].NumOfRows)
+	assert.Equal(t, "Growing", segments[0].State)
+	assert.False(t, segments[0].Compacted)
+
+	// Check the second segment
+	assert.Equal(t, int64(2), segments[1].SegmentID)
+	assert.Equal(t, int64(2), segments[1].CollectionID)
+	assert.Equal(t, int64(2), segments[1].PartitionID)
+	assert.Equal(t, "channel2", segments[1].Channel)
+	assert.Equal(t, int64(200), segments[1].NumOfRows)
+	assert.Equal(t, "Sealed", segments[1].State)
+	assert.True(t, segments[1].Compacted)
 }

@@ -1880,14 +1880,14 @@ func TestRegisterRestRouter(t *testing.T) {
 		path       string
 		statusCode int
 	}{
-		{path: mhttp.QCoordSegmentsPath, statusCode: http.StatusInternalServerError},
-		{path: mhttp.QCoordChannelsPath, statusCode: http.StatusInternalServerError},
-		{path: mhttp.QCoordAllTasksPath, statusCode: http.StatusInternalServerError},
-		{path: mhttp.DNodeSyncTasksPath, statusCode: http.StatusInternalServerError},
-		{path: mhttp.DCoordCompactionTasksPath, statusCode: http.StatusInternalServerError},
-		{path: mhttp.DCoordImportTasksPath, statusCode: http.StatusInternalServerError},
-		{path: mhttp.DCoordBuildIndexTasksPath, statusCode: http.StatusInternalServerError},
-		{path: mhttp.DNodeSyncTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.QCTargetPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.QCDistPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.QCAllTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DNSyncTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DCCompactionTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DCImportTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DCBuildIndexTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DNSyncTasksPath, statusCode: http.StatusInternalServerError},
 	}
 
 	for _, tt := range tests {
