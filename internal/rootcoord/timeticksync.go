@@ -163,7 +163,7 @@ func (t *timetickSync) sendToChannel() bool {
 		}
 	}
 
-	if len(idleSessionList) > 0 && !streamingutil.IsStreamingServiceEnabled() {
+	if len(idleSessionList) > 0 {
 		// give warning every 2 second if not get ttMsg from source sessions
 		if maxCnt%10 == 0 {
 			log.Warn("session idle for long time", zap.Any("idle list", idleSessionList),

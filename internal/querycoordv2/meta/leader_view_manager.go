@@ -109,6 +109,12 @@ func WithSegment2LeaderView(segmentID int64, isGrowing bool) LeaderViewFilter {
 	})
 }
 
+func WithServiceable() LeaderViewFilter {
+	return lvFilterFunc(func(view *LeaderView) bool {
+		return view.UnServiceableError == nil
+	})
+}
+
 type LeaderView struct {
 	ID                     int64
 	CollectionID           int64

@@ -111,7 +111,6 @@ func (t *searchTask) CanSkipAllocTimestamp() bool {
 		}
 		consistencyLevel = collectionInfo.consistencyLevel
 	}
-
 	return consistencyLevel != commonpb.ConsistencyLevel_Strong
 }
 

@@ -174,10 +174,11 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 ### All contributors
 
 <br><!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-413-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-415-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
+<a href="https://github.com/Ahmetyasin"><img src="https://avatars.githubusercontent.com/u/34247619?v=4" width="30px" /></a>
 <a href="https://github.com/Ald392"><img src="https://avatars.githubusercontent.com/u/166891594?v=4" width="30px" /></a>
 <a href="https://github.com/AliDotS"><img src="https://avatars.githubusercontent.com/u/33119433?v=4" width="30px" /></a>
 <a href="https://github.com/AllenYu1987"><img src="https://avatars.githubusercontent.com/u/12489985?v=4" width="30px" /></a>
@@ -572,6 +573,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/yxm1536"><img src="https://avatars.githubusercontent.com/u/62009483?v=4" width="30px" /></a>
 <a href="https://github.com/yylstudy"><img src="https://avatars.githubusercontent.com/u/26402953?v=4" width="30px" /></a>
 <a href="https://github.com/zamanmub"><img src="https://avatars.githubusercontent.com/u/32416908?v=4" width="30px" /></a>
+<a href="https://github.com/zander-bobronnikov"><img src="https://avatars.githubusercontent.com/u/183726703?v=4" width="30px" /></a>
 <a href="https://github.com/zc2638"><img src="https://avatars.githubusercontent.com/u/28284116?v=4" width="30px" /></a>
 <a href="https://github.com/zc277584121"><img src="https://avatars.githubusercontent.com/u/17022025?v=4" width="30px" /></a>
 <a href="https://github.com/zengxy"><img src="https://avatars.githubusercontent.com/u/11961641?v=4" width="30px" /></a>

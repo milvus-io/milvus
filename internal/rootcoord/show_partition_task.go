@@ -67,3 +67,12 @@ func (t *showPartitionTask) Execute(ctx context.Context) error {
 
 	return nil
 }
+
+func (t *showPartitionTask) GetLockerKey() LockerKey {
+	collectionName := t.core.getRealCollectionName(t.ctx, t.Req.GetDbName(), t.Req.GetCollectionName())
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(t.Req.GetDbName(), false),
+		NewCollectionLockerKey(collectionName, false),
+	)
+}

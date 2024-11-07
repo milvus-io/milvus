@@ -1,8 +1,14 @@
-use std::{collections::HashMap, ffi::CStr};
+use std::{ffi::CStr};
 
 use libc::{c_char, c_void};
 
-use crate::{array::RustArray, index_reader::IndexReaderWrapper, tokenizer::create_tokenizer};
+use crate::{
+    array::RustArray,
+    string_c::c_str_to_str,
+    index_reader::IndexReaderWrapper,
+    tokenizer::create_tokenizer,
+    log::init_log,
+};
 
 #[no_mangle]
 pub extern "C" fn tantivy_match_query(ptr: *mut c_void, query: *const c_char) -> RustArray {
@@ -18,23 +24,22 @@ pub extern "C" fn tantivy_match_query(ptr: *mut c_void, query: *const c_char) ->
 pub extern "C" fn tantivy_register_tokenizer(
     ptr: *mut c_void,
     tokenizer_name: *const c_char,
-    tokenizer_params: *mut c_void,
+    tokenizer_params: *const c_char,
 ) {
+    init_log();
     let real = ptr as *mut IndexReaderWrapper;
     let tokenizer_name_str = unsafe { CStr::from_ptr(tokenizer_name) };
-    let analyzer = unsafe {
-        let m = tokenizer_params as *const HashMap<String, String>;
-        create_tokenizer(&(*m))
-    };
+    let params = unsafe{c_str_to_str(tokenizer_params).to_string()};
+    let analyzer = create_tokenizer(&params);
     match analyzer {
-        Some(text_analyzer) => unsafe {
+        Ok(text_analyzer) => unsafe {
             (*real).register_tokenizer(
                 String::from(tokenizer_name_str.to_str().unwrap()),
                 text_analyzer,
             );
         },
-        None => {
-            panic!("unsupported tokenizer");
-        }
+        Err(err) => {
+            panic!("create tokenizer failed with error: {} param: {}", err.to_string(), params);
+        },
     }
 }
