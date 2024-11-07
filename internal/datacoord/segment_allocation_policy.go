@@ -107,7 +107,18 @@ func AllocatePolicyL1(segments []*SegmentInfo, count int64,
 		for _, allocation := range segment.allocations {
 			allocSize += allocation.NumOfRows
 		}
-		free := segment.GetMaxRowNum() - segment.GetNumOfRows() - allocSize
+
+		// When inserts are too fast, hardTimeTick may lag, causing segment to be unable to seal in time.
+		// To prevent allocating large segment, introducing the sealProportion factor here.
+		// The condition `free < 0` ensures that the allocation exceeds the minimum sealable size,
+		// preventing segments from remaining unsealable indefinitely.
+		maxRowsWithSealProportion := int64(float64(segment.GetMaxRowNum()) * paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat())
+		free := maxRowsWithSealProportion - segment.GetNumOfRows() - allocSize
+		if free < 0 {
+			continue
+		}
+
+		free = segment.GetMaxRowNum() - segment.GetNumOfRows() - allocSize
 		if free < count {
 			continue
 		}
