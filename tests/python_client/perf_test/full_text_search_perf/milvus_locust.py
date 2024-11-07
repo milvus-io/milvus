@@ -172,7 +172,7 @@ class MilvusUser(MilvusBaseUser):
     """Main Milvus user class that defines the test tasks"""
 
     @tag('insert')
-    @task(2)
+    @task(4)
     def insert(self):
         """Insert random vectors"""
         batch_size = 1000
@@ -218,9 +218,9 @@ class MilvusUser(MilvusBaseUser):
     @tag('delete')
     @task(1)
     def delete(self):
-        """delete random vectors in 2 min window"""
+        """delete random vectors in 30s window before 10 minutes"""
         _min = int((time.time()-600)*(10**6))
-        _max = int((time.time()-480)*(10**6))
+        _max = int((time.time()-530)*(10**6))
 
         expr = f"id >= {_min} and id <= {_max}"
 
@@ -235,6 +235,7 @@ class MilvusORMClient:
         self.request_type = "ORM"
         self.collection_name = environment.parsed_options.milvus_collection
         self.collection = Collection(self.collection_name)
+        self.sleep_time = 1
 
     def insert(self, data):
         start = time.time()
@@ -248,15 +249,19 @@ class MilvusORMClient:
                 response_length=0,
                 exception=None
             )
+            self.sleep_time = 0.1
         except Exception as e:
-            logger.error(f"Insert error: {str(e)}")
-            events.request.fire(
-                request_type=self.request_type,
-                name="Insert",
-                response_time=(time.time() - start) * 1000,
-                response_length=0,
-                exception=e
-            )
+            if "memory" in str(e) or "deny" in str(e):
+                time.sleep(self.sleep_time)
+                self.sleep_time *= 2
+            else:
+                events.request.fire(
+                    request_type=self.request_type,
+                    name="Insert",
+                    response_time=(time.time() - start) * 1000,
+                    response_length=0,
+                    exception=e
+                )
 
     def search(self, data, anns_field, top_k, param=None, output_fields=None):
         if param is None:
