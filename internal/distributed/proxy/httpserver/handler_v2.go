@@ -1801,8 +1801,16 @@ func (h *HandlersV2) createIndex(ctx context.Context, c *gin.Context, anyReq any
 		}
 		c.Set(ContextRequest, req)
 
-		for key, value := range indexParam.Params {
-			req.ExtraParams = append(req.ExtraParams, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+		var err error
+		req.ExtraParams, err = convertToExtraParams(indexParam)
+		if err != nil {
+			// will not happen
+			log.Ctx(ctx).Warn("high level restful api, convertToExtraParams fail", zap.Error(err), zap.Any("request", anyReq))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
 		}
 		resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateIndex", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 			return h.proxy.CreateIndex(reqCtx, req.(*milvuspb.CreateIndexRequest))
