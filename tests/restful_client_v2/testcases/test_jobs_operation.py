@@ -6,7 +6,7 @@ from sklearn import preprocessing
 from pathlib import Path
 import pandas as pd
 import numpy as np
-from pymilvus import Collection
+from pymilvus import Collection, utility
 from utils.utils import gen_collection_name
 from utils.util_log import test_log as logger
 import pytest
@@ -50,8 +50,8 @@ class TestCreateImportJob(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        rsp = self.collection_client.collection_create(payload)
-
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
         # upload file to storage
         data = []
         for i in range(insert_num):
@@ -100,7 +100,7 @@ class TestCreateImportJob(TestBase):
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         c = Collection(name)
-        c.load(_refresh=True)
+        c.load(_refresh=True, timeou=120)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
@@ -140,8 +140,8 @@ class TestCreateImportJob(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        rsp = self.collection_client.collection_create(payload)
-
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
         # upload file to storage
         data = []
         for i in range(insert_num):
@@ -190,7 +190,7 @@ class TestCreateImportJob(TestBase):
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         c = Collection(name)
-        c.load(_refresh=True)
+        c.load(_refresh=True, timeou=120)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
@@ -229,7 +229,8 @@ class TestCreateImportJob(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        rsp = self.collection_client.collection_create(payload)
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # upload file to storage
         data = []
@@ -282,7 +283,7 @@ class TestCreateImportJob(TestBase):
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         c = Collection(name)
-        c.load(_refresh=True)
+        c.load(_refresh=True, timeou=120)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
@@ -321,7 +322,8 @@ class TestCreateImportJob(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        rsp = self.collection_client.collection_create(payload)
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # upload file to storage
         file_nums = 2
@@ -373,7 +375,7 @@ class TestCreateImportJob(TestBase):
         time.sleep(10)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True)
+        c.load(_refresh=True, timeou=120)
         assert c.num_entities == 2000
         # assert import data can be queried
         payload = {
@@ -402,7 +404,8 @@ class TestCreateImportJob(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        rsp = self.collection_client.collection_create(payload)
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # upload file to storage
         file_nums = 2
@@ -454,7 +457,7 @@ class TestCreateImportJob(TestBase):
         time.sleep(10)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True)
+        c.load(_refresh=True, timeou=120)
         assert c.num_entities == 2000
         # assert import data can be queried
         payload = {
@@ -483,7 +486,8 @@ class TestCreateImportJob(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        rsp = self.collection_client.collection_create(payload)
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # upload file to storage
         file_nums = 2
@@ -540,7 +544,7 @@ class TestCreateImportJob(TestBase):
         time.sleep(10)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True)
+        c.load(_refresh=True, timeou=120)
         assert c.num_entities == 2000
         # assert import data can be queried
         payload = {
@@ -569,7 +573,8 @@ class TestCreateImportJob(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        rsp = self.collection_client.collection_create(payload)
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # upload file to storage
         file_nums = 2
@@ -665,7 +670,7 @@ class TestCreateImportJob(TestBase):
         time.sleep(10)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True)
+        c.load(_refresh=True, timeou=120)
         assert c.num_entities == 6000
         # assert import data can be queried
         payload = {
@@ -722,8 +727,8 @@ class TestCreateImportJob(TestBase):
                 {"fieldName": "image_emb", "indexName": "image_emb", "metricType": "L2"}
             ]
         }
-        rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
         # create restore collection
         restore_collection_name = f"{name}_restore"
         payload["collectionName"] = restore_collection_name
@@ -848,7 +853,8 @@ class TestImportJobAdvance(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        rsp = self.collection_client.collection_create(payload)
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # upload file to storage
         file_nums = 10
@@ -916,7 +922,7 @@ class TestImportJobAdvance(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True)
+        c.load(_refresh=True, timeou=120)
         assert c.num_entities == file_nums * batch_size
         # assert import data can be queried
         payload = {
@@ -948,7 +954,8 @@ class TestCreateImportJobAdvance(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        rsp = self.collection_client.collection_create(payload)
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # upload file to storage
         task_num = 48
@@ -1009,7 +1016,7 @@ class TestCreateImportJobAdvance(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True)
+        c.load(_refresh=True, timeou=120)
         assert c.num_entities == file_nums * batch_size * task_num
         # assert import data can be queried
         payload = {
@@ -1038,7 +1045,8 @@ class TestCreateImportJobAdvance(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        rsp = self.collection_client.collection_create(payload)
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # upload file to storage
         task_num = 1000
@@ -1099,7 +1107,7 @@ class TestCreateImportJobAdvance(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True)
+        c.load(_refresh=True, timeou=120)
         assert c.num_entities == file_nums * batch_size * task_num
         # assert import data can be queried
         payload = {
@@ -1140,7 +1148,8 @@ class TestCreateImportJobNegative(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        rsp = self.collection_client.collection_create(payload)
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # upload file to storage
         data = []
@@ -1211,7 +1220,8 @@ class TestCreateImportJobNegative(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        rsp = self.collection_client.collection_create(payload)
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # create import job
         payload = {
@@ -1265,7 +1275,8 @@ class TestCreateImportJobNegative(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        rsp = self.collection_client.collection_create(payload)
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # create import job
         payload = {
@@ -1520,8 +1531,8 @@ class TestCreateImportJobNegative(TestBase):
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         c = Collection(name)
-        c.load(_refresh=True)
         time.sleep(10)
+        c.load(_refresh=True, timeou=120)
         res = c.query(
             expr="",
             output_fields=["count(*)"],

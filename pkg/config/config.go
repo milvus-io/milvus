@@ -96,9 +96,15 @@ func flattenNode(node *yaml.Node, parentKey string, result map[string]string) {
 
 			switch valueNode.Kind {
 			case yaml.ScalarNode:
-				// Scalar value, store it as a string
-				result[lowerKey(fullKey)] = valueNode.Value
-				result[formatKey(fullKey)] = valueNode.Value
+				// handle null value
+				if valueNode.Tag == "!!null" {
+					result[lowerKey(fullKey)] = ""
+					result[formatKey(fullKey)] = ""
+				} else {
+					// Scalar value, store it as a string
+					result[lowerKey(fullKey)] = valueNode.Value
+					result[formatKey(fullKey)] = valueNode.Value
+				}
 			case yaml.MappingNode:
 				// Nested map, process recursively
 				flattenNode(valueNode, fullKey, result)

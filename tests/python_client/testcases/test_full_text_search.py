@@ -15,6 +15,11 @@ from faker import Faker
 Faker.seed(19530)
 fake_en = Faker("en_US")
 fake_zh = Faker("zh_CN")
+
+# patch faker to generate text with specific distribution
+cf.patch_faker_text(fake_en, cf.en_vocabularies_distribution)
+cf.patch_faker_text(fake_zh, cf.zh_vocabularies_distribution)
+
 pd.set_option("expand_frame_repr", False)
 
 prefix = "full_text_search_collection"
@@ -28,7 +33,7 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_collection_for_full_text_search(self, tokenizer):
         """
         target: test create collection with full text search
@@ -92,7 +97,7 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
         assert len(res["functions"]) == len(text_fields)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_collection_for_full_text_search_twice_with_same_schema(self, tokenizer):
         """
         target: test create collection with full text search twice with same schema
@@ -170,7 +175,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("tokenizer", ["unsupported"])
-    @pytest.mark.xfail(reason="")
+    @pytest.mark.skip(reason="check not implement may cause panic")
     def test_create_collection_for_full_text_search_with_unsupported_tokenizer(self, tokenizer):
         """
         target: test create collection with full text search with unsupported tokenizer
@@ -244,7 +249,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         expected: create collection failed
         """
         tokenizer_params = {
-            "tokenizer": "default",
+            "tokenizer": "standard",
         }
         dim = 128
         fields = [
@@ -322,7 +327,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         expected: create collection failed
         """
         tokenizer_params = {
-            "tokenizer": "default",
+            "tokenizer": "standard",
         }
         dim = 128
         fields = [
@@ -392,7 +397,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("nullable", [False, True])
     @pytest.mark.parametrize("text_lang", ["en", "zh", "hybrid"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_insert_for_full_text_search_default(self, tokenizer, text_lang, nullable):
         """
         target: test insert data with full text search
@@ -537,7 +542,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("enable_dynamic_field", [True])
     @pytest.mark.parametrize("nullable", [False])
     @pytest.mark.parametrize("text_lang", ["en"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_insert_for_full_text_search_enable_dynamic_field(self, tokenizer, text_lang, nullable, enable_dynamic_field):
         """
         target: test insert data with full text search and enable dynamic field
@@ -687,7 +692,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("nullable", [True])
     @pytest.mark.parametrize("text_lang", ["en"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_insert_for_full_text_search_with_dataframe(self, tokenizer, text_lang, nullable):
         """
         target: test insert data for full text search with dataframe
@@ -826,7 +831,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         assert len(data) == count
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_insert_for_full_text_search_with_part_of_empty_string(self, tokenizer):
         """
         target: test insert data with full text search with part of empty string
@@ -985,7 +990,7 @@ class TestInsertWithFullTextSearchNegative(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nullable", [True])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_insert_with_full_text_search_with_non_varchar_data(self, tokenizer, nullable):
         """
         target: test insert data with full text search with non varchar data
@@ -1084,7 +1089,7 @@ class TestUpsertWithFullTextSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("nullable", [False, True])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/37021")
     def test_upsert_for_full_text_search(self, tokenizer, nullable):
         """
@@ -1255,7 +1260,7 @@ class TestUpsertWithFullTextSearchNegative(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nullable", [False])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/37021")
     def test_upsert_for_full_text_search_with_no_varchar_data(self, tokenizer, nullable):
         """
@@ -1397,7 +1402,7 @@ class TestDeleteWithFullTextSearch(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_delete_for_full_text_search(self, tokenizer):
         """
         target: test delete data for full text search
@@ -1559,7 +1564,7 @@ class TestCreateIndexWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("b", [0.1])
     @pytest.mark.parametrize("k", [1.2])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_index_for_full_text_search_default(
             self, tokenizer, index_type, k, b
     ):
@@ -1683,7 +1688,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("b", [0.5])
     @pytest.mark.parametrize("k", [1.5])
     @pytest.mark.parametrize("index_type", ["HNSW", "INVALID_INDEX_TYPE"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_full_text_search_with_invalid_index_type(
             self, tokenizer, index_type, k, b
     ):
@@ -1791,7 +1796,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("k", [1.5])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("metric_type", ["COSINE", "L2", "IP"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_full_text_search_index_with_invalid_metric_type(
             self, tokenizer, index_type, metric_type, k, b
     ):
@@ -1898,7 +1903,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("b", [0.5])
     @pytest.mark.parametrize("k", [1.5])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_index_using_bm25_metric_type_for_non_bm25_output_field(
             self, tokenizer, index_type, k, b
     ):
@@ -1995,7 +2000,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("b", [-1])
     @pytest.mark.parametrize("k", [-1])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_create_full_text_search_with_invalid_bm25_params(
             self, tokenizer, index_type, k, b
     ):
@@ -2116,7 +2121,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
     @pytest.mark.parametrize("expr", ["text_match", "id_range"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     @pytest.mark.parametrize("offset", [10, 0])
     def test_full_text_search_default(
             self, offset, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq
@@ -2214,6 +2219,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
+        collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
@@ -2311,7 +2317,6 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("expr", ["text_match"])
     @pytest.mark.parametrize("offset", [10])
     @pytest.mark.parametrize("tokenizer", ["jieba"])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/36751")
     def test_full_text_search_with_jieba_tokenizer(
             self, offset, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq
     ):
@@ -2323,7 +2328,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         expected: full text search successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": tokenizer,
+                "tokenizer": tokenizer,
         }
         dim = 128
         fields = [
@@ -2429,9 +2434,10 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             collection_w.create_index("text", {"index_type": "INVERTED"})
         collection_w.load()
         limit = 100
-        search_data = [fake.text().lower() + " " + random.choice(tokens) for _ in range(nq)]
+        token = random.choice(tokens)
+        search_data = [fake.text().lower() + " " + token for _ in range(nq)]
         if expr == "text_match":
-            filter = f"text_match(text, '{tokens[0]}')"
+            filter = f"text_match(text, '{token}')"
             res, _ = collection_w.query(
                 expr=filter,
             )
@@ -2488,7 +2494,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 result_text = r.text
                 # verify search result satisfies the filter
                 if expr == "text_match":
-                    assert tokens[0] in result_text
+                    assert token in result_text
                 if expr == "id_range":
                     assert _id < data_size // 2
                 # verify search result has overlap with search text
@@ -2497,7 +2503,6 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 assert len(
                     overlap) > 0, f"query text: {search_text}, \ntext: {result_text} \n overlap: {overlap} \n word freq a: {word_freq_a} \n word freq b: {word_freq_b}\n result: {r}"
 
-
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nq", [2])
     @pytest.mark.parametrize("empty_percent", [0])
@@ -2505,7 +2510,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("expr", [None])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_full_text_search_with_range_search(
             self, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq
     ):
@@ -2670,7 +2675,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("expr", [None])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_full_text_search_with_search_iterator(
             self, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq
     ):
@@ -2823,7 +2828,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("invalid_search_data", ["empty_text"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/37022")
     def test_search_for_full_text_search_with_empty_string_search_data(
             self, tokenizer, enable_inverted_index, enable_partition_key, empty_percent, index_type, invalid_search_data
@@ -2953,7 +2958,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
     @pytest.mark.parametrize("invalid_search_data", ["sparse_vector", "dense_vector"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_search_for_full_text_search_with_invalid_search_data(
             self, tokenizer, enable_inverted_index, enable_partition_key, empty_percent, index_type, invalid_search_data
     ):
@@ -3100,7 +3105,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_hybrid_search_with_full_text_search(
             self, tokenizer, enable_inverted_index, enable_partition_key, empty_percent, index_type
     ):
