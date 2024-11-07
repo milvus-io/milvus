@@ -1790,10 +1790,9 @@ class TestCollectionSearch(TestcaseBase):
         dim = 64
         auto_id = True
         enable_dynamic_field = True
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
-                                                                                  1, auto_id=auto_id, dim=dim,
-                                                                                  enable_dynamic_field=enable_dynamic_field)[
-                                                     0:5]
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, nb, 1, auto_id=auto_id, dim=dim,
+                                         enable_dynamic_field=enable_dynamic_field)[0:5]
         # 2. release collection
         log.info("test_search_collection_after_release_load: releasing collection %s" %
                  collection_w.name)
@@ -1974,8 +1973,7 @@ class TestCollectionSearch(TestcaseBase):
         auto_id = True
         enable_dynamic_field = False
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 100,
-                                                                      auto_id=auto_id,
-                                                                      dim=min_dim,
+                                                                      auto_id=auto_id, dim=min_dim,
                                                                       enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. search
         nq = 2
@@ -2064,12 +2062,9 @@ class TestCollectionSearch(TestcaseBase):
         auto_id = True
         enable_dynamic_field = False
         self._connect()
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
-                                                                                  partition_num=1,
-                                                                                  auto_id=auto_id,
-                                                                                  dim=dim, is_index=False,
-                                                                                  enable_dynamic_field=enable_dynamic_field)[
-                                                     0:5]
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, partition_num=1, auto_id=auto_id,
+                                         dim=dim, is_index=False, enable_dynamic_field=enable_dynamic_field)[0:5]
         HNSW_index_params = {"M": M, "efConstruction": efConstruction}
         HNSW_index = {"index_type": "HNSW",
                       "params": HNSW_index_params, "metric_type": "L2"}
@@ -2100,12 +2095,9 @@ class TestCollectionSearch(TestcaseBase):
         auto_id = False
         enable_dynamic_field = False
         self._connect()
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
-                                                                                  partition_num=1,
-                                                                                  auto_id=auto_id,
-                                                                                  dim=dim, is_index=False,
-                                                                                  enable_dynamic_field=enable_dynamic_field)[
-                                                     0:5]
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, partition_num=1, auto_id=auto_id,
+                                         dim=dim, is_index=False, enable_dynamic_field=enable_dynamic_field)[0:5]
         # nlist is of no use
         HNSW_index_params = {
             "M": M, "efConstruction": efConstruction, "nlist": 100}
@@ -2144,7 +2136,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = \
             self.init_collection_general(prefix, True, 5000, partition_num=1,
                                          auto_id=auto_id, dim=dim, is_index=False,
-                                         enable_dynamic_field=enable_dynamic_field)[ 0:5]
+                                         enable_dynamic_field=enable_dynamic_field)[0:5]
         HNSW_index_params = {"M": M, "efConstruction": efConstruction}
         HNSW_index = {"index_type": "HNSW",
                       "params": HNSW_index_params, "metric_type": "L2"}
@@ -2175,13 +2167,10 @@ class TestCollectionSearch(TestcaseBase):
         dim = 64
         auto_id = False
         enable_dynamic_field = False
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
-                                                                                  partition_num=1,
-                                                                                  is_all_data_type=True,
-                                                                                  auto_id=auto_id,
-                                                                                  dim=dim, is_index=False,
-                                                                                  enable_dynamic_field=enable_dynamic_field)[
-                                                     0:5]
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, 5000, partition_num=1, is_all_data_type=True,
+                                         auto_id=auto_id, dim=dim, is_index=False,
+                                         enable_dynamic_field=enable_dynamic_field)[0:5]
         # 2. create index on vector field and load
         params = cf.get_index_params_params(index)
         default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
@@ -2231,14 +2220,11 @@ class TestCollectionSearch(TestcaseBase):
         if index == "DISKANN":
             pytest.skip("https://github.com/milvus-io/milvus/issues/30793")
         # 1. initialize with data
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
-                                                                                  partition_num=1,
-                                                                                  is_all_data_type=True,
-                                                                                  auto_id=auto_id,
-                                                                                  dim=default_dim, is_index=False,
-                                                                                  enable_dynamic_field=enable_dynamic_field,
-                                                                                  multiple_dim_array=[default_dim,
-                                                                                                      default_dim])[0:5]
+        collection_w, _, _, insert_ids, time_stamp =\
+            self.init_collection_general(prefix, True, 5000, partition_num=1, is_all_data_type=True,
+                                         auto_id=auto_id, dim=default_dim, is_index=False,
+                                         enable_dynamic_field=enable_dynamic_field,
+                                         multiple_dim_array=[default_dim, default_dim])[0:5]
         # 2. create index on vector field and load
         params = cf.get_index_params_params(index)
         default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
@@ -2282,12 +2268,10 @@ class TestCollectionSearch(TestcaseBase):
         dim = 64
         auto_id = False
         enable_dynamic_field = False
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
-                                                                                  partition_num=1,
-                                                                                  auto_id=auto_id,
-                                                                                  dim=dim, is_index=False,
-                                                                                  enable_dynamic_field=enable_dynamic_field)[
-                                                     0:5]
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, 5000, partition_num=1, auto_id=auto_id,
+                                         dim=dim, is_index=False,
+                                         enable_dynamic_field=enable_dynamic_field)[0:5]
         # 2. create index and load
         params = cf.get_index_params_params(index)
         if params.get("m"):
@@ -2424,12 +2408,9 @@ class TestCollectionSearch(TestcaseBase):
         dim = 64
         auto_id = True
         enable_dynamic_field = True
-        collection_w, _vectors, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
-                                                                                         partition_num=1,
-                                                                                         auto_id=auto_id,
-                                                                                         dim=dim, is_index=False,
-                                                                                         enable_dynamic_field=enable_dynamic_field)[
-                                                            0:5]
+        collection_w, _vectors, _, insert_ids, time_stamp =\
+            self.init_collection_general(prefix, True, 5000, partition_num=1, auto_id=auto_id,
+                                         dim=dim, is_index=False, enable_dynamic_field=enable_dynamic_field)[0:5]
         # 2. get vectors that inserted into collection
         original_vectors = []
         if enable_dynamic_field:
@@ -2492,12 +2473,9 @@ class TestCollectionSearch(TestcaseBase):
         dim = 64
         auto_id = True
         enable_dynamic_field = False
-        collection_w, _vectors, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
-                                                                                         partition_num=1,
-                                                                                         auto_id=auto_id,
-                                                                                         dim=dim, is_index=False,
-                                                                                         enable_dynamic_field=enable_dynamic_field)[
-                                                            0:5]
+        collection_w, _vectors, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, 5000, partition_num=1, auto_id=auto_id,
+                                         dim=dim, is_index=False, enable_dynamic_field=enable_dynamic_field)[0:5]
         # 2. get vectors that inserted into collection
         original_vectors = []
         if enable_dynamic_field:
@@ -2562,12 +2540,9 @@ class TestCollectionSearch(TestcaseBase):
         dim = 64
         auto_id = True
         enable_dynamic_field = False
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
-                                                                                  partition_num=1,
-                                                                                  auto_id=auto_id,
-                                                                                  dim=dim, is_index=False,
-                                                                                  enable_dynamic_field=enable_dynamic_field)[
-                                                     0:5]
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, 5000, partition_num=1, auto_id=auto_id,
+                                         dim=dim, is_index=False, enable_dynamic_field=enable_dynamic_field)[0:5]
         # 2. create different index
         params = cf.get_index_params_params(index)
         if params.get("m"):
@@ -2608,8 +2583,7 @@ class TestCollectionSearch(TestcaseBase):
         auto_id = False
         enable_dynamic_field = False
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim,
+                                                                      auto_id=auto_id, dim=dim,
                                                                       enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. search for multiple times
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
@@ -2638,11 +2612,9 @@ class TestCollectionSearch(TestcaseBase):
         dim = 64
         auto_id = True
         enable_dynamic_field = False
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
-                                                                                  auto_id=auto_id,
-                                                                                  dim=dim,
-                                                                                  enable_dynamic_field=enable_dynamic_field)[
-                                                     0:5]
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, nb, auto_id=auto_id, dim=dim,
+                                         enable_dynamic_field=enable_dynamic_field)[0:5]
         # 2. search
         log.info("test_search_sync_async_multiple_times: searching collection %s" %
                  collection_w.name)
@@ -2704,12 +2676,9 @@ class TestCollectionSearch(TestcaseBase):
         nb = 1200
         auto_id = False
         enable_dynamic_field = True
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
-                                                                                  partition_num=1,
-                                                                                  auto_id=auto_id,
-                                                                                  is_index=False,
-                                                                                  enable_dynamic_field=enable_dynamic_field)[
-                                                     0:5]
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, nb, partition_num=1, auto_id=auto_id,
+                                         is_index=False, enable_dynamic_field=enable_dynamic_field)[0:5]
 
         # 2. create index
         default_index = {"index_type": "IVF_FLAT",
@@ -2747,10 +2716,8 @@ class TestCollectionSearch(TestcaseBase):
         nb = 1000
         auto_id = False
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                      partition_num=1,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim,
-                                                                      is_index=False)[0:4]
+                                                                      partition_num=1, auto_id=auto_id,
+                                                                      dim=dim, is_index=False)[0:4]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
@@ -2785,11 +2752,8 @@ class TestCollectionSearch(TestcaseBase):
         dim = 64
         auto_id = False
         enable_dynamic_field = False
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                      partition_num=1,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim,
-                                                                      is_index=False,
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb, partition_num=1,
+                                                                      auto_id=auto_id, dim=dim, is_index=False,
                                                                       enable_dynamic_field=enable_dynamic_field)[0:4]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create index
@@ -2824,8 +2788,7 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with data
         dim = 64
         auto_id = True
-        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id,
-                                                    dim=dim, is_index=False)[0]
+        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create empty partition
         partition_name = "search_partition_empty"
@@ -2862,13 +2825,9 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with binary data
         dim = 64
         auto_id = False
-        collection_w, _, binary_raw_vector, insert_ids, time_stamp = self.init_collection_general(prefix, True, 2,
-                                                                                                  is_binary=True,
-                                                                                                  auto_id=auto_id,
-                                                                                                  dim=dim,
-                                                                                                  is_index=False,
-                                                                                                  is_flush=is_flush)[
-                                                                     0:5]
+        collection_w, _, binary_raw_vector, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, 2, is_binary=True, auto_id=auto_id,
+                                         dim=dim, is_index=False, is_flush=is_flush)[0:5]
         # 2. create index on sclalar and vector field
         default_index = {"index_type": "INVERTED", "params": {}}
         collection_w.create_index(ct.default_float_field_name, default_index)
@@ -2907,12 +2866,9 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with binary data
         dim = 64
         auto_id = False
-        collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
-                                                                                      is_binary=True,
-                                                                                      auto_id=auto_id,
-                                                                                      dim=dim,
-                                                                                      is_index=False,
-                                                                                      is_flush=is_flush)[0:4]
+        collection_w, _, binary_raw_vector, insert_ids = \
+            self.init_collection_general(prefix, True, 2, is_binary=True, auto_id=auto_id,
+                                         dim=dim, is_index=False, is_flush=is_flush)[0:4]
         # 2. create index
         default_index = {"index_type": index, "params": {
             "nlist": 128}, "metric_type": "HAMMING"}
@@ -2950,12 +2906,9 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with binary data
         dim = 64
         auto_id = False
-        collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
-                                                                                      is_binary=True,
-                                                                                      auto_id=auto_id,
-                                                                                      dim=dim,
-                                                                                      is_index=False,
-                                                                                      is_flush=is_flush)[0:4]
+        collection_w, _, binary_raw_vector, insert_ids = \
+            self.init_collection_general(prefix, True, 2, is_binary=True, auto_id=auto_id,
+                                         dim=dim, is_index=False, is_flush=is_flush)[0:4]
         log.info("auto_id= %s, _async= %s" % (auto_id, _async))
         # 2. create index
         default_index = {"index_type": index, "params": {
@@ -3178,15 +3131,10 @@ class TestCollectionSearch(TestcaseBase):
         dim = 64
         auto_id = True
         enable_dynamic_field = False
-        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                             is_all_data_type=True,
-                                                                             auto_id=auto_id,
-                                                                             dim=dim, is_index=False,
-                                                                             enable_dynamic_field=enable_dynamic_field,
-                                                                             nullable_fields={
-                                                                                 ct.default_bool_field_name: null_data_percent})[
-                                                0:4]
-
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb, is_all_data_type=True, auto_id=auto_id,
+                                         dim=dim, is_index=False, enable_dynamic_field=enable_dynamic_field,
+                                         nullable_fields={ct.default_bool_field_name: null_data_percent})[0:4]
         # 2. create index and load
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
         vector_name_list.append(ct.default_float_vec_field_name)
@@ -3372,12 +3320,9 @@ class TestCollectionSearch(TestcaseBase):
         nb = 1000
         dim = 64
         enable_dynamic_field = True
-        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                             auto_id=True,
-                                                                             dim=dim,
-                                                                             is_index=False,
-                                                                             enable_dynamic_field=enable_dynamic_field)[
-                                                0:4]
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb, auto_id=True, dim=dim,
+                                         is_index=False, enable_dynamic_field=enable_dynamic_field)[0:4]
 
         # 2. create index
         index_param = {"index_type": "IVF_FLAT",
@@ -3458,12 +3403,10 @@ class TestCollectionSearch(TestcaseBase):
                            ct.default_float_field_name: null_data_percent,
                            ct.default_double_field_name: null_data_percent,
                            ct.default_string_field_name: null_data_percent}
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                      is_all_data_type=True,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim,
-                                                                      multiple_dim_array=[dim, dim],
-                                                                      nullable_fields=nullable_fields)[0:4]
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb, is_all_data_type=True,
+                                         auto_id=auto_id, dim=dim, multiple_dim_array=[dim, dim],
+                                         nullable_fields=nullable_fields)[0:4]
         # 2. search
         log.info("test_search_expression_all_data_type: Searching collection %s" %
                  collection_w.name)
@@ -4086,11 +4029,10 @@ class TestCollectionSearch(TestcaseBase):
         enable_dynamic_field = False
         threads_num = 10
         threads = []
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                      auto_id=auto_id, dim=dim,
-                                                                      enable_dynamic_field=enable_dynamic_field,
-                                                                      nullable_fields={ct.default_string_field_name:
-                                                                                           null_data_percent})[0:4]
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb, auto_id=auto_id, dim=dim,
+                                         enable_dynamic_field=enable_dynamic_field,
+                                         nullable_fields={ct.default_string_field_name: null_data_percent})[0:4]
 
         def search(collection_w):
             vectors = [[random.random() for _ in range(dim)]
@@ -4129,16 +4071,14 @@ class TestCollectionSearch(TestcaseBase):
         enable_dynamic_field = False
         threads_num = 10
         threads = []
-        collection_w_1, _, _, insert_ids = self.init_collection_general(prefix, False, nb,
-                                                                        auto_id=True, dim=dim,
-                                                                        enable_dynamic_field=enable_dynamic_field,
-                                                                        nullable_fields={
-                                                                            ct.default_json_field_name: 1})[0:4]
-        collection_w_2, _, _, insert_ids = self.init_collection_general(prefix, False, nb,
-                                                                        auto_id=True, dim=dim,
-                                                                        enable_dynamic_field=enable_dynamic_field,
-                                                                        nullable_fields={
-                                                                            ct.default_json_field_name: 1})[0:4]
+        collection_w_1, _, _, insert_ids = \
+            self.init_collection_general(prefix, False, nb, auto_id=True, dim=dim,
+                                         enable_dynamic_field=enable_dynamic_field,
+                                         nullable_fields={ct.default_json_field_name: 1})[0:4]
+        collection_w_2, _, _, insert_ids = \
+            self.init_collection_general(prefix, False, nb, auto_id=True, dim=dim,
+                                         enable_dynamic_field=enable_dynamic_field,
+                                         nullable_fields={ct.default_json_field_name: 1})[0:4]
         collection_w_1.release()
         collection_w_2.release()
         # insert data
@@ -4262,11 +4202,10 @@ class TestCollectionSearch(TestcaseBase):
         nb = 10000
         dim = 64
         enable_dynamic_field = True
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
-                                                                      nb, dim=dim,
-                                                                      is_index=False,
-                                                                      enable_dynamic_field=enable_dynamic_field,
-                                                                      with_json=False)[0:4]
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb, dim=dim, is_index=False,
+                                         enable_dynamic_field=enable_dynamic_field,
+                                         with_json=False)[0:4]
 
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
@@ -4297,11 +4236,10 @@ class TestCollectionSearch(TestcaseBase):
         nb = 10000
         dim = 64
         enable_dynamic_field = True
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
-                                                                      nb, dim=dim,
-                                                                      is_index=False,
-                                                                      enable_dynamic_field=enable_dynamic_field,
-                                                                      with_json=False)[0:4]
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb, dim=dim, is_index=False,
+                                         enable_dynamic_field=enable_dynamic_field,
+                                         with_json=False)[0:4]
 
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
@@ -4335,10 +4273,9 @@ class TestCollectionSearch(TestcaseBase):
         dim = 64
         auto_id = True
         enable_dynamic_field = False
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb_old,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim,
-                                                                      enable_dynamic_field=enable_dynamic_field)[0:4]
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb_old, auto_id=auto_id,
+                                         dim=dim, enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         collection_w.search(vectors[:nq], default_search_field,
@@ -4384,8 +4321,7 @@ class TestCollectionSearch(TestcaseBase):
         auto_id = False
         enable_dynamic_field = False
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb_old,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim,
+                                                                      auto_id=auto_id, dim=dim,
                                                                       enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
@@ -4433,8 +4369,7 @@ class TestCollectionSearch(TestcaseBase):
         auto_id = True
         enable_dynamic_field = True
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb_old,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim,
+                                                                      auto_id=auto_id, dim=dim,
                                                                       enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
@@ -4476,8 +4411,7 @@ class TestCollectionSearch(TestcaseBase):
         auto_id = False
         enable_dynamic_field = True
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb_old,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim,
+                                                                      auto_id=auto_id, dim=dim,
                                                                       enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
@@ -4636,8 +4570,7 @@ class TestCollectionSearch(TestcaseBase):
         enable_dynamic_field = False
         self._connect()
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, False, nb,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim,
+                                                                      auto_id=auto_id, dim=dim,
                                                                       enable_dynamic_field=enable_dynamic_field)[0:4]
         collection_w.create_partition(partition_name)
         insert_ids = cf.insert_data(collection_w, nb, auto_id=auto_id, dim=dim,
@@ -4671,8 +4604,7 @@ class TestCollectionSearch(TestcaseBase):
         auto_id = False
         enable_dynamic_field = True
         self._connect()
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, False, nb,
-                                                                      auto_id=auto_id,
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, False, nb, auto_id=auto_id,
                                                                       dim=dim, is_index=False,
                                                                       enable_dynamic_field=enable_dynamic_field)[0:4]
         collection_w.create_partition(partition_name)
@@ -5130,10 +5062,9 @@ class TestSearchBase(TestcaseBase):
         top_k = 1
 
         # 1. initialize with data
-        collection_w, insert_entities, _, insert_ids, _ = self.init_collection_general(prefix, True, nb,
-                                                                                       is_binary=False,
-                                                                                       is_index=False,
-                                                                                       dim=dim)[0:5]
+        collection_w, insert_entities, _, insert_ids, _ = \
+            self.init_collection_general(prefix, True, nb, is_binary=False,
+                                         is_index=False, dim=dim)[0:5]
         flat_index = {"index_type": "FLAT", "params": {}, "metric_type": "IP"}
         collection_w.create_index(ct.default_float_vec_field_name, flat_index)
         insert_vectors = insert_entities[0][default_search_field].tolist()
@@ -5820,11 +5751,9 @@ class TestSearchString(TestcaseBase):
         dim = 64
         nb = 1000
         enable_dynamic_field = True
-        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True,
-                                                                             nb, dim=dim,
-                                                                             is_index=False,
-                                                                             enable_dynamic_field=enable_dynamic_field)[
-                                                0:4]
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb, dim=dim,
+                                         is_index=False, enable_dynamic_field=enable_dynamic_field)[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
@@ -5876,12 +5805,9 @@ class TestSearchString(TestcaseBase):
         """
         dim = 64
         # 1. initialize with binary data
-        collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
-                                                                                      is_binary=True,
-                                                                                      dim=dim,
-                                                                                      is_index=False,
-                                                                                      primary_field=ct.default_string_field_name)[
-                                                         0:4]
+        collection_w, _, binary_raw_vector, insert_ids = \
+            self.init_collection_general(prefix, True, 2, is_binary=True, dim=dim,
+                                         is_index=False, primary_field=ct.default_string_field_name)[0:4]
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT",
                          "params": {"nlist": 128}, "metric_type": "JACCARD"}
@@ -5912,11 +5838,9 @@ class TestSearchString(TestcaseBase):
         # 1. initialize with binary data
         dim = 128
         auto_id = True
-        collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
-                                                                                      is_binary=True,
-                                                                                      auto_id=auto_id,
-                                                                                      dim=dim,
-                                                                                      is_index=False)[0:4]
+        collection_w, _, binary_raw_vector, insert_ids = \
+            self.init_collection_general(prefix, True, 2, is_binary=True, auto_id=auto_id,
+                                         dim=dim, is_index=False)[0:4]
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT",
                          "params": {"nlist": 128}, "metric_type": "JACCARD"}
@@ -6904,8 +6828,7 @@ class TestSearchDiskann(TestcaseBase):
         enable_dynamic_field = True
         nb = 2000
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id,
-                                                                      nb=nb, dim=dim,
-                                                                      is_index=False,
+                                                                      nb=nb, dim=dim, is_index=False,
                                                                       enable_dynamic_field=enable_dynamic_field)[0:4]
 
         # 2. create index
@@ -7787,11 +7710,9 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 1. initialize without data
         auto_id = True
         enable_dynamic_field = False
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, default_nb,
-                                                                                  1, auto_id=auto_id,
-                                                                                  dim=default_dim,
-                                                                                  enable_dynamic_field=enable_dynamic_field)[
-                                                     0:5]
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, default_nb, 1, auto_id=auto_id,
+                                         dim=default_dim, enable_dynamic_field=enable_dynamic_field)[0:5]
         # 2. release collection
         log.info("test_range_search_collection_after_release_load: releasing collection %s" %
                  collection_w.name)
@@ -7869,10 +7790,9 @@ class TestCollectionRangeSearch(TestcaseBase):
         nb_old = 500
         dim = 111
         enable_dynamic_field = False
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb_old,
-                                                                                  dim=dim,
-                                                                                  enable_dynamic_field=enable_dynamic_field)[
-                                                     0:5]
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, nb_old, dim=dim,
+                                         enable_dynamic_field=enable_dynamic_field)[0:5]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         range_search_params = {"metric_type": "COSINE", "params": {"radius": 0,
@@ -7992,11 +7912,9 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 1. initialize with data
         dim = 96
         enable_dynamic_field = False
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
-                                                                                  partition_num=1,
-                                                                                  dim=dim, is_index=False,
-                                                                                  enable_dynamic_field=enable_dynamic_field)[
-                                                     0:5]
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, 5000, partition_num=1,
+                                         dim=dim, is_index=False, enable_dynamic_field=enable_dynamic_field)[0:5]
         # 2. create index and load
         params = cf.get_index_params_params(index)
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
@@ -8112,13 +8030,10 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 1. initialize with binary data
         dim = 48
         auto_id = False
-        collection_w, _, binary_raw_vector, insert_ids, time_stamp = self.init_collection_general(prefix, True, 2,
-                                                                                                  is_binary=True,
-                                                                                                  auto_id=auto_id,
-                                                                                                  dim=dim,
-                                                                                                  is_index=False,
-                                                                                                  is_flush=is_flush)[
-                                                                     0:5]
+        collection_w, _, binary_raw_vector, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, 2, is_binary=True,
+                                         auto_id=auto_id, dim=dim, is_index=False,
+                                         is_flush=is_flush)[0:5]
         # 2. create index
         default_index = {"index_type": index, "params": {
             "nlist": 128}, "metric_type": "JACCARD"}
@@ -8154,10 +8069,9 @@ class TestCollectionRangeSearch(TestcaseBase):
         expected: return empty
         """
         # 1. initialize with binary data
-        collection_w, _, binary_raw_vector, insert_ids, time_stamp = self.init_collection_general(prefix, True, 2,
-                                                                                                  is_binary=True,
-                                                                                                  dim=default_dim,
-                                                                                                  is_index=False, )[0:5]
+        collection_w, _, binary_raw_vector, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, 2, is_binary=True,
+                                         dim=default_dim, is_index=False, )[0:5]
         # 2. create index
         default_index = {"index_type": index, "params": {
             "nlist": 128}, "metric_type": "JACCARD"}
@@ -8196,12 +8110,9 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 1. initialize with binary data
         dim = 80
         auto_id = True
-        collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
-                                                                                      is_binary=True,
-                                                                                      auto_id=auto_id,
-                                                                                      dim=dim,
-                                                                                      is_index=False,
-                                                                                      is_flush=is_flush)[0:4]
+        collection_w, _, binary_raw_vector, insert_ids = \
+            self.init_collection_general(prefix, True, 2, is_binary=True, auto_id=auto_id,
+                                         dim=dim, is_index=False, is_flush=is_flush)[0:4]
         # 2. create index
         default_index = {"index_type": index, "params": {
             "nlist": 128}, "metric_type": "HAMMING"}
@@ -8237,10 +8148,9 @@ class TestCollectionRangeSearch(TestcaseBase):
         expected: return empty
         """
         # 1. initialize with binary data
-        collection_w, _, binary_raw_vector, insert_ids, time_stamp = self.init_collection_general(prefix, True, 2,
-                                                                                                  is_binary=True,
-                                                                                                  dim=default_dim,
-                                                                                                  is_index=False, )[0:5]
+        collection_w, _, binary_raw_vector, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, 2, is_binary=True,
+                                         dim=default_dim, is_index=False, )[0:5]
         # 2. create index
         default_index = {"index_type": index, "params": {
             "nlist": 128}, "metric_type": "HAMMING"}
@@ -8329,10 +8239,9 @@ class TestCollectionRangeSearch(TestcaseBase):
         expected: return empty
         """
         # 1. initialize with binary data
-        collection_w, _, binary_raw_vector, insert_ids, time_stamp = self.init_collection_general(prefix, True, 2,
-                                                                                                  is_binary=True,
-                                                                                                  dim=default_dim,
-                                                                                                  is_index=False, )[0:5]
+        collection_w, _, binary_raw_vector, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, 2, is_binary=True,
+                                         dim=default_dim, is_index=False, )[0:5]
         # 2. create index
         default_index = {"index_type": index, "params": {
             "nlist": 128}, "metric_type": "JACCARD"}
@@ -8501,11 +8410,9 @@ class TestCollectionRangeSearch(TestcaseBase):
         dim = 66
         auto_id = False
         nb = 4000
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
-                                                                                  auto_id=auto_id, dim=dim,
-                                                                                  nullable_fields={
-                                                                                      ct.default_float_field_name:
-                                                                                          null_data_percent})[0:5]
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, nb,  auto_id=auto_id, dim=dim,
+                                         nullable_fields={ct.default_float_field_name: null_data_percent})[0:5]
 
         def search(collection_w):
             vectors = [[random.random() for _ in range(dim)]
@@ -10069,8 +9976,7 @@ class TestCollectionSearchJSON(TestcaseBase):
         # 1. initialize with data
         nq = 1
         dim = 128
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(
-            prefix, True, dim=dim)[0:5]
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, dim=dim)[0:5]
         # 2. search before insert time_stamp
         log.info("test_search_json_expression_object: searching collection %s" %
                  collection_w.name)
@@ -12741,8 +12647,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         """
         # 1. initialize collection with data
         collection_w, _, _, insert_ids, time_stamp = \
-            self.init_collection_general(prefix, True, is_index=False, multiple_dim_array=[default_dim, default_dim])[
-            0:5]
+            self.init_collection_general(prefix, True, is_index=False,
+                                         multiple_dim_array=[default_dim, default_dim])[0:5]
 
         # 2. create index
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
@@ -12812,11 +12718,9 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         """
         nb, auto_id, dim, enable_dynamic_field = 20000, False, 768, False
         # 1. init collection
-        collection_w, insert_vectors, _, insert_ids = self.init_collection_general(prefix, True, nb=nb,
-                                                                                   multiple_dim_array=[dim, dim * 2],
-                                                                                   with_json=False,
-                                                                                   vector_data_type="SPARSE_FLOAT_VECTOR")[
-                                                      0:4]
+        collection_w, insert_vectors, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb=nb, multiple_dim_array=[dim, dim * 2],
+                                         with_json=False, vector_data_type="SPARSE_FLOAT_VECTOR")[0:4]
         # 2. extract vector field name
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
         # 3. prepare search params
@@ -13168,10 +13072,10 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                            ct.default_float_field_name: null_data_percent,
                            ct.default_double_field_name: null_data_percent,
                            ct.default_string_field_name: null_data_percent}
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000, partition_num=1,
-                                                                      is_all_data_type=True, dim=default_dim,
-                                                                      is_index=False, nullable_fields=nullable_fields)[
-                                         0:4]
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, 5000, partition_num=1,
+                                         is_all_data_type=True, dim=default_dim,
+                                         is_index=False, nullable_fields=nullable_fields)[0:4]
         # 2. create index on vector field and load
         index = "HNSW"
         params = cf.get_index_params_params(index)
@@ -13366,13 +13270,10 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         nb = 2000
         dim = 64
         auto_id = True
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
-                                                                                  1, auto_id=auto_id, dim=dim,
-                                                                                  nullable_fields={
-                                                                                      ct.default_string_field_name: null_data_percent},
-                                                                                  default_value_fields={
-                                                                                      ct.default_float_field_name: np.float32(
-                                                                                          10.0)})[0:5]
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, nb, 1, auto_id=auto_id, dim=dim,
+                                         nullable_fields={ct.default_string_field_name: null_data_percent},
+                                         default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:5]
         # 2. release collection
         collection_w.release()
         # 3. Search the pre-released collection after load
@@ -13401,14 +13302,11 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         expected: search successfully with limit(topK)
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000, partition_num=1,
-                                                                      is_all_data_type=True, dim=default_dim,
-                                                                      is_index=False,
-                                                                      nullable_fields={
-                                                                          ct.default_string_field_name: null_data_percent},
-                                                                      default_value_fields={
-                                                                          ct.default_float_field_name: np.float32(
-                                                                              10.0)})[0:4]
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, 5000, partition_num=1, is_all_data_type=True,
+                                         dim=default_dim, is_index=False,
+                                         nullable_fields={ct.default_string_field_name: null_data_percent},
+                                         default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:4]
         # 2. create index on vector field and load
         index = "HNSW"
         params = cf.get_index_params_params(index)
@@ -13450,9 +13348,9 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         """
         # 1. initialize with data
         dim = 64
-        collection_w = self.init_collection_general(prefix, True, dim=dim, is_index=False,
-                                                    nullable_fields={ct.default_string_field_name: null_data_percent})[
-            0]
+        collection_w = \
+            self.init_collection_general(prefix, True, dim=dim, is_index=False,
+                                         nullable_fields={ct.default_string_field_name: null_data_percent})[0]
         collection_w.create_index(field_name, {"metric_type": "L2"})
         collection_w.load()
         # 2. search iterator

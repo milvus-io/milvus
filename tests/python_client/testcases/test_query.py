@@ -2080,7 +2080,7 @@ class TestQueryParams(TestcaseBase):
             res = collection_w.query(expr=expr)[0]
             query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
             assert query_ids == set(filter_ids)
-            
+
             # query again with expression template
             expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
             expr_params = cf.get_expr_params_from_template(expressions[1])
