@@ -5,6 +5,7 @@ package datacoord
 import (
 	context "context"
 
+	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -304,6 +305,53 @@ func (_c *MockChannelManager_GetChannelNamesByCollectionID_Call) Return(_a0 []st
 }
 
 func (_c *MockChannelManager_GetChannelNamesByCollectionID_Call) RunAndReturn(run func(int64) []string) *MockChannelManager_GetChannelNamesByCollectionID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetChannelWatchInfos provides a mock function with given fields:
+func (_m *MockChannelManager) GetChannelWatchInfos() map[int64]map[string]*datapb.ChannelWatchInfo {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetChannelWatchInfos")
+	}
+
+	var r0 map[int64]map[string]*datapb.ChannelWatchInfo
+	if rf, ok := ret.Get(0).(func() map[int64]map[string]*datapb.ChannelWatchInfo); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64]map[string]*datapb.ChannelWatchInfo)
+		}
+	}
+
+	return r0
+}
+
+// MockChannelManager_GetChannelWatchInfos_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetChannelWatchInfos'
+type MockChannelManager_GetChannelWatchInfos_Call struct {
+	*mock.Call
+}
+
+// GetChannelWatchInfos is a helper method to define mock.On call
+func (_e *MockChannelManager_Expecter) GetChannelWatchInfos() *MockChannelManager_GetChannelWatchInfos_Call {
+	return &MockChannelManager_GetChannelWatchInfos_Call{Call: _e.mock.On("GetChannelWatchInfos")}
+}
+
+func (_c *MockChannelManager_GetChannelWatchInfos_Call) Run(run func()) *MockChannelManager_GetChannelWatchInfos_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockChannelManager_GetChannelWatchInfos_Call) Return(_a0 map[int64]map[string]*datapb.ChannelWatchInfo) *MockChannelManager_GetChannelWatchInfos_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockChannelManager_GetChannelWatchInfos_Call) RunAndReturn(run func() map[int64]map[string]*datapb.ChannelWatchInfo) *MockChannelManager_GetChannelWatchInfos_Call {
 	_c.Call.Return(run)
 	return _c
 }

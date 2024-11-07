@@ -1489,6 +1489,14 @@ func convertToExtraParams(indexParam IndexParam) ([]*commonpb.KeyValuePair, erro
 	if indexParam.IndexType != "" {
 		params = append(params, &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: indexParam.IndexType})
 	}
+	if indexParam.IndexType == "" {
+		for key, value := range indexParam.Params {
+			if key == common.IndexTypeKey {
+				params = append(params, &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: fmt.Sprintf("%v", value)})
+				break
+			}
+		}
+	}
 	if indexParam.MetricType != "" {
 		params = append(params, &commonpb.KeyValuePair{Key: common.MetricTypeKey, Value: indexParam.MetricType})
 	}

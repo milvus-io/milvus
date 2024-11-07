@@ -502,8 +502,11 @@ std::string
 GenIndexPathPrefix(ChunkManagerPtr cm,
                    int64_t build_id,
                    int64_t index_version) {
-    return cm->GetRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
-           GenIndexPathIdentifier(build_id, index_version);
+    boost::filesystem::path prefix = cm->GetRootPath();
+    boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
+    boost::filesystem::path path1 =
+        GenIndexPathIdentifier(build_id, index_version);
+    return (prefix / path / path1).string();
 }
 
 std::string
@@ -512,29 +515,38 @@ GenTextIndexPathPrefix(ChunkManagerPtr cm,
                        int64_t index_version,
                        int64_t segment_id,
                        int64_t field_id) {
-    return cm->GetRootPath() + "/" + std::string(TEXT_LOG_ROOT_PATH) + "/" +
-           GenTextIndexPathIdentifier(
-               build_id, index_version, segment_id, field_id);
+    boost::filesystem::path prefix = cm->GetRootPath();
+    boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
+    boost::filesystem::path path1 = GenTextIndexPathIdentifier(
+        build_id, index_version, segment_id, field_id);
+    return (prefix / path / path1).string();
 }
 
 std::string
 GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id) {
-    return cm->GetRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
-           std::to_string(build_id);
+    boost::filesystem::path prefix = cm->GetRootPath();
+    boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
+    boost::filesystem::path path1 = std::to_string(build_id);
+    return (prefix / path / path1).string();
 }
 
 std::string
 GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
                           int64_t segment_id,
                           int64_t field_id) {
-    return cm->GetRootPath() + "/" + std::string(RAWDATA_ROOT_PATH) + "/" +
-           std::to_string(segment_id) + "/" + std::to_string(field_id) + "/";
+    boost::filesystem::path prefix = cm->GetRootPath();
+    boost::filesystem::path path = std::string(RAWDATA_ROOT_PATH);
+    boost::filesystem::path path1 =
+        std::to_string(segment_id) + "/" + std::to_string(field_id) + "/";
+    return (prefix / path / path1).string();
 }
 
 std::string
 GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id) {
-    return cm->GetRootPath() + "/" + std::string(RAWDATA_ROOT_PATH) + "/" +
-           std::to_string(segment_id);
+    boost::filesystem::path prefix = cm->GetRootPath();
+    boost::filesystem::path path = std::string(RAWDATA_ROOT_PATH);
+    boost::filesystem::path path1 = std::to_string(segment_id);
+    return (prefix / path / path1).string();
 }
 
 std::unique_ptr<DataCodec>

@@ -18,12 +18,14 @@ package querycoordv2
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -34,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -240,6 +243,52 @@ func (s *Server) balanceChannels(ctx context.Context,
 	}
 
 	return nil
+}
+
+func getMetrics[T any](ctx context.Context, s *Server, req *milvuspb.GetMetricsRequest) ([]T, error) {
+	var metrics []T
+	var mu sync.Mutex
+	errorGroup, ctx := errgroup.WithContext(ctx)
+
+	for _, node := range s.nodeMgr.GetAll() {
+		node := node
+		errorGroup.Go(func() error {
+			resp, err := s.cluster.GetMetrics(ctx, node.ID(), req)
+			if err := merr.CheckRPCCall(resp, err); err != nil {
+				log.Warn("failed to get metric from QueryNode", zap.Int64("nodeID", node.ID()))
+				return err
+			}
+
+			if resp.Response == "" {
+				return nil
+			}
+
+			infos := make([]T, 0)
+			err = json.Unmarshal([]byte(resp.Response), &infos)
+			if err != nil {
+				log.Warn("invalid metrics of query node was found", zap.Error(err))
+				return err
+			}
+
+			mu.Lock()
+			metrics = append(metrics, infos...)
+			mu.Unlock()
+			return nil
+		})
+	}
+	err := errorGroup.Wait()
+
+	return metrics, err
+}
+
+func (s *Server) getChannelsFromQueryNode(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
+	channels, err := getMetrics[*metricsinfo.Channel](ctx, s, req)
+	return metricsinfo.MarshalGetMetricsValues(channels, err)
+}
+
+func (s *Server) getSegmentsFromQueryNode(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
+	segments, err := getMetrics[*metricsinfo.Segment](ctx, s, req)
+	return metricsinfo.MarshalGetMetricsValues(segments, err)
 }
 
 // TODO(dragondriver): add more detail metrics

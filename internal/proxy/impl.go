@@ -6242,7 +6242,6 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
 	log := log.Ctx(ctx).With(
-		zap.String("dbName", req.GetDbName()),
 		zap.String("collectionName", req.GetCollectionName()),
 		zap.String("partition name", req.GetPartitionName()),
 		zap.Any("files", req.GetFiles()),
@@ -6269,11 +6268,6 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		}
 	}()
 
-	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, req.GetDbName())
-	if err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		resp.Status = merr.Status(err)
@@ -6384,7 +6378,6 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		}
 	}
 	importRequest := &internalpb.ImportRequestInternal{
-		DbID:           dbInfo.dbID,
 		CollectionID:   collectionID,
 		CollectionName: req.GetCollectionName(),
 		PartitionIDs:   partitionIDs,
@@ -6409,28 +6402,14 @@ func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImp
 		}, nil
 	}
 	log := log.Ctx(ctx).With(
-		zap.String("dbName", req.GetDbName()),
 		zap.String("jobID", req.GetJobID()),
 	)
-
-	resp := &internalpb.GetImportProgressResponse{
-		Status: merr.Success(),
-	}
-
 	method := "GetImportProgress"
 	tr := timerecord.NewTimeRecorder(method)
 	log.Info(rpcReceived(method))
 
-	// Fill db id for datacoord.
-	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, req.GetDbName())
-	if err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-	req.DbID = dbInfo.dbID
-
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
-	resp, err = node.dataCoord.GetImportProgress(ctx, req)
+	resp, err := node.dataCoord.GetImportProgress(ctx, req)
 	if resp.GetStatus().GetCode() != 0 || err != nil {
 		log.Warn("get import progress failed", zap.String("reason", resp.GetStatus().GetReason()), zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel, req.GetDbName(), "").Inc()
@@ -6467,11 +6446,6 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 		err          error
 		collectionID UniqueID
 	)
-	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, req.GetDbName())
-	if err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
 	if req.GetCollectionName() != "" {
 		collectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
@@ -6480,9 +6454,7 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 			return resp, nil
 		}
 	}
-
 	resp, err = node.dataCoord.ListImports(ctx, &internalpb.ListImportsRequestInternal{
-		DbID:         dbInfo.dbID,
 		CollectionID: collectionID,
 	})
 	if resp.GetStatus().GetCode() != 0 || err != nil {
@@ -6503,26 +6475,34 @@ func DeregisterSubLabel(subLabel string) {
 
 // RegisterRestRouter registers the router for the proxy
 func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
-	// Cluster request
+	// Cluster request that executed by proxy
 	router.GET(http.ClusterInfoPath, getClusterInfo(node))
 	router.GET(http.ClusterConfigsPath, getConfigs(paramtable.Get().GetAll()))
 	router.GET(http.ClusterClientsPath, getConnectedClients)
 	router.GET(http.ClusterDependenciesPath, getDependencies)
 
-	// Hook request
+	// Hook request that executed by proxy
 	router.GET(http.HookConfigsPath, getConfigs(paramtable.GetHookParams().GetAll()))
 
-	// QueryCoord request
-	router.GET(http.QCoordSegmentsPath, getQueryComponentMetrics(node, metricsinfo.QuerySegmentDist))
-	router.GET(http.QCoordChannelsPath, getQueryComponentMetrics(node, metricsinfo.QueryChannelDist))
-	router.GET(http.QCoordAllTasksPath, getQueryComponentMetrics(node, metricsinfo.QueryCoordAllTasks))
+	// QueryCoord requests that are forwarded from proxy
+	router.GET(http.QCTargetPath, getQueryComponentMetrics(node, metricsinfo.QueryTarget))
+	router.GET(http.QCDistPath, getQueryComponentMetrics(node, metricsinfo.QueryDist))
+	router.GET(http.QCReplicaPath, getQueryComponentMetrics(node, metricsinfo.QueryReplicas))
+	router.GET(http.QCResourceGroupPath, getQueryComponentMetrics(node, metricsinfo.QueryResourceGroups))
+	router.GET(http.QCAllTasksPath, getQueryComponentMetrics(node, metricsinfo.QueryCoordAllTasks))
 
-	// DataCoord request
-	router.GET(http.DCoordAllTasksPath, getDataComponentMetrics(node, metricsinfo.DataCoordAllTasks))
-	router.GET(http.DCoordCompactionTasksPath, getDataComponentMetrics(node, metricsinfo.CompactionTasks))
-	router.GET(http.DCoordImportTasksPath, getDataComponentMetrics(node, metricsinfo.ImportTasks))
-	router.GET(http.DCoordBuildIndexTasksPath, getDataComponentMetrics(node, metricsinfo.BuildIndexTasks))
+	// QueryNode requests that are forwarded from querycoord
+	router.GET(http.QNSegmentsPath, getQueryComponentMetrics(node, metricsinfo.QuerySegments))
+	router.GET(http.QNChannelsPath, getQueryComponentMetrics(node, metricsinfo.QueryChannels))
 
-	// Datanode request
-	router.GET(http.DNodeSyncTasksPath, getDataComponentMetrics(node, metricsinfo.SyncTasks))
+	// DataCoord requests that are forwarded from proxy
+	router.GET(http.DCDistPath, getDataComponentMetrics(node, metricsinfo.DataDist))
+	router.GET(http.DCCompactionTasksPath, getDataComponentMetrics(node, metricsinfo.CompactionTasks))
+	router.GET(http.DCImportTasksPath, getDataComponentMetrics(node, metricsinfo.ImportTasks))
+	router.GET(http.DCBuildIndexTasksPath, getDataComponentMetrics(node, metricsinfo.BuildIndexTasks))
+
+	// Datanode requests that are forwarded from datacoord
+	router.GET(http.DNSyncTasksPath, getDataComponentMetrics(node, metricsinfo.SyncTasks))
+	router.GET(http.DNSegmentsPath, getDataComponentMetrics(node, metricsinfo.DataSegments))
+	router.GET(http.DNChannelsPath, getDataComponentMetrics(node, metricsinfo.DataChannels))
 }

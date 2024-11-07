@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"runtime"
 	"sync"
@@ -68,6 +69,7 @@ type TargetManagerInterface interface {
 	SaveCurrentTarget(catalog metastore.QueryCoordCatalog)
 	Recover(catalog metastore.QueryCoordCatalog) error
 	CanSegmentBeMoved(collectionID, segmentID int64) bool
+	GetTargetJSON(scope TargetScope) string
 }
 
 type TargetManager struct {
@@ -631,4 +633,29 @@ func (mgr *TargetManager) CanSegmentBeMoved(collectionID, segmentID int64) bool 
 	}
 
 	return false
+}
+
+func (mgr *TargetManager) GetTargetJSON(scope TargetScope) string {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+
+	ret := mgr.getTarget(scope)
+	if ret == nil {
+		return ""
+	}
+
+	v, err := json.Marshal(ret.toQueryCoordCollectionTargets())
+	if err != nil {
+		log.Warn("failed to marshal target", zap.Error(err))
+		return ""
+	}
+	return string(v)
+}
+
+func (mgr *TargetManager) getTarget(scope TargetScope) *target {
+	if scope == CurrentTarget {
+		return mgr.current
+	}
+
+	return mgr.next
 }

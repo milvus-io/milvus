@@ -17,11 +17,13 @@
 package meta
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -34,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -600,6 +603,64 @@ func (suite *TargetManagerSuite) TestRecover() {
 	targets, err := suite.catalog.GetCollectionTargets()
 	suite.NoError(err)
 	suite.Len(targets, 0)
+}
+
+func (suite *TargetManagerSuite) TestGetTargetJSON() {
+	collectionID := int64(1003)
+	suite.meta.PutCollection(&Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:  collectionID,
+			ReplicaNumber: 1,
+		},
+	})
+	suite.meta.PutPartition(&Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: collectionID,
+			PartitionID:  1,
+		},
+	})
+
+	nextTargetChannels := []*datapb.VchannelInfo{
+		{
+			CollectionID:        collectionID,
+			ChannelName:         "channel-1",
+			UnflushedSegmentIds: []int64{1, 2, 3, 4},
+			DroppedSegmentIds:   []int64{11, 22, 33},
+		},
+		{
+			CollectionID:        collectionID,
+			ChannelName:         "channel-2",
+			UnflushedSegmentIds: []int64{5},
+		},
+	}
+
+	nextTargetSegments := []*datapb.SegmentInfo{
+		{
+			ID:            11,
+			PartitionID:   1,
+			InsertChannel: "channel-1",
+		},
+		{
+			ID:            12,
+			PartitionID:   1,
+			InsertChannel: "channel-2",
+		},
+	}
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
+	suite.NoError(suite.mgr.UpdateCollectionNextTarget(collectionID))
+	suite.True(suite.mgr.UpdateCollectionCurrentTarget(collectionID))
+
+	jsonStr := suite.mgr.GetTargetJSON(CurrentTarget)
+	assert.NotEmpty(suite.T(), jsonStr)
+
+	var currentTarget []*metricsinfo.QueryCoordTarget
+	err := json.Unmarshal([]byte(jsonStr), &currentTarget)
+	suite.NoError(err)
+	assert.Len(suite.T(), currentTarget, 1)
+	assert.Equal(suite.T(), collectionID, currentTarget[0].CollectionID)
+	assert.Len(suite.T(), currentTarget[0].DMChannels, 2)
+	assert.Len(suite.T(), currentTarget[0].Segments, 2)
 }
 
 func TestTargetManager(t *testing.T) {

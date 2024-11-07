@@ -117,6 +117,7 @@ class ChunkManager {
     /**
      * @brief Get the Root Path
      * @return std::string
+     * Note: when join path, please check the training '/'
      */
     virtual std::string
     GetRootPath() const = 0;

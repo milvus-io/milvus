@@ -73,6 +73,13 @@ func (t *target) send(pack *MsgPack) error {
 	if t.closed {
 		return nil
 	}
+
+	if !t.timer.Stop() {
+		select {
+		case <-t.timer.C:
+		default:
+		}
+	}
 	t.timer.Reset(t.maxLag)
 	select {
 	case <-t.cancelCh.CloseCh():

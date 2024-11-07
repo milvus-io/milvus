@@ -3021,6 +3021,8 @@ def get_activate_func_from_metric_type(metric_type):
         activate_function = lambda x: (1 + x) * 0.5
     elif metric_type == "IP":
         activate_function = lambda x: 0.5 + math.atan(x)/ math.pi
+    elif metric_type == "BM25":
+        activate_function = lambda x: 2 * math.atan(x) / math.pi
     else:
         activate_function  = lambda x: 1.0 - 2*math.atan(x) / math.pi
     return activate_function

@@ -23,6 +23,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/metrics"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -182,4 +184,22 @@ func (t *target) removeCollectionTarget(collectionID int64) {
 
 func (t *target) getCollectionTarget(collectionID int64) *CollectionTarget {
 	return t.collectionTargetMap[collectionID]
+}
+
+func (t *target) toQueryCoordCollectionTargets() []*metricsinfo.QueryCoordTarget {
+	return lo.MapToSlice(t.collectionTargetMap, func(k int64, v *CollectionTarget) *metricsinfo.QueryCoordTarget {
+		segments := lo.MapToSlice(v.GetAllSegments(), func(k int64, s *datapb.SegmentInfo) *metricsinfo.Segment {
+			return metrics.NewSegmentFrom(s)
+		})
+
+		dmChannels := lo.MapToSlice(v.GetAllDmChannels(), func(k string, ch *DmChannel) *metricsinfo.DmChannel {
+			return metrics.NewDMChannelFrom(ch.VchannelInfo)
+		})
+
+		return &metricsinfo.QueryCoordTarget{
+			CollectionID: k,
+			Segments:     segments,
+			DMChannels:   dmChannels,
+		}
+	})
 }

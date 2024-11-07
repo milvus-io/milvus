@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -465,4 +467,34 @@ func (m *ReplicaManager) GetResourceGroupByCollection(collection typeutil.Unique
 	replicas := m.GetByCollection(collection)
 	ret := typeutil.NewSet(lo.Map(replicas, func(r *Replica, _ int) string { return r.GetResourceGroup() })...)
 	return ret
+}
+
+// GetReplicasJSON returns a JSON representation of all replicas managed by the ReplicaManager.
+// It locks the ReplicaManager for reading, converts the replicas to their protobuf representation,
+// marshals them into a JSON string, and returns the result.
+// If an error occurs during marshaling, it logs a warning and returns an empty string.
+func (m *ReplicaManager) GetReplicasJSON() string {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	replicas := lo.MapToSlice(m.replicas, func(i typeutil.UniqueID, r *Replica) *metricsinfo.Replica {
+		channelTowRWNodes := make(map[string][]int64)
+		for k, v := range r.replicaPB.GetChannelNodeInfos() {
+			channelTowRWNodes[k] = v.GetRwNodes()
+		}
+		return &metricsinfo.Replica{
+			ID:               r.GetID(),
+			CollectionID:     r.GetCollectionID(),
+			RWNodes:          r.GetNodes(),
+			ResourceGroup:    r.GetResourceGroup(),
+			RONodes:          r.GetRONodes(),
+			ChannelToRWNodes: channelTowRWNodes,
+		}
+	})
+	ret, err := json.Marshal(replicas)
+	if err != nil {
+		log.Warn("failed to marshal replicas", zap.Error(err))
+		return ""
+	}
+	return string(ret)
 }

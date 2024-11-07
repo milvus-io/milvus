@@ -75,6 +75,12 @@ func (t *CreateIndexTask) Await(ctx context.Context) error {
 			if finished {
 				return nil
 			}
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 			timer.Reset(t.interval)
 		case <-ctx.Done():
 			return ctx.Err()
