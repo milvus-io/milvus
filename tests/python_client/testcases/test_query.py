@@ -79,8 +79,22 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w, entities = self.init_collection_general(prefix, insert_data=True, nb=10)[0:2]
         term_expr = f'{default_int_field_name} in {entities[:default_pos]}'
-        error = {ct.err_code: 1100, ct.err_msg: "cannot parse expression: int64 in .."}
+        error = {ct.err_code: 999, ct.err_msg: "cannot parse expression: int64 in"}
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
+
+        # check missing the template variable
+        expr = "int64 in {value_0}"
+        expr_params = {"value_1": [0, 1]}
+        error = {ct.err_code: 999, ct.err_msg: "the value of expression template variable name {value_0} is not found"}
+        collection_w.query(expr=expr, expr_params=expr_params,
+                           check_task=CheckTasks.err_res, check_items=error)
+
+        # check the template variable type dismatch
+        expr = "int64 in {value_0}"
+        expr_params = {"value_0": 1}
+        error = {ct.err_code: 999, ct.err_msg: "the value of term expression template variable {value_0} is not array"}
+        collection_w.query(expr=expr, expr_params=expr_params,
+                           check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query(self, enable_dynamic_field):
@@ -409,43 +423,45 @@ class TestQueryParams(TestcaseBase):
         self.collection_wrap.query(term_expr, output_fields=["float", "int64", "int8", "varchar"],
                                    check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
-    @pytest.fixture(scope="function", params=cf.gen_normal_expressions())
-    def get_normal_expr(self, request):
-        if request.param == "":
-            pytest.skip("query with "" expr is invalid")
-        yield request.param
-
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_with_expression(self, get_normal_expr, enable_dynamic_field):
+    def test_query_with_expression(self, enable_dynamic_field):
         """
         target: test query with different expr
         method: query with different boolean expr
         expected: verify query result
         """
         # 1. initialize with data
-        nb = 1000
+        nb = 2000
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                              enable_dynamic_field=enable_dynamic_field)[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
-        expr = get_normal_expr
-        expression = expr.replace("&&", "and").replace("||", "or")
-        filter_ids = []
-        for i, _id in enumerate(insert_ids):
-            if enable_dynamic_field:
-                int64 = _vectors[i][ct.default_int64_field_name]
-                float = _vectors[i][ct.default_float_field_name]
-            else:
-                int64 = _vectors.int64[i]
-                float = _vectors.float[i]
-            if not expression or eval(expression):
-                filter_ids.append(_id)
+        for expressions in cf.gen_normal_expressions_and_templates():
+            log.debug(f"test_query_with_expression: {expressions}")
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            filter_ids = []
+            for i, _id in enumerate(insert_ids):
+                if enable_dynamic_field:
+                    int64 = _vectors[i][ct.default_int64_field_name]
+                    float = _vectors[i][ct.default_float_field_name]
+                else:
+                    int64 = _vectors.int64[i]
+                    float = _vectors.float[i]
+                if not expr or eval(expr):
+                    filter_ids.append(_id)
 
-        # query and verify result
-        res = collection_w.query(expr=expression)[0]
-        query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
-        assert query_ids == set(filter_ids)
+            # query and verify result
+            res = collection_w.query(expr=expr, limit=nb)[0]
+            query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
+            assert query_ids == set(filter_ids)
+
+            # query again with expression template
+            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+            expr_params = cf.get_expr_params_from_template(expressions[1])
+            res = collection_w.query(expr=expr, expr_params=expr_params, limit=nb)[0]
+            query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
+            assert query_ids == set(filter_ids)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_wrong_term_keyword(self):
@@ -2029,7 +2045,7 @@ class TestQueryParams(TestcaseBase):
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_enable_mmap_query_with_expression(self, get_normal_expr, enable_dynamic_field):
+    def test_enable_mmap_query_with_expression(self, enable_dynamic_field):
         """
         target: turn on mmap use different expr queries
         method: turn on mmap and query with different expr
@@ -2039,7 +2055,6 @@ class TestQueryParams(TestcaseBase):
         nb = 1000
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb, is_index=False,
                                                                              enable_dynamic_field=enable_dynamic_field)[0:4]
-
         # enable mmap
         collection_w.set_properties({'mmap.enabled': True})
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="query_expr_index")
@@ -2047,23 +2062,31 @@ class TestQueryParams(TestcaseBase):
         collection_w.load()
         # filter result with expression in collection
         _vectors = _vectors[0]
-        expr = get_normal_expr
-        expression = expr.replace("&&", "and").replace("||", "or")
-        filter_ids = []
-        for i, _id in enumerate(insert_ids):
-            if enable_dynamic_field:
-                int64 = _vectors[i][ct.default_int64_field_name]
-                float = _vectors[i][ct.default_float_field_name]
-            else:
-                int64 = _vectors.int64[i]
-                float = _vectors.float[i]
-            if not expression or eval(expression):
-                filter_ids.append(_id)
+        for expressions in cf.gen_normal_expressions_and_templates()[1:]:
+            log.debug(f"expr: {expressions}")
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            filter_ids = []
+            for i, _id in enumerate(insert_ids):
+                if enable_dynamic_field:
+                    int64 = _vectors[i][ct.default_int64_field_name]
+                    float = _vectors[i][ct.default_float_field_name]
+                else:
+                    int64 = _vectors.int64[i]
+                    float = _vectors.float[i]
+                if not expr or eval(expr):
+                    filter_ids.append(_id)
 
-        # query and verify result
-        res = collection_w.query(expr=expression)[0]
-        query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
-        assert query_ids == set(filter_ids)
+            # query and verify result
+            res = collection_w.query(expr=expr)[0]
+            query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
+            assert query_ids == set(filter_ids)
+            
+            # query again with expression template
+            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+            expr_params = cf.get_expr_params_from_template(expressions[1])
+            res = collection_w.query(expr=expr, expr_params=expr_params)[0]
+            query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
+            assert query_ids == set(filter_ids)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_mmap_query_string_field_not_primary_is_empty(self):
@@ -3823,8 +3846,7 @@ class TestQueryCount(TestcaseBase):
                            check_items={exp_res: [{count: 0}]})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression", cf.gen_normal_expressions())
-    def test_count_expressions(self, expression):
+    def test_count_expressions(self):
         """
         target: test count with expr
         method: count with expr
@@ -3835,19 +3857,28 @@ class TestQueryCount(TestcaseBase):
 
         # filter result with expression in collection
         _vectors = _vectors[0]
-        expression = expression.replace("&&", "and").replace("||", "or")
-        filter_ids = []
-        for i, _id in enumerate(insert_ids):
-            int64 = _vectors.int64[i]
-            float = _vectors.float[i]
-            if not expression or eval(expression):
-                filter_ids.append(_id)
-        res = len(filter_ids)
+        for expressions in cf.gen_normal_expressions_and_templates():
+            log.debug(f"query with expression: {expressions}")
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            filter_ids = []
+            for i, _id in enumerate(insert_ids):
+                int64 = _vectors.int64[i]
+                float = _vectors.float[i]
+                if not expr or eval(expr):
+                    filter_ids.append(_id)
+            res = len(filter_ids)
 
-        # count with expr
-        collection_w.query(expr=expression, output_fields=[count],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: res}]})
+            # count with expr
+            collection_w.query(expr=expr, output_fields=[count],
+                               check_task=CheckTasks.check_query_results,
+                               check_items={exp_res: [{count: res}]})
+
+            # count agian with expr template
+            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+            expr_params = cf.get_expr_params_from_template(expressions[1])
+            collection_w.query(expr=expr, expr_params=expr_params, output_fields=[count],
+                               check_task=CheckTasks.check_query_results,
+                               check_items={exp_res: [{count: res}]})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("bool_type", [True, False, "true", "false"])
@@ -3885,8 +3916,7 @@ class TestQueryCount(TestcaseBase):
                            check_items={exp_res: [{count: res}]})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("expression", cf.gen_normal_expressions_field(default_float_field_name))
-    def test_count_expression_auto_field(self, expression):
+    def test_count_expression_auto_field(self):
         """
         target: test count with expr
         method: count with expr
@@ -3897,21 +3927,26 @@ class TestQueryCount(TestcaseBase):
 
         # filter result with expression in collection
         _vectors = _vectors[0]
-        expression = expression.replace("&&", "and").replace("||", "or")
-        filter_ids = []
-        for i, _id in enumerate(insert_ids):
-            float = _vectors.float[i]
-            if not expression or eval(expression):
-                filter_ids.append(_id)
-        res = len(filter_ids)
+        for expressions in cf.gen_normal_expressions_and_templates_field(default_float_field_name):
+            log.debug(f"query with expression: {expressions}")
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            filter_ids = []
+            for i, _id in enumerate(insert_ids):
+                float = _vectors.float[i]
+                if not expr or eval(expr):
+                    filter_ids.append(_id)
+            res = len(filter_ids)
 
-        # count with expr
-        collection_w.query(expr=expression, output_fields=[count],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: res}]})
+            # count with expr
+            collection_w.query(expr=expr, output_fields=[count],
+                               check_task=CheckTasks.check_query_results, check_items={exp_res: [{count: res}]})
+            # count with expr and expr_params
+            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+            expr_params = cf.get_expr_params_from_template(expressions[1])
+            collection_w.query(expr=expr, expr_params=expr_params, output_fields=[count],
+                               check_task=CheckTasks.check_query_results, check_items={exp_res: [{count: res}]})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #25841")
     def test_count_expression_all_datatype(self):
         """
         target: test count with expr
@@ -3922,9 +3957,8 @@ class TestQueryCount(TestcaseBase):
         collection_w = self.init_collection_general(insert_data=True, is_all_data_type=True)[0]
 
         # count with expr
-        expression = "int64 >= 0 && int32 >= 1999 && int16 >= 0 && int8 >= 0 && float <= 1999.0 && double >= 0"
-        # expression = "int64 == 1999"
-        collection_w.query(expr=expression, output_fields=[count],
+        expr = "int64 >= 0 && int32 >= 1999 && int16 >= 0 && int8 <= 0 && float <= 1999.0 && double >= 0"
+        collection_w.query(expr=expr, output_fields=[count],
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: [{count: 1}]})
 
