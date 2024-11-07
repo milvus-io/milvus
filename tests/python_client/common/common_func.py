@@ -778,7 +778,7 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
 def gen_all_datatype_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                        auto_id=False, dim=ct.default_dim, enable_dynamic_field=True, **kwargs):
     tokenizer_params = {
-        "tokenizer": "default",
+        "tokenizer": "standard",
     }
     fields = [
         gen_int64_field(),
