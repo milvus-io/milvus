@@ -350,6 +350,52 @@ func (_c *MockRWChannelStore_GetNodesChannels_Call) RunAndReturn(run func() []*N
 	return _c
 }
 
+// HasChannel provides a mock function with given fields: channel
+func (_m *MockRWChannelStore) HasChannel(channel string) bool {
+	ret := _m.Called(channel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasChannel")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(channel)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockRWChannelStore_HasChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasChannel'
+type MockRWChannelStore_HasChannel_Call struct {
+	*mock.Call
+}
+
+// HasChannel is a helper method to define mock.On call
+//   - channel string
+func (_e *MockRWChannelStore_Expecter) HasChannel(channel interface{}) *MockRWChannelStore_HasChannel_Call {
+	return &MockRWChannelStore_HasChannel_Call{Call: _e.mock.On("HasChannel", channel)}
+}
+
+func (_c *MockRWChannelStore_HasChannel_Call) Run(run func(channel string)) *MockRWChannelStore_HasChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockRWChannelStore_HasChannel_Call) Return(_a0 bool) *MockRWChannelStore_HasChannel_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockRWChannelStore_HasChannel_Call) RunAndReturn(run func(string) bool) *MockRWChannelStore_HasChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Reload provides a mock function with given fields:
 func (_m *MockRWChannelStore) Reload() error {
 	ret := _m.Called()
