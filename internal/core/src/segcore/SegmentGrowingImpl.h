@@ -368,6 +368,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     AddTexts(FieldId field_id,
              const std::string* texts,
+             const bool* texts_valid_data,
              size_t n,
              int64_t offset_begin);
 
