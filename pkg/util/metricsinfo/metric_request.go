@@ -45,10 +45,16 @@ const (
 	MetricRequestParamsSeparator = ","
 
 	// QuerySegmentDist request for segment distribution on the query node
-	QuerySegmentDist = "qc_segment_dist"
+	QuerySegments = "qn_segments"
 
 	// QueryChannelDist request for channel distribution on the query node
-	QueryChannelDist = "qc_channel_dist"
+	QueryChannels = "qn_channels"
+
+	// QueryDist request for segment/channel/leader view distribution on querycoord
+	QueryDist = "qc_dist"
+
+	// QueryTarget request for segment/channel target on the querycoord
+	QueryTarget = "qc_target"
 
 	// QueryCoordAllTasks request for get tasks on the querycoord
 	QueryCoordAllTasks = "qc_tasks_all"
@@ -59,8 +65,8 @@ const (
 	// QueryResourceGroups request for get resource groups on the querycoord
 	QueryResourceGroups = "qc_resource_group"
 
-	// DataCoordAllTasks request for get tasks on the datacoord
-	DataCoordAllTasks = "dc_tasks_all"
+	// DataDist request for get segments on the datacoord
+	DataDist = "dc_segments"
 
 	// ImportTasks request for get import tasks from the datacoord
 	ImportTasks = "dc_import_tasks"
@@ -73,6 +79,12 @@ const (
 
 	// SyncTasks request for get sync tasks from the datanode
 	SyncTasks = "dn_sync_tasks"
+
+	// DataSegments request for get segments from the datanode
+	DataSegments = "dn_segments"
+
+	// DataChannels request for get channels from the datanode
+	DataChannels = "dn_channels"
 
 	// MetricRequestParamVerboseKey as a request parameter decide to whether return verbose value
 	MetricRequestParamVerboseKey = "verbose"

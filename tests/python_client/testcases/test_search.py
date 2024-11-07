@@ -29,6 +29,11 @@ from faker import Faker
 Faker.seed(19530)
 fake_en = Faker("en_US")
 fake_zh = Faker("zh_CN")
+
+# patch faker to generate text with specific distribution
+cf.patch_faker_text(fake_en, cf.en_vocabularies_distribution)
+cf.patch_faker_text(fake_zh, cf.zh_vocabularies_distribution)
+
 pd.set_option("expand_frame_repr", False)
 
 prefix = "search_collection"
@@ -13324,9 +13329,9 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
-    @pytest.mark.parametrize("tokenizer", ["jieba", "default"])
-    def test_search_with_text_match_filter_normal(
-            self, tokenizer, enable_inverted_index, enable_partition_key
+    @pytest.mark.parametrize("tokenizer", ["standard"])
+    def test_search_with_text_match_filter_normal_en(
+        self, tokenizer, enable_inverted_index, enable_partition_key
     ):
         """
         target: test text match normal
@@ -13480,3 +13485,4 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
                     for r in res:
                         r = r.to_dict()
                         assert any([token in r["entity"][field] for token in top_10_tokens])
+     

@@ -30,12 +30,14 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -56,6 +58,19 @@ func CheckGrpcReady(ctx context.Context, targetCh chan error) {
 func GetIP(ip string) string {
 	if len(ip) == 0 {
 		return GetLocalIP()
+	}
+	netIP := net.ParseIP(ip)
+	// not a valid ip addr
+	if netIP == nil {
+		log.Warn("cannot parse input ip, treat it as hostname/service name", zap.String("ip", ip))
+		return ip
+	}
+	// only localhost or unicast is acceptable
+	if netIP.IsUnspecified() {
+		panic(errors.Newf(`"%s" in param table is Unspecified IP address and cannot be used`))
+	}
+	if netIP.IsMulticast() || netIP.IsLinkLocalMulticast() || netIP.IsInterfaceLocalMulticast() {
+		panic(errors.Newf(`"%s" in param table is Multicast IP address and cannot be used`))
 	}
 	return ip
 }

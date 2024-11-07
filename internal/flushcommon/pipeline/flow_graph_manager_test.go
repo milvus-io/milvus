@@ -18,8 +18,8 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"math/rand"
 	"os"
 	"testing"
 
@@ -30,15 +30,20 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestMain(t *testing.M) {
@@ -98,7 +103,7 @@ func TestFlowGraphManager(t *testing.T) {
 }
 
 func generateChannelWatchInfo() *datapb.ChannelWatchInfo {
-	collectionID := int64(rand.Uint32())
+	collectionID := int64(1)
 	dmChannelName := fmt.Sprintf("%s_%d", "fake-ch-", collectionID)
 	schema := &schemapb.CollectionSchema{
 		Name: fmt.Sprintf("%s_%d", "collection_", collectionID),
@@ -123,4 +128,106 @@ func generateChannelWatchInfo() *datapb.ChannelWatchInfo {
 		State:  datapb.ChannelWatchState_WatchSuccess,
 		Schema: schema,
 	}
+}
+
+type mockTimeSender struct{}
+
+func (m *mockTimeSender) Update(channel string, ts typeutil.Timestamp, stats []*commonpb.SegmentStats) {
+	panic("implement me")
+}
+
+func (m *mockTimeSender) GetLatestTimestamp(channel string) typeutil.Timestamp {
+	return 0
+}
+
+func newFlowGraphManager(t *testing.T) (string, FlowgraphManager) {
+	mockBroker := broker.NewMockBroker(t)
+	mockBroker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockBroker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockBroker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil).Maybe()
+
+	wbm := writebuffer.NewMockBufferManager(t)
+	wbm.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	dispClient := msgdispatcher.NewMockClient(t)
+	dispClient.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(make(chan *msgstream.MsgPack), nil)
+
+	pipelineParams := &util.PipelineParams{
+		Ctx:                context.TODO(),
+		Session:            &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 0}},
+		Broker:             mockBroker,
+		TimeTickSender:     &mockTimeSender{},
+		DispClient:         dispClient,
+		WriteBufferManager: wbm,
+	}
+
+	chanWatchInfo := generateChannelWatchInfo()
+	ds, err := NewDataSyncService(
+		context.TODO(),
+		pipelineParams,
+		chanWatchInfo,
+		util.NewTickler(),
+	)
+	assert.NoError(t, err)
+
+	fm := NewFlowgraphManager()
+	fm.AddFlowgraph(ds)
+	return ds.vchannelName, fm
+}
+
+func TestGetChannelsJSON(t *testing.T) {
+	paramtable.SetNodeID(1)
+	_, fm := newFlowGraphManager(t)
+	obj := []*metricsinfo.Channel{
+		{
+			Name:           "fake-ch-_1",
+			WatchState:     "Healthy",
+			LatestTimeTick: typeutil.TimestampToString(0),
+			NodeID:         paramtable.GetNodeID(),
+			CollectionID:   1,
+		},
+	}
+
+	expectedBytes, err := json.Marshal(obj)
+	assert.NoError(t, err)
+	expectedJSON := string(expectedBytes)
+
+	jsonResult := fm.GetChannelsJSON()
+	assert.JSONEq(t, expectedJSON, jsonResult)
+}
+
+func TestGetSegmentJSON(t *testing.T) {
+	ch, fm := newFlowGraphManager(t)
+	ds, ok := fm.GetFlowgraphService(ch)
+	assert.True(t, ok)
+
+	nodeID := paramtable.GetNodeID()
+	paramtable.SetNodeID(1)
+	defer paramtable.SetNodeID(nodeID)
+
+	pkStatsFactory := func(*datapb.SegmentInfo) pkoracle.PkStat {
+		return pkoracle.NewBloomFilterSet()
+	}
+	segment := &datapb.SegmentInfo{
+		ID:           1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		Level:        datapb.SegmentLevel_L1,
+		NumOfRows:    10240,
+		CollectionID: 1,
+	}
+
+	s := metrics.NewSegmentFrom(segment)
+	s.NodeID = 1
+	s.Channel = "fake-ch-_1"
+	s.FlushedRows = 10240
+
+	expectedBytes, err := json.Marshal([]*metricsinfo.Segment{s})
+	assert.NoError(t, err)
+	expectedJSON := string(expectedBytes)
+
+	ds.metacache.AddSegment(segment, pkStatsFactory, metacache.NoneBm25StatsFactory)
+	jsonResult := fm.GetSegmentsJSON()
+	fmt.Println(jsonResult)
+	assert.JSONEq(t, expectedJSON, jsonResult)
 }

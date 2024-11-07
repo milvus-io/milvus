@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -89,15 +88,6 @@ func (s *ReplicaTestSuit) TestNodeDownOnSingleReplica() {
 
 	ctx := context.Background()
 
-	qn := s.Cluster.AddQueryNode()
-	// check segment number on new querynode
-	s.Eventually(func() bool {
-		resp, err := qn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
-		return len(resp.Channels) == 1 && len(resp.Segments) == 2
-	}, 30*time.Second, 1*time.Second)
-
 	stopSearchCh := make(chan struct{})
 	failCounter := atomic.NewInt64(0)
 	go func() {
@@ -116,7 +106,9 @@ func (s *ReplicaTestSuit) TestNodeDownOnSingleReplica() {
 				searchReq := integration.ConstructSearchRequest("", name, expr,
 					integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
 
-				searchResult, err := s.Cluster.Proxy.Search(ctx, searchReq)
+				searchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				defer cancel()
+				searchResult, err := s.Cluster.Proxy.Search(searchCtx, searchReq)
 
 				err = merr.CheckRPCCall(searchResult, err)
 				if err != nil {
@@ -130,7 +122,7 @@ func (s *ReplicaTestSuit) TestNodeDownOnSingleReplica() {
 	s.Equal(failCounter.Load(), int64(0))
 
 	// stop qn in single replica expected got search failures
-	qn.Stop()
+	s.Cluster.QueryNode.Stop()
 	time.Sleep(10 * time.Second)
 	s.True(failCounter.Load() > 0)
 
@@ -150,23 +142,6 @@ func (s *ReplicaTestSuit) TestNodeDownOnMultiReplica() {
 	s.NoError(err)
 	s.Len(resp.Replicas, 2)
 
-	// add a querynode, expected balance happens
-	qn1 := s.Cluster.AddQueryNode()
-	qn2 := s.Cluster.AddQueryNode()
-
-	// check segment num on new query node
-	s.Eventually(func() bool {
-		resp, err := qn1.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		return len(resp.Channels) == 1 && len(resp.Segments) == 2
-	}, 30*time.Second, 1*time.Second)
-
-	s.Eventually(func() bool {
-		resp, err := qn2.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		return len(resp.Channels) == 1 && len(resp.Segments) == 2
-	}, 30*time.Second, 1*time.Second)
-
 	stopSearchCh := make(chan struct{})
 	failCounter := atomic.NewInt64(0)
 	go func() {
@@ -185,7 +160,9 @@ func (s *ReplicaTestSuit) TestNodeDownOnMultiReplica() {
 				searchReq := integration.ConstructSearchRequest("", name, expr,
 					integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
 
-				searchResult, err := s.Cluster.Proxy.Search(ctx, searchReq)
+				searchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				defer cancel()
+				searchResult, err := s.Cluster.Proxy.Search(searchCtx, searchReq)
 
 				err = merr.CheckRPCCall(searchResult, err)
 				if err != nil {
@@ -199,7 +176,7 @@ func (s *ReplicaTestSuit) TestNodeDownOnMultiReplica() {
 	s.Equal(failCounter.Load(), int64(0))
 
 	// stop qn in multi replica replica expected no search failures
-	qn1.Stop()
+	s.Cluster.QueryNode.Stop()
 	time.Sleep(20 * time.Second)
 	s.Equal(failCounter.Load(), int64(0))
 

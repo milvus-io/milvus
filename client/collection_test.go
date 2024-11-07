@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -117,11 +118,20 @@ func (s *CollectionSuite) TestCreateCollectionOptions() {
 		WithField(entity.NewField().WithName("int64").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName("vector").WithDim(128).WithDataType(entity.FieldTypeFloatVector))
 
-	opt = NewCreateCollectionOption(collectionName, schema).WithShardNum(2)
+	opt = NewCreateCollectionOption(collectionName, schema).
+		WithShardNum(2).
+		WithConsistencyLevel(entity.ClEventually).
+		WithProperty(common.CollectionTTLConfigKey, 86400)
 
 	req = opt.Request()
 	s.Equal(collectionName, req.GetCollectionName())
 	s.EqualValues(2, req.GetShardsNum())
+	s.EqualValues(commonpb.ConsistencyLevel_Eventually, req.GetConsistencyLevel())
+	if s.Len(req.GetProperties(), 1) {
+		kv := req.GetProperties()[0]
+		s.Equal(common.CollectionTTLConfigKey, kv.GetKey())
+		s.Equal("86400", kv.GetValue())
+	}
 
 	collSchema = &schemapb.CollectionSchema{}
 	err = proto.Unmarshal(req.GetSchema(), collSchema)
@@ -270,6 +280,37 @@ func (s *CollectionSuite) TestRenameCollection() {
 		s.mock.EXPECT().RenameCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
 		err := s.client.RenameCollection(ctx, NewRenameCollectionOption(oldName, newName))
+		s.Error(err)
+	})
+}
+
+func (s *CollectionSuite) TestAlterCollection() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	collName := fmt.Sprintf("test_collection_%s", s.randString(6))
+	key := s.randString(6)
+	value := s.randString(6)
+
+	s.Run("success", func() {
+		s.mock.EXPECT().AlterCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, acr *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+			s.Equal(collName, acr.GetCollectionName())
+			if s.Len(acr.GetProperties(), 1) {
+				item := acr.GetProperties()[0]
+				s.Equal(key, item.GetKey())
+				s.Equal(value, item.GetValue())
+			}
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.AlterCollection(ctx, NewAlterCollectionOption(collName).WithProperty(key, value))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		s.mock.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.AlterCollection(ctx, NewAlterCollectionOption(collName).WithProperty(key, value))
 		s.Error(err)
 	})
 }

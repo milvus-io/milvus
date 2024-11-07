@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -917,4 +919,24 @@ func (rm *ResourceManager) validateResourceGroupIsDeletable(rgName string) error
 		}
 	}
 	return nil
+}
+
+func (rm *ResourceManager) GetResourceGroupsJSON() string {
+	rm.rwmutex.RLock()
+	defer rm.rwmutex.RUnlock()
+
+	rgs := lo.MapToSlice(rm.groups, func(i string, r *ResourceGroup) *metricsinfo.ResourceGroup {
+		return &metricsinfo.ResourceGroup{
+			Name:  r.GetName(),
+			Nodes: r.GetNodes(),
+			Cfg:   r.GetConfig(),
+		}
+	})
+	ret, err := json.Marshal(rgs)
+	if err != nil {
+		log.Error("failed to marshal resource groups", zap.Error(err))
+		return ""
+	}
+
+	return string(ret)
 }

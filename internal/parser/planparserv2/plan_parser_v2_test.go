@@ -719,7 +719,7 @@ func Test_FixErrorListenerNotRemoved(t *testing.T) {
 
 	normal := "1 < Int32Field < (Int16Field)"
 	for i := 0; i < 10; i++ {
-		err := handleExprWithErrorListener(schemaHelper, normal, &errorListenerTest{})
+		err := handleExpr(schemaHelper, normal)
 		err1, ok := err.(error)
 		assert.True(t, ok)
 		assert.Error(t, err1)
@@ -997,7 +997,6 @@ func Test_JSONContains(t *testing.T) {
 		`JSON_contains(JSONField, 5)`,
 		`json_contains(A, [1,2,3])`,
 		`array_contains(A, [1,2,3])`,
-		`array_contains(ArrayField, [1,2,3])`,
 		`array_contains(ArrayField, 1)`,
 		`json_contains(JSONField, 5)`,
 		`json_contains($meta, 1)`,
@@ -1030,6 +1029,8 @@ func Test_InvalidJSONContains(t *testing.T) {
 		`json_contains(A, StringField > 5)`,
 		`json_contains(A)`,
 		`json_contains(A, 5, C)`,
+		`json_contains(ArrayField, "abc")`,
+		`json_contains(ArrayField, [1,2])`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -1135,7 +1136,7 @@ func Test_JSONContainsAll(t *testing.T) {
 		`JSON_CONTAINS_ALL(A, [1,"2",3.0])`,
 		`array_contains_all(ArrayField, [1,2,3])`,
 		`array_contains_all(ArrayField, [1])`,
-		`json_contains_all(ArrayField, [1,2,3])`,
+		`array_contains_all(ArrayField, [1,2,3])`,
 	}
 	for _, expr = range exprs {
 		plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -1157,6 +1158,7 @@ func Test_JSONContainsAll(t *testing.T) {
 		`JSON_CONTAINS_ALL(A[""], [1,2,3])`,
 		`JSON_CONTAINS_ALL(Int64Field, [1,2,3])`,
 		`JSON_CONTAINS_ALL(A, B)`,
+		`JSON_CONTAINS_ALL(ArrayField, [[1,2,3]])`,
 	}
 	for _, expr = range invalidExprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -1180,8 +1182,6 @@ func Test_JSONContainsAny(t *testing.T) {
 		`json_contains_any(A, [1,"2",3.0])`,
 		`JSON_CONTAINS_ANY(A, [1,"2",3.0])`,
 		`JSON_CONTAINS_ANY(ArrayField, [1,2,3])`,
-		`JSON_CONTAINS_ANY(ArrayField, [3,4,5])`,
-		`JSON_CONTAINS_ANY(ArrayField, [1,2,3])`,
 	}
 	for _, expr = range exprs {
 		plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -1202,6 +1202,7 @@ func Test_JSONContainsAny(t *testing.T) {
 		`JSON_CONTAINS_ANY(A, [2>>a])`,
 		`JSON_CONTAINS_ANY(A[""], [1,2,3])`,
 		`JSON_CONTAINS_ANY(Int64Field, [1,2,3])`,
+		`JSON_CONTAINS_ANY(ArrayField, [[1,2,3]])`,
 		`JSON_CONTAINS_ANY(A, B)`,
 	}
 	for _, expr = range invalidExprs {
@@ -1378,25 +1379,21 @@ func BenchmarkPlanCache(b *testing.B) {
 
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
-		r := handleExpr(schemaHelper, "array_length(ArrayField) == 10")
-		err := getError(r)
-		assert.NoError(b, err)
-	}
-}
+	b.Run("cached", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			r := handleExpr(schemaHelper, "array_length(ArrayField) == 10")
+			err := getError(r)
+			assert.NoError(b, err)
+		}
+	})
 
-func BenchmarkNoPlanCache(b *testing.B) {
-	schema := newTestSchema()
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-	require.NoError(b, err)
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		r := handleExpr(schemaHelper, fmt.Sprintf("array_length(ArrayField) == %d", i))
-		err := getError(r)
-		assert.NoError(b, err)
-	}
+	b.Run("uncached", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			r := handleExpr(schemaHelper, fmt.Sprintf("array_length(ArrayField) == %d", i))
+			err := getError(r)
+			assert.NoError(b, err)
+		}
+	})
 }
 
 func randomChineseString(length int) string {
@@ -1457,12 +1454,12 @@ func BenchmarkTemplateWithString(b *testing.B) {
 
 	elements := make([]interface{}, 100)
 	for i := 0; i < 100; i++ {
-		elements[i] = generateExpressionFieldData(schemapb.DataType_String, fmt.Sprintf(`"%s",`, randomChineseString(rand.Intn(100))))
+		elements[i] = generateTemplateValue(schemapb.DataType_String, fmt.Sprintf(`"%s",`, randomChineseString(rand.Intn(100))))
 	}
 	expr := "StringField in {list}"
 
 	mv := map[string]*schemapb.TemplateValue{
-		"list": generateExpressionFieldData(schemapb.DataType_Array, elements),
+		"list": generateTemplateValue(schemapb.DataType_Array, elements),
 	}
 
 	for i := 0; i < b.N; i++ {

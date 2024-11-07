@@ -35,10 +35,12 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -383,7 +385,7 @@ func (s *SyncTaskSuite) TestNextID() {
 }
 
 func (s *SyncTaskSuite) TestSyncTask_MarshalJSON() {
-	task := &SyncTask{
+	t := &SyncTask{
 		segmentID:     12345,
 		batchRows:     100,
 		level:         datapb.SegmentLevel_L0,
@@ -394,18 +396,22 @@ func (s *SyncTaskSuite) TestSyncTask_MarshalJSON() {
 		execTime:      2 * time.Second,
 	}
 
-	expectedJSON := `{
-        "segment_id": 12345,
-        "batch_rows": 100,
-        "segment_level": "L0",
-        "ts_from": 1000,
-        "ts_to": 2000,
-        "delta_row_count": 10,
-        "flush_size": 1024,
-        "running_time": 2000000000
-    }`
+	tm := &metricsinfo.SyncTask{
+		SegmentID:     t.segmentID,
+		BatchRows:     t.batchRows,
+		SegmentLevel:  t.level.String(),
+		TSFrom:        t.tsFrom,
+		TSTo:          t.tsTo,
+		DeltaRowCount: t.deltaRowCount,
+		FlushSize:     t.flushedSize,
+		RunningTime:   t.execTime.String(),
+		NodeID:        paramtable.GetNodeID(),
+	}
+	expectedBytes, err := json.Marshal(tm)
+	s.NoError(err)
+	expectedJSON := string(expectedBytes)
 
-	data, err := task.MarshalJSON()
+	data, err := t.MarshalJSON()
 	s.NoError(err)
 	s.JSONEq(expectedJSON, string(data))
 }

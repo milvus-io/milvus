@@ -145,8 +145,8 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 			// Skip bulk insert segments.
 			continue
 		}
-		if s.GetIsInvisible() {
-			// skip invisible segments
+		if s.GetIsInvisible() && s.GetCreatedByCompaction() {
+			// skip invisible compaction segments
 			continue
 		}
 
@@ -154,11 +154,10 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		switch {
 		case s.GetState() == commonpb.SegmentState_Dropped:
 			droppedIDs.Insert(s.GetID())
-		case !isFlushState(s.GetState()):
+		case !isFlushState(s.GetState()) || s.GetIsInvisible():
 			growingIDs.Insert(s.GetID())
 		case s.GetLevel() == datapb.SegmentLevel_L0:
 			levelZeroIDs.Insert(s.GetID())
-
 		default:
 			flushedIDs.Insert(s.GetID())
 		}
@@ -185,7 +184,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	// ================================================
 	isValid := func(ids ...UniqueID) bool {
 		for _, id := range ids {
-			if seg, ok := validSegmentInfos[id]; !ok || seg == nil {
+			if seg, ok := validSegmentInfos[id]; !ok || seg == nil || seg.GetIsInvisible() {
 				return false
 			}
 		}

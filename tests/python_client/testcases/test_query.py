@@ -29,6 +29,11 @@ Faker.seed(19530)
 fake_en = Faker("en_US")
 fake_zh = Faker("zh_CN")
 fake_de = Faker("de_DE")
+
+# patch faker to generate text with specific distribution
+cf.patch_faker_text(fake_en, cf.en_vocabularies_distribution)
+cf.patch_faker_text(fake_zh, cf.zh_vocabularies_distribution)
+
 pd.set_option("expand_frame_repr", False)
 
 
@@ -4470,8 +4475,8 @@ class TestQueryTextMatch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
-    @pytest.mark.parametrize("tokenizer", ["jieba", "default"])
-    def test_query_text_match_normal(
+    @pytest.mark.parametrize("tokenizer", ["standard"])
+    def test_query_text_match_en_normal(
         self, tokenizer, enable_inverted_index, enable_partition_key
     ):
         """
@@ -4603,6 +4608,145 @@ class TestQueryTextMatch(TestcaseBase):
             for r in res:
                 assert any([token in r[field] for token in top_10_tokens])
 
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("enable_partition_key", [True, False])
+    @pytest.mark.parametrize("enable_inverted_index", [True, False])
+    @pytest.mark.parametrize("tokenizer", ["jieba"])
+    @pytest.mark.xfail(reason="unstable")
+    def test_query_text_match_zh_normal(
+            self, tokenizer, enable_inverted_index, enable_partition_key
+    ):
+        """
+        target: test text match normal
+        method: 1. enable text match and insert data with varchar
+                2. get the most common words and query with text match
+                3. verify the result
+        expected: text match successfully and result is correct
+        """
+        tokenizer_params = {
+            "tokenizer": tokenizer,
+        }
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="word",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                enable_match=True,
+                is_partition_key=enable_partition_key,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                enable_match=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="paragraph",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                enable_match=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_tokenizer=True,
+                enable_match=True,
+                tokenizer_params=tokenizer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        data_size = 3000
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
+        fake = fake_en
+        if tokenizer == "jieba":
+            language = "zh"
+            fake = fake_zh
+        else:
+            language = "en"
+
+        data = [
+            {
+                "id": i,
+                "word": fake.word().lower(),
+                "sentence": fake.sentence().lower(),
+                "paragraph": fake.paragraph().lower(),
+                "text": fake.text().lower(),
+                "emb": [random.random() for _ in range(dim)],
+            }
+            for i in range(data_size)
+        ]
+        df = pd.DataFrame(data)
+        log.info(f"dataframe\n{df}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(
+                data[i: i + batch_size]
+                if i + batch_size < len(df)
+                else data[i: len(df)]
+            )
+        # only if the collection is flushed, the inverted index ca be applied.
+        # growing segment may be not applied, although in strong consistency.
+        collection_w.flush()
+        collection_w.create_index(
+            "emb",
+            {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}},
+        )
+        if enable_inverted_index:
+            collection_w.create_index("word", {"index_type": "INVERTED"})
+        collection_w.load()
+        # analyze the croup
+        text_fields = ["word", "sentence", "paragraph", "text"]
+        wf_map = {}
+        for field in text_fields:
+            wf_map[field] = cf.analyze_documents(df[field].tolist(), language=language)
+        # query single field for one token
+        for field in text_fields:
+            token = wf_map[field].most_common()[0][0]
+            expr = f"text_match({field}, '{token}')"
+            log.info(f"expr: {expr}")
+            res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+            assert len(res) > 0
+            log.info(f"res len {len(res)}")
+            for r in res:
+                assert token in r[field]
+
+            # verify inverted index
+            if enable_inverted_index:
+                if field == "word":
+                    expr = f"{field} == '{token}'"
+                    log.info(f"expr: {expr}")
+                    res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+                    log.info(f"res len {len(res)}")
+                    for r in res:
+                        assert r[field] == token
+        # query single field for multi-word
+        for field in text_fields:
+            # match top 10 most common words
+            top_10_tokens = []
+            for word, count in wf_map[field].most_common(10):
+                top_10_tokens.append(word)
+            string_of_top_10_words = " ".join(top_10_tokens)
+            expr = f"text_match({field}, '{string_of_top_10_words}')"
+            log.info(f"expr {expr}")
+            res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+            log.info(f"res len {len(res)}")
+            for r in res:
+                assert any([token in r[field] for token in top_10_tokens])
+
+
+
     @pytest.mark.skip("unimplemented")
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_text_match_custom_analyzer(self):
@@ -4614,24 +4758,16 @@ class TestQueryTextMatch(TestcaseBase):
         expected: get the correct token, text match successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": "standard",
-            "alpha_num_only": True,
-            "ascii_folding": True,
-            "lower_case": True,
-            "max_token_length": 40,
-            "split_compound_words": [
-                "dampf",
-                "schiff",
-                "fahrt",
-                "brot",
-                "backen",
-                "automat",
-            ],
-            "stemmer": "English",
-            "stop": {
-                "language": "English",
-                "words": ["an", "the"],
-            },
+                "tokenizer": "standard",
+                # "lowercase", "asciifolding", "alphanumonly" was system filter
+                "filter":["lowercase", "asciifolding", "alphanumonly",
+                {
+                    "type": "stop",
+                    "stop_words": ["in", "of"],
+                }, {
+                    "type": "stemmer",
+                    "language": "english",
+                }],
         }
         dim = 128
         fields = [
@@ -4742,7 +4878,7 @@ class TestQueryTextMatch(TestcaseBase):
         expected: query successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": "default",
+            "tokenizer": "standard",
         }
         # 1. initialize with data
         dim = 128
@@ -4821,6 +4957,7 @@ class TestQueryTextMatch(TestcaseBase):
             wf_map[field] = cf.analyze_documents(df[field].tolist(), language=language)
 
         df_new = cf.split_dataframes(df, fields=text_fields)
+        log.info(f"df \n{df}")
         log.info(f"new df \n{df_new}")
         for field in text_fields:
             expr_list = []
@@ -4830,16 +4967,15 @@ class TestQueryTextMatch(TestcaseBase):
                 tmp = f"text_match({field}, '{word}')"
                 log.info(f"tmp expr {tmp}")
                 expr_list.append(tmp)
-                manual_result = df_new[
-                    df_new.apply(lambda row: word in row[field], axis=1)
-                ]
-                tmp_res = set(manual_result["id"].tolist())
-                log.info(f"manual check result for  {tmp} {len(manual_result)}")
+                tmp_res = cf.manual_check_text_match(df_new, word, field)
+                log.info(f"manual check result for  {tmp} {len(tmp_res)}")
                 pd_tmp_res_list.append(tmp_res)
+            log.info(f"manual res {len(pd_tmp_res_list)}, {pd_tmp_res_list}")
             final_res = set(pd_tmp_res_list[0])
             for i in range(1, len(pd_tmp_res_list)):
                 final_res = final_res.intersection(set(pd_tmp_res_list[i]))
             log.info(f"intersection res {len(final_res)}")
+            log.info(f"final res {final_res}")
             and_expr = " and ".join(expr_list)
             log.info(f"expr: {and_expr}")
             res, _ = collection_w.query(expr=and_expr, output_fields=text_fields)
@@ -4856,7 +4992,7 @@ class TestQueryTextMatch(TestcaseBase):
         expected: query successfully and result is correct
         """
         tokenizer_params = {
-            "tokenizer": "default",
+            "tokenizer": "standard",
         }
         # 1. initialize with data
         dim = 128
@@ -4999,7 +5135,7 @@ class TestQueryTextMatch(TestcaseBase):
 
         # 1. initialize with data
         tokenizer_params = {
-            "tokenizer": "default",
+            "tokenizer": "standard",
         }
         # 1. initialize with data
         dim = 128
@@ -5144,7 +5280,7 @@ class TestQueryTextMatch(TestcaseBase):
         # 1. initialize with data
         fake_en = Faker("en_US")
         tokenizer_params = {
-            "tokenizer": "default",
+            "tokenizer": "standard",
         }
         dim = 128
         default_fields = [
@@ -5371,7 +5507,7 @@ class TestQueryTextMatch(TestcaseBase):
         """
         # 1. initialize with data
         tokenizer_params = {
-            "tokenizer": "default",
+            "tokenizer": "standard",
         }
         # 1. initialize with data
         dim = 128

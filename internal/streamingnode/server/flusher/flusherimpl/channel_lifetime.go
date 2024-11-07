@@ -129,7 +129,9 @@ func (c *channelLifetime) Run() error {
 					BinLogFileCounterIncr: uint64(len(insertLogs)),
 				})
 			}
-		})
+		},
+		func() { go func() { c.Cancel() }() },
+	)
 	if err != nil {
 		return err
 	}

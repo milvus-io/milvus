@@ -16,8 +16,10 @@
 package meta
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -30,7 +32,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type ResourceManagerSuite struct {
@@ -618,4 +622,34 @@ func (suite *ResourceManagerSuite) TestUnassignFail() {
 	suite.Panics(func() {
 		suite.manager.HandleNodeDown(1)
 	})
+}
+
+func TestGetResourceGroupsJSON(t *testing.T) {
+	manager := &ResourceManager{groups: make(map[string]*ResourceGroup)}
+	rg1 := NewResourceGroup("rg1", newResourceGroupConfig(0, 10))
+	rg1.nodes = typeutil.NewUniqueSet(1, 2)
+	rg2 := NewResourceGroup("rg2", newResourceGroupConfig(0, 20))
+	rg2.nodes = typeutil.NewUniqueSet(3, 4)
+	manager.groups["rg1"] = rg1
+	manager.groups["rg2"] = rg2
+
+	jsonOutput := manager.GetResourceGroupsJSON()
+	var resourceGroups []*metricsinfo.ResourceGroup
+	err := json.Unmarshal([]byte(jsonOutput), &resourceGroups)
+	assert.NoError(t, err)
+	assert.Len(t, resourceGroups, 2)
+
+	checkResult := func(rg *metricsinfo.ResourceGroup) {
+		if rg.Name == "rg1" {
+			assert.ElementsMatch(t, []int64{1, 2}, rg.Nodes)
+		} else if rg.Name == "rg2" {
+			assert.ElementsMatch(t, []int64{3, 4}, rg.Nodes)
+		} else {
+			assert.Failf(t, "unexpected resource group name", "unexpected resource group name %s", rg.Name)
+		}
+	}
+
+	for _, rg := range resourceGroups {
+		checkResult(rg)
+	}
 }

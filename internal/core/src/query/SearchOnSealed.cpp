@@ -161,8 +161,10 @@ SearchOnSealed(const Schema& schema,
         offset += chunk_size;
     }
     if (search_info.group_by_field_id_.has_value()) {
-        result.AssembleChunkVectorIterators(
-            num_queries, 1, -1, final_qr.chunk_iterators());
+        result.AssembleChunkVectorIterators(num_queries,
+                                            num_chunk,
+                                            column->GetNumRowsUntilChunk(),
+                                            final_qr.chunk_iterators());
     } else {
         result.distances_ = std::move(final_qr.mutable_distances());
         result.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());
@@ -201,7 +203,7 @@ SearchOnSealed(const Schema& schema,
         auto sub_qr = BruteForceSearchIterators(
             dataset, vec_data, row_count, search_info, bitset, data_type);
         result.AssembleChunkVectorIterators(
-            num_queries, 1, -1, sub_qr.chunk_iterators());
+            num_queries, 1, {0}, sub_qr.chunk_iterators());
     } else {
         auto sub_qr = BruteForceSearch(
             dataset, vec_data, row_count, search_info, bitset, data_type);

@@ -165,6 +165,11 @@ class ChunkedColumnBase : public ColumnBase {
         return num_rows_until_chunk_[chunk_id];
     }
 
+    const std::vector<int64_t>&
+    GetNumRowsUntilChunk() const {
+        return num_rows_until_chunk_;
+    }
+
  protected:
     bool nullable_{false};
     size_t num_rows_{0};
@@ -310,6 +315,11 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     StringViews(int64_t chunk_id) const override {
         return std::dynamic_pointer_cast<StringChunk>(chunks_[chunk_id])
             ->StringViews();
+    }
+
+    std::shared_ptr<Chunk>
+    GetChunk(int64_t chunk_id) const {
+        return chunks_[chunk_id];
     }
 
     BufferView

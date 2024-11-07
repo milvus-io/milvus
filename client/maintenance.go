@@ -57,6 +57,12 @@ func (t *LoadTask) Await(ctx context.Context) error {
 			if loaded {
 				return nil
 			}
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 			timer.Reset(t.interval)
 		case <-ctx.Done():
 			return ctx.Err()
@@ -162,6 +168,12 @@ func (t *FlushTask) Await(ctx context.Context) error {
 			}
 			if flushed {
 				return nil
+			}
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 			timer.Reset(t.interval)
 		case <-ctx.Done():
