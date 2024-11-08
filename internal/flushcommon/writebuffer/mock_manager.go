@@ -76,6 +76,55 @@ func (_c *MockBufferManager_BufferData_Call) RunAndReturn(run func(string, []*In
 	return _c
 }
 
+// CreateNewGrowingSegment provides a mock function with given fields: ctx, channel, partition, segmentID
+func (_m *MockBufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, partition int64, segmentID int64) error {
+	ret := _m.Called(ctx, channel, partition, segmentID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateNewGrowingSegment")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64, int64) error); ok {
+		r0 = rf(ctx, channel, partition, segmentID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBufferManager_CreateNewGrowingSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateNewGrowingSegment'
+type MockBufferManager_CreateNewGrowingSegment_Call struct {
+	*mock.Call
+}
+
+// CreateNewGrowingSegment is a helper method to define mock.On call
+//   - ctx context.Context
+//   - channel string
+//   - partition int64
+//   - segmentID int64
+func (_e *MockBufferManager_Expecter) CreateNewGrowingSegment(ctx interface{}, channel interface{}, partition interface{}, segmentID interface{}) *MockBufferManager_CreateNewGrowingSegment_Call {
+	return &MockBufferManager_CreateNewGrowingSegment_Call{Call: _e.mock.On("CreateNewGrowingSegment", ctx, channel, partition, segmentID)}
+}
+
+func (_c *MockBufferManager_CreateNewGrowingSegment_Call) Run(run func(ctx context.Context, channel string, partition int64, segmentID int64)) *MockBufferManager_CreateNewGrowingSegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].(int64))
+	})
+	return _c
+}
+
+func (_c *MockBufferManager_CreateNewGrowingSegment_Call) Return(_a0 error) *MockBufferManager_CreateNewGrowingSegment_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBufferManager_CreateNewGrowingSegment_Call) RunAndReturn(run func(context.Context, string, int64, int64) error) *MockBufferManager_CreateNewGrowingSegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropChannel provides a mock function with given fields: channel
 func (_m *MockBufferManager) DropChannel(channel string) {
 	_m.Called(channel)

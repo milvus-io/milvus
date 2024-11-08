@@ -849,6 +849,20 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 			UpdateIsImporting(1, true),
 		)
 		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(UpdateAsDroppedIfEmptyWhenFlushing(1))
+		assert.NoError(t, err)
+	})
+
+	t.Run("update empty segment into flush", func(t *testing.T) {
+		meta, err := newMemoryMeta()
+		assert.NoError(t, err)
+		meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing}})
+		err = meta.UpdateSegmentsInfo(
+			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
+			UpdateAsDroppedIfEmptyWhenFlushing(1),
+		)
+		assert.NoError(t, err)
 	})
 
 	t.Run("update checkpoints and start position of non existed segment", func(t *testing.T) {

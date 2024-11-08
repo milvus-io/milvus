@@ -107,6 +107,41 @@ func (_c *MockWriteBuffer_Close_Call) RunAndReturn(run func(context.Context, boo
 	return _c
 }
 
+// CreateNewGrowingSegment provides a mock function with given fields: partitionID, segmentID, startPos
+func (_m *MockWriteBuffer) CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition) {
+	_m.Called(partitionID, segmentID, startPos)
+}
+
+// MockWriteBuffer_CreateNewGrowingSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateNewGrowingSegment'
+type MockWriteBuffer_CreateNewGrowingSegment_Call struct {
+	*mock.Call
+}
+
+// CreateNewGrowingSegment is a helper method to define mock.On call
+//   - partitionID int64
+//   - segmentID int64
+//   - startPos *msgpb.MsgPosition
+func (_e *MockWriteBuffer_Expecter) CreateNewGrowingSegment(partitionID interface{}, segmentID interface{}, startPos interface{}) *MockWriteBuffer_CreateNewGrowingSegment_Call {
+	return &MockWriteBuffer_CreateNewGrowingSegment_Call{Call: _e.mock.On("CreateNewGrowingSegment", partitionID, segmentID, startPos)}
+}
+
+func (_c *MockWriteBuffer_CreateNewGrowingSegment_Call) Run(run func(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition)) *MockWriteBuffer_CreateNewGrowingSegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64), args[2].(*msgpb.MsgPosition))
+	})
+	return _c
+}
+
+func (_c *MockWriteBuffer_CreateNewGrowingSegment_Call) Return() *MockWriteBuffer_CreateNewGrowingSegment_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockWriteBuffer_CreateNewGrowingSegment_Call) RunAndReturn(run func(int64, int64, *msgpb.MsgPosition)) *MockWriteBuffer_CreateNewGrowingSegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropPartitions provides a mock function with given fields: partitionIDs
 func (_m *MockWriteBuffer) DropPartitions(partitionIDs []int64) {
 	_m.Called(partitionIDs)

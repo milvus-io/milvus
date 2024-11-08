@@ -2,8 +2,9 @@ package utility
 
 import (
 	"context"
+	"reflect"
 
-	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
@@ -20,7 +21,7 @@ var (
 type ExtraAppendResult struct {
 	TimeTick uint64
 	TxnCtx   *message.TxnContext
-	Extra    *anypb.Any
+	Extra    protoreflect.ProtoMessage
 }
 
 // NotPersistedHint is the hint of not persisted message.
@@ -47,20 +48,29 @@ func WithExtraAppendResult(ctx context.Context, r *ExtraAppendResult) context.Co
 	return context.WithValue(ctx, extraAppendResultValue, r)
 }
 
-// AttachAppendResultExtra set extra to context
-func AttachAppendResultExtra(ctx context.Context, extra *anypb.Any) {
+// ModifyAppendResultExtra modify extra in context
+func ModifyAppendResultExtra[M protoreflect.ProtoMessage](ctx context.Context, modifier func(old M) (new M)) {
 	result := ctx.Value(extraAppendResultValue)
-	result.(*ExtraAppendResult).Extra = extra
+	var old M
+	if result.(*ExtraAppendResult).Extra != nil {
+		old = result.(*ExtraAppendResult).Extra.(M)
+	}
+	new := modifier(old)
+	if reflect.ValueOf(new).IsNil() {
+		result.(*ExtraAppendResult).Extra = nil
+		return
+	}
+	result.(*ExtraAppendResult).Extra = new
 }
 
-// AttachAppendResultTimeTick set time tick to context
-func AttachAppendResultTimeTick(ctx context.Context, timeTick uint64) {
+// ReplaceAppendResultTimeTick set time tick to context
+func ReplaceAppendResultTimeTick(ctx context.Context, timeTick uint64) {
 	result := ctx.Value(extraAppendResultValue)
 	result.(*ExtraAppendResult).TimeTick = timeTick
 }
 
-// AttachAppendResultTxnContext set txn context to context
-func AttachAppendResultTxnContext(ctx context.Context, txnCtx *message.TxnContext) {
+// ReplaceAppendResultTxnContext set txn context to context
+func ReplaceAppendResultTxnContext(ctx context.Context, txnCtx *message.TxnContext) {
 	result := ctx.Value(extraAppendResultValue)
 	result.(*ExtraAppendResult).TxnCtx = txnCtx
 }

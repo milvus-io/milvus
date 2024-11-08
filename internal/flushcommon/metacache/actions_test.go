@@ -89,6 +89,13 @@ func (s *SegmentActionSuite) TestActions() {
 	action = UpdateNumOfRows(numOfRows)
 	action(info)
 	s.Equal(numOfRows, info.NumOfRows())
+
+	info = &SegmentInfo{}
+	actions := SegmentActions(UpdateState(state), UpdateCheckpoint(cp), UpdateNumOfRows(numOfRows))
+	actions(info)
+	s.Equal(state, info.State())
+	s.Equal(cp, info.Checkpoint())
+	s.Equal(numOfRows, info.NumOfRows())
 }
 
 func (s *SegmentActionSuite) TestMergeActions() {
