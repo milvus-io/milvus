@@ -3002,31 +3002,9 @@ func (c *Core) DropPrivilegeGroup(ctx context.Context, in *milvuspb.DropPrivileg
 		return merr.Status(err), nil
 	}
 
-	redoTask := newBaseRedoTask(c.stepExecutor)
-	redoTask.AddSyncStep(NewSimpleStep("drop privilege group meta data", func(ctx context.Context) ([]nestedStep, error) {
-		if err := c.meta.DropPrivilegeGroup(in.GroupName); err != nil {
-			ctxLog.Warn("fail to drop privilege group", zap.Error(err))
-			return nil, err
-		}
-		return nil, nil
-	}))
-
-	redoTask.AddAsyncStep(NewSimpleStep("drop privilege group cache", func(ctx context.Context) ([]nestedStep, error) {
-		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-			OpType: int32(typeutil.CacheDropPrivilegeGroup),
-			OpKey:  in.GroupName,
-		}); err != nil {
-			log.Warn("drop privilege group cache failed", zap.Any("in", in), zap.Error(err))
-			return nil, err
-		}
-		return nil, nil
-	}))
-
-	err := redoTask.Execute(ctx)
-	if err != nil {
-		errMsg := "fail to execute task when dropping the privilege group"
-		log.Warn(errMsg, zap.Error(err))
-		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_DropPrivilegeGroupFailure), nil
+	if err := c.meta.DropPrivilegeGroup(in.GroupName); err != nil {
+		ctxLog.Warn("fail to drop privilege group", zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	ctxLog.Debug(method + " success")

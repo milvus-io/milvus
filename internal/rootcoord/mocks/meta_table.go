@@ -680,6 +680,67 @@ func (_c *IMetaTable_OperatePrivilegeGroup_Call) RunAndReturn(run func(string, [
 	return _c
 }
 
+
+
+// GetPrivilegeGroupRoles provides a mock function with given fields: groupName
+func (_m *IMetaTable) GetPrivilegeGroupRoles(groupName string) ([]*milvuspb.RoleEntity, error) {
+	ret := _m.Called(groupName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPrivilegeGroupRoles")
+	}
+
+	var r0 []*milvuspb.RoleEntity
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) ([]*milvuspb.RoleEntity, error)); ok {
+		return rf(groupName)
+	}
+	if rf, ok := ret.Get(0).(func(string) []*milvuspb.RoleEntity); ok {
+		r0 = rf(groupName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*milvuspb.RoleEntity)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(groupName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_GetPrivilegeGroupRoles_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPrivilegeGroupRoles'
+type IMetaTable_GetPrivilegeGroupRoles_Call struct {
+	*mock.Call
+}
+
+// GetPrivilegeGroupRoles is a helper method to define mock.On call
+//   - groupName string
+func (_e *IMetaTable_Expecter) GetPrivilegeGroupRoles(groupName interface{}) *IMetaTable_GetPrivilegeGroupRoles_Call {
+	return &IMetaTable_GetPrivilegeGroupRoles_Call{Call: _e.mock.On("GetPrivilegeGroupRoles", groupName)}
+}
+
+func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) Run(run func(groupName string)) *IMetaTable_GetPrivilegeGroupRoles_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) Return(_a0 []*milvuspb.RoleEntity, _a1 error) *IMetaTable_GetPrivilegeGroupRoles_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) RunAndReturn(run func(string) ([]*milvuspb.RoleEntity, error)) *IMetaTable_GetPrivilegeGroupRoles_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+
 // ChangeCollectionState provides a mock function with given fields: ctx, collectionID, state, ts
 func (_m *IMetaTable) ChangeCollectionState(ctx context.Context, collectionID int64, state etcdpb.CollectionState, ts uint64) error {
 	ret := _m.Called(ctx, collectionID, state, ts)

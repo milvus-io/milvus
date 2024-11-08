@@ -10,7 +10,6 @@ const (
 	CacheDeleteUser
 	CacheDropRole
 	CacheRefresh
-	CacheDropPrivilegeGroup
 )
 
 type CacheOp struct {

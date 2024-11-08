@@ -2,7 +2,7 @@
 
 SCRIPTS_DIR=$(dirname "$0")
 THIRD_PARTY_DIR=$SCRIPTS_DIR/../cmake_build/thirdparty
-API_VERSION=$(go list -m github.com/shaoting-huang/milvus-proto/go-api/v2@v2.0.0-20241106070152-9f16b6314bc5 | awk -F' ' '{print $2}')
+API_VERSION=$(go list -m github.com/shaoting-huang/milvus-proto/go-api/v2@v2.0.0-20241108033138-7b1fab17faae | awk -F' ' '{print $2}')
 
 if [ ! -d "$THIRD_PARTY_DIR/milvus-proto" ]; then
   mkdir -p $THIRD_PARTY_DIR
