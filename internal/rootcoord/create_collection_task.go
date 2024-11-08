@@ -563,3 +563,10 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 
 	return undoTask.Execute(ctx)
 }
+
+func (t *createCollectionTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(t.Req.GetDbName(), true),
+	)
+}

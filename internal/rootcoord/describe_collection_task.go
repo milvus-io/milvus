@@ -53,3 +53,12 @@ func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
 	t.Rsp = convertModelToDesc(coll, aliases, db.Name)
 	return nil
 }
+
+func (t *describeCollectionTask) GetLockerKey() LockerKey {
+	collectionName := t.core.getRealCollectionName(t.ctx, t.Req.GetDbName(), t.Req.GetCollectionName())
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(t.Req.GetDbName(), false),
+		NewCollectionLockerKey(collectionName, false),
+	)
+}
