@@ -88,8 +88,12 @@ type TargetObserver struct {
 	mut                  sync.Mutex                // Guard readyNotifiers
 	readyNotifiers       map[int64][]chan struct{} // CollectionID -> Notifiers
 
-	dispatcher *taskDispatcher[int64]
-	keylocks   *lock.KeyLock[int64]
+	// loadingDispatcher updates targets for collections that are loading (also collections without a current target).
+	loadingDispatcher *taskDispatcher[int64]
+	// loadedDispatcher updates targets for loaded collections.
+	loadedDispatcher *taskDispatcher[int64]
+
+	keylocks *lock.KeyLock[int64]
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -117,8 +121,8 @@ func NewTargetObserver(
 		keylocks:             lock.NewKeyLock[int64](),
 	}
 
-	dispatcher := newTaskDispatcher(result.check)
-	result.dispatcher = dispatcher
+	result.loadingDispatcher = newTaskDispatcher(result.check)
+	result.loadedDispatcher = newTaskDispatcher(result.check)
 	return result
 }
 
@@ -127,7 +131,8 @@ func (ob *TargetObserver) Start() {
 		ctx, cancel := context.WithCancel(context.Background())
 		ob.cancel = cancel
 
-		ob.dispatcher.Start()
+		ob.loadingDispatcher.Start()
+		ob.loadedDispatcher.Start()
 
 		ob.wg.Add(1)
 		go func() {
@@ -147,7 +152,8 @@ func (ob *TargetObserver) Stop() {
 		}
 		ob.wg.Wait()
 
-		ob.dispatcher.Stop()
+		ob.loadingDispatcher.Stop()
+		ob.loadedDispatcher.Stop()
 	})
 }
 
@@ -170,7 +176,13 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 
 		case <-ticker.C:
 			ob.clean()
-			ob.dispatcher.AddTask(ob.meta.GetAll()...)
+			loaded := lo.FilterMap(ob.meta.GetAllCollections(), func(collection *meta.Collection, _ int) (int64, bool) {
+				if collection.GetStatus() == querypb.LoadStatus_Loaded {
+					return collection.GetCollectionID(), true
+				}
+				return 0, false
+			})
+			ob.loadedDispatcher.AddTask(loaded...)
 
 		case req := <-ob.updateChan:
 			log.Info("manually trigger update target",
@@ -220,7 +232,7 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 func (ob *TargetObserver) Check(ctx context.Context, collectionID int64, partitionID int64) bool {
 	result := ob.targetMgr.IsCurrentTargetExist(collectionID, partitionID)
 	if !result {
-		ob.dispatcher.AddTask(collectionID)
+		ob.loadingDispatcher.AddTask(collectionID)
 	}
 	return result
 }
