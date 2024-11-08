@@ -1,6 +1,18 @@
-// SegmentInsertBuffer can be reused to buffer all insert data of one segment
-// buffer.Serialize will serialize the InsertBuffer and clear it
-// pkstats keeps tracking pkstats of the segment until Finish
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package compaction
 
@@ -155,7 +167,7 @@ func (w *MultiSegmentWriter) addNewWriter() error {
 	if err != nil {
 		return err
 	}
-	writer, err := NewSegmentWriter(w.schema, w.maxRows, newSegmentID, w.partitionID, w.collectionID, w.bm25Fields)
+	writer, err := NewSegmentWriter(w.schema, w.maxRows, compactionBatchSize, newSegmentID, w.partitionID, w.collectionID, w.bm25Fields)
 	if err != nil {
 		return err
 	}
@@ -351,6 +363,7 @@ type SegmentWriter struct {
 	rowCount     *atomic.Int64
 	syncedSize   *atomic.Int64
 
+	batchSize     int
 	maxBinlogSize uint64
 }
 
@@ -484,8 +497,7 @@ func (w *SegmentWriter) FlushAndIsFull() bool {
 	return w.writer.WrittenMemorySize() > w.maxBinlogSize
 }
 
-func (w *SegmentWriter) FlushAndIsFullWithBinlogMaxSize(binLogMaxSize uint64) bool {
-	w.writer.Flush()
+func (w *SegmentWriter) IsFullWithBinlogMaxSize(binLogMaxSize uint64) bool {
 	return w.writer.WrittenMemorySize() > binLogMaxSize
 }
 
@@ -528,15 +540,15 @@ func (w *SegmentWriter) GetTotalSize() int64 {
 func (w *SegmentWriter) clear() {
 	w.syncedSize.Add(int64(w.writer.WrittenMemorySize()))
 
-	writer, closers, _ := newBinlogWriter(w.collectionID, w.partitionID, w.segmentID, w.sch)
+	writer, closers, _ := newBinlogWriter(w.collectionID, w.partitionID, w.segmentID, w.sch, w.batchSize)
 	w.writer = writer
 	w.closers = closers
 	w.tsFrom = math.MaxUint64
 	w.tsTo = 0
 }
 
-func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, segID, partID, collID int64, Bm25Fields []int64) (*SegmentWriter, error) {
-	writer, closers, err := newBinlogWriter(collID, partID, segID, sch)
+func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, batchSize int, segID, partID, collID int64, Bm25Fields []int64) (*SegmentWriter, error) {
+	writer, closers, err := newBinlogWriter(collID, partID, segID, sch, batchSize)
 	if err != nil {
 		return nil, err
 	}
@@ -567,6 +579,7 @@ func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, segID, par
 		rowCount:     atomic.NewInt64(0),
 		syncedSize:   atomic.NewInt64(0),
 
+		batchSize:     batchSize,
 		maxBinlogSize: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 	}
 
@@ -576,13 +589,13 @@ func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, segID, par
 	return &segWriter, nil
 }
 
-func newBinlogWriter(collID, partID, segID int64, schema *schemapb.CollectionSchema,
+func newBinlogWriter(collID, partID, segID int64, schema *schemapb.CollectionSchema, batchSize int,
 ) (writer *storage.SerializeWriter[*storage.Value], closers []func() (*storage.Blob, error), err error) {
 	fieldWriters := storage.NewBinlogStreamWriters(collID, partID, segID, schema.Fields)
 	closers = make([]func() (*storage.Blob, error), 0, len(fieldWriters))
 	for _, w := range fieldWriters {
 		closers = append(closers, w.Finalize)
 	}
-	writer, err = storage.NewBinlogSerializeWriter(schema, partID, segID, fieldWriters, 100)
+	writer, err = storage.NewBinlogSerializeWriter(schema, partID, segID, fieldWriters, batchSize)
 	return
 }
