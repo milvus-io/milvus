@@ -33,7 +33,9 @@ import (
 
 type BinlogIO interface {
 	Download(ctx context.Context, paths []string) ([][]byte, error)
+	AsyncDownload(ctx context.Context, paths []string) []*conc.Future[any]
 	Upload(ctx context.Context, kvs map[string][]byte) error
+	AsyncUpload(ctx context.Context, kvs map[string][]byte) []*conc.Future[any]
 }
 
 type BinlogIoImpl struct {
@@ -46,6 +48,18 @@ func NewBinlogIO(cm storage.ChunkManager) BinlogIO {
 }
 
 func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, error) {
+	futures := b.AsyncDownload(ctx, paths)
+	err := conc.AwaitAll(futures...)
+	if err != nil {
+		return nil, err
+	}
+
+	return lo.Map(futures, func(future *conc.Future[any], _ int) []byte {
+		return future.Value().([]byte)
+	}), nil
+}
+
+func (b *BinlogIoImpl) AsyncDownload(ctx context.Context, paths []string) []*conc.Future[any] {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "Download")
 	defer span.End()
 
@@ -74,17 +88,15 @@ func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, 
 		futures = append(futures, future)
 	}
 
-	err := conc.AwaitAll(futures...)
-	if err != nil {
-		return nil, err
-	}
-
-	return lo.Map(futures, func(future *conc.Future[any], _ int) []byte {
-		return future.Value().([]byte)
-	}), nil
+	return futures
 }
 
 func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error {
+	futures := b.AsyncUpload(ctx, kvs)
+	return conc.AwaitAll(futures...)
+}
+
+func (b *BinlogIoImpl) AsyncUpload(ctx context.Context, kvs map[string][]byte) []*conc.Future[any] {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "Upload")
 	defer span.End()
 
@@ -108,5 +120,5 @@ func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error 
 		futures = append(futures, future)
 	}
 
-	return conc.AwaitAll(futures...)
+	return futures
 }

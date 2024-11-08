@@ -50,6 +50,30 @@ func (t *tsMsgImpl) SetTs(ts uint64) {
 	t.ts = ts
 }
 
+type CreateSegmentMessageBody struct {
+	*tsMsgImpl
+	CreateSegmentMessage message.ImmutableCreateSegmentMessageV2
+}
+
+func NewCreateSegmentMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	createMsg, err := message.AsImmutableCreateSegmentMessageV2(msg)
+	if err != nil {
+		return nil, err
+	}
+	return &CreateSegmentMessageBody{
+		tsMsgImpl: &tsMsgImpl{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: msg.TimeTick(),
+				EndTimestamp:   msg.TimeTick(),
+			},
+			ts:      msg.TimeTick(),
+			sz:      msg.EstimateSize(),
+			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
+		},
+		CreateSegmentMessage: createMsg,
+	}, nil
+}
+
 type FlushMessageBody struct {
 	*tsMsgImpl
 	FlushMessage message.ImmutableFlushMessageV2

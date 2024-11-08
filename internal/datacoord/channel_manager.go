@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -53,6 +54,8 @@ type ChannelManager interface {
 	GetNodeChannelsByCollectionID(collectionID int64) map[int64][]string
 	GetChannelsByCollectionID(collectionID int64) []RWChannel
 	GetChannelNamesByCollectionID(collectionID int64) []string
+
+	GetChannelWatchInfos() map[int64]map[string]*datapb.ChannelWatchInfo
 }
 
 // An interface sessionManager implments
@@ -737,6 +740,22 @@ func (m *ChannelManagerImpl) fillChannelWatchInfo(op *ChannelOp) error {
 		ch.UpdateWatchInfo(info)
 	}
 	return nil
+}
+
+func (m *ChannelManagerImpl) GetChannelWatchInfos() map[int64]map[string]*datapb.ChannelWatchInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	infos := make(map[int64]map[string]*datapb.ChannelWatchInfo)
+	for _, nc := range m.store.GetNodesChannels() {
+		for _, ch := range nc.Channels {
+			watchInfo := proto.Clone(ch.GetWatchInfo()).(*datapb.ChannelWatchInfo)
+			if _, ok := infos[nc.NodeID]; !ok {
+				infos[nc.NodeID] = make(map[string]*datapb.ChannelWatchInfo)
+			}
+			infos[nc.NodeID][watchInfo.Vchan.ChannelName] = watchInfo
+		}
+	}
+	return infos
 }
 
 func inferStateByOpType(opType ChannelOpType) datapb.ChannelWatchState {

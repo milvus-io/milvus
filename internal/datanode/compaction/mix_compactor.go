@@ -23,6 +23,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -199,26 +201,43 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		log.Warn("compact wrong, fail to merge deltalogs", zap.Error(err))
 		return
 	}
-	isValueDeleted := func(v *storage.Value) bool {
-		ts, ok := delta[v.PK.GetValue()]
+
+	isValueDeleted := func(pk any, ts typeutil.Timestamp) bool {
+		oldts, ok := delta[pk]
 		// insert task and delete task has the same ts when upsert
 		// here should be < instead of <=
 		// to avoid the upsert data to be deleted after compact
-		if ok && uint64(v.Timestamp) < ts {
+		if ok && ts < oldts {
+			deletedRowCount++
+			return true
+		}
+		// Filtering expired entity
+		if isExpiredEntity(t.plan.GetCollectionTtl(), t.currentTs, typeutil.Timestamp(ts)) {
+			expiredRowCount++
 			return true
 		}
 		return false
 	}
 
-	iter, err := storage.NewBinlogDeserializeReader(blobs, pkField.GetFieldID())
+	reader, err := storage.NewCompositeBinlogRecordReader(blobs)
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 		return
 	}
-	defer iter.Close()
+	defer reader.Close()
 
+	writeSlice := func(r storage.Record, start, end int) error {
+		sliced := r.Slice(start, end)
+		defer sliced.Release()
+		err = mWriter.WriteRecord(sliced)
+		if err != nil {
+			log.Warn("compact wrong, failed to writer row", zap.Error(err))
+			return err
+		}
+		return nil
+	}
 	for {
-		err = iter.Next()
+		err = reader.Next()
 		if err != nil {
 			if err == sio.EOF {
 				err = nil
@@ -228,23 +247,45 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				return
 			}
 		}
-		v := iter.Value()
+		r := reader.Record()
+		pkArray := r.Column(pkField.FieldID)
+		tsArray := r.Column(common.TimeStampField).(*array.Int64)
 
-		if isValueDeleted(v) {
-			deletedRowCount++
-			continue
+		sliceStart := -1
+		rows := r.Len()
+		for i := 0; i < rows; i++ {
+			// Filtering deleted entities
+			var pk any
+			switch pkField.DataType {
+			case schemapb.DataType_Int64:
+				pk = pkArray.(*array.Int64).Value(i)
+			case schemapb.DataType_VarChar:
+				pk = pkArray.(*array.String).Value(i)
+			default:
+				panic("invalid data type")
+			}
+			ts := typeutil.Timestamp(tsArray.Value(i))
+			if isValueDeleted(pk, ts) {
+				if sliceStart != -1 {
+					err = writeSlice(r, sliceStart, i)
+					if err != nil {
+						return
+					}
+					sliceStart = -1
+				}
+				continue
+			}
+
+			if sliceStart == -1 {
+				sliceStart = i
+			}
 		}
 
-		// Filtering expired entity
-		if isExpiredEntity(t.plan.GetCollectionTtl(), t.currentTs, typeutil.Timestamp(v.Timestamp)) {
-			expiredRowCount++
-			continue
-		}
-
-		err = mWriter.Write(v)
-		if err != nil {
-			log.Warn("compact wrong, failed to writer row", zap.Error(err))
-			return
+		if sliceStart != -1 {
+			err = writeSlice(r, sliceStart, r.Len())
+			if err != nil {
+				return
+			}
 		}
 	}
 	return

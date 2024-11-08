@@ -408,11 +408,13 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             auto res = index_.Search(dataset, search_conf, bitset);
             milvus::tracer::AddEvent("finish_knowhere_index_search");
             if (!res.has_value()) {
-                PanicInfo(ErrorCode::UnexpectedError,
-                          "failed to search: config={} {}: {}",
-                          search_conf.dump(),
-                          KnowhereStatusString(res.error()),
-                          res.what());
+                PanicInfo(
+                    ErrorCode::UnexpectedError,
+                    // escape json brace in case of using message as format
+                    "failed to search: config={{{}}} {}: {}",
+                    search_conf.dump(),
+                    KnowhereStatusString(res.error()),
+                    res.what());
             }
             return res.value();
         }

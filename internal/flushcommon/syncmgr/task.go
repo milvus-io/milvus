@@ -422,10 +422,11 @@ func (t *SyncTask) MarshalJSON() ([]byte, error) {
 		SegmentID:     t.segmentID,
 		BatchRows:     t.batchRows,
 		SegmentLevel:  t.level.String(),
-		TsFrom:        t.tsFrom,
-		TsTo:          t.tsTo,
+		TSFrom:        t.tsFrom,
+		TSTo:          t.tsTo,
 		DeltaRowCount: t.deltaRowCount,
 		FlushSize:     t.flushedSize,
-		RunningTime:   t.execTime,
+		RunningTime:   t.execTime.String(),
+		NodeID:        paramtable.GetNodeID(),
 	})
 }

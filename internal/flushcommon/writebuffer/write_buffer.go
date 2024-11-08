@@ -37,6 +37,8 @@ const (
 type WriteBuffer interface {
 	// HasSegment checks whether certain segment exists in this buffer.
 	HasSegment(segmentID int64) bool
+	// CreateNewGrowingSegment creates a new growing segment in the buffer.
+	CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition)
 	// BufferData is the method to buffer dml data msgs.
 	BufferData(insertMsgs []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error
 	// FlushTimestamp set flush timestamp for write buffer
@@ -520,14 +522,13 @@ func (id *InsertData) batchPkExists(pks []storage.PrimaryKey, tss []uint64, hits
 	return hits
 }
 
-// bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.
-func (wb *writeBufferBase) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition) error {
-	_, ok := wb.metaCache.GetSegmentByID(inData.segmentID)
+func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition) {
+	_, ok := wb.metaCache.GetSegmentByID(segmentID)
 	// new segment
 	if !ok {
 		wb.metaCache.AddSegment(&datapb.SegmentInfo{
-			ID:            inData.segmentID,
-			PartitionID:   inData.partitionID,
+			ID:            segmentID,
+			PartitionID:   partitionID,
 			CollectionID:  wb.collectionID,
 			InsertChannel: wb.channelName,
 			StartPosition: startPos,
@@ -535,14 +536,20 @@ func (wb *writeBufferBase) bufferInsert(inData *InsertData, startPos, endPos *ms
 		}, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
 		}, metacache.NewBM25StatsFactory, metacache.SetStartPosRecorded(false))
-		log.Info("add growing segment", zap.Int64("segmentID", inData.segmentID), zap.String("channel", wb.channelName))
+		log.Info("add growing segment", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName))
 	}
+}
 
+// bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.
+func (wb *writeBufferBase) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition) error {
+	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos)
 	segBuf := wb.getOrCreateBuffer(inData.segmentID)
 
 	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)
-	wb.metaCache.UpdateSegments(metacache.UpdateBufferedRows(segBuf.insertBuffer.rows),
-		metacache.WithSegmentIDs(inData.segmentID))
+	wb.metaCache.UpdateSegments(metacache.SegmentActions(
+		metacache.UpdateBufferedRows(segBuf.insertBuffer.rows),
+		metacache.SetStartPositionIfNil(startPos),
+	), metacache.WithSegmentIDs(inData.segmentID))
 
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(float64(totalMemSize))
 

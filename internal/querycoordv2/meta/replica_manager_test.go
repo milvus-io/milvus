@@ -17,9 +17,12 @@
 package meta
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -27,10 +30,12 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -493,4 +498,55 @@ func (suite *ReplicaManagerV2Suite) recoverReplica(k int, clearOutbound bool) {
 func TestReplicaManager(t *testing.T) {
 	suite.Run(t, new(ReplicaManagerSuite))
 	suite.Run(t, new(ReplicaManagerV2Suite))
+}
+
+func TestGetReplicasJSON(t *testing.T) {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything).Return(nil)
+	idAllocator := RandomIncrementIDAllocator()
+	replicaManager := NewReplicaManager(idAllocator, catalog)
+
+	// Add some replicas to the ReplicaManager
+	replica1 := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  100,
+		ResourceGroup: "rg1",
+		Nodes:         []int64{1, 2, 3},
+	})
+	replica2 := newReplica(&querypb.Replica{
+		ID:            2,
+		CollectionID:  200,
+		ResourceGroup: "rg2",
+		Nodes:         []int64{4, 5, 6},
+	})
+
+	err := replicaManager.put(replica1)
+	assert.NoError(t, err)
+
+	err = replicaManager.put(replica2)
+	assert.NoError(t, err)
+
+	jsonOutput := replicaManager.GetReplicasJSON()
+	var replicas []*metricsinfo.Replica
+	err = json.Unmarshal([]byte(jsonOutput), &replicas)
+	assert.NoError(t, err)
+	assert.Len(t, replicas, 2)
+
+	checkResult := func(replica *metricsinfo.Replica) {
+		if replica.ID == 1 {
+			assert.Equal(t, int64(100), replica.CollectionID)
+			assert.Equal(t, "rg1", replica.ResourceGroup)
+			assert.ElementsMatch(t, []int64{1, 2, 3}, replica.RWNodes)
+		} else if replica.ID == 2 {
+			assert.Equal(t, int64(200), replica.CollectionID)
+			assert.Equal(t, "rg2", replica.ResourceGroup)
+			assert.ElementsMatch(t, []int64{4, 5, 6}, replica.RWNodes)
+		} else {
+			assert.Failf(t, "unexpected replica id", "unexpected replica id %d", replica.ID)
+		}
+	}
+
+	for _, replica := range replicas {
+		checkResult(replica)
+	}
 }

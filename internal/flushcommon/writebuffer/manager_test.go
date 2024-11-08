@@ -107,6 +107,25 @@ func (s *ManagerSuite) TestFlushSegments() {
 	})
 }
 
+func (s *ManagerSuite) TestCreateNewGrowingSegment() {
+	manager := s.manager
+	err := manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1)
+	s.Error(err)
+
+	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Once()
+	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+
+	wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
+		idAllocator: s.allocator,
+	})
+	s.NoError(err)
+	s.manager.mut.Lock()
+	s.manager.buffers[s.channelName] = wb
+	s.manager.mut.Unlock()
+	err = manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1)
+	s.NoError(err)
+}
+
 func (s *ManagerSuite) TestBufferData() {
 	manager := s.manager
 	s.Run("channel_not_found", func() {

@@ -35,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+const compactionBatchSize = 100
+
 func isExpiredEntity(ttl int64, now, ts typeutil.Timestamp) bool {
 	// entity expire is not enabled if duration <= 0
 	if ttl <= 0 {

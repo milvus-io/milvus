@@ -10,19 +10,23 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 var ErrFencedAssign = errors.New("fenced assign")
 
 // newPartitionSegmentManager creates a new partition segment assign manager.
 func newPartitionSegmentManager(
+	wal *syncutil.Future[wal.WAL],
 	pchannel types.PChannelInfo,
 	vchannel string,
 	collectionID int64,
@@ -37,6 +41,7 @@ func newPartitionSegmentManager(
 			zap.String("vchannel", vchannel),
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("partitionID", paritionID)),
+		wal:          wal,
 		pchannel:     pchannel,
 		vchannel:     vchannel,
 		collectionID: collectionID,
@@ -50,6 +55,7 @@ func newPartitionSegmentManager(
 type partitionSegmentManager struct {
 	mu                   sync.Mutex
 	logger               *log.MLogger
+	wal                  *syncutil.Future[wal.WAL]
 	pchannel             types.PChannelInfo
 	vchannel             string
 	collectionID         int64
@@ -72,17 +78,20 @@ func (m *partitionSegmentManager) AssignSegment(ctx context.Context, req *Assign
 	// So it's just a promise check here.
 	// If the request time tick is less than the fenced time tick, the assign operation is fenced.
 	// A special error will be returned to indicate the assign operation is fenced.
-	// The wal will retry it with new timetick.
 	if req.TimeTick <= m.fencedAssignTimeTick {
 		return nil, ErrFencedAssign
 	}
 	return m.assignSegment(ctx, req)
 }
 
-// SealAllSegmentsAndFenceUntil seals all segments and fence assign until the maximum of timetick or max time tick.
-func (m *partitionSegmentManager) SealAllSegmentsAndFenceUntil(timeTick uint64) (sealedSegments []*segmentAllocManager) {
+// SealAndFenceSegmentUntil seal all segment that contains the message less than the incoming timetick.
+func (m *partitionSegmentManager) SealAndFenceSegmentUntil(timeTick uint64) (sealedSegments []*segmentAllocManager) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// no-op if the incoming time tick is less than the fenced time tick.
+	if timeTick <= m.fencedAssignTimeTick {
+		return
+	}
 
 	segmentManagers := m.collectShouldBeSealedWithPolicy(func(segmentMeta *segmentAllocManager) (policy.PolicyName, bool) { return policy.PolicyNameFenced, true })
 	// fence the assign operation until the incoming time tick or latest assigned timetick.
@@ -225,6 +234,27 @@ func (m *partitionSegmentManager) allocNewGrowingSegment(ctx context.Context) (*
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, errors.Wrap(err, "failed to alloc growing segment at datacoord")
 	}
+	msg, err := message.NewCreateSegmentMessageBuilderV2().
+		WithVChannel(pendingSegment.GetVChannel()).
+		WithHeader(&message.CreateSegmentMessageHeader{}).
+		WithBody(&message.CreateSegmentMessageBody{
+			CollectionId: pendingSegment.GetCollectionID(),
+			Segments: []*messagespb.CreateSegmentInfo{{
+				// We only execute one segment creation operation at a time.
+				// But in future, we need to modify the segment creation operation to support batch creation.
+				// Because the partition-key based collection may create huge amount of segments at the same time.
+				PartitionId: pendingSegment.GetPartitionID(),
+				SegmentId:   pendingSegment.GetSegmentID(),
+			}},
+		}).BuildMutable()
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create new segment message, segmentID: %d", pendingSegment.GetSegmentID())
+	}
+	// Send CreateSegmentMessage into wal.
+	msgID, err := m.wal.Get().Append(ctx, msg)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to send create segment message into wal, segmentID: %d", pendingSegment.GetSegmentID())
+	}
 
 	// Getnerate growing segment limitation.
 	limitation := policy.GetSegmentLimitationPolicy().GenerateLimitation()
@@ -232,13 +262,14 @@ func (m *partitionSegmentManager) allocNewGrowingSegment(ctx context.Context) (*
 	// Commit it into streaming node meta.
 	// growing segment can be assigned now.
 	tx := pendingSegment.BeginModification()
-	tx.IntoGrowing(&limitation)
+	tx.IntoGrowing(&limitation, msgID.TimeTick)
 	if err := tx.Commit(ctx); err != nil {
 		return nil, errors.Wrapf(err, "failed to commit modification of segment assignment into growing, segmentID: %d", pendingSegment.GetSegmentID())
 	}
-	m.logger.Info(
-		"generate new growing segment",
+	m.logger.Info("generate new growing segment",
 		zap.Int64("segmentID", pendingSegment.GetSegmentID()),
+		zap.String("messageID", msgID.MessageID.String()),
+		zap.Uint64("timetick", msgID.TimeTick),
 		zap.String("limitationPolicy", limitation.PolicyName),
 		zap.Uint64("segmentBinarySize", limitation.SegmentSize),
 		zap.Any("extraInfo", limitation.ExtraInfo),
@@ -280,12 +311,28 @@ func (m *partitionSegmentManager) createNewPendingSegment(ctx context.Context) (
 
 // assignSegment assigns a segment for a assign segment request and return should trigger a seal operation.
 func (m *partitionSegmentManager) assignSegment(ctx context.Context, req *AssignSegmentRequest) (*AssignSegmentResult, error) {
-	// Alloc segment for insert at previous segments.
+	hitTimeTickTooOld := false
+	// Alloc segment for insert at allocated segments.
 	for _, segment := range m.segments {
-		inserted, ack := segment.AllocRows(ctx, req)
-		if inserted {
-			return &AssignSegmentResult{SegmentID: segment.GetSegmentID(), Acknowledge: ack}, nil
+		result, err := segment.AllocRows(ctx, req)
+		if err == nil {
+			return result, nil
 		}
+		if errors.IsAny(err, ErrTooLargeInsert) {
+			// Return error directly.
+			// If the insert message is too large to hold by single segment, it can not be inserted anymore.
+			return nil, err
+		}
+		if errors.Is(err, ErrTimeTickTooOld) {
+			hitTimeTickTooOld = true
+		}
+	}
+
+	// If the timetick is too old for existing segment, it can not be inserted even allocate new growing segment,
+	// (new growing segment's timetick is always greater than the old gorwing segmet's timetick).
+	// Return directly to avoid unnecessary growing segment allocation.
+	if hitTimeTickTooOld {
+		return nil, ErrTimeTickTooOld
 	}
 
 	// If not inserted, ask a new growing segment to insert.
@@ -293,8 +340,5 @@ func (m *partitionSegmentManager) assignSegment(ctx context.Context, req *Assign
 	if err != nil {
 		return nil, err
 	}
-	if inserted, ack := newGrowingSegment.AllocRows(ctx, req); inserted {
-		return &AssignSegmentResult{SegmentID: newGrowingSegment.GetSegmentID(), Acknowledge: ack}, nil
-	}
-	return nil, status.NewUnrecoverableError("too large insert message, cannot hold in empty growing segment, stats: %+v", req.InsertMetrics)
+	return newGrowingSegment.AllocRows(ctx, req)
 }

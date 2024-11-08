@@ -39,12 +39,6 @@ func WithCollectionID(collectionID int64) ImportJobFilter {
 	}
 }
 
-func WithDbID(DbID int64) ImportJobFilter {
-	return func(job ImportJob) bool {
-		return job.GetDbID() == DbID
-	}
-}
-
 func WithJobStates(states ...internalpb.ImportJobState) ImportJobFilter {
 	return func(job ImportJob) bool {
 		for _, state := range states {
@@ -106,7 +100,6 @@ func UpdateJobCompleteTime(completeTime string) UpdateJobAction {
 
 type ImportJob interface {
 	GetJobID() int64
-	GetDbID() int64
 	GetCollectionID() int64
 	GetCollectionName() string
 	GetPartitionIDs() []int64

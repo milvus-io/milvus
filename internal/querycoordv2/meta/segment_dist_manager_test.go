@@ -19,10 +19,13 @@ package meta
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
 
 type SegmentDistManagerSuite struct {
@@ -187,4 +190,64 @@ func (suite *SegmentDistManagerSuite) AssertShard(segments []*Segment, shard str
 
 func TestSegmentDistManager(t *testing.T) {
 	suite.Run(t, new(SegmentDistManagerSuite))
+}
+
+func TestGetSegmentDistJSON(t *testing.T) {
+	// Initialize SegmentDistManager
+	manager := NewSegmentDistManager()
+
+	// Add some segments to the SegmentDistManager
+	segment1 := SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "channel-1",
+		NumOfRows:     1000,
+		State:         commonpb.SegmentState_Flushed,
+	})
+	segment1.Node = 1
+	segment1.Version = 1
+
+	segment2 := SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            2,
+		CollectionID:  200,
+		PartitionID:   20,
+		InsertChannel: "channel-2",
+		NumOfRows:     2000,
+		State:         commonpb.SegmentState_Flushed,
+	})
+	segment2.Node = 2
+	segment2.Version = 1
+
+	manager.Update(1, segment1)
+	manager.Update(2, segment2)
+
+	segments := manager.GetSegmentDist()
+	assert.Equal(t, 2, len(segments))
+
+	checkResults := func(s *metricsinfo.Segment) {
+		if s.SegmentID == 1 {
+			assert.Equal(t, int64(100), s.CollectionID)
+			assert.Equal(t, int64(10), s.PartitionID)
+			assert.Equal(t, "channel-1", s.Channel)
+			assert.Equal(t, int64(1000), s.NumOfRows)
+			assert.Equal(t, "Flushed", s.State)
+			assert.Equal(t, int64(1), s.NodeID)
+			assert.Equal(t, int64(1), s.LoadedTimestamp)
+		} else if s.SegmentID == 2 {
+			assert.Equal(t, int64(200), s.CollectionID)
+			assert.Equal(t, int64(20), s.PartitionID)
+			assert.Equal(t, "channel-2", s.Channel)
+			assert.Equal(t, int64(2000), s.NumOfRows)
+			assert.Equal(t, "Flushed", s.State)
+			assert.Equal(t, int64(2), s.NodeID)
+			assert.Equal(t, int64(1), s.LoadedTimestamp)
+		} else {
+			assert.Failf(t, "unexpected segment id", "unexpected segment id %d", s.SegmentID)
+		}
+	}
+
+	for _, s := range segments {
+		checkResults(s)
+	}
 }
