@@ -28,7 +28,6 @@ import (
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
-	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -38,9 +37,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var _ RecordReader = (*compositeBinlogRecordReader)(nil)
+var _ RecordReader = (*CompositeBinlogRecordReader)(nil)
 
-type compositeBinlogRecordReader struct {
+type CompositeBinlogRecordReader struct {
 	blobs [][]*Blob
 
 	blobPos int
@@ -51,7 +50,7 @@ type compositeBinlogRecordReader struct {
 	r compositeRecord
 }
 
-func (crr *compositeBinlogRecordReader) iterateNextBatch() error {
+func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
 	if crr.closers != nil {
 		for _, close := range crr.closers {
 			if close != nil {
@@ -91,7 +90,7 @@ func (crr *compositeBinlogRecordReader) iterateNextBatch() error {
 	return nil
 }
 
-func (crr *compositeBinlogRecordReader) Next() error {
+func (crr *CompositeBinlogRecordReader) Next() error {
 	if crr.rrs == nil {
 		if crr.blobs == nil || len(crr.blobs) == 0 {
 			return io.EOF
@@ -135,11 +134,11 @@ func (crr *compositeBinlogRecordReader) Next() error {
 	return nil
 }
 
-func (crr *compositeBinlogRecordReader) Record() Record {
+func (crr *CompositeBinlogRecordReader) Record() Record {
 	return &crr.r
 }
 
-func (crr *compositeBinlogRecordReader) Close() {
+func (crr *CompositeBinlogRecordReader) Close() {
 	for _, close := range crr.closers {
 		if close != nil {
 			close()
@@ -158,7 +157,7 @@ func parseBlobKey(blobKey string) (colId FieldID, logId UniqueID) {
 	return InvalidUniqueID, InvalidUniqueID
 }
 
-func newCompositeBinlogRecordReader(blobs []*Blob) (*compositeBinlogRecordReader, error) {
+func NewCompositeBinlogRecordReader(blobs []*Blob) (*CompositeBinlogRecordReader, error) {
 	blobMap := make(map[FieldID][]*Blob)
 	for _, blob := range blobs {
 		colId, _ := parseBlobKey(blob.Key)
@@ -178,13 +177,13 @@ func newCompositeBinlogRecordReader(blobs []*Blob) (*compositeBinlogRecordReader
 		})
 		sortedBlobs = append(sortedBlobs, blobsForField)
 	}
-	return &compositeBinlogRecordReader{
+	return &CompositeBinlogRecordReader{
 		blobs: sortedBlobs,
 	}, nil
 }
 
 func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*DeserializeReader[*Value], error) {
-	reader, err := newCompositeBinlogRecordReader(blobs)
+	reader, err := NewCompositeBinlogRecordReader(blobs)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +233,7 @@ func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*Deserialize
 }
 
 func newDeltalogOneFieldReader(blobs []*Blob) (*DeserializeReader[*DeleteLog], error) {
-	reader, err := newCompositeBinlogRecordReader(blobs)
+	reader, err := NewCompositeBinlogRecordReader(blobs)
 	if err != nil {
 		return nil, err
 	}
@@ -263,8 +262,6 @@ type BinlogStreamWriter struct {
 	partitionID  UniqueID
 	segmentID    UniqueID
 	fieldSchema  *schemapb.FieldSchema
-
-	memorySize int // To be updated on the fly
 
 	buf bytes.Buffer
 	rw  *singleFieldRecordWriter
@@ -306,7 +303,7 @@ func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
 		Key:        strconv.Itoa(int(bsw.fieldSchema.FieldID)),
 		Value:      b.Bytes(),
 		RowNum:     int64(bsw.rw.numRows),
-		MemorySize: int64(bsw.memorySize),
+		MemorySize: int64(bsw.rw.writtenUncompressed),
 	}, nil
 }
 
@@ -319,7 +316,7 @@ func (bsw *BinlogStreamWriter) writeBinlogHeaders(w io.Writer) error {
 	de := NewBaseDescriptorEvent(bsw.collectionID, bsw.partitionID, bsw.segmentID)
 	de.PayloadDataType = bsw.fieldSchema.DataType
 	de.FieldID = bsw.fieldSchema.FieldID
-	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(bsw.memorySize))
+	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(bsw.rw.writtenUncompressed)))
 	de.descriptorEventData.AddExtra(nullableKey, bsw.fieldSchema.Nullable)
 	if err := de.Write(w); err != nil {
 		return err
@@ -356,6 +353,50 @@ func NewBinlogStreamWriters(collectionID, partitionID, segmentID UniqueID,
 	return bws
 }
 
+func ValueSerializer(v []*Value, fieldSchema []*schemapb.FieldSchema) (Record, uint64, error) {
+	builders := make(map[FieldID]array.Builder, len(fieldSchema))
+	types := make(map[FieldID]schemapb.DataType, len(fieldSchema))
+	for _, f := range fieldSchema {
+		dim, _ := typeutil.GetDim(f)
+		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, serdeMap[f.DataType].arrowType(int(dim)))
+		types[f.FieldID] = f.DataType
+	}
+
+	var memorySize uint64
+	for _, vv := range v {
+		m := vv.Value.(map[FieldID]any)
+
+		for fid, e := range m {
+			typeEntry, ok := serdeMap[types[fid]]
+			if !ok {
+				panic("unknown type")
+			}
+			ok = typeEntry.serialize(builders[fid], e)
+			if !ok {
+				return nil, 0, merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", types[fid]))
+			}
+		}
+	}
+	arrays := make([]arrow.Array, len(types))
+	fields := make([]arrow.Field, len(types))
+	field2Col := make(map[FieldID]int, len(types))
+	i := 0
+	for fid, builder := range builders {
+		arrays[i] = builder.NewArray()
+		memorySize += uint64(calculateArraySize(arrays[i]))
+
+		builder.Release()
+		fields[i] = arrow.Field{
+			Name:     strconv.Itoa(int(fid)),
+			Type:     arrays[i].DataType(),
+			Nullable: true, // No nullable check here.
+		}
+		field2Col[fid] = i
+		i++
+	}
+	return newSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(len(v))), types, field2Col), memorySize, nil
+}
+
 func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, segmentID UniqueID,
 	eventWriters map[FieldID]*BinlogStreamWriter, batchSize int,
 ) (*SerializeWriter[*Value], error) {
@@ -368,53 +409,9 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 		}
 		rws[fid] = rw
 	}
-	compositeRecordWriter := newCompositeRecordWriter(rws)
+	compositeRecordWriter := NewCompositeRecordWriter(rws)
 	return NewSerializeRecordWriter[*Value](compositeRecordWriter, func(v []*Value) (Record, uint64, error) {
-		builders := make(map[FieldID]array.Builder, len(schema.Fields))
-		types := make(map[FieldID]schemapb.DataType, len(schema.Fields))
-		for _, f := range schema.Fields {
-			dim, _ := typeutil.GetDim(f)
-			builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, serdeMap[f.DataType].arrowType(int(dim)))
-			types[f.FieldID] = f.DataType
-		}
-
-		var memorySize uint64
-		for _, vv := range v {
-			m := vv.Value.(map[FieldID]any)
-
-			for fid, e := range m {
-				typeEntry, ok := serdeMap[types[fid]]
-				if !ok {
-					panic("unknown type")
-				}
-				ok = typeEntry.serialize(builders[fid], e)
-				if !ok {
-					return nil, 0, merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", types[fid]))
-				}
-			}
-		}
-		arrays := make([]arrow.Array, len(types))
-		fields := make([]arrow.Field, len(types))
-		field2Col := make(map[FieldID]int, len(types))
-		i := 0
-		for fid, builder := range builders {
-			arrays[i] = builder.NewArray()
-			size := lo.SumBy[*memory.Buffer, int](arrays[i].Data().Buffers(), func(b *memory.Buffer) int {
-				return b.Len()
-			})
-			eventWriters[fid].memorySize += size
-			memorySize += uint64(size)
-
-			builder.Release()
-			fields[i] = arrow.Field{
-				Name:     strconv.Itoa(int(fid)),
-				Type:     arrays[i].DataType(),
-				Nullable: true, // No nullable check here.
-			}
-			field2Col[fid] = i
-			i++
-		}
-		return newSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(len(v))), types, field2Col), memorySize, nil
+		return ValueSerializer(v, schema.Fields)
 	}, batchSize), nil
 }
 
@@ -515,7 +512,7 @@ func newDeltalogSerializeWriter(eventWriter *DeltalogStreamWriter, batchSize int
 		return nil, err
 	}
 	rws[0] = rw
-	compositeRecordWriter := newCompositeRecordWriter(rws)
+	compositeRecordWriter := NewCompositeRecordWriter(rws)
 	return NewSerializeRecordWriter[*DeleteLog](compositeRecordWriter, func(v []*DeleteLog) (Record, uint64, error) {
 		builder := array.NewBuilder(memory.DefaultAllocator, arrow.BinaryTypes.String)
 
