@@ -705,7 +705,7 @@ func (sfw *singleFieldRecordWriter) Write(r Record) error {
 	sfw.numRows += r.Len()
 	a := r.Column(sfw.fieldId)
 
-	sfw.writtenUncompressed += uint64(a.Data().Buffers()[0].Len())
+	sfw.writtenUncompressed += uint64(calculateArraySize(a))
 	rec := array.NewRecord(sfw.schema, []arrow.Array{a}, int64(r.Len()))
 	defer rec.Release()
 	return sfw.fw.WriteBuffered(rec)
