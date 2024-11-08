@@ -2511,7 +2511,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("expr", ["id_range"])
-    @pytest.mark.parametrize("tokenizer", ["default"])
+    @pytest.mark.parametrize("tokenizer", ["standard"])
     @pytest.mark.parametrize("offset", [0])
     def test_full_text_search_for_growing_segment(
             self, offset, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq
