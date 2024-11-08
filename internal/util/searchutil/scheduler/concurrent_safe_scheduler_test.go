@@ -1,4 +1,4 @@
-package tasks
+package scheduler
 
 import (
 	"context"

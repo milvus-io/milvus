@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -22,7 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var _ Task = &QueryTask{}
+var _ scheduler.Task = &QueryTask{}
 
 func NewQueryTask(ctx context.Context,
 	collection *segments.Collection,
