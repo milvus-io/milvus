@@ -144,6 +144,7 @@ func composePaths(segments []*datapb.CompactionSegmentBinlogs) (
 	return deltaPaths, insertPaths, nil
 }
 
+// serialize data in writer memory to blobs and construct the binlog metadata
 func serializeWrite(ctx context.Context, allocator allocator.Interface, writer *SegmentWriter) (kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "serializeWrite")
 	defer span.End()
