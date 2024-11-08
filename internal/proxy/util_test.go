@@ -919,25 +919,6 @@ func TestGetRole(t *testing.T) {
 	assert.Equal(t, 1, len(roles))
 }
 
-func TestGetGroupPrivileges(t *testing.T) {
-	globalMetaCache = nil
-	_, err := GetGroupPrivileges("foo")
-	assert.Error(t, err)
-	mockCache := NewMockCache(t)
-	mockCache.On("GetGroupPrivileges",
-		mock.AnythingOfType("string"),
-	).Return(func(groupName string) map[string]struct{} {
-		return map[string]struct{}{
-			"CreateCollection":   {},
-			"DescribeCollection": {},
-		}
-	})
-	globalMetaCache = mockCache
-	privileges, err := GetGroupPrivileges("group1")
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(privileges))
-}
-
 func TestPasswordVerify(t *testing.T) {
 	username := "user-test00"
 	password := "PasswordVerify"

@@ -1121,13 +1121,6 @@ func AppendUserInfoForRPC(ctx context.Context) context.Context {
 	return ctx
 }
 
-func GetGroupPrivileges(groupName string) (map[string]struct{}, error) {
-	if globalMetaCache == nil {
-		return map[string]struct{}{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
-	}
-	return globalMetaCache.GetGroupPrivileges(groupName), nil
-}
-
 func GetRole(username string) ([]string, error) {
 	if globalMetaCache == nil {
 		return []string{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")

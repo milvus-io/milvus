@@ -30,7 +30,6 @@ import (
 	"github.com/stretchr/testify/require"
 	uatomic "go.uber.org/atomic"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -627,10 +626,6 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 	client := &MockRootCoordClientInterface{}
 	qc := &mocks.MockQueryCoordClient{}
 	mgr := newShardClientMgr()
-	privGroups := []*milvuspb.PrivilegeGroupInfo{{
-		GroupName:  "pg1",
-		Privileges: []*milvuspb.PrivilegeEntity{{Name: "CreateCollection"}, {Name: "DescribeCollection"}},
-	}}
 
 	t.Run("InitMetaCache", func(t *testing.T) {
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
@@ -641,9 +636,8 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{
-				Status:          merr.Success(),
-				PolicyInfos:     []string{"policy1", "policy2", "policy3"},
-				PrivilegeGroups: privGroups,
+				Status:      merr.Success(),
+				PolicyInfos: []string{"policy1", "policy2", "policy3"},
 			}, nil
 		}
 		err = InitMetaCache(context.Background(), client, qc, mgr)
@@ -653,10 +647,9 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 	t.Run("GetPrivilegeInfo", func(t *testing.T) {
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{
-				Status:          merr.Success(),
-				PolicyInfos:     []string{"policy1", "policy2", "policy3"},
-				UserRoles:       []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2")},
-				PrivilegeGroups: privGroups,
+				Status:      merr.Success(),
+				PolicyInfos: []string{"policy1", "policy2", "policy3"},
+				UserRoles:   []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2")},
 			}, nil
 		}
 		err := InitMetaCache(context.Background(), client, qc, mgr)
@@ -665,17 +658,14 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 		assert.Equal(t, 3, len(policyInfos))
 		roles := globalMetaCache.GetUserRole("foo")
 		assert.Equal(t, 2, len(roles))
-		groups := globalMetaCache.GetGroupPrivileges("pg1")
-		assert.Equal(t, 2, len(groups))
 	})
 
 	t.Run("GetPrivilegeInfo", func(t *testing.T) {
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{
-				Status:          merr.Success(),
-				PolicyInfos:     []string{"policy1", "policy2", "policy3"},
-				UserRoles:       []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2")},
-				PrivilegeGroups: privGroups,
+				Status:      merr.Success(),
+				PolicyInfos: []string{"policy1", "policy2", "policy3"},
+				UserRoles:   []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2")},
 			}, nil
 		}
 		err := InitMetaCache(context.Background(), client, qc, mgr)
@@ -701,27 +691,6 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 		roles = globalMetaCache.GetUserRole("foo")
 		assert.Equal(t, 2, len(roles))
 
-		groupInfo := &milvuspb.PrivilegeGroupInfo{GroupName: "pg1", Privileges: []*milvuspb.PrivilegeEntity{{Name: "DropCollection"}}}
-		v, err := proto.Marshal(groupInfo)
-		assert.NoError(t, err)
-		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheAddPrivilegesToGroup, OpKey: string(v)})
-		assert.NoError(t, err)
-		groups := globalMetaCache.GetGroupPrivileges("pg1")
-		assert.Equal(t, 3, len(groups))
-
-		groupInfo = &milvuspb.PrivilegeGroupInfo{GroupName: "pg1", Privileges: []*milvuspb.PrivilegeEntity{{Name: "DropCollection"}, {Name: "RenameCollection"}}}
-		v, err = proto.Marshal(groupInfo)
-		assert.NoError(t, err)
-		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRemovePrivilegesFromGroup, OpKey: string(v)})
-		assert.NoError(t, err)
-		groups = globalMetaCache.GetGroupPrivileges("pg1")
-		assert.Equal(t, 2, len(groups))
-
-		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheDropPrivilegeGroup, OpKey: "pg1"})
-		assert.NoError(t, err)
-		groups = globalMetaCache.GetGroupPrivileges("pg1")
-		assert.Equal(t, 0, len(groups))
-
 		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheGrantPrivilege, OpKey: ""})
 		assert.Error(t, err)
 		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: 100, OpKey: "policyX"})
@@ -737,8 +706,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 					"policy2",
 					"policy3",
 				},
-				UserRoles:       []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2"), funcutil.EncodeUserRoleCache("foo2", "role3")},
-				PrivilegeGroups: privGroups,
+				UserRoles: []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2"), funcutil.EncodeUserRoleCache("foo2", "role3")},
 			}, nil
 		}
 		err := InitMetaCache(context.Background(), client, qc, mgr)

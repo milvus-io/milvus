@@ -104,6 +104,7 @@ type IMetaTable interface {
 	DropPrivilegeGroup(groupName string) error
 	ListPrivilegeGroups() ([]*milvuspb.PrivilegeGroupInfo, error)
 	OperatePrivilegeGroup(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error
+	GetPrivilegeGroupRoles(groupName string) ([]*milvuspb.RoleEntity, error)
 }
 
 // MetaTable is a persistent meta set of all databases, collections and partitions.
@@ -1610,4 +1611,41 @@ func (mt *MetaTable) OperatePrivilegeGroup(groupName string, privileges []*milvu
 		Privileges: mergedPrivs,
 	}
 	return mt.catalog.SavePrivilegeGroup(mt.ctx, data)
+}
+
+func (mt *MetaTable) GetPrivilegeGroupRoles(groupName string) ([]*milvuspb.RoleEntity, error) {
+	if funcutil.IsEmptyString(groupName) {
+		return nil, fmt.Errorf("the privilege group name is empty")
+	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	// get all roles
+	roles, err := mt.catalog.ListRole(mt.ctx, util.DefaultTenant, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	roleEntity := lo.Map(roles, func(entity *milvuspb.RoleResult, _ int) *milvuspb.RoleEntity {
+		return entity.GetRole()
+	})
+
+	// get roles that have the privilege group
+	grants, err := mt.catalog.ListGrant(mt.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		DbName: util.AnyWord,
+	})
+	if err != nil {
+		return nil, err
+	}
+	groupGrants := lo.Filter(grants, func(grant *milvuspb.GrantEntity, _ int) bool {
+		return grant.Grantor.Privilege.Name == groupName
+	})
+	groupRoles := lo.Map(groupGrants, func(grant *milvuspb.GrantEntity, _ int) *milvuspb.RoleEntity {
+		return grant.Role
+	})
+
+	// filter roles that have the privilege group
+	result := lo.Filter(roleEntity, func(role *milvuspb.RoleEntity, _ int) bool {
+		return lo.Contains(groupRoles, role)
+	})
+	return result, nil
 }

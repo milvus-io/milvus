@@ -66,16 +66,6 @@ func TestPrivilegeInterceptor(t *testing.T) {
 					funcutil.EncodeUserRoleCache("alice", "role1"),
 					funcutil.EncodeUserRoleCache("fooo", "role2"),
 				},
-				PrivilegeGroups: []*milvuspb.PrivilegeGroupInfo{
-					{
-						GroupName:  "privilege_group1",
-						Privileges: []*milvuspb.PrivilegeEntity{{Name: "CreateCollection"}, {Name: "DescribeCollection"}},
-					},
-					{
-						GroupName:  "privilege_group2",
-						Privileges: []*milvuspb.PrivilegeEntity{{Name: "DropCollection"}},
-					},
-				},
 			}, nil
 		}
 
@@ -212,20 +202,6 @@ func TestResourceGroupPrivilege(t *testing.T) {
 				UserRoles: []string{
 					funcutil.EncodeUserRoleCache("fooo", "role1"),
 				},
-				PrivilegeGroups: []*milvuspb.PrivilegeGroupInfo{
-					{
-						GroupName:  "privilege_group1",
-						Privileges: []*milvuspb.PrivilegeEntity{{Name: "CreateCollection"}, {Name: "DropCollection"}},
-					},
-					{
-						GroupName:  "privilege_group2",
-						Privileges: []*milvuspb.PrivilegeEntity{{Name: "DescribeCollection"}},
-					},
-					{
-						GroupName:  "privilege_group3",
-						Privileges: []*milvuspb.PrivilegeEntity{{Name: "ShowCollections"}},
-					},
-				},
 			}, nil
 		}
 		InitMetaCache(ctx, client, queryCoord, mgr)
@@ -256,7 +232,7 @@ func TestResourceGroupPrivilege(t *testing.T) {
 	})
 }
 
-func TestBuiltinPrivilegeGroup(t *testing.T) {
+func TestPrivilegeGroup(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("grant ReadOnly to single collection", func(t *testing.T) {
@@ -585,128 +561,5 @@ func TestBuiltinPrivilegeGroup(t *testing.T) {
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{})
 		assert.NoError(t, err)
-	})
-}
-
-func TestCustomPrivilegeGroup(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("grant privilege group operation privilege", func(t *testing.T) {
-		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
-
-		var err error
-		ctx = GetContext(context.Background(), "fooo:123456")
-		client := &MockRootCoordClientInterface{}
-		queryCoord := &mocks.MockQueryCoordClient{}
-		mgr := newShardClientMgr()
-
-		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
-			return &internalpb.ListPolicyResponse{
-				Status: merr.Success(),
-				PolicyInfos: []string{
-					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeCreatePrivilegeGroup.String(), "default"),
-					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeListPrivilegeGroups.String(), "default"),
-				},
-				UserRoles: []string{
-					funcutil.EncodeUserRoleCache("fooo", "role1"),
-				},
-			}, nil
-		}
-		InitMetaCache(ctx, client, queryCoord, mgr)
-		defer CleanPrivilegeCache()
-
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreatePrivilegeGroupRequest{})
-		assert.NoError(t, err)
-
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.ListPrivilegeGroupsRequest{})
-		assert.NoError(t, err)
-
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DropPrivilegeGroupRequest{})
-		assert.Error(t, err)
-
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.OperatePrivilegeGroupRequest{})
-		assert.Error(t, err)
-	})
-
-	t.Run("grant custom privilege group to single collection", func(t *testing.T) {
-		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
-
-		var err error
-		ctx = GetContext(context.Background(), "fooo:123456")
-		client := &MockRootCoordClientInterface{}
-		queryCoord := &mocks.MockQueryCoordClient{}
-		mgr := newShardClientMgr()
-		groupName := "customGroup"
-
-		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
-			return &internalpb.ListPolicyResponse{
-				Status: merr.Success(),
-				PolicyInfos: []string{
-					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "col1", groupName, "default"),
-				},
-				UserRoles: []string{
-					funcutil.EncodeUserRoleCache("fooo", "role1"),
-				},
-				PrivilegeGroups: []*milvuspb.PrivilegeGroupInfo{{
-					GroupName:  groupName,
-					Privileges: []*milvuspb.PrivilegeEntity{{Name: "Query"}, {Name: "Delete"}},
-				}},
-			}, nil
-		}
-		InitMetaCache(ctx, client, queryCoord, mgr)
-		defer CleanPrivilegeCache()
-
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{CollectionName: "col1"})
-		assert.NoError(t, err)
-
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DeleteRequest{CollectionName: "col1"})
-		assert.NoError(t, err)
-
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{CollectionName: "col2"})
-		assert.Error(t, err)
-
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DeleteRequest{CollectionName: "col2"})
-		assert.Error(t, err)
-	})
-
-	t.Run("grant custom privilege group to all collection", func(t *testing.T) {
-		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
-
-		var err error
-		ctx = GetContext(context.Background(), "fooo:123456")
-		client := &MockRootCoordClientInterface{}
-		queryCoord := &mocks.MockQueryCoordClient{}
-		mgr := newShardClientMgr()
-		groupName := "customGroup"
-
-		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
-			return &internalpb.ListPolicyResponse{
-				Status: merr.Success(),
-				PolicyInfos: []string{
-					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", groupName, "default"),
-				},
-				UserRoles: []string{
-					funcutil.EncodeUserRoleCache("fooo", "role1"),
-				},
-				PrivilegeGroups: []*milvuspb.PrivilegeGroupInfo{{
-					GroupName:  groupName,
-					Privileges: []*milvuspb.PrivilegeEntity{{Name: "CreateCollection"}, {Name: "DescribeCollection"}},
-				}},
-			}, nil
-		}
-		InitMetaCache(ctx, client, queryCoord, mgr)
-		defer CleanPrivilegeCache()
-
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateCollectionRequest{})
-		assert.NoError(t, err)
-
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DescribeCollectionRequest{})
-		assert.NoError(t, err)
-
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DropCollectionRequest{})
-		assert.Error(t, err)
 	})
 }

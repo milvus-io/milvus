@@ -283,11 +283,6 @@ func PrivilegeGroupContains(args ...interface{}) (interface{}, error) {
 		_, ok := adminPrivileges[requestPrivilege]
 		return ok, nil
 	default:
-		if !collMatch(requestObj, policyObj) {
-			return false, nil
-		}
-		privileges := globalMetaCache.GetGroupPrivileges(policyPrivilege)
-		_, ok := privileges[requestPrivilege]
-		return ok, nil
+		return false, nil
 	}
 }

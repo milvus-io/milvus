@@ -11,8 +11,6 @@ const (
 	CacheDropRole
 	CacheRefresh
 	CacheDropPrivilegeGroup
-	CacheAddPrivilegesToGroup
-	CacheRemovePrivilegesFromGroup
 )
 
 type CacheOp struct {
