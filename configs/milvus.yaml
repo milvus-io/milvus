@@ -369,7 +369,7 @@ queryCoord:
   checkHealthRPCTimeout: 2000 # 100ms, the timeout of check health rpc to query node
   brokerTimeout: 5000 # 5000ms, querycoord broker rpc timeout
   collectionRecoverTimes: 3 # if collection recover times reach the limit during loading state, release it
-  observerTaskParallel: 128 # the parallel observer dispatcher task number
+  observerTaskParallel: 16 # the parallel observer dispatcher task number
   checkAutoBalanceConfigInterval: 10 # the interval of check auto balance config
   checkNodeSessionInterval: 60 # the interval(in seconds) of check querynode cluster session
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop

@@ -2213,7 +2213,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.ObserverTaskParallel = ParamItem{
 		Key:          "queryCoord.observerTaskParallel",
 		Version:      "2.3.2",
-		DefaultValue: "128",
+		DefaultValue: "16",
 		PanicIfEmpty: true,
 		Doc:          "the parallel observer dispatcher task number",
 		Export:       true,
