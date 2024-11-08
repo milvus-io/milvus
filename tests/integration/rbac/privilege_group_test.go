@@ -17,6 +17,7 @@ package rbac
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -58,17 +59,25 @@ func (s *PrivilegeGroupTestSuite) TestBuiltinPrivilegeGroup() {
 	s.NoError(err)
 	s.True(merr.Ok(createRoleResp))
 
-	s.grantPrivilege(ctx, roleName, "ReadOnly", commonpb.ObjectType_Collection.String(), util.AnyWord, util.AnyWord)
-	s.grantPrivilege(ctx, roleName, "ReadWrite", commonpb.ObjectType_Collection.String(), util.AnyWord, util.AnyWord)
-	s.grantPrivilege(ctx, roleName, "Admin", commonpb.ObjectType_Global.String(), util.AnyWord, util.AnyWord)
+	s.operatePrivilege(ctx, roleName, "ReadOnly", commonpb.ObjectType_Collection.String(), milvuspb.OperatePrivilegeType_Grant)
+	s.operatePrivilege(ctx, roleName, "ReadWrite", commonpb.ObjectType_Collection.String(), milvuspb.OperatePrivilegeType_Grant)
+	s.operatePrivilege(ctx, roleName, "Admin", commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
 
-	s.validateGrants(ctx, roleName, commonpb.ObjectType_Global.String(), util.AnyWord, util.AnyWord, 1)
-	s.validateGrants(ctx, roleName, commonpb.ObjectType_Collection.String(), util.AnyWord, util.AnyWord, 2)
+	s.validateGrants(ctx, roleName, commonpb.ObjectType_Global.String(), 1)
+	s.validateGrants(ctx, roleName, commonpb.ObjectType_Collection.String(), 2)
 }
 
+/*
+create group1: query, search
+grant insert to role -> role: insert
+grant group1 to role -> role: insert, group1(query, search)
+create group2: query, delete
+grant group2 to role -> role: insert, group1(query, search), group2(query, delete)
+add query, load to group1 -> group1: query, search, load -> role: insert, group1(query, search, load), group2(query, delete)
+remove query from group1 -> group1: search, load -> role: insert, group1(search, load), group2(query, delete), role still have query privilege because of group2 granted.
+*/
 func (s *PrivilegeGroupTestSuite) TestCustomPrivilegeGroup() {
 	ctx := GetContext(context.Background(), "root:123456")
-	groupName := "test_privilege_group"
 
 	// Helper function to operate on privilege groups
 	operatePrivilegeGroup := func(groupName string, operateType milvuspb.OperatePrivilegeGroupType, privileges []*milvuspb.PrivilegeEntity) {
@@ -82,86 +91,97 @@ func (s *PrivilegeGroupTestSuite) TestCustomPrivilegeGroup() {
 	}
 
 	// Helper function to list privilege groups and return the target group and its privileges
-	listAndValidatePrivilegeGroup := func(expectedGroupName string, expectedPrivilegeCount int) []*milvuspb.PrivilegeEntity {
+	validatePrivilegeGroup := func(groupName string, privileges int) []*milvuspb.PrivilegeEntity {
 		resp, err := s.Cluster.Proxy.ListPrivilegeGroups(ctx, &milvuspb.ListPrivilegeGroupsRequest{})
 		s.NoError(err)
-		privGroupInfo := resp.PrivilegeGroups[0]
-		s.Equal(expectedGroupName, privGroupInfo.GroupName)
-		s.Equal(expectedPrivilegeCount, len(privGroupInfo.Privileges))
-		return privGroupInfo.Privileges
+		for _, privGroup := range resp.PrivilegeGroups {
+			if privGroup.GroupName == groupName {
+				s.Equal(privileges, len(privGroup.Privileges))
+				return privGroup.Privileges
+			}
+		}
+		return nil
 	}
 
-	// Test creating a privilege group
+	// create group1: query, search
 	createResp, err := s.Cluster.Proxy.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
-		GroupName: groupName,
+		GroupName: "group1",
 	})
 	s.NoError(err)
 	s.True(merr.Ok(createResp))
-
-	// Validate the group was created
-	listAndValidatePrivilegeGroup(groupName, 0)
-
-	// Test adding privileges
-	operatePrivilegeGroup(groupName, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup, []*milvuspb.PrivilegeEntity{
-		{Name: "CreateCollection"},
-		{Name: "DescribeCollection"},
+	validatePrivilegeGroup("group1", 0)
+	operatePrivilegeGroup("group1", milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup, []*milvuspb.PrivilegeEntity{
+		{Name: "Query"},
+		{Name: "Search"},
 	})
-	listAndValidatePrivilegeGroup(groupName, 2)
+	validatePrivilegeGroup("group1", 2)
 
-	// Test adding more privileges (one duplicate, one new)
-	operatePrivilegeGroup(groupName, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup, []*milvuspb.PrivilegeEntity{
-		{Name: "DescribeCollection"},
-		{Name: "DropCollection"},
-	})
-	listAndValidatePrivilegeGroup(groupName, 3)
-
-	// Test removing privileges (including a non-existent one)
-	operatePrivilegeGroup(groupName, milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup, []*milvuspb.PrivilegeEntity{
-		{Name: "DescribeCollection"},
-		{Name: "DropCollection"},
-		{Name: "RenameCollection"},
-	})
-	privileges := listAndValidatePrivilegeGroup(groupName, 1)
-	s.Equal("CreateCollection", privileges[0].Name)
-
-	// Test grant privilege group
-	roleName := "test_role"
+	// grant insert to role -> role: insert
+	role := "role1"
 	createRoleResp, err := s.Cluster.Proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{
-		Entity: &milvuspb.RoleEntity{Name: roleName},
+		Entity: &milvuspb.RoleEntity{Name: role},
 	})
 	s.NoError(err)
 	s.True(merr.Ok(createRoleResp))
+	s.operatePrivilege(ctx, role, "Insert", commonpb.ObjectType_Collection.String(), milvuspb.OperatePrivilegeType_Grant)
+	s.validateGrants(ctx, role, commonpb.ObjectType_Collection.String(), 1)
 
-	// Grant privileges
-	s.grantPrivilege(ctx, roleName, groupName, commonpb.ObjectType_Global.String(), util.AnyWord, util.AnyWord)
-	s.validateGrants(ctx, roleName, commonpb.ObjectType_Global.String(), util.AnyWord, util.AnyWord, 1)
+	// grant group1 to role -> role: insert, group1(query, search)
+	s.operatePrivilege(ctx, role, "group1", commonpb.ObjectType_Collection.String(), milvuspb.OperatePrivilegeType_Grant)
+	s.validateGrants(ctx, role, commonpb.ObjectType_Collection.String(), 2)
+
+	// create group2: query, delete
+	createResp2, err := s.Cluster.Proxy.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName: "group2",
+	})
+	s.NoError(err)
+	s.True(merr.Ok(createResp2))
+	validatePrivilegeGroup("group2", 0)
+	operatePrivilegeGroup("group2", milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup, []*milvuspb.PrivilegeEntity{
+		{Name: "Query"},
+		{Name: "Delete"},
+	})
+	validatePrivilegeGroup("group2", 2)
+
+	// grant group2 to role -> role: insert, group1(query, search), group2(query, delete)
+	s.operatePrivilege(ctx, role, "group2", commonpb.ObjectType_Collection.String(), milvuspb.OperatePrivilegeType_Grant)
+	s.validateGrants(ctx, role, commonpb.ObjectType_Collection.String(), 3)
+
+	// add query, load to group1 -> group1: query, search, load -> role: insert, group1(query, search, load), group2(query, delete)
+	operatePrivilegeGroup("group1", milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup, []*milvuspb.PrivilegeEntity{
+		{Name: "Query"},
+		{Name: "Load"},
+	})
+	validatePrivilegeGroup("group1", 3)
+	s.validateGrants(ctx, role, commonpb.ObjectType_Collection.String(), 3)
+
+	// remove query from group1 -> group1: search, load -> role: insert, group1(search, load), group2(query, delete), role still have query privilege because of group2 granted.
+	operatePrivilegeGroup("group1", milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup, []*milvuspb.PrivilegeEntity{
+		{Name: "Query"},
+	})
+	validatePrivilegeGroup("group1", 2)
+	s.validateGrants(ctx, role, commonpb.ObjectType_Collection.String(), 3)
 
 	// Drop the group during any role usage will cause error
 	dropResp, _ := s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
-		GroupName: groupName,
+		GroupName: "group1",
 	})
 	s.Error(merr.Error(dropResp))
 
-	// Revoke privilege group
-	revokeResp, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
-		Type: milvuspb.OperatePrivilegeType_Revoke,
-		Entity: &milvuspb.GrantEntity{
-			Role:       &milvuspb.RoleEntity{Name: roleName},
-			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
-			ObjectName: util.AnyWord,
-			DbName:     util.AnyWord,
-			Grantor: &milvuspb.GrantorEntity{
-				User:      &milvuspb.UserEntity{Name: util.UserRoot},
-				Privilege: &milvuspb.PrivilegeEntity{Name: groupName},
-			},
-		},
-	})
-	s.NoError(err)
-	s.True(merr.Ok(revokeResp))
+	// Revoke privilege group and privileges
+	s.operatePrivilege(ctx, role, "group1", commonpb.ObjectType_Collection.String(), milvuspb.OperatePrivilegeType_Revoke)
+	s.operatePrivilege(ctx, role, "group2", commonpb.ObjectType_Collection.String(), milvuspb.OperatePrivilegeType_Revoke)
+	s.operatePrivilege(ctx, role, "Insert", commonpb.ObjectType_Collection.String(), milvuspb.OperatePrivilegeType_Revoke)
 
 	// Drop the privilege group after revoking the privilege will succeed
 	dropResp, err = s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
-		GroupName: groupName,
+		GroupName: "group1",
+	})
+	s.NoError(err)
+	s.True(merr.Ok(dropResp))
+
+	dropResp, err = s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
+		GroupName: "group2",
 	})
 	s.NoError(err)
 	s.True(merr.Ok(dropResp))
@@ -173,23 +193,23 @@ func (s *PrivilegeGroupTestSuite) TestCustomPrivilegeGroup() {
 
 	// Drop the role
 	dropRoleResp, err := s.Cluster.Proxy.DropRole(ctx, &milvuspb.DropRoleRequest{
-		RoleName: roleName,
+		RoleName: role,
 	})
 	s.NoError(err)
 	s.True(merr.Ok(dropRoleResp))
 }
 
-func (s *PrivilegeGroupTestSuite) grantPrivilege(ctx context.Context, roleName, privilegeName, objectType, objectName, dbName string) {
+func (s *PrivilegeGroupTestSuite) operatePrivilege(ctx context.Context, role, privilege, objectType string, operateType milvuspb.OperatePrivilegeType) {
 	resp, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
-		Type: milvuspb.OperatePrivilegeType_Grant,
+		Type: operateType,
 		Entity: &milvuspb.GrantEntity{
-			Role:       &milvuspb.RoleEntity{Name: roleName},
+			Role:       &milvuspb.RoleEntity{Name: role},
 			Object:     &milvuspb.ObjectEntity{Name: objectType},
-			ObjectName: objectName,
-			DbName:     dbName,
+			ObjectName: util.AnyWord,
+			DbName:     util.AnyWord,
 			Grantor: &milvuspb.GrantorEntity{
 				User:      &milvuspb.UserEntity{Name: util.UserRoot},
-				Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
+				Privilege: &milvuspb.PrivilegeEntity{Name: privilege},
 			},
 		},
 	})
@@ -197,15 +217,16 @@ func (s *PrivilegeGroupTestSuite) grantPrivilege(ctx context.Context, roleName, 
 	s.True(merr.Ok(resp))
 }
 
-func (s *PrivilegeGroupTestSuite) validateGrants(ctx context.Context, roleName, objectType, objectName, dbName string, expectedCount int) {
+func (s *PrivilegeGroupTestSuite) validateGrants(ctx context.Context, roleName, objectType string, expectedCount int) {
 	resp, err := s.Cluster.Proxy.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
 		Entity: &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: roleName},
 			Object:     &milvuspb.ObjectEntity{Name: objectType},
-			ObjectName: objectName,
-			DbName:     dbName,
+			ObjectName: util.AnyWord,
+			DbName:     util.AnyWord,
 		},
 	})
+	fmt.Println("!!!validateGrants: ", resp)
 	s.NoError(err)
 	s.True(merr.Ok(resp.GetStatus()))
 	s.Len(resp.GetEntities(), expectedCount)

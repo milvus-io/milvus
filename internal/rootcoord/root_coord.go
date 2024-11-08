@@ -3055,83 +3055,118 @@ func (c *Core) OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePr
 		return merr.Status(err), nil
 	}
 
-	groups, err := c.meta.ListPrivilegeGroups()
-	if err != nil && !common.IsIgnorableError(err) {
-		log.Warn("fail to list privilege groups", zap.Error(err))
-		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeGroupFailure), nil
-	}
-	currGroups := lo.SliceToMap(groups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
-		return group.GroupName, group.Privileges
-	})
-
-	// get roles granted to the group
-	roles, err := c.meta.GetPrivilegeGroupRoles(in.GroupName)
-	if err != nil {
-		return nil, err
-	}
-
-	newGroups := make(map[string][]*milvuspb.PrivilegeEntity)
-	for k, v := range currGroups {
-		if k != in.GroupName {
-			newGroups[k] = v
-			continue
+	redoTask := newBaseRedoTask(c.stepExecutor)
+	redoTask.AddSyncStep(NewSimpleStep("operate privilege group", func(ctx context.Context) ([]nestedStep, error) {
+		groups, err := c.meta.ListPrivilegeGroups()
+		if err != nil && !common.IsIgnorableError(err) {
+			log.Warn("fail to list privilege groups", zap.Error(err))
+			return nil, err
 		}
-		switch in.Type {
-		case milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup:
-			newPrivs := lo.Union(v, in.Privileges)
-			newGroups[k] = newPrivs
-		case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
-			newPrivs, _ := lo.Difference(v, in.Privileges)
-			newGroups[k] = newPrivs
-		default:
-			return merr.StatusWithErrorCode(errors.New("invalid operate type"), commonpb.ErrorCode_OperatePrivilegeGroupFailure), nil
-		}
-	}
-
-	rolesToRevoke := []*milvuspb.GrantEntity{}
-	rolesToGrant := []*milvuspb.GrantEntity{}
-	for _, role := range roles {
-		grants, err := c.meta.SelectGrant(util.DefaultTenant, &milvuspb.GrantEntity{
-			Role:   role,
-			DbName: util.AnyWord,
+		currGroups := lo.SliceToMap(groups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
+			return group.GroupName, group.Privileges
 		})
+
+		// get roles granted to the group
+		roles, err := c.meta.GetPrivilegeGroupRoles(in.GroupName)
 		if err != nil {
-			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeGroupFailure), nil
+			return nil, err
 		}
-		currGrants := c.expandPrivilegeGroups(grants, currGroups)
-		newGrants := c.expandPrivilegeGroups(grants, newGroups)
 
-		toRevoke, toGrant := lo.Difference(currGrants, newGrants)
-		rolesToRevoke = append(rolesToRevoke, toRevoke...)
-		rolesToGrant = append(rolesToGrant, toGrant...)
-	}
-
-	if len(rolesToRevoke) > 0 {
-		opType := int32(typeutil.CacheRevokePrivilege)
-		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-			OpType: opType,
-			OpKey:  funcutil.PolicyForPrivileges(rolesToRevoke),
-		}); err != nil {
-			log.Warn("fail to refresh policy info cache for revoke privileges in operate privilege group", zap.Any("in", in), zap.Error(err))
-			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeGroupFailure), nil
+		newGroups := make(map[string][]*milvuspb.PrivilegeEntity)
+		for k, v := range currGroups {
+			if k != in.GroupName {
+				newGroups[k] = v
+				continue
+			}
+			switch in.Type {
+			case milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup:
+				newPrivs := lo.Union(v, in.Privileges)
+				newGroups[k] = lo.UniqBy(newPrivs, func(p *milvuspb.PrivilegeEntity) string {
+					return p.Name
+				})
+			case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
+				newPrivs, _ := lo.Difference(v, in.Privileges)
+				newGroups[k] = newPrivs
+			default:
+				return nil, errors.New("invalid operate type")
+			}
 		}
-	}
 
-	if len(rolesToGrant) > 0 {
-		opType := int32(typeutil.CacheGrantPrivilege)
-		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-			OpType: opType,
-			OpKey:  funcutil.PolicyForPrivileges(rolesToGrant),
-		}); err != nil {
-			log.Warn("fail to refresh policy info cache for grants privilege in operate privilege group", zap.Any("in", in), zap.Error(err))
-			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeGroupFailure), nil
+		rolesToRevoke := []*milvuspb.GrantEntity{}
+		rolesToGrant := []*milvuspb.GrantEntity{}
+		compareGrants := func(a, b *milvuspb.GrantEntity) bool {
+			return a.Role.GetName() == b.Role.GetName() &&
+				a.Object.GetName() == b.Object.GetName() &&
+				a.ObjectName == b.ObjectName &&
+				a.Grantor.GetUser().GetName() == b.Grantor.GetUser().GetName() &&
+				a.Grantor.GetPrivilege().GetName() == b.Grantor.GetPrivilege().GetName() &&
+				a.DbName == b.DbName
 		}
-	}
+		for _, role := range roles {
+			grants, err := c.meta.SelectGrant(util.DefaultTenant, &milvuspb.GrantEntity{
+				Role:   role,
+				DbName: util.AnyWord,
+			})
+			if err != nil {
+				return nil, err
+			}
+			currGrants := c.expandPrivilegeGroups(grants, currGroups)
+			newGrants := c.expandPrivilegeGroups(grants, newGroups)
 
-	err = c.meta.OperatePrivilegeGroup(in.GroupName, in.Privileges, in.Type)
-	if err != nil && !common.IsIgnorableError(err) {
-		log.Warn("fail to operate privilege group", zap.Error(err))
-		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeGroupFailure), nil
+			toRevoke := lo.Filter(currGrants, func(item *milvuspb.GrantEntity, _ int) bool {
+				return !lo.ContainsBy(newGrants, func(newItem *milvuspb.GrantEntity) bool {
+					return compareGrants(item, newItem)
+				})
+			})
+
+			toGrant := lo.Filter(newGrants, func(item *milvuspb.GrantEntity, _ int) bool {
+				return !lo.ContainsBy(currGrants, func(currItem *milvuspb.GrantEntity) bool {
+					return compareGrants(item, currItem)
+				})
+			})
+
+			rolesToRevoke = append(rolesToRevoke, toRevoke...)
+			rolesToGrant = append(rolesToGrant, toGrant...)
+		}
+
+		if len(rolesToRevoke) > 0 {
+			opType := int32(typeutil.CacheRevokePrivilege)
+			if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+				OpType: opType,
+				OpKey:  funcutil.PolicyForPrivileges(rolesToRevoke),
+			}); err != nil {
+				log.Warn("fail to refresh policy info cache for revoke privileges in operate privilege group", zap.Any("in", in), zap.Error(err))
+				return nil, err
+			}
+		}
+
+		if len(rolesToGrant) > 0 {
+			opType := int32(typeutil.CacheGrantPrivilege)
+			if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+				OpType: opType,
+				OpKey:  funcutil.PolicyForPrivileges(rolesToGrant),
+			}); err != nil {
+				log.Warn("fail to refresh policy info cache for grants privilege in operate privilege group", zap.Any("in", in), zap.Error(err))
+				return nil, err
+			}
+		}
+		return nil, nil
+	}))
+
+	redoTask.AddSyncStep(NewSimpleStep("operate privilege group meta data", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.meta.OperatePrivilegeGroup(in.GroupName, in.Privileges, in.Type)
+		if err != nil && !common.IsIgnorableError(err) {
+			log.Warn("fail to operate privilege group", zap.Error(err))
+		}
+		return nil, err
+	}))
+
+	err := redoTask.Execute(ctx)
+	if err != nil {
+		errMsg := "fail to execute task when operate privilege group"
+		ctxLog.Warn(errMsg, zap.Error(err))
+		status := merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperatePrivilegeGroupFailure)
+		return status, nil
 	}
 
 	ctxLog.Debug(method + " success")
@@ -3160,5 +3195,8 @@ func (c *Core) expandPrivilegeGroups(grants []*milvuspb.GrantEntity, groups map[
 			}
 		}
 	}
-	return newGrants
+	// uniq by role + object + object name + grantor user + privilege name + db name
+	return lo.UniqBy(newGrants, func(g *milvuspb.GrantEntity) string {
+		return fmt.Sprintf("%s-%s-%s-%s-%s-%s", g.Role, g.Object, g.ObjectName, g.Grantor.User, g.Grantor.Privilege.Name, g.DbName)
+	})
 }

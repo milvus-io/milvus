@@ -1562,13 +1562,13 @@ func (mt *MetaTable) OperatePrivilegeGroup(groupName string, privileges []*milvu
 	if !definedByUsers {
 		return merr.WrapErrParameterInvalidMsg("there is no privilege group name [%s] to operate", groupName)
 	}
+	groups, err := mt.catalog.ListPrivilegeGroups(mt.ctx)
+	if err != nil {
+		return err
+	}
 	for _, p := range privileges {
 		if util.IsPrivilegeNameDefined(p.Name) {
 			continue
-		}
-		groups, err := mt.ListPrivilegeGroups()
-		if err != nil {
-			return err
 		}
 		for _, group := range groups {
 			// add privileges for custom privilege group
@@ -1629,23 +1629,20 @@ func (mt *MetaTable) GetPrivilegeGroupRoles(groupName string) ([]*milvuspb.RoleE
 		return entity.GetRole()
 	})
 
-	// get roles that have the privilege group
-	grants, err := mt.catalog.ListGrant(mt.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
-		DbName: util.AnyWord,
-	})
-	if err != nil {
-		return nil, err
+	rolesMap := make(map[*milvuspb.RoleEntity]struct{})
+	for _, role := range roleEntity {
+		grants, err := mt.catalog.ListGrant(mt.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+			Role:   role,
+			DbName: util.AnyWord,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, grant := range grants {
+			if grant.Grantor.Privilege.Name == groupName {
+				rolesMap[role] = struct{}{}
+			}
+		}
 	}
-	groupGrants := lo.Filter(grants, func(grant *milvuspb.GrantEntity, _ int) bool {
-		return grant.Grantor.Privilege.Name == groupName
-	})
-	groupRoles := lo.Map(groupGrants, func(grant *milvuspb.GrantEntity, _ int) *milvuspb.RoleEntity {
-		return grant.Role
-	})
-
-	// filter roles that have the privilege group
-	result := lo.Filter(roleEntity, func(role *milvuspb.RoleEntity, _ int) bool {
-		return lo.Contains(groupRoles, role)
-	})
-	return result, nil
+	return lo.Keys(rolesMap), nil
 }

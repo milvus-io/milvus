@@ -2083,7 +2083,6 @@ func TestMetaTable_PrivilegeGroup(t *testing.T) {
 	catalog.EXPECT().ListRole(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SavePrivilegeGroup(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().DropPrivilegeGroup(mock.Anything, mock.Anything).Return(nil)
-	// catalog.EXPECT().GetPrivilegeGroupRoles(mock.Anything).Return(nil, nil)
 	mt := &MetaTable{
 		dbName2Meta: map[string]*model.Database{
 			"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated, nil),

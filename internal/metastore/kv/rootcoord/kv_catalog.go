@@ -1517,16 +1517,10 @@ func (kc *Catalog) DropPrivilegeGroup(ctx context.Context, groupName string) err
 }
 
 func (kc *Catalog) SavePrivilegeGroup(ctx context.Context, data *milvuspb.PrivilegeGroupInfo) error {
-	// dedup privileges
-	dedupedMap := lo.SliceToMap(data.Privileges, func(p *milvuspb.PrivilegeEntity) (string, *milvuspb.PrivilegeEntity) {
-		return p.Name, p
-	})
-	dedupedPrivileges := lo.Values(dedupedMap)
-
 	k := BuildPrivilegeGroupkey(data.GroupName)
 	groupInfo := &milvuspb.PrivilegeGroupInfo{
 		GroupName:  data.GroupName,
-		Privileges: dedupedPrivileges,
+		Privileges: lo.Uniq(data.Privileges),
 	}
 	v, err := proto.Marshal(groupInfo)
 	if err != nil {
