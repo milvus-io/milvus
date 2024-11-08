@@ -48,7 +48,8 @@ const (
 	// DefaultServiceRoot default root path used in kv by Session
 	DefaultServiceRoot = "session/"
 	// DefaultIDKey default id key for Session
-	DefaultIDKey = "id"
+	DefaultIDKey         = "id"
+	SupportedLabelPrefix = "MILVUS_SERVER_LABEL_"
 )
 
 // SessionEventType session event type
@@ -100,8 +101,9 @@ type SessionRaw struct {
 	IndexEngineVersion IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
 	LeaseID            *clientv3.LeaseID  `json:"LeaseID,omitempty"`
 
-	HostName   string `json:"HostName,omitempty"`
-	EnableDisk bool   `json:"EnableDisk,omitempty"`
+	HostName     string            `json:"HostName,omitempty"`
+	EnableDisk   bool              `json:"EnableDisk,omitempty"`
+	ServerLabels map[string]string `json:"ServerLabels,omitempty"`
 }
 
 func (s *SessionRaw) GetAddress() string {
@@ -110,6 +112,10 @@ func (s *SessionRaw) GetAddress() string {
 
 func (s *SessionRaw) GetServerID() int64 {
 	return s.ServerID
+}
+
+func (s *SessionRaw) GetServerLabel() map[string]string {
+	return s.ServerLabels
 }
 
 func (s *SessionRaw) IsTriggerKill() bool {
@@ -286,7 +292,8 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 		panic(err)
 	}
 	s.ServerID = serverID
-	log.Info("start server", zap.String("name", serverName), zap.String("address", address), zap.Int64("id", s.ServerID))
+	s.ServerLabels = GetServerLabelsFromEnv(serverName)
+	log.Info("start server", zap.String("name", serverName), zap.String("address", address), zap.Int64("id", s.ServerID), zap.Any("server_labels", s.ServerLabels))
 }
 
 // String makes Session struct able to be logged by zap
@@ -327,6 +334,25 @@ func (s *Session) getServerID() (int64, error) {
 		paramtable.SetNodeID(nodeID)
 	}
 	return nodeID, nil
+}
+
+func GetServerLabelsFromEnv(role string) map[string]string {
+	ret := make(map[string]string)
+	switch role {
+	case "querynode":
+		for _, value := range os.Environ() {
+			rs := []rune(value)
+			in := strings.Index(value, "=")
+			key := string(rs[0:in])
+			value := string(rs[in+1:])
+
+			if strings.HasPrefix(key, SupportedLabelPrefix) {
+				label := strings.TrimPrefix(key, SupportedLabelPrefix)
+				ret[label] = value
+			}
+		}
+	}
+	return ret
 }
 
 func (s *Session) checkIDExist() {
