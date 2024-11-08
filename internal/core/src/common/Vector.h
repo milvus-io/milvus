@@ -50,6 +50,10 @@ class BaseVector {
         return type_kind_;
     }
 
+    virtual void resize(vector_size_t newSize, bool setNotNull=true) {
+        length_ = newSize;
+    }
+
  protected:
     DataType type_kind_;
     size_t length_;
@@ -236,6 +240,9 @@ class RowVector : public BaseVector {
         assert(index < children_values_.size());
         return children_values_[index];
     }
+
+    void
+    resize(vector_size_t new_size, bool setNotNull = true) override;
 
  private:
     std::vector<VectorPtr> children_values_;

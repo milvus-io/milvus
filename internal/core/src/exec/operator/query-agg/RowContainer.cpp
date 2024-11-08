@@ -123,6 +123,11 @@ char* RowContainer::newRow() {
     return nullptr;
 }
 
+inline void RowContainer::extractColumn(const char *const *rows, int32_t num_rows, milvus::exec::RowColumn column,
+                                        milvus::vector_size_t result_offset, const milvus::VectorPtr &result) {
+    MILVUS_DYNAMIC_TYPE_DISPATCH(extractColumnTyped, result->type(), rows, {}, num_rows, column, result_offset, result);
+}
+
 void RowContainer::store(const milvus::ColumnVectorPtr &column_data, milvus::vector_size_t index, char *row,
                          int32_t column_index) {
     auto numKeys = keyTypes_.size();

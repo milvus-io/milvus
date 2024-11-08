@@ -265,6 +265,85 @@ public:
         }
     }
 
+    template <bool useRowNumber, typename T>
+    static void extractValuesWithNulls(
+            const char* const* rows,
+            folly::Range<const vector_size_t*> rowNumbers,
+            int32_t numRows,
+            int32_t offset,
+            int32_t nullByte,
+            uint8_t nullMask,
+            int32_t resultOffset,
+            const VectorPtr& result){
+
+    }
+
+    template <bool useRowNumber, typename T>
+    static void extractValuesNoNulls(
+            const char* const* rows,
+            folly::Range<const vector_size_t*> rowNumbers,
+            int32_t numRows,
+            int32_t offset,
+            int32_t resultOffset,
+            const VectorPtr& result){
+
+    }
+
+    template <bool useRowNumbers, DataType Type>
+    static void extractColumnTypedInternal(
+            const char* const* rows,
+            folly::Range<const vector_size_t*> rowNumbers,
+            int32_t numRows,
+            RowColumn column,
+            int32_t resultOffset,
+            const VectorPtr& result) {
+        result->resize(numRows + resultOffset);
+        if constexpr (Type == DataType::ROW || Type == DataType::JSON || Type == DataType::ARRAY || Type == DataType::NONE) {
+            PanicInfo(DataTypeInvalid, "Not Support Extract types:[ROW/JSON/ARRAY/NONE]");
+        }
+        using T = typename milvus::TypeTraits<Type>::NativeType;
+
+        auto nullMask = column.nullMask();
+        auto offset = column.offset();
+        if (nullMask) {
+            extractValuesWithNulls<useRowNumbers, T>(
+                    rows,
+                    rowNumbers,
+                    numRows,
+                    offset,
+                    column.nullByte(),
+                    nullMask,
+                    resultOffset,
+                    result);
+        } else {
+            extractValuesNoNulls<useRowNumbers, T>(
+                    rows, rowNumbers, numRows, offset, resultOffset, result);
+        }
+    }
+
+    template <DataType Type>
+    static void extractColumnTyped(const char* const* rows,
+                                   folly::Range<const vector_size_t*> rowNumbers,
+                                   int32_t numRows,
+                                   RowColumn column,
+                                   int32_t resultOffset,
+                                   const VectorPtr& result) {
+        if (rowNumbers.size() > 0) {
+            extractColumnTypedInternal<true, Type>(
+                    rows, rowNumbers, rowNumbers.size(), column, resultOffset, result);
+        } else {
+            extractColumnTypedInternal<false, Type>(
+                    rows, rowNumbers, numRows, column, resultOffset, result);
+        }
+    }
+
+    static void extractColumn(const char* const* rows, int32_t num_rows, RowColumn column, vector_size_t result_offset,
+                              const VectorPtr& result);
+
+    void extractColumn(const char* const* rows, int32_t numRows, int32_t column_idx, const VectorPtr& result) {
+        extractColumn(rows, numRows, columnAt(column_idx), 0, result);
+    }
+
     static inline int32_t nullByte(int32_t nullOffset) {
         return nullOffset / 8;
     }
