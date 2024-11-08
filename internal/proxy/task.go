@@ -89,6 +89,7 @@ const (
 	DescribeAliasTaskName         = "DescribeAliasTask"
 	ListAliasesTaskName           = "ListAliasesTask"
 	AlterCollectionTaskName       = "AlterCollectionTask"
+	AlterCollectionFieldTaskName  = "AlterColeectionFiledTask"
 	UpsertTaskName                = "UpsertTask"
 	CreateResourceGroupTaskName   = "CreateResourceGroupTask"
 	UpdateResourceGroupsTaskName  = "UpdateResourceGroupsTask"
@@ -953,6 +954,15 @@ func hasLazyLoadProp(props ...*commonpb.KeyValuePair) bool {
 	return false
 }
 
+func hasPropInDeletekeys(keys []string) bool {
+	for _, key := range keys {
+		if key == common.MmapEnabledKey || key == common.LazyLoadEnableKey {
+			return true
+		}
+	}
+	return false
+}
+
 func validatePartitionKeyIsolation(colName string, isPartitionKeyEnabled bool, props ...*commonpb.KeyValuePair) (bool, error) {
 	iso, err := common.IsPartitionKeyIsolationKvEnabled(props...)
 	if err != nil {
@@ -980,19 +990,36 @@ func validatePartitionKeyIsolation(colName string, isPartitionKeyEnabled bool, p
 }
 
 func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
+	if len(t.GetProperties()) > 0 && len(t.GetDeleteKeys()) > 0 {
+		return merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
+	}
+
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
 	}
 
 	t.CollectionID = collectionID
-	if hasMmapProp(t.Properties...) || hasLazyLoadProp(t.Properties...) {
-		loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
-		if err != nil {
-			return err
+
+	if len(t.GetProperties()) > 0 {
+		if hasMmapProp(t.Properties...) || hasLazyLoadProp(t.Properties...) {
+			loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
+			if err != nil {
+				return err
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+			}
 		}
-		if loaded {
-			return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+	} else if len(t.GetDeleteKeys()) > 0 {
+		if hasPropInDeletekeys(t.DeleteKeys) {
+			loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
+			if err != nil {
+				return err
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+			}
 		}
 	}
 
@@ -1062,6 +1089,135 @@ func (t *alterCollectionTask) Execute(ctx context.Context) error {
 }
 
 func (t *alterCollectionTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type alterCollectionFieldTask struct {
+	baseTask
+	Condition
+	*milvuspb.AlterCollectionFieldRequest
+	ctx        context.Context
+	rootCoord  types.RootCoordClient
+	result     *commonpb.Status
+	queryCoord types.QueryCoordClient
+	dataCoord  types.DataCoordClient
+}
+
+func (t *alterCollectionFieldTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *alterCollectionFieldTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *alterCollectionFieldTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *alterCollectionFieldTask) Name() string {
+	return AlterCollectionTaskName
+}
+
+func (t *alterCollectionFieldTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *alterCollectionFieldTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *alterCollectionFieldTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *alterCollectionFieldTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *alterCollectionFieldTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_AlterCollection
+	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+	if err != nil {
+		return err
+	}
+
+	isPartitionKeyMode, err := isPartitionKeyMode(ctx, t.GetDbName(), t.CollectionName)
+	if err != nil {
+		return err
+	}
+	// check if the new partition key isolation is valid to use
+	newIsoValue, err := validatePartitionKeyIsolation(t.CollectionName, isPartitionKeyMode, t.Properties...)
+	if err != nil {
+		return err
+	}
+	collBasicInfo, err := globalMetaCache.GetCollectionInfo(t.ctx, t.GetDbName(), t.CollectionName, collectionID)
+	if err != nil {
+		return err
+	}
+	oldIsoValue := collBasicInfo.partitionKeyIsolation
+
+	log.Info("alter collection field pre check with partition key isolation",
+		zap.String("collectionName", t.CollectionName),
+		zap.String("fieldName", t.FieldName),
+		zap.Bool("isPartitionKeyMode", isPartitionKeyMode),
+		zap.Bool("newIsoValue", newIsoValue),
+		zap.Bool("oldIsoValue", oldIsoValue))
+
+	// if the isolation flag in properties is not set, meta cache will assign partitionKeyIsolation in collection info to false
+	//   - None|false -> false, skip
+	//   - None|false -> true, check if the collection has vector index
+	//   - true -> false, check if the collection has vector index
+	//   - false -> true, check if the collection has vector index
+	//   - true -> true, skip
+	if oldIsoValue != newIsoValue {
+		collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
+		if err != nil {
+			return err
+		}
+
+		hasVecIndex := false
+		indexName := ""
+		indexResponse, err := t.dataCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+			CollectionID: collectionID,
+			IndexName:    "",
+		})
+		if err != nil {
+			return merr.WrapErrServiceInternal("describe index failed", err.Error())
+		}
+		for _, index := range indexResponse.IndexInfos {
+			for _, field := range collSchema.Fields {
+				if index.FieldID == field.FieldID && typeutil.IsVectorType(field.DataType) {
+					hasVecIndex = true
+					field.GetIndexParams()
+					indexName = field.GetName()
+				}
+			}
+		}
+		if hasVecIndex {
+			return merr.WrapErrIndexDuplicate(indexName,
+				"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
+		}
+	}
+
+	return nil
+}
+
+func (t *alterCollectionFieldTask) Execute(ctx context.Context) error {
+	var err error
+	t.result, err = t.rootCoord.AlterCollectionField(ctx, t.AlterCollectionFieldRequest)
+	return merr.CheckRPCCall(t.result, err)
+}
+
+func (t *alterCollectionFieldTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
