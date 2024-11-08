@@ -250,7 +250,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 
 	// test execute success
 	s.lbBalancer.ExpectedCalls = nil
-	s.mgr.EXPECT().ReleaseClient(mock.Anything)
+	s.mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
@@ -289,7 +289,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 
 	// test get client failed, and retry failed, expected success
 	s.mgr.ExpectedCalls = nil
-	s.mgr.EXPECT().ReleaseClient(mock.Anything)
+	s.mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, errors.New("fake error")).Times(1)
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
@@ -310,7 +310,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.Error(err)
 
 	s.mgr.ExpectedCalls = nil
-	s.mgr.EXPECT().ReleaseClient(mock.Anything)
+	s.mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, errors.New("fake error")).Times(1)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
@@ -331,7 +331,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 
 	// test exec failed, then retry success
 	s.mgr.ExpectedCalls = nil
-	s.mgr.EXPECT().ReleaseClient(mock.Anything)
+	s.mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
@@ -359,7 +359,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	// test exec timeout
 	s.mgr.ExpectedCalls = nil
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
-	s.mgr.EXPECT().ReleaseClient(mock.Anything)
+	s.mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	s.qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, context.Canceled).Times(1)
@@ -384,7 +384,7 @@ func (s *LBPolicySuite) TestExecute() {
 	ctx := context.Background()
 	mockErr := errors.New("mock error")
 	// test  all channel success
-	s.mgr.EXPECT().ReleaseClient(mock.Anything)
+	s.mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil)

@@ -28,7 +28,7 @@ func TestShardClientMgr(t *testing.T) {
 	_, err := mgr.GetClient(ctx, nodeInfo)
 	assert.Nil(t, err)
 
-	mgr.ReleaseClient(1)
+	mgr.ReleaseClientRef(1)
 	assert.Equal(t, len(mgr.clients.data), 1)
 	mgr.Close()
 	assert.Equal(t, len(mgr.clients.data), 0)
@@ -57,10 +57,10 @@ func TestShardClient(t *testing.T) {
 	assert.Equal(t, int64(2), shardClient.refCnt.Load())
 	assert.Equal(t, true, shardClient.initialized.Load())
 
-	shardClient.Release()
+	shardClient.DecRef()
 	assert.Equal(t, int64(1), shardClient.refCnt.Load())
 
-	shardClient.Release()
+	shardClient.DecRef()
 	assert.Equal(t, int64(0), shardClient.refCnt.Load())
 	assert.Equal(t, true, shardClient.isClosed)
 }

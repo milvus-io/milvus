@@ -66,15 +66,21 @@ func (n *shardClient) getClient(ctx context.Context) (types.QueryNodeClient, err
 		if err != nil {
 			return nil, err
 		}
-		n.refCnt.Inc()
+		n.IncRef()
 		return client, nil
 	}
 }
 
-func (n *shardClient) Release() {
+func (n *shardClient) DecRef() bool {
 	if n.refCnt.Dec() == 0 {
 		n.Close()
+		return true
 	}
+	return false
+}
+
+func (n *shardClient) IncRef() {
+	n.refCnt.Inc()
 }
 
 func (n *shardClient) close() {
@@ -148,7 +154,7 @@ func (n *shardClient) roundRobinSelectClient() (types.QueryNodeClient, error) {
 
 type shardClientMgr interface {
 	GetClient(ctx context.Context, nodeInfo nodeInfo) (types.QueryNodeClient, error)
-	ReleaseClient(nodeID int64)
+	ReleaseClientRef(nodeID int64)
 	Close()
 	SetClientCreatorFunc(creator queryNodeCreatorFunc)
 }
@@ -209,6 +215,7 @@ func (c *shardClientMgrImpl) GetClient(ctx context.Context, info nodeInfo) (type
 			// Create a new client if it doesn't exist
 			newClient, err := newShardClient(info, c.clientCreator)
 			if err != nil {
+				c.clients.Unlock()
 				return nil, err
 			}
 			c.clients.data[info.nodeID] = newClient
@@ -229,23 +236,23 @@ func (c *shardClientMgrImpl) PurgeClient() {
 			return
 		case <-ticker.C:
 			shardLocations := globalMetaCache.ListShardLocation()
-			for nodeID := range c.clients.data {
+			c.clients.Lock()
+			for nodeID, client := range c.clients.data {
 				if _, ok := shardLocations[nodeID]; !ok {
-					c.clients.Lock()
+					client.DecRef()
 					delete(c.clients.data, nodeID)
-					c.clients.Unlock()
-					c.ReleaseClient(nodeID)
 				}
 			}
+			c.clients.Unlock()
 		}
 	}
 }
 
-func (c *shardClientMgrImpl) ReleaseClient(nodeID int64) {
-	c.clients.Lock()
-	defer c.clients.Unlock()
+func (c *shardClientMgrImpl) ReleaseClientRef(nodeID int64) {
+	c.clients.RLock()
+	defer c.clients.RUnlock()
 	if client, ok := c.clients.data[nodeID]; ok {
-		client.Release()
+		client.DecRef()
 	}
 }
 

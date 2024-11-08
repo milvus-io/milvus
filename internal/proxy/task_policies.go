@@ -39,7 +39,7 @@ func RoundRobinPolicy(
 				combineErr = merr.Combine(combineErr, err)
 				continue
 			}
-			defer mgr.ReleaseClient(target.nodeID)
+			defer mgr.ReleaseClientRef(target.nodeID)
 			err = query(ctx, target.nodeID, qn, channel)
 			if err != nil {
 				log.Warn("query channel failed", zap.String("channel", channel), zap.Int64("nodeID", target.nodeID), zap.Error(err))

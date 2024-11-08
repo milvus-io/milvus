@@ -1036,7 +1036,7 @@ func (m *MetaCache) DeprecateShardCache(database, collectionName string) {
 	if ok {
 		delete(dbInfo, collectionName)
 		if len(dbInfo) == 0 {
-			delete(dbInfo, database)
+			delete(m.collLeader, database)
 		}
 	}
 }
@@ -1072,7 +1072,7 @@ func (m *MetaCache) InvalidateShardLeaderCache(collections []int64) {
 			}
 		}
 		if len(dbInfo) == 0 {
-			delete(dbInfo, dbName)
+			delete(m.collLeader, dbName)
 		}
 	}
 }

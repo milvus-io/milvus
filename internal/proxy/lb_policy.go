@@ -192,7 +192,6 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		defer balancer.CancelWorkload(targetNode.nodeID, workload.nq)
 
 		client, err := lb.clientMgr.GetClient(ctx, targetNode)
-		defer lb.clientMgr.ReleaseClient(targetNode.nodeID)
 		if err != nil {
 			log.Warn("search/query channel failed, node not available",
 				zap.Int64("collectionID", workload.collectionID),
@@ -204,6 +203,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode, workload.channel)
 			return lastErr
 		}
+		defer lb.clientMgr.ReleaseClientRef(targetNode.nodeID)
 
 		err = workload.exec(ctx, targetNode.nodeID, client, workload.channel)
 		if err != nil {
