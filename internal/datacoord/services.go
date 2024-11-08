@@ -553,6 +553,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths()),
 		UpdateStartPosition(req.GetStartPositions()),
 		UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()),
+		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 	)
 
 	// Update segment info in memory and meta.

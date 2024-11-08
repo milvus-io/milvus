@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -18,6 +19,13 @@ import (
 )
 
 const dirtyThreshold = 30 * 1024 * 1024 // 30MB
+
+var (
+	ErrSegmentNotGrowing = errors.New("segment is not growing")
+	ErrTimeTickTooOld    = errors.New("time tick is too old")
+	ErrNotEnoughSpace    = stats.ErrNotEnoughSpace
+	ErrTooLargeInsert    = stats.ErrTooLargeInsert
+)
 
 // newSegmentAllocManagerFromProto creates a new segment assignment meta from proto.
 func newSegmentAllocManagerFromProto(
@@ -161,14 +169,20 @@ func (s *segmentAllocManager) TxnSem() int32 {
 
 // AllocRows ask for rows from current segment.
 // Only growing and not fenced segment can alloc rows.
-func (s *segmentAllocManager) AllocRows(ctx context.Context, req *AssignSegmentRequest) (bool, *atomic.Int32) {
+func (s *segmentAllocManager) AllocRows(ctx context.Context, req *AssignSegmentRequest) (*AssignSegmentResult, error) {
 	// if the segment is not growing or reach limit, return false directly.
 	if s.inner.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
-		return false, nil
+		return nil, ErrSegmentNotGrowing
 	}
-	inserted := resource.Resource().SegmentAssignStatsManager().AllocRows(s.GetSegmentID(), req.InsertMetrics)
-	if !inserted {
-		return false, nil
+	if req.TimeTick <= s.inner.GetStat().CreateSegmentTimeTick {
+		// The incoming insert request's timetick is less than the segment's create time tick,
+		// return ErrTimeTickTooOld and reallocate new timetick.
+		return nil, ErrTimeTickTooOld
+	}
+
+	err := resource.Resource().SegmentAssignStatsManager().AllocRows(s.GetSegmentID(), req.InsertMetrics)
+	if err != nil {
+		return nil, err
 	}
 	s.dirtyBytes += req.InsertMetrics.BinarySize
 	s.ackSem.Inc()
@@ -181,7 +195,10 @@ func (s *segmentAllocManager) AllocRows(ctx context.Context, req *AssignSegmentR
 
 	// persist stats if too dirty.
 	s.persistStatsIfTooDirty(ctx)
-	return inserted, s.ackSem
+	return &AssignSegmentResult{
+		SegmentID:   s.GetSegmentID(),
+		Acknowledge: s.ackSem,
+	}, nil
 }
 
 // Snapshot returns the snapshot of the segment assignment meta.
@@ -237,7 +254,7 @@ func (m *mutableSegmentAssignmentMeta) IntoPending() {
 }
 
 // IntoGrowing transfers the segment assignment meta into growing state.
-func (m *mutableSegmentAssignmentMeta) IntoGrowing(limitation *policy.SegmentLimitation) {
+func (m *mutableSegmentAssignmentMeta) IntoGrowing(limitation *policy.SegmentLimitation, createSegmentTimeTick uint64) {
 	if m.modifiedCopy.State != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_PENDING {
 		panic("tranfer state to growing from non-pending state")
 	}
@@ -247,6 +264,7 @@ func (m *mutableSegmentAssignmentMeta) IntoGrowing(limitation *policy.SegmentLim
 		MaxBinarySize:                    limitation.SegmentSize,
 		CreateTimestampNanoseconds:       now,
 		LastModifiedTimestampNanoseconds: now,
+		CreateSegmentTimeTick:            createSegmentTimeTick,
 	}
 }
 

@@ -129,6 +129,14 @@ func WithNoSyncingTask() SegmentFilter {
 
 type SegmentAction func(info *SegmentInfo)
 
+func SegmentActions(actions ...SegmentAction) SegmentAction {
+	return func(info *SegmentInfo) {
+		for _, act := range actions {
+			act(info)
+		}
+	}
+}
+
 func UpdateState(state commonpb.SegmentState) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.state = state
@@ -144,6 +152,14 @@ func UpdateCheckpoint(checkpoint *msgpb.MsgPosition) SegmentAction {
 func UpdateNumOfRows(numOfRows int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.flushedRows = numOfRows
+	}
+}
+
+func SetStartPositionIfNil(startPos *msgpb.MsgPosition) SegmentAction {
+	return func(info *SegmentInfo) {
+		if info.startPosition == nil {
+			info.startPosition = startPos
+		}
 	}
 }
 

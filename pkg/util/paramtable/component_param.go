@@ -1196,7 +1196,7 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 	p.UseLockScheduler = ParamItem{
 		Key:          "rootCoord.useLockScheduler",
 		Version:      "2.4.15",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "use lock to schedule the task",
 		Export:       false,
 	}

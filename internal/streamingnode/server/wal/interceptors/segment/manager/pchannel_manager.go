@@ -39,7 +39,7 @@ func RecoverPChannelSegmentAllocManager(
 		return nil, errors.Wrap(err, "failed to get pchannel info from rootcoord")
 	}
 	metrics := metricsutil.NewSegmentAssignMetrics(pchannel.Name)
-	managers, waitForSealed := buildNewPartitionManagers(pchannel, rawMetas, resp.GetCollections(), metrics)
+	managers, waitForSealed := buildNewPartitionManagers(wal, pchannel, rawMetas, resp.GetCollections(), metrics)
 
 	// PChannelSegmentAllocManager is the segment assign manager of determined pchannel.
 	logger := log.With(zap.Any("pchannel", pchannel))
@@ -143,8 +143,8 @@ func (m *PChannelSegmentAllocManager) RemovePartition(ctx context.Context, colle
 	return m.helper.WaitUntilNoWaitSeal(ctx)
 }
 
-// SealAllSegmentsAndFenceUntil seals all segments and fence assign until timetick and return the segmentIDs.
-func (m *PChannelSegmentAllocManager) SealAllSegmentsAndFenceUntil(ctx context.Context, collectionID int64, timetick uint64) ([]int64, error) {
+// SealAndFenceSegmentUntil seal all segment that contains the message less than the incoming timetick.
+func (m *PChannelSegmentAllocManager) SealAndFenceSegmentUntil(ctx context.Context, collectionID int64, timetick uint64) ([]int64, error) {
 	if err := m.checkLifetime(); err != nil {
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func (m *PChannelSegmentAllocManager) SealAllSegmentsAndFenceUntil(ctx context.C
 
 	// All message's timetick less than incoming timetick is all belong to the output sealed segment.
 	// So the output sealed segment transfer into flush == all message's timetick less than incoming timetick are flushed.
-	sealedSegments, err := m.managers.SealAllSegmentsAndFenceUntil(collectionID, timetick)
+	sealedSegments, err := m.managers.SealAndFenceSegmentUntil(collectionID, timetick)
 	if err != nil {
 		return nil, err
 	}

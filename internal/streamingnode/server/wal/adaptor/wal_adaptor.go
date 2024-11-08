@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -115,13 +116,20 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		metricsGuard.Finish(err)
 		return nil, err
 	}
+	var extra *anypb.Any
+	if extraAppendResult.Extra != nil {
+		var err error
+		if extra, err = anypb.New(extraAppendResult.Extra); err != nil {
+			panic("unreachable: failed to marshal extra append result")
+		}
+	}
 
 	// unwrap the messageID if needed.
 	r := &wal.AppendResult{
 		MessageID: messageID,
 		TimeTick:  extraAppendResult.TimeTick,
 		TxnCtx:    extraAppendResult.TxnCtx,
-		Extra:     extraAppendResult.Extra,
+		Extra:     extra,
 	}
 	metricsGuard.Finish(nil)
 	return r, nil

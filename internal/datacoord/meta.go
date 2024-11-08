@@ -1013,6 +1013,24 @@ func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 	}
 }
 
+// UpdateAsDroppedIfEmptyWhenFlushing updates segment state to Dropped if segment is empty and in Flushing state
+// It's used to make a empty flushing segment to be dropped directly.
+func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update as dropped if empty when flusing failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		if segment.GetNumOfRows() == 0 && segment.GetState() == commonpb.SegmentState_Flushing {
+			log.Info("meta update: update as dropped if empty when flusing", zap.Int64("segmentID", segmentID))
+			updateSegStateAndPrepareMetrics(segment, commonpb.SegmentState_Dropped, modPack.metricMutation)
+		}
+		return true
+	}
+}
+
 // updateSegmentsInfo update segment infos
 // will exec all operators, and update all changed segments
 func (m *meta) UpdateSegmentsInfo(operators ...UpdateOperator) error {

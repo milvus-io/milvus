@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
@@ -32,7 +33,10 @@ func TestSegmentAllocManager(t *testing.T) {
 	initializeTestState(t)
 
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Append(mock.Anything, mock.Anything).Return(nil, nil)
+	w.EXPECT().Append(mock.Anything, mock.Anything).Return(&wal.AppendResult{
+		MessageID: rmq.NewRmqID(1),
+		TimeTick:  2,
+	}, nil)
 	f := syncutil.NewFuture[wal.WAL]()
 	f.Set(w)
 
@@ -42,8 +46,21 @@ func TestSegmentAllocManager(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Ask for allocate segment
+	// Ask for a too old timetick.
 	result, err := m.AssignSegment(ctx, &AssignSegmentRequest{
+		CollectionID: 1,
+		PartitionID:  1,
+		InsertMetrics: stats.InsertMetrics{
+			Rows:       100,
+			BinarySize: 100,
+		},
+		TimeTick: 1,
+	})
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrTimeTickTooOld)
+
+	// Ask for allocate segment
+	result, err = m.AssignSegment(ctx, &AssignSegmentRequest{
 		CollectionID: 1,
 		PartitionID:  1,
 		InsertMetrics: stats.InsertMetrics{
@@ -163,7 +180,7 @@ func TestSegmentAllocManager(t *testing.T) {
 	ts := tsoutil.GetCurrentTime()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
-	ids, err := m.SealAllSegmentsAndFenceUntil(ctx, 1, ts)
+	ids, err := m.SealAndFenceSegmentUntil(ctx, 1, ts)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Empty(t, ids)
@@ -190,14 +207,26 @@ func TestCreateAndDropCollection(t *testing.T) {
 	initializeTestState(t)
 
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Append(mock.Anything, mock.Anything).Return(nil, nil)
+	w.EXPECT().Append(mock.Anything, mock.Anything).Return(&wal.AppendResult{
+		MessageID: rmq.NewRmqID(1),
+		TimeTick:  1,
+	}, nil)
 	f := syncutil.NewFuture[wal.WAL]()
 	f.Set(w)
 
 	m, err := RecoverPChannelSegmentAllocManager(context.Background(), types.PChannelInfo{Name: "v1"}, f)
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
-	inspector.GetSegmentSealedInspector().RegsiterPChannelManager(m)
+
+	m.MustSealSegments(context.Background(), stats.SegmentBelongs{
+		PChannel:     "v1",
+		VChannel:     "v1",
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    4000,
+	})
+
+	inspector.GetSegmentSealedInspector().RegisterPChannelManager(m)
 
 	ctx := context.Background()
 
