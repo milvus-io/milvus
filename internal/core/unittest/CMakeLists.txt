@@ -86,6 +86,7 @@ set(MILVUS_TEST_FILES
         test_tracer.cpp
         test_utils.cpp
         test_chunked_segment.cpp
+        test_json_key_index.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )
