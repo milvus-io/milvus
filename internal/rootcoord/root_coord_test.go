@@ -1787,6 +1787,39 @@ func TestRootCoord_RBACError(t *testing.T) {
 		}
 	})
 
+	t.Run("operate privilege group failed", func(t *testing.T) {
+		mockMeta := c.meta.(*mockMetaTable)
+		mockMeta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+			return nil, errors.New("mock error")
+		}
+		mockMeta.CreatePrivilegeGroupFunc = func(groupName string) error {
+			return errors.New("mock error")
+		}
+		mockMeta.GetPrivilegeGroupRolesFunc = func(groupName string) ([]*milvuspb.RoleEntity, error) {
+			return nil, errors.New("mock error")
+		}
+		{
+			resp, err := c.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{})
+			assert.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		}
+		{
+			resp, err := c.ListPrivilegeGroups(ctx, &milvuspb.ListPrivilegeGroupsRequest{})
+			assert.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		}
+		{
+			resp, err := c.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{})
+			assert.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		}
+		{
+			resp, err := c.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{})
+			assert.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		}
+	})
+
 	t.Run("select grant failed", func(t *testing.T) {
 		{
 			resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{})

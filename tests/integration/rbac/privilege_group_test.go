@@ -199,6 +199,41 @@ func (s *PrivilegeGroupTestSuite) TestCustomPrivilegeGroup() {
 	s.True(merr.Ok(dropRoleResp))
 }
 
+func (s *PrivilegeGroupTestSuite) TestInvalidPrivilegeGroup() {
+	ctx := GetContext(context.Background(), "root:123456")
+
+	createResp, err := s.Cluster.Proxy.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName: "",
+	})
+	s.NoError(err)
+	s.False(merr.Ok(createResp))
+
+	dropResp, err := s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
+		GroupName: "group1",
+	})
+	s.NoError(err)
+	s.True(merr.Ok(dropResp))
+
+	dropResp, err = s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
+		GroupName: "",
+	})
+	s.NoError(err)
+	s.False(merr.Ok(dropResp))
+
+	operateResp, err := s.Cluster.Proxy.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
+		GroupName: "",
+	})
+	s.NoError(err)
+	s.False(merr.Ok(operateResp))
+
+	operateResp, err = s.Cluster.Proxy.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
+		GroupName:  "group1",
+		Privileges: []*milvuspb.PrivilegeEntity{{Name: "123"}},
+	})
+	s.NoError(err)
+	s.False(merr.Ok(operateResp))
+}
+
 func (s *PrivilegeGroupTestSuite) operatePrivilege(ctx context.Context, role, privilege, objectType string, operateType milvuspb.OperatePrivilegeType) {
 	resp, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
 		Type: operateType,

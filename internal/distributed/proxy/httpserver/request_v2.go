@@ -6,7 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -275,8 +274,8 @@ func (req *RoleReq) GetRoleName() string {
 }
 
 type PrivilegeGroupReq struct {
-	PrivilegeGroupName string                      `json:"privilegeGroupName" binding:"required"`
-	Privileges         []*milvuspb.PrivilegeEntity `json:"privileges"`
+	PrivilegeGroupName string   `json:"privilegeGroupName" binding:"required"`
+	Privileges         []string `json:"privileges"`
 }
 
 type GrantReq struct {
