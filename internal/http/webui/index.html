@@ -39,6 +39,9 @@
         <li class="nav-item">
           <a class="nav-link" id="runtime-metrics-tab" data-toggle="tab" href="#runtime-metrics" role="tab" aria-controls="runtime-metrics" aria-selected="false">Runtime Metrics</a>
         </li>
+        <li class="nav-item">
+          <a class="nav-link" id="request-tab" data-toggle="tab" href="#request-metrics" role="tab" aria-controls="request-metrics" aria-selected="false">Requests</a>
+        </li>
       </ul>
 
       <!-- Tab Content -->
@@ -52,7 +55,12 @@
         <div class="tab-pane fade" id="runtime-metrics" role="tabpanel" aria-labelledby="runtime-metrics-tab">
           <table id="nodeMetrics" class="table table-hover mt-3"></table>
         </div>
-      </div>
+
+        <!-- Node Request Table -->
+        <div class="tab-pane fade" id="request-metrics" role="tabpanel" aria-labelledby="request-tab">
+          <table id="nodeRequests" class="table table-hover mt-3"></table>
+        </div>
+    </div>
 
       <h2>
         Connected Clients
@@ -85,6 +93,14 @@
             .catch(error => {
               handleError(error);
             });
+
+    // fetchData(MILVUS_URI + "/_node/requests", nodeRequests)
+    //         .then(data => {
+    //           renderNodeRequests(data)
+    //         })
+    //         .catch(error => {
+    //           handleError(error);
+    //         });
 
     fetchData(MILVUS_URI + "/_cluster/clients", clientInfos)
             .then(data => {

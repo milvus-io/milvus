@@ -91,7 +91,7 @@ func newTaskScheduler(
 		handler:                   handler,
 		indexEngineVersionManager: indexEngineVersionManager,
 		allocator:                 allocator,
-		taskStats:                 expirable.NewLRU[UniqueID, Task](1024, nil, time.Minute*5),
+		taskStats:                 expirable.NewLRU[UniqueID, Task](64, nil, time.Minute*15),
 	}
 	ts.reloadFromMeta()
 	return ts

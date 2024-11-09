@@ -52,7 +52,7 @@ type importTasks struct {
 func newImportTasks() *importTasks {
 	return &importTasks{
 		tasks:     make(map[int64]ImportTask),
-		taskStats: expirable.NewLRU[UniqueID, ImportTask](4096, nil, time.Minute*60),
+		taskStats: expirable.NewLRU[UniqueID, ImportTask](64, nil, time.Minute*30),
 	}
 }
 
@@ -301,9 +301,6 @@ func (m *importMeta) RemoveTask(taskID int64) error {
 
 func (m *importMeta) TaskStatsJSON() string {
 	tasks := m.tasks.listTaskStats()
-	if len(tasks) == 0 {
-		return ""
-	}
 
 	ret, err := json.Marshal(tasks)
 	if err != nil {

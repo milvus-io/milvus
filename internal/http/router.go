@@ -75,6 +75,8 @@ const (
 	ClusterDependenciesPath = "/_cluster/dependencies"
 	// HookConfigsPath is the path to get hook configurations.
 	HookConfigsPath = "/_hook/configs"
+	// SlowQueryPath is the path to get slow queries metrics
+	SlowQueryPath = "/_cluster/slow_query"
 
 	// QCDistPath is the path to get QueryCoord distribution.
 	QCDistPath = "/_qc/dist"
