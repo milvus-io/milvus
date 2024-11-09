@@ -897,6 +897,10 @@ func TestMethodGet(t *testing.T) {
 		Status: &StatusSuccess,
 		Alias:  DefaultAliasName,
 	}, nil).Once()
+	mp.EXPECT().ListPrivilegeGroups(mock.Anything, mock.Anything).Return(&milvuspb.ListPrivilegeGroupsResponse{
+		Status:          &StatusSuccess,
+		PrivilegeGroups: []*milvuspb.PrivilegeGroupInfo{{GroupName: "group1", Privileges: []*milvuspb.PrivilegeEntity{{Name: "*"}}}},
+	}, nil).Once()
 
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
@@ -987,6 +991,9 @@ func TestMethodGet(t *testing.T) {
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(AliasCategory, DescribeAction),
 	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(PrivilegeGroupCategory, ListAction),
+	})
 
 	for _, testcase := range queryTestCases {
 		t.Run(testcase.path, func(t *testing.T) {
@@ -996,7 +1003,8 @@ func TestMethodGet(t *testing.T) {
 				`"indexName": "` + DefaultIndexName + `",` +
 				`"userName": "` + util.UserRoot + `",` +
 				`"roleName": "` + util.RoleAdmin + `",` +
-				`"aliasName": "` + DefaultAliasName + `"` +
+				`"aliasName": "` + DefaultAliasName + `",` +
+				`"privilegeGroupName": "pg"` +
 				`}`))
 			req := httptest.NewRequest(http.MethodPost, testcase.path, bodyReader)
 			w := httptest.NewRecorder()
@@ -1037,6 +1045,7 @@ func TestMethodDelete(t *testing.T) {
 	mp.EXPECT().DropRole(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().DropAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().DropPrivilegeGroup(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
 	queryTestCases = append(queryTestCases, rawTestCase{
@@ -1057,10 +1066,13 @@ func TestMethodDelete(t *testing.T) {
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(AliasCategory, DropAction),
 	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(PrivilegeGroupCategory, DropAction),
+	})
 	for _, testcase := range queryTestCases {
 		t.Run(testcase.path, func(t *testing.T) {
 			bodyReader := bytes.NewReader([]byte(`{"collectionName": "` + DefaultCollectionName + `", "partitionName": "` + DefaultPartitionName +
-				`", "userName": "` + util.UserRoot + `", "roleName": "` + util.RoleAdmin + `", "indexName": "` + DefaultIndexName + `", "aliasName": "` + DefaultAliasName + `"}`))
+				`", "userName": "` + util.UserRoot + `", "roleName": "` + util.RoleAdmin + `", "indexName": "` + DefaultIndexName + `", "aliasName": "` + DefaultAliasName + `", "privilegeGroupName": "pg"}`))
 			req := httptest.NewRequest(http.MethodPost, testcase.path, bodyReader)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -1099,6 +1111,8 @@ func TestMethodPost(t *testing.T) {
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Once()
 	mp.EXPECT().CreateAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().AlterAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().CreatePrivilegeGroup(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
 	mp.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
 		Status: commonSuccessStatus, JobID: "1234567890",
 	}, nil).Once()
@@ -1191,6 +1205,15 @@ func TestMethodPost(t *testing.T) {
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(ImportJobCategory, DescribeAction),
 	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(PrivilegeGroupCategory, CreateAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(PrivilegeGroupCategory, AddPrivilegesToGroupAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(PrivilegeGroupCategory, RemovePrivilegesFromGroupAction),
+	})
 
 	for _, testcase := range queryTestCases {
 		t.Run(testcase.path, func(t *testing.T) {
@@ -1201,6 +1224,7 @@ func TestMethodPost(t *testing.T) {
 				`"indexParams": [{"indexName": "` + DefaultIndexName + `", "fieldName": "book_intro", "metricType": "L2", "params": {"nlist": 30, "index_type": "IVF_FLAT"}}],` +
 				`"userName": "` + util.UserRoot + `", "password": "Milvus", "newPassword": "milvus", "roleName": "` + util.RoleAdmin + `",` +
 				`"roleName": "` + util.RoleAdmin + `", "objectType": "Global", "objectName": "*", "privilege": "*",` +
+				`"privilegeGroupName": "pg", "privileges": ["create", "drop"],` +
 				`"aliasName": "` + DefaultAliasName + `",` +
 				`"jobId": "1234567890",` +
 				`"files": [["book.json"]]` +

@@ -859,6 +859,61 @@ func (_c *MockProxy_CreatePartition_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// CreatePrivilegeGroup provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CreatePrivilegeGroup(_a0 context.Context, _a1 *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePrivilegeGroupRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreatePrivilegeGroupRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_CreatePrivilegeGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreatePrivilegeGroup'
+type MockProxy_CreatePrivilegeGroup_Call struct {
+	*mock.Call
+}
+
+// CreatePrivilegeGroup is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreatePrivilegeGroupRequest
+func (_e *MockProxy_Expecter) CreatePrivilegeGroup(_a0 interface{}, _a1 interface{}) *MockProxy_CreatePrivilegeGroup_Call {
+	return &MockProxy_CreatePrivilegeGroup_Call{Call: _e.mock.On("CreatePrivilegeGroup", _a0, _a1)}
+}
+
+func (_c *MockProxy_CreatePrivilegeGroup_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreatePrivilegeGroupRequest)) *MockProxy_CreatePrivilegeGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreatePrivilegeGroupRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_CreatePrivilegeGroup_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_CreatePrivilegeGroup_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_CreatePrivilegeGroup_Call) RunAndReturn(run func(context.Context, *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error)) *MockProxy_CreatePrivilegeGroup_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateResourceGroup provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) CreateResourceGroup(_a0 context.Context, _a1 *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1680,6 +1735,61 @@ func (_c *MockProxy_DropPartition_Call) Return(_a0 *commonpb.Status, _a1 error) 
 }
 
 func (_c *MockProxy_DropPartition_Call) RunAndReturn(run func(context.Context, *milvuspb.DropPartitionRequest) (*commonpb.Status, error)) *MockProxy_DropPartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropPrivilegeGroup provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DropPrivilegeGroup(_a0 context.Context, _a1 *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropPrivilegeGroupRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropPrivilegeGroupRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DropPrivilegeGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropPrivilegeGroup'
+type MockProxy_DropPrivilegeGroup_Call struct {
+	*mock.Call
+}
+
+// DropPrivilegeGroup is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropPrivilegeGroupRequest
+func (_e *MockProxy_Expecter) DropPrivilegeGroup(_a0 interface{}, _a1 interface{}) *MockProxy_DropPrivilegeGroup_Call {
+	return &MockProxy_DropPrivilegeGroup_Call{Call: _e.mock.On("DropPrivilegeGroup", _a0, _a1)}
+}
+
+func (_c *MockProxy_DropPrivilegeGroup_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropPrivilegeGroupRequest)) *MockProxy_DropPrivilegeGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DropPrivilegeGroupRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DropPrivilegeGroup_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_DropPrivilegeGroup_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_DropPrivilegeGroup_Call) RunAndReturn(run func(context.Context, *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error)) *MockProxy_DropPrivilegeGroup_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4184,6 +4294,61 @@ func (_c *MockProxy_ListIndexedSegment_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// ListPrivilegeGroups provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListPrivilegeGroups(_a0 context.Context, _a1 *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *milvuspb.ListPrivilegeGroupsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListPrivilegeGroupsRequest) *milvuspb.ListPrivilegeGroupsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListPrivilegeGroupsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListPrivilegeGroupsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListPrivilegeGroups_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListPrivilegeGroups'
+type MockProxy_ListPrivilegeGroups_Call struct {
+	*mock.Call
+}
+
+// ListPrivilegeGroups is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListPrivilegeGroupsRequest
+func (_e *MockProxy_Expecter) ListPrivilegeGroups(_a0 interface{}, _a1 interface{}) *MockProxy_ListPrivilegeGroups_Call {
+	return &MockProxy_ListPrivilegeGroups_Call{Call: _e.mock.On("ListPrivilegeGroups", _a0, _a1)}
+}
+
+func (_c *MockProxy_ListPrivilegeGroups_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListPrivilegeGroupsRequest)) *MockProxy_ListPrivilegeGroups_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListPrivilegeGroupsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListPrivilegeGroups_Call) Return(_a0 *milvuspb.ListPrivilegeGroupsResponse, _a1 error) *MockProxy_ListPrivilegeGroups_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ListPrivilegeGroups_Call) RunAndReturn(run func(context.Context, *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error)) *MockProxy_ListPrivilegeGroups_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListResourceGroups provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) ListResourceGroups(_a0 context.Context, _a1 *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -4510,6 +4675,61 @@ func (_c *MockProxy_OperatePrivilege_Call) Return(_a0 *commonpb.Status, _a1 erro
 }
 
 func (_c *MockProxy_OperatePrivilege_Call) RunAndReturn(run func(context.Context, *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error)) *MockProxy_OperatePrivilege_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// OperatePrivilegeGroup provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) OperatePrivilegeGroup(_a0 context.Context, _a1 *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperatePrivilegeGroupRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.OperatePrivilegeGroupRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_OperatePrivilegeGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'OperatePrivilegeGroup'
+type MockProxy_OperatePrivilegeGroup_Call struct {
+	*mock.Call
+}
+
+// OperatePrivilegeGroup is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.OperatePrivilegeGroupRequest
+func (_e *MockProxy_Expecter) OperatePrivilegeGroup(_a0 interface{}, _a1 interface{}) *MockProxy_OperatePrivilegeGroup_Call {
+	return &MockProxy_OperatePrivilegeGroup_Call{Call: _e.mock.On("OperatePrivilegeGroup", _a0, _a1)}
+}
+
+func (_c *MockProxy_OperatePrivilegeGroup_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.OperatePrivilegeGroupRequest)) *MockProxy_OperatePrivilegeGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.OperatePrivilegeGroupRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_OperatePrivilegeGroup_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_OperatePrivilegeGroup_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_OperatePrivilegeGroup_Call) RunAndReturn(run func(context.Context, *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error)) *MockProxy_OperatePrivilegeGroup_Call {
 	_c.Call.Return(run)
 	return _c
 }

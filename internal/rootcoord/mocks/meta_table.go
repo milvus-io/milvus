@@ -570,6 +570,52 @@ func (_c *IMetaTable_CreateDatabase_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// CreatePrivilegeGroup provides a mock function with given fields: groupName
+func (_m *IMetaTable) CreatePrivilegeGroup(groupName string) error {
+	ret := _m.Called(groupName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreatePrivilegeGroup")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(groupName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CreatePrivilegeGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreatePrivilegeGroup'
+type IMetaTable_CreatePrivilegeGroup_Call struct {
+	*mock.Call
+}
+
+// CreatePrivilegeGroup is a helper method to define mock.On call
+//   - groupName string
+func (_e *IMetaTable_Expecter) CreatePrivilegeGroup(groupName interface{}) *IMetaTable_CreatePrivilegeGroup_Call {
+	return &IMetaTable_CreatePrivilegeGroup_Call{Call: _e.mock.On("CreatePrivilegeGroup", groupName)}
+}
+
+func (_c *IMetaTable_CreatePrivilegeGroup_Call) Run(run func(groupName string)) *IMetaTable_CreatePrivilegeGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CreatePrivilegeGroup_Call) Return(_a0 error) *IMetaTable_CreatePrivilegeGroup_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CreatePrivilegeGroup_Call) RunAndReturn(run func(string) error) *IMetaTable_CreatePrivilegeGroup_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateRole provides a mock function with given fields: tenant, entity
 func (_m *IMetaTable) CreateRole(tenant string, entity *milvuspb.RoleEntity) error {
 	ret := _m.Called(tenant, entity)
@@ -838,6 +884,52 @@ func (_c *IMetaTable_DropGrant_Call) Return(_a0 error) *IMetaTable_DropGrant_Cal
 }
 
 func (_c *IMetaTable_DropGrant_Call) RunAndReturn(run func(string, *milvuspb.RoleEntity) error) *IMetaTable_DropGrant_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropPrivilegeGroup provides a mock function with given fields: groupName
+func (_m *IMetaTable) DropPrivilegeGroup(groupName string) error {
+	ret := _m.Called(groupName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropPrivilegeGroup")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(groupName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_DropPrivilegeGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropPrivilegeGroup'
+type IMetaTable_DropPrivilegeGroup_Call struct {
+	*mock.Call
+}
+
+// DropPrivilegeGroup is a helper method to define mock.On call
+//   - groupName string
+func (_e *IMetaTable_Expecter) DropPrivilegeGroup(groupName interface{}) *IMetaTable_DropPrivilegeGroup_Call {
+	return &IMetaTable_DropPrivilegeGroup_Call{Call: _e.mock.On("DropPrivilegeGroup", groupName)}
+}
+
+func (_c *IMetaTable_DropPrivilegeGroup_Call) Run(run func(groupName string)) *IMetaTable_DropPrivilegeGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_DropPrivilegeGroup_Call) Return(_a0 error) *IMetaTable_DropPrivilegeGroup_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_DropPrivilegeGroup_Call) RunAndReturn(run func(string) error) *IMetaTable_DropPrivilegeGroup_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1265,6 +1357,64 @@ func (_c *IMetaTable_GetDatabaseByName_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// GetPrivilegeGroupRoles provides a mock function with given fields: groupName
+func (_m *IMetaTable) GetPrivilegeGroupRoles(groupName string) ([]*milvuspb.RoleEntity, error) {
+	ret := _m.Called(groupName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPrivilegeGroupRoles")
+	}
+
+	var r0 []*milvuspb.RoleEntity
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) ([]*milvuspb.RoleEntity, error)); ok {
+		return rf(groupName)
+	}
+	if rf, ok := ret.Get(0).(func(string) []*milvuspb.RoleEntity); ok {
+		r0 = rf(groupName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*milvuspb.RoleEntity)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(groupName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_GetPrivilegeGroupRoles_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPrivilegeGroupRoles'
+type IMetaTable_GetPrivilegeGroupRoles_Call struct {
+	*mock.Call
+}
+
+// GetPrivilegeGroupRoles is a helper method to define mock.On call
+//   - groupName string
+func (_e *IMetaTable_Expecter) GetPrivilegeGroupRoles(groupName interface{}) *IMetaTable_GetPrivilegeGroupRoles_Call {
+	return &IMetaTable_GetPrivilegeGroupRoles_Call{Call: _e.mock.On("GetPrivilegeGroupRoles", groupName)}
+}
+
+func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) Run(run func(groupName string)) *IMetaTable_GetPrivilegeGroupRoles_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) Return(_a0 []*milvuspb.RoleEntity, _a1 error) *IMetaTable_GetPrivilegeGroupRoles_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) RunAndReturn(run func(string) ([]*milvuspb.RoleEntity, error)) *IMetaTable_GetPrivilegeGroupRoles_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsAlias provides a mock function with given fields: db, name
 func (_m *IMetaTable) IsAlias(db string, name string) bool {
 	ret := _m.Called(db, name)
@@ -1304,6 +1454,62 @@ func (_c *IMetaTable_IsAlias_Call) Return(_a0 bool) *IMetaTable_IsAlias_Call {
 }
 
 func (_c *IMetaTable_IsAlias_Call) RunAndReturn(run func(string, string) bool) *IMetaTable_IsAlias_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IsCustomPrivilegeGroup provides a mock function with given fields: groupName
+func (_m *IMetaTable) IsCustomPrivilegeGroup(groupName string) (bool, error) {
+	ret := _m.Called(groupName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsCustomPrivilegeGroup")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (bool, error)); ok {
+		return rf(groupName)
+	}
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(groupName)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(groupName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_IsCustomPrivilegeGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsCustomPrivilegeGroup'
+type IMetaTable_IsCustomPrivilegeGroup_Call struct {
+	*mock.Call
+}
+
+// IsCustomPrivilegeGroup is a helper method to define mock.On call
+//   - groupName string
+func (_e *IMetaTable_Expecter) IsCustomPrivilegeGroup(groupName interface{}) *IMetaTable_IsCustomPrivilegeGroup_Call {
+	return &IMetaTable_IsCustomPrivilegeGroup_Call{Call: _e.mock.On("IsCustomPrivilegeGroup", groupName)}
+}
+
+func (_c *IMetaTable_IsCustomPrivilegeGroup_Call) Run(run func(groupName string)) *IMetaTable_IsCustomPrivilegeGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_IsCustomPrivilegeGroup_Call) Return(_a0 bool, _a1 error) *IMetaTable_IsCustomPrivilegeGroup_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_IsCustomPrivilegeGroup_Call) RunAndReturn(run func(string) (bool, error)) *IMetaTable_IsCustomPrivilegeGroup_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1715,6 +1921,63 @@ func (_c *IMetaTable_ListPolicy_Call) RunAndReturn(run func(string) ([]string, e
 	return _c
 }
 
+// ListPrivilegeGroups provides a mock function with given fields:
+func (_m *IMetaTable) ListPrivilegeGroups() ([]*milvuspb.PrivilegeGroupInfo, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListPrivilegeGroups")
+	}
+
+	var r0 []*milvuspb.PrivilegeGroupInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func() ([]*milvuspb.PrivilegeGroupInfo, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() []*milvuspb.PrivilegeGroupInfo); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*milvuspb.PrivilegeGroupInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_ListPrivilegeGroups_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListPrivilegeGroups'
+type IMetaTable_ListPrivilegeGroups_Call struct {
+	*mock.Call
+}
+
+// ListPrivilegeGroups is a helper method to define mock.On call
+func (_e *IMetaTable_Expecter) ListPrivilegeGroups() *IMetaTable_ListPrivilegeGroups_Call {
+	return &IMetaTable_ListPrivilegeGroups_Call{Call: _e.mock.On("ListPrivilegeGroups")}
+}
+
+func (_c *IMetaTable_ListPrivilegeGroups_Call) Run(run func()) *IMetaTable_ListPrivilegeGroups_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListPrivilegeGroups_Call) Return(_a0 []*milvuspb.PrivilegeGroupInfo, _a1 error) *IMetaTable_ListPrivilegeGroups_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_ListPrivilegeGroups_Call) RunAndReturn(run func() ([]*milvuspb.PrivilegeGroupInfo, error)) *IMetaTable_ListPrivilegeGroups_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListUserRole provides a mock function with given fields: tenant
 func (_m *IMetaTable) ListUserRole(tenant string) ([]string, error) {
 	ret := _m.Called(tenant)
@@ -1809,6 +2072,54 @@ func (_c *IMetaTable_OperatePrivilege_Call) Return(_a0 error) *IMetaTable_Operat
 }
 
 func (_c *IMetaTable_OperatePrivilege_Call) RunAndReturn(run func(string, *milvuspb.GrantEntity, milvuspb.OperatePrivilegeType) error) *IMetaTable_OperatePrivilege_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// OperatePrivilegeGroup provides a mock function with given fields: groupName, privileges, operateType
+func (_m *IMetaTable) OperatePrivilegeGroup(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
+	ret := _m.Called(groupName, privileges, operateType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for OperatePrivilegeGroup")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, []*milvuspb.PrivilegeEntity, milvuspb.OperatePrivilegeGroupType) error); ok {
+		r0 = rf(groupName, privileges, operateType)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_OperatePrivilegeGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'OperatePrivilegeGroup'
+type IMetaTable_OperatePrivilegeGroup_Call struct {
+	*mock.Call
+}
+
+// OperatePrivilegeGroup is a helper method to define mock.On call
+//   - groupName string
+//   - privileges []*milvuspb.PrivilegeEntity
+//   - operateType milvuspb.OperatePrivilegeGroupType
+func (_e *IMetaTable_Expecter) OperatePrivilegeGroup(groupName interface{}, privileges interface{}, operateType interface{}) *IMetaTable_OperatePrivilegeGroup_Call {
+	return &IMetaTable_OperatePrivilegeGroup_Call{Call: _e.mock.On("OperatePrivilegeGroup", groupName, privileges, operateType)}
+}
+
+func (_c *IMetaTable_OperatePrivilegeGroup_Call) Run(run func(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType)) *IMetaTable_OperatePrivilegeGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].([]*milvuspb.PrivilegeEntity), args[2].(milvuspb.OperatePrivilegeGroupType))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_OperatePrivilegeGroup_Call) Return(_a0 error) *IMetaTable_OperatePrivilegeGroup_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_OperatePrivilegeGroup_Call) RunAndReturn(run func(string, []*milvuspb.PrivilegeEntity, milvuspb.OperatePrivilegeGroupType) error) *IMetaTable_OperatePrivilegeGroup_Call {
 	_c.Call.Return(run)
 	return _c
 }

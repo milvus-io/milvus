@@ -49,6 +49,9 @@ const (
 
 	// GranteeIDPrefix prefix for mapping among privilege and grantor
 	GranteeIDPrefix = ComponentPrefix + CommonCredentialPrefix + "/grantee-id"
+
+	// PrivilegeGroupPrefix prefix for privilege group
+	PrivilegeGroupPrefix = ComponentPrefix + "/privilege-group"
 )
 
 func BuildDatabasePrefixWithDBID(dbID int64) string {
@@ -68,4 +71,8 @@ func getDatabasePrefix(dbID int64) string {
 		return BuildDatabasePrefixWithDBID(dbID)
 	}
 	return CollectionMetaPrefix
+}
+
+func BuildPrivilegeGroupkey(groupName string) string {
+	return fmt.Sprintf("%s/%s", PrivilegeGroupPrefix, groupName)
 }
