@@ -1748,6 +1748,9 @@ func TestRootCoord_RBACError(t *testing.T) {
 		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 			return nil, nil
 		}
+		mockMeta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+			return nil, nil
+		}
 		{
 			resp, err := c.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{Entity: &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: "foo"},
@@ -1878,6 +1881,9 @@ func TestRootCoord_BuiltinRoles(t *testing.T) {
 		}
 		mockMeta.OperatePrivilegeFunc = func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 			return nil
+		}
+		mockMeta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+			return nil, nil
 		}
 		err := c.initBuiltinRoles()
 		assert.Equal(t, nil, err)
