@@ -121,7 +121,7 @@ class Schema {
              int64_t max_length,
              bool nullable,
              bool enable_match,
-             bool enable_tokenizer,
+             bool enable_analyzer,
              std::map<std::string, std::string>& params) {
         auto field_meta = FieldMeta(name,
                                     id,
@@ -129,7 +129,7 @@ class Schema {
                                     max_length,
                                     nullable,
                                     enable_match,
-                                    enable_tokenizer,
+                                    enable_analyzer,
                                     params);
         this->AddField(std::move(field_meta));
     }

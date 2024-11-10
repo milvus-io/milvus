@@ -2638,7 +2638,7 @@ func TestValidateFunction(t *testing.T) {
 	t.Run("Valid function schema", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_tokenizer", Value: "true"}}},
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
 				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
 			},
 			Functions: []*schemapb.FunctionSchema{
@@ -2657,7 +2657,7 @@ func TestValidateFunction(t *testing.T) {
 	t.Run("Invalid function schema - duplicate function names", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_tokenizer", Value: "true"}}},
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
 				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
 			},
 			Functions: []*schemapb.FunctionSchema{
@@ -2702,7 +2702,7 @@ func TestValidateFunction(t *testing.T) {
 	t.Run("Invalid function schema - output field not found", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_tokenizer", Value: "true"}}},
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
 			},
 			Functions: []*schemapb.FunctionSchema{
 				{
@@ -2721,7 +2721,7 @@ func TestValidateFunction(t *testing.T) {
 	t.Run("Invalid function schema - nullable input field", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_tokenizer", Value: "true"}}, Nullable: true},
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}, Nullable: true},
 				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
 			},
 			Functions: []*schemapb.FunctionSchema{
@@ -2741,7 +2741,7 @@ func TestValidateFunction(t *testing.T) {
 	t.Run("Invalid function schema - output field is primary key", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_tokenizer", Value: "true"}}},
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
 				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsPrimaryKey: true},
 			},
 			Functions: []*schemapb.FunctionSchema{
@@ -2761,7 +2761,7 @@ func TestValidateFunction(t *testing.T) {
 	t.Run("Invalid function schema - output field is partition key", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_tokenizer", Value: "true"}}},
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
 				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsPartitionKey: true},
 			},
 			Functions: []*schemapb.FunctionSchema{
@@ -2781,7 +2781,7 @@ func TestValidateFunction(t *testing.T) {
 	t.Run("Invalid function schema - output field is clustering key", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_tokenizer", Value: "true"}}},
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
 				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsClusteringKey: true},
 			},
 			Functions: []*schemapb.FunctionSchema{
@@ -2801,7 +2801,7 @@ func TestValidateFunction(t *testing.T) {
 	t.Run("Invalid function schema - nullable output field", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_tokenizer", Value: "true"}}},
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
 				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
 			},
 			Functions: []*schemapb.FunctionSchema{
@@ -2827,7 +2827,7 @@ func TestValidateFunctionInputField(t *testing.T) {
 		fields := []*schemapb.FieldSchema{
 			{
 				DataType:   schemapb.DataType_VarChar,
-				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_tokenizer", Value: "true"}},
+				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}},
 			},
 		}
 		err := checkFunctionInputField(function, fields)
@@ -2854,7 +2854,7 @@ func TestValidateFunctionInputField(t *testing.T) {
 		fields := []*schemapb.FieldSchema{
 			{
 				DataType:   schemapb.DataType_VarChar,
-				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_tokenizer", Value: "false"}},
+				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "false"}},
 			},
 		}
 		err := checkFunctionInputField(function, fields)
@@ -2868,11 +2868,11 @@ func TestValidateFunctionInputField(t *testing.T) {
 		fields := []*schemapb.FieldSchema{
 			{
 				DataType:   schemapb.DataType_VarChar,
-				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_tokenizer", Value: "true"}},
+				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}},
 			},
 			{
 				DataType:   schemapb.DataType_VarChar,
-				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_tokenizer", Value: "true"}},
+				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}},
 			},
 		}
 		err := checkFunctionInputField(function, fields)

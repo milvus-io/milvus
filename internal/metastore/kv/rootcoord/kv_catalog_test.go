@@ -1250,7 +1250,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 					DataType: schemapb.DataType_VarChar,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "enable_tokenizer",
+							Key:   "enable_analyzer",
 							Value: "true",
 						},
 					},
@@ -1354,7 +1354,7 @@ func TestCatalog_DropCollection(t *testing.T) {
 					DataType: schemapb.DataType_VarChar,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "enable_tokenizer",
+							Key:   "enable_analyzer",
 							Value: "true",
 						},
 					},

@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+const analyzerParams = "analyzer_params"
+
 // BM25 Runner
 // Input: string
 // Output: map[uint32]float32
@@ -40,9 +42,9 @@ type BM25FunctionRunner struct {
 	concurrency int
 }
 
-func getTokenizerParams(field *schemapb.FieldSchema) string {
+func getAnalyzerParams(field *schemapb.FieldSchema) string {
 	for _, param := range field.GetTypeParams() {
-		if param.Key == "tokenizer_params" {
+		if param.Key == analyzerParams {
 			return param.Value
 		}
 	}
@@ -66,7 +68,7 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 		}
 
 		if field.GetFieldID() == schema.GetInputFieldIds()[0] {
-			params = getTokenizerParams(field)
+			params = getAnalyzerParams(field)
 		}
 	}
 

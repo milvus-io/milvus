@@ -1328,7 +1328,11 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				}
 			}
 			for key, fieldParam := range field.ElementTypeParams {
-				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", fieldParam)})
+				value, err := getElementTypeParams(fieldParam)
+				if err != nil {
+					return nil, err
+				}
+				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: key, Value: value})
 			}
 			if lo.Contains(allOutputFields, field.FieldName) {
 				fieldSchema.IsFunctionOutput = true
