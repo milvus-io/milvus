@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"encoding/json"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -27,8 +28,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -82,74 +85,90 @@ func (s *Server) getCollectionMetrics(ctx context.Context) *metricsinfo.DataCoor
 	return ret
 }
 
-// GetSyncTaskMetrics retrieves and aggregates the sync task metrics of the datanode.
-func (s *Server) GetSyncTaskMetrics(
-	ctx context.Context,
-	req *milvuspb.GetMetricsRequest,
-) (string, error) {
-	resp, err := s.requestDataNodeGetMetrics(ctx, req)
-	if err != nil {
-		return "", err
-	}
-
-	tasks := make(map[string][]*metricsinfo.SyncTask, resp.Len())
-	resp.Range(func(key string, value *milvuspb.GetMetricsResponse) bool {
-		if value.Response != "" {
-			var sts []*metricsinfo.SyncTask
-			if err1 := json.Unmarshal([]byte(value.Response), &sts); err1 != nil {
-				log.Warn("failed to unmarshal sync task metrics")
-				err = err1
-				return false
-			}
-			tasks[key] = sts
+func (s *Server) getChannelsJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
+	channels, err := getMetrics[*metricsinfo.Channel](s, ctx, req)
+	// fill checkpoint timestamp
+	channel2Checkpoints := s.meta.GetChannelCheckpoints()
+	for _, channel := range channels {
+		if cp, ok := channel2Checkpoints[channel.Name]; ok {
+			channel.CheckpointTS = typeutil.TimestampToString(cp.GetTimestamp())
+		} else {
+			log.Warn("channel not found in meta cache", zap.String("channel", channel.Name))
 		}
-		return true
-	})
-
-	if err != nil {
-		return "", err
 	}
-
-	if len(tasks) == 0 {
-		return "", nil
-	}
-
-	bs, err := json.Marshal(tasks)
-	if err != nil {
-		return "", err
-	}
-	return (string)(bs), nil
+	return metricsinfo.MarshalGetMetricsValues(channels, err)
 }
 
-func (s *Server) requestDataNodeGetMetrics(
-	ctx context.Context,
-	req *milvuspb.GetMetricsRequest,
-) (*typeutil.ConcurrentMap[string, *milvuspb.GetMetricsResponse], error) {
-	nodes := s.cluster.GetSessions()
+// mergeChannels merges the channel metrics from data nodes and channel watch infos from channel manager
+// dnChannels: a slice of Channel metrics from data nodes
+// dcChannels: a map of channel watch infos from the channel manager, keyed by node ID and channel name
+func mergeChannels(dnChannels []*metricsinfo.Channel, dcChannels map[int64]map[string]*datapb.ChannelWatchInfo) []*metricsinfo.Channel {
+	mergedChannels := make([]*metricsinfo.Channel, 0)
 
-	rets := typeutil.NewConcurrentMap[string, *milvuspb.GetMetricsResponse]()
-	wg, ctx := errgroup.WithContext(ctx)
-	for _, node := range nodes {
-		wg.Go(func() error {
-			cli, err := node.GetOrCreateClient(ctx)
-			if err != nil {
-				return err
+	// Add or update channels from data nodes
+	for _, dnChannel := range dnChannels {
+		if dcChannelMap, ok := dcChannels[dnChannel.NodeID]; ok {
+			if dcChannel, ok := dcChannelMap[dnChannel.Name]; ok {
+				dnChannel.WatchState = dcChannel.State.String()
+				delete(dcChannelMap, dnChannel.Name)
 			}
-			ret, err := cli.GetMetrics(ctx, req)
-			if err != nil {
-				return err
-			}
-			key := metricsinfo.ConstructComponentName(typeutil.DataNodeRole, node.NodeID())
-			rets.Insert(key, ret)
-			return nil
-		})
+		}
+		mergedChannels = append(mergedChannels, dnChannel)
 	}
 
-	err := wg.Wait()
+	// Add remaining channels from channel manager
+	for nodeID, dcChannelMap := range dcChannels {
+		for _, dcChannel := range dcChannelMap {
+			mergedChannels = append(mergedChannels, &metricsinfo.Channel{
+				Name:         dcChannel.Vchan.ChannelName,
+				CollectionID: dcChannel.Vchan.CollectionID,
+				WatchState:   dcChannel.State.String(),
+				NodeID:       nodeID,
+			})
+		}
+	}
+
+	return mergedChannels
+}
+
+func (s *Server) getDistJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) string {
+	segments := s.meta.getSegmentsMetrics()
+	var channels []*metricsinfo.DmChannel
+	for nodeID, ch := range s.channelManager.GetChannelWatchInfos() {
+		for _, chInfo := range ch {
+			dmChannel := metrics.NewDMChannelFrom(chInfo.GetVchan())
+			dmChannel.NodeID = nodeID
+			dmChannel.WatchState = chInfo.State.String()
+			dmChannel.StartWatchTS = chInfo.GetStartTs()
+			channels = append(channels, dmChannel)
+		}
+	}
+
+	if len(segments) == 0 && len(channels) == 0 {
+		return ""
+	}
+
+	dist := &metricsinfo.DataCoordDist{
+		Segments:   segments,
+		DMChannels: channels,
+	}
+
+	bs, err := json.Marshal(dist)
 	if err != nil {
-		return nil, err
+		log.Warn("marshal dist value failed", zap.String("err", err.Error()))
+		return ""
 	}
-	return rets, nil
+	return string(bs)
+}
+
+func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
+	ret, err := getMetrics[*metricsinfo.Segment](s, ctx, req)
+	return metricsinfo.MarshalGetMetricsValues(ret, err)
+}
+
+func (s *Server) getSyncTaskJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
+	ret, err := getMetrics[*metricsinfo.SyncTask](s, ctx, req)
+	return metricsinfo.MarshalGetMetricsValues(ret, err)
 }
 
 // getSystemInfoMetrics composes data cluster metrics
@@ -321,4 +340,45 @@ func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetri
 	}
 	infos.BaseComponentInfos.HasError = false
 	return infos, nil
+}
+
+// getMetrics retrieves and aggregates the metrics of the datanode to a slice
+func getMetrics[T any](s *Server, ctx context.Context, req *milvuspb.GetMetricsRequest) ([]T, error) {
+	var metrics []T
+	var mu sync.Mutex
+	errorGroup, ctx := errgroup.WithContext(ctx)
+
+	nodes := s.cluster.GetSessions()
+	for _, node := range nodes {
+		errorGroup.Go(func() error {
+			cli, err := node.GetOrCreateClient(ctx)
+			if err != nil {
+				return err
+			}
+			resp, err := cli.GetMetrics(ctx, req)
+			if err != nil {
+				log.Warn("failed to get metric from DataNode", zap.Int64("nodeID", node.NodeID()))
+				return err
+			}
+
+			if resp.Response == "" {
+				return nil
+			}
+
+			var infos []T
+			err = json.Unmarshal([]byte(resp.Response), &infos)
+			if err != nil {
+				log.Warn("invalid metrics of data node was found", zap.Error(err))
+				return err
+			}
+
+			mu.Lock()
+			metrics = append(metrics, infos...)
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	err := errorGroup.Wait()
+	return metrics, err
 }

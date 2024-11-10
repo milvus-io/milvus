@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc/metadata"
 
@@ -63,131 +64,161 @@ func GetContext(ctx context.Context, originValue string) context.Context {
 
 func (s *RBACBackupTestSuite) TestBackup() {
 	ctx := GetContext(context.Background(), "root:123456")
+
+	createRole := func(name string) {
+		resp, err := s.Cluster.Proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+			Entity: &milvuspb.RoleEntity{Name: name},
+		})
+		s.NoError(err)
+		s.True(merr.Ok(resp))
+	}
+
+	operatePrivilege := func(role, privilege, objectName, dbName string, operateType milvuspb.OperatePrivilegeType) {
+		resp, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
+			Type: operateType,
+			Entity: &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: role},
+				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
+				ObjectName: objectName,
+				DbName:     dbName,
+				Grantor:    &milvuspb.GrantorEntity{User: &milvuspb.UserEntity{Name: util.UserRoot}, Privilege: &milvuspb.PrivilegeEntity{Name: privilege}},
+			},
+		})
+		s.NoError(err)
+		s.True(merr.Ok(resp))
+	}
+
 	// test empty rbac content
-	resp, err := s.Cluster.Proxy.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
+	emptyBackupRBACResp, err := s.Cluster.Proxy.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
 	s.NoError(err)
-	s.True(merr.Ok(resp.GetStatus()))
-	s.Equal("", resp.GetRBACMeta().String())
+	s.True(merr.Ok(emptyBackupRBACResp.GetStatus()))
+	s.Equal("", emptyBackupRBACResp.GetRBACMeta().String())
 
 	// generate some rbac content
+	// create role test_role
 	roleName := "test_role"
-	resp1, err := s.Cluster.Proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{
-		Entity: &milvuspb.RoleEntity{
-			Name: roleName,
-		},
+	createRole(roleName)
+
+	// grant collection level search privilege to role test_role
+	operatePrivilege(roleName, "Search", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
+
+	// create privielge group test_group
+	groupName := "test_group"
+	createPrivGroupResp, err := s.Cluster.Proxy.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName: groupName,
 	})
 	s.NoError(err)
-	s.True(merr.Ok(resp1))
-	resp2, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
-		Type: milvuspb.OperatePrivilegeType_Grant,
-		Entity: &milvuspb.GrantEntity{
-			Role:       &milvuspb.RoleEntity{Name: roleName},
-			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
-			ObjectName: util.AnyWord,
-			DbName:     util.AnyWord,
-			Grantor: &milvuspb.GrantorEntity{
-				User:      &milvuspb.UserEntity{Name: util.UserRoot},
-				Privilege: &milvuspb.PrivilegeEntity{Name: "Search"},
-			},
-		},
+	s.True(merr.Ok(createPrivGroupResp))
+
+	// add query and insert privilege to group test_group
+	addPrivsToGroupResp, err := s.Cluster.Proxy.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
+		GroupName:  groupName,
+		Privileges: []*milvuspb.PrivilegeEntity{{Name: "Query"}, {Name: "Insert"}},
+		Type:       milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,
 	})
 	s.NoError(err)
-	s.True(merr.Ok(resp2))
-	s.Equal("", resp2.GetReason())
+	s.True(merr.Ok(addPrivsToGroupResp))
+
+	// grant privilege group test_group to role test_role
+	operatePrivilege(roleName, groupName, util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
+
 	userName := "test_user"
 	passwd := "test_passwd"
-	resp3, err := s.Cluster.Proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
+	createCredResp, err := s.Cluster.Proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
 		Username: userName,
 		Password: crypto.Base64Encode(passwd),
 	})
 	s.NoError(err)
-	s.True(merr.Ok(resp3))
-	resp4, err := s.Cluster.Proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{
+	s.True(merr.Ok(createCredResp))
+	operateUserRoleResp, err := s.Cluster.Proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{
 		Username: userName,
 		RoleName: roleName,
 	})
 	s.NoError(err)
-	s.True(merr.Ok(resp4))
+	s.True(merr.Ok(operateUserRoleResp))
 
-	// test back up rbac
-	resp5, err := s.Cluster.Proxy.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
+	// test back up rbac, grants should contain
+	backupRBACResp, err := s.Cluster.Proxy.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
 	s.NoError(err)
-	s.True(merr.Ok(resp5.GetStatus()))
+	s.True(merr.Ok(backupRBACResp.GetStatus()))
+	s.Equal(2, len(backupRBACResp.GetRBACMeta().Grants))
+	grants := lo.SliceToMap(backupRBACResp.GetRBACMeta().Grants, func(g *milvuspb.GrantEntity) (string, *milvuspb.GrantEntity) {
+		return g.Grantor.Privilege.Name, g
+	})
+	s.True(grants["Search"] != nil)
+	s.True(grants[groupName] != nil)
+	s.Equal(groupName, backupRBACResp.GetRBACMeta().PrivilegeGroups[0].GroupName)
+	s.Equal(2, len(backupRBACResp.GetRBACMeta().PrivilegeGroups[0].Privileges))
 
 	// test restore, expect to failed due to role/user already exist
-	resp6, err := s.Cluster.Proxy.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{
-		RBACMeta: resp5.GetRBACMeta(),
+	restoreRBACResp, err := s.Cluster.Proxy.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{
+		RBACMeta: backupRBACResp.GetRBACMeta(),
 	})
 	s.NoError(err)
-	s.False(merr.Ok(resp6))
+	s.False(merr.Ok(restoreRBACResp))
 
-	// drop exist role/user, successful to restore
-	resp7, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
-		Type: milvuspb.OperatePrivilegeType_Revoke,
-		Entity: &milvuspb.GrantEntity{
-			Role:       &milvuspb.RoleEntity{Name: roleName},
-			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
-			ObjectName: util.AnyWord,
-			DbName:     util.AnyWord,
-			Grantor: &milvuspb.GrantorEntity{
-				User:      &milvuspb.UserEntity{Name: util.UserRoot},
-				Privilege: &milvuspb.PrivilegeEntity{Name: "Search"},
-			},
-		},
+	// revoke privilege search from role test_role before dropping the role
+	operatePrivilege(roleName, "Search", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Revoke)
+
+	// revoke privilege group test_group from role test_role before dropping the role
+	operatePrivilege(roleName, groupName, util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Revoke)
+
+	// drop privilege group test_group
+	dropPrivGroupResp, err := s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
+		GroupName: groupName,
 	})
 	s.NoError(err)
-	s.True(merr.Ok(resp7))
-	resp8, err := s.Cluster.Proxy.DropRole(ctx, &milvuspb.DropRoleRequest{
+	s.True(merr.Ok(dropPrivGroupResp))
+
+	// drop role test_role
+	dropRoleResp, err := s.Cluster.Proxy.DropRole(ctx, &milvuspb.DropRoleRequest{
 		RoleName: roleName,
 	})
 	s.NoError(err)
-	s.True(merr.Ok(resp8))
-	resp9, err := s.Cluster.Proxy.DeleteCredential(ctx, &milvuspb.DeleteCredentialRequest{
+	s.True(merr.Ok(dropRoleResp))
+
+	// delete credential
+	delCredResp, err := s.Cluster.Proxy.DeleteCredential(ctx, &milvuspb.DeleteCredentialRequest{
 		Username: userName,
 	})
 	s.NoError(err)
-	s.True(merr.Ok(resp9))
+	s.True(merr.Ok(delCredResp))
 
-	resp10, err := s.Cluster.Proxy.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{
-		RBACMeta: resp5.GetRBACMeta(),
+	// restore rbac
+	restoreRBACResp, err = s.Cluster.Proxy.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{
+		RBACMeta: backupRBACResp.GetRBACMeta(),
 	})
 	s.NoError(err)
-	s.True(merr.Ok(resp10))
+	s.True(merr.Ok(restoreRBACResp))
 
 	// check the restored rbac, should be same as the original one
-	resp11, err := s.Cluster.Proxy.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
+	backupRBACResp2, err := s.Cluster.Proxy.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
 	s.NoError(err)
-	s.True(merr.Ok(resp11.GetStatus()))
-	s.Equal(resp11.GetRBACMeta().String(), resp5.GetRBACMeta().String())
+	s.True(merr.Ok(backupRBACResp2.GetStatus()))
+	s.Equal(backupRBACResp2.GetRBACMeta().String(), backupRBACResp.GetRBACMeta().String())
 
 	// clean rbac meta
-	resp12, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
-		Type: milvuspb.OperatePrivilegeType_Revoke,
-		Entity: &milvuspb.GrantEntity{
-			Role:       &milvuspb.RoleEntity{Name: roleName},
-			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
-			ObjectName: util.AnyWord,
-			DbName:     util.AnyWord,
-			Grantor: &milvuspb.GrantorEntity{
-				User:      &milvuspb.UserEntity{Name: util.UserRoot},
-				Privilege: &milvuspb.PrivilegeEntity{Name: "Search"},
-			},
-		},
+	operatePrivilege(roleName, "Search", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Revoke)
+
+	operatePrivilege(roleName, groupName, util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Revoke)
+
+	dropPrivGroupResp2, err := s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
+		GroupName: groupName,
 	})
 	s.NoError(err)
-	s.True(merr.Ok(resp12))
+	s.True(merr.Ok(dropPrivGroupResp2))
 
-	resp13, err := s.Cluster.Proxy.DropRole(ctx, &milvuspb.DropRoleRequest{
+	dropRoleResp2, err := s.Cluster.Proxy.DropRole(ctx, &milvuspb.DropRoleRequest{
 		RoleName: roleName,
 	})
 	s.NoError(err)
-	s.True(merr.Ok(resp13))
+	s.True(merr.Ok(dropRoleResp2))
 
-	resp14, err := s.Cluster.Proxy.DeleteCredential(ctx, &milvuspb.DeleteCredentialRequest{
+	delCredResp2, err := s.Cluster.Proxy.DeleteCredential(ctx, &milvuspb.DeleteCredentialRequest{
 		Username: userName,
 	})
 	s.NoError(err)
-	s.True(merr.Ok(resp14))
+	s.True(merr.Ok(delCredResp2))
 }
 
 func TestRBACBackup(t *testing.T) {

@@ -66,7 +66,7 @@ func (s *TaskStatsSuite) SetupSubTest() {
 }
 
 func (s *TaskStatsSuite) GenSegmentWriterWithBM25(magic int64) {
-	segWriter, err := compaction.NewSegmentWriter(s.schema, 100, magic, s.partitionID, s.collectionID, []int64{102})
+	segWriter, err := compaction.NewSegmentWriter(s.schema, 100, statsBatchSize, magic, s.partitionID, s.collectionID, []int64{102})
 	s.Require().NoError(err)
 
 	v := storage.Value{
@@ -115,6 +115,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			return result, nil
 		})
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+		s.mockBinlogIO.EXPECT().AsyncUpload(mock.Anything, mock.Anything).Return(nil)
 
 		ctx, cancel := context.WithCancel(context.Background())
 
@@ -157,8 +158,8 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			}
 			return result, nil
 		})
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Times(2)
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
+		s.mockBinlogIO.EXPECT().AsyncUpload(mock.Anything, mock.Anything).Return(nil)
 
 		ctx, cancel := context.WithCancel(context.Background())
 

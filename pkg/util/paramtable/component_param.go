@@ -1117,6 +1117,7 @@ type rootCoordConfig struct {
 	MaxDatabaseNum              ParamItem `refreshable:"false"`
 	MaxGeneralCapacity          ParamItem `refreshable:"true"`
 	GracefulStopTimeout         ParamItem `refreshable:"true"`
+	UseLockScheduler            ParamItem `refreshable:"true"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -1191,6 +1192,15 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.UseLockScheduler = ParamItem{
+		Key:          "rootCoord.useLockScheduler",
+		Version:      "2.4.15",
+		DefaultValue: "true",
+		Doc:          "use lock to schedule the task",
+		Export:       false,
+	}
+	p.UseLockScheduler.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

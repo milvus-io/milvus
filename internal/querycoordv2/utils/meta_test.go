@@ -22,6 +22,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	etcdKV "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -39,7 +40,7 @@ import (
 func TestSpawnReplicasWithRG(t *testing.T) {
 	paramtable.Init()
 	config := GenerateEtcdConfig()
-	cli, _ := etcd.GetEtcdClient(
+	cli, err := etcd.GetEtcdClient(
 		config.UseEmbedEtcd.GetAsBool(),
 		config.EtcdUseSSL.GetAsBool(),
 		config.Endpoints.GetAsStrings(),
@@ -47,6 +48,7 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 		config.EtcdTLSKey.GetValue(),
 		config.EtcdTLSCACert.GetValue(),
 		config.EtcdTLSMinVersion.GetValue())
+	require.NoError(t, err)
 	kv := etcdKV.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 
 	store := querycoord.NewCatalog(kv)

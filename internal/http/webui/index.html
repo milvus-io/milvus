@@ -30,7 +30,29 @@
       <h2>
         Component Information
       </h2>
-      <table id="components" class="table table-hover"></table>
+
+      <!-- Navigation Tabs -->
+      <ul class="nav nav-tabs" id="componentTabs" role="tablist">
+        <li class="nav-item">
+          <a class="nav-link active" id="base-stats-tab" data-toggle="tab" href="#base-stats" role="tab" aria-controls="base-stats" aria-selected="true">Base Stats</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" id="runtime-metrics-tab" data-toggle="tab" href="#runtime-metrics" role="tab" aria-controls="runtime-metrics" aria-selected="false">Runtime Metrics</a>
+        </li>
+      </ul>
+
+      <!-- Tab Content -->
+      <div class="tab-content" id="componentTabsContent">
+        <!-- Components Table (Base Stats) -->
+        <div class="tab-pane fade show active" id="base-stats" role="tabpanel" aria-labelledby="base-stats-tab">
+          <table id="components" class="table table-hover mt-3"></table>
+        </div>
+
+        <!-- Node Metrics Table (Runtime Metrics) -->
+        <div class="tab-pane fade" id="runtime-metrics" role="tabpanel" aria-labelledby="runtime-metrics-tab">
+          <table id="nodeMetrics" class="table table-hover mt-3"></table>
+        </div>
+      </div>
 
       <h2>
         Connected Clients
@@ -58,6 +80,7 @@
             .then(data => {
               renderSysInfo(data);
               renderComponentInfo(data);
+              renderNodesMetrics(data)
             })
             .catch(error => {
               handleError(error);

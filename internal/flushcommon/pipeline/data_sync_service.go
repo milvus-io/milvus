@@ -77,6 +77,7 @@ type nodeConfig struct {
 	vChannelName string
 	metacache    metacache.MetaCache
 	serverID     typeutil.UniqueID
+	dropCallback func()
 }
 
 // Start the flow graph in dataSyncService
@@ -222,6 +223,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	info *datapb.ChannelWatchInfo, metacache metacache.MetaCache,
 	unflushed, flushed []*datapb.SegmentInfo, input <-chan *msgstream.MsgPack,
 	wbTaskObserverCallback writebuffer.TaskObserverCallback,
+	dropCallback func(),
 ) (*DataSyncService, error) {
 	var (
 		channelName  = info.GetVchan().GetChannelName()
@@ -238,6 +240,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		vChannelName: channelName,
 		metacache:    metacache,
 		serverID:     serverID,
+		dropCallback: dropCallback,
 	}
 
 	ctx, cancel := context.WithCancel(params.Ctx)
@@ -280,7 +283,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		flushed,
 		unflushed,
 		params.CompactionExecutor,
-		params.FlushMsgHandler,
+		params.MsgHandler,
 	)
 	if err != nil {
 		return nil, err
@@ -355,7 +358,7 @@ func NewDataSyncService(initCtx context.Context, pipelineParams *util.PipelinePa
 	if metaCache, err = getMetaCacheWithTickler(initCtx, pipelineParams, info, tickler, unflushedSegmentInfos, flushedSegmentInfos); err != nil {
 		return nil, err
 	}
-	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, nil, nil)
+	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, nil, nil, nil)
 }
 
 func NewStreamingNodeDataSyncService(
@@ -364,6 +367,7 @@ func NewStreamingNodeDataSyncService(
 	info *datapb.ChannelWatchInfo,
 	input <-chan *msgstream.MsgPack,
 	wbTaskObserverCallback writebuffer.TaskObserverCallback,
+	dropCallback func(),
 ) (*DataSyncService, error) {
 	// recover segment checkpoints
 	var (
@@ -389,7 +393,7 @@ func NewStreamingNodeDataSyncService(
 	if metaCache, err = getMetaCacheForStreaming(initCtx, pipelineParams, info, unflushedSegmentInfos, flushedSegmentInfos); err != nil {
 		return nil, err
 	}
-	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, input, wbTaskObserverCallback)
+	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, input, wbTaskObserverCallback, dropCallback)
 }
 
 func NewDataSyncServiceWithMetaCache(metaCache metacache.MetaCache) *DataSyncService {

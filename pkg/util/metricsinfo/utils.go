@@ -12,7 +12,12 @@
 package metricsinfo
 
 import (
+	"encoding/json"
 	"os"
+
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // FillDeployMetricsWithEnv fill deploy metrics with env.
@@ -22,4 +27,21 @@ func FillDeployMetricsWithEnv(m *DeployMetrics) {
 	m.BuildVersion = os.Getenv(GitBuildTagsEnvKey)
 	m.UsedGoVersion = os.Getenv(MilvusUsedGoVersion)
 	m.BuildTime = os.Getenv(MilvusBuildTimeEnvKey)
+}
+
+func MarshalGetMetricsValues[T any](metrics []T, err error) (string, error) {
+	if err != nil {
+		return "", err
+	}
+
+	if len(metrics) == 0 {
+		return "", nil
+	}
+
+	bs, err := json.Marshal(metrics)
+	if err != nil {
+		log.Warn("marshal metrics value failed", zap.Any("metrics", metrics), zap.String("err", err.Error()))
+		return "", nil
+	}
+	return string(bs), nil
 }

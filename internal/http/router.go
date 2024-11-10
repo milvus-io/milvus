@@ -65,19 +65,46 @@ const (
 
 // for WebUI restful api root path
 const (
-	ClusterInfoPath         = "/_cluster/info"
-	ClusterConfigsPath      = "/_cluster/configs"
-	ClusterClientsPath      = "/_cluster/clients"
+	// ClusterInfoPath is the path to get cluster information.
+	ClusterInfoPath = "/_cluster/info"
+	// ClusterConfigsPath is the path to get cluster configurations.
+	ClusterConfigsPath = "/_cluster/configs"
+	// ClusterClientsPath is the path to get connected clients.
+	ClusterClientsPath = "/_cluster/clients"
+	// ClusterDependenciesPath is the path to get cluster dependencies.
 	ClusterDependenciesPath = "/_cluster/dependencies"
-	HookConfigsPath         = "/_hook/configs"
-	QCoordSegmentsPath      = "/_qcoord/segments"
-	QCoordChannelsPath      = "/_qcoord/channels"
-	QCoordAllTasksPath      = "/_qcoord/tasks/all"
+	// HookConfigsPath is the path to get hook configurations.
+	HookConfigsPath = "/_hook/configs"
 
-	DCoordAllTasksPath        = "/_dcoord/tasks/all"
-	DCoordImportTasksPath     = "/_dcoord/tasks/import"
-	DCoordCompactionTasksPath = "/_dcoord/tasks/compaction"
-	DCoordBuildIndexTasksPath = "/_dcoord/tasks/build_index"
+	// QCDistPath is the path to get QueryCoord distribution.
+	QCDistPath = "/_qc/dist"
+	// QCTargetPath is the path to get QueryCoord target.
+	QCTargetPath = "/_qc/target"
+	// QCReplicaPath is the path to get QueryCoord replica.
+	QCReplicaPath = "/_qc/replica"
+	// QCResourceGroupPath is the path to get QueryCoord resource group.
+	QCResourceGroupPath = "/_qc/resource_group"
+	// QCAllTasksPath is the path to get all tasks in QueryCoord.
+	QCAllTasksPath = "/_qc/tasks"
 
-	DNodeSyncTasksPath = "/_dnode/tasks/sync"
+	// QNSegmentsPath is the path to get segments in QueryNode.
+	QNSegmentsPath = "/_qn/segments"
+	// QNChannelsPath is the path to get channels in QueryNode.
+	QNChannelsPath = "/_qn/channels"
+
+	// DCDistPath is the path to get all segments and channels distribution in DataCoord.
+	DCDistPath = "/_dc/dist"
+	// DCImportTasksPath is the path to get import tasks in DataCoord.
+	DCImportTasksPath = "/_dc/tasks/import"
+	// DCCompactionTasksPath is the path to get compaction tasks in DataCoord.
+	DCCompactionTasksPath = "/_dc/tasks/compaction"
+	// DCBuildIndexTasksPath is the path to get build index tasks in DataCoord.
+	DCBuildIndexTasksPath = "/_dc/tasks/build_index"
+
+	// DNSyncTasksPath is the path to get sync tasks in DataNode.
+	DNSyncTasksPath = "/_dn/tasks/sync"
+	// DNSegmentsPath is the path to get segments in DataNode.
+	DNSegmentsPath = "/_dn/segments"
+	// DNChannelsPath is the path to get channels in DataNode.
+	DNChannelsPath = "/_dn/channels"
 )

@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -245,13 +246,19 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 	segments := map[int64]commonpb.SegmentState{
 		0: commonpb.SegmentState_Flushed,
 		1: commonpb.SegmentState_Sealed,
+		2: commonpb.SegmentState_Sealed,
 	}
 	for segID, state := range segments {
+		numOfRows := int64(100)
+		if segID == 2 {
+			numOfRows = 0
+		}
 		info := &datapb.SegmentInfo{
 			ID:            segID,
 			InsertChannel: "ch1",
 			State:         state,
 			Level:         datapb.SegmentLevel_L1,
+			NumOfRows:     numOfRows,
 		}
 		err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
 		s.Require().NoError(err)
@@ -262,11 +269,14 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 		inSegID     int64
 		inDropped   bool
 		inFlushed   bool
+		numOfRows   int64
 
 		expectedState commonpb.SegmentState
 	}{
-		{"segID=0, flushed to dropped", 0, true, false, commonpb.SegmentState_Dropped},
-		{"segID=1, sealed to flushing", 1, false, true, commonpb.SegmentState_Flushing},
+		{"segID=0, flushed to dropped", 0, true, false, 100, commonpb.SegmentState_Dropped},
+		{"segID=1, sealed to flushing", 1, false, true, 100, commonpb.SegmentState_Flushing},
+		// empty segment flush should be dropped directly.
+		{"segID=2, sealed to dropped", 2, false, true, 0, commonpb.SegmentState_Dropped},
 	}
 
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key, "False")
@@ -289,7 +299,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 			segment := s.testServer.meta.GetSegment(test.inSegID)
 			s.NotNil(segment)
 			s.EqualValues(0, len(segment.GetBinlogs()))
-			s.EqualValues(segment.NumOfRows, 0)
+			s.EqualValues(segment.NumOfRows, test.numOfRows)
 
 			flushing := []commonpb.SegmentState{commonpb.SegmentState_Flushed, commonpb.SegmentState_Flushing}
 			if lo.Contains(flushing, test.expectedState) {
@@ -361,6 +371,7 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	segments := map[int64]int64{
 		0: 0,
 		1: 0,
+		2: 0,
 	}
 	for segID, collID := range segments {
 		info := &datapb.SegmentInfo{
@@ -445,6 +456,24 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.EqualValues(segment.DmlPosition.ChannelName, "ch1")
 	s.EqualValues(segment.DmlPosition.MsgID, []byte{1, 2, 3})
 	s.EqualValues(segment.NumOfRows, 10)
+
+	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:           2,
+		CollectionID:        0,
+		Channel:             "ch1",
+		Field2BinlogPaths:   []*datapb.FieldBinlog{},
+		Field2StatslogPaths: []*datapb.FieldBinlog{},
+		CheckPoints:         []*datapb.CheckPoint{},
+		Flushed:             true,
+	})
+	s.NoError(err)
+	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
+	segment = s.testServer.meta.GetSegment(2)
+	s.NotNil(segment)
+	s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
 }
 
 func (s *ServerSuite) TestFlush_NormalCase() {
@@ -1412,10 +1441,9 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
 
-		// db does not exist
+		// normal case
 		var job ImportJob = &importJob{
 			ImportJob: &datapb.ImportJob{
-				DbID:   1,
 				JobID:  0,
 				Schema: &schemapb.CollectionSchema{},
 				State:  internalpb.ImportJobState_Failed,
@@ -1424,31 +1452,12 @@ func TestImportV2(t *testing.T) {
 		err = s.importMeta.AddJob(job)
 		assert.NoError(t, err)
 		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
-			DbID:  2,
-			JobID: "0",
-		})
-		assert.NoError(t, err)
-		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-
-		// normal case
-		job = &importJob{
-			ImportJob: &datapb.ImportJob{
-				DbID:   1,
-				JobID:  0,
-				Schema: &schemapb.CollectionSchema{},
-				State:  internalpb.ImportJobState_Pending,
-			},
-		}
-		err = s.importMeta.AddJob(job)
-		assert.NoError(t, err)
-		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
-			DbID:  1,
 			JobID: "0",
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
-		assert.Equal(t, int64(10), resp.GetProgress())
-		assert.Equal(t, internalpb.ImportJobState_Pending, resp.GetState())
+		assert.Equal(t, int64(0), resp.GetProgress())
+		assert.Equal(t, internalpb.ImportJobState_Failed, resp.GetState())
 	})
 
 	t.Run("ListImports", func(t *testing.T) {
@@ -1471,7 +1480,6 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		var job ImportJob = &importJob{
 			ImportJob: &datapb.ImportJob{
-				DbID:         2,
 				JobID:        0,
 				CollectionID: 1,
 				Schema:       &schemapb.CollectionSchema{},
@@ -1488,20 +1496,7 @@ func TestImportV2(t *testing.T) {
 		}
 		err = s.importMeta.AddTask(task)
 		assert.NoError(t, err)
-		// db id not match
 		resp, err = s.ListImports(ctx, &internalpb.ListImportsRequestInternal{
-			DbID:         3,
-			CollectionID: 1,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
-		assert.Equal(t, 0, len(resp.GetJobIDs()))
-		assert.Equal(t, 0, len(resp.GetStates()))
-		assert.Equal(t, 0, len(resp.GetReasons()))
-		assert.Equal(t, 0, len(resp.GetProgresses()))
-		// db id match
-		resp, err = s.ListImports(ctx, &internalpb.ListImportsRequestInternal{
-			DbID:         2,
 			CollectionID: 1,
 		})
 		assert.NoError(t, err)
@@ -1525,11 +1520,9 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 
 	// get collection failed
-	handler := NewNMockHandler(t)
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).
-		Return(nil, errors.New("mock err"))
-	s.handler = handler
-	assert.NoError(t, err)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
+	s.broker = broker
 	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{
 		Vchannel: "ch-1",
 	})
@@ -1547,9 +1540,13 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 		IndexedSegmentIds:   []int64{4},
 	}
 
-	handler = NewNMockHandler(t)
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).
-		Return(&collectionInfo{Schema: &schemapb.CollectionSchema{}}, nil)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Unset()
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Schema: &schemapb.CollectionSchema{},
+		}, nil)
+	handler := NewNMockHandler(t)
 	handler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).Return(channelInfo)
 	s.handler = handler
 

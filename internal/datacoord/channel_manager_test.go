@@ -805,3 +805,51 @@ func (s *ChannelManagerSuite) TestStartupRootCoordFailed() {
 
 func (s *ChannelManagerSuite) TestCheckLoop() {}
 func (s *ChannelManagerSuite) TestGet()       {}
+
+func (s *ChannelManagerSuite) TestGetChannelWatchInfos() {
+	store := NewMockRWChannelStore(s.T())
+	store.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{
+		{
+			NodeID: 1,
+			Channels: map[string]RWChannel{
+				"ch1": &channelMeta{
+					WatchInfo: &datapb.ChannelWatchInfo{
+						Vchan: &datapb.VchannelInfo{
+							ChannelName: "ch1",
+						},
+						StartTs: 100,
+						State:   datapb.ChannelWatchState_ToWatch,
+						OpID:    1,
+					},
+				},
+			},
+		},
+		{
+			NodeID: 2,
+			Channels: map[string]RWChannel{
+				"ch2": &channelMeta{
+					WatchInfo: &datapb.ChannelWatchInfo{
+						Vchan: &datapb.VchannelInfo{
+							ChannelName: "ch2",
+						},
+						StartTs: 10,
+						State:   datapb.ChannelWatchState_WatchSuccess,
+						OpID:    1,
+					},
+				},
+			},
+		},
+	})
+
+	cm := &ChannelManagerImpl{store: store}
+	infos := cm.GetChannelWatchInfos()
+	s.Equal(2, len(infos))
+	s.Equal("ch1", infos[1]["ch1"].GetVchan().ChannelName)
+	s.Equal("ch2", infos[2]["ch2"].GetVchan().ChannelName)
+
+	// test empty value
+	store.EXPECT().GetNodesChannels().Unset()
+	store.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{})
+	infos = cm.GetChannelWatchInfos()
+	s.Equal(0, len(infos))
+}

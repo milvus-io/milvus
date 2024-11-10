@@ -7,17 +7,20 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // buildNewPartitionManagers builds new partition managers.
 func buildNewPartitionManagers(
+	wal *syncutil.Future[wal.WAL],
 	pchannel types.PChannelInfo,
 	rawMetas []*streamingpb.SegmentAssignmentMeta,
 	collectionInfos []*rootcoordpb.CollectionInfoOnPChannel,
@@ -62,6 +65,7 @@ func buildNewPartitionManagers(
 			}
 			// otherwise, just create a new manager.
 			_, ok := managers.GetOrInsert(partition.GetPartitionId(), newPartitionSegmentManager(
+				wal,
 				pchannel,
 				collectionInfo.GetVchannel(),
 				collectionID,
@@ -77,6 +81,7 @@ func buildNewPartitionManagers(
 	m := &partitionSegmentManagers{
 		mu:              sync.Mutex{},
 		logger:          log.With(zap.Any("pchannel", pchannel)),
+		wal:             wal,
 		pchannel:        pchannel,
 		managers:        managers,
 		collectionInfos: collectionInfoMap,
@@ -91,6 +96,7 @@ type partitionSegmentManagers struct {
 	mu sync.Mutex
 
 	logger          *log.MLogger
+	wal             *syncutil.Future[wal.WAL]
 	pchannel        types.PChannelInfo
 	managers        *typeutil.ConcurrentMap[int64, *partitionSegmentManager] // map partitionID to partition manager
 	collectionInfos map[int64]*rootcoordpb.CollectionInfoOnPChannel          // map collectionID to collectionInfo
@@ -112,6 +118,7 @@ func (m *partitionSegmentManagers) NewCollection(collectionID int64, vchannel st
 	m.collectionInfos[collectionID] = newCollectionInfo(collectionID, vchannel, partitionID)
 	for _, partitionID := range partitionID {
 		if _, loaded := m.managers.GetOrInsert(partitionID, newPartitionSegmentManager(
+			m.wal,
 			m.pchannel,
 			vchannel,
 			collectionID,
@@ -149,6 +156,7 @@ func (m *partitionSegmentManagers) NewPartition(collectionID int64, partitionID 
 	})
 
 	if _, loaded := m.managers.GetOrInsert(partitionID, newPartitionSegmentManager(
+		m.wal,
 		m.pchannel,
 		m.collectionInfos[collectionID].Vchannel,
 		collectionID,
@@ -255,8 +263,8 @@ func (m *partitionSegmentManagers) RemovePartition(collectionID int64, partition
 	return segments
 }
 
-// SealAllSegmentsAndFenceUntil seals all segments and fence assign until timetick.
-func (m *partitionSegmentManagers) SealAllSegmentsAndFenceUntil(collectionID int64, timetick uint64) ([]*segmentAllocManager, error) {
+// SealAndFenceSegmentUntil seal all segment that contains the message less than the incoming timetick.
+func (m *partitionSegmentManagers) SealAndFenceSegmentUntil(collectionID int64, timetick uint64) ([]*segmentAllocManager, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -278,7 +286,7 @@ func (m *partitionSegmentManagers) SealAllSegmentsAndFenceUntil(collectionID int
 				zap.Int64("partitionID", partition.PartitionId))
 			return nil, errors.New("partition not found")
 		}
-		newSealedSegments := pm.SealAllSegmentsAndFenceUntil(timetick)
+		newSealedSegments := pm.SealAndFenceSegmentUntil(timetick)
 		for _, segment := range newSealedSegments {
 			segmentIDs = append(segmentIDs, segment.GetSegmentID())
 		}

@@ -1,6 +1,7 @@
 package planparserv2
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,12 +15,16 @@ type convertTestcase struct {
 	expect map[string]*planpb.GenericValue
 }
 
+func generateJSONData(v interface{}) []byte {
+	data, _ := json.Marshal(v)
+	return data
+}
+
 func Test_ConvertToGenericValue(t *testing.T) {
 	tests := []convertTestcase{
 		{
 			input: map[string]*schemapb.TemplateValue{
 				"bool": {
-					Type: schemapb.DataType_Bool,
 					Val: &schemapb.TemplateValue_BoolVal{
 						BoolVal: false,
 					},
@@ -36,7 +41,6 @@ func Test_ConvertToGenericValue(t *testing.T) {
 		{
 			input: map[string]*schemapb.TemplateValue{
 				"int": {
-					Type: schemapb.DataType_Int64,
 					Val: &schemapb.TemplateValue_Int64Val{
 						Int64Val: 999,
 					},
@@ -53,7 +57,6 @@ func Test_ConvertToGenericValue(t *testing.T) {
 		{
 			input: map[string]*schemapb.TemplateValue{
 				"float": {
-					Type: schemapb.DataType_Float,
 					Val: &schemapb.TemplateValue_FloatVal{
 						FloatVal: 55.55,
 					},
@@ -70,7 +73,6 @@ func Test_ConvertToGenericValue(t *testing.T) {
 		{
 			input: map[string]*schemapb.TemplateValue{
 				"string": {
-					Type: schemapb.DataType_VarChar,
 					Val: &schemapb.TemplateValue_StringVal{
 						StringVal: "abc",
 					},
@@ -87,31 +89,13 @@ func Test_ConvertToGenericValue(t *testing.T) {
 		{
 			input: map[string]*schemapb.TemplateValue{
 				"array": {
-					Type: schemapb.DataType_Array,
 					Val: &schemapb.TemplateValue_ArrayVal{
 						ArrayVal: &schemapb.TemplateArrayValue{
-							Array: []*schemapb.TemplateValue{
-								{
-									Type: schemapb.DataType_Int64,
-									Val: &schemapb.TemplateValue_Int64Val{
-										Int64Val: 111,
-									},
-								},
-								{
-									Type: schemapb.DataType_Int64,
-									Val: &schemapb.TemplateValue_Int64Val{
-										Int64Val: 222,
-									},
-								},
-								{
-									Type: schemapb.DataType_Int64,
-									Val: &schemapb.TemplateValue_Int64Val{
-										Int64Val: 333,
-									},
+							Data: &schemapb.TemplateArrayValue_LongData{
+								LongData: &schemapb.LongArray{
+									Data: []int64{111, 222, 333},
 								},
 							},
-							SameType:    true,
-							ElementType: schemapb.DataType_Int64,
 						},
 					},
 				},
@@ -147,33 +131,11 @@ func Test_ConvertToGenericValue(t *testing.T) {
 		{
 			input: map[string]*schemapb.TemplateValue{
 				"not_same_array": {
-					Type: schemapb.DataType_Array,
 					Val: &schemapb.TemplateValue_ArrayVal{
 						ArrayVal: &schemapb.TemplateArrayValue{
-							Array: []*schemapb.TemplateValue{
-								{
-									Type: schemapb.DataType_Int64,
-									Val: &schemapb.TemplateValue_Int64Val{
-										Int64Val: 111,
-									},
-								},
-								{
-									Type: schemapb.DataType_Float,
-									Val: &schemapb.TemplateValue_FloatVal{
-										FloatVal: 222.222,
-									},
-								},
-								{
-									Type: schemapb.DataType_Bool,
-									Val: &schemapb.TemplateValue_BoolVal{
-										BoolVal: true,
-									},
-								},
-								{
-									Type: schemapb.DataType_VarChar,
-									Val: &schemapb.TemplateValue_StringVal{
-										StringVal: "abc",
-									},
+							Data: &schemapb.TemplateArrayValue_JsonData{
+								JsonData: &schemapb.JSONArray{
+									Data: [][]byte{generateJSONData(111), generateJSONData(222.222), generateJSONData(true), generateJSONData("abc")},
 								},
 							},
 						},
@@ -206,6 +168,7 @@ func Test_ConvertToGenericValue(t *testing.T) {
 									},
 								},
 							},
+							ElementType: schemapb.DataType_JSON,
 						},
 					},
 				},
@@ -220,32 +183,28 @@ func Test_ConvertToGenericValue(t *testing.T) {
 	}
 }
 
-func generateExpressionFieldData(dataType schemapb.DataType, data interface{}) *schemapb.TemplateValue {
+func generateTemplateValue(dataType schemapb.DataType, data interface{}) *schemapb.TemplateValue {
 	switch dataType {
 	case schemapb.DataType_Bool:
 		return &schemapb.TemplateValue{
-			Type: dataType,
 			Val: &schemapb.TemplateValue_BoolVal{
 				BoolVal: data.(bool),
 			},
 		}
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
 		return &schemapb.TemplateValue{
-			Type: dataType,
 			Val: &schemapb.TemplateValue_Int64Val{
 				Int64Val: data.(int64),
 			},
 		}
 	case schemapb.DataType_Float, schemapb.DataType_Double:
 		return &schemapb.TemplateValue{
-			Type: dataType,
 			Val: &schemapb.TemplateValue_FloatVal{
 				FloatVal: data.(float64),
 			},
 		}
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		return &schemapb.TemplateValue{
-			Type: dataType,
 			Val: &schemapb.TemplateValue_StringVal{
 				StringVal: data.(string),
 			},
@@ -255,31 +214,66 @@ func generateExpressionFieldData(dataType schemapb.DataType, data interface{}) *
 		// Assume the inner data is already in an appropriate format.
 		// Placeholder for array implementation.
 		// You might want to define a recursive approach based on the data structure.
-		value := data.([]interface{})
-		arrayData := make([]*schemapb.TemplateValue, len(value))
-		elementType := schemapb.DataType_None
-		sameType := true
-		for i, v := range value {
-			element := v.(*schemapb.TemplateValue)
-			arrayData[i] = element
-			if elementType == schemapb.DataType_None {
-				elementType = element.GetType()
-			} else if elementType != element.GetType() {
-				sameType = false
-				elementType = schemapb.DataType_JSON
-			}
-		}
 		return &schemapb.TemplateValue{
-			Type: dataType,
 			Val: &schemapb.TemplateValue_ArrayVal{
-				ArrayVal: &schemapb.TemplateArrayValue{
-					Array:       arrayData,
-					ElementType: elementType,
-					SameType:    sameType,
+				ArrayVal: data.(*schemapb.TemplateArrayValue),
+			},
+		}
+	default:
+		return nil
+	}
+}
+
+func generateTemplateArrayValue(dataType schemapb.DataType, data interface{}) *schemapb.TemplateArrayValue {
+	switch dataType {
+	case schemapb.DataType_Bool:
+		return &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_BoolData{
+				BoolData: &schemapb.BoolArray{
+					Data: data.([]bool),
 				},
 			},
 		}
-
+	case schemapb.DataType_Int64:
+		return &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_LongData{
+				LongData: &schemapb.LongArray{
+					Data: data.([]int64),
+				},
+			},
+		}
+	case schemapb.DataType_Double:
+		return &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_DoubleData{
+				DoubleData: &schemapb.DoubleArray{
+					Data: data.([]float64),
+				},
+			},
+		}
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		return &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_StringData{
+				StringData: &schemapb.StringArray{
+					Data: data.([]string),
+				},
+			},
+		}
+	case schemapb.DataType_JSON:
+		return &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_JsonData{
+				JsonData: &schemapb.JSONArray{
+					Data: data.([][]byte),
+				},
+			},
+		}
+	case schemapb.DataType_Array:
+		return &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_ArrayData{
+				ArrayData: &schemapb.TemplateArrayValueArray{
+					Data: data.([]*schemapb.TemplateArrayValue),
+				},
+			},
+		}
 	default:
 		return nil
 	}

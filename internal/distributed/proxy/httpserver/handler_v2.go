@@ -132,6 +132,13 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(RoleCategory+GrantPrivilegeAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.addPrivilegeToRole))))
 	router.POST(RoleCategory+RevokePrivilegeAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.removePrivilegeFromRole))))
 
+	// privilege group
+	router.POST(PrivilegeGroupCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.createPrivilegeGroup))))
+	router.POST(PrivilegeGroupCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.dropPrivilegeGroup))))
+	router.POST(PrivilegeGroupCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.listPrivilegeGroups))))
+	router.POST(PrivilegeGroupCategory+AddPrivilegesToGroupAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.addPrivilegesToGroup))))
+	router.POST(PrivilegeGroupCategory+RemovePrivilegesFromGroupAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.removePrivilegesFromGroup))))
+
 	router.POST(IndexCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listIndexes)))))
 	router.POST(IndexCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &IndexReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.describeIndex)))))
 
@@ -148,8 +155,8 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 
 	router.POST(ImportJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listImportJob)))))
 	router.POST(ImportJobCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &ImportReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createImportJob)))))
-	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &GetImportReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getImportJobProcess)))))
-	router.POST(ImportJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetImportReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getImportJobProcess)))))
+	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getImportJobProcess)))))
+	router.POST(ImportJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getImportJobProcess)))))
 }
 
 type (
@@ -192,7 +199,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			}
 		}
 		username, _ := c.Get(ContextUsername)
-		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(c, c.Request.URL.Path)
+		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(getCtx(c), c.Request.URL.Path)
 		defer span.End()
 		ctx = proxy.NewContextWithMetadata(ctx, username.(string), dbName)
 		traceID := span.SpanContext().TraceID().String()
@@ -204,10 +211,23 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 	}
 }
 
+const (
+	v2CtxKey = `milvus_restful_v2_ctxkey`
+)
+
+func getCtx(ctx *gin.Context) context.Context {
+	v, ok := ctx.Get(v2CtxKey)
+	if !ok {
+		return ctx
+	}
+	return v.(context.Context)
+}
+
 // restfulSizeMiddleware is the middleware fetchs metrics stats from gin struct.
 func restfulSizeMiddleware(handler gin.HandlerFunc, observeOutbound bool) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		h := metrics.WrapRestfulContext(ctx, ctx.Request.ContentLength)
+		ctx.Set(v2CtxKey, h)
 		handler(ctx)
 		metrics.RecordRestfulMetrics(h, int64(ctx.Writer.Size()), observeOutbound)
 	}
@@ -1773,6 +1793,85 @@ func (h *HandlersV2) removePrivilegeFromRole(ctx context.Context, c *gin.Context
 	return h.operatePrivilegeToRole(ctx, c, anyReq.(*GrantReq), milvuspb.OperatePrivilegeType_Revoke, dbName)
 }
 
+func (h *HandlersV2) createPrivilegeGroup(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*PrivilegeGroupReq)
+	req := &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName: httpReq.PrivilegeGroupName,
+	}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreatePrivilegeGroup", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.CreatePrivilegeGroup(reqCtx, req.(*milvuspb.CreatePrivilegeGroupRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) dropPrivilegeGroup(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*PrivilegeGroupReq)
+	req := &milvuspb.DropPrivilegeGroupRequest{
+		GroupName: httpReq.PrivilegeGroupName,
+	}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropPrivilegeGroup", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.DropPrivilegeGroup(reqCtx, req.(*milvuspb.DropPrivilegeGroupRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) listPrivilegeGroups(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	req := &milvuspb.ListPrivilegeGroupsRequest{}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ListPrivilegeGroups", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ListPrivilegeGroups(reqCtx, req.(*milvuspb.ListPrivilegeGroupsRequest))
+	})
+	if err == nil {
+		privGroups := make([]map[string]interface{}, 0)
+		for _, group := range resp.(*milvuspb.ListPrivilegeGroupsResponse).PrivilegeGroups {
+			privileges := make([]string, len(group.Privileges))
+			for i, privilege := range group.Privileges {
+				privileges[i] = privilege.Name
+			}
+			groupInfo := map[string]interface{}{
+				HTTPReturnPrivilegeGroupName: group.GroupName,
+				HTTPReturnPrivileges:         strings.Join(privileges, ","),
+			}
+			privGroups = append(privGroups, groupInfo)
+		}
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
+			HTTPReturnPrivilegeGroups: privGroups,
+		}})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) addPrivilegesToGroup(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	return h.operatePrivilegeGroup(ctx, c, anyReq, dbName, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
+}
+
+func (h *HandlersV2) removePrivilegesFromGroup(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	return h.operatePrivilegeGroup(ctx, c, anyReq, dbName, milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup)
+}
+
+func (h *HandlersV2) operatePrivilegeGroup(ctx context.Context, c *gin.Context, anyReq any, dbName string, operateType milvuspb.OperatePrivilegeGroupType) (interface{}, error) {
+	httpReq := anyReq.(*PrivilegeGroupReq)
+	req := &milvuspb.OperatePrivilegeGroupRequest{
+		GroupName: httpReq.PrivilegeGroupName,
+		Privileges: lo.Map(httpReq.Privileges, func(p string, _ int) *milvuspb.PrivilegeEntity {
+			return &milvuspb.PrivilegeEntity{Name: p}
+		}),
+		Type: operateType,
+	}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/OperatePrivilegeGroup", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.OperatePrivilegeGroup(reqCtx, req.(*milvuspb.OperatePrivilegeGroupRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
 func (h *HandlersV2) listIndexes(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	collectionGetter, _ := anyReq.(requestutil.CollectionNameGetter)
 	indexNames := []string{}
@@ -1863,8 +1962,16 @@ func (h *HandlersV2) createIndex(ctx context.Context, c *gin.Context, anyReq any
 		}
 		c.Set(ContextRequest, req)
 
-		for key, value := range indexParam.Params {
-			req.ExtraParams = append(req.ExtraParams, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+		var err error
+		req.ExtraParams, err = convertToExtraParams(indexParam)
+		if err != nil {
+			// will not happen
+			log.Ctx(ctx).Warn("high level restful api, convertToExtraParams fail", zap.Error(err), zap.Any("request", anyReq))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
 		}
 		resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateIndex", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 			return h.proxy.CreateIndex(reqCtx, req.(*milvuspb.CreateIndexRequest))

@@ -147,3 +147,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 	}
 	return nil
 }
+
+func (t *showCollectionTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(NewClusterLockerKey(false), NewDatabaseLockerKey(t.Req.GetDbName(), false))
+}

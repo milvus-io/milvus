@@ -804,8 +804,6 @@ func TestValidateName(t *testing.T) {
 		assert.Nil(t, ValidateRoleName(name))
 		assert.Nil(t, ValidateObjectName(name))
 		assert.Nil(t, ValidateObjectType(name))
-		assert.Nil(t, ValidatePrincipalName(name))
-		assert.Nil(t, ValidatePrincipalType(name))
 		assert.Nil(t, ValidatePrivilege(name))
 	}
 
@@ -828,8 +826,6 @@ func TestValidateName(t *testing.T) {
 		assert.NotNil(t, validateName(name, nameType))
 		assert.NotNil(t, ValidateRoleName(name))
 		assert.NotNil(t, ValidateObjectType(name))
-		assert.NotNil(t, ValidatePrincipalName(name))
-		assert.NotNil(t, ValidatePrincipalType(name))
 		assert.NotNil(t, ValidatePrivilege(name))
 	}
 	assert.NotNil(t, ValidateObjectName(" "))

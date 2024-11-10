@@ -26,6 +26,7 @@ import (
 // pipeline used for querynode
 type Pipeline interface {
 	base.StreamPipeline
+	GetCollectionID() UniqueID
 }
 
 type pipeline struct {
@@ -33,6 +34,10 @@ type pipeline struct {
 
 	collectionID  UniqueID
 	embeddingNode embeddingNode
+}
+
+func (p *pipeline) GetCollectionID() UniqueID {
+	return p.collectionID
 }
 
 func (p *pipeline) Close() {

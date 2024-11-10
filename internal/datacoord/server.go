@@ -506,7 +506,11 @@ func (s *Server) initCluster() error {
 	s.sessionManager = session.NewDataNodeManagerImpl(session.WithDataNodeCreator(s.dataNodeCreator))
 
 	var err error
-	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, s.sessionManager, s.idAllocator, withCheckerV2())
+	channelManagerOpts := []ChannelmanagerOpt{withCheckerV2()}
+	if streamingutil.IsStreamingServiceEnabled() {
+		channelManagerOpts = append(channelManagerOpts, withEmptyPolicyFactory())
+	}
+	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, s.sessionManager, s.idAllocator, channelManagerOpts...)
 	if err != nil {
 		return err
 	}
@@ -705,7 +709,7 @@ func (s *Server) initIndexNodeManager() {
 }
 
 func (s *Server) initCompaction() {
-	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.channelManager, s.meta, s.allocator, s.taskScheduler, s.handler)
+	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.meta, s.allocator, s.taskScheduler, s.handler)
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler, s.meta)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
 }
@@ -1007,8 +1011,12 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
 	}
 	// set segment to SegmentState_Flushed
-	if err := s.meta.SetState(segmentID, commonpb.SegmentState_Flushed); err != nil {
-		log.Error("flush segment complete failed", zap.Error(err))
+	var operators []UpdateOperator
+	operators = append(operators, SetSegmentIsInvisible(segmentID, true))
+	operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
+	err := s.meta.UpdateSegmentsInfo(operators...)
+	if err != nil {
+		log.Warn("flush segment complete failed", zap.Error(err))
 		return err
 	}
 	select {
@@ -1137,6 +1145,11 @@ func (s *Server) registerMetricsRequest() {
 			return s.getSystemInfoMetrics(ctx, req)
 		})
 
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataDist,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.getDistJSON(ctx, req), nil
+		})
+
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ImportTasks,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.importMeta.TaskStatsJSON(), nil
@@ -1154,8 +1167,19 @@ func (s *Server) registerMetricsRequest() {
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTasks,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return s.GetSyncTaskMetrics(ctx, req)
+			return s.getSyncTaskJSON(ctx, req)
 		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataSegments,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.getSegmentsJSON(ctx, req)
+		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataChannels,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.getChannelsJSON(ctx, req)
+		})
+
 	log.Info("register metrics actions finished")
 }
 

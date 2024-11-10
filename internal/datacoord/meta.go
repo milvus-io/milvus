@@ -791,7 +791,7 @@ func UpdateCompactedOperator(segmentID int64) UpdateOperator {
 	}
 }
 
-func UpdateSegmentVisible(segmentID int64) UpdateOperator {
+func SetSegmentIsInvisible(segmentID int64, isInvisible bool) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
@@ -799,7 +799,7 @@ func UpdateSegmentVisible(segmentID int64) UpdateOperator {
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
-		segment.IsInvisible = false
+		segment.IsInvisible = isInvisible
 		return true
 	}
 }
@@ -1009,6 +1009,24 @@ func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 			return false
 		}
 		segment.IsImporting = isImporting
+		return true
+	}
+}
+
+// UpdateAsDroppedIfEmptyWhenFlushing updates segment state to Dropped if segment is empty and in Flushing state
+// It's used to make a empty flushing segment to be dropped directly.
+func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update as dropped if empty when flusing failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		if segment.GetNumOfRows() == 0 && segment.GetState() == commonpb.SegmentState_Flushing {
+			log.Info("meta update: update as dropped if empty when flusing", zap.Int64("segmentID", segmentID))
+			updateSegStateAndPrepareMetrics(segment, commonpb.SegmentState_Dropped, modPack.metricMutation)
+		}
 		return true
 	}
 }
@@ -1551,13 +1569,12 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 				IsSorted: compactToSegment.GetIsSorted(),
 			})
 
-		// L1 segment with NumRows=0 will be discarded, so no need to change the metric
-		if compactToSegmentInfo.GetNumOfRows() > 0 {
-			// metrics mutation for compactTo segments
-			metricMutation.addNewSeg(compactToSegmentInfo.GetState(), compactToSegmentInfo.GetLevel(), compactToSegmentInfo.GetIsSorted(), compactToSegmentInfo.GetNumOfRows())
-		} else {
+		if compactToSegmentInfo.GetNumOfRows() == 0 {
 			compactToSegmentInfo.State = commonpb.SegmentState_Dropped
 		}
+
+		// metrics mutation for compactTo segments
+		metricMutation.addNewSeg(compactToSegmentInfo.GetState(), compactToSegmentInfo.GetLevel(), compactToSegmentInfo.GetIsSorted(), compactToSegmentInfo.GetNumOfRows())
 
 		log.Info("Add a new compactTo segment",
 			zap.Int64("compactTo", compactToSegmentInfo.GetID()),
@@ -1582,6 +1599,7 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 	for _, seg := range compactToInfos {
 		binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
 	}
+
 	// alter compactTo before compactFrom segments to avoid data lost if service crash during AlterSegments
 	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
 		log.Warn("fail to alter compactTo segments", zap.Error(err))
@@ -1979,6 +1997,11 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 	// metrics mutation for compaction from segments
 	updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 
+	resultInvisible := oldSegment.GetIsInvisible()
+	if !oldSegment.GetCreatedByCompaction() {
+		resultInvisible = false
+	}
+
 	segmentInfo := &datapb.SegmentInfo{
 		CollectionID:              oldSegment.GetCollectionID(),
 		PartitionID:               oldSegment.GetPartitionID(),
@@ -1994,7 +2017,8 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 		LastLevel:                 oldSegment.GetLastLevel(),
 		PartitionStatsVersion:     oldSegment.GetPartitionStatsVersion(),
 		LastPartitionStatsVersion: oldSegment.GetLastPartitionStatsVersion(),
-		IsInvisible:               oldSegment.GetIsInvisible(),
+		CreatedByCompaction:       oldSegment.GetCreatedByCompaction(),
+		IsInvisible:               resultInvisible,
 		ID:                        result.GetSegmentID(),
 		NumOfRows:                 result.GetNumRows(),
 		Binlogs:                   result.GetInsertLogs(),
@@ -2002,7 +2026,6 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 		TextStatsLogs:             result.GetTextStatsLogs(),
 		Bm25Statslogs:             result.GetBm25Logs(),
 		Deltalogs:                 nil,
-		CreatedByCompaction:       true,
 		CompactionFrom:            []int64{oldSegmentID},
 		IsSorted:                  true,
 	}
@@ -2024,4 +2047,29 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 	m.segments.SetSegment(result.GetSegmentID(), segment)
 
 	return metricMutation, nil
+}
+
+func (m *meta) getSegmentsMetrics() []*metricsinfo.Segment {
+	m.RLock()
+	defer m.RUnlock()
+
+	segments := make([]*metricsinfo.Segment, 0, len(m.segments.segments))
+	for _, s := range m.segments.segments {
+		segments = append(segments, &metricsinfo.Segment{
+			SegmentID:    s.ID,
+			CollectionID: s.CollectionID,
+			PartitionID:  s.PartitionID,
+			Channel:      s.InsertChannel,
+			NumOfRows:    s.NumOfRows,
+			State:        s.State.String(),
+			MemSize:      s.size.Load(),
+			Level:        s.Level.String(),
+			IsImporting:  s.IsImporting,
+			Compacted:    s.Compacted,
+			IsSorted:     s.IsSorted,
+			NodeID:       paramtable.GetNodeID(),
+		})
+	}
+
+	return segments
 }

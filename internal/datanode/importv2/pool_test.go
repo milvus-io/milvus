@@ -20,10 +20,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestResizePools(t *testing.T) {
