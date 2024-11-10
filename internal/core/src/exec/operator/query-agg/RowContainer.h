@@ -21,6 +21,7 @@
 #include "common/Vector.h"
 #include "common/Utils.h"
 #include "Aggregate.h"
+#include "storage/Util.h"
 
 namespace milvus {
 namespace exec {
@@ -281,18 +282,27 @@ public:
             const VectorPtr& result){
         auto maxRows = numRows + resultOffset;
         AssertInfo(maxRows == result->size(), "extracted rows number should be equal to the size of result vector");
-        for(auto i = 0; i < numRows; i++) {
-            const char* row;
-            if constexpr (useRowNumber) {
-                auto rowNumber = rowNumbers[i];
-                row = rowNumber >= 0? rows[rowNumber]: nullptr;
-            } else {
-                row = rows[i];
+        if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view>) {
+            PanicInfo(DataTypeInvalid, "Not support extract string values for now");
+        } else {
+            auto result_column_vec = std::dynamic_pointer_cast<ColumnVector>(result);
+            AssertInfo(result_column_vec != nullptr, "Input column to extract result must be of ColumnVector type");
+            for (auto i = 0; i < numRows; i++) {
+                const char *row;
+                if constexpr (useRowNumber) {
+                    auto rowNumber = rowNumbers[i];
+                    row = rowNumber >= 0 ? rows[rowNumber] : nullptr;
+                } else {
+                    row = rows[i];
+                }
                 auto resultIndex = resultOffset + i;
-
+                if (row == nullptr || isNullAt(row, nullByte, nullMask)) {
+                    result_column_vec->nullAt(resultIndex);
+                } else {
+                    result_column_vec->SetValueAt<T>(resultIndex, valueAt<T>(row, offset));
+                }
             }
         }
-
     }
 
     template <bool useRowNumber, typename T>
@@ -303,7 +313,29 @@ public:
             int32_t offset,
             int32_t resultOffset,
             const VectorPtr& result){
-
+        auto maxRows = numRows + resultOffset;
+        AssertInfo(maxRows == result->size(), "extracted rows number should be equal to the size of result vector");
+        if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view>) {
+            PanicInfo(DataTypeInvalid, "Not support extract string values for now");
+        } else {
+            auto result_column_vec = std::dynamic_pointer_cast<ColumnVector>(result);
+            AssertInfo(result_column_vec != nullptr, "Input column to extract result must be of ColumnVector type");
+            for (auto i = 0; i < numRows; i++) {
+                const char *row;
+                if constexpr (useRowNumber) {
+                    auto rowNumber = rowNumbers[i];
+                    row = rowNumber >= 0 ? rows[rowNumber] : nullptr;
+                } else {
+                    row = rows[i];
+                }
+                auto resultIndex = resultOffset + i;
+                if (row == nullptr) {
+                    result_column_vec->nullAt(resultIndex);
+                } else {
+                    result_column_vec->SetValueAt<T>(resultIndex, valueAt<T>(row, offset));
+                }
+            }
+        }
     }
 
     template <bool useRowNumbers, DataType Type>

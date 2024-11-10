@@ -137,6 +137,18 @@ class ColumnVector final : public SimpleVector {
         return reinterpret_cast<char*>(GetRawData()) + index * size_of_element;
     }
 
+    template<typename T>
+    void
+    SetValueAt(size_t index, const T& value) {
+        *(reinterpret_cast<T*>(values_->Data()) + index) = value;
+    }
+
+    void
+    nullAt(size_t index) {
+        valid_values_.set(index, false);
+    }
+
+
     bool
     ValidAt(size_t index) override {
         return valid_values_[index];
