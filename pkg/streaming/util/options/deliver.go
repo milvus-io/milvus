@@ -16,8 +16,7 @@ const (
 
 	DeliverFilterTypeTimeTickGT  deliverFilterType = 1
 	DeliverFilterTypeTimeTickGTE deliverFilterType = 2
-	DeliverFilterTypeVChannel    deliverFilterType = 3
-	DeliverFilterTypeMessageType deliverFilterType = 4
+	DeliverFilterTypeMessageType deliverFilterType = 3
 )
 
 type (
@@ -91,17 +90,6 @@ func DeliverFilterTimeTickGTE(timeTick uint64) DeliverFilter {
 	}
 }
 
-// DeliverFilterVChannel delivers messages filtered by vchannel.
-func DeliverFilterVChannel(vchannel string) DeliverFilter {
-	return &streamingpb.DeliverFilter{
-		Filter: &streamingpb.DeliverFilter_Vchannel{
-			Vchannel: &streamingpb.DeliverFilterVChannel{
-				Vchannel: vchannel,
-			},
-		},
-	}
-}
-
 // DeliverFilterMessageType delivers messages filtered by message type.
 func DeliverFilterMessageType(messageType ...message.MessageType) DeliverFilter {
 	messageTypes := make([]messagespb.MessageType, 0, len(messageType))
@@ -153,11 +141,6 @@ func GetFilterFunc(filters []DeliverFilter) func(message.ImmutableMessage) bool 
 					return im.TimeTick() >= filter.GetTimeTickGte().TimeTick
 				}
 				return true
-			})
-		case *streamingpb.DeliverFilter_Vchannel:
-			filterFuncs = append(filterFuncs, func(im message.ImmutableMessage) bool {
-				// vchannel == "" is a broadcast operation.
-				return im.VChannel() == "" || im.VChannel() == filter.GetVchannel().Vchannel
 			})
 		case *streamingpb.DeliverFilter_MessageType:
 			filterFuncs = append(filterFuncs, func(im message.ImmutableMessage) bool {

@@ -71,6 +71,7 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 		}
 		return hc.newConsumer(ctx, &consumer.ConsumerOptions{
 			Assignment:     assign,
+			VChannel:       opts.VChannel,
 			DeliverPolicy:  opts.DeliverPolicy,
 			DeliverFilters: opts.DeliverFilters,
 			MessageHandler: opts.MessageHandler,

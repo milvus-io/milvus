@@ -24,6 +24,9 @@ type ConsumerOptions struct {
 	// The cosume target
 	Assignment *types.PChannelInfoAssigned
 
+	// VChannel is the vchannel of the consumer.
+	VChannel string
+
 	// DeliverPolicy is the deliver policy of the consumer.
 	DeliverPolicy options.DeliverPolicy
 
@@ -66,7 +69,7 @@ func CreateConsumer(
 	cli := &consumerImpl{
 		ctx:              ctx,
 		walName:          createResp.GetWalName(),
-		assignment:       *opts.Assignment,
+		opts:             opts,
 		grpcStreamClient: streamClient,
 		handlerClient:    handlerClient,
 		logger: log.With(
@@ -87,16 +90,14 @@ func createConsumeRequest(ctx context.Context, opts *ConsumerOptions) (context.C
 	ctx = contextutil.WithPickServerID(ctx, opts.Assignment.Node.ServerID)
 	// create the consumer request.
 	return contextutil.WithCreateConsumer(ctx, &streamingpb.CreateConsumerRequest{
-		Pchannel:       types.NewProtoFromPChannelInfo(opts.Assignment.Channel),
-		DeliverPolicy:  opts.DeliverPolicy,
-		DeliverFilters: opts.DeliverFilters,
+		Pchannel: types.NewProtoFromPChannelInfo(opts.Assignment.Channel),
 	}), nil
 }
 
 type consumerImpl struct {
 	ctx              context.Context // TODO: the cancel method of consumer should be managed by consumerImpl, fix it in future.
 	walName          string
-	assignment       types.PChannelInfoAssigned
+	opts             *ConsumerOptions
 	grpcStreamClient streamingpb.StreamingNodeHandlerService_ConsumeClient
 	handlerClient    streamingpb.StreamingNodeHandlerServiceClient
 	logger           *log.MLogger
@@ -158,7 +159,9 @@ func (c *consumerImpl) recvLoop() (err error) {
 		c.finishErr.Set(err)
 		c.msgHandler.Close()
 	}()
-
+	if err := c.createVChannelConsumer(); err != nil {
+		return err
+	}
 	for {
 		resp, err := c.grpcStreamClient.Recv()
 		if errors.Is(err, io.EOF) {
@@ -198,6 +201,30 @@ func (c *consumerImpl) recvLoop() (err error) {
 			c.logger.Warn("unknown response type", zap.Any("response", resp))
 		}
 	}
+}
+
+func (c *consumerImpl) createVChannelConsumer() error {
+	// Create the vchannel client.
+	if err := c.grpcStreamClient.Send(&streamingpb.ConsumeRequest{
+		Request: &streamingpb.ConsumeRequest_CreateVchannelConsumer{
+			CreateVchannelConsumer: &streamingpb.CreateVChannelConsumerRequest{
+				Vchannel:       c.opts.VChannel,
+				DeliverPolicy:  c.opts.DeliverPolicy,
+				DeliverFilters: c.opts.DeliverFilters,
+			},
+		},
+	}); err != nil {
+		return err
+	}
+	resp, err := c.grpcStreamClient.Recv()
+	if err != nil {
+		return err
+	}
+	createVChannelResp := resp.GetCreateVchannel()
+	if createVChannelResp == nil {
+		return status.NewInvalidRequestSeq("expect create vchannel response")
+	}
+	return nil
 }
 
 func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
