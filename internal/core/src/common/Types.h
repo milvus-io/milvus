@@ -693,7 +693,12 @@ using column_index_t = uint32_t;
 class RowType final {
 public:
     RowType(std::vector<std::string>&& names, std::vector<milvus::DataType>&& types):
-        names_(std::move(names)), columns_types_(std::move(types)){};
+        names_(std::move(names)), columns_types_(std::move(types)){
+        AssertInfo(names_.size() == columns_types_.size(),
+                   "Name count:{} and column count:{} must be the same",
+                   names_.size(),
+                   columns_types_.size())
+    };
 
     static const std::shared_ptr<const RowType> None;
 
@@ -710,6 +715,10 @@ public:
 
     milvus::DataType column_type(uint32_t idx) const {
         return columns_types_.at(idx);
+    }
+
+    size_t column_count() const {
+        return names_.size();
     }
 
 private:

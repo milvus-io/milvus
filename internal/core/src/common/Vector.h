@@ -26,6 +26,8 @@
 #include "common/Types.h"
 
 namespace milvus {
+class BaseVector;
+using VectorPtr = std::shared_ptr<BaseVector>;
 
 /**
  * @brief base class for different type vector  
@@ -50,9 +52,22 @@ class BaseVector {
         return type_kind_;
     }
 
+    size_t
+    nullCount() const {
+        return null_count_.has_value()?null_count_.value():0;
+    }
+
     virtual void resize(vector_size_t newSize, bool setNotNull=true) {
         length_ = newSize;
     }
+
+    static void prepareForReuse(VectorPtr& vector, vector_size_t size);
+
+    /// Resets non-reusable buffers and updates child vectors by calling
+    /// BaseVector::prepareForReuse.
+    /// Base implementation checks and resets nulls buffer if needed. Keeps the
+    /// nulls buffer if singly-referenced, mutable and has at least one null bit set.
+    virtual void prepareForReuse();
 
  protected:
     DataType type_kind_;
@@ -60,8 +75,6 @@ class BaseVector {
     // todo: use null_count to skip some bitset operate
     std::optional<size_t> null_count_;
 };
-
-using VectorPtr = std::shared_ptr<BaseVector>;
 
 /**
  * SimpleVector abstracts over various Columnar Storage Formats,
@@ -227,6 +240,17 @@ class RowVector : public BaseVector {
             if (child->size() > length_) {
                 length_ = child->size();
             }
+        }
+    }
+
+    RowVector(const RowTypePtr& rowType,
+              size_t size,
+              std::optional<size_t> nullCount = std::nullopt):
+            BaseVector(DataType::ROW, size, nullCount){
+        auto column_count = rowType->column_count();
+        for(auto i = 0; i < column_count; i++) {
+            auto column_type = rowType->column_type(i);
+            children_values_.emplace_back(std::make_shared<ColumnVector>(column_type, size));
         }
     }
 

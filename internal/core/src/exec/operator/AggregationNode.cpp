@@ -18,9 +18,11 @@ PhyAggregationNode::PhyAggregationNode(int32_t operator_id,
 
 void PhyAggregationNode::prepareOutput(vector_size_t size){
     if (output_) {
-        // reuse the output vector
+        VectorPtr new_output = std::move(output_);
+        BaseVector::prepareForReuse(new_output, size);
+        output_ = std::static_pointer_cast<RowVector>(new_output);
     } else {
-        // create the output vector
+        output_ = std::make_shared<RowVector>(output_type_, size, 0);
     }
 }
 

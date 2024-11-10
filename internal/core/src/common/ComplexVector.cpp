@@ -17,6 +17,20 @@
 #include "Vector.h"
 
 namespace milvus {
+
+void BaseVector::prepareForReuse(milvus::VectorPtr &vector, milvus::vector_size_t size) {
+    if(!vector.unique()) {
+        vector = std::make_shared<BaseVector>(vector->type(), size, vector->nullCount());
+    } else {
+        vector->prepareForReuse();
+        vector->resize(size);
+    }
+}
+
+void BaseVector::prepareForReuse() {
+    null_count_ = std::nullopt;
+}
+
 void
 RowVector::resize(milvus::vector_size_t new_size, bool setNotNull) {
     const auto oldSize = size();

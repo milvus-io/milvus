@@ -281,7 +281,17 @@ public:
             const VectorPtr& result){
         auto maxRows = numRows + resultOffset;
         AssertInfo(maxRows == result->size(), "extracted rows number should be equal to the size of result vector");
+        for(auto i = 0; i < numRows; i++) {
+            const char* row;
+            if constexpr (useRowNumber) {
+                auto rowNumber = rowNumbers[i];
+                row = rowNumber >= 0? rows[rowNumber]: nullptr;
+            } else {
+                row = rows[i];
+                auto resultIndex = resultOffset + i;
 
+            }
+        }
 
     }
 
