@@ -152,7 +152,12 @@ void GroupingSet::extractGroups(folly::Range<char **> groups, const milvus::RowV
     auto totalKeys = rows->KeyTypes().size();
     for(auto i = 0; i < totalKeys; i++) {
         auto keyVector = result->child(i);
-        rows.ex
+        rows->extractColumn(groups.data(), groups.size(), i, keyVector);
+    }
+    for (auto i = 0; i < aggregates_.size(); i++) {
+        auto& function = aggregates_[i].function_;
+        auto aggregateVector = result->child(totalKeys + i);
+        function->extractValues(groups.data(), groups.size(), &aggregateVector);
     }
 }
 

@@ -25,15 +25,23 @@ void PhyAggregationNode::prepareOutput(vector_size_t size){
 }
 
 RowVectorPtr PhyAggregationNode::GetOutput() {
-  if (finished_||!no_more_input_) {
+  if (finished_||!no_more_input_||(!no_more_input_ && !grouping_set_->hasOutput())) {
       input_ = nullptr;
       return nullptr;
   }
+
   const auto& queryConfig = operator_context_->get_driver_context()->GetQueryConfig();
   auto batch_size = queryConfig->get_expr_batch_size();
   const auto outputRowCount = isGlobal_?1:batch_size;
   prepareOutput(outputRowCount);
-  //grouping_set_-
+  const bool hasData = grouping_set_->getOutput(outputRowCount, outputRowCount, resultIterator_, output_);
+  if (!hasData) {
+      resultIterator_.reset();
+      if (no_more_input_) {
+        finished_ = true;
+      }
+      return nullptr;
+  }
   numOutputRows_ += output_->size();
   return output_;
 }

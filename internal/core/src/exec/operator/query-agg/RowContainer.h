@@ -122,6 +122,10 @@ struct RowContainerIterator {
     inline char* currentRow() const {
         return rowBegin_;
     }
+
+    void reset() {
+        *this = {};
+    }
 };
 
 class RowContainer {
@@ -275,6 +279,9 @@ public:
             uint8_t nullMask,
             int32_t resultOffset,
             const VectorPtr& result){
+        auto maxRows = numRows + resultOffset;
+        AssertInfo(maxRows == result->size(), "extracted rows number should be equal to the size of result vector");
+
 
     }
 

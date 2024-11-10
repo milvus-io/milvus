@@ -76,6 +76,8 @@ private:
     // flush.
     int64_t numOutputRows_ = 0;
     bool finished_ = false;
+
+    RowContainerIterator resultIterator_;
 };
 }
 }
