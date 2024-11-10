@@ -31,22 +31,17 @@ public:
     Accumulator(
         bool isFixedSize,
         int32_t fixedSize,
-        bool useExternalMemory,
         int32_t alignment,
         DataType spillType,
         std::function<void(folly::Range<char**> groups, VectorPtr& result)>
             spillExtractFunction,
         std::function<void(folly::Range<char**> groups)> destroyFunction);
 
-    explicit Accumulator(Aggregate* aggregate);
+    explicit Accumulator(Aggregate* aggregate, DataType spillType);
 
     bool isFixedSize() const {
         return isFixedSize_;
     }
-
-    bool usesExternalMemory() const {
-        return usesExternalMemory_;
-    }        
 
     int32_t alignment() const {
         return alignment_;
@@ -59,7 +54,6 @@ public:
 private:
     const bool isFixedSize_;
     const int32_t fixedSize_;
-    const bool usesExternalMemory_;
     const int32_t alignment_;
     const DataType spillType_;
     std::function<void(folly::Range<char**> groups, VectorPtr& result)> spillExtractFunction_;
@@ -445,8 +439,6 @@ private:
     std::vector<uint8_t> initialNulls_;
 
     std::vector<Accumulator> accumulators_;
-
-    bool usesExternalMemory_{false};
 
     // Head of linked list of free rows.
     char* firstFreeRow_ = nullptr;

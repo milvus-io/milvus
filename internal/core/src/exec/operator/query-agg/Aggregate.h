@@ -72,6 +72,29 @@ public:
 
     virtual void extractValues(char** groups, int32_t numGroups, VectorPtr* result) {};
 
+    // Returns true if the accumulator never takes more than
+    // accumulatorFixedWidthSize() bytes. If this is false, the
+    // accumulator needs to track its changing variable length footprint
+    // using RowSizeTracker (Aggregate::trackRowSize), see ArrayAggAggregate for
+    // sample usage. A group row with at least one variable length key or
+    // aggregate will have a 32-bit slot at offset RowContainer::rowSize_ for
+    // keeping track of per-row size. The size is relevant for keeping caps on
+    // result set and spilling batch sizes with skewed data.
+    virtual bool isFixedSize() const {
+        return true;
+    }
+
+    // Returns the fixed number of bytes the accumulator takes on a group
+    // row. Variable width accumulators will reference the variable
+    // width part of the state from the fixed part.
+    virtual int32_t accumulatorFixedWidthSize() const = 0;
+
+    /// Returns the alignment size of the accumulator.  Some types such as
+    /// int128_t require aligned access.  This value must be a power of 2.
+    virtual int32_t accumulatorAlignmentSize() const {
+        return 1;
+    }
+
 protected:
     virtual void setOffsetsInternal(
       int32_t offset,

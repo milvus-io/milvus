@@ -133,8 +133,7 @@ std::vector<Accumulator> GroupingSet::accumulators(bool /*excludeToIntermediate*
     std::vector<Accumulator> accumulators;
     accumulators.reserve(aggregates_.size());
     for(auto& aggregate: aggregates_) {
-        // add accumalator for each aggregate
-        // accumulators.emplace_back(Accumulator{aggregate-});
+        accumulators.emplace_back(Accumulator{aggregate.function_.get(), aggregate.intermediateType_});
     }
     return accumulators;
 }

@@ -59,7 +59,6 @@ RowContainer::RowContainer(const std::vector<DataType> &keyTypes,
         nullOffsets_.push_back(nullOffset);
         ++nullOffset;
         isVariableWidth |= !accumulator.isFixedSize();
-        usesExternalMemory_ |= accumulator.usesExternalMemory();
         alignment_ = combineAlignments(accumulator.alignment(), alignment_);
     }
 
@@ -145,7 +144,6 @@ void RowContainer::store(const milvus::ColumnVectorPtr &column_data, milvus::vec
 Accumulator::Accumulator(
         bool isFixedSize,
         int32_t fixedSize,
-        bool useExternalMemory,
         int32_t alignment,
         DataType spillType,
         std::function<void(folly::Range<char**> groups, milvus::VectorPtr& result)>
@@ -153,7 +151,6 @@ Accumulator::Accumulator(
         std::function<void(folly::Range<char**> groups)> destroyFunction):
         isFixedSize_{isFixedSize},
         fixedSize_{fixedSize},
-        usesExternalMemory_{useExternalMemory},
         alignment_{alignment},
         spillType_{spillType},
         spillExtractFunction_{std::move(spillExtractFunction)},
@@ -161,11 +158,13 @@ Accumulator::Accumulator(
             
         }
 
-Accumulator::Accumulator(milvus::exec::Aggregate *aggregate): alignment_(1),
-    isFixedSize_(true),
-    spillType_(DataType::NONE),
-    usesExternalMemory_(false),
-    fixedSize_(1){
+Accumulator::Accumulator(milvus::exec::Aggregate *aggregate, DataType spillType):
+    isFixedSize_(aggregate->isFixedSize()),
+    fixedSize_{aggregate->accumulatorFixedWidthSize()},
+    alignment_(aggregate->accumulatorAlignmentSize()),
+    spillType_(spillType){
+    AssertInfo(aggregate!=nullptr, "Input aggregate for accumulator cannot be nullptr!");
 }
+
 }
 }

@@ -29,8 +29,14 @@ struct AggregateInfo{
     /// Indices of the input columns in the input RowVector.
     std::vector<column_index_t> input_column_idxes_;
 
+    /// Boolean indicating whether inputs must be de-duplicated before aggregating
+    bool distinct{false};
+
     /// Index of the result column in the output RowVector.
     column_index_t output_;
+
+    /// Type of intermediate results. Used for spilling.
+    DataType intermediateType_;
 };
 
 std::vector<AggregateInfo> toAggregateInfo(
