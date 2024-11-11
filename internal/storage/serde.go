@@ -30,7 +30,6 @@ import (
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -59,7 +58,7 @@ type RecordWriter interface {
 }
 
 type (
-	Serializer[T any]   func([]T) (Record, uint64, error)
+	Serializer[T any]   func([]T) (Record, error)
 	Deserializer[T any] func(Record, []T) error
 )
 
@@ -614,7 +613,13 @@ func (r *selectiveRecord) Slice(start, end int) Record {
 }
 
 func calculateArraySize(a arrow.Array) int {
+	if a == nil || a.Data() == nil || a.Data().Buffers() == nil {
+		return 0
+	}
 	return lo.SumBy[*memory.Buffer, int](a.Data().Buffers(), func(b *memory.Buffer) int {
+		if b == nil {
+			return 0
+		}
 		return b.Len()
 	})
 }
@@ -791,9 +796,8 @@ type SerializeWriter[T any] struct {
 	batchSize  int
 	mu         sync.Mutex
 
-	buffer            []T
-	pos               int
-	writtenMemorySize atomic.Uint64
+	buffer []T
+	pos    int
 }
 
 func (sw *SerializeWriter[T]) Flush() error {
@@ -803,7 +807,7 @@ func (sw *SerializeWriter[T]) Flush() error {
 		return nil
 	}
 	buf := sw.buffer[:sw.pos]
-	r, size, err := sw.serializer(buf)
+	r, err := sw.serializer(buf)
 	if err != nil {
 		return err
 	}
@@ -812,7 +816,6 @@ func (sw *SerializeWriter[T]) Flush() error {
 		return err
 	}
 	sw.pos = 0
-	sw.writtenMemorySize.Add(size)
 	return nil
 }
 
@@ -831,6 +834,8 @@ func (sw *SerializeWriter[T]) Write(value T) error {
 }
 
 func (sw *SerializeWriter[T]) WriteRecord(r Record) error {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
 	if len(sw.buffer) != 0 {
 		return errors.New("serialize buffer is not empty")
 	}
@@ -839,16 +844,13 @@ func (sw *SerializeWriter[T]) WriteRecord(r Record) error {
 		return err
 	}
 
-	size := 0
-	for fid := range r.Schema() {
-		size += calculateArraySize(r.Column(fid))
-	}
-	sw.writtenMemorySize.Add(uint64(size))
 	return nil
 }
 
 func (sw *SerializeWriter[T]) WrittenMemorySize() uint64 {
-	return sw.writtenMemorySize.Load()
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.rw.GetWrittenUncompressed()
 }
 
 func (sw *SerializeWriter[T]) Close() error {
@@ -868,13 +870,13 @@ func NewSerializeRecordWriter[T any](rw RecordWriter, serializer Serializer[T], 
 }
 
 type simpleArrowRecord struct {
-	Record
-
 	r      arrow.Record
 	schema map[FieldID]schemapb.DataType
 
 	field2Col map[FieldID]int
 }
+
+var _ Record = (*simpleArrowRecord)(nil)
 
 func (sr *simpleArrowRecord) Schema() map[FieldID]schemapb.DataType {
 	return sr.schema
@@ -898,6 +900,11 @@ func (sr *simpleArrowRecord) Release() {
 
 func (sr *simpleArrowRecord) ArrowSchema() *arrow.Schema {
 	return sr.r.Schema()
+}
+
+func (sr *simpleArrowRecord) Slice(start, end int) Record {
+	s := sr.r.NewSlice(int64(start), int64(end))
+	return newSimpleArrowRecord(s, sr.schema, sr.field2Col)
 }
 
 func newSimpleArrowRecord(r arrow.Record, schema map[FieldID]schemapb.DataType, field2Col map[FieldID]int) *simpleArrowRecord {
