@@ -59,7 +59,7 @@ void GroupingSet::initializeGlobalAggregation() {
 
     for(auto& aggregate: aggregates_) {
         auto& function = aggregate.function_;
-        Accumulator accumulator(function.get());
+        Accumulator accumulator(function.get(), function->resultType());
         // Accumulator offset must be aligned by their alignment size.
         offset = milvus::bits::roundUp(offset, accumulator.alignment());
         function->setOffsets(offset,

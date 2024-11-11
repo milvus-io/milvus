@@ -343,24 +343,25 @@ public:
         result->resize(numRows + resultOffset);
         if constexpr (Type == DataType::ROW || Type == DataType::JSON || Type == DataType::ARRAY || Type == DataType::NONE) {
             PanicInfo(DataTypeInvalid, "Not Support Extract types:[ROW/JSON/ARRAY/NONE]");
-        }
-        using T = typename milvus::TypeTraits<Type>::NativeType;
-
-        auto nullMask = column.nullMask();
-        auto offset = column.offset();
-        if (nullMask) {
-            extractValuesWithNulls<useRowNumbers, T>(
-                    rows,
-                    rowNumbers,
-                    numRows,
-                    offset,
-                    column.nullByte(),
-                    nullMask,
-                    resultOffset,
-                    result);
         } else {
-            extractValuesNoNulls<useRowNumbers, T>(
-                    rows, rowNumbers, numRows, offset, resultOffset, result);
+            using T = typename milvus::TypeTraits<Type>::NativeType;
+
+            auto nullMask = column.nullMask();
+            auto offset = column.offset();
+            if (nullMask) {
+                extractValuesWithNulls<useRowNumbers, T>(
+                        rows,
+                        rowNumbers,
+                        numRows,
+                        offset,
+                        column.nullByte(),
+                        nullMask,
+                        resultOffset,
+                        result);
+            } else {
+                extractValuesNoNulls<useRowNumbers, T>(
+                        rows, rowNumbers, numRows, offset, resultOffset, result);
+            }
         }
     }
 

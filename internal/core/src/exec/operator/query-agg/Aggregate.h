@@ -37,6 +37,11 @@ private:
     // so larger values need not be represented.
     int32_t rowSizeOffset_ = 0;
 
+    // Number of null accumulators in the current state of the aggregation
+    // operator for this aggregate. If 0, clearing the null as part of update
+    // is not needed.
+    uint64_t numNulls_ = 0;
+
 public:
     DataType resultType() const {
         return result_type_;
@@ -71,6 +76,18 @@ public:
                              const std::vector<VectorPtr>& input, bool mayPushDown) {} ;
 
     virtual void extractValues(char** groups, int32_t numGroups, VectorPtr* result) {};
+
+    template <typename T>
+    T* value(char* group) const {
+        AssertInfo(reinterpret_cast<uintptr_t>(group + offset_) % accumulatorAlignmentSize() == 0,
+                   "aggregation value in the groups is not aligned");
+        return reinterpret_cast<T*>(group + offset_);
+    }
+
+
+    bool isNull(char* group) const {
+        return numNulls_ && (group[nullByte_]&nullMask_);
+    }
 
     // Returns true if the accumulator never takes more than
     // accumulatorFixedWidthSize() bytes. If this is false, the

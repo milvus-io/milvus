@@ -23,8 +23,10 @@ std::vector<AggregateInfo> toAggregateInfo(
         AggregateInfo info;
         auto& inputColumnIdxes = info.input_column_idxes_;
         for (const auto& inputExpr: aggregate.call_->inputs()) {
-            if (auto fieldExpr = dynamic_cast<const expr::CallExpr*>(inputExpr.get())) {
-                //inputColumnIdxes.emplace_back(inputType->GetChildIndex(fieldExpr->fun_name()));
+            if (auto fieldExpr = dynamic_cast<const expr::FieldAccessTypeExpr*>(inputExpr.get())) {
+                inputColumnIdxes.emplace_back(inputType->GetChildIndex(fieldExpr->name()));
+            } else if (inputExpr != nullptr) {
+                PanicInfo(ExprInvalid, "Only support aggregation towards column for now");
             }
         }
         auto index = numKeys + i;

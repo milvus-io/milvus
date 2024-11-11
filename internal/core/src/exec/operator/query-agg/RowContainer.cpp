@@ -163,6 +163,7 @@ Accumulator::Accumulator(milvus::exec::Aggregate *aggregate, DataType spillType)
     fixedSize_{aggregate->accumulatorFixedWidthSize()},
     alignment_(aggregate->accumulatorAlignmentSize()),
     spillType_(spillType){
+
     AssertInfo(aggregate!=nullptr, "Input aggregate for accumulator cannot be nullptr!");
 }
 

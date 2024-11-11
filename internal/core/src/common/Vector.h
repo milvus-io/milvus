@@ -52,6 +52,10 @@ class BaseVector {
         return type_kind_;
     }
 
+    int32_t elementSize() const {
+        return GetDataTypeSize(type_kind_);
+    };
+
     size_t
     nullCount() const {
         return null_count_.has_value()?null_count_.value():0;
@@ -148,6 +152,10 @@ class ColumnVector final : public SimpleVector {
         valid_values_.set(index, false);
     }
 
+    void
+    clearNullAt(size_t index) {
+        valid_values_.set(index, true);
+    }
 
     bool
     ValidAt(size_t index) override {

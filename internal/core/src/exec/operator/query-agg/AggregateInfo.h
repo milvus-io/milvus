@@ -36,7 +36,7 @@ struct AggregateInfo{
     column_index_t output_;
 
     /// Type of intermediate results. Used for spilling.
-    DataType intermediateType_;
+    DataType intermediateType_{DataType::None};
 };
 
 std::vector<AggregateInfo> toAggregateInfo(
