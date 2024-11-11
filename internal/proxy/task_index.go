@@ -237,17 +237,6 @@ func (cit *createIndexTask) parseIndexParams() error {
 			indexParamsMap[common.IndexTypeKey] = indexType
 			cit.isAutoIndex = true
 		}
-
-		// check json index params
-		isJSONIndex := typeutil.IsJSONType(cit.fieldSchema.DataType)
-		if isJSONIndex {
-			if _, exist := indexParamsMap[common.JSONCastTypeKey]; !exist {
-				return merr.WrapErrParameterMissing(common.JSONCastTypeKey, "json index must specify cast type")
-			}
-			if _, exist := indexParamsMap[common.JSONPathKey]; !exist {
-				return merr.WrapErrParameterMissing(common.JSONPathKey, "json index must specify json path")
-			}
-		}
 	} else {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
 		if Params.AutoIndexConfig.Enable.GetAsBool() { // `enable` only for cloud instance.

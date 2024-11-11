@@ -593,8 +593,6 @@ func TestCreateIndexWithOtherFieldName(t *testing.T) {
 
 // create all scalar index on json field -> error
 func TestCreateIndexJsonField(t *testing.T) {
-	// there is no entry to set index params for json field, so we skip this case for now
-	t.Skip()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
 
@@ -609,7 +607,7 @@ func TestCreateIndexJsonField(t *testing.T) {
 	// create vector index on json field
 	idx := index.NewSCANNIndex(entity.L2, 8, false)
 	_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultJSONFieldName, idx).WithIndexName("json_index"))
-	common.CheckErr(t, err, false, "missing_param=json_cast_type")
+	common.CheckErr(t, err, false, "index SCANN only supports vector data type")
 
 	// create scalar index on json field
 	type scalarIndexError struct {
@@ -617,7 +615,6 @@ func TestCreateIndexJsonField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewInvertedIndex(), "INVERTED are not supported on JSON field"},
 		{index.NewSortedIndex(), "STL_SORT are only supported on numeric field"},
 		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
@@ -943,7 +940,7 @@ func TestCreateVectorIndexScalarField(t *testing.T) {
 	// create index
 	for _, field := range schema.Fields {
 		// can not set json_cast_type/json_path to create json index, so skip json field
-		if field.DataType < entity.FieldTypeJSON {
+		if field.DataType < 100 {
 			// create float vector index on scalar field
 			for _, idx := range hp.GenAllFloatIndex(entity.COSINE) {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
