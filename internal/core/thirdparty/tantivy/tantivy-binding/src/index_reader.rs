@@ -105,6 +105,18 @@ impl IndexReaderWrapper {
         self.search(&q)
     }
 
+    pub fn upper_bound_range_query_bool(&self, upper_bound: bool, inclusive: bool) -> Vec<u32> {
+        let lower_bound = Bound::Unbounded;
+        let upper_bound = make_bounds(Term::from_field_bool(self.field, upper_bound), inclusive);
+        let q = RangeQuery::new_term_bounds(
+            self.field_name.to_string(),
+            tantivy::schema::Type::Bool,
+            &lower_bound,
+            &upper_bound,
+        );
+        self.search(&q)
+    }
+
     pub fn range_query_i64(
         &self,
         lower_bound: i64,

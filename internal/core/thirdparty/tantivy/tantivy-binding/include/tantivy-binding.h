@@ -46,6 +46,8 @@ RustArray tantivy_lower_bound_range_query_i64(void *ptr, int64_t lower_bound, bo
 
 RustArray tantivy_upper_bound_range_query_i64(void *ptr, int64_t upper_bound, bool inclusive);
 
+RustArray tantivy_upper_bound_range_query_bool(void *ptr, bool upper_bound, bool inclusive);
+
 RustArray tantivy_range_query_i64(void *ptr,
                                   int64_t lower_bound,
                                   int64_t upper_bound,

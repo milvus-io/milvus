@@ -71,6 +71,19 @@ pub extern "C" fn tantivy_upper_bound_range_query_i64(
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_upper_bound_range_query_bool(
+    ptr: *mut c_void,
+    upper_bound: bool,
+    inclusive: bool,
+) -> RustArray {
+    let real = ptr as *mut IndexReaderWrapper;
+    unsafe {
+        let hits = (*real).upper_bound_range_query_bool(upper_bound, inclusive);
+        RustArray::from_vec(hits)
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_range_query_i64(
     ptr: *mut c_void,
     lower_bound: i64,
