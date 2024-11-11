@@ -23,7 +23,6 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
 )
 
 // FieldType field data type alias type
@@ -370,7 +369,7 @@ func (f *Field) WithEnableAnalyzer(enable bool) *Field {
 	if f.TypeParams == nil {
 		f.TypeParams = make(map[string]string)
 	}
-	f.TypeParams[common.EnableAnalyzerKey] = strconv.FormatBool(enable)
+	f.TypeParams["enable_analyzer"] = strconv.FormatBool(enable)
 	return f
 }
 
@@ -379,7 +378,7 @@ func (f *Field) WithAnalyzerParams(params map[string]any) *Field {
 		f.TypeParams = make(map[string]string)
 	}
 	bs, _ := json.Marshal(params)
-	f.TypeParams[common.AnalyzerParamKey] = string(bs)
+	f.TypeParams["analyzer_params"] = string(bs)
 	return f
 }
 
