@@ -125,9 +125,6 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
         auto chunk_info =
             segment_->chunk_view<std::string_view>(field_id, current_chunk_id);
 
-        auto chunk_data = chunk_info.first.data();
-        auto chunk_valid_data = chunk_info.second;
-
         auto current_chunk_size =
             segment_->chunk_size(field_id, current_chunk_id);
         return [=,
@@ -136,13 +133,13 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
             if (current_chunk_pos >= current_chunk_size) {
                 current_chunk_id++;
                 current_chunk_pos = 0;
-                auto chunk_info = segment_->chunk_view<std::string_view>(
+                chunk_info = segment_->chunk_view<std::string_view>(
                     field_id, current_chunk_id);
-                chunk_data = chunk_info.first.data();
-                chunk_valid_data = chunk_info.second;
                 current_chunk_size =
                     segment_->chunk_size(field_id, current_chunk_id);
             }
+            auto chunk_data = chunk_info.first;
+            auto chunk_valid_data = chunk_info.second;
             if (current_chunk_pos < chunk_valid_data.size() &&
                 !chunk_valid_data[current_chunk_pos]) {
                 current_chunk_pos++;
