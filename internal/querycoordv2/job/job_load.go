@@ -27,11 +27,13 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -109,8 +111,15 @@ func (job *LoadCollectionJob) PreExecute() error {
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded collection")
 	}
 
+	// handle legacy proxy load request
+	if len(req.GetLoadFields()) == 0 {
+		req.LoadFields = lo.FilterMap(req.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
+			return field.GetFieldID(), field.GetFieldID() >= common.StartOfUserFieldID
+		})
+	}
+
 	if !funcutil.SliceSetEqual(collection.GetLoadFields(), req.GetLoadFields()) {
-		log.Warn("collection with different load field list exists, release this collection first before chaning its replica number",
+		log.Warn("collection with different load field list exists, release this collection first before chaning its load fields",
 			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
 			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
 		)
@@ -314,8 +323,15 @@ func (job *LoadPartitionJob) PreExecute() error {
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded partitions")
 	}
 
+	// handle legacy proxy load request
+	if len(req.GetLoadFields()) == 0 {
+		req.LoadFields = lo.FilterMap(req.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
+			return field.GetFieldID(), field.GetFieldID() >= common.StartOfUserFieldID
+		})
+	}
+
 	if !funcutil.SliceSetEqual(collection.GetLoadFields(), req.GetLoadFields()) {
-		log.Warn("collection with different load field list exists, release this collection first before chaning its replica number",
+		log.Warn("collection with different load field list exists, release this collection first before chaning its load fields",
 			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
 			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
 		)
