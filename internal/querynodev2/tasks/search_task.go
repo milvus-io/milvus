@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -30,8 +31,8 @@ import (
 )
 
 var (
-	_ Task      = &SearchTask{}
-	_ MergeTask = &SearchTask{}
+	_ scheduler.Task      = &SearchTask{}
+	_ scheduler.MergeTask = &SearchTask{}
 )
 
 type SearchTask struct {
@@ -346,7 +347,7 @@ func (t *SearchTask) NQ() int64 {
 	return t.nq
 }
 
-func (t *SearchTask) MergeWith(other Task) bool {
+func (t *SearchTask) MergeWith(other scheduler.Task) bool {
 	switch other := other.(type) {
 	case *SearchTask:
 		return t.Merge(other)
@@ -416,7 +417,7 @@ func NewStreamingSearchTask(ctx context.Context,
 	}
 }
 
-func (t *StreamingSearchTask) MergeWith(other Task) bool {
+func (t *StreamingSearchTask) MergeWith(other scheduler.Task) bool {
 	return false
 }
 
