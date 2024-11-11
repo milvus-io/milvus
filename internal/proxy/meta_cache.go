@@ -1043,8 +1043,8 @@ func (m *MetaCache) DeprecateShardCache(database, collectionName string) {
 
 // used for Garbage collection shard client
 func (m *MetaCache) ListShardLocation() map[int64]nodeInfo {
-	m.leaderMut.Lock()
-	defer m.leaderMut.Unlock()
+	m.leaderMut.RLock()
+	defer m.leaderMut.RUnlock()
 	shardLeaderInfo := make(map[int64]nodeInfo)
 
 	for _, dbInfo := range m.collLeader {
