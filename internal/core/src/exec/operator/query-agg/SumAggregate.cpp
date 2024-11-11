@@ -16,20 +16,40 @@
 
 #include "SumAggregateBase.h"
 #include "RegisterAggregateFunctions.h"
+#include "AggregateUtil.h"
+#include "AggregateNames.h"
+#include "expr/FunctionSignature.h"
 
 namespace milvus {
 namespace exec {
 
-template <typename TInput, typename TAccumulator, typename ResultType>
+template<typename TInput, typename TAccumulator, typename ResultType>
 using SumAggregate = SumAggregateBase<TInput, TAccumulator, ResultType, false>;
 
-template <typename <typename U, typename V, typename W> class T>
+template<template<typename U, typename V, typename W> class T>
+AggregateRegistrationResult registerSum(
+        const std::string &name,
+        bool withCompanionFunctions,
+        bool overwrite) {
+    std::vector<std::shared_ptr<expr::AggregateFunctionSignature>> signatures{
+            expr::AggregateFunctionSignatureBuilder()
+                    .returnType(DataType::DOUBLE)
+                    .intermediateType(DataType::DOUBLE)
+                    .argumentType(DataType::DOUBLE).build()};
+
+    for(const auto& inputType: {DataType::INT8, DataType::INT16, DataType::INT32, DataType::INT64}) {
+        signatures.emplace_back(expr::AggregateFunctionSignatureBuilder()
+        .argumentType(inputType)
+        .intermediateType(DataType::INT64)
+        .intermediateType(DataType::INT64).build());
+    }
+};
 
 
 void registerSumAggregate(const std::string& prefix,
                           bool withCompanionFunctions,
                           bool overwrite) {
-    regis
+    registerSum<SumAggregate>(prefix + kSum, withCompanionFunctions, overwrite);
 }
 }
 }

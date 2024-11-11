@@ -10,4 +10,4 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
 add_source_at_current_directory_recursively()
-add_library(milvus_exec OBJECT ${SOURCE_FILES} operator/query-agg/AggregateUtil.h)
+add_library(milvus_exec OBJECT ${SOURCE_FILES})
