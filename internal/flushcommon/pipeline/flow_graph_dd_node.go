@@ -332,7 +332,7 @@ func (ddn *ddNode) Close() {
 
 func newDDNode(ctx context.Context, collID typeutil.UniqueID, vChannelName string, droppedSegmentIDs []typeutil.UniqueID,
 	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compaction.Executor, handler flusher.MsgHandler,
-) (*ddNode, error) {
+) *ddNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(paramtable.Get().DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
@@ -364,5 +364,5 @@ func newDDNode(ctx context.Context, collID typeutil.UniqueID, vChannelName strin
 		zap.Int("No. growing segments", len(growingSegments)),
 	)
 
-	return dd, nil
+	return dd
 }

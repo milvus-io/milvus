@@ -146,6 +146,31 @@ func TestManager(t *testing.T) {
 			c.Close()
 		})
 	})
+
+	t.Run("test_repeated_vchannel", func(t *testing.T) {
+		prefix := fmt.Sprintf("mock%d", time.Now().UnixNano())
+		c := NewDispatcherManager(prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
+		go c.Run()
+		assert.NotNil(t, c)
+		ctx := context.Background()
+		_, err := c.Add(ctx, "mock_vchannel_0", nil, common.SubscriptionPositionUnknown)
+		assert.NoError(t, err)
+		_, err = c.Add(ctx, "mock_vchannel_1", nil, common.SubscriptionPositionUnknown)
+		assert.NoError(t, err)
+		_, err = c.Add(ctx, "mock_vchannel_2", nil, common.SubscriptionPositionUnknown)
+		assert.NoError(t, err)
+
+		_, err = c.Add(ctx, "mock_vchannel_0", nil, common.SubscriptionPositionUnknown)
+		assert.Error(t, err)
+		_, err = c.Add(ctx, "mock_vchannel_1", nil, common.SubscriptionPositionUnknown)
+		assert.Error(t, err)
+		_, err = c.Add(ctx, "mock_vchannel_2", nil, common.SubscriptionPositionUnknown)
+		assert.Error(t, err)
+
+		assert.NotPanics(t, func() {
+			c.Close()
+		})
+	})
 }
 
 type vchannelHelper struct {
