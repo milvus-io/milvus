@@ -30,7 +30,10 @@ import (
 )
 
 func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ...grpc.CallOption) ([]ResultSet, error) {
-	req := option.Request()
+	req, err := option.Request()
+	if err != nil {
+		return nil, err
+	}
 	collection, err := c.getCollection(ctx, req.GetCollectionName())
 	if err != nil {
 		return nil, err
