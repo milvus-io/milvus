@@ -97,6 +97,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="prepare data for perf test")
     parser.add_argument("--host", type=str, default="10.104.19.96")
     parser.add_argument("--port", type=int, default=19530)
-    parser.add_argument("--data_size", type=Union[int, str], default=1000_000)
+    parser.add_argument("--data_size", type=str, default="1000_000")
     args = parser.parse_args()
     prepare_data(host=args.host, port=args.port, data_size=args.data_size)
