@@ -31,7 +31,7 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000_000):
     fields = [
         FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
         FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=25536,
-                    enable_analyzer=True, analyzer_params=analyzer_params),
+                    enable_analyzer=True, analyzer_params=analyzer_params, enable_match=True),
         FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
     ]
     schema = CollectionSchema(fields=fields, description="beir test collection")
