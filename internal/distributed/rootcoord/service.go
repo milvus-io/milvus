@@ -550,3 +550,19 @@ func (s *Server) BackupRBAC(ctx context.Context, request *milvuspb.BackupRBACMet
 func (s *Server) RestoreRBAC(ctx context.Context, request *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error) {
 	return s.rootCoord.RestoreRBAC(ctx, request)
 }
+
+func (s *Server) CreatePrivilegeGroup(ctx context.Context, request *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {
+	return s.rootCoord.CreatePrivilegeGroup(ctx, request)
+}
+
+func (s *Server) DropPrivilegeGroup(ctx context.Context, request *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error) {
+	return s.rootCoord.DropPrivilegeGroup(ctx, request)
+}
+
+func (s *Server) ListPrivilegeGroups(ctx context.Context, request *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error) {
+	return s.rootCoord.ListPrivilegeGroups(ctx, request)
+}
+
+func (s *Server) OperatePrivilegeGroup(ctx context.Context, request *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
+	return s.rootCoord.OperatePrivilegeGroup(ctx, request)
+}

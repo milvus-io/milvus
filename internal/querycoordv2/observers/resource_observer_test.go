@@ -130,12 +130,8 @@ func (suite *ResourceObserverSuite) TestObserverRecoverOperation() {
 	suite.NoError(suite.meta.ResourceManager.MeetRequirement("rg1"))
 	suite.NoError(suite.meta.ResourceManager.MeetRequirement("rg2"))
 	suite.NoError(suite.meta.ResourceManager.MeetRequirement("rg3"))
-	// but new node with id 10 is not in
-	suite.nodeMgr.Remove(10)
-	suite.NoError(suite.meta.ResourceManager.MeetRequirement("rg1"))
-	suite.NoError(suite.meta.ResourceManager.MeetRequirement("rg2"))
-	suite.NoError(suite.meta.ResourceManager.MeetRequirement("rg3"))
 	// new node is down, rg3 cannot use that node anymore.
+	suite.nodeMgr.Remove(10)
 	suite.meta.ResourceManager.HandleNodeDown(10)
 	suite.observer.checkAndRecoverResourceGroup()
 	suite.NoError(suite.meta.ResourceManager.MeetRequirement("rg1"))

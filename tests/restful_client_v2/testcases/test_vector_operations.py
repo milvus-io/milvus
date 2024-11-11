@@ -1204,7 +1204,7 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("groupingField", ['user_id', None])
-    @pytest.mark.parametrize("tokenizer", ['default'])
+    @pytest.mark.parametrize("tokenizer", ['standard'])
     def test_search_vector_for_en_full_text_search(self, nb, dim, insert_round, auto_id,
                                                       is_partition_key, enable_dynamic_schema, groupingField, tokenizer):
         """
@@ -1224,7 +1224,7 @@ class TestSearchVector(TestBase):
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
                     {"fieldName": "document_content", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "1000", "enable_tokenizer": True,
+                     "elementTypeParams": {"max_length": "1000", "enable_analyzer": True,
                                            "analyzer_params": {
                                                "tokenizer": tokenizer,
                                            },
@@ -1252,7 +1252,7 @@ class TestSearchVector(TestBase):
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
         assert rsp['code'] == 0
-        if tokenizer == 'default':
+        if tokenizer == 'standard':
             fake = fake_en
         elif tokenizer == 'jieba':
             fake = fake_zh
@@ -1339,7 +1339,7 @@ class TestSearchVector(TestBase):
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
                     {"fieldName": "document_content", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "1000", "enable_tokenizer": True,
+                     "elementTypeParams": {"max_length": "1000", "enable_analyzer": True,
                                            "analyzer_params": {
                                                "tokenizer": tokenizer,
                                            },
@@ -1367,7 +1367,7 @@ class TestSearchVector(TestBase):
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
         assert rsp['code'] == 0
-        if tokenizer == 'default':
+        if tokenizer == 'standard':
             fake = fake_en
         elif tokenizer == 'jieba':
             fake = fake_zh
@@ -1893,7 +1893,7 @@ class TestSearchVector(TestBase):
             language = "zh"
         # create a collection
         dim = 128
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         name = gen_collection_name()
@@ -1903,34 +1903,34 @@ class TestSearchVector(TestBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
                 is_partition_key=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -2730,7 +2730,7 @@ class TestQueryVector(TestBase):
             language = "zh"
         # create a collection
         dim = 128
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         name = gen_collection_name()
@@ -2740,34 +2740,34 @@ class TestQueryVector(TestBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
                 is_partition_key=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]

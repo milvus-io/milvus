@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -218,7 +219,7 @@ func (suite *JobSuite) BeforeTest(suiteName, testName string) {
 	for collection, partitions := range suite.partitions {
 		suite.broker.EXPECT().
 			GetPartitions(mock.Anything, collection).
-			Return(partitions, nil)
+			Return(partitions, nil).Maybe()
 	}
 }
 
@@ -289,32 +290,6 @@ func (suite *JobSuite) TestLoadCollection() {
 		req := &querypb.LoadCollectionRequest{
 			CollectionID:  collection,
 			ReplicaNumber: 3,
-		}
-		job := NewLoadCollectionJob(
-			ctx,
-			req,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.collectionObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(job)
-		err := job.Wait()
-		suite.ErrorIs(err, merr.ErrParameterInvalid)
-	}
-
-	// Test load existed collection with different load fields
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
-			continue
-		}
-		req := &querypb.LoadCollectionRequest{
-			CollectionID: collection,
-			LoadFields:   []int64{100, 101},
 		}
 		job := NewLoadCollectionJob(
 			ctx,
@@ -450,6 +425,131 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 	}
 }
 
+func (suite *JobSuite) TestLoadCollectionWithLoadFields() {
+	ctx := context.Background()
+
+	suite.Run("init_load", func() {
+		// Test load collection
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+				continue
+			}
+			// Load with 1 replica
+			req := &querypb.LoadCollectionRequest{
+				CollectionID: collection,
+				LoadFields:   []int64{100, 101, 102},
+			}
+			job := NewLoadCollectionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.NoError(err)
+			suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
+			suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+			suite.assertCollectionLoaded(collection)
+		}
+	})
+
+	suite.Run("load_again_same_fields", func() {
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+				continue
+			}
+			req := &querypb.LoadCollectionRequest{
+				CollectionID: collection,
+				LoadFields:   []int64{102, 101, 100}, // field id order shall not matter
+			}
+			job := NewLoadCollectionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.NoError(err)
+		}
+	})
+
+	suite.Run("load_again_diff_fields", func() {
+		// Test load existed collection with different load fields
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+				continue
+			}
+			req := &querypb.LoadCollectionRequest{
+				CollectionID: collection,
+				LoadFields:   []int64{100, 101},
+			}
+			job := NewLoadCollectionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.ErrorIs(err, merr.ErrParameterInvalid)
+		}
+	})
+
+	suite.Run("load_from_legacy_proxy", func() {
+		// Test load again with legacy proxy
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+				continue
+			}
+			req := &querypb.LoadCollectionRequest{
+				CollectionID: collection,
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100},
+						{FieldID: 101},
+						{FieldID: 102},
+					},
+				},
+			}
+			job := NewLoadCollectionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.NoError(err)
+		}
+	})
+}
+
 func (suite *JobSuite) TestLoadPartition() {
 	ctx := context.Background()
 
@@ -522,34 +622,6 @@ func (suite *JobSuite) TestLoadPartition() {
 			CollectionID:  collection,
 			PartitionIDs:  suite.partitions[collection],
 			ReplicaNumber: 3,
-		}
-		job := NewLoadPartitionJob(
-			ctx,
-			req,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.collectionObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(job)
-		err := job.Wait()
-		suite.ErrorIs(err, merr.ErrParameterInvalid)
-	}
-
-	// Test load partition with different load fields
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
-			continue
-		}
-
-		req := &querypb.LoadPartitionsRequest{
-			CollectionID: collection,
-			PartitionIDs: suite.partitions[collection],
-			LoadFields:   []int64{100, 101},
 		}
 		job := NewLoadPartitionJob(
 			ctx,
@@ -680,6 +752,140 @@ func (suite *JobSuite) TestLoadPartition() {
 	suite.scheduler.Add(job)
 	err = job.Wait()
 	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
+}
+
+func (suite *JobSuite) TestLoadPartitionWithLoadFields() {
+	ctx := context.Background()
+
+	suite.Run("init_load", func() {
+		// Test load partition
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
+				continue
+			}
+			// Load with 1 replica
+			req := &querypb.LoadPartitionsRequest{
+				CollectionID:  collection,
+				PartitionIDs:  suite.partitions[collection],
+				ReplicaNumber: 1,
+				LoadFields:    []int64{100, 101, 102},
+			}
+			job := NewLoadPartitionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.NoError(err)
+			suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
+			suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+			suite.assertCollectionLoaded(collection)
+		}
+	})
+
+	suite.Run("load_with_same_load_fields", func() {
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
+				continue
+			}
+			// Load with 1 replica
+			req := &querypb.LoadPartitionsRequest{
+				CollectionID:  collection,
+				PartitionIDs:  suite.partitions[collection],
+				ReplicaNumber: 1,
+				LoadFields:    []int64{102, 101, 100},
+			}
+			job := NewLoadPartitionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.NoError(err)
+		}
+	})
+
+	suite.Run("load_with_diff_load_fields", func() {
+		// Test load partition with different load fields
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
+				continue
+			}
+
+			req := &querypb.LoadPartitionsRequest{
+				CollectionID: collection,
+				PartitionIDs: suite.partitions[collection],
+				LoadFields:   []int64{100, 101},
+			}
+			job := NewLoadPartitionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.ErrorIs(err, merr.ErrParameterInvalid)
+		}
+	})
+
+	suite.Run("load_legacy_proxy", func() {
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
+				continue
+			}
+			// Load with 1 replica
+			req := &querypb.LoadPartitionsRequest{
+				CollectionID:  collection,
+				PartitionIDs:  suite.partitions[collection],
+				ReplicaNumber: 1,
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100},
+						{FieldID: 101},
+						{FieldID: 102},
+					},
+				},
+			}
+			job := NewLoadPartitionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.NoError(err)
+		}
+	})
 }
 
 func (suite *JobSuite) TestDynamicLoad() {

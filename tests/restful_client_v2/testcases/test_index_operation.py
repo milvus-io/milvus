@@ -255,7 +255,7 @@ class TestCreateIndex(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
-    @pytest.mark.parametrize("tokenizer", ['default', 'jieba'])
+    @pytest.mark.parametrize("tokenizer", ['standard', 'jieba'])
     @pytest.mark.parametrize("index_type", ['SPARSE_INVERTED_INDEX', 'SPARSE_WAND'])
     @pytest.mark.parametrize("bm25_k1", [1.2, 1.5])
     @pytest.mark.parametrize("bm25_b", [0.7, 0.5])
@@ -279,7 +279,7 @@ class TestCreateIndex(TestBase):
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
                     {"fieldName": "document_content", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "1000", "enable_tokenizer": True,
+                     "elementTypeParams": {"max_length": "1000", "enable_analyzer": True,
                                            "analyzer_params": {
                                                "tokenizer": tokenizer,
                                            },
@@ -302,7 +302,7 @@ class TestCreateIndex(TestBase):
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
         assert rsp['code'] == 0
-        if tokenizer == 'default':
+        if tokenizer == 'standard':
             fake = fake_en
         elif tokenizer == 'jieba':
             fake = fake_zh

@@ -1621,7 +1621,7 @@ class TestUtilityAdvanced(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         collection_w.insert(df)
         # get sealed segments
-        collection_w.num_entities
+        collection_w.flush()
         # get growing segments
         collection_w.insert(df)
         collection_w.load()
@@ -1635,8 +1635,11 @@ class TestUtilityAdvanced(TestcaseBase):
         src_node_id = all_querynodes[0]
         dst_node_ids = all_querynodes[1:]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
-        # add a segment id which is not exist
-        sealed_segment_ids.append(max(segment_distribution[src_node_id]["sealed"]) + 1)
+        if len(segment_distribution[src_node_id]["sealed"]) == 0:
+            sealed_segment_ids = [0] # add a segment id which is not exist
+        else:
+            # add a segment id which is not exist
+            sealed_segment_ids.append(max(segment_distribution[src_node_id]["sealed"]) + 1)
         # load balance
         self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
                                        check_task=CheckTasks.err_res,
@@ -3882,7 +3885,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.database_wrap.using_database(ct.default_db)
         self.utility_wrap.describe_resource_group(ct.default_resource_group_name,
                                                   check_task=CheckTasks.check_permission_deny)
-        
+
         # set using db to db_name and verify grants
         self.database_wrap.using_database(db_name)
         self.utility_wrap.role_list_grants()

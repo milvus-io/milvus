@@ -13,7 +13,7 @@ pub extern "C" fn tantivy_create_text_writer(
     field_name: *const c_char,
     path: *const c_char,
     tokenizer_name: *const c_char,
-    tokenizer_params: *const c_char,
+    analyzer_params: *const c_char,
     num_threads: usize,
     overall_memory_budget_in_bytes: usize,
     in_ram: bool,
@@ -22,7 +22,7 @@ pub extern "C" fn tantivy_create_text_writer(
     let field_name_str = unsafe { CStr::from_ptr(field_name).to_str().unwrap() };
     let path_str = unsafe { CStr::from_ptr(path).to_str().unwrap() };
     let tokenizer_name_str = unsafe { CStr::from_ptr(tokenizer_name).to_str().unwrap() };
-    let params = unsafe{c_str_to_str(tokenizer_params).to_string()};
+    let params = unsafe{c_str_to_str(analyzer_params).to_string()};
     let analyzer = create_tokenizer(&params);
     match analyzer {
         Ok(text_analyzer) => {

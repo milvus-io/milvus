@@ -159,7 +159,6 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 	partitionIDs := lo.Map(partitions, func(partition *Partition, i int) int64 {
 		return partition.PartitionID
 	})
-	allocatedTarget := NewCollectionTarget(nil, nil, partitionIDs)
 
 	channelInfos := make(map[string][]*datapb.VchannelInfo)
 	segments := make(map[int64]*datapb.SegmentInfo, 0)
@@ -194,7 +193,8 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 		return nil
 	}
 
-	mgr.next.updateCollectionTarget(collectionID, NewCollectionTarget(segments, dmChannels, partitionIDs))
+	allocatedTarget := NewCollectionTarget(segments, dmChannels, partitionIDs)
+	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
 	log.Debug("finish to update next targets for collection",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("PartitionIDs", partitionIDs),
