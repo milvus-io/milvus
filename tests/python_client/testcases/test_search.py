@@ -4809,6 +4809,73 @@ class TestCollectionSearch(TestcaseBase):
                                   check_task=CheckTasks.err_res,
                                   check_items={"err_code": 999, "err_msg": f"invalid dimension: {dim}."})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #37547")
+    def test_search_verify_expr_cache(self, is_flush):
+        """
+        target: test search case to test expr cache
+        method: 1. create collection with a double datatype field
+                2. search with expr "doubleField == 0"
+                3. drop this collection
+                4. create collection with same collection name and same field name but modify the type of double field
+                   as varchar datatype
+                5. search with expr "doubleField == 0" again
+        expected: 1. search successfully with limit(topK) for the first collection
+                  2. report error for the second collection with the same name
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, is_flush=is_flush)[0:5]
+        collection_name = collection_w.name
+        # 2. generate search data
+        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim)
+        # 3. search with expr "nullableFid == 0"
+        search_exp = f"{ct.default_float_field_name} == 0"
+        output_fields = [default_int64_field_name, default_float_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            search_exp,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": 1,
+                                         "output_fields": output_fields})
+        # 4. drop collection
+        collection_w.drop()
+        # 5. create the same collection name with same field name but varchar field type
+        int64_field = cf.gen_int64_field(is_primary=True)
+        string_field = cf.gen_string_field(ct.default_float_field_name)
+        json_field = cf.gen_json_field()
+        float_vector_field = cf.gen_float_vec_field()
+        fields = [int64_field, string_field, json_field, float_vector_field]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(name=collection_name, schema=schema)
+        int64_values = pd.Series(data=[i for i in range(default_nb)])
+        string_values = pd.Series(data=[str(i) for i in range(default_nb)], dtype="string")
+        json_values = [{"number": i, "string": str(i), "bool": bool(i),
+                        "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(default_nb)]
+        float_vec_values = cf.gen_vectors(default_nb, default_dim)
+        df = pd.DataFrame({
+            ct.default_int64_field_name: int64_values,
+            ct.default_float_field_name: string_values,
+            ct.default_json_field_name: json_values,
+            ct.default_float_vec_field_name: float_vec_values
+        })
+        collection_w.insert(df)
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+        collection_w.load()
+        collection_w.flush()
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            search_exp,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1100,
+                                         "err_msg": "failed to create query plan: cannot parse expression: float == 0, "
+                                                    "error: comparisons between VarChar and Int64 are not supported: "
+                                                    "invalid parameter"})
+
 
 class TestSearchBase(TestcaseBase):
     @pytest.fixture(
@@ -13278,6 +13345,74 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit,
                                          "output_fields": output_fields})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #37547")
+    def test_search_none_data_expr_cache(self, is_flush):
+        """
+        target: test search case with none data to test expr cache
+        method: 1. create collection with double datatype as nullable field
+                2. search with expr "nullableFid == 0"
+                3. drop this collection
+                4. create collection with same collection name and same field name but modify the type of nullable field
+                   as varchar datatype
+                5. search with expr "nullableFid == 0" again
+        expected: 1. search successfully with limit(topK) for the first collection
+                  2. report error for the second collection with the same name
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, is_flush=is_flush,
+                                         nullable_fields={ct.default_float_field_name: 0.5})[0:5]
+        collection_name = collection_w.name
+        # 2. generate search data
+        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim)
+        # 3. search with expr "nullableFid == 0"
+        search_exp = f"{ct.default_float_field_name} == 0"
+        output_fields = [default_int64_field_name, default_float_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            search_exp,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": 1,
+                                         "output_fields": output_fields})
+        # 4. drop collection
+        collection_w.drop()
+        # 5. create the same collection name with same field name but varchar field type
+        int64_field = cf.gen_int64_field(is_primary=True)
+        string_field = cf.gen_string_field(ct.default_float_field_name, nullable=True)
+        json_field = cf.gen_json_field()
+        float_vector_field = cf.gen_float_vec_field()
+        fields = [int64_field, string_field, json_field, float_vector_field]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(name=collection_name, schema=schema)
+        int64_values = pd.Series(data=[i for i in range(default_nb)])
+        string_values = pd.Series(data=[str(i) for i in range(default_nb)], dtype="string")
+        json_values = [{"number": i, "string": str(i), "bool": bool(i),
+                        "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(default_nb)]
+        float_vec_values = cf.gen_vectors(default_nb, default_dim)
+        df = pd.DataFrame({
+            ct.default_int64_field_name: int64_values,
+            ct.default_float_field_name: None,
+            ct.default_json_field_name: json_values,
+            ct.default_float_vec_field_name: float_vec_values
+        })
+        collection_w.insert(df)
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+        collection_w.load()
+        collection_w.flush()
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            search_exp,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1100,
+                                         "err_msg": "failed to create query plan: cannot parse expression: float == 0, "
+                                                    "error: comparisons between VarChar and Int64 are not supported: "
+                                                    "invalid parameter"})
 
 
 class TestSearchWithTextMatchFilter(TestcaseBase):
