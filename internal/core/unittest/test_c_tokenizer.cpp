@@ -31,7 +31,7 @@ TEST(ValidateTextSchema, JieBa) {
     milvus::proto::schema::FieldSchema schema;
     {
         auto kv = schema.add_type_params();
-        kv->set_key("tokenizer_params");
+        kv->set_key("analyzer_params");
         kv->set_value(R"({"tokenizer": "jieba"})");
     }
 
@@ -47,10 +47,10 @@ set_cmap(CMap m, const std::string& key, const std::string& value) {
 }
 
 TEST(CTokenizer, Default) {
-    auto tokenizer_params = R"({"tokenizer": "standard"})";
+    auto analyzer_params = R"({"tokenizer": "standard"})";
     CTokenizer tokenizer;
     {
-        auto status = create_tokenizer(tokenizer_params, &tokenizer);
+        auto status = create_tokenizer(analyzer_params, &tokenizer);
         ASSERT_EQ(milvus::ErrorCode::Success, status.error_code);
     }
 
