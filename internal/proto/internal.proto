@@ -121,7 +121,7 @@ message SearchRequest {
   bool   is_advanced = 20;
   int64 offset = 21;
   common.ConsistencyLevel consistency_level = 22;
-  bool is_topk_reduce = 23;
+  bool is_topk_reduce = 26;
 }
 
 message SubSearchResults {

@@ -178,8 +178,12 @@ func MergeToAdvancedResults(ctx context.Context, results []*internalpb.SearchRes
 
 	channelsMvcc := make(map[string]uint64)
 	relatedDataSize := int64(0)
+	isTopkReduce := false
 	for index, result := range results {
 		relatedDataSize += result.GetCostAggregation().GetTotalRelatedDataSize()
+		if result.GetIsTopkReduce() {
+			isTopkReduce = true
+		}
 		for ch, ts := range result.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
 		}
@@ -198,6 +202,7 @@ func MergeToAdvancedResults(ctx context.Context, results []*internalpb.SearchRes
 		searchResults.SubResults = append(searchResults.SubResults, subResult)
 	}
 	searchResults.ChannelsMvcc = channelsMvcc
+	searchResults.IsTopkReduce = isTopkReduce
 	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
 		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
 			return result.GetCostAggregation(), true
