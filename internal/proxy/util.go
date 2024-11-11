@@ -906,14 +906,6 @@ func ValidateObjectType(entity string) error {
 	return validateName(entity, "ObjectType")
 }
 
-func ValidatePrincipalName(entity string) error {
-	return validateName(entity, "PrincipalName")
-}
-
-func ValidatePrincipalType(entity string) error {
-	return validateName(entity, "PrincipalType")
-}
-
 func ValidatePrivilege(entity string) error {
 	if util.IsAnyWord(entity) {
 		return nil

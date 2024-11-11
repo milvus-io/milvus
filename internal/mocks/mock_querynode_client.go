@@ -153,10 +153,6 @@ func (_m *MockQueryNodeClient) DeleteBatch(ctx context.Context, in *querypb.Dele
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
-	if len(ret) == 0 {
-		panic("no return value specified for DeleteBatch")
-	}
-
 	var r0 *querypb.DeleteBatchResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DeleteBatchRequest, ...grpc.CallOption) (*querypb.DeleteBatchResponse, error)); ok {

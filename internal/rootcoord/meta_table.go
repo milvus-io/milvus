@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
@@ -96,6 +97,12 @@ type IMetaTable interface {
 	ListUserRole(tenant string) ([]string, error)
 	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)
 	RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error
+	IsCustomPrivilegeGroup(groupName string) (bool, error)
+	CreatePrivilegeGroup(groupName string) error
+	DropPrivilegeGroup(groupName string) error
+	ListPrivilegeGroups() ([]*milvuspb.PrivilegeGroupInfo, error)
+	OperatePrivilegeGroup(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error
+	GetPrivilegeGroupRoles(groupName string) ([]*milvuspb.RoleEntity, error)
 }
 
 type MetaTable struct {
@@ -1424,4 +1431,188 @@ func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvu
 	defer mt.permissionLock.Unlock()
 
 	return mt.catalog.RestoreRBAC(mt.ctx, tenant, meta)
+}
+
+// check if the privielge group name is defined by users
+func (mt *MetaTable) IsCustomPrivilegeGroup(groupName string) (bool, error) {
+	privGroups, err := mt.catalog.ListPrivilegeGroups(mt.ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, group := range privGroups {
+		if group.GroupName == groupName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (mt *MetaTable) CreatePrivilegeGroup(groupName string) error {
+	if funcutil.IsEmptyString(groupName) {
+		return fmt.Errorf("the privilege group name is empty")
+	}
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	definedByUsers, err := mt.IsCustomPrivilegeGroup(groupName)
+	if err != nil {
+		return err
+	}
+	if definedByUsers {
+		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by users", groupName)
+	}
+	if util.IsPrivilegeNameDefined(groupName) {
+		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by built in privileges or privilege groups in system", groupName)
+	}
+	data := &milvuspb.PrivilegeGroupInfo{
+		GroupName:  groupName,
+		Privileges: make([]*milvuspb.PrivilegeEntity, 0),
+	}
+	return mt.catalog.SavePrivilegeGroup(mt.ctx, data)
+}
+
+func (mt *MetaTable) DropPrivilegeGroup(groupName string) error {
+	if funcutil.IsEmptyString(groupName) {
+		return fmt.Errorf("the privilege group name is empty")
+	}
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	definedByUsers, err := mt.IsCustomPrivilegeGroup(groupName)
+	if err != nil {
+		return err
+	}
+	if !definedByUsers {
+		return nil
+	}
+	// check if the group is used by any role
+	roles, err := mt.catalog.ListRole(mt.ctx, util.DefaultTenant, nil, false)
+	if err != nil {
+		return err
+	}
+	roleEntity := lo.Map(roles, func(entity *milvuspb.RoleResult, _ int) *milvuspb.RoleEntity {
+		return entity.GetRole()
+	})
+	for _, role := range roleEntity {
+		grants, err := mt.catalog.ListGrant(mt.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+			Role:   role,
+			DbName: util.AnyWord,
+		})
+		if err != nil {
+			return err
+		}
+		for _, grant := range grants {
+			if grant.Grantor.Privilege.Name == groupName {
+				return errors.Newf("privilege group [%s] is used by role [%s], Use REVOKE API to revoke it first", groupName, role.GetName())
+			}
+		}
+	}
+	return mt.catalog.DropPrivilegeGroup(mt.ctx, groupName)
+}
+
+func (mt *MetaTable) ListPrivilegeGroups() ([]*milvuspb.PrivilegeGroupInfo, error) {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	return mt.catalog.ListPrivilegeGroups(mt.ctx)
+}
+
+func (mt *MetaTable) OperatePrivilegeGroup(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
+	if funcutil.IsEmptyString(groupName) {
+		return fmt.Errorf("the privilege group name is empty")
+	}
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	// validate input params
+	definedByUsers, err := mt.IsCustomPrivilegeGroup(groupName)
+	if err != nil {
+		return err
+	}
+	if !definedByUsers {
+		return merr.WrapErrParameterInvalidMsg("there is no privilege group name [%s] to operate", groupName)
+	}
+	groups, err := mt.catalog.ListPrivilegeGroups(mt.ctx)
+	if err != nil {
+		return err
+	}
+	for _, p := range privileges {
+		if util.IsPrivilegeNameDefined(p.Name) {
+			continue
+		}
+		for _, group := range groups {
+			// add privileges for custom privilege group
+			if group.GroupName == p.Name {
+				privileges = append(privileges, group.Privileges...)
+			} else {
+				return merr.WrapErrParameterInvalidMsg("there is no privilege name or privielge group name [%s] defined in system to operate", p.Name)
+			}
+		}
+	}
+
+	// merge with current privileges
+	group, err := mt.catalog.GetPrivilegeGroup(mt.ctx, groupName)
+	if err != nil {
+		log.Warn("fail to get privilege group", zap.String("privilege_group", groupName), zap.Error(err))
+		return err
+	}
+	privSet := lo.SliceToMap(group.Privileges, func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
+		return p.Name, struct{}{}
+	})
+	switch operateType {
+	case milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup:
+		for _, p := range privileges {
+			privSet[p.Name] = struct{}{}
+		}
+	case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
+		for _, p := range privileges {
+			delete(privSet, p.Name)
+		}
+	default:
+		log.Warn("unsupported operate type", zap.Any("operate_type", operateType))
+		return fmt.Errorf("unsupported operate type: %v", operateType)
+	}
+
+	mergedPrivs := lo.Map(lo.Keys(privSet), func(priv string, _ int) *milvuspb.PrivilegeEntity {
+		return &milvuspb.PrivilegeEntity{Name: priv}
+	})
+	data := &milvuspb.PrivilegeGroupInfo{
+		GroupName:  groupName,
+		Privileges: mergedPrivs,
+	}
+	return mt.catalog.SavePrivilegeGroup(mt.ctx, data)
+}
+
+func (mt *MetaTable) GetPrivilegeGroupRoles(groupName string) ([]*milvuspb.RoleEntity, error) {
+	if funcutil.IsEmptyString(groupName) {
+		return nil, fmt.Errorf("the privilege group name is empty")
+	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	// get all roles
+	roles, err := mt.catalog.ListRole(mt.ctx, util.DefaultTenant, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	roleEntity := lo.Map(roles, func(entity *milvuspb.RoleResult, _ int) *milvuspb.RoleEntity {
+		return entity.GetRole()
+	})
+
+	rolesMap := make(map[*milvuspb.RoleEntity]struct{})
+	for _, role := range roleEntity {
+		grants, err := mt.catalog.ListGrant(mt.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+			Role:   role,
+			DbName: util.AnyWord,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, grant := range grants {
+			if grant.Grantor.Privilege.Name == groupName {
+				rolesMap[role] = struct{}{}
+			}
+		}
+	}
+	return lo.Keys(rolesMap), nil
 }

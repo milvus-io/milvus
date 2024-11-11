@@ -1748,6 +1748,9 @@ func TestRootCoord_RBACError(t *testing.T) {
 		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 			return nil, nil
 		}
+		mockMeta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+			return nil, nil
+		}
 		{
 			resp, err := c.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{Entity: &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: "foo"},
@@ -1781,6 +1784,39 @@ func TestRootCoord_RBACError(t *testing.T) {
 		}
 		mockMeta.SelectUserFunc = func(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
 			return nil, errors.New("mock error")
+		}
+	})
+
+	t.Run("operate privilege group failed", func(t *testing.T) {
+		mockMeta := c.meta.(*mockMetaTable)
+		mockMeta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+			return nil, errors.New("mock error")
+		}
+		mockMeta.CreatePrivilegeGroupFunc = func(groupName string) error {
+			return errors.New("mock error")
+		}
+		mockMeta.GetPrivilegeGroupRolesFunc = func(groupName string) ([]*milvuspb.RoleEntity, error) {
+			return nil, errors.New("mock error")
+		}
+		{
+			resp, err := c.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{})
+			assert.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		}
+		{
+			resp, err := c.ListPrivilegeGroups(ctx, &milvuspb.ListPrivilegeGroupsRequest{})
+			assert.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		}
+		{
+			resp, err := c.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{})
+			assert.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		}
+		{
+			resp, err := c.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{})
+			assert.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 		}
 	})
 
@@ -1878,6 +1914,9 @@ func TestRootCoord_BuiltinRoles(t *testing.T) {
 		}
 		mockMeta.OperatePrivilegeFunc = func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 			return nil
+		}
+		mockMeta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+			return nil, nil
 		}
 		err := c.initBuiltinRoles()
 		assert.Equal(t, nil, err)

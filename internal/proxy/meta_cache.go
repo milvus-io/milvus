@@ -1120,9 +1120,15 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 
 	switch op.OpType {
 	case typeutil.CacheGrantPrivilege:
-		m.privilegeInfos[op.OpKey] = struct{}{}
+		keys := funcutil.PrivilegesForPolicy(op.OpKey)
+		for _, key := range keys {
+			m.privilegeInfos[key] = struct{}{}
+		}
 	case typeutil.CacheRevokePrivilege:
-		delete(m.privilegeInfos, op.OpKey)
+		keys := funcutil.PrivilegesForPolicy(op.OpKey)
+		for _, key := range keys {
+			delete(m.privilegeInfos, key)
+		}
 	case typeutil.CacheAddUserToRole:
 		user, role, err := funcutil.DecodeUserRoleCache(op.OpKey)
 		if err != nil {

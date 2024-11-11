@@ -258,6 +258,11 @@ func (req *RoleReq) GetRoleName() string {
 	return req.RoleName
 }
 
+type PrivilegeGroupReq struct {
+	PrivilegeGroupName string   `json:"privilegeGroupName" binding:"required"`
+	Privileges         []string `json:"privileges"`
+}
+
 type GrantReq struct {
 	RoleName   string `json:"roleName" binding:"required"`
 	ObjectType string `json:"objectType" binding:"required"`
