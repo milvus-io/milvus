@@ -30,13 +30,13 @@ def setup_collection(environment):
     # 获取配置参数
     collection_name = environment.parsed_options.milvus_collection
     connections.connect(uri=environment.host)
-    tokenizer_params = {
+    analyzer_params = {
         "tokenizer": "standard"
     }
     fields = [
         FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
         FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=25536,
-                    enable_tokenizer=True, tokenizer_params=tokenizer_params, enable_match=True),
+                    enable_analyzer=True, analyzer_params=analyzer_params, enable_match=True),
         FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
     ]
     schema = CollectionSchema(fields=fields, description="beir test collection")
