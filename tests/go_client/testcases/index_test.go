@@ -939,7 +939,6 @@ func TestCreateVectorIndexScalarField(t *testing.T) {
 
 	// create index
 	for _, field := range schema.Fields {
-		// can not set json_cast_type/json_path to create json index, so skip json field
 		if field.DataType < 100 {
 			// create float vector index on scalar field
 			for _, idx := range hp.GenAllFloatIndex(entity.COSINE) {
