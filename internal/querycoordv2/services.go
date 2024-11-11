@@ -113,15 +113,6 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 			}, nil
 		}
 
-		if percentage == 100 {
-			_, err := utils.GetShardLeaders(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, collectionID)
-			if err != nil {
-				percentage = 99
-				msg := "show collection failed due to target not ready"
-				log.Warn(msg, zap.Error(err))
-			}
-		}
-
 		if collection.IsRefreshed() {
 			refreshProgress = 100
 		}
@@ -164,7 +155,6 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 		})
 	}
 
-	_, getShardErr := utils.GetShardLeaders(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, req.GetCollectionID())
 	for _, partitionID := range partitions {
 		percentage := s.meta.GetPartitionLoadPercentage(partitionID)
 		if percentage < 0 {
@@ -184,11 +174,6 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 			}, nil
 		}
 
-		if percentage == 100 && getShardErr != nil {
-			percentage = 99
-			msg := "show partition failed due to target not ready"
-			log.Warn(msg, zap.Error(getShardErr))
-		}
 		percentages = append(percentages, int64(percentage))
 	}
 
