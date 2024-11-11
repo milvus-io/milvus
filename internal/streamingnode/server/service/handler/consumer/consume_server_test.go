@@ -45,9 +45,6 @@ func TestCreateConsumeServer(t *testing.T) {
 			Name: "test",
 			Term: 1,
 		},
-		DeliverPolicy: &streamingpb.DeliverPolicy{
-			Policy: &streamingpb.DeliverPolicy_All{},
-		},
 	}))
 	ctx := metadata.NewIncomingContext(context.Background(), meta)
 	grpcConsumeServer.ExpectedCalls = nil
@@ -55,8 +52,30 @@ func TestCreateConsumeServer(t *testing.T) {
 	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{Name: "test", Term: int64(1)}).Return(nil, errors.New("wal not exist"))
 	assertCreateConsumeServerFail(t, manager, grpcConsumeServer)
 
-	// Return error if create scanner failed.
+	// Return error if send created failed.
 	l := mock_wal.NewMockWAL(t)
+	manager.ExpectedCalls = nil
+	l.EXPECT().WALName().Return("test")
+	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{Name: "test", Term: int64(1)}).Return(l, nil)
+	grpcConsumeServer.EXPECT().Send(mock.Anything).Return(errors.New("send created failed"))
+	assertCreateConsumeServerFail(t, manager, grpcConsumeServer)
+
+	// Return error if recv failed.
+	grpcConsumeServer.EXPECT().Send(mock.Anything).Unset()
+	grpcConsumeServer.EXPECT().Send(mock.Anything).Return(nil)
+	grpcConsumeServer.EXPECT().Recv().Return(nil, io.ErrUnexpectedEOF)
+	assertCreateConsumeServerFail(t, manager, grpcConsumeServer)
+
+	// Return error if create scanner failed.
+	grpcConsumeServer.EXPECT().Recv().Unset()
+	grpcConsumeServer.EXPECT().Recv().Return(&streamingpb.ConsumeRequest{
+		Request: &streamingpb.ConsumeRequest_CreateVchannelConsumer{
+			CreateVchannelConsumer: &streamingpb.CreateVChannelConsumerRequest{
+				Vchannel: "test",
+			},
+		},
+	}, nil)
+	l = mock_wal.NewMockWAL(t)
 	l.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, errors.New("create scanner failed"))
 	l.EXPECT().WALName().Return("test")
 	manager.ExpectedCalls = nil
@@ -64,7 +83,15 @@ func TestCreateConsumeServer(t *testing.T) {
 	assertCreateConsumeServerFail(t, manager, grpcConsumeServer)
 
 	// Return error if send created failed.
-	grpcConsumeServer.EXPECT().Send(mock.Anything).Return(errors.New("send created failed"))
+	grpcConsumeServer.EXPECT().Send(mock.Anything).Unset()
+	i := 0
+	grpcConsumeServer.EXPECT().Send(mock.Anything).RunAndReturn(func(cr *streamingpb.ConsumeResponse) error {
+		if i >= 1 {
+			return io.ErrUnexpectedEOF
+		}
+		i++
+		return nil
+	})
 	l.EXPECT().Read(mock.Anything, mock.Anything).Unset()
 	s := mock_wal.NewMockScanner(t)
 	s.EXPECT().Close().Return(nil)

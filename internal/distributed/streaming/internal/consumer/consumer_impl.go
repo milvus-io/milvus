@@ -100,6 +100,7 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 		}
 		opts := &handler.ConsumerOptions{
 			PChannel:       rc.opts.PChannel,
+			VChannel:       rc.opts.VChannel,
 			DeliverPolicy:  deliverPolicy,
 			DeliverFilters: deliverFilters,
 			MessageHandler: nopCloseMH,
