@@ -11,7 +11,7 @@ spec:
     namespaces:
       - chaos-testing
     labelSelectors:
-      app.kubernetes.io/instance: milvus-chaos
+      app.kubernetes.io/instance: fts-stable-test-11
       app.kubernetes.io/name: milvus
       component: querynode
 

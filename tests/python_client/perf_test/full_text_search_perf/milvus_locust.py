@@ -242,7 +242,7 @@ class MilvusORMClient:
             )
             self.sleep_time = 0.1
         except Exception as e:
-            if "memory" in str(e) or "deny" in str(e):
+            if "memory" in str(e) or "deny" in str(e) or "limit" in str(e):
                 time.sleep(self.sleep_time)
                 self.sleep_time *= 2
             else:
