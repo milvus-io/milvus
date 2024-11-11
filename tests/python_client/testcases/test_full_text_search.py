@@ -2523,7 +2523,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 3. verify the result
         expected: full text search successfully and result is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -2533,31 +2533,31 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=enable_partition_key,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
