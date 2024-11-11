@@ -1,9 +1,4 @@
 from typing import Union
-
-import pandas as pd
-from minio import Minio
-import glob
-import os
 from pymilvus import (
     connections, list_collections,
     FieldSchema, CollectionSchema, DataType,
@@ -16,7 +11,7 @@ from loguru import logger
 
 
 def prepare_data(host="127.0.0.1", port=19530, data_size=1000_000):
-
+    data_size = int(data_size)
     b_z = 100_000
     file_num = data_size // b_z
     batch_files = [f"wikipedia-22-12-en-text/parquet-train-{i:05d}-of-00252.parquet" for i in range(file_num)]
@@ -30,13 +25,13 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000_000):
         logger.info(f"collection {collection_name} exists, drop it")
         Collection(name=collection_name).drop()
 
-    tokenizer_params = {
-        "tokenizer": "default",
+    analyzer_params = {
+        "tokenizer": "standard",
     }
     fields = [
         FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
         FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=25536,
-                    enable_tokenizer=True, tokenizer_params=tokenizer_params),
+                    enable_analyzer=True, analyzer_params=analyzer_params),
         FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
     ]
     schema = CollectionSchema(fields=fields, description="beir test collection")
@@ -101,9 +96,7 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000_000):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="prepare data for perf test")
     parser.add_argument("--host", type=str, default="10.104.19.96")
-    parser.add_argument("--minio_host", type=str, default="10.104.21.211")
-    parser.add_argument("--bucket_name", type=str, default="milvus-bucket")
     parser.add_argument("--port", type=int, default=19530)
     parser.add_argument("--data_size", type=Union[int, str], default=1000_000)
     args = parser.parse_args()
-    prepare_data(host=args.host, port=args.port)
+    prepare_data(host=args.host, port=args.port, data_size=args.data_size)
