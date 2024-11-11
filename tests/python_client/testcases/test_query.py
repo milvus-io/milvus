@@ -576,13 +576,16 @@ class TestQueryParams(TestcaseBase):
         expected: raise exception
         """
         exprs = [f'{ct.default_int64_field_name} in 1',
-                 f'{ct.default_int64_field_name} in "in"',
-                 f'{ct.default_int64_field_name} in (mn)']
+                 f'{ct.default_int64_field_name} in "in"']
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        error = {ct.err_code: 1100, ct.err_msg: "cannot parse expression: int64 in 1, "
-                                                "error: line 1:9 no viable alternative at input 'in1'"}
         for expr in exprs:
+            error = {ct.err_code: 1100, ct.err_msg: f"cannot parse expression: {expr}, "
+                                                    "error: the right-hand side of 'in' must be a list"}
             collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
+        expr = f'{ct.default_int64_field_name} in (mn)'
+        error = {ct.err_code: 1100, ct.err_msg: f"cannot parse expression: {expr}, "
+                                                "error: field mn not exist"}
+        collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_empty_term_array(self):
@@ -605,12 +608,19 @@ class TestQueryParams(TestcaseBase):
         expected: raise exception
         """
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
-        int_values = [[1., 2.], [1, 2.]]
+        values = [1., 2.]
+        term_expr = f'{ct.default_int64_field_name} in {values}'
         error = {ct.err_code: 1100,
-                 ct.err_msg: "failed to create query plan: cannot parse expression: int64 in [1, 2.0]"}
-        for values in int_values:
-            term_expr = f'{ct.default_int64_field_name} in {values}'
-            collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
+                 ct.err_msg: f"cannot parse expression: int64 in {values}, "
+                             "error: value 'float_val:1' in list cannot be casted to Int64"}
+        collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
+
+        values = [1, 2.]
+        term_expr = f'{ct.default_int64_field_name} in {values}'
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"cannot parse expression: int64 in {values}, "
+                             "error: value 'float_val:2' in list cannot be casted to Int64"}
+        collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_non_constant_array_term(self):
@@ -621,10 +631,9 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         constants = [[1], (), {}]
-        error = {ct.err_code: 1100,
-                 ct.err_msg: "cannot parse expression: int64 in [[1]], error: value '[1]' in "
-                             "list cannot be casted to Int64"}
         for constant in constants:
+            error = {ct.err_code: 1100,
+                     ct.err_msg: f"cannot parse expression: int64 in [{constant}]"}
             term_expr = f'{ct.default_int64_field_name} in [{constant}]'
             collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1813,7 +1822,7 @@ class TestQueryParams(TestcaseBase):
         assert key_res == int_values[offset: pos + offset]
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_query_pagination_with_expression(self, offset, get_normal_expr):
+    def test_query_pagination_with_expression(self, offset):
         """
         target: test query pagination with different expression
         method: query with different expression and verify the result
@@ -1825,20 +1834,27 @@ class TestQueryParams(TestcaseBase):
 
         # filter result with expression in collection
         _vectors = _vectors[0]
-        expr = get_normal_expr
-        expression = expr.replace("&&", "and").replace("||", "or")
-        filter_ids = []
-        for i, _id in enumerate(insert_ids):
-            int64 = _vectors.int64[i]
-            float = _vectors.float[i]
-            if not expression or eval(expression):
-                filter_ids.append(_id)
+        for expressions in cf.gen_normal_expressions_and_templates()[1:]:
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            filter_ids = []
+            for i, _id in enumerate(insert_ids):
+                int64 = _vectors.int64[i]
+                float = _vectors.float[i]
+                if not expr or eval(expr):
+                    filter_ids.append(_id)
 
-        # query and verify result
-        query_params = {"offset": offset, "limit": 10}
-        res = collection_w.query(expr=expression, params=query_params)[0]
-        key_res = [item[key] for item in res for key in item]
-        assert key_res == filter_ids
+            # query and verify result
+            query_params = {"offset": offset, "limit": 10}
+            res = collection_w.query(expr=expr, params=query_params)[0]
+            key_res = [item[key] for item in res for key in item]
+            assert key_res == filter_ids
+
+            # query again with expression tempalte
+            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+            expr_params = cf.get_expr_params_from_template(expressions[1])
+            res = collection_w.query(expr=expr, expr_params=expr_params, params=query_params)[0]
+            key_res = [item[key] for item in res for key in item]
+            assert key_res == filter_ids
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_pagination_with_partition(self, offset):
@@ -1946,11 +1962,14 @@ class TestQueryParams(TestcaseBase):
         int_values = vectors[0][ct.default_int64_field_name].values.tolist()
         pos = 10
         term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos + 10]}'
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"invalid max query result window, (offset+limit) should be in range [1, 16384], but got 67900"}
+        if limit == -1:
+            error = {ct.err_code: 65535,
+                     ct.err_msg: f"invalid max query result window, limit [{limit}] is invalid, should be greater than 0"}
         collection_w.query(term_expr, offset=10, limit=limit,
-                           check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 65535,
-                                        ct.err_msg: f"invalid max query result window, (offset+limit) "
-                                                    f"should be in range [1, 16384], but got {limit}"})
+                           check_task=CheckTasks.err_res, check_items=error)
+
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", ["12 s", " ", [0, 1], {2}])
@@ -1983,11 +2002,13 @@ class TestQueryParams(TestcaseBase):
         int_values = vectors[0][ct.default_int64_field_name].values.tolist()
         pos = 10
         term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos + 10]}'
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"invalid max query result window, (offset+limit) should be in range [1, 16384], but got 67900"}
+        if offset == -1:
+            error = {ct.err_code: 65535,
+                     ct.err_msg: f"invalid max query result window, offset [{offset}] is invalid, should be gte than 0"}
         collection_w.query(term_expr, offset=offset, limit=10,
-                           check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 65535,
-                                        ct.err_msg: f"invalid max query result window, (offset+limit) "
-                                                    f"should be in range [1, 16384], but got {offset}"})
+                           check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("not stable")
@@ -2709,8 +2730,7 @@ class TestQueryString(TestcaseBase):
         collection_w = self.init_collection_general(prefix, insert_data=True)[0]
         collection_w.query(expression, check_task=CheckTasks.err_res,
                            check_items={ct.err_code: 1100,
-                                        ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}, "
-                                                    f"error: value '1' in list cannot be casted to VarChar: invalid parameter"})
+                                        ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_string_expr_with_binary(self):
@@ -5860,12 +5880,11 @@ class TestQueryFunction(TestcaseBase):
         expected: raise exception
         """
         collection_w, entities = self.init_collection_general(
-            prefix, insert_data=True, nb=10
-        )[0:2]
+            prefix, insert_data=True, nb=10)[0:2]
         test_cases = [
             (
-                "A_FUNCTION_THAT_DOES_NOT_EXIST()",
-                "function A_FUNCTION_THAT_DOES_NOT_EXIST() not found",
+                "A_FUNCTION_THAT_DOES_NOT_EXIST()".lower(),
+                "function A_FUNCTION_THAT_DOES_NOT_EXIST() not found".lower(),
             ),
             # empty
             ("empty()", "function empty() not found"),

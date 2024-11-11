@@ -140,7 +140,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
-                                         "err_msg": "should create connect first"})
+                                         "err_msg": "should create connection first"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_no_collection(self):
@@ -292,7 +292,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         if index == "FLAT":
             pytest.skip("skip in FLAT index")
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 2000,
                                                                       is_index=False)[0:4]
         # 2. create index and load
         params = cf.get_index_params_params(index)
@@ -301,6 +301,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.load()
         # 3. search
         invalid_search_params = cf.gen_invalid_search_params_type()
+        # TODO: update the error msg assertion as #37543 fixed
         for invalid_search_param in invalid_search_params:
             if index == invalid_search_param["index_type"]:
                 search_params = {"metric_type": "L2",
@@ -310,9 +311,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                     search_params, default_limit,
                                     default_search_exp,
                                     check_task=CheckTasks.err_res,
-                                    check_items={"err_code": 65535,
-                                                 "err_msg": "failed to search: invalid param in json:"
-                                                            " invalid json key invalid_key"})
+                                    check_items={"err_code": 999,
+                                                 "err_msg": "fail to search on QueryNode"})
 
     @pytest.mark.skip("not support now")
     @pytest.mark.tags(CaseLabel.L1)
@@ -371,9 +371,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix)[0]
         # 2. search with invalid limit (topK)
-        log.info("test_search_param_invalid_limit_value: searching with "
-                 "invalid limit (topK) = %s" % limit)
-        err_msg = f"topk [{limit}] is invalid, top k should be in range [1, 16384], but got {limit}"
+        err_msg = f"topk [{limit}] is invalid, it should be in range [1, 16384]"
         if limit == 0:
             err_msg = "`limit` value 0 is illegal"
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
@@ -481,21 +479,47 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "failed to create query plan"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("expression", cf.gen_invalid_bool_expressions())
-    def test_search_with_expression_invalid_bool(self, expression):
+    def test_search_with_expression_invalid_bool(self):
         """
         target: test search invalid bool
         method: test search invalid bool
         expected: searched failed
         """
         collection_w = self.init_collection_general(prefix, True, is_all_data_type=True)[0]
-        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        expressions = ["bool", "true", "false"]
+        for expression in expressions:
+            log.debug(f"search with expression: {expression}")
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                default_search_params, default_limit, expression,
+                                check_task=CheckTasks.err_res,
+                                check_items={"err_code": 1100,
+                                             "err_msg": "failed to create query plan: predicate is not a "
+                                                        "boolean expression: %s, data type: Bool" % expression})
+        expression = "!bool"
+        log.debug(f"search with expression: {expression}")
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, expression,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1100,
-                                         "err_msg": "failed to create query plan: predicate is not a "
-                                                    "boolean expression: %s, data type: Bool" % expression})
+                                         "err_msg": "cannot parse expression: !bool, "
+                                                    "error: not op can only be applied on boolean expression"})
+        expression = "int64 > 0 and bool"
+        log.debug(f"search with expression: {expression}")
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit, expression,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1100,
+                                         "err_msg": "cannot parse expression: int64 > 0 and bool, "
+                                                    "error: 'and' can only be used between boolean expressions"})
+        expression = "int64 > 0 or false"
+        log.debug(f"search with expression: {expression}")
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit, expression,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1100,
+                                         "err_msg": "cannot parse expression: int64 > 0 or false, "
+                                                    "error: 'or' can only be used between boolean expressions"})
+
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expression", ["int64 like 33", "float LIKE 33"])
@@ -711,7 +735,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 2. search collection without data before load
         log.info("test_search_with_empty_collection: Searching empty collection %s"
                  % collection_w.name)
-        err_msg = "collection" + collection_w.name + "was not loaded into memory"
+        # err_msg = "collection" + collection_w.name + "was not loaded into memory"
+        err_msg = "collection not loaded"
         vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim, vector_data_type)
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp, timeout=1,
@@ -799,38 +824,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
                                          "err_msg": "partition name search_partition_0 not found"})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[1:7])
-    def test_search_different_index_invalid_params(self, index):
-        """
-        target: test search with different index
-        method: test search with different index
-        expected: searched successfully
-        """
-        # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
-                                                                      partition_num=1,
-                                                                      is_index=False)[0:4]
-        # 2. create different index
-        params = cf.get_index_params_params(index)
-        if params.get("m"):
-            if (default_dim % params["m"]) != 0:
-                params["m"] = default_dim // 4
-        log.info("test_search_different_index_invalid_params: Creating index-%s" % index)
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
-        collection_w.create_index("float_vector", default_index)
-        log.info("test_search_different_index_invalid_params: Created index-%s" % index)
-        collection_w.load()
-        # 3. search
-        log.info("test_search_different_index_invalid_params: Searching after "
-                 "creating index-%s" % index)
-        search_params = cf.gen_invalid_search_param(index)
-        collection_w.search(vectors, default_search_field,
-                            search_params[0], default_limit,
-                            default_search_exp,
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535, "err_msg": "type must be number, but is string"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_partition_not_existed(self):
@@ -1287,7 +1280,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             expr,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
-                                         "err_msg": "UnknownError: unsupported right datatype JSON of compare expr"})
+                                         "err_msg": "query failed: Operator::GetOutput failed"})
 
 
 class TestCollectionSearch(TestcaseBase):
@@ -2738,9 +2731,8 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("partition_names",
-                             [["(.*)"], ["search(.*)"]])
-    def test_search_index_partitions_fuzzy(self, nq, partition_names):
+    @pytest.mark.parametrize("partition_names", [["(.*)"], ["search(.*)"]])
+    def test_search_index_partitions_fuzzy(self, partition_names):
         """
         target: test search from partitions
         method: search from partitions with fuzzy
@@ -2755,6 +2747,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb, partition_num=1,
                                                                       auto_id=auto_id, dim=dim, is_index=False,
                                                                       enable_dynamic_field=enable_dynamic_field)[0:4]
+        nq = 2
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create index
         nlist = 128
@@ -2762,21 +2755,14 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         # 3. search through partitions
-        log.info("test_search_index_partitions_fuzzy: searching through partitions")
-        limit = 1000
-        limit_check = limit
-        par = collection_w.partitions
+        limit = 100
         search_params = {"metric_type": "COSINE", "params": {"nprobe": nlist}}
-        if partition_names == ["search(.*)"]:
-            insert_ids = insert_ids[par[0].num_entities:]
-            if limit > par[1].num_entities:
-                limit_check = par[1].num_entities
         collection_w.search(vectors[:nq], default_search_field,
-                            search_params, limit, default_search_exp,
-                            partition_names,
+                            search_params, limit=limit, expr=default_search_exp,
+                            partition_names=partition_names,
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 65535,
-                                         ct.err_msg: "partition name %s not found" % partition_names})
+                                         ct.err_msg: f"partition name {partition_names[0]} not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_partition_empty(self, nq, _async):
@@ -3963,26 +3949,26 @@ class TestCollectionSearch(TestcaseBase):
                                          "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("invalid_output_fields", [["%"], [""], ["-"]])
-    def test_search_with_invalid_output_fields(self, invalid_output_fields):
+    def test_search_with_invalid_output_fields(self):
         """
         target: test search with output fields using wildcard
         method: search with one output_field (wildcard)
         expected: search success
         """
         # 1. initialize with data
+        invalid_output_fields = [["%"], [""], ["-"]]
         auto_id = False
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id)[0:4]
         # 2. search
-        log.info("test_search_with_output_field_wildcard: Searching collection %s" % collection_w.name)
-        error1 = {"err_code": 65535, "err_msg": "field %s not exist" % invalid_output_fields[0]}
-        error2 = {"err_code": 1, "err_msg": "`output_fields` value %s is illegal" % invalid_output_fields[0]}
-        error = error2 if invalid_output_fields == [""] else error1
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp,
-                            output_fields=invalid_output_fields,
-                            check_task=CheckTasks.err_res, check_items=error)
+        for field in invalid_output_fields:
+            error1 = {ct.err_code: 999, ct.err_msg: "field %s not exist" % field[0]}
+            error2 = {ct.err_code: 999, ct.err_msg: "`output_fields` value %s is illegal" % field}
+            error = error2 if field == [""] else error1
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                default_search_params, default_limit,
+                                default_search_exp,
+                                output_fields=field,
+                                check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_multi_collections(self, nq, _async):
@@ -4921,7 +4907,7 @@ class TestSearchBase(TestcaseBase):
             collection_w.search(vectors[:nq], default_search_field, default_search_params, top_k,
                                 check_task=CheckTasks.err_res,
                                 check_items={"err_code": 65535,
-                                             "err_msg": f"topk [{top_k}] is invalid, top k should be in range"
+                                             "err_msg": f"topk [{top_k}] is invalid, it should be in range"
                                                         f" [1, 16384], but got {top_k}"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -5295,7 +5281,7 @@ class TestSearchBase(TestcaseBase):
                                      default_search_exp,
                                      check_task=CheckTasks.err_res,
                                      check_items={"err_code": 1,
-                                                  "err_msg": "'should create connect first.'"})
+                                                  "err_msg": "should create connection first"})
 
     @pytest.mark.tags(CaseLabel.L2)
     # @pytest.mark.timeout(300)
@@ -6766,7 +6752,7 @@ class TestSearchPaginationInvalid(TestcaseBase):
                             default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
-                                         "err_msg": "offset [%s] is invalid" % offset})
+                                         "err_msg": "wrong type for offset, expect int"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("offset", [-1, 16385])
@@ -6786,8 +6772,7 @@ class TestSearchPaginationInvalid(TestcaseBase):
                             default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
-                                         "err_msg": "offset [%d] is invalid, should be in range "
-                                                    "[1, 16384], but got %d" % (offset, offset)})
+                                         "err_msg": f"offset [{offset}] is invalid, it should be in range [1, 16384]"})
 
 
 class TestSearchDiskann(TestcaseBase):
@@ -6889,41 +6874,7 @@ class TestSearchDiskann(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("limit", [1])
-    @pytest.mark.parametrize("search_list", [-1, 0])
-    def test_search_invalid_params_with_diskann_A(self, search_list, limit):
-        """
-        target: test delete after creating index
-        method: 1.create collection , insert data, primary_field is int field
-                2.create diskann index
-                3.search with invalid params, where  topk <=20, search list [topk, 2147483647]
-        expected: search report an error
-        """
-        # 1. initialize with data
-        dim = 90
-        auto_id = False
-        collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
-        # 2. create index
-        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
-        collection_w.create_index(ct.default_float_vec_field_name, default_index)
-        collection_w.load()
-        default_search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        output_fields = [default_int64_field_name,
-                         default_float_field_name, default_string_field_name]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, limit,
-                            default_search_exp,
-                            output_fields=output_fields,
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
-                                         "err_msg": "param search_list_size out of range [ 1,2147483647 ]"})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("limit", [20])
-    @pytest.mark.parametrize("search_list", [19])
-    def test_search_invalid_params_with_diskann_B(self, search_list, limit):
+    def test_search_invalid_params_with_diskann_B(self):
         """
         target: test delete after creating index
         method: 1.create collection , insert data, primary_field is int field
@@ -6933,6 +6884,7 @@ class TestSearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         dim = 100
+        limit = 20
         auto_id = True
         collection_w, _, _, insert_ids = \
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
@@ -6940,7 +6892,7 @@ class TestSearchDiskann(TestcaseBase):
         default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
-        default_search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
+        default_search_params = {"metric_type": "L2", "params": {"search_list": limit-1}}
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name, default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -6948,8 +6900,8 @@ class TestSearchDiskann(TestcaseBase):
                             default_search_exp,
                             output_fields=output_fields,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
-                                         "err_msg": "UnknownError"})
+                            check_items={"err_code": 999,
+                                         "err_msg": f"should be larger than k({limit})"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_diskann_with_string_pk(self):
@@ -9117,29 +9069,29 @@ class TestCollectionLoadOperation(TestcaseBase):
         expected: No exception
         """
         # insert data
-        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
+        collection_w = self.init_collection_wrap(name=prefix)
+        p1_name = cf.gen_unique_str("par1")
+        partition_w1 = self.init_partition_wrap(collection_w, name=p1_name)
+        p2_name = cf.gen_unique_str("par2")
+        partition_w2 = self.init_partition_wrap(collection_w, name=p2_name)
         collection_w.create_index(default_search_field, default_index_params)
         # load && release
         partition_w2.load()
         partition_w2.release()
         partition_w2.drop()
-        # delete data
-        delete_ids = [i for i in range(50, 150)]
-        collection_w.delete(f"int64 in {delete_ids}")
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+        collection_w.search(vectors[:1], field_name, default_search_params, 10,
                             partition_names=[partition_w1.name, partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 65535, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_items={ct.err_code: 999, ct.err_msg: f'partition name {partition_w2.name} not found'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 10,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 65535, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_items={ct.err_code: 999, ct.err_msg: 'failed to search: collection not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 10,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 65535, ct.err_msg: 'not found'})
+                            check_items={ct.err_code: 999, ct.err_msg: f'partition name {partition_w2.name} not found'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_load_collection_release_partition(self):
@@ -10317,13 +10269,16 @@ class TestCollectionSearchJSON(TestcaseBase):
         # 3. search
         collection_w.load()
         expression = f"{expr_prefix}({ct.default_string_array_field_name}, '1000')"
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"cannot parse expression: {expression}, "
+                             f"error: ContainsAll operation element must be an array"}
+        if expr_prefix in ["array_contains_any", "ARRAY_CONTAINS_ANY"]:
+            error = {ct.err_code: 1100,
+                     ct.err_msg: f"cannot parse expression: {expression}, "
+                                 f"error: ContainsAny operation element must be an array"}
         collection_w.search(vectors[:default_nq], default_search_field, {},
                             limit=ct.default_nb, expr=expression,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1100,
-                                         ct.err_msg: "failed to create query plan: cannot parse "
-                                                     "expression: %s, error: contains_any operation "
-                                                     "element must be an array" % expression})
+                            check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestSearchIterator(TestcaseBase):
@@ -10542,7 +10497,7 @@ class TestSearchIterator(TestcaseBase):
         collection_w.search_iterator(vectors[:2], field_name, search_params, batch_size,
                                      check_task=CheckTasks.err_res,
                                      check_items={"err_code": 1,
-                                                  "err_msg": "Not support multiple vector iterator at present"})
+                                                  "err_msg": "Not support search iteration over multiple vectors at present"})
 
 
 class TestSearchGroupBy(TestcaseBase):

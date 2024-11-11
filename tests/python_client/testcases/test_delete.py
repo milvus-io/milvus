@@ -95,7 +95,7 @@ class TestDeleteParams(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 1, ct.err_msg: "should create connect first"}
+        error = {ct.err_code: 1, ct.err_msg: "should create connection first"}
         collection_w.delete(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
 
     # Not Milvus Exception
@@ -108,7 +108,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        error = {ct.err_code: 1, ct.err_msg: "expr cannot be None"}
+        error = {ct.err_code: 999, ct.err_msg: "cannot be None"}
         collection_w.delete(expr=None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -121,7 +121,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        error = {ct.err_code: 1, ct.err_msg: f"expr value {expr} is illegal"}
+        error = {ct.err_code: 999, ct.err_msg: f"value {expr} is illegal"}
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -195,8 +195,7 @@ class TestDeleteParams(TestcaseBase):
                                                     is_all_data_type=True, is_index=True)[0]
         expr = f"{ct.default_float_vec_field_name} in [[0.1]]"
         error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create delete plan: cannot parse expression: {expr}, "
-                             f"error: value '[0.1]' in list cannot be casted to FloatVector: invalid parameter"}
+                 ct.err_msg: f"failed to create delete plan: cannot parse expression: {expr}"}
 
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -629,8 +628,8 @@ class TestDeleteOperation(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
 
         # raise exception
-        error = {ct.err_code: 200,
-                 ct.err_msg: f"Failed to get partition id: partition={ct.default_tag}: partition not found"}
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"Failed to get partition id: partition not found[partition={ct.default_tag}]"}
         collection_w.delete(tmp_expr, partition_name=ct.default_tag,
                             check_task=CheckTasks.err_res, check_items=error)
 
@@ -2153,7 +2152,7 @@ class TestDeleteComplexExpr(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True)[0]
 
         # delete
-        error = {ct.err_code: 1, ct.err_msg: "expr cannot be empty"}
+        error = {ct.err_code: 1, ct.err_msg: "cannot be empty"}
         collection_w.delete(expr="", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)

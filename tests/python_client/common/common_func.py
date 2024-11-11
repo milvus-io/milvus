@@ -2227,7 +2227,7 @@ def gen_invalid_search_params_type():
         if index_type == "FLAT":
             continue
         # search_params.append({"index_type": index_type, "search_params": {"invalid_key": invalid_search_key}})
-        if index_type in ["IVF_FLAT", "IVF_SQ8", "IVF_PQ"]:
+        if index_type in ["IVF_FLAT", "IVF_SQ8", "IVF_PQ", "BIN_FLAT", "BIN_IVF_FLAT"]:
             for nprobe in ct.get_invalid_ints:
                 ivf_search_params = {"index_type": index_type, "search_params": {"nprobe": nprobe}}
                 search_params.append(ivf_search_params)
@@ -2304,35 +2304,6 @@ def gen_autoindex_search_params():
         {"efSearch": "100"},
         {"search_k": "1000"}
     ]
-    return search_params
-
-
-def gen_invalid_search_param(index_type, metric_type="L2"):
-    search_params = []
-    if index_type in ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"] \
-            or index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]:
-        for nprobe in [-1]:
-            ivf_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
-            search_params.append(ivf_search_params)
-    elif index_type in ["HNSW"]:
-        for ef in [-1]:
-            hnsw_search_param = {"metric_type": metric_type, "params": {"ef": ef}}
-            search_params.append(hnsw_search_param)
-    elif index_type == "ANNOY":
-        for search_k in ["-2"]:
-            annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
-            search_params.append(annoy_search_param)
-    elif index_type == "DISKANN":
-        for search_list in ["-1"]:
-            diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
-            search_params.append(diskann_search_param)
-    elif index_type == "SCANN":
-        for reorder_k in [-1]:
-            scann_search_param = {"metric_type": metric_type, "params": {"reorder_k": reorder_k, "nprobe": 10}}
-            search_params.append(scann_search_param)
-    else:
-        log.error("Invalid index_type.")
-        raise Exception("Invalid index_type.")
     return search_params
 
 
@@ -2482,18 +2453,6 @@ def gen_invalid_string_expressions():
     expressions = [
         "varchar in [0, \"1\"]",
         "varchar not in [\"0\", 1, 2]"
-    ]
-    return expressions
-
-
-def gen_invalid_bool_expressions():
-    expressions = [
-        "bool",
-        "!bool",
-        "true",
-        "false",
-        "int64 > 0 and bool",
-        "int64 > 0 or false"
     ]
     return expressions
 

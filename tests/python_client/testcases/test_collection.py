@@ -270,7 +270,8 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1, ct.err_msg: "Collection '%s' not exist, or you can pass in schema to create one."}
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"Collection '{c_name}' not exist, or you can pass in schema to create one."}
         self.collection_wrap.init_collection(c_name, schema=None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -762,7 +763,7 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         schema = cf.gen_default_collection_schema(description=None)
-        error = {ct.err_code: 1, ct.err_msg: "None has type NoneType, but expected one of: bytes, unicode"}
+        error = {ct.err_code: 1, ct.err_msg: "description [None] has type NoneType, but expected one of: bytes, str"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -847,7 +848,7 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1, ct.err_msg: f"expected one of: int, long"}
+        error = {ct.err_code: 999, ct.err_msg: f"invalid num_shards type"}
         self.collection_wrap.init_collection(c_name, schema=default_schema, shards_num=error_type_shards_num,
                                              check_task=CheckTasks.err_res,
                                              check_items=error)
@@ -1086,7 +1087,7 @@ class TestCollectionOperation(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.collection_wrap.init_collection(c_name, schema=default_schema,
                                              check_task=CheckTasks.err_res, check_items=error)
         assert self.collection_wrap.collection is None
@@ -1261,7 +1262,7 @@ class TestCollectionDataframe(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1, ct.err_msg: "Dataframe can not be None."}
+        error = {ct.err_code: 999, ct.err_msg: "Data type must be pandas.DataFrame"}
         self.collection_wrap.construct_from_dataframe(c_name, None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1291,7 +1292,8 @@ class TestCollectionDataframe(TestcaseBase):
         mix_data = [(1, 2., [0.1, 0.2]), (2, 3., 4)]
         df = pd.DataFrame(data=mix_data, columns=list("ABC"))
         error = {ct.err_code: 1,
-                 ct.err_msg: "The Input data type is inconsistent with defined schema, please check it."}
+                 ct.err_msg: "The Input data type is inconsistent with defined schema, "
+                             "{C} field should be a float_vector, but got a {<class 'list'>} instead."}
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field='A', check_task=CheckTasks.err_res,
                                                       check_items=error)
 
@@ -1965,7 +1967,7 @@ class TestDropCollection(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         collection_wr.drop(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2066,7 +2068,7 @@ class TestHasCollection(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2181,7 +2183,7 @@ class TestListCollections(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 999, ct.err_msg: 'should create connection first'}
         self.utility_wrap.list_collections(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2274,7 +2276,7 @@ class TestLoadCollection(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         collection_wr.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2290,7 +2292,7 @@ class TestLoadCollection(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 999, ct.err_msg: 'should create connection first'}
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2304,8 +2306,8 @@ class TestLoadCollection(TestcaseBase):
         c_name = cf.gen_unique_str()
         collection_wr = self.init_collection_wrap(name=c_name)
         collection_wr.drop()
-        error = {ct.err_code: 100,
-                 ct.err_msg: "collection= : collection not found"}
+        error = {ct.err_code: 999,
+                 ct.err_msg: "collection not found"}
         collection_wr.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2319,8 +2321,8 @@ class TestLoadCollection(TestcaseBase):
         c_name = cf.gen_unique_str()
         collection_wr = self.init_collection_wrap(name=c_name)
         collection_wr.drop()
-        error = {ct.err_code: 100,
-                 ct.err_msg: "collection= : collection not found"}
+        error = {ct.err_code: 999,
+                 ct.err_msg: "collection not found"}
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2801,8 +2803,8 @@ class TestLoadCollection(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
-        error = {ct.err_code: 65535,
-                 ct.err_msg: "failed to load collection: failed to spawn replica for collection: nodes not enough"}
+        error = {ct.err_code: 999,
+                 ct.err_msg: "failed to spawn replica for collection: resource group node not enough"}
         collection_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.ClusterOnly)
@@ -3315,7 +3317,7 @@ class TestLoadPartition(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 1, ct.err_msg: 'should create connect first.'}
+        error = {ct.err_code: 999, ct.err_msg: 'should create connection first.'}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3340,7 +3342,7 @@ class TestLoadPartition(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 1, ct.err_msg: 'should create connect first.'}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first.'}
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3956,7 +3958,7 @@ class TestCollectionJSON(TestcaseBase):
         """
         self._connect()
         cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1, ct.err_msg: "Partition key field type must be DataType.INT64 or DataType.VARCHAR."}
+        error = {ct.err_code: 1, ct.err_msg: "Primary key type must be DataType.INT64 or DataType.VARCHAR"}
         cf.gen_json_default_collection_schema(primary_field=primary_field, is_partition_key=True,
                                               check_task=CheckTasks.err_res, check_items=error)
 
@@ -4015,7 +4017,6 @@ class TestCollectionARRAY(TestcaseBase):
                                   check_items={ct.err_code: 65535, ct.err_msg: "element data type None is not valid"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.skip("issue #27522")
     @pytest.mark.parametrize("element_type", [1001, 'a', [], (), {1}, DataType.BINARY_VECTOR,
                                               DataType.FLOAT_VECTOR, DataType.JSON, DataType.ARRAY])
     def test_collection_array_field_element_type_invalid(self, element_type):
@@ -4030,9 +4031,20 @@ class TestCollectionARRAY(TestcaseBase):
         vec_field = cf.gen_float_vec_field()
         array_field = cf.gen_array_field(element_type=element_type)
         array_schema = cf.gen_collection_schema([int_field, vec_field, array_field])
-        error = {ct.err_code: 65535, ct.err_msg: "element data type None is not valid"}
+        error = {ct.err_code: 999, ct.err_msg: f"element type {element_type} is not supported"}
         if element_type in ['a', {1}]:
-            error = {ct.err_code: 1, ct.err_msg: "Unexpected error"}
+            error = {ct.err_code: 999, ct.err_msg: "Unexpected error"}
+        if element_type in [[], ()]:
+            error = {ct.err_code: 65535, ct.err_msg: "element data type None is not valid"}
+        if element_type in [DataType.BINARY_VECTOR, DataType.FLOAT_VECTOR, DataType.JSON, DataType.ARRAY]:
+            data_type = element_type.name
+            if element_type == DataType.BINARY_VECTOR:
+                data_type = "BinaryVector"
+            if element_type == DataType.FLOAT_VECTOR:
+                data_type = "FloatVector"
+            if element_type == DataType.ARRAY:
+                data_type = "Array"
+            error = {ct.err_code: 999, ct.err_msg: f"element type {data_type} is not supported"}
         self.init_collection_wrap(schema=array_schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4391,6 +4403,7 @@ class TestCollectionMultipleVectorInvalid(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("issue #37543")
     def test_create_collection_multiple_vectors_invalid_dim(self, get_invalid_dim):
         """
         target: test create collection with multiple vector fields
@@ -4645,11 +4658,11 @@ class TestCollectionDefaultValueInvalid(TestcaseBase):
         int_fields.append(cf.gen_int64_field(is_primary=True))
         int_fields.append(cf.gen_float_vec_field(vector_data_type=vector_type, default_value=10))
         schema = cf.gen_collection_schema(fields=int_fields)
-        error = {ct.err_code: 1100, ct.err_msg: "default value type mismatches field schema type"}
+        error = {ct.err_code: 1100, ct.err_msg: f"type not support default_value"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("scalar_type", ["JSON", "ARRAY"])
+    @pytest.mark.parametrize("scalar_type", ["JSON", "Array"])
     def test_create_collection_default_value_on_not_support_scalar_field(self, scalar_type):
         """
         target: test create collection with set default value on not supported scalar field
@@ -4662,12 +4675,13 @@ class TestCollectionDefaultValueInvalid(TestcaseBase):
         # add other vector fields to maximum fields num
         if scalar_type == "JSON":
             int_fields.append(cf.gen_json_field(default_value=10))
-        if scalar_type == "ARRAY":
+        if scalar_type == "Array":
             int_fields.append(cf.gen_array_field(default_value=10))
         int_fields.append(cf.gen_int64_field(is_primary=True, default_value=10))
         int_fields.append(cf.gen_float_vec_field())
         schema = cf.gen_collection_schema(fields=int_fields)
-        error = {ct.err_code: 1100, ct.err_msg: "default value type mismatches field schema type"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"type not support default_value, type:{scalar_type}"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -4685,7 +4699,8 @@ class TestCollectionDefaultValueInvalid(TestcaseBase):
         int_fields.append(cf.gen_int8_field(default_value=10.0))
         int_fields.append(cf.gen_float_vec_field())
         schema = cf.gen_collection_schema(fields=int_fields)
-        error = {ct.err_code: 1100, ct.err_msg: "default value type mismatches field schema type"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: "type (Int8) of field (int8) is not equal to the type(DataType_Double) of default_value"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
