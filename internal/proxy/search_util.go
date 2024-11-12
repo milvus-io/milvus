@@ -26,7 +26,7 @@ type rankParams struct {
 	roundDecimal    int64
 	groupByFieldId  int64
 	groupSize       int64
-	groupStrictSize bool
+	strictGroupSize bool
 }
 
 func (r *rankParams) GetLimit() int64 {
@@ -64,9 +64,9 @@ func (r *rankParams) GetGroupSize() int64 {
 	return 1
 }
 
-func (r *rankParams) GetGroupStrictSize() bool {
+func (r *rankParams) GetStrictGroupSize() bool {
 	if r != nil {
-		return r.groupStrictSize
+		return r.strictGroupSize
 	}
 	return false
 }
@@ -170,15 +170,15 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	// 5. parse group by field and group by size
 	var groupByFieldId, groupSize int64
-	var groupStrictSize bool
+	var strictGroupSize bool
 	if isAdvanced {
-		groupByFieldId, groupSize, groupStrictSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupSize(), rankParams.GetGroupStrictSize()
+		groupByFieldId, groupSize, strictGroupSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupSize(), rankParams.GetStrictGroupSize()
 	} else {
 		groupByInfo := parseGroupByInfo(searchParamsPair, schema)
 		if groupByInfo.err != nil {
 			return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: groupByInfo.err}
 		}
-		groupByFieldId, groupSize, groupStrictSize = groupByInfo.GetGroupByFieldId(), groupByInfo.GetGroupSize(), groupByInfo.GetGroupStrictSize()
+		groupByFieldId, groupSize, strictGroupSize = groupByInfo.GetGroupByFieldId(), groupByInfo.GetGroupSize(), groupByInfo.GetStrictGroupSize()
 	}
 
 	// 6. parse iterator tag, prevent trying to groupBy when doing iteration or doing range-search
@@ -199,7 +199,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			RoundDecimal:    roundDecimal,
 			GroupByFieldId:  groupByFieldId,
 			GroupSize:       groupSize,
-			GroupStrictSize: groupStrictSize,
+			StrictGroupSize: strictGroupSize,
 		},
 		offset:     offset,
 		isIterator: isIterator,
@@ -303,7 +303,7 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 type groupByInfo struct {
 	groupByFieldId  int64
 	groupSize       int64
-	groupStrictSize bool
+	strictGroupSize bool
 	err             error
 }
 
@@ -321,9 +321,9 @@ func (g *groupByInfo) GetGroupSize() int64 {
 	return 0
 }
 
-func (g *groupByInfo) GetGroupStrictSize() bool {
+func (g *groupByInfo) GetStrictGroupSize() bool {
 	if g != nil {
-		return g.groupStrictSize
+		return g.strictGroupSize
 	}
 	return false
 }
@@ -389,17 +389,17 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 	ret.groupSize = groupSize
 
 	// 3.  parse group strict size
-	var groupStrictSize bool
-	groupStrictSizeStr, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupStrictSize, searchParamsPair)
+	var strictGroupSize bool
+	strictGroupSizeStr, err := funcutil.GetAttrByKeyFromRepeatedKV(StrictGroupSize, searchParamsPair)
 	if err != nil {
-		groupStrictSize = false
+		strictGroupSize = false
 	} else {
-		groupStrictSize, err = strconv.ParseBool(groupStrictSizeStr)
+		strictGroupSize, err = strconv.ParseBool(strictGroupSizeStr)
 		if err != nil {
-			groupStrictSize = false
+			strictGroupSize = false
 		}
 	}
-	ret.groupStrictSize = groupStrictSize
+	ret.strictGroupSize = strictGroupSize
 	return ret
 }
 
@@ -460,7 +460,7 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 		roundDecimal:    roundDecimal,
 		groupByFieldId:  groupByInfo.GetGroupByFieldId(),
 		groupSize:       groupByInfo.GetGroupSize(),
-		groupStrictSize: groupByInfo.GetGroupStrictSize(),
+		strictGroupSize: groupByInfo.GetStrictGroupSize(),
 	}, nil
 }
 

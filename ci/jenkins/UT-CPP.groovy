@@ -9,7 +9,8 @@ pipeline {
         parallelsAlwaysFailFast()
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         preserveStashes(buildCount: 5)
-        disableConcurrentBuilds(abortPrevious: true)
+        // abort previous build if it's a PR, otherwise queue the build
+        disableConcurrentBuilds(abortPrevious: env.CHANGE_ID != null)
         timeout(time: 6, unit: 'HOURS')
         throttleJobProperty(
             categories: ['cpp-unit-test'],

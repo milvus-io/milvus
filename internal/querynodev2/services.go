@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -689,7 +690,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		return resp, nil
 	}
 
-	var task tasks.Task
+	var task scheduler.Task
 	if paramtable.Get().QueryNodeCfg.UseStreamComputing.GetAsBool() {
 		task = tasks.NewStreamingSearchTask(searchCtx, collection, node.manager, req, node.serverID)
 	} else {

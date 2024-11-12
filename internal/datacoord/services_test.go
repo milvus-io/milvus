@@ -1533,7 +1533,7 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 	channelInfo := &datapb.VchannelInfo{
 		CollectionID:        0,
 		ChannelName:         "ch-1",
-		SeekPosition:        nil,
+		SeekPosition:        &msgpb.MsgPosition{Timestamp: 10},
 		UnflushedSegmentIds: []int64{1},
 		FlushedSegmentIds:   []int64{2},
 		DroppedSegmentIds:   []int64{3},

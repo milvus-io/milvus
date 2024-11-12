@@ -23,110 +23,52 @@
         </div>
         <div class="col-md-8">
             <h2>
-                Database List
+                Database
             </h2>
             <table id="database" class="table table-hover">
-                <thead class="thead-light">
-                <tr>
-                    <th scope="col">Database ID</th>
-                    <th scope="col">Name</th>
-                    <th scope="col">Create Time</th>
-                </tr>
-                </thead>
-                <tbody>
-                <tr>
-                    <td>1</td>
-                    <td>db1</td>
-                    <td>2022-11-11 12:00:00</td>
-                </tr>
-                <tr>
-                    <td>2</td>
-                    <td>db2</td>
-                    <td>2022-11-11 12:00:00</td>
-                </tr>
-                </tbody>
             </table>
+            <div style="display: flex; justify-content: space-between;">
+                <p id="db_totalCount"></p>
+                <p id="dbPaginationControls"></p>
+            </div>
 
             <h2>
-                Collection List
+                Collection
             </h2>
-            <table id="collectionMeta" class="table table-hover">
-                <thead class="thead-light">
-                <tr>
-                    <th scope="col">Collection ID</th>
-                    <th scope="col">Collection Name</th>
-                    <th scope="col">Partition Key Count</th>
-                    <th scope="col">Partition Count</th>
-                    <th scope="col">Channel Count</th>
-                    <th scope="col">Segment Count</th>
-                    <th scope="col">Binlog Count</th>
-                    <th scope="col">Size</th>
-                </tr>
-                </thead>
-                <tbody>
-                <tr>
-                    <td>1</td>
-                    <td>db1.coll1-fake</td>
-                    <td>1</td>
-                    <td>1</td>
-                    <td>1</td>
-                    <td>1</td>
-                    <td>1</td>
-                    <td>1</td>
-                </tr>
-                <tr>
-                    <td>2</td>
-                    <td>db1.coll2-fake</td>
-                    <td>2</td>
-                    <td>2</td>
-                    <td>2</td>
-                    <td>2</td>
-                    <td>2</td>
-                    <td>2</td>
-                </tr>
-                </tbody>
-            </table>
 
+            <!-- Navigation Tabs -->
+            <ul class="nav nav-tabs" id="componentTabs" role="tablist">
+                <li class="nav-item">
+                    <a class="nav-link active" id="coll-base-stats-tab" data-toggle="tab" href="#coll-base-stats" role="tab" aria-controls="coll-base-stats" aria-selected="true">Base </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="coll-request-tab" data-toggle="tab" href="#coll-request-metrics" role="tab" aria-controls="coll-request-metrics" aria-selected="false">Requests</a>
+                </li>
 
-            <h2>
-                Collection Metrics
-            </h2>
-            <table id="collectionMetrics" class="table table-hover">
-                <thead class="thead-light">
-                <tr>
-                    <th scope="col">Collection Name</th>
-                    <th scope="col">isQueryable</th>
-                    <th scope="col">isWritable</th>
-                    <th scope="col">Query Ops/s</th>
-                    <th scope="col">Search Ops/s</th>
-                    <th scope="col">Insert Throughput(MB/s)</th>
-                    <th scope="col">Delete Throughput(MB/s)</th>
-                </tr>
-                </thead>
-                <tbody>
-                <tr>
-                    <td>db1.coll-fake</td>
-                    <td>true</td>
-                    <td>true</td>
-                    <td>20</td>
-                    <td>20</td>
-                    <td>1</td>
-                    <td>0.5</td>
-                </tr>
-                <tr>
-                    <td>db1.col2-fake</td>
-                    <td>true</td>
-                    <td>true</td>
-                    <td>20</td>
-                    <td>20</td>
-                    <td>1</td>
-                    <td>0.5</td>
-                </tr>
-                </tbody>
-            </table>
+                <!-- Search Input -->
+                <li class="nav-item ml-auto">
+                    <input type="text" class="form-control"  placeholder="Search database..." id="databaseSearch" oninput="searchCollections()">
+                </li>
+            </ul>
+
+            <!-- Tab Content -->
+            <div class="tab-content" id="componentTabsContent">
+                <div class="tab-pane fade show active" id="coll-base-stats" role="tabpanel" aria-labelledby="coll-base-stats-tab">
+                    <table id="collectionList" class="table table-hover"></table>
+                </div>
+
+                <div class="tab-pane fade" id="coll-request-metrics" role="tabpanel" aria-labelledby="coll-request-tab">
+                    <table id="collectionRequests" class="table table-hover mt-3"></table>
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between;">
+                <p id="collection_totalCount"></p>
+                <p id="collectionPaginationControls"></p>
+            </div>
         </div>
-        <div class="col-md-2">
-        </div>
+
+        <div class="col-md-2"></div>
     </div>
     <div id="footer"></div>
 </div>
@@ -137,12 +79,33 @@
         $('#footer').load("footer.html");
     });
 
-    fetchData(MILVUS_URI + "/", clientInfos)
+    function searchCollections() {
+        const searchTerm = document.getElementById('databaseSearch').value;
+        let dbName = 'default';
+        if (searchTerm !== '') {
+            dbName = searchTerm;
+        }
+        fetchCollections(dbName);
+    }
+    searchCollections()
+
+    // TODO - Implement the following functions and support search with db name
+    // fetchData(MILVUS_URI + "/_collection/metrics", collectionRequest)
+    //     .then(data => {
+    //         collectionRequestsData = data;
+    //         renderCollectionRequests(startPage, paginationSize);
+    //     })
+    //     .catch(error => {
+    //         handleError(error);
+    //     });
+
+    fetchData(MILVUS_URI + "/databases", databases)
         .then(data => {
-            //TODO add collection render
+            databaseData = data;
+            renderDatabases(startPage, paginationSize)
         })
         .catch(error => {
-            handleError(new Error("Unimplemented API"));
+            handleError(error);
         });
 </script>
 </body>

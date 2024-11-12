@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/proto"
@@ -736,13 +737,15 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		meta, err := newMemoryMeta()
 		assert.NoError(t, err)
 
-		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		segment1 := NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1, State: commonpb.SegmentState_Growing,
 			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
 			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
-		}}
+		})
 		err = meta.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
+		require.EqualValues(t, -1, segment1.deltaRowcount.Load())
+		assert.EqualValues(t, 0, segment1.getDeltaCount())
 
 		err = meta.UpdateSegmentsInfo(
 			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
@@ -758,6 +761,9 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		updated := meta.GetHealthySegment(1)
+		assert.EqualValues(t, -1, updated.deltaRowcount.Load())
+		assert.EqualValues(t, 1, updated.getDeltaCount())
+
 		expected := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, State: commonpb.SegmentState_Flushing, NumOfRows: 10,
 			StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}},

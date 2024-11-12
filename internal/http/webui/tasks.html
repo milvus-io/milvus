@@ -25,123 +25,29 @@
       <h2>
         QueryCoord Tasks
       </h2>
-      <table id="channelCP" class="table table-hover">
-        <thead class="thead-light">
-        <tr>
-          <th scope="col">Task ID</th>
-          <th scope="col">Source</th>
-          <th scope="col">Actions</th>
-          <th scope="col">Type</th>
-          <th scope="col">State</th>
-        </tr>
-        </thead>
-        <tbody>
-        <tr>
-          <td>1</td>
-          <td>indexChecker</td>
-          <td>querynode1</td>
-          <td>querynode2</td>
-          <td>queued</td>
-        </tr>
-        <tr>
-          <td>2</td>
-          <td>loadChannel</td>
-          <td>querynode1</td>
-          <td>querynode2</td>
-          <td>queued</td>
-        </tr>
-        </tbody>
-      </table>
+      <table id="qcTasks" class="table table-hover"></table>
 
       <h2>
         Compaction Tasks
       </h2>
-      <table id="compactionTasks" class="table table-hover">
-        <thead class="thead-light">
-        <tr>
-          <th scope="col">Task ID</th>
-          <th scope="col">Plan</th>
-          <th scope="col">State</th>
-          <th scope="col">Datanode</th>
-        </tr>
-        </thead>
-        <tbody>
-        <tr>
-          <td>1</td>
-          <td>fake-plan</td>
-          <td>running</td>
-          <td>datanode1</td>
-        </tr>
-        <tr>
-          <td>2</td>
-          <td>fake-plan</td>
-          <td>running</td>
-          <td>datanode2</td>
-        </tr>
-        </tbody>
-      </table>
-
-      <h2>
-        Flush Tasks
-      </h2>
-      <table id="flushTasks" class="table table-hover">
-        <thead class="thead-light">
-        <tr>
-          <th scope="col">Task ID</th>
-          <th scope="col">Segment ID</th>
-          <th scope="col">Insertion Size(MB)</th>
-          <th scope="col">Deletion Size(MB)</th>
-          <th scope="col">State</th>
-          <th scope="col">Datanode</th>
-        </tr>
-        </thead>
-        <tbody>
-        <tr>
-          <td>1</td>
-          <td>1111</td>
-          <td>10</td>
-          <td>5</td>
-          <td>running</td>
-          <td>datanode1</td>
-        </tr>
-        <tr>
-          <td>2</td>
-          <td>2222</td>
-          <td>5</td>
-          <td>5</td>
-          <td>running</td>
-          <td>datanode2</td>
-        </tr>
-        </tbody>
-      </table>
+      <table id="compactionTasks" class="table table-hover"></table>
 
       <h2>
         Index Build Tasks
       </h2>
-      <table id="indexBuildTasks" class="table table-hover">
-        <thead class="thead-light">
-        <tr>
-          <th scope="col">Task ID</th>
-          <th scope="col">Plan</th>
-          <th scope="col">State</th>
-          <th scope="col">Indexnode</th>
-        </tr>
-        </thead>
-        <tbody>
-        <tr>
-          <td>1</td>
-          <td>fake-plan</td>
-          <td>running</td>
-          <td>datanode1</td>
-        </tr>
-        <tr>
-          <td>2</td>
-          <td>fake-plan</td>
-          <td>running</td>
-          <td>datanode2</td>
-        </tr>
-        </tbody>
+      <table id="buildIndexTasks" class="table table-hover"></table>
+
+      <h2>
+        Import Tasks
+      </h2>
+      <table id="importTasks" class="table table-hover"></table>
+
+      <h2>
+        Sync Task
+      </h2>
+      <table id="syncTasks" class="table table-hover">
       </table>
+
     </div>
     <div class="col-md-2">
     </div>
@@ -156,13 +62,47 @@
   });
 
   document.addEventListener("DOMContentLoaded", function() {
-    fetchData(MILVUS_URI + "/", sysmetrics)
+    fetchData(MILVUS_URI + "/_qc/tasks", qcTasks)
             .then(data => {
-              //TODO add tasks render
+              renderQCTasks(data)
             })
             .catch(error => {
-              handleError(new Error("Unimplemented API"));
+              handleError(error);
             });
+
+    fetchData(MILVUS_URI + "/_dc/tasks/compaction", dc_compaction_task)
+            .then(data => {
+              renderCompactionTasks(data)
+            })
+            .catch(error => {
+              handleError(error);
+            });
+
+    fetchData(MILVUS_URI + "/_dc/tasks/build_index", dc_build_index_task)
+            .then(data => {
+              renderBuildIndexTasks(data)
+            })
+            .catch(error => {
+              handleError(error);
+            });
+
+    fetchData(MILVUS_URI + "/_dc/tasks/import", dc_import_task)
+            .then(data => {
+              renderImportTasks(data)
+            })
+            .catch(error => {
+              handleError(error);
+            });
+
+    fetchData(MILVUS_URI + "/_dn/tasks/sync", dn_sync_task)
+            .then(data => {
+              renderSyncTasks(data)
+            })
+            .catch(error => {
+              handleError(error);
+            });
+
+
   });
 </script>
 </body>

@@ -111,7 +111,7 @@ func (suite *CompactionTaskMetaSuite) TestTaskStatsJSON() {
 
 	// testing return empty string
 	actualJSON := suite.meta.TaskStatsJSON()
-	suite.Equal("", actualJSON)
+	suite.Equal("[]", actualJSON)
 
 	err := suite.meta.SaveCompactionTask(task1)
 	suite.NoError(err)

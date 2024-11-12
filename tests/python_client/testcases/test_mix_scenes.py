@@ -2203,8 +2203,8 @@ class TestGroupSearch(TestCaseClassBase):
         """
         target:
             1. search on 4 different float vector fields with group by varchar field with group size
-        verify results entity = limit * group_size  and group size is full if group_strict_size is True
-        verify results group counts = limit if group_strict_size is False
+        verify results entity = limit * group_size  and group size is full if strict_group_size is True
+        verify results group counts = limit if strict_group_size is False
         """
         nq = 2
         limit = 50
@@ -2212,11 +2212,11 @@ class TestGroupSearch(TestCaseClassBase):
         for j in range(len(self.vector_fields)):
             search_vectors = cf.gen_vectors(nq, dim=self.dims[j], vector_data_type=self.vector_fields[j])
             search_params = {"params": cf.get_search_params_params(self.index_types[j])}
-            # when group_strict_size=true, it shall return results with entities = limit * group_size
+            # when strict_group_size=true, it shall return results with entities = limit * group_size
             res1 = self.collection_wrap.search(data=search_vectors, anns_field=self.vector_fields[j],
                                                param=search_params, limit=limit,
                                                group_by_field=group_by_field,
-                                               group_size=group_size, group_strict_size=True,
+                                               group_size=group_size, strict_group_size=True,
                                                output_fields=[group_by_field])[0]
             for i in range(nq):
                 assert len(res1[i]) == limit * group_size
@@ -2226,11 +2226,11 @@ class TestGroupSearch(TestCaseClassBase):
                         group_values.append(res1[i][l*group_size+k].fields.get(group_by_field))
                     assert len(set(group_values)) == 1
 
-            # when group_strict_size=false, it shall return results with group counts = limit
+            # when strict_group_size=false, it shall return results with group counts = limit
             res1 = self.collection_wrap.search(data=search_vectors, anns_field=self.vector_fields[j],
                                                param=search_params, limit=limit,
                                                group_by_field=group_by_field,
-                                               group_size=group_size, group_strict_size=False,
+                                               group_size=group_size, strict_group_size=False,
                                                output_fields=[group_by_field])[0]
             for i in range(nq):
                 group_values = []
@@ -2438,7 +2438,7 @@ class TestGroupSearch(TestCaseClassBase):
                                                    param=search_param, limit=limit, offset=limit * r,
                                                    expr=default_search_exp,
                                                    group_by_field=grpby_field, group_size=group_size,
-                                                   group_strict_size=True,
+                                                   strict_group_size=True,
                                                    output_fields=[grpby_field],
                                                    check_task=CheckTasks.check_search_results,
                                                    check_items={"nq": 1, "limit": res_count},
@@ -2459,7 +2459,7 @@ class TestGroupSearch(TestCaseClassBase):
                                                 param=search_param, limit=limit * page_rounds,
                                                 expr=default_search_exp,
                                                 group_by_field=grpby_field, group_size=group_size,
-                                                group_strict_size=True,
+                                                strict_group_size=True,
                                                 output_fields=[grpby_field],
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": 1, "limit": total_count}
@@ -2488,7 +2488,7 @@ class TestGroupSearch(TestCaseClassBase):
         self.collection_wrap.search(data=search_vectors, anns_field=default_search_field,
                                     param=search_params, limit=limit,
                                     group_by_field=group_by_field,
-                                    group_size=max_group_size, group_strict_size=True,
+                                    group_size=max_group_size, strict_group_size=True,
                                     output_fields=[group_by_field])
         exceed_max_group_size = max_group_size + 1
         error = {ct.err_code: 999,
@@ -2497,7 +2497,7 @@ class TestGroupSearch(TestCaseClassBase):
         self.collection_wrap.search(data=search_vectors, anns_field=default_search_field,
                                     param=search_params, limit=limit,
                                     group_by_field=group_by_field,
-                                    group_size=exceed_max_group_size, group_strict_size=True,
+                                    group_size=exceed_max_group_size, strict_group_size=True,
                                     output_fields=[group_by_field],
                                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -2505,7 +2505,7 @@ class TestGroupSearch(TestCaseClassBase):
         self.collection_wrap.search(data=search_vectors, anns_field=default_search_field,
                                     param=search_params, limit=limit,
                                     group_by_field=group_by_field,
-                                    group_size=max_group_size, group_strict_size=True,
+                                    group_size=max_group_size, strict_group_size=True,
                                     output_fields=[group_by_field])
         below_min_group_size = min_group_size - 1
         error = {ct.err_code: 999,
@@ -2513,6 +2513,6 @@ class TestGroupSearch(TestCaseClassBase):
         self.collection_wrap.search(data=search_vectors, anns_field=default_search_field,
                                     param=search_params, limit=limit,
                                     group_by_field=group_by_field,
-                                    group_size=below_min_group_size, group_strict_size=True,
+                                    group_size=below_min_group_size, strict_group_size=True,
                                     output_fields=[group_by_field],
                                     check_task=CheckTasks.err_res, check_items=error)

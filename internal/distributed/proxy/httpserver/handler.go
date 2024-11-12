@@ -27,6 +27,9 @@ func (h *Handlers) RegisterRoutesTo(router gin.IRouter) {
 	router.GET("/health", wrapHandler(h.handleGetHealth))
 	router.POST("/dummy", wrapHandler(h.handleDummy))
 
+	router.GET("/databases", wrapHandler(h.handleListDatabases))
+	router.GET("/database", wrapHandler(h.handleDescribeDatabases))
+
 	router.POST("/collection", wrapHandler(h.handleCreateCollection))
 	router.DELETE("/collection", wrapHandler(h.handleDropCollection))
 	router.GET("/collection/existence", wrapHandler(h.handleHasCollection))
@@ -94,6 +97,24 @@ func (h *Handlers) handleDummy(c *gin.Context) (interface{}, error) {
 		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
 	}
 	return h.proxy.Dummy(c, &req)
+}
+
+func (h *Handlers) handleListDatabases(c *gin.Context) (interface{}, error) {
+	req := milvuspb.ListDatabasesRequest{}
+	err := shouldBind(c, &req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
+	}
+	return h.proxy.ListDatabases(c, &req)
+}
+
+func (h *Handlers) handleDescribeDatabases(c *gin.Context) (interface{}, error) {
+	req := milvuspb.DescribeDatabaseRequest{}
+	err := shouldBind(c, &req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
+	}
+	return h.proxy.DescribeDatabase(c, &req)
 }
 
 func (h *Handlers) handleCreateCollection(c *gin.Context) (interface{}, error) {

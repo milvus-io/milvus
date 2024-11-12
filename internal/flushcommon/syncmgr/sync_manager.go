@@ -70,7 +70,7 @@ func NewSyncManager(chunkManager storage.ChunkManager) SyncManager {
 		keyLockDispatcher: dispatcher,
 		chunkManager:      chunkManager,
 		tasks:             typeutil.NewConcurrentMap[string, Task](),
-		taskStats:         expirable.NewLRU[string, Task](512, nil, time.Minute*15),
+		taskStats:         expirable.NewLRU[string, Task](16, nil, time.Minute*15),
 	}
 	// setup config update watcher
 	params.Watch(params.DataNodeCfg.MaxParallelSyncMgrTasks.Key, config.NewHandler("datanode.syncmgr.poolsize", syncMgr.resizeHandler))

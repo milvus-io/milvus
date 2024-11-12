@@ -72,6 +72,7 @@ type Cache interface {
 	GetShards(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]nodeInfo, error)
 	DeprecateShardCache(database, collectionName string)
 	InvalidateShardLeaderCache(collections []int64)
+	ListShardLocation() map[int64]nodeInfo
 	RemoveCollection(ctx context.Context, database, collectionName string)
 	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string
 	RemovePartition(ctx context.Context, database, collectionName string, partitionName string)
@@ -288,9 +289,7 @@ func (info *collectionInfo) isCollectionCached() bool {
 
 // shardLeaders wraps shard leader mapping for iteration.
 type shardLeaders struct {
-	idx        *atomic.Int64
-	deprecated *atomic.Bool
-
+	idx          *atomic.Int64
 	collectionID int64
 	shardLeaders map[string][]nodeInfo
 }
@@ -419,19 +418,19 @@ func (m *MetaCache) getCollection(database, collectionName string, collectionID 
 	return nil, false
 }
 
-func (m *MetaCache) getCollectionShardLeader(database, collectionName string) (*shardLeaders, bool) {
+func (m *MetaCache) getCollectionShardLeader(database, collectionName string) *shardLeaders {
 	m.leaderMut.RLock()
 	defer m.leaderMut.RUnlock()
 
 	db, ok := m.collLeader[database]
 	if !ok {
-		return nil, false
+		return nil
 	}
 
 	if leaders, ok := db[collectionName]; ok {
-		return leaders, !leaders.deprecated.Load()
+		return leaders
 	}
-	return nil, false
+	return nil
 }
 
 func (m *MetaCache) update(ctx context.Context, database, collectionName string, collectionID UniqueID) (*collectionInfo, error) {
@@ -957,9 +956,9 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		zap.String("collectionName", collectionName),
 		zap.Int64("collectionID", collectionID))
 
-	cacheShardLeaders, ok := m.getCollectionShardLeader(database, collectionName)
+	cacheShardLeaders := m.getCollectionShardLeader(database, collectionName)
 	if withCache {
-		if ok {
+		if cacheShardLeaders != nil {
 			metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
 			iterator := cacheShardLeaders.GetReader()
 			return iterator.Shuffle(), nil
@@ -995,11 +994,9 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 	newShardLeaders := &shardLeaders{
 		collectionID: info.collID,
 		shardLeaders: shards,
-		deprecated:   atomic.NewBool(false),
 		idx:          atomic.NewInt64(0),
 	}
 
-	// lock leader
 	m.leaderMut.Lock()
 	if _, ok := m.collLeader[database]; !ok {
 		m.collLeader[database] = make(map[string]*shardLeaders)
@@ -1008,15 +1005,6 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 
 	iterator := newShardLeaders.GetReader()
 	ret := iterator.Shuffle()
-
-	oldLeaders := make(map[string][]nodeInfo)
-	if cacheShardLeaders != nil {
-		oldLeaders = cacheShardLeaders.shardLeaders
-	}
-	// update refcnt in shardClientMgr
-	// update shard leader's just create a empty client pool
-	// and init new client will be execute in getClient
-	_ = m.shardMgr.UpdateShardLeaders(oldLeaders, ret)
 	m.leaderMut.Unlock()
 
 	metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -1042,9 +1030,33 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 // DeprecateShardCache clear the shard leader cache of a collection
 func (m *MetaCache) DeprecateShardCache(database, collectionName string) {
 	log.Info("clearing shard cache for collection", zap.String("collectionName", collectionName))
-	if shards, ok := m.getCollectionShardLeader(database, collectionName); ok {
-		shards.deprecated.Store(true)
+	m.leaderMut.Lock()
+	defer m.leaderMut.Unlock()
+	dbInfo, ok := m.collLeader[database]
+	if ok {
+		delete(dbInfo, collectionName)
+		if len(dbInfo) == 0 {
+			delete(m.collLeader, database)
+		}
 	}
+}
+
+// used for Garbage collection shard client
+func (m *MetaCache) ListShardLocation() map[int64]nodeInfo {
+	m.leaderMut.RLock()
+	defer m.leaderMut.RUnlock()
+	shardLeaderInfo := make(map[int64]nodeInfo)
+
+	for _, dbInfo := range m.collLeader {
+		for _, shardLeaders := range dbInfo {
+			for _, nodeInfos := range shardLeaders.shardLeaders {
+				for _, node := range nodeInfos {
+					shardLeaderInfo[node.nodeID] = node
+				}
+			}
+		}
+	}
+	return shardLeaderInfo
 }
 
 func (m *MetaCache) InvalidateShardLeaderCache(collections []int64) {
@@ -1053,11 +1065,14 @@ func (m *MetaCache) InvalidateShardLeaderCache(collections []int64) {
 	defer m.leaderMut.Unlock()
 
 	collectionSet := typeutil.NewUniqueSet(collections...)
-	for _, db := range m.collLeader {
-		for _, shardLeaders := range db {
+	for dbName, dbInfo := range m.collLeader {
+		for collectionName, shardLeaders := range dbInfo {
 			if collectionSet.Contain(shardLeaders.collectionID) {
-				shardLeaders.deprecated.Store(true)
+				delete(dbInfo, collectionName)
 			}
+		}
+		if len(dbInfo) == 0 {
+			delete(m.collLeader, dbName)
 		}
 	}
 }

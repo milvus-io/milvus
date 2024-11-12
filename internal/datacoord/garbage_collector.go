@@ -473,6 +473,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 		log.Info("GC segment start...", zap.Int("insert_logs", len(segment.GetBinlogs())),
 			zap.Int("delta_logs", len(segment.GetDeltalogs())),
 			zap.Int("stats_logs", len(segment.GetStatslogs())),
+			zap.Int("bm25_logs", len(segment.GetBm25Statslogs())),
 			zap.Int("text_logs", len(segment.GetTextStatsLogs())))
 		if err := gc.removeObjectFiles(ctx, logs); err != nil {
 			log.Warn("GC segment remove logs failed", zap.Error(err))
@@ -560,6 +561,11 @@ func getLogs(sinfo *SegmentInfo) map[string]struct{} {
 		}
 	}
 	for _, flog := range sinfo.GetDeltalogs() {
+		for _, l := range flog.GetBinlogs() {
+			logs[l.GetLogPath()] = struct{}{}
+		}
+	}
+	for _, flog := range sinfo.GetBm25Statslogs() {
 		for _, l := range flog.GetBinlogs() {
 			logs[l.GetLogPath()] = struct{}{}
 		}

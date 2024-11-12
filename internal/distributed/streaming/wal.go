@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -55,7 +54,7 @@ type walAccesserImpl struct {
 
 // RawAppend writes a record to the log.
 func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
-	assertNoSystemMessage(msg)
+	assertValidMessage(msg)
 	if err := w.lifetime.Add(lifetime.IsWorking); err != nil {
 		return nil, status.NewOnShutdownError("wal accesser closed, %s", err.Error())
 	}
@@ -71,14 +70,17 @@ func (w *walAccesserImpl) Read(_ context.Context, opts ReadOption) Scanner {
 		newErrScanner(status.NewOnShutdownError("wal accesser closed, %s", err.Error()))
 	}
 	defer w.lifetime.Done()
+	if opts.VChannel == "" {
+		return newErrScanner(status.NewInvaildArgument("vchannel is required"))
+	}
 
 	// TODO: optimize the consumer into pchannel level.
 	pchannel := funcutil.ToPhysicalChannel(opts.VChannel)
-	filters := append(opts.DeliverFilters, options.DeliverFilterVChannel(opts.VChannel))
 	rc := consumer.NewResumableConsumer(w.handlerClient.CreateConsumer, &consumer.ConsumerOptions{
 		PChannel:       pchannel,
+		VChannel:       opts.VChannel,
 		DeliverPolicy:  opts.DeliverPolicy,
-		DeliverFilters: filters,
+		DeliverFilters: opts.DeliverFilters,
 		MessageHandler: opts.MessageHandler,
 	})
 	return rc

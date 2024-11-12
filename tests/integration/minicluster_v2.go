@@ -180,6 +180,14 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 		return nil, err
 	}
 	log.Info("minicluster ports", zap.Ints("ports", ports))
+	params.RootCoordGrpcServerCfg.IP = "localhost"
+	params.QueryCoordGrpcServerCfg.IP = "localhost"
+	params.DataCoordGrpcServerCfg.IP = "localhost"
+	params.ProxyGrpcServerCfg.IP = "localhost"
+	params.QueryNodeGrpcServerCfg.IP = "localhost"
+	params.DataNodeGrpcServerCfg.IP = "localhost"
+	params.IndexNodeGrpcServerCfg.IP = "localhost"
+	params.StreamingNodeGrpcServerCfg.IP = "localhost"
 	params.Save(params.RootCoordGrpcServerCfg.Port.Key, fmt.Sprint(ports[0]))
 	params.Save(params.DataCoordGrpcServerCfg.Port.Key, fmt.Sprint(ports[1]))
 	params.Save(params.QueryCoordGrpcServerCfg.Port.Key, fmt.Sprint(ports[2]))
@@ -456,14 +464,23 @@ func (cluster *MiniClusterV2) Stop() error {
 	if cluster.clientConn != nil {
 		cluster.clientConn.Close()
 	}
-	cluster.RootCoord.Stop()
-	log.Info("mini cluster rootCoord stopped")
-	cluster.DataCoord.Stop()
-	log.Info("mini cluster dataCoord stopped")
-	cluster.QueryCoord.Stop()
-	log.Info("mini cluster queryCoord stopped")
-	cluster.Proxy.Stop()
-	log.Info("mini cluster proxy stopped")
+	if cluster.RootCoord != nil {
+		cluster.RootCoord.Stop()
+		log.Info("mini cluster rootCoord stopped")
+	}
+
+	if cluster.DataCoord != nil {
+		cluster.DataCoord.Stop()
+		log.Info("mini cluster dataCoord stopped")
+	}
+	if cluster.QueryCoord != nil {
+		cluster.QueryCoord.Stop()
+		log.Info("mini cluster queryCoord stopped")
+	}
+	if cluster.Proxy != nil {
+		cluster.Proxy.Stop()
+		log.Info("mini cluster proxy stopped")
+	}
 
 	cluster.StopAllDataNodes()
 	cluster.StopAllStreamingNodes()

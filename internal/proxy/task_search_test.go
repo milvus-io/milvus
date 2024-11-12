@@ -2111,8 +2111,8 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	mgr := NewMockShardClientManager(t)
+	mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
-	mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
 	lb := NewLBPolicyImpl(mgr)
 
 	defer qc.Close()
@@ -2325,7 +2325,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			},
 		}
 		// 1. first parse rank params
-		// outer params require to group by field 101 and groupSize=3 and groupStrictSize=false
+		// outer params require to group by field 101 and groupSize=3 and strictGroupSize=false
 		testRankParamsPairs := getValidSearchParams()
 		testRankParamsPairs = append(testRankParamsPairs, &commonpb.KeyValuePair{
 			Key:   GroupByFieldKey,
@@ -2336,7 +2336,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			Value: strconv.FormatInt(3, 10),
 		})
 		testRankParamsPairs = append(testRankParamsPairs, &commonpb.KeyValuePair{
-			Key:   GroupStrictSize,
+			Key:   StrictGroupSize,
 			Value: "false",
 		})
 		testRankParamsPairs = append(testRankParamsPairs, &commonpb.KeyValuePair{
@@ -2348,7 +2348,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		// 2. parse search params for sub request in hybridsearch
 		params := getValidSearchParams()
-		// inner params require to group by field 103 and groupSize=10 and groupStrictSize=true
+		// inner params require to group by field 103 and groupSize=10 and strictGroupSize=true
 		params = append(params, &commonpb.KeyValuePair{
 			Key:   GroupByFieldKey,
 			Value: "c3",
@@ -2358,7 +2358,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			Value: strconv.FormatInt(10, 10),
 		})
 		params = append(params, &commonpb.KeyValuePair{
-			Key:   GroupStrictSize,
+			Key:   StrictGroupSize,
 			Value: "true",
 		})
 
@@ -2370,7 +2370,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		// set by main request rather than inner sub request
 		assert.Equal(t, int64(101), searchInfo.planInfo.GetGroupByFieldId())
 		assert.Equal(t, int64(3), searchInfo.planInfo.GetGroupSize())
-		assert.False(t, searchInfo.planInfo.GetGroupStrictSize())
+		assert.False(t, searchInfo.planInfo.GetStrictGroupSize())
 	})
 
 	t.Run("parseSearchInfo error", func(t *testing.T) {
@@ -2744,7 +2744,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			node:   node,
 		}
 
-		err := qt.Requery()
+		err := qt.Requery(nil)
 		assert.NoError(t, err)
 		assert.Len(t, qt.result.Results.FieldsData, 2)
 		for _, field := range qt.result.Results.FieldsData {
@@ -2773,7 +2773,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			node:    node,
 		}
 
-		err := qt.Requery()
+		err := qt.Requery(nil)
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
 	})
@@ -2807,7 +2807,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			node:   node,
 		}
 
-		err := qt.Requery()
+		err := qt.Requery(nil)
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
 	})

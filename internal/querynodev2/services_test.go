@@ -69,9 +69,10 @@ type ServiceSuite struct {
 	schema         *schemapb.CollectionSchema
 	partitionIDs   []int64
 	// Test segments
-	validSegmentIDs   []int64
-	flushedSegmentIDs []int64
-	droppedSegmentIDs []int64
+	validSegmentIDs     []int64
+	flushedSegmentIDs   []int64
+	droppedSegmentIDs   []int64
+	levelZeroSegmentIDs []int64
 	// Test channel
 	vchannel string
 	pchannel string
@@ -101,8 +102,9 @@ func (suite *ServiceSuite) SetupSuite() {
 	suite.collectionName = "test-collection"
 	suite.partitionIDs = []int64{222}
 	suite.validSegmentIDs = []int64{1, 2, 3}
-	suite.flushedSegmentIDs = []int64{4, 5, 6}
+	suite.flushedSegmentIDs = []int64{5, 6}
 	suite.droppedSegmentIDs = []int64{7, 8, 9}
+	suite.levelZeroSegmentIDs = []int64{4}
 
 	var err error
 	suite.mapper = metautil.NewDynChannelMapper()
@@ -279,16 +281,17 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 		PartitionIDs: suite.partitionIDs,
 		Infos: []*datapb.VchannelInfo{
 			{
-				CollectionID:      suite.collectionID,
-				ChannelName:       suite.vchannel,
-				SeekPosition:      suite.position,
-				FlushedSegmentIds: suite.flushedSegmentIDs,
-				DroppedSegmentIds: suite.droppedSegmentIDs,
+				CollectionID:        suite.collectionID,
+				ChannelName:         suite.vchannel,
+				SeekPosition:        suite.position,
+				FlushedSegmentIds:   suite.flushedSegmentIDs,
+				DroppedSegmentIds:   suite.droppedSegmentIDs,
+				LevelZeroSegmentIds: suite.levelZeroSegmentIDs,
 			},
 		},
 		SegmentInfos: map[int64]*datapb.SegmentInfo{
-			suite.flushedSegmentIDs[0]: {
-				ID:            suite.flushedSegmentIDs[0],
+			suite.levelZeroSegmentIDs[0]: {
+				ID:            suite.levelZeroSegmentIDs[0],
 				CollectionID:  suite.collectionID,
 				PartitionID:   suite.partitionIDs[0],
 				InsertChannel: suite.vchannel,

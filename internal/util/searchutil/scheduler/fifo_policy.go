@@ -1,4 +1,4 @@
-package tasks
+package scheduler
 
 import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"

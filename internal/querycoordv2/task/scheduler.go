@@ -202,7 +202,7 @@ func NewScheduler(ctx context.Context,
 		channelTasks: make(map[replicaChannelIndex]Task),
 		processQueue: newTaskQueue(),
 		waitQueue:    newTaskQueue(),
-		taskStats:    expirable.NewLRU[UniqueID, Task](512, nil, time.Minute*30),
+		taskStats:    expirable.NewLRU[UniqueID, Task](64, nil, time.Minute*15),
 	}
 }
 
@@ -574,10 +574,6 @@ func (scheduler *taskScheduler) GetSegmentTaskNum() int {
 // GetTasksJSON returns the JSON string of all tasks.
 // the task stats object is thread safe and can be accessed without lock
 func (scheduler *taskScheduler) GetTasksJSON() string {
-	if scheduler.taskStats.Len() == 0 {
-		return ""
-	}
-
 	tasks := scheduler.taskStats.Values()
 	ret, err := json.Marshal(tasks)
 	if err != nil {

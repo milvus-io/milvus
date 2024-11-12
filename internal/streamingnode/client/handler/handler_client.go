@@ -49,6 +49,9 @@ type ConsumerOptions struct {
 	// PChannel is the pchannel of the consumer.
 	PChannel string
 
+	// VChannel is the vchannel of the consumer.
+	VChannel string
+
 	// DeliverPolicy is the deliver policy of the consumer.
 	DeliverPolicy options.DeliverPolicy
 

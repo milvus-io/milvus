@@ -17,9 +17,6 @@ func TestWithCreateConsumer(t *testing.T) {
 			Name: "test",
 			Term: 1,
 		},
-		DeliverPolicy: &streamingpb.DeliverPolicy{
-			Policy: &streamingpb.DeliverPolicy_All{},
-		},
 	}
 	ctx := WithCreateConsumer(context.Background(), req)
 
@@ -32,7 +29,6 @@ func TestWithCreateConsumer(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, req.Pchannel.Name, req2.Pchannel.Name)
 	assert.Equal(t, req.Pchannel.Term, req2.Pchannel.Term)
-	assert.Equal(t, req.DeliverPolicy.String(), req2.DeliverPolicy.String())
 
 	// panic case.
 	assert.NotPanics(t, func() { WithCreateConsumer(context.Background(), nil) })

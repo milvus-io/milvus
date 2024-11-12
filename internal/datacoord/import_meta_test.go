@@ -251,7 +251,7 @@ func TestTaskStatsJSON(t *testing.T) {
 	assert.NoError(t, err)
 
 	statsJSON := im.TaskStatsJSON()
-	assert.Equal(t, "", statsJSON)
+	assert.Equal(t, "[]", statsJSON)
 
 	task1 := &importTask{
 		ImportTaskV2: &datapb.ImportTaskV2{

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -42,11 +43,12 @@ type LookAsideBalancerSuite struct {
 
 func (suite *LookAsideBalancerSuite) SetupTest() {
 	suite.clientMgr = NewMockShardClientManager(suite.T())
+	suite.clientMgr.EXPECT().ReleaseClientRef(mock.Anything).Maybe()
 	suite.balancer = NewLookAsideBalancer(suite.clientMgr)
 	suite.balancer.Start(context.Background())
 
 	qn := mocks.NewMockQueryNodeClient(suite.T())
-	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(1)).Return(qn, nil).Maybe()
+	suite.clientMgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
 	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, errors.New("fake error")).Maybe()
 }
 
@@ -298,22 +300,46 @@ func (suite *LookAsideBalancerSuite) TestCancelWorkload() {
 }
 
 func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
+	qn := mocks.NewMockQueryNodeClient(suite.T())
+	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, errors.New("fake error")).Maybe()
 	qn2 := mocks.NewMockQueryNodeClient(suite.T())
-	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(2)).Return(qn2, nil).Maybe()
 	qn2.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
 		},
 	}, nil).Maybe()
+	suite.clientMgr.ExpectedCalls = nil
+	suite.clientMgr.EXPECT().ReleaseClientRef(mock.Anything).Maybe()
+	suite.clientMgr.EXPECT().GetClient(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ni nodeInfo) (types.QueryNodeClient, error) {
+		if ni.nodeID == 1 {
+			return qn, nil
+		}
+
+		if ni.nodeID == 2 {
+			return qn2, nil
+		}
+		return nil, errors.New("unexpected node")
+	}).Maybe()
 
 	metrics1 := &CostMetrics{}
 	metrics1.ts.Store(time.Now().UnixMilli())
 	metrics1.unavailable.Store(true)
 	suite.balancer.metricsMap.Insert(1, metrics1)
+	suite.balancer.RegisterNodeInfo([]nodeInfo{
+		{
+			nodeID: 1,
+		},
+	})
 	metrics2 := &CostMetrics{}
 	metrics2.ts.Store(time.Now().UnixMilli())
 	metrics2.unavailable.Store(true)
 	suite.balancer.metricsMap.Insert(2, metrics2)
+	suite.balancer.knownNodeInfos.Insert(2, nodeInfo{})
+	suite.balancer.RegisterNodeInfo([]nodeInfo{
+		{
+			nodeID: 2,
+		},
+	})
 	suite.Eventually(func() bool {
 		metrics, ok := suite.balancer.metricsMap.Get(1)
 		return ok && metrics.unavailable.Load()
@@ -339,10 +365,16 @@ func (suite *LookAsideBalancerSuite) TestGetClientFailed() {
 	metrics1.ts.Store(time.Now().UnixMilli())
 	metrics1.unavailable.Store(true)
 	suite.balancer.metricsMap.Insert(2, metrics1)
+	suite.balancer.RegisterNodeInfo([]nodeInfo{
+		{
+			nodeID: 2,
+		},
+	})
 
 	// test get shard client from client mgr return nil
 	suite.clientMgr.ExpectedCalls = nil
-	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(2)).Return(nil, errors.New("shard client not found"))
+	suite.clientMgr.EXPECT().ReleaseClientRef(mock.Anything).Maybe()
+	suite.clientMgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, errors.New("shard client not found"))
 	// expected stopping the health check after failure times reaching the limit
 	suite.Eventually(func() bool {
 		return !suite.balancer.metricsMap.Contain(2)
@@ -352,7 +384,9 @@ func (suite *LookAsideBalancerSuite) TestGetClientFailed() {
 func (suite *LookAsideBalancerSuite) TestNodeRecover() {
 	// mock qn down for a while and then recover
 	qn3 := mocks.NewMockQueryNodeClient(suite.T())
-	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(3)).Return(qn3, nil)
+	suite.clientMgr.ExpectedCalls = nil
+	suite.clientMgr.EXPECT().ReleaseClientRef(mock.Anything)
+	suite.clientMgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn3, nil)
 	qn3.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Abnormal,
@@ -368,6 +402,11 @@ func (suite *LookAsideBalancerSuite) TestNodeRecover() {
 	metrics1 := &CostMetrics{}
 	metrics1.ts.Store(time.Now().UnixMilli())
 	suite.balancer.metricsMap.Insert(3, metrics1)
+	suite.balancer.RegisterNodeInfo([]nodeInfo{
+		{
+			nodeID: 3,
+		},
+	})
 	suite.Eventually(func() bool {
 		metrics, ok := suite.balancer.metricsMap.Get(3)
 		return ok && metrics.unavailable.Load()
@@ -384,7 +423,9 @@ func (suite *LookAsideBalancerSuite) TestNodeOffline() {
 	Params.Save(Params.ProxyCfg.HealthCheckTimeout.Key, "1000")
 	// mock qn down for a while and then recover
 	qn3 := mocks.NewMockQueryNodeClient(suite.T())
-	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(3)).Return(qn3, nil)
+	suite.clientMgr.ExpectedCalls = nil
+	suite.clientMgr.EXPECT().ReleaseClientRef(mock.Anything)
+	suite.clientMgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn3, nil)
 	qn3.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Abnormal,
@@ -394,6 +435,11 @@ func (suite *LookAsideBalancerSuite) TestNodeOffline() {
 	metrics1 := &CostMetrics{}
 	metrics1.ts.Store(time.Now().UnixMilli())
 	suite.balancer.metricsMap.Insert(3, metrics1)
+	suite.balancer.RegisterNodeInfo([]nodeInfo{
+		{
+			nodeID: 3,
+		},
+	})
 	suite.Eventually(func() bool {
 		metrics, ok := suite.balancer.metricsMap.Get(3)
 		return ok && metrics.unavailable.Load()

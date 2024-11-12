@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
@@ -32,7 +33,6 @@ type shardClient struct {
 	sync.RWMutex
 	info     nodeInfo
 	isClosed bool
-	refCnt   int
 	clients  []types.QueryNodeClient
 	idx      atomic.Int64
 	poolSize int
@@ -40,13 +40,15 @@ type shardClient struct {
 
 	initialized atomic.Bool
 	creator     queryNodeCreatorFunc
+
+	refCnt *atomic.Int64
 }
 
 func (n *shardClient) getClient(ctx context.Context) (types.QueryNodeClient, error) {
 	if !n.initialized.Load() {
 		n.Lock()
 		if !n.initialized.Load() {
-			if err := n.initClients(); err != nil {
+			if err := n.initClients(ctx); err != nil {
 				n.Unlock()
 				return nil, err
 			}
@@ -55,28 +57,34 @@ func (n *shardClient) getClient(ctx context.Context) (types.QueryNodeClient, err
 		n.Unlock()
 	}
 
-	n.RLock()
-	defer n.RUnlock()
-	if n.isClosed {
-		return nil, errClosed
+	// Attempt to get a connection from the idle connection pool, supporting context cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+		client, err := n.roundRobinSelectClient()
+		if err != nil {
+			return nil, err
+		}
+		n.IncRef()
+		return client, nil
 	}
-
-	idx := n.idx.Inc()
-	return n.clients[int(idx)%n.poolSize], nil
 }
 
-func (n *shardClient) inc() {
-	n.Lock()
-	defer n.Unlock()
-	if n.isClosed {
-		return
+func (n *shardClient) DecRef() bool {
+	if n.refCnt.Dec() == 0 {
+		n.Close()
+		return true
 	}
-	n.refCnt++
+	return false
+}
+
+func (n *shardClient) IncRef() {
+	n.refCnt.Inc()
 }
 
 func (n *shardClient) close() {
 	n.isClosed = true
-	n.refCnt = 0
 
 	for _, client := range n.clients {
 		if err := client.Close(); err != nil {
@@ -86,50 +94,36 @@ func (n *shardClient) close() {
 	n.clients = nil
 }
 
-func (n *shardClient) dec() bool {
-	n.Lock()
-	defer n.Unlock()
-	if n.isClosed {
-		return true
-	}
-	if n.refCnt > 0 {
-		n.refCnt--
-	}
-	if n.refCnt == 0 {
-		n.close()
-	}
-	return n.refCnt == 0
-}
-
 func (n *shardClient) Close() {
 	n.Lock()
 	defer n.Unlock()
 	n.close()
 }
 
-func newPoolingShardClient(info *nodeInfo, creator queryNodeCreatorFunc) (*shardClient, error) {
+func newShardClient(info nodeInfo, creator queryNodeCreatorFunc) (*shardClient, error) {
+	num := paramtable.Get().ProxyCfg.QueryNodePoolingSize.GetAsInt()
+	if num <= 0 {
+		num = 1
+	}
+
 	return &shardClient{
 		info: nodeInfo{
 			nodeID:  info.nodeID,
 			address: info.address,
 		},
-		refCnt:  1,
-		pooling: true,
-		creator: creator,
+		poolSize: num,
+		creator:  creator,
+		refCnt:   atomic.NewInt64(1),
 	}, nil
 }
 
-func (n *shardClient) initClients() error {
-	num := paramtable.Get().ProxyCfg.QueryNodePoolingSize.GetAsInt()
-	if num <= 0 {
-		num = 1
-	}
-	clients := make([]types.QueryNodeClient, 0, num)
-	for i := 0; i < num; i++ {
-		client, err := n.creator(context.Background(), n.info.address, n.info.nodeID)
+func (n *shardClient) initClients(ctx context.Context) error {
+	clients := make([]types.QueryNodeClient, 0, n.poolSize)
+	for i := 0; i < n.poolSize; i++ {
+		client, err := n.creator(ctx, n.info.address, n.info.nodeID)
 		if err != nil {
-			// roll back already created clients
-			for _, c := range clients[:i] {
+			// Roll back already created clients
+			for _, c := range clients {
 				c.Close()
 			}
 			return errors.Wrap(err, fmt.Sprintf("create client for node=%d failed", n.info.nodeID))
@@ -138,13 +132,29 @@ func (n *shardClient) initClients() error {
 	}
 
 	n.clients = clients
-	n.poolSize = num
 	return nil
 }
 
+// roundRobinSelectClient selects a client in a round-robin manner
+func (n *shardClient) roundRobinSelectClient() (types.QueryNodeClient, error) {
+	n.Lock()
+	defer n.Unlock()
+	if n.isClosed {
+		return nil, errClosed
+	}
+
+	if len(n.clients) == 0 {
+		return nil, errors.New("no available clients")
+	}
+
+	nextClientIndex := n.idx.Inc() % int64(len(n.clients))
+	nextClient := n.clients[nextClientIndex]
+	return nextClient, nil
+}
+
 type shardClientMgr interface {
-	GetClient(ctx context.Context, nodeID UniqueID) (types.QueryNodeClient, error)
-	UpdateShardLeaders(oldLeaders map[string][]nodeInfo, newLeaders map[string][]nodeInfo) error
+	GetClient(ctx context.Context, nodeInfo nodeInfo) (types.QueryNodeClient, error)
+	ReleaseClientRef(nodeID int64)
 	Close()
 	SetClientCreatorFunc(creator queryNodeCreatorFunc)
 }
@@ -155,6 +165,8 @@ type shardClientMgrImpl struct {
 		data map[UniqueID]*shardClient
 	}
 	clientCreator queryNodeCreatorFunc
+
+	closeCh chan struct{}
 }
 
 // SessionOpt provides a way to set params in SessionManager
@@ -176,10 +188,13 @@ func newShardClientMgr(options ...shardClientMgrOpt) *shardClientMgrImpl {
 			data map[UniqueID]*shardClient
 		}{data: make(map[UniqueID]*shardClient)},
 		clientCreator: defaultQueryNodeClientCreator,
+		closeCh:       make(chan struct{}),
 	}
 	for _, opt := range options {
 		opt(s)
 	}
+
+	go s.PurgeClient()
 	return s
 }
 
@@ -187,79 +202,65 @@ func (c *shardClientMgrImpl) SetClientCreatorFunc(creator queryNodeCreatorFunc) 
 	c.clientCreator = creator
 }
 
-// Warning this method may modify parameter `oldLeaders`
-func (c *shardClientMgrImpl) UpdateShardLeaders(oldLeaders map[string][]nodeInfo, newLeaders map[string][]nodeInfo) error {
-	oldLocalMap := make(map[UniqueID]*nodeInfo)
-	for _, nodes := range oldLeaders {
-		for i := range nodes {
-			n := &nodes[i]
-			_, ok := oldLocalMap[n.nodeID]
-			if !ok {
-				oldLocalMap[n.nodeID] = n
-			}
-		}
-	}
-	newLocalMap := make(map[UniqueID]*nodeInfo)
-
-	for _, nodes := range newLeaders {
-		for i := range nodes {
-			n := &nodes[i]
-			_, ok := oldLocalMap[n.nodeID]
-			if !ok {
-				_, ok2 := newLocalMap[n.nodeID]
-				if !ok2 {
-					newLocalMap[n.nodeID] = n
-				}
-			}
-			delete(oldLocalMap, n.nodeID)
-		}
-	}
-	c.clients.Lock()
-	defer c.clients.Unlock()
-
-	for _, node := range newLocalMap {
-		client, ok := c.clients.data[node.nodeID]
-		if ok {
-			client.inc()
-		} else {
-			// context.Background() is useless
-			// TODO QueryNode NewClient remove ctx parameter
-			// TODO Remove Init && Start interface in QueryNode client
-			if c.clientCreator == nil {
-				return fmt.Errorf("clientCreator function is nil")
-			}
-			client, err := newPoolingShardClient(node, c.clientCreator)
-			if err != nil {
-				return err
-			}
-			c.clients.data[node.nodeID] = client
-		}
-	}
-	for _, node := range oldLocalMap {
-		client, ok := c.clients.data[node.nodeID]
-		if ok && client.dec() {
-			delete(c.clients.data, node.nodeID)
-		}
-	}
-	return nil
-}
-
-func (c *shardClientMgrImpl) GetClient(ctx context.Context, nodeID UniqueID) (types.QueryNodeClient, error) {
+func (c *shardClientMgrImpl) GetClient(ctx context.Context, info nodeInfo) (types.QueryNodeClient, error) {
 	c.clients.RLock()
-	client, ok := c.clients.data[nodeID]
+	client, ok := c.clients.data[info.nodeID]
 	c.clients.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("can not find client of node %d", nodeID)
+		c.clients.Lock()
+		// Check again after acquiring the lock
+		client, ok = c.clients.data[info.nodeID]
+		if !ok {
+			// Create a new client if it doesn't exist
+			newClient, err := newShardClient(info, c.clientCreator)
+			if err != nil {
+				c.clients.Unlock()
+				return nil, err
+			}
+			c.clients.data[info.nodeID] = newClient
+			client = newClient
+		}
+		c.clients.Unlock()
 	}
+
 	return client.getClient(ctx)
+}
+
+func (c *shardClientMgrImpl) PurgeClient() {
+	ticker := time.NewTicker(600 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.closeCh:
+			return
+		case <-ticker.C:
+			shardLocations := globalMetaCache.ListShardLocation()
+			c.clients.Lock()
+			for nodeID, client := range c.clients.data {
+				if _, ok := shardLocations[nodeID]; !ok {
+					client.DecRef()
+					delete(c.clients.data, nodeID)
+				}
+			}
+			c.clients.Unlock()
+		}
+	}
+}
+
+func (c *shardClientMgrImpl) ReleaseClientRef(nodeID int64) {
+	c.clients.RLock()
+	defer c.clients.RUnlock()
+	if client, ok := c.clients.data[nodeID]; ok {
+		client.DecRef()
+	}
 }
 
 // Close release clients
 func (c *shardClientMgrImpl) Close() {
 	c.clients.Lock()
 	defer c.clients.Unlock()
-
+	close(c.closeCh)
 	for _, s := range c.clients.data {
 		s.Close()
 	}

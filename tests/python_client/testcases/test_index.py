@@ -2947,7 +2947,7 @@ class TestBitmapIndex(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("bitmap_cardinality_limit", [-10, 0, 1001])
-    # @pytest.mark.skip("valid now")
+    @pytest.mark.skip("need hybrid index config, not available now")
     def test_bitmap_cardinality_limit_invalid(self, request, bitmap_cardinality_limit):
         """
         target:

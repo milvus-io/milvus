@@ -50,16 +50,16 @@ import (
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
-	"github.com/milvus-io/milvus/internal/querynodev2/optimizers"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
+	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -113,7 +113,7 @@ type QueryNode struct {
 	loader segments.Loader
 
 	// Search/Query
-	scheduler tasks.Scheduler
+	scheduler scheduler.Scheduler
 
 	// etcd client
 	etcdCli *clientv3.Client
@@ -339,7 +339,7 @@ func (node *QueryNode) Init() error {
 		}
 
 		schedulePolicy := paramtable.Get().QueryNodeCfg.SchedulePolicyName.GetValue()
-		node.scheduler = tasks.NewScheduler(
+		node.scheduler = scheduler.NewScheduler(
 			schedulePolicy,
 		)
 

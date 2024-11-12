@@ -88,6 +88,8 @@ const (
 
 	// MetricRequestParamVerboseKey as a request parameter decide to whether return verbose value
 	MetricRequestParamVerboseKey = "verbose"
+
+	MetricRequestParamTargetScopeKey = "target_scope"
 )
 
 type MetricsRequestAction func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error)

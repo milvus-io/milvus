@@ -17,10 +17,11 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"gopkg.in/yaml.v3"
+	"github.com/spf13/cast"
 
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -80,48 +81,41 @@ func formatKey(key string) string {
 	return result
 }
 
-func flattenNode(node *yaml.Node, parentKey string, result map[string]string) {
-	// The content of the node should contain key-value pairs in a MappingNode
-	if node.Kind == yaml.MappingNode {
-		for i := 0; i < len(node.Content); i += 2 {
-			keyNode := node.Content[i]
-			valueNode := node.Content[i+1]
+func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {
+	for k, v := range m {
+		fullKey := k
+		if prefix != "" {
+			fullKey = prefix + "." + k
+		}
 
-			key := keyNode.Value
-			// Construct the full key with parent hierarchy
-			fullKey := key
-			if parentKey != "" {
-				fullKey = parentKey + "." + key
-			}
-
-			switch valueNode.Kind {
-			case yaml.ScalarNode:
-				// handle null value
-				if valueNode.Tag == "!!null" {
-					result[lowerKey(fullKey)] = ""
-					result[formatKey(fullKey)] = ""
+		switch val := v.(type) {
+		case map[string]interface{}:
+			flattenAndMergeMap(fullKey, val, result)
+		case map[interface{}]interface{}:
+			flattenAndMergeMap(fullKey, cast.ToStringMap(val), result)
+		case []interface{}:
+			str := ""
+			for i, item := range val {
+				itemStr, err := cast.ToStringE(item)
+				if err != nil {
+					continue
+				}
+				if i == 0 {
+					str = itemStr
 				} else {
-					// Scalar value, store it as a string
-					result[lowerKey(fullKey)] = valueNode.Value
-					result[formatKey(fullKey)] = valueNode.Value
+					str = str + "," + itemStr
 				}
-			case yaml.MappingNode:
-				// Nested map, process recursively
-				flattenNode(valueNode, fullKey, result)
-			case yaml.SequenceNode:
-				// List (sequence), process elements
-				var listStr string
-				for j, item := range valueNode.Content {
-					if j > 0 {
-						listStr += ","
-					}
-					if item.Kind == yaml.ScalarNode {
-						listStr += item.Value
-					}
-				}
-				result[lowerKey(fullKey)] = listStr
-				result[formatKey(fullKey)] = listStr
 			}
+			result[lowerKey(fullKey)] = str
+			result[formatKey(fullKey)] = str
+		default:
+			str, err := cast.ToStringE(val)
+			if err != nil {
+				fmt.Printf("cast to string failed %s, error = %s\n", fullKey, err.Error())
+				continue
+			}
+			result[lowerKey(fullKey)] = str
+			result[formatKey(fullKey)] = str
 		}
 	}
 }

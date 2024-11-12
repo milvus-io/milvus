@@ -197,9 +197,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
 	log.Debug("finish to update next targets for collection",
 		zap.Int64("collectionID", collectionID),
-		zap.Int64s("PartitionIDs", partitionIDs),
-		zap.Int64s("segments", allocatedTarget.GetAllSegmentIDs()),
-		zap.Strings("channels", allocatedTarget.GetAllDmChannelNames()))
+		zap.Int64s("PartitionIDs", partitionIDs))
 
 	return nil
 }
@@ -606,6 +604,7 @@ func (mgr *TargetManager) Recover(catalog metastore.QueryCoordCatalog) error {
 			zap.Int64("collectionID", t.GetCollectionID()),
 			zap.Strings("channels", newTarget.GetAllDmChannelNames()),
 			zap.Int("segmentNum", len(newTarget.GetAllSegmentIDs())),
+			zap.Int64("version", newTarget.GetTargetVersion()),
 		)
 
 		// clear target info in meta store
