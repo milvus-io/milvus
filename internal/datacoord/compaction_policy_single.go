@@ -47,7 +47,6 @@ func (policy *singleCompactionPolicy) Enable() bool {
 }
 
 func (policy *singleCompactionPolicy) Trigger() (map[CompactionTriggerType][]CompactionView, error) {
-	log.Info("start trigger singleCompactionPolicy...")
 	ctx := context.Background()
 	collections := policy.meta.GetCollections()
 
@@ -67,14 +66,14 @@ func (policy *singleCompactionPolicy) Trigger() (map[CompactionTriggerType][]Com
 
 func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64, manual bool) ([]CompactionView, int64, error) {
 	log := log.With(zap.Int64("collectionID", collectionID))
-	log.Info("start trigger single compaction")
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		log.Warn("fail to get collection from handler")
+		log.Warn("fail to apply singleCompactionPolicy, unable to get collection from handler",
+			zap.Error(err))
 		return nil, 0, err
 	}
 	if collection == nil {
-		log.Warn("collection not exist")
+		log.Warn("fail to apply singleCompactionPolicy, collection not exist")
 		return nil, 0, nil
 	}
 	if !isCollectionAutoCompactionEnabled(collection) {
@@ -84,7 +83,7 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 
 	newTriggerID, err := policy.allocator.AllocID(ctx)
 	if err != nil {
-		log.Warn("fail to allocate triggerID", zap.Error(err))
+		log.Warn("fail to apply singleCompactionPolicy, unable to allocate triggerID", zap.Error(err))
 		return nil, 0, err
 	}
 
@@ -106,7 +105,7 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 
 		collectionTTL, err := getCollectionTTL(collection.Properties)
 		if err != nil {
-			log.Warn("get collection ttl failed, skip to handle compaction")
+			log.Warn("failed to apply singleCompactionPolicy, get collection ttl failed")
 			return make([]CompactionView, 0), 0, err
 		}
 
@@ -124,7 +123,11 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 		}
 	}
 
-	log.Info("finish trigger single compaction", zap.Int("viewNum", len(views)))
+	if len(views) > 0 {
+		log.Info("succeeded to apply singleCompactionPolicy",
+			zap.Int64("triggerID", newTriggerID),
+			zap.Int("triggered view num", len(views)))
+	}
 	return views, newTriggerID, nil
 }
 
