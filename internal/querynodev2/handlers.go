@@ -43,7 +43,7 @@ import (
 func loadL0Segments(ctx context.Context, delegator delegator.ShardDelegator, req *querypb.WatchDmChannelsRequest) error {
 	l0Segments := make([]*querypb.SegmentLoadInfo, 0)
 	for _, channel := range req.GetInfos() {
-		for _, segmentID := range channel.GetFlushedSegmentIds() {
+		for _, segmentID := range channel.GetLevelZeroSegmentIds() {
 			segmentInfo, ok := req.GetSegmentInfos()[segmentID]
 			if !ok ||
 				segmentInfo.GetLevel() != datapb.SegmentLevel_L0 {
