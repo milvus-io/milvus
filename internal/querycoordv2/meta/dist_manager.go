@@ -48,10 +48,6 @@ func (dm *DistributionManager) GetDistributionJSON() string {
 	channels := dm.GetChannelDist()
 	leaderView := dm.GetLeaderView()
 
-	if len(segments) == 0 && len(channels) == 0 && len(leaderView) == 0 {
-		return ""
-	}
-
 	dist := &metricsinfo.QueryCoordDist{
 		Segments:    segments,
 		DMChannels:  channels,

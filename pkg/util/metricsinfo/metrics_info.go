@@ -70,6 +70,34 @@ const (
 	MilvusUsedGoVersion = "MILVUS_USED_GO_VERSION"
 )
 
+type SearchParams struct {
+	DSL          []string `json:"dsl,omitempty"`
+	SearchParams []string `json:"search_params,omitempty"`
+	NQ           []int64  `json:"nq,omitempty"`
+}
+
+type QueryParams struct {
+	SearchParams []*SearchParams `json:"search_params,omitempty"`
+	Expr         string          `json:"expr,omitempty"`
+	OutputFields string          `json:"output_fields,omitempty"`
+}
+
+type SlowQuery struct {
+	Time                  string       `json:"time,omitempty"`
+	Role                  string       `json:"role,omitempty"`
+	Database              string       `json:"database,omitempty"`
+	Collection            string       `json:"collection,omitempty"`
+	Partitions            string       `json:"partitions,omitempty"`
+	ConsistencyLevel      string       `json:"consistency_level,omitempty"`
+	UseDefaultConsistency bool         `json:"use_default_consistency,omitempty"`
+	GuaranteeTimestamp    uint64       `json:"guarantee_timestamp,omitempty"`
+	Duration              string       `json:"duration,omitempty"`
+	User                  string       `json:"user,omitempty"`
+	QueryParams           *QueryParams `json:"query_params,omitempty"`
+	Type                  string       `json:"type,omitempty"`
+	TraceID               string       `json:"trace_id,omitempty"`
+}
+
 type DmChannel struct {
 	NodeID                 int64           `json:"node_id,omitempty"`
 	Version                int64           `json:"version,omitempty"`
@@ -109,7 +137,6 @@ type Segment struct {
 	FlushedRows    int64 `json:"flushed_rows,omitempty"`
 	SyncBufferRows int64 `json:"sync_buffer_rows,omitempty"`
 	SyncingRows    int64 `json:"syncing_rows,omitempty"`
-	// TODO add checkpoints
 }
 
 type SegmentIndex struct {
@@ -127,15 +154,16 @@ type QueryCoordTarget struct {
 }
 
 type LeaderView struct {
-	LeaderID           int64      `json:"leader_id"`
-	CollectionID       int64      `json:"collection_id"`
-	Channel            string     `json:"channel"`
-	Version            int64      `json:"version"`
-	SealedSegments     []*Segment `json:"sealed_segments"`
-	GrowingSegments    []*Segment `json:"growing_segments"`
-	TargetVersion      int64      `json:"target_version"`
-	NumOfGrowingRows   int64      `json:"num_of_growing_rows"`
-	UnServiceableError string     `json:"unserviceable_error"`
+	LeaderID           int64      `json:"leader_id,omitempty"`
+	CollectionID       int64      `json:"collection_id,omitempty"`
+	NodeID             int64      `json:"node_id,omitempty"`
+	Channel            string     `json:"channel,omitempty"`
+	Version            int64      `json:"version,omitempty"`
+	SealedSegments     []*Segment `json:"sealed_segments,omitempty"`
+	GrowingSegments    []*Segment `json:"growing_segments,omitempty"`
+	TargetVersion      int64      `json:"target_version,omitempty"`
+	NumOfGrowingRows   int64      `json:"num_of_growing_rows,omitempty"`
+	UnServiceableError string     `json:"unserviceable_error,omitempty"`
 }
 
 type QueryCoordDist struct {

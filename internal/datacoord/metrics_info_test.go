@@ -325,7 +325,7 @@ func TestGetSyncTaskMetrics(t *testing.T) {
 		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
 		svr.cluster = mockCluster
 
-		expectedJSON := ""
+		expectedJSON := "null"
 		actualJSON, err := svr.getSyncTaskJSON(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, expectedJSON, actualJSON)
@@ -449,7 +449,7 @@ func TestGetSegmentsJSON(t *testing.T) {
 		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
 		svr.cluster = mockCluster
 
-		expectedJSON := ""
+		expectedJSON := "null"
 		actualJSON, err := svr.getSegmentsJSON(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, expectedJSON, actualJSON)
@@ -591,7 +591,7 @@ func TestGetChannelsJSON(t *testing.T) {
 		svr.cluster = mockCluster
 		svr.meta = &meta{channelCPs: newChannelCps()}
 
-		expectedJSON := ""
+		expectedJSON := "null"
 		actualJSON, err := svr.getChannelsJSON(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, expectedJSON, actualJSON)

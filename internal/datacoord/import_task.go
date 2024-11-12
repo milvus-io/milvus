@@ -185,7 +185,7 @@ func (p *preImportTask) MarshalJSON() ([]byte, error) {
 		NodeID:       p.GetNodeID(),
 		State:        p.GetState().String(),
 		Reason:       p.GetReason(),
-		TaskType:     "PreImportTask",
+		TaskType:     p.GetType().String(),
 		CreatedTime:  p.GetCreatedTime(),
 		CompleteTime: p.GetCompleteTime(),
 	}
@@ -231,7 +231,7 @@ func (t *importTask) MarshalJSON() ([]byte, error) {
 		NodeID:       t.GetNodeID(),
 		State:        t.GetState().String(),
 		Reason:       t.GetReason(),
-		TaskType:     "ImportTask",
+		TaskType:     t.GetType().String(),
 		CreatedTime:  t.GetCreatedTime(),
 		CompleteTime: t.GetCompleteTime(),
 	}

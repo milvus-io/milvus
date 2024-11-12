@@ -200,11 +200,16 @@ func (s *Server) registerMetricsRequest() {
 	}
 
 	QueryDistAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-		return s.targetMgr.GetTargetJSON(meta.CurrentTarget), nil
+		return s.dist.GetDistributionJSON(), nil
 	}
 
 	QueryTargetAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-		return s.dist.GetDistributionJSON(), nil
+		scope := meta.CurrentTarget
+		v := jsonReq.Get(metricsinfo.MetricRequestParamTargetScopeKey)
+		if v.Exists() {
+			scope = meta.TargetScope(v.Int())
+		}
+		return s.targetMgr.GetTargetJSON(scope), nil
 	}
 
 	QueryReplicasAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {

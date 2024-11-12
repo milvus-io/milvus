@@ -102,7 +102,7 @@ func newSegmentIndexBuildInfo() *segmentBuildInfo {
 		// build ID -> segment index
 		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
 		// build ID -> task stats
-		taskStats: expirable.NewLRU[UniqueID, *indexTaskStats](1024, nil, time.Minute*60),
+		taskStats: expirable.NewLRU[UniqueID, *indexTaskStats](64, nil, time.Minute*30),
 	}
 }
 
@@ -1075,10 +1075,6 @@ func (m *indexMeta) HasIndex(collectionID int64) bool {
 
 func (m *indexMeta) TaskStatsJSON() string {
 	tasks := m.segmentBuildInfo.GetTaskStats()
-	if len(tasks) == 0 {
-		return ""
-	}
-
 	ret, err := json.Marshal(tasks)
 	if err != nil {
 		return ""

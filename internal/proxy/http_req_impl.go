@@ -118,6 +118,20 @@ func getDependencies(c *gin.Context) {
 	c.Data(http.StatusOK, contentType, ret)
 }
 
+func getSlowQuery(node *Proxy) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		slowQueries := node.slowQueries.Values()
+		ret, err := json.Marshal(slowQueries)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+		c.Data(http.StatusOK, contentType, ret)
+	}
+}
+
 // buildReqParams fetch all parameters from query parameter of URL, add them into a map data structure.
 // put key and value from query parameter into map, concatenate values with separator if values size is greater than 1
 func buildReqParams(c *gin.Context, metricsType string) map[string]interface{} {
