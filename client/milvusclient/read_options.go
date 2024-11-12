@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"strconv"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -40,7 +41,7 @@ const (
 )
 
 type SearchOption interface {
-	Request() *milvuspb.SearchRequest
+	Request() (*milvuspb.SearchRequest, error)
 }
 
 var _ SearchOption = (*searchOption)(nil)
@@ -70,12 +71,12 @@ type annRequest struct {
 	groupByField string
 }
 
-func (opt *searchOption) Request() *milvuspb.SearchRequest {
+func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
 	// TODO check whether search is hybrid after logic merged
 	return opt.prepareSearchRequest(opt.request)
 }
 
-func (opt *searchOption) prepareSearchRequest(annRequest *annRequest) *milvuspb.SearchRequest {
+func (opt *searchOption) prepareSearchRequest(annRequest *annRequest) (*milvuspb.SearchRequest, error) {
 	request := &milvuspb.SearchRequest{
 		CollectionName:   opt.collectionName,
 		PartitionNames:   opt.partitionNames,
@@ -104,11 +105,15 @@ func (opt *searchOption) prepareSearchRequest(annRequest *annRequest) *milvuspb.
 		}
 		request.SearchParams = entity.MapKvPairs(params)
 
+		var err error
 		// placeholder group
-		request.PlaceholderGroup = vector2PlaceholderGroupBytes(annRequest.vectors)
+		request.PlaceholderGroup, err = vector2PlaceholderGroupBytes(annRequest.vectors)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return request
+	return request, nil
 }
 
 func (opt *searchOption) WithFilter(expr string) *searchOption {
@@ -159,25 +164,29 @@ func NewSearchOption(collectionName string, limit int, vectors []entity.Vector) 
 	}
 }
 
-func vector2PlaceholderGroupBytes(vectors []entity.Vector) []byte {
+func vector2PlaceholderGroupBytes(vectors []entity.Vector) ([]byte, error) {
+	phv, err := vector2Placeholder(vectors)
+	if err != nil {
+		return nil, err
+	}
 	phg := &commonpb.PlaceholderGroup{
 		Placeholders: []*commonpb.PlaceholderValue{
-			vector2Placeholder(vectors),
+			phv,
 		},
 	}
 
-	bs, _ := proto.Marshal(phg)
-	return bs
+	bs, err := proto.Marshal(phg)
+	return bs, err
 }
 
-func vector2Placeholder(vectors []entity.Vector) *commonpb.PlaceholderValue {
+func vector2Placeholder(vectors []entity.Vector) (*commonpb.PlaceholderValue, error) {
 	var placeHolderType commonpb.PlaceholderType
 	ph := &commonpb.PlaceholderValue{
 		Tag:    "$0",
 		Values: make([][]byte, 0, len(vectors)),
 	}
 	if len(vectors) == 0 {
-		return ph
+		return ph, nil
 	}
 	switch vectors[0].(type) {
 	case entity.FloatVector:
@@ -190,12 +199,16 @@ func vector2Placeholder(vectors []entity.Vector) *commonpb.PlaceholderValue {
 		placeHolderType = commonpb.PlaceholderType_Float16Vector
 	case entity.SparseEmbedding:
 		placeHolderType = commonpb.PlaceholderType_SparseFloatVector
+	case entity.Text:
+		placeHolderType = commonpb.PlaceholderType_VarChar
+	default:
+		return nil, errors.Newf("unsupported search data type: %T", vectors[0])
 	}
 	ph.Type = placeHolderType
 	for _, vector := range vectors {
 		ph.Values = append(ph.Values, vector.Serialize())
 	}
-	return ph
+	return ph, nil
 }
 
 type QueryOption interface {

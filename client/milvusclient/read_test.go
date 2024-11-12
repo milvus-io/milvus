@@ -118,11 +118,14 @@ func (s *ReadSuite) TestSearch() {
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collectionName, s.schemaDyn)
 
+		_, err := s.client.Search(ctx, NewSearchOption(collectionName, 10, []entity.Vector{nonSupportData{}}))
+		s.Error(err)
+
 		s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			return nil, merr.WrapErrServiceInternal("mocked")
 		}).Once()
 
-		_, err := s.client.Search(ctx, NewSearchOption(collectionName, 10, []entity.Vector{
+		_, err = s.client.Search(ctx, NewSearchOption(collectionName, 10, []entity.Vector{
 			entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 				return rand.Float32()
 			})),

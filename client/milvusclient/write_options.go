@@ -109,14 +109,15 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 		}
 	}
 
-	// check all fixed field pass value
-	for _, field := range colSchema.Fields {
-		_, has := mNameColumn[field.Name]
-		if !has &&
-			!field.AutoID && !field.IsDynamic {
-			return nil, 0, fmt.Errorf("field %s not passed", field.Name)
-		}
-	}
+	// missing field shall be checked in server side
+	// // check all fixed field pass value
+	// for _, field := range colSchema.Fields {
+	// 	_, has := mNameColumn[field.Name]
+	// 	if !has &&
+	// 		!field.AutoID && !field.IsDynamic {
+	// 		return nil, 0, fmt.Errorf("field %s not passed", field.Name)
+	// 	}
+	// }
 
 	fieldsData := make([]*schemapb.FieldData, 0, len(mNameColumn)+1)
 	for _, fixedColumn := range mNameColumn {
