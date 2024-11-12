@@ -465,7 +465,7 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Key:          "metastore.type",
 		Version:      "2.2.0",
 		DefaultValue: util.MetaStoreTypeEtcd,
-		Doc:          `Default value: etcd, Valid values: [etcd, tikv] `,
+		Doc:          `Default value: etcd, Valid values: [etcd, tikv]`,
 		Export:       true,
 	}
 	p.MetaStoreType.Init(base.mgr)
