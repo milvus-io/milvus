@@ -6,7 +6,7 @@ grpc_gevent.init_gevent()
 
 from locust import User, events, task, constant_throughput, tag
 from locust.runners import MasterRunner, WorkerRunner
-from pymilvus import (connections, Collection, FieldSchema, CollectionSchema, DataType, FunctionType,
+from pymilvus import (connections, Collection, FieldSchema, CollectionSchema, DataType, FunctionType, list_collections,
                       Function)
 import numpy as np
 import time
@@ -91,17 +91,21 @@ def on_test_start(environment, **_kwargs):
 
 def wait_for_setup(environment):
     """等待setup完成"""
-    timeout = 30  #
+    timeout = 60
     connections.connect(uri=environment.host)
-    collection = Collection(environment.parsed_options.milvus_collection)
-    is_loaded = len(collection.get_replicas().groups) > 0
+    is_loaded = False
     start_time = time.time()
 
     while not is_loaded:
         if time.time() - start_time > timeout:
             raise Exception("Timeout waiting for collection setup")
         time.sleep(1)
-        is_loaded = len(collection.get_replicas().groups) > 0
+        try:
+            collection = Collection(environment.parsed_options.milvus_collection)
+            is_loaded = len(collection.get_replicas().groups) > 0
+        except Exception as e:
+            logger.error(f"Error checking collection: {str(e)}")
+            is_loaded = False
     logger.info("Setup confirmed completed")
 
 
@@ -177,8 +181,20 @@ class MilvusORMClient:
         logger.debug("Initializing MilvusORMClient")
         self.request_type = "ORM"
         self.collection_name = environment.parsed_options.milvus_collection
+        self.wait_collection_ready()
         self.collection = Collection(self.collection_name)
         self.sleep_time = 1
+
+    def wait_collection_ready(self):
+        """等待collection准备就绪"""
+        timeout = 60
+        start_time = time.time()
+        is_ready = self.collection_name in list_collections()
+        while not is_ready:
+            if time.time() - start_time > timeout:
+                raise Exception("Timeout waiting for collection to be ready")
+            time.sleep(1)
+            is_ready = self.collection_name in list_collections()
 
     def insert(self, data):
         start = time.time()
