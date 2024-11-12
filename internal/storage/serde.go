@@ -24,10 +24,12 @@ import (
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
+	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/apache/arrow/go/v12/parquet/compress"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
-	"go.uber.org/atomic"
+	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -40,6 +42,7 @@ type Record interface {
 	Column(i FieldID) arrow.Array
 	Len() int
 	Release()
+	Slice(start, end int) Record
 }
 
 type RecordReader interface {
@@ -50,11 +53,12 @@ type RecordReader interface {
 
 type RecordWriter interface {
 	Write(r Record) error
+	GetWrittenUncompressed() uint64
 	Close()
 }
 
 type (
-	Serializer[T any]   func([]T) (Record, uint64, error)
+	Serializer[T any]   func([]T) (Record, error)
 	Deserializer[T any] func(Record, []T) error
 )
 
@@ -63,6 +67,8 @@ type compositeRecord struct {
 	recs   map[FieldID]arrow.Record
 	schema map[FieldID]schemapb.DataType
 }
+
+var _ Record = (*compositeRecord)(nil)
 
 func (r *compositeRecord) Column(i FieldID) arrow.Array {
 	return r.recs[i].Column(0)
@@ -91,6 +97,17 @@ func (r *compositeRecord) ArrowSchema() *arrow.Schema {
 		fields = append(fields, rec.Schema().Field(0))
 	}
 	return arrow.NewSchema(fields, nil)
+}
+
+func (r *compositeRecord) Slice(start, end int) Record {
+	slices := make(map[FieldID]arrow.Record)
+	for i, rec := range r.recs {
+		slices[i] = rec.NewSlice(int64(start), int64(end))
+	}
+	return &compositeRecord{
+		recs:   slices,
+		schema: r.schema,
+	}
 }
 
 type serdeEntry struct {
@@ -527,6 +544,17 @@ func (deser *DeserializeReader[T]) Next() error {
 	return nil
 }
 
+func (deser *DeserializeReader[T]) NextRecord() (Record, error) {
+	if len(deser.values) != 0 {
+		return nil, errors.New("deserialize result is not empty")
+	}
+
+	if err := deser.rr.Next(); err != nil {
+		return nil, err
+	}
+	return deser.rr.Record(), nil
+}
+
 func (deser *DeserializeReader[T]) Value() T {
 	return deser.values[deser.pos]
 }
@@ -580,6 +608,22 @@ func (r *selectiveRecord) Release() {
 	// do nothing.
 }
 
+func (r *selectiveRecord) Slice(start, end int) Record {
+	panic("not implemented")
+}
+
+func calculateArraySize(a arrow.Array) int {
+	if a == nil || a.Data() == nil || a.Data().Buffers() == nil {
+		return 0
+	}
+	return lo.SumBy[*memory.Buffer, int](a.Data().Buffers(), func(b *memory.Buffer) int {
+		if b == nil {
+			return 0
+		}
+		return b.Len()
+	})
+}
+
 func newSelectiveRecord(r Record, selectedFieldId FieldID) *selectiveRecord {
 	dt, ok := r.Schema()[selectedFieldId]
 	if !ok {
@@ -594,16 +638,29 @@ func newSelectiveRecord(r Record, selectedFieldId FieldID) *selectiveRecord {
 	}
 }
 
-var _ RecordWriter = (*compositeRecordWriter)(nil)
+var _ RecordWriter = (*CompositeRecordWriter)(nil)
 
-type compositeRecordWriter struct {
+type CompositeRecordWriter struct {
 	writers map[FieldID]RecordWriter
+
+	writtenUncompressed uint64
 }
 
-func (crw *compositeRecordWriter) Write(r Record) error {
+func (crw *CompositeRecordWriter) GetWrittenUncompressed() uint64 {
+	return crw.writtenUncompressed
+}
+
+func (crw *CompositeRecordWriter) Write(r Record) error {
 	if len(r.Schema()) != len(crw.writers) {
 		return fmt.Errorf("schema length mismatch %d, expected %d", len(r.Schema()), len(crw.writers))
 	}
+
+	var bytes uint64
+	for fid := range r.Schema() {
+		arr := r.Column(fid)
+		bytes += uint64(calculateArraySize(arr))
+	}
+	crw.writtenUncompressed += bytes
 	for fieldId, w := range crw.writers {
 		sr := newSelectiveRecord(r, fieldId)
 		if err := w.Write(sr); err != nil {
@@ -613,7 +670,7 @@ func (crw *compositeRecordWriter) Write(r Record) error {
 	return nil
 }
 
-func (crw *compositeRecordWriter) Close() {
+func (crw *CompositeRecordWriter) Close() {
 	if crw != nil {
 		for _, w := range crw.writers {
 			if w != nil {
@@ -623,8 +680,8 @@ func (crw *compositeRecordWriter) Close() {
 	}
 }
 
-func newCompositeRecordWriter(writers map[FieldID]RecordWriter) *compositeRecordWriter {
-	return &compositeRecordWriter{
+func NewCompositeRecordWriter(writers map[FieldID]RecordWriter) *CompositeRecordWriter {
+	return &CompositeRecordWriter{
 		writers: writers,
 	}
 }
@@ -640,20 +697,27 @@ func WithRecordWriterProps(writerProps *parquet.WriterProperties) RecordWriterOp
 }
 
 type singleFieldRecordWriter struct {
-	fw      *pqarrow.FileWriter
-	fieldId FieldID
-	schema  *arrow.Schema
-
-	numRows     int
+	fw          *pqarrow.FileWriter
+	fieldId     FieldID
+	schema      *arrow.Schema
 	writerProps *parquet.WriterProperties
+
+	numRows             int
+	writtenUncompressed uint64
 }
 
 func (sfw *singleFieldRecordWriter) Write(r Record) error {
 	sfw.numRows += r.Len()
 	a := r.Column(sfw.fieldId)
+
+	sfw.writtenUncompressed += uint64(calculateArraySize(a))
 	rec := array.NewRecord(sfw.schema, []arrow.Array{a}, int64(r.Len()))
 	defer rec.Release()
 	return sfw.fw.WriteBuffered(rec)
+}
+
+func (sfw *singleFieldRecordWriter) GetWrittenUncompressed() uint64 {
+	return sfw.writtenUncompressed
 }
 
 func (sfw *singleFieldRecordWriter) Close() {
@@ -687,7 +751,8 @@ type multiFieldRecordWriter struct {
 	fieldIds []FieldID
 	schema   *arrow.Schema
 
-	numRows int
+	numRows             int
+	writtenUncompressed uint64
 }
 
 func (mfw *multiFieldRecordWriter) Write(r Record) error {
@@ -695,10 +760,15 @@ func (mfw *multiFieldRecordWriter) Write(r Record) error {
 	columns := make([]arrow.Array, len(mfw.fieldIds))
 	for i, fieldId := range mfw.fieldIds {
 		columns[i] = r.Column(fieldId)
+		mfw.writtenUncompressed += uint64(calculateArraySize(columns[i]))
 	}
 	rec := array.NewRecord(mfw.schema, columns, int64(r.Len()))
 	defer rec.Release()
 	return mfw.fw.WriteBuffered(rec)
+}
+
+func (mfw *multiFieldRecordWriter) GetWrittenUncompressed() uint64 {
+	return mfw.writtenUncompressed
 }
 
 func (mfw *multiFieldRecordWriter) Close() {
@@ -726,9 +796,8 @@ type SerializeWriter[T any] struct {
 	batchSize  int
 	mu         sync.Mutex
 
-	buffer            []T
-	pos               int
-	writtenMemorySize atomic.Uint64
+	buffer []T
+	pos    int
 }
 
 func (sw *SerializeWriter[T]) Flush() error {
@@ -738,7 +807,7 @@ func (sw *SerializeWriter[T]) Flush() error {
 		return nil
 	}
 	buf := sw.buffer[:sw.pos]
-	r, size, err := sw.serializer(buf)
+	r, err := sw.serializer(buf)
 	if err != nil {
 		return err
 	}
@@ -747,7 +816,6 @@ func (sw *SerializeWriter[T]) Flush() error {
 		return err
 	}
 	sw.pos = 0
-	sw.writtenMemorySize.Add(size)
 	return nil
 }
 
@@ -765,8 +833,24 @@ func (sw *SerializeWriter[T]) Write(value T) error {
 	return nil
 }
 
+func (sw *SerializeWriter[T]) WriteRecord(r Record) error {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	if len(sw.buffer) != 0 {
+		return errors.New("serialize buffer is not empty")
+	}
+
+	if err := sw.rw.Write(r); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (sw *SerializeWriter[T]) WrittenMemorySize() uint64 {
-	return sw.writtenMemorySize.Load()
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.rw.GetWrittenUncompressed()
 }
 
 func (sw *SerializeWriter[T]) Close() error {
@@ -786,13 +870,13 @@ func NewSerializeRecordWriter[T any](rw RecordWriter, serializer Serializer[T], 
 }
 
 type simpleArrowRecord struct {
-	Record
-
 	r      arrow.Record
 	schema map[FieldID]schemapb.DataType
 
 	field2Col map[FieldID]int
 }
+
+var _ Record = (*simpleArrowRecord)(nil)
 
 func (sr *simpleArrowRecord) Schema() map[FieldID]schemapb.DataType {
 	return sr.schema
@@ -816,6 +900,11 @@ func (sr *simpleArrowRecord) Release() {
 
 func (sr *simpleArrowRecord) ArrowSchema() *arrow.Schema {
 	return sr.r.Schema()
+}
+
+func (sr *simpleArrowRecord) Slice(start, end int) Record {
+	s := sr.r.NewSlice(int64(start), int64(end))
+	return newSimpleArrowRecord(s, sr.schema, sr.field2Col)
 }
 
 func newSimpleArrowRecord(r arrow.Record, schema map[FieldID]schemapb.DataType, field2Col map[FieldID]int) *simpleArrowRecord {

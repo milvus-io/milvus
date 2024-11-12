@@ -365,6 +365,15 @@ func TestProxy(t *testing.T) {
 	var err error
 	var wg sync.WaitGroup
 	paramtable.Init()
+	params := paramtable.Get()
+	params.RootCoordGrpcServerCfg.IP = "localhost"
+	params.QueryCoordGrpcServerCfg.IP = "localhost"
+	params.DataCoordGrpcServerCfg.IP = "localhost"
+	params.ProxyGrpcServerCfg.IP = "localhost"
+	params.QueryNodeGrpcServerCfg.IP = "localhost"
+	params.DataNodeGrpcServerCfg.IP = "localhost"
+	params.IndexNodeGrpcServerCfg.IP = "localhost"
+	params.StreamingNodeGrpcServerCfg.IP = "localhost"
 
 	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
 	t.Setenv("ROCKSMQ_PATH", path)

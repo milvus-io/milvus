@@ -23,6 +23,7 @@ import (
 )
 
 type LBBalancer interface {
+	RegisterNodeInfo(nodeInfos []nodeInfo)
 	SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error)
 	CancelWorkload(node int64, nq int64)
 	UpdateCostMetrics(node int64, cost *internalpb.CostAggregation)

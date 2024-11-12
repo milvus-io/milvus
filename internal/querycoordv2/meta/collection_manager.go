@@ -169,9 +169,11 @@ func (m *CollectionManager) Recover(broker Broker) error {
 			}
 		}
 
-		m.collections[collection.CollectionID] = &Collection{
+		// update collection's CreateAt and UpdateAt to now after qc restart
+		m.putCollection(false, &Collection{
 			CollectionLoadInfo: collection,
-		}
+			CreatedAt:          time.Now(),
+		})
 	}
 
 	for collection, partitions := range partitions {
@@ -187,13 +189,19 @@ func (m *CollectionManager) Recover(broker Broker) error {
 				}
 
 				partition.RecoverTimes += 1
-				m.putPartition([]*Partition{{PartitionLoadInfo: partition}}, true)
+				m.putPartition([]*Partition{
+					{
+						PartitionLoadInfo: partition,
+						CreatedAt:         time.Now(),
+					},
+				}, true)
 				continue
 			}
 
 			m.putPartition([]*Partition{
 				{
 					PartitionLoadInfo: partition,
+					CreatedAt:         time.Now(),
 				},
 			}, false)
 		}

@@ -17,9 +17,7 @@
 package config
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -27,7 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"gopkg.in/yaml.v3"
+	"gopkg.in/yaml.v2"
 
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -131,7 +129,7 @@ func (fs *FileSource) loadFromFile() error {
 		}
 
 		ext := filepath.Ext(configFile)
-		if len(ext) == 0 || ext[1:] != "yaml" {
+		if len(ext) == 0 || (ext[1:] != "yaml" && ext[1:] != "yml") {
 			return fmt.Errorf("Unsupported Config Type: " + ext)
 		}
 
@@ -140,26 +138,13 @@ func (fs *FileSource) loadFromFile() error {
 			return errors.Wrap(err, "Read config failed: "+configFile)
 		}
 
-		// handle empty file
-		if len(data) == 0 {
-			continue
+		var config map[string]interface{}
+		err = yaml.Unmarshal(data, &config)
+		if err != nil {
+			return errors.Wrap(err, "unmarshal yaml file "+configFile+" failed")
 		}
 
-		var node yaml.Node
-		decoder := yaml.NewDecoder(bytes.NewReader(data))
-		if err := decoder.Decode(&node); err != nil && !errors.Is(err, io.EOF) {
-			return errors.Wrap(err, "YAML unmarshal failed: "+configFile)
-		}
-
-		if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
-			// Get the content of the Document Node
-			contentNode := node.Content[0]
-
-			// Recursively process the content of the Document Node
-			flattenNode(contentNode, "", newConfig)
-		} else if node.Kind == yaml.MappingNode {
-			flattenNode(&node, "", newConfig)
-		}
+		flattenAndMergeMap("", config, newConfig)
 	}
 
 	return fs.update(newConfig)

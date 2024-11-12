@@ -337,16 +337,6 @@ func (s *Server) initQueryCoord() error {
 	s.proxyWatcher.DelSessionFunc(s.proxyClientManager.DelProxyClient)
 	log.Info("init proxy manager done")
 
-	// Init heartbeat
-	log.Info("init dist controller")
-	s.distController = dist.NewDistController(
-		s.cluster,
-		s.nodeMgr,
-		s.dist,
-		s.targetMgr,
-		s.taskScheduler,
-	)
-
 	// Init checker controller
 	log.Info("init checker controller")
 	s.getBalancerFunc = func() balance.Balance {
@@ -391,6 +381,20 @@ func (s *Server) initQueryCoord() error {
 
 	// Init observers
 	s.initObserver()
+
+	// Init heartbeat
+	syncTargetVersionFn := func(collectionID int64) {
+		s.targetObserver.TriggerUpdateCurrentTarget(collectionID)
+	}
+	log.Info("init dist controller")
+	s.distController = dist.NewDistController(
+		s.cluster,
+		s.nodeMgr,
+		s.dist,
+		s.targetMgr,
+		s.taskScheduler,
+		syncTargetVersionFn,
+	)
 
 	// Init load status cache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
@@ -460,6 +464,7 @@ func (s *Server) initObserver() {
 		s.dist,
 		s.broker,
 		s.cluster,
+		s.nodeMgr,
 	)
 	s.collectionObserver = observers.NewCollectionObserver(
 		s.dist,
@@ -507,6 +512,7 @@ func (s *Server) startQueryCoord() error {
 			Address:  node.Address,
 			Hostname: node.HostName,
 			Version:  node.Version,
+			Labels:   node.GetServerLabel(),
 		}))
 		s.taskScheduler.AddExecutor(node.ServerID)
 
@@ -745,6 +751,7 @@ func (s *Server) watchNodes(revision int64) {
 					Address:  addr,
 					Hostname: event.Session.HostName,
 					Version:  event.Session.Version,
+					Labels:   event.Session.GetServerLabel(),
 				}))
 				s.nodeUpEventChan <- nodeID
 				select {

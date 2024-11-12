@@ -6,10 +6,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 )
 
-var _ Task = &QueryStreamTask{}
+var _ scheduler.Task = &QueryStreamTask{}
 
 func NewQueryStreamTask(ctx context.Context,
 	collection *segments.Collection,

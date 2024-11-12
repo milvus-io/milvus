@@ -744,6 +744,65 @@ func (_c *RootCoord_CreatePartition_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// CreatePrivilegeGroup provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) CreatePrivilegeGroup(_a0 context.Context, _a1 *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreatePrivilegeGroup")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePrivilegeGroupRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreatePrivilegeGroupRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_CreatePrivilegeGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreatePrivilegeGroup'
+type RootCoord_CreatePrivilegeGroup_Call struct {
+	*mock.Call
+}
+
+// CreatePrivilegeGroup is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreatePrivilegeGroupRequest
+func (_e *RootCoord_Expecter) CreatePrivilegeGroup(_a0 interface{}, _a1 interface{}) *RootCoord_CreatePrivilegeGroup_Call {
+	return &RootCoord_CreatePrivilegeGroup_Call{Call: _e.mock.On("CreatePrivilegeGroup", _a0, _a1)}
+}
+
+func (_c *RootCoord_CreatePrivilegeGroup_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreatePrivilegeGroupRequest)) *RootCoord_CreatePrivilegeGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreatePrivilegeGroupRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_CreatePrivilegeGroup_Call) Return(_a0 *commonpb.Status, _a1 error) *RootCoord_CreatePrivilegeGroup_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoord_CreatePrivilegeGroup_Call) RunAndReturn(run func(context.Context, *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error)) *RootCoord_CreatePrivilegeGroup_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateRole provides a mock function with given fields: _a0, _a1
 func (_m *RootCoord) CreateRole(_a0 context.Context, _a1 *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1330,6 +1389,65 @@ func (_c *RootCoord_DropPartition_Call) Return(_a0 *commonpb.Status, _a1 error) 
 }
 
 func (_c *RootCoord_DropPartition_Call) RunAndReturn(run func(context.Context, *milvuspb.DropPartitionRequest) (*commonpb.Status, error)) *RootCoord_DropPartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropPrivilegeGroup provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) DropPrivilegeGroup(_a0 context.Context, _a1 *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropPrivilegeGroup")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropPrivilegeGroupRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropPrivilegeGroupRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_DropPrivilegeGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropPrivilegeGroup'
+type RootCoord_DropPrivilegeGroup_Call struct {
+	*mock.Call
+}
+
+// DropPrivilegeGroup is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropPrivilegeGroupRequest
+func (_e *RootCoord_Expecter) DropPrivilegeGroup(_a0 interface{}, _a1 interface{}) *RootCoord_DropPrivilegeGroup_Call {
+	return &RootCoord_DropPrivilegeGroup_Call{Call: _e.mock.On("DropPrivilegeGroup", _a0, _a1)}
+}
+
+func (_c *RootCoord_DropPrivilegeGroup_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropPrivilegeGroupRequest)) *RootCoord_DropPrivilegeGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DropPrivilegeGroupRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_DropPrivilegeGroup_Call) Return(_a0 *commonpb.Status, _a1 error) *RootCoord_DropPrivilegeGroup_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoord_DropPrivilegeGroup_Call) RunAndReturn(run func(context.Context, *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error)) *RootCoord_DropPrivilegeGroup_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2205,6 +2323,65 @@ func (_c *RootCoord_ListPolicy_Call) RunAndReturn(run func(context.Context, *int
 	return _c
 }
 
+// ListPrivilegeGroups provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) ListPrivilegeGroups(_a0 context.Context, _a1 *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListPrivilegeGroups")
+	}
+
+	var r0 *milvuspb.ListPrivilegeGroupsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListPrivilegeGroupsRequest) *milvuspb.ListPrivilegeGroupsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListPrivilegeGroupsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListPrivilegeGroupsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_ListPrivilegeGroups_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListPrivilegeGroups'
+type RootCoord_ListPrivilegeGroups_Call struct {
+	*mock.Call
+}
+
+// ListPrivilegeGroups is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListPrivilegeGroupsRequest
+func (_e *RootCoord_Expecter) ListPrivilegeGroups(_a0 interface{}, _a1 interface{}) *RootCoord_ListPrivilegeGroups_Call {
+	return &RootCoord_ListPrivilegeGroups_Call{Call: _e.mock.On("ListPrivilegeGroups", _a0, _a1)}
+}
+
+func (_c *RootCoord_ListPrivilegeGroups_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListPrivilegeGroupsRequest)) *RootCoord_ListPrivilegeGroups_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListPrivilegeGroupsRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_ListPrivilegeGroups_Call) Return(_a0 *milvuspb.ListPrivilegeGroupsResponse, _a1 error) *RootCoord_ListPrivilegeGroups_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoord_ListPrivilegeGroups_Call) RunAndReturn(run func(context.Context, *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error)) *RootCoord_ListPrivilegeGroups_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // OperatePrivilege provides a mock function with given fields: _a0, _a1
 func (_m *RootCoord) OperatePrivilege(_a0 context.Context, _a1 *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -2260,6 +2437,65 @@ func (_c *RootCoord_OperatePrivilege_Call) Return(_a0 *commonpb.Status, _a1 erro
 }
 
 func (_c *RootCoord_OperatePrivilege_Call) RunAndReturn(run func(context.Context, *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error)) *RootCoord_OperatePrivilege_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// OperatePrivilegeGroup provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) OperatePrivilegeGroup(_a0 context.Context, _a1 *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for OperatePrivilegeGroup")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperatePrivilegeGroupRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.OperatePrivilegeGroupRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_OperatePrivilegeGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'OperatePrivilegeGroup'
+type RootCoord_OperatePrivilegeGroup_Call struct {
+	*mock.Call
+}
+
+// OperatePrivilegeGroup is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.OperatePrivilegeGroupRequest
+func (_e *RootCoord_Expecter) OperatePrivilegeGroup(_a0 interface{}, _a1 interface{}) *RootCoord_OperatePrivilegeGroup_Call {
+	return &RootCoord_OperatePrivilegeGroup_Call{Call: _e.mock.On("OperatePrivilegeGroup", _a0, _a1)}
+}
+
+func (_c *RootCoord_OperatePrivilegeGroup_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.OperatePrivilegeGroupRequest)) *RootCoord_OperatePrivilegeGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.OperatePrivilegeGroupRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_OperatePrivilegeGroup_Call) Return(_a0 *commonpb.Status, _a1 error) *RootCoord_OperatePrivilegeGroup_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoord_OperatePrivilegeGroup_Call) RunAndReturn(run func(context.Context, *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error)) *RootCoord_OperatePrivilegeGroup_Call {
 	_c.Call.Return(run)
 	return _c
 }

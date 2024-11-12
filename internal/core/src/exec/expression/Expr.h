@@ -363,14 +363,10 @@ class SegmentExpr : public Expr {
                     if (segment_->type() == SegmentType::Sealed) {
                         // first is the raw data, second is valid_data
                         // use valid_data to see if raw data is null
-                        auto data_vec = segment_
-                                            ->get_batch_views<T>(
-                                                field_id_, i, data_pos, size)
-                                            .first;
-                        auto valid_data = segment_
-                                              ->get_batch_views<T>(
-                                                  field_id_, i, data_pos, size)
-                                              .second;
+                        auto fetched_data = segment_->get_batch_views<T>(
+                            field_id_, i, data_pos, size);
+                        auto data_vec = fetched_data.first;
+                        auto valid_data = fetched_data.second;
                         func(data_vec.data(),
                              valid_data.data(),
                              size,

@@ -17,14 +17,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-func ValidateTextSchema(fieldSchema *schemapb.FieldSchema) error {
+func ValidateTextSchema(fieldSchema *schemapb.FieldSchema, EnableBM25 bool) error {
 	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
-	if !h.EnableMatch() {
+	if !h.EnableMatch() && !EnableBM25 {
 		return nil
 	}
 
-	if !h.EnableTokenizer() {
-		return fmt.Errorf("field %s is set to enable match but not enable tokenizer", fieldSchema.Name)
+	if !h.EnableAnalyzer() {
+		return fmt.Errorf("field %s is set to enable match or bm25 function but not enable analyzer", fieldSchema.Name)
 	}
 
 	bs, err := proto.Marshal(fieldSchema)

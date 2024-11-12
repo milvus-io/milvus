@@ -55,6 +55,36 @@ func (s *MiniClusterSuite) WaitForLoad(ctx context.Context, collection string) {
 	s.waitForLoadInternal(ctx, "", collection)
 }
 
+func (s *MiniClusterSuite) WaitForSortedSegmentLoaded(ctx context.Context, dbName, collection string) {
+	cluster := s.Cluster
+	getSegmentsSorted := func() bool {
+		querySegmentInfo, err := cluster.Proxy.GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{
+			DbName:         dbName,
+			CollectionName: collection,
+		})
+		if err != nil {
+			panic("GetQuerySegmentInfo fail")
+		}
+
+		for _, info := range querySegmentInfo.GetInfos() {
+			if !info.GetIsSorted() {
+				return false
+			}
+		}
+		return true
+	}
+
+	for !getSegmentsSorted() {
+		select {
+		case <-ctx.Done():
+			s.FailNow("failed to wait for get segments sorted")
+			return
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+}
+
 func (s *MiniClusterSuite) waitForLoadInternal(ctx context.Context, dbName, collection string) {
 	cluster := s.Cluster
 	getLoadingProgress := func() *milvuspb.GetLoadingProgressResponse {

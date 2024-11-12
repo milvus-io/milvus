@@ -16,7 +16,7 @@ func TestValidateEmptyTextSchema(t *testing.T) {
 		DataType:   schemapb.DataType_VarChar,
 		TypeParams: []*commonpb.KeyValuePair{},
 	}
-	assert.Nil(t, ValidateTextSchema(fs))
+	assert.Nil(t, ValidateTextSchema(fs, false))
 }
 
 func TestValidateTextSchema(t *testing.T) {
@@ -33,7 +33,7 @@ func TestValidateTextSchema(t *testing.T) {
 			DataType: schemapb.DataType_VarChar,
 			TypeParams: []*commonpb.KeyValuePair{
 				{Key: "enable_match", Value: "true"},
-				{Key: "tokenizer_params", Value: `{"tokenizer": "standard"}`},
+				{Key: "analyzer_params", Value: `{"tokenizer": "standard"}`},
 			},
 		},
 		{
@@ -41,32 +41,32 @@ func TestValidateTextSchema(t *testing.T) {
 			DataType: schemapb.DataType_VarChar,
 			TypeParams: []*commonpb.KeyValuePair{
 				{Key: "enable_match", Value: "true"},
-				{Key: "tokenizer_params", Value: `{"tokenizer": "standard"}`},
+				{Key: "analyzer_params", Value: `{"tokenizer": "standard"}`},
 			},
 		},
 	}
 
 	for idx, tt := range tests {
-		t.Run(fmt.Sprintf("enable_tokenizer not set %d", idx), func(t *testing.T) {
-			err := ValidateTextSchema(tt)
+		t.Run(fmt.Sprintf("enable_analyzer not set %d", idx), func(t *testing.T) {
+			err := ValidateTextSchema(tt, false)
 			assert.NotNil(t, err)
 		})
 	}
 
 	for idx, tt := range tests {
-		t.Run(fmt.Sprintf("enable_tokenizer set to false %d", idx), func(t *testing.T) {
+		t.Run(fmt.Sprintf("enable_analyzer set to false %d", idx), func(t *testing.T) {
 			tt.TypeParams = append(tt.TypeParams, &commonpb.KeyValuePair{
-				Key:   "enable_tokenizer",
+				Key:   "enable_analyzer",
 				Value: "false",
 			})
-			err := ValidateTextSchema(tt)
+			err := ValidateTextSchema(tt, false)
 			assert.NotNil(t, err)
 		})
 	}
 	for idx, tt := range tests {
-		t.Run(fmt.Sprintf("enable_tokenizer set to true %d", idx), func(t *testing.T) {
+		t.Run(fmt.Sprintf("enable_analyzer set to true %d", idx), func(t *testing.T) {
 			tt.TypeParams[len(tt.TypeParams)-1].Value = "true"
-			err := ValidateTextSchema(tt)
+			err := ValidateTextSchema(tt, false)
 			assert.Nil(t, err)
 		})
 	}

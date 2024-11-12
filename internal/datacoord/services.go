@@ -553,6 +553,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths()),
 		UpdateStartPosition(req.GetStartPositions()),
 		UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()),
+		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 	)
 
 	// Update segment info in memory and meta.
@@ -951,6 +952,12 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 
 	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, collection.Schema, 0) // TODO: remove RWChannel, just use vchannel + collectionID
 	channelInfo := s.handler.GetDataVChanPositions(channel, allPartitionID)
+	if channelInfo.SeekPosition == nil {
+		log.Warn("channel recovery start position is not found, may collection is on creating")
+		resp.Status = merr.Status(merr.WrapErrChannelNotAvailable(req.GetVchannel(), "start position is nil"))
+		return resp, nil
+	}
+
 	log.Info("datacoord get channel recovery info",
 		zap.String("channel", channelInfo.GetChannelName()),
 		zap.Int("# of unflushed segments", len(channelInfo.GetUnflushedSegmentIds())),

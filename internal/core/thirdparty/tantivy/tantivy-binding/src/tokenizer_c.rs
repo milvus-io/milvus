@@ -9,9 +9,9 @@ use crate::{
 };
 
 #[no_mangle]
-pub extern "C" fn tantivy_create_tokenizer(tokenizer_params: *const c_char) -> *mut c_void {
+pub extern "C" fn tantivy_create_tokenizer(analyzer_params: *const c_char) -> *mut c_void {
     init_log();
-    let params = unsafe{c_str_to_str(tokenizer_params).to_string()};
+    let params = unsafe{c_str_to_str(analyzer_params).to_string()};
     let analyzer = create_tokenizer(&params);
     match analyzer {
         Ok(text_analyzer) => create_binding(text_analyzer),

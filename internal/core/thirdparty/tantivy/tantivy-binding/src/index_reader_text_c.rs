@@ -24,12 +24,12 @@ pub extern "C" fn tantivy_match_query(ptr: *mut c_void, query: *const c_char) ->
 pub extern "C" fn tantivy_register_tokenizer(
     ptr: *mut c_void,
     tokenizer_name: *const c_char,
-    tokenizer_params: *const c_char,
+    analyzer_params: *const c_char,
 ) {
     init_log();
     let real = ptr as *mut IndexReaderWrapper;
     let tokenizer_name_str = unsafe { CStr::from_ptr(tokenizer_name) };
-    let params = unsafe{c_str_to_str(tokenizer_params).to_string()};
+    let params = unsafe{c_str_to_str(analyzer_params).to_string()};
     let analyzer = create_tokenizer(&params);
     match analyzer {
         Ok(text_analyzer) => unsafe {

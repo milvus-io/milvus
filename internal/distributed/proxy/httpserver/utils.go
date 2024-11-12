@@ -1510,6 +1510,18 @@ func convertToExtraParams(indexParam IndexParam) ([]*commonpb.KeyValuePair, erro
 	return params, nil
 }
 
+func getElementTypeParams(param interface{}) (string, error) {
+	if str, ok := param.(string); ok {
+		return str, nil
+	}
+
+	jsonBytes, err := json.Marshal(param)
+	if err != nil {
+		return "", err
+	}
+	return string(jsonBytes), nil
+}
+
 func MetricsHandlerFunc(c *gin.Context) {
 	path := c.Request.URL.Path
 	metrics.RestfulFunctionCall.WithLabelValues(

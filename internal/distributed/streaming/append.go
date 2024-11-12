@@ -34,11 +34,16 @@ func (w *walAccesserImpl) getProducer(pchannel string) *producer.ResumableProduc
 	return p
 }
 
-// assertNoSystemMessage asserts the message is not system message.
-func assertNoSystemMessage(msgs ...message.MutableMessage) {
+// assertValidMessage asserts the message is not system message.
+func assertValidMessage(msgs ...message.MutableMessage) {
 	for _, msg := range msgs {
 		if msg.MessageType().IsSystem() {
 			panic("system message is not allowed to append from client")
+		}
+	}
+	for _, msg := range msgs {
+		if msg.VChannel() == "" {
+			panic("vchannel is empty")
 		}
 	}
 }

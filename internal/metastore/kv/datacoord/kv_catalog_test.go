@@ -533,7 +533,7 @@ func Test_DropSegment(t *testing.T) {
 		deltalogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentDeltalogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
 		statelogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentStatslogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
 
-		assert.Equal(t, 4, len(removedKvs))
+		assert.Equal(t, 5, len(removedKvs))
 		for _, k := range []string{segKey, binlogPreix, deltalogPreix, statelogPreix} {
 			_, ok := removedKvs[k]
 			assert.True(t, ok)
