@@ -79,6 +79,7 @@ type TargetObserver struct {
 	distMgr   *meta.DistributionManager
 	broker    meta.Broker
 	cluster   session.Cluster
+	nodeMgr   *session.NodeManager
 
 	initChan chan initRequest
 	// nextTargetLastUpdate map[int64]time.Time
@@ -100,6 +101,7 @@ func NewTargetObserver(
 	distMgr *meta.DistributionManager,
 	broker meta.Broker,
 	cluster session.Cluster,
+	nodeMgr *session.NodeManager,
 ) *TargetObserver {
 	result := &TargetObserver{
 		meta:                 meta,
@@ -107,6 +109,7 @@ func NewTargetObserver(
 		distMgr:              distMgr,
 		broker:               broker,
 		cluster:              cluster,
+		nodeMgr:              nodeMgr,
 		nextTargetLastUpdate: typeutil.NewConcurrentMap[int64, time.Time](),
 		updateChan:           make(chan targetUpdateRequest, 10),
 		readyNotifiers:       make(map[int64][]chan struct{}),
@@ -220,6 +223,10 @@ func (ob *TargetObserver) Check(ctx context.Context, collectionID int64, partiti
 		ob.dispatcher.AddTask(collectionID)
 	}
 	return result
+}
+
+func (ob *TargetObserver) TriggerUpdateCurrentTarget(collectionID int64) {
+	ob.dispatcher.AddTask(collectionID)
 }
 
 func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
@@ -362,89 +369,66 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		return false
 	}
 
-	for _, channel := range channelNames {
-		views := ob.distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel.GetChannelName()))
-		nodes := lo.Map(views, func(v *meta.LeaderView, _ int) int64 { return v.ID })
+	collectionReadyLeaders := make([]*meta.LeaderView, 0)
+	for channel := range channelNames {
+		channelReadyLeaders := lo.Filter(ob.distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel)), func(leader *meta.LeaderView, _ int) bool {
+			return utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, leader, meta.NextTarget) == nil
+		})
+		collectionReadyLeaders = append(collectionReadyLeaders, channelReadyLeaders...)
+
+		nodes := lo.Map(channelReadyLeaders, func(view *meta.LeaderView, _ int) int64 { return view.ID })
 		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager, collectionID, nodes)
 		if int32(len(group)) < replicaNum {
 			log.RatedInfo(10, "channel not ready",
-				zap.Int("readyReplicaNum", len(group)),
-				zap.String("channelName", channel.GetChannelName()),
+				zap.Int("readyReplicaNum", len(channelReadyLeaders)),
+				zap.String("channelName", channel),
 			)
 			return false
 		}
 	}
 
-	// and last check historical segment
-	SealedSegments := ob.targetMgr.GetSealedSegmentsByCollection(collectionID, meta.NextTarget)
-	for _, segment := range SealedSegments {
-		views := ob.distMgr.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(segment.GetID(), false))
-		nodes := lo.Map(views, func(view *meta.LeaderView, _ int) int64 { return view.ID })
-		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager, collectionID, nodes)
-		if int32(len(group)) < replicaNum {
-			log.RatedInfo(10, "segment not ready",
-				zap.Int("readyReplicaNum", len(group)),
-				zap.Int64("segmentID", segment.GetID()),
-			)
-			return false
-		}
-	}
-
-	replicas := ob.meta.ReplicaManager.GetByCollection(collectionID)
-	actions := make([]*querypb.SyncAction, 0, 1)
 	var collectionInfo *milvuspb.DescribeCollectionResponse
 	var partitions []int64
 	var indexInfo []*indexpb.IndexInfo
 	var err error
-	for _, replica := range replicas {
-		leaders := ob.distMgr.ChannelDistManager.GetShardLeadersByReplica(replica)
-		for ch, leaderID := range leaders {
-			actions = actions[:0]
-			leaderView := ob.distMgr.LeaderViewManager.GetLeaderShardView(leaderID, ch)
-			if leaderView == nil {
-				log.RatedInfo(10, "leader view not ready",
-					zap.Int64("nodeID", leaderID),
-					zap.String("channel", ch),
-				)
-				continue
-			}
-			updateVersionAction := ob.checkNeedUpdateTargetVersion(ctx, leaderView)
-			if updateVersionAction != nil {
-				actions = append(actions, updateVersionAction)
-			}
+	newVersion := ob.targetMgr.GetCollectionTargetVersion(collectionID, meta.NextTarget)
+	for _, leader := range collectionReadyLeaders {
+		updateVersionAction := ob.checkNeedUpdateTargetVersion(ctx, leader, newVersion)
+		if updateVersionAction == nil {
+			continue
+		}
+		replica := ob.meta.ReplicaManager.GetByCollectionAndNode(collectionID, leader.ID)
+		if replica == nil {
+			log.Warn("replica not found", zap.Int64("nodeID", leader.ID), zap.Int64("collectionID", collectionID))
+			continue
+		}
 
-			if len(actions) == 0 {
-				continue
-			}
-
-			// init all the meta information
-			if collectionInfo == nil {
-				collectionInfo, err = ob.broker.DescribeCollection(ctx, collectionID)
-				if err != nil {
-					log.Warn("failed to get collection info", zap.Error(err))
-					return false
-				}
-
-				partitions, err = utils.GetPartitions(ob.meta.CollectionManager, collectionID)
-				if err != nil {
-					log.Warn("failed to get partitions", zap.Error(err))
-					return false
-				}
-
-				// Get collection index info
-				indexInfo, err = ob.broker.ListIndexes(ctx, collectionID)
-				if err != nil {
-					log.Warn("fail to get index info of collection", zap.Error(err))
-					return false
-				}
+		// init all the meta information
+		if collectionInfo == nil {
+			collectionInfo, err = ob.broker.DescribeCollection(ctx, collectionID)
+			if err != nil {
+				log.Warn("failed to get collection info", zap.Error(err))
+				return false
 			}
 
-			if !ob.sync(ctx, replica, leaderView, actions, collectionInfo, partitions, indexInfo) {
+			partitions, err = utils.GetPartitions(ob.meta.CollectionManager, collectionID)
+			if err != nil {
+				log.Warn("failed to get partitions", zap.Error(err))
+				return false
+			}
+
+			// Get collection index info
+			indexInfo, err = ob.broker.ListIndexes(ctx, collectionID)
+			if err != nil {
+				log.Warn("fail to get index info of collection", zap.Error(err))
 				return false
 			}
 		}
-	}
 
+		if !ob.sync(ctx, replica, leader, []*querypb.SyncAction{updateVersionAction}, collectionInfo, partitions, indexInfo) {
+			return false
+		}
+	}
 	return true
 }
 
@@ -497,29 +481,8 @@ func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leade
 	return true
 }
 
-func (ob *TargetObserver) checkCollectionLeaderVersionIsCurrent(ctx context.Context, collectionID int64) bool {
-	replicas := ob.meta.ReplicaManager.GetByCollection(collectionID)
-	for _, replica := range replicas {
-		leaders := ob.distMgr.ChannelDistManager.GetShardLeadersByReplica(replica)
-		for ch, leaderID := range leaders {
-			leaderView := ob.distMgr.LeaderViewManager.GetLeaderShardView(leaderID, ch)
-			if leaderView == nil {
-				return false
-			}
-
-			action := ob.checkNeedUpdateTargetVersion(ctx, leaderView)
-			if action != nil {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, leaderView *meta.LeaderView) *querypb.SyncAction {
+func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, leaderView *meta.LeaderView, targetVersion int64) *querypb.SyncAction {
 	log.Ctx(ctx).WithRateGroup("qcv2.LeaderObserver", 1, 60)
-	targetVersion := ob.targetMgr.GetCollectionTargetVersion(leaderView.CollectionID, meta.NextTarget)
-
 	if targetVersion <= leaderView.TargetVersion {
 		return nil
 	}

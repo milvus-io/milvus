@@ -154,6 +154,7 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 			return partition.GetPartitionID()
 		})
 	}
+
 	for _, partitionID := range partitions {
 		percentage := s.meta.GetPartitionLoadPercentage(partitionID)
 		if percentage < 0 {
@@ -172,6 +173,7 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 				Status: merr.Status(err),
 			}, nil
 		}
+
 		percentages = append(percentages, int64(percentage))
 	}
 

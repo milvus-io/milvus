@@ -760,7 +760,14 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 	s.Len(resp.GetResourceGroups(), rgNum+2)
 
 	// test load collection with dynamic update
-	s.loadCollection(collectionName, dbName, 3, rgs[:3])
+	loadStatus, err := s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		ReplicaNumber:  int32(3),
+		ResourceGroups: rgs[:3],
+	})
+	s.NoError(err)
+	s.True(merr.Ok(loadStatus))
 	s.Eventually(func() bool {
 		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
@@ -771,7 +778,14 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 		return len(resp3.GetReplicas()) == 3
 	}, 30*time.Second, 1*time.Second)
 
-	s.loadCollection(collectionName, dbName, 2, rgs[3:])
+	loadStatus, err = s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		ReplicaNumber:  int32(2),
+		ResourceGroups: rgs[3:],
+	})
+	s.NoError(err)
+	s.True(merr.Ok(loadStatus))
 	s.Eventually(func() bool {
 		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
@@ -783,7 +797,14 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 	}, 30*time.Second, 1*time.Second)
 
 	// test load collection with dynamic update
-	s.loadCollection(collectionName, dbName, 5, rgs)
+	loadStatus, err = s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		ReplicaNumber:  int32(5),
+		ResourceGroups: rgs,
+	})
+	s.NoError(err)
+	s.True(merr.Ok(loadStatus))
 	s.Eventually(func() bool {
 		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,

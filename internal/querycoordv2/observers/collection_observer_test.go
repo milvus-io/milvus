@@ -71,6 +71,8 @@ type CollectionObserverSuite struct {
 	targetObserver    *TargetObserver
 	checkerController *checkers.CheckerController
 
+	nodeMgr *session.NodeManager
+
 	// Test object
 	ob *CollectionObserver
 }
@@ -191,8 +193,8 @@ func (suite *CollectionObserverSuite) SetupTest() {
 
 	// Dependencies
 	suite.dist = meta.NewDistributionManager()
-	nodeMgr := session.NewNodeManager()
-	suite.meta = meta.NewMeta(suite.idAllocator, suite.store, nodeMgr)
+	suite.nodeMgr = session.NewNodeManager()
+	suite.meta = meta.NewMeta(suite.idAllocator, suite.store, suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.cluster = session.NewMockCluster(suite.T())
@@ -201,6 +203,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 		suite.cluster,
+		suite.nodeMgr,
 	)
 	suite.checkerController = &checkers.CheckerController{}
 
@@ -223,6 +226,16 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.targetObserver.Start()
 	suite.ob.Start()
 	suite.loadAll()
+
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 1,
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 2,
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 3,
+	}))
 }
 
 func (suite *CollectionObserverSuite) TearDownTest() {
@@ -248,12 +261,19 @@ func (suite *CollectionObserverSuite) TestObserve() {
 		Channel:      "100-dmc0",
 		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}},
 	})
+	view := &meta.LeaderView{
+		ID:           2,
+		CollectionID: 103,
+		Channel:      "103-dmc0",
+		Segments:     make(map[int64]*querypb.SegmentDist),
+	}
 	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
 		ID:           2,
 		CollectionID: 100,
 		Channel:      "100-dmc1",
 		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2, Version: 0}},
-	})
+	}, view)
+
 	view1 := &meta.LeaderView{
 		ID:           3,
 		CollectionID: 102,
@@ -265,7 +285,7 @@ func (suite *CollectionObserverSuite) TestObserve() {
 	suite.True(ok)
 	view2 := &meta.LeaderView{
 		ID:           3,
-		CollectionID: 13,
+		CollectionID: 103,
 		Channel:      "103-dmc0",
 		Segments:     make(map[int64]*querypb.SegmentDist),
 	}
@@ -273,8 +293,15 @@ func (suite *CollectionObserverSuite) TestObserve() {
 		view2.Segments[segment.GetID()] = &querypb.SegmentDist{
 			NodeID: 3, Version: 0,
 		}
+		view.Segments[segment.GetID()] = &querypb.SegmentDist{
+			NodeID: 2, Version: 0,
+		}
 	}
 	suite.dist.LeaderViewManager.Update(3, view1, view2)
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
 	suite.Eventually(func() bool {
 		return suite.isCollectionLoadedContinue(suite.collections[2], time)

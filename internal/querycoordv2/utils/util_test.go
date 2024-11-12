@@ -52,9 +52,10 @@ func (suite *UtilTestSuite) setNodeAvailable(nodes ...int64) {
 
 func (suite *UtilTestSuite) TestCheckLeaderAvaliable() {
 	leadview := &meta.LeaderView{
-		ID:       1,
-		Channel:  "test",
-		Segments: map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
+		ID:            1,
+		Channel:       "test",
+		Segments:      map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
+		TargetVersion: 1011,
 	}
 
 	mockTargetManager := meta.NewMockTargetManager(suite.T())
@@ -64,18 +65,20 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliable() {
 			InsertChannel: "test",
 		},
 	}).Maybe()
+	mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything).Return(1011).Maybe()
 
 	suite.setNodeAvailable(1, 2)
-	err := CheckLeaderAvailable(suite.nodeMgr, mockTargetManager, leadview)
+	err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
 	suite.NoError(err)
 }
 
 func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 	suite.Run("leader not available", func() {
 		leadview := &meta.LeaderView{
-			ID:       1,
-			Channel:  "test",
-			Segments: map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
+			ID:            1,
+			Channel:       "test",
+			Segments:      map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
+			TargetVersion: 1011,
 		}
 		mockTargetManager := meta.NewMockTargetManager(suite.T())
 		mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
@@ -84,18 +87,19 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 				InsertChannel: "test",
 			},
 		}).Maybe()
+		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything).Return(1011).Maybe()
 		// leader nodeID=1 not available
 		suite.setNodeAvailable(2)
-		err := CheckLeaderAvailable(suite.nodeMgr, mockTargetManager, leadview)
+		err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
 		suite.Error(err)
-		suite.nodeMgr = session.NewNodeManager()
 	})
 
 	suite.Run("shard worker not available", func() {
 		leadview := &meta.LeaderView{
-			ID:       1,
-			Channel:  "test",
-			Segments: map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
+			ID:            11111,
+			Channel:       "test",
+			Segments:      map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
+			TargetVersion: 1011,
 		}
 
 		mockTargetManager := meta.NewMockTargetManager(suite.T())
@@ -105,14 +109,35 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 				InsertChannel: "test",
 			},
 		}).Maybe()
+		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything).Return(1011).Maybe()
 		// leader nodeID=2 not available
 		suite.setNodeAvailable(1)
-		err := CheckLeaderAvailable(suite.nodeMgr, mockTargetManager, leadview)
+		err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
 		suite.Error(err)
-		suite.nodeMgr = session.NewNodeManager()
 	})
 
 	suite.Run("segment lacks", func() {
+		leadview := &meta.LeaderView{
+			ID:            1,
+			Channel:       "test",
+			Segments:      map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
+			TargetVersion: 1011,
+		}
+		mockTargetManager := meta.NewMockTargetManager(suite.T())
+		mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
+			// target segmentID=1 not in leadView
+			1: {
+				ID:            1,
+				InsertChannel: "test",
+			},
+		}).Maybe()
+		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything).Return(1011).Maybe()
+		suite.setNodeAvailable(1, 2)
+		err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
+		suite.Error(err)
+	})
+
+	suite.Run("target version not synced", func() {
 		leadview := &meta.LeaderView{
 			ID:       1,
 			Channel:  "test",
@@ -126,10 +151,10 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 				InsertChannel: "test",
 			},
 		}).Maybe()
+		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything).Return(1011).Maybe()
 		suite.setNodeAvailable(1, 2)
-		err := CheckLeaderAvailable(suite.nodeMgr, mockTargetManager, leadview)
+		err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
 		suite.Error(err)
-		suite.nodeMgr = session.NewNodeManager()
 	})
 }
 
