@@ -59,6 +59,8 @@ func TestSegmentStats(t *testing.T) {
 	assert.Equal(t, stat.Insert.Rows, uint64(160))
 	assert.Equal(t, stat.Insert.BinarySize, uint64(320))
 	assert.True(t, time.Now().After(now))
+	assert.False(t, stat.IsEmpty())
+	assert.False(t, stat.ShouldBeSealed())
 
 	insert1 = InsertMetrics{
 		Rows:       100,
@@ -68,6 +70,8 @@ func TestSegmentStats(t *testing.T) {
 	assert.False(t, inserted)
 	assert.Equal(t, stat.Insert.Rows, uint64(160))
 	assert.Equal(t, stat.Insert.BinarySize, uint64(320))
+	assert.False(t, stat.IsEmpty())
+	assert.True(t, stat.ShouldBeSealed())
 
 	stat.UpdateOnSync(SyncOperationMetrics{
 		BinLogCounterIncr:     4,
@@ -75,4 +79,21 @@ func TestSegmentStats(t *testing.T) {
 	})
 	assert.Equal(t, uint64(7), stat.BinLogCounter)
 	assert.Equal(t, uint64(13), stat.BinLogFileCounter)
+}
+
+func TestOversizeAlloc(t *testing.T) {
+	now := time.Now()
+	stat := &SegmentStats{
+		Insert:           InsertMetrics{},
+		MaxBinarySize:    400,
+		CreateTime:       now,
+		LastModifiedTime: now,
+	}
+	// Try to alloc a oversized insert metrics.
+	inserted := stat.AllocRows(InsertMetrics{
+		BinarySize: 401,
+	})
+	assert.False(t, inserted)
+	assert.True(t, stat.IsEmpty())
+	assert.False(t, stat.ShouldBeSealed())
 }

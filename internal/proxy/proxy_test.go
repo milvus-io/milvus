@@ -365,6 +365,15 @@ func TestProxy(t *testing.T) {
 	var err error
 	var wg sync.WaitGroup
 	paramtable.Init()
+	params := paramtable.Get()
+	params.RootCoordGrpcServerCfg.IP = "localhost"
+	params.QueryCoordGrpcServerCfg.IP = "localhost"
+	params.DataCoordGrpcServerCfg.IP = "localhost"
+	params.ProxyGrpcServerCfg.IP = "localhost"
+	params.QueryNodeGrpcServerCfg.IP = "localhost"
+	params.DataNodeGrpcServerCfg.IP = "localhost"
+	params.IndexNodeGrpcServerCfg.IP = "localhost"
+	params.StreamingNodeGrpcServerCfg.IP = "localhost"
 
 	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
 	t.Setenv("ROCKSMQ_PATH", path)
@@ -4570,7 +4579,6 @@ func TestProxy_Import(t *testing.T) {
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		mc := NewMockCache(t)
-		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{},
@@ -4611,10 +4619,6 @@ func TestProxy_Import(t *testing.T) {
 		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
-		mc := NewMockCache(t)
-		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
-		globalMetaCache = mc
-
 		dataCoord := mocks.NewMockDataCoordClient(t)
 		dataCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
 			Status: merr.Success(),
@@ -4639,10 +4643,6 @@ func TestProxy_Import(t *testing.T) {
 	t.Run("ListImportTasks", func(t *testing.T) {
 		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-
-		mc := NewMockCache(t)
-		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
-		globalMetaCache = mc
 
 		dataCoord := mocks.NewMockDataCoordClient(t)
 		dataCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(&internalpb.ListImportsResponse{

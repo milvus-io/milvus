@@ -28,6 +28,9 @@ func newScannerAdaptor(
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
 ) wal.Scanner {
+	if readOption.VChannel == "" {
+		panic("vchannel of scanner must be set")
+	}
 	if readOption.MesasgeHandler == nil {
 		readOption.MesasgeHandler = defaultMessageHandler(make(chan message.ImmutableMessage))
 	}
@@ -170,6 +173,12 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 		return
 	}
 
+	// Filtering the vchannel
+	// If the message is not belong to any vchannel, it should be broadcasted to all vchannels.
+	// Otherwise, it should be filtered by vchannel.
+	if msg.VChannel() != "" && s.readOption.VChannel != msg.VChannel() {
+		return
+	}
 	// Filtering the message if needed.
 	// System message should never be filtered.
 	if s.filterFunc != nil && !s.filterFunc(msg) {

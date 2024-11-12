@@ -205,9 +205,10 @@ class TestCreateCollection(TestBase):
                      "isClusteringKey": clustering_key_field == "book_category", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
                     {"fieldName": "document_content", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "1000", "enable_tokenizer": True,
+                     "elementTypeParams": {"max_length": "1000",
+                                           "enable_analyzer": True,
                                            "analyzer_params": {
-                                               "tokenizer": "default"
+                                               "tokenizer": "standard"
                                            },
                                            "enable_match": True}},
                     {"fieldName": "json", "dataType": "JSON", "elementTypeParams": {}},

@@ -104,3 +104,19 @@ func (bv BinaryVector) Serialize() []byte {
 func (bv BinaryVector) FieldType() FieldType {
 	return FieldTypeBinaryVector
 }
+
+type Text string
+
+// Dim returns vector dimension.
+func (t Text) Dim() int {
+	return 0
+}
+
+// entity.FieldType returns coresponding field type.
+func (t Text) FieldType() FieldType {
+	return FieldTypeVarChar
+}
+
+func (t Text) Serialize() []byte {
+	return []byte(t)
+}

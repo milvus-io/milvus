@@ -4,6 +4,7 @@ option go_package = "github.com/milvus-io/milvus/internal/proto/internalpb";
 
 import "common.proto";
 import "schema.proto";
+import "milvus.proto";
 
 message GetTimeTickChannelRequest {
 }
@@ -263,6 +264,7 @@ message ListPolicyResponse {
   common.Status status = 1;
   repeated string policy_infos = 2;
   repeated string user_roles = 3;
+  repeated milvus.PrivilegeGroupInfo privilege_groups = 4;
 }
 
 message ShowConfigurationsRequest {
@@ -345,7 +347,6 @@ message ImportResponse {
 message GetImportProgressRequest {
   string db_name = 1;
   string jobID = 2;
-  int64 dbID = 3;
 }
 
 message ImportTaskProgress {

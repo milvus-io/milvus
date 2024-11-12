@@ -108,11 +108,11 @@ func (m *CompactionTriggerManager) startLoop() {
 	defer logutil.LogPanic()
 	defer m.closeWg.Done()
 
-	l0Ticker := time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
+	l0Ticker := time.NewTicker(Params.DataCoordCfg.L0CompactionTriggerInterval.GetAsDuration(time.Second))
 	defer l0Ticker.Stop()
 	clusteringTicker := time.NewTicker(Params.DataCoordCfg.ClusteringCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer clusteringTicker.Stop()
-	singleTicker := time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
+	singleTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer singleTicker.Stop()
 	log.Info("Compaction trigger manager start")
 	for {

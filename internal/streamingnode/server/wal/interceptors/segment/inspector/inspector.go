@@ -27,7 +27,7 @@ type SealOperationInspector interface {
 	TriggerSealWaited(ctx context.Context, pchannel string) error
 
 	// RegisterPChannelManager registers a pchannel manager.
-	RegsiterPChannelManager(m SealOperator)
+	RegisterPChannelManager(m SealOperator)
 
 	// UnregisterPChannelManager unregisters a pchannel manager.
 	UnregisterPChannelManager(m SealOperator)

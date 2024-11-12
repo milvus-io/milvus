@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -112,6 +113,16 @@ func GetObjectNames(m interface{}, index int32) []string {
 
 func PolicyForPrivilege(roleName string, objectType string, objectName string, privilege string, dbName string) string {
 	return fmt.Sprintf(`{"PType":"p","V0":"%s","V1":"%s","V2":"%s"}`, roleName, PolicyForResource(dbName, objectType, objectName), privilege)
+}
+
+func PolicyForPrivileges(grants []*milvuspb.GrantEntity) string {
+	return strings.Join(lo.Map(grants, func(r *milvuspb.GrantEntity, _ int) string {
+		return PolicyForPrivilege(r.Role.Name, r.Object.Name, r.ObjectName, r.Grantor.Privilege.Name, r.DbName)
+	}), "|")
+}
+
+func PrivilegesForPolicy(policy string) []string {
+	return strings.Split(policy, "|")
 }
 
 func PolicyForResource(dbName string, objectType string, objectName string) string {

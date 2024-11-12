@@ -63,7 +63,7 @@ etcd:
     password:  # password for etcd authentication
 
 metastore:
-  type: etcd # Default value: etcd, Valid values: [etcd, tikv] 
+  type: etcd # Default value: etcd, Valid values: [etcd, tikv]
   snapshot:
     ttl: 86400 # snapshot ttl in seconds
     reserveTime: 3600 # snapshot reserve time in seconds
@@ -403,7 +403,7 @@ queryNode:
       nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
-    multipleChunkedEnable: false # Enable multiple chunked search
+    multipleChunkedEnable: true # Enable multiple chunked search
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
@@ -564,6 +564,23 @@ dataCoord:
     maxParallelTaskNum: 10
     dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
     gcInterval: 1800 # The time interval in seconds for compaction gc
+    mix:
+      triggerInterval: 60 # The time interval in seconds to trigger mix compaction
+    levelzero:
+      triggerInterval: 10 # The time interval in seconds for trigger L0 compaction
+      forceTrigger:
+        minSize: 8388608 # The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB
+        maxSize: 67108864 # The maxmum size in bytes to force trigger a LevelZero Compaction, default as 64MB
+        deltalogMinNum: 10 # The minimum number of deltalog files to force trigger a LevelZero Compaction
+        deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
+    single:
+      ratio:
+        threshold: 0.2 # The ratio threshold of a segment to trigger a single compaction, default as 0.2
+      deltalog:
+        maxsize: 16777216 # The deltalog size of a segment to trigger a single compaction, default as 16MB
+        maxnum: 200 # The deltalog count of a segment to trigger a compaction, default as 200
+      expiredlog:
+        maxsize: 10485760 # The expired log size of a segment to trigger a compaction, default as 10MB
     clustering:
       enable: true # Enable clustering compaction
       autoEnable: false # Enable auto clustering compaction
@@ -579,12 +596,6 @@ dataCoord:
       minClusterSizeRatio: 0.01 # minimum cluster size / avg size in Kmeans train
       maxClusterSizeRatio: 10 # maximum cluster size / avg size in Kmeans train
       maxClusterSize: 5g # maximum cluster size in Kmeans train
-    levelzero:
-      forceTrigger:
-        minSize: 8388608 # The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB
-        maxSize: 67108864 # The maxmum size in bytes to force trigger a LevelZero Compaction, default as 64MB
-        deltalogMinNum: 10 # The minimum number of deltalog files to force trigger a LevelZero Compaction
-        deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
   syncSegmentsInterval: 300 # The time interval for regularly syncing segments
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
@@ -1077,4 +1088,4 @@ knowhere:
       pq_code_budget_gb_ratio: 0.125 # Size limit on the PQ code (compared with raw data)
       search_cache_budget_gb_ratio: 0.1 # Ratio of cached node numbers to raw data
     search: # Diskann search params
-      beam_width_ratio: 4.0 # Ratio between the maximum number of IO requests per search iteration and CPU number.
+      beam_width_ratio: 4.0 # Ratio between the maximum number of IO requests per search iteration and CPU number

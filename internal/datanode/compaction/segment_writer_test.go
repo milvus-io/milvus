@@ -44,7 +44,7 @@ func (s *SegmentWriteSuite) TestWriteFailed() {
 	s.Run("get bm25 field failed", func() {
 		schema := genCollectionSchemaWithBM25()
 		// init segment writer with invalid bm25 fieldID
-		writer, err := NewSegmentWriter(schema, 1024, 1, s.parititonID, s.collectionID, []int64{1000})
+		writer, err := NewSegmentWriter(schema, 1024, compactionBatchSize, 1, s.parititonID, s.collectionID, []int64{1000})
 		s.Require().NoError(err)
 
 		v := storage.Value{
@@ -59,7 +59,7 @@ func (s *SegmentWriteSuite) TestWriteFailed() {
 	s.Run("parse bm25 field data failed", func() {
 		schema := genCollectionSchemaWithBM25()
 		// init segment writer with wrong field as bm25 sparse field
-		writer, err := NewSegmentWriter(schema, 1024, 1, s.parititonID, s.collectionID, []int64{101})
+		writer, err := NewSegmentWriter(schema, 1024, compactionBatchSize, 1, s.parititonID, s.collectionID, []int64{101})
 		s.Require().NoError(err)
 
 		v := storage.Value{

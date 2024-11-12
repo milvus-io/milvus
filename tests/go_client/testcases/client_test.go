@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	clientv2 "github.com/milvus-io/milvus/client/v2"
+	clientv2 "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	"github.com/milvus-io/milvus/tests/go_client/testcases/helper"

@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	_ "github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -49,6 +50,8 @@ import (
 )
 
 var _ task = (*statsTask)(nil)
+
+const statsBatchSize = 10000
 
 type statsTask struct {
 	ident  string
@@ -157,7 +160,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 	numRows := st.req.GetNumRows()
 
 	bm25FieldIds := compaction.GetBM25FieldIDs(st.req.GetSchema())
-	writer, err := compaction.NewSegmentWriter(st.req.GetSchema(), numRows, st.req.GetTargetSegmentID(), st.req.GetPartitionID(), st.req.GetCollectionID(), bm25FieldIds)
+	writer, err := compaction.NewSegmentWriter(st.req.GetSchema(), numRows, statsBatchSize, st.req.GetTargetSegmentID(), st.req.GetPartitionID(), st.req.GetCollectionID(), bm25FieldIds)
 	if err != nil {
 		log.Warn("sort segment wrong, unable to init segment writer",
 			zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
@@ -165,22 +168,23 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 	}
 
 	var (
-		flushBatchCount   int   // binlog batch count
-		unFlushedRowCount int64 = 0
+		flushBatchCount int // binlog batch count
 
-		// All binlog meta of a segment
-		allBinlogs = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
+		allBinlogs    = make(map[typeutil.UniqueID]*datapb.FieldBinlog) // All binlog meta of a segment
+		uploadFutures = make([]*conc.Future[any], 0)
+
+		downloadCost     time.Duration
+		serWriteTimeCost time.Duration
+		sortTimeCost     time.Duration
 	)
 
-	serWriteTimeCost := time.Duration(0)
-	uploadTimeCost := time.Duration(0)
-	sortTimeCost := time.Duration(0)
-
+	downloadStart := time.Now()
 	values, err := st.downloadData(ctx, numRows, writer.GetPkID(), bm25FieldIds)
 	if err != nil {
 		log.Warn("download data failed", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err
 	}
+	downloadCost = time.Since(downloadStart)
 
 	sortStart := time.Now()
 	sort.Slice(values, func(i, j int) bool {
@@ -188,15 +192,14 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 	})
 	sortTimeCost += time.Since(sortStart)
 
-	for _, v := range values {
+	for i, v := range values {
 		err := writer.Write(v)
 		if err != nil {
 			log.Warn("write value wrong, failed to writer row", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 			return nil, err
 		}
-		unFlushedRowCount++
 
-		if (unFlushedRowCount+1)%100 == 0 && writer.FlushAndIsFullWithBinlogMaxSize(st.req.GetBinlogMaxSize()) {
+		if (i+1)%statsBatchSize == 0 && writer.IsFullWithBinlogMaxSize(st.req.GetBinlogMaxSize()) {
 			serWriteStart := time.Now()
 			binlogNum, kvs, partialBinlogs, err := serializeWrite(ctx, st.req.GetStartLogID()+st.logIDOffset, writer)
 			if err != nil {
@@ -205,17 +208,10 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 			}
 			serWriteTimeCost += time.Since(serWriteStart)
 
-			uploadStart := time.Now()
-			if err := st.binlogIO.Upload(ctx, kvs); err != nil {
-				log.Warn("stats wrong, failed to upload kvs", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
-				return nil, err
-			}
-			uploadTimeCost += time.Since(uploadStart)
-
+			uploadFutures = append(uploadFutures, st.binlogIO.AsyncUpload(ctx, kvs)...)
 			mergeFieldBinlogs(allBinlogs, partialBinlogs)
 
 			flushBatchCount++
-			unFlushedRowCount = 0
 			st.logIDOffset += binlogNum
 			if st.req.GetStartLogID()+st.logIDOffset >= st.req.GetEndLogID() {
 				log.Warn("binlog files too much, log is not enough", zap.Int64("taskID", st.req.GetTaskID()),
@@ -236,14 +232,15 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		serWriteTimeCost += time.Since(serWriteStart)
 		st.logIDOffset += binlogNum
 
-		uploadStart := time.Now()
-		if err := st.binlogIO.Upload(ctx, kvs); err != nil {
-			return nil, err
-		}
-		uploadTimeCost += time.Since(uploadStart)
-
+		uploadFutures = append(uploadFutures, st.binlogIO.AsyncUpload(ctx, kvs)...)
 		mergeFieldBinlogs(allBinlogs, partialBinlogs)
 		flushBatchCount++
+	}
+
+	err = conc.AwaitAll(uploadFutures...)
+	if err != nil {
+		log.Warn("stats wrong, failed to upload kvs", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
+		return nil, err
 	}
 
 	serWriteStart := time.Now()
@@ -302,7 +299,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		zap.Int64("old rows", numRows),
 		zap.Int("valid rows", len(values)),
 		zap.Int("binlog batch count", flushBatchCount),
-		zap.Duration("upload binlogs elapse", uploadTimeCost),
+		zap.Duration("download elapse", downloadCost),
 		zap.Duration("sort elapse", sortTimeCost),
 		zap.Duration("serWrite elapse", serWriteTimeCost),
 		zap.Duration("total elapse", totalElapse))

@@ -436,8 +436,9 @@ func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo)
 	binlogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentBinlogPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 	deltalogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentDeltalogPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 	statelogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentStatslogPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+	bm25logPrefix := fmt.Sprintf("%s/%d/%d/%d", SegmentBM25logPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 
-	keys := []string{segKey, binlogPreix, deltalogPreix, statelogPreix}
+	keys := []string{segKey, binlogPreix, deltalogPreix, statelogPreix, bm25logPrefix}
 	if err := kc.MetaKv.MultiSaveAndRemoveWithPrefix(nil, keys); err != nil {
 		return err
 	}

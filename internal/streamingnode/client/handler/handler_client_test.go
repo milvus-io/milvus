@@ -98,11 +98,11 @@ func TestHandlerClient(t *testing.T) {
 
 	consumer, err := handler.CreateConsumer(ctx, &ConsumerOptions{
 		PChannel:      "pchannel",
+		VChannel:      "vchannel",
 		DeliverPolicy: options.DeliverPolicyAll(),
 		DeliverFilters: []options.DeliverFilter{
 			options.DeliverFilterTimeTickGT(10),
 			options.DeliverFilterTimeTickGTE(10),
-			options.DeliverFilterVChannel("vchannel"),
 		},
 		MessageHandler: make(message.ChanMessageHandler),
 	})

@@ -9,14 +9,15 @@ import (
 // v2
 const (
 	// --- category ---
-	CollectionCategory = "/collections/"
-	EntityCategory     = "/entities/"
-	PartitionCategory  = "/partitions/"
-	UserCategory       = "/users/"
-	RoleCategory       = "/roles/"
-	IndexCategory      = "/indexes/"
-	AliasCategory      = "/aliases/"
-	ImportJobCategory  = "/jobs/import/"
+	CollectionCategory     = "/collections/"
+	EntityCategory         = "/entities/"
+	PartitionCategory      = "/partitions/"
+	UserCategory           = "/users/"
+	RoleCategory           = "/roles/"
+	IndexCategory          = "/indexes/"
+	AliasCategory          = "/aliases/"
+	ImportJobCategory      = "/jobs/import/"
+	PrivilegeGroupCategory = "/privilege_groups/"
 
 	ListAction           = "list"
 	HasAction            = "has"
@@ -37,13 +38,15 @@ const (
 	AdvancedSearchAction = "advanced_search"
 	HybridSearchAction   = "hybrid_search"
 
-	UpdatePasswordAction  = "update_password"
-	GrantRoleAction       = "grant_role"
-	RevokeRoleAction      = "revoke_role"
-	GrantPrivilegeAction  = "grant_privilege"
-	RevokePrivilegeAction = "revoke_privilege"
-	AlterAction           = "alter"
-	GetProgressAction     = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
+	UpdatePasswordAction            = "update_password"
+	GrantRoleAction                 = "grant_role"
+	RevokeRoleAction                = "revoke_role"
+	GrantPrivilegeAction            = "grant_privilege"
+	RevokePrivilegeAction           = "revoke_privilege"
+	AlterAction                     = "alter"
+	GetProgressAction               = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
+	AddPrivilegesToGroupAction      = "add_privileges_to_group"
+	RemovePrivilegesFromGroupAction = "remove_privileges_from_group"
 )
 
 const (
@@ -125,11 +128,14 @@ const (
 
 	HTTPReturnRowCount = "rowCount"
 
-	HTTPReturnObjectType = "objectType"
-	HTTPReturnObjectName = "objectName"
-	HTTPReturnPrivilege  = "privilege"
-	HTTPReturnGrantor    = "grantor"
-	HTTPReturnDbName     = "dbName"
+	HTTPReturnObjectType         = "objectType"
+	HTTPReturnObjectName         = "objectName"
+	HTTPReturnPrivilege          = "privilege"
+	HTTPReturnGrantor            = "grantor"
+	HTTPReturnDbName             = "dbName"
+	HTTPReturnPrivilegeGroupName = "privilegeGroupName"
+	HTTPReturnPrivileges         = "privileges"
+	HTTPReturnPrivilegeGroups    = "privilegeGroups"
 
 	DefaultMetricType       = metric.COSINE
 	DefaultPrimaryFieldName = "id"
@@ -148,6 +154,6 @@ const (
 	ParamRangeFilter     = "range_filter"
 	ParamGroupByField    = "group_by_field"
 	ParamGroupSize       = "group_size"
-	ParamGroupStrictSize = "group_strict_size"
+	ParamStrictGroupSize = "strict_group_size"
 	BoundedTimestamp     = 2
 )

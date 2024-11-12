@@ -12,13 +12,25 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdint>
+#include "arrow/table_builder.h"
+#include "arrow/type_fwd.h"
 #include "common/BitsetView.h"
+#include "common/Consts.h"
+#include "common/FieldDataInterface.h"
 #include "common/QueryInfo.h"
 #include "common/Schema.h"
+#include "common/Types.h"
+#include "expr/ITypeExpr.h"
 #include "knowhere/comp/index_param.h"
 #include "mmap/ChunkedColumn.h"
+#include "mmap/Types.h"
+#include "query/ExecPlanNodeVisitor.h"
 #include "query/SearchOnSealed.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentSealedImpl.h"
 #include "test_utils/DataGen.h"
+#include <memory>
+#include <numeric>
 #include <vector>
 
 struct DeferRelease {
@@ -134,4 +146,116 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     for (int i = 0; i < total_row_count; i++) {
         ASSERT_TRUE(offsets.find(i) != offsets.end());
     }
+}
+
+TEST(test_chunk_segment, TestTermExpr) {
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64, true);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64, true);
+    schema->AddField(FieldName("ts"), TimestampFieldID, DataType::INT64, true);
+    schema->set_primary_field_id(pk_fid);
+    auto segment =
+        segcore::CreateSealedSegment(schema,
+                                     nullptr,
+                                     -1,
+                                     segcore::SegcoreConfig::default_config(),
+                                     false,
+                                     false,
+                                     true);
+    size_t test_data_count = 1000;
+
+    auto arrow_i64_field = arrow::field("int64", arrow::int64());
+    auto arrow_pk_field = arrow::field("pk", arrow::int64());
+    auto arrow_ts_field = arrow::field("ts", arrow::int64());
+    std::vector<std::shared_ptr<arrow::Field>> arrow_fields = {
+        arrow_i64_field, arrow_pk_field, arrow_ts_field};
+
+    std::vector<FieldId> field_ids = {int64_fid, pk_fid, TimestampFieldID};
+
+    int start_id = 1;
+    int chunk_num = 2;
+
+    std::vector<FieldDataInfo> field_infos;
+    for (auto fid : field_ids) {
+        FieldDataInfo field_info;
+        field_info.field_id = fid.get();
+        field_info.row_count = test_data_count * chunk_num;
+        field_infos.push_back(field_info);
+    }
+
+    // generate data
+    for (int chunk_id = 0; chunk_id < chunk_num;
+         chunk_id++, start_id += test_data_count) {
+        std::vector<int64_t> test_data(test_data_count);
+        std::iota(test_data.begin(), test_data.end(), start_id);
+
+        auto builder = std::make_shared<arrow::Int64Builder>();
+        auto status = builder->AppendValues(test_data.begin(), test_data.end());
+        ASSERT_TRUE(status.ok());
+        auto res = builder->Finish();
+        ASSERT_TRUE(res.ok());
+        std::shared_ptr<arrow::Array> arrow_int64;
+        arrow_int64 = res.ValueOrDie();
+
+        for (int i = 0; i < arrow_fields.size(); i++) {
+            auto f = arrow_fields[i];
+            auto fid = field_ids[i];
+            auto arrow_schema =
+                std::make_shared<arrow::Schema>(arrow::FieldVector(1, f));
+            auto record_batch = arrow::RecordBatch::Make(
+                arrow_schema, arrow_int64->length(), {arrow_int64});
+
+            auto res2 = arrow::RecordBatchReader::Make({record_batch});
+            ASSERT_TRUE(res2.ok());
+            auto arrow_reader = res2.ValueOrDie();
+
+            field_infos[i].arrow_reader_channel->push(
+                std::make_shared<ArrowDataWrapper>(
+                    arrow_reader, nullptr, nullptr));
+        }
+    }
+
+    // load
+    for (int i = 0; i < field_infos.size(); i++) {
+        field_infos[i].arrow_reader_channel->close();
+        segment->LoadFieldData(field_ids[i], field_infos[i]);
+    }
+
+    // query int64 expr
+    std::vector<proto::plan::GenericValue> filter_data;
+    for (int i = 1; i <= 10; ++i) {
+        proto::plan::GenericValue v;
+        v.set_int64_val(i);
+        filter_data.push_back(v);
+    }
+    auto term_filter_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(int64_fid, DataType::INT64), filter_data);
+    BitsetType final;
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       term_filter_expr);
+    final = query::ExecuteQueryExpr(
+        plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
+    ASSERT_EQ(10, final.count());
+
+    // query pk expr
+    auto pk_term_filter_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(pk_fid, DataType::INT64), filter_data);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  pk_term_filter_expr);
+    final = query::ExecuteQueryExpr(
+        plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
+    ASSERT_EQ(10, final.count());
+
+    // query pk in second chunk
+    std::vector<proto::plan::GenericValue> filter_data2;
+    proto::plan::GenericValue v;
+    v.set_int64_val(test_data_count + 1);
+    filter_data2.push_back(v);
+    pk_term_filter_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(pk_fid, DataType::INT64), filter_data2);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  pk_term_filter_expr);
+    final = query::ExecuteQueryExpr(
+        plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
+    ASSERT_EQ(1, final.count());
 }

@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // Meta Prefix consts
@@ -114,6 +115,10 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetFlushState.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreatePrivilegeGroup.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropPrivilegeGroup.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListPrivilegeGroups.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeOperatePrivilegeGroup.String()),
 		},
 		commonpb.ObjectType_Global.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String()),
@@ -151,6 +156,10 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeAlias.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListAliases.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupAdmin.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreatePrivilegeGroup.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropPrivilegeGroup.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListPrivilegeGroups.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeOperatePrivilegeGroup.String()),
 		},
 		commonpb.ObjectType_User.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
@@ -306,6 +315,9 @@ func MetaStore2API(name string) string {
 func PrivilegeNameForAPI(name string) string {
 	_, ok := commonpb.ObjectPrivilege_value[name]
 	if !ok {
+		if strings.HasPrefix(name, PrivilegeGroupWord) {
+			return typeutil.After(name, PrivilegeGroupWord)
+		}
 		return ""
 	}
 	return MetaStore2API(name)
@@ -325,6 +337,15 @@ func PrivilegeNameForMetastore(name string) string {
 		return dbPrivilege
 	}
 	return dbPrivilege
+}
+
+// check if the name is defined by built in privileges or privilege groups in system
+func IsPrivilegeNameDefined(name string) bool {
+	return PrivilegeNameForMetastore(name) != ""
+}
+
+func PrivilegeGroupNameForMetastore(name string) string {
+	return PrivilegeGroupWord + name
 }
 
 func IsAnyWord(word string) bool {

@@ -13,6 +13,7 @@ const (
 	MessageTypeTimeTick         MessageType = MessageType(messagespb.MessageType_TimeTick)
 	MessageTypeInsert           MessageType = MessageType(messagespb.MessageType_Insert)
 	MessageTypeDelete           MessageType = MessageType(messagespb.MessageType_Delete)
+	MessageTypeCreateSegment    MessageType = MessageType(messagespb.MessageType_CreateSegment)
 	MessageTypeFlush            MessageType = MessageType(messagespb.MessageType_Flush)
 	MessageTypeManualFlush      MessageType = MessageType(messagespb.MessageType_ManualFlush)
 	MessageTypeCreateCollection MessageType = MessageType(messagespb.MessageType_CreateCollection)
@@ -31,6 +32,7 @@ var messageTypeName = map[MessageType]string{
 	MessageTypeInsert:           "INSERT",
 	MessageTypeDelete:           "DELETE",
 	MessageTypeFlush:            "FLUSH",
+	MessageTypeCreateSegment:    "CREATE_SEGMENT",
 	MessageTypeManualFlush:      "MANUAL_FLUSH",
 	MessageTypeCreateCollection: "CREATE_COLLECTION",
 	MessageTypeDropCollection:   "DROP_COLLECTION",

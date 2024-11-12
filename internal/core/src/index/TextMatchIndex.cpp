@@ -21,18 +21,18 @@ constexpr const char* TMP_TEXT_LOG_PREFIX = "/tmp/milvus/text-log/";
 
 TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
                                const char* tokenizer_name,
-                               const char* tokenizer_params)
+                               const char* analyzer_params)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Text;
     std::string field_name = "tmp_text_index";
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        field_name.c_str(), true, "", tokenizer_name, tokenizer_params);
+        field_name.c_str(), true, "", tokenizer_name, analyzer_params);
 }
 
 TextMatchIndex::TextMatchIndex(const std::string& path,
                                const char* tokenizer_name,
-                               const char* tokenizer_params)
+                               const char* analyzer_params)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     path_ = path;
@@ -42,12 +42,12 @@ TextMatchIndex::TextMatchIndex(const std::string& path,
                                                      false,
                                                      path_.c_str(),
                                                      tokenizer_name,
-                                                     tokenizer_params);
+                                                     analyzer_params);
 }
 
 TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
                                const char* tokenizer_name,
-                               const char* tokenizer_params)
+                               const char* analyzer_params)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     schema_ = ctx.fieldDataMeta.field_schema;
@@ -65,7 +65,7 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
                                                      false,
                                                      path_.c_str(),
                                                      tokenizer_name,
-                                                     tokenizer_params);
+                                                     analyzer_params);
 }
 
 TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx)
@@ -172,8 +172,8 @@ TextMatchIndex::CreateReader() {
 
 void
 TextMatchIndex::RegisterTokenizer(const char* tokenizer_name,
-                                  const char* tokenizer_params) {
-    wrapper_->register_tokenizer(tokenizer_name, tokenizer_params);
+                                  const char* analyzer_params) {
+    wrapper_->register_tokenizer(tokenizer_name, analyzer_params);
 }
 
 TargetBitmap

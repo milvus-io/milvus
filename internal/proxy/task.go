@@ -55,7 +55,7 @@ const (
 	IteratorField        = "iterator"
 	GroupByFieldKey      = "group_by_field"
 	GroupSizeKey         = "group_size"
-	GroupStrictSize      = "group_strict_size"
+	StrictGroupSize      = "strict_group_size"
 	RankGroupScorer      = "rank_group_scorer"
 	AnnsFieldKey         = "anns_field"
 	TopKKey              = "topk"
@@ -407,7 +407,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 
-		if err := ctokenizer.ValidateTextSchema(field); err != nil {
+		if err := ctokenizer.ValidateTextSchema(field, wasBm25FunctionInputField(t.schema, field)); err != nil {
 			return err
 		}
 	}

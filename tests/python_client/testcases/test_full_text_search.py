@@ -40,7 +40,7 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
         method: create collection with full text search, use bm25 function
         expected: create collection successfully
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -50,30 +50,30 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -104,7 +104,7 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
         method: create collection with full text search, use bm25 function, then create again
         expected: create collection successfully and create again successfully
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -114,30 +114,30 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -182,7 +182,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         method: create collection with full text search, use bm25 function and unsupported tokenizer
         expected: create collection failed
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -192,30 +192,30 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -248,7 +248,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         method: create collection with full text search, use bm25 function and invalid input/output
         expected: create collection failed
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": "standard",
         }
         dim = 128
@@ -258,30 +258,30 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -326,7 +326,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         method: create collection with full text search, use bm25 function and input field not tokenized
         expected: create collection failed
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": "standard",
         }
         dim = 128
@@ -336,30 +336,30 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=False,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=False,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -377,7 +377,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         )
         schema.add_function(bm25_function)
         check_task = CheckTasks.err_res
-        check_items = {ct.err_code: 65535, ct.err_msg: "BM25 function input field must set enable_tokenizer to true"}
+        check_items = {ct.err_code: 65535, ct.err_msg: "BM25 function input field must set enable_analyzer to true"}
         self.init_collection_wrap(
             name=cf.gen_unique_str(prefix), schema=schema,
             check_task=check_task,
@@ -405,7 +405,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 2. query count and verify the result
         expected: insert successfully and count is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -415,8 +415,8 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
@@ -424,23 +424,23 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 nullable=nullable,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 nullable=nullable,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -551,7 +551,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 3. query count and verify the result
         expected: insert successfully and count is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -561,8 +561,8 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
@@ -570,23 +570,23 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 nullable=nullable,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 nullable=nullable,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -699,7 +699,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         method: 1. insert data with varchar in dataframe format
                 2. query count and verify the result
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -709,8 +709,8 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
@@ -718,23 +718,23 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 nullable=nullable,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 nullable=nullable,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -841,7 +841,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         expected: insert successfully, count is correct, and search result is correct
         """
 
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -851,30 +851,30 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -998,7 +998,7 @@ class TestInsertWithFullTextSearchNegative(TestcaseBase):
         expected: insert failed
         """
 
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -1008,8 +1008,8 @@ class TestInsertWithFullTextSearchNegative(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
@@ -1017,23 +1017,23 @@ class TestInsertWithFullTextSearchNegative(TestcaseBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 nullable=nullable,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 nullable=nullable,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -1099,7 +1099,7 @@ class TestUpsertWithFullTextSearch(TestcaseBase):
                 3. check the data
         expected: upsert successfully and data is updated
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -1109,8 +1109,8 @@ class TestUpsertWithFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
@@ -1118,23 +1118,23 @@ class TestUpsertWithFullTextSearch(TestcaseBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 nullable=nullable,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 nullable=nullable,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -1269,7 +1269,7 @@ class TestUpsertWithFullTextSearchNegative(TestcaseBase):
                 2. upsert in half of the data with some data is int
         expected: upsert failed
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -1279,8 +1279,8 @@ class TestUpsertWithFullTextSearchNegative(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
@@ -1288,23 +1288,23 @@ class TestUpsertWithFullTextSearchNegative(TestcaseBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 nullable=nullable,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 nullable=nullable,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -1411,7 +1411,7 @@ class TestDeleteWithFullTextSearch(TestcaseBase):
                 3. check the data
         expected: delete successfully and data is deleted
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -1421,30 +1421,30 @@ class TestDeleteWithFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -1575,7 +1575,7 @@ class TestCreateIndexWithFullTextSearch(TestcaseBase):
                 3. verify the index info by describe index
         expected: create index successfully and index info is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         empty_percent = 0.0
@@ -1586,31 +1586,31 @@ class TestCreateIndexWithFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -1698,7 +1698,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
                 2. create index for full text search with invalid index type
         expected: create index failed
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         empty_percent = 0.0
@@ -1709,31 +1709,31 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -1806,7 +1806,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
                 2. create index for full text search with invalid metric type
         expected: create index failed
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         empty_percent = 0.0
@@ -1817,31 +1817,31 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -1914,7 +1914,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
                 2. create index using bm25 metric type for non bm25 output field
         expected: create index failed
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         empty_percent = 0.0
@@ -1925,31 +1925,31 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -2010,7 +2010,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
                 2. create index for full text search with invalid bm25 params
         expected: create index failed
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         empty_percent = 0.0
@@ -2021,31 +2021,31 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=True,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -2133,7 +2133,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 3. verify the result
         expected: full text search successfully and result is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -2143,31 +2143,31 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=enable_partition_key,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -2327,7 +2327,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 3. verify the result
         expected: full text search successfully and result is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
                 "tokenizer": tokenizer,
         }
         dim = 128
@@ -2337,31 +2337,31 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=enable_partition_key,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -2521,7 +2521,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 3. verify the result
         expected: full text search successfully and result is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -2531,31 +2531,31 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=enable_partition_key,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -2686,7 +2686,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 3. verify the result
         expected: full text search successfully and result is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -2696,31 +2696,31 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=enable_partition_key,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -2840,7 +2840,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
                 3. verify the result
         expected: full text search successfully but result is empty
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -2850,30 +2850,30 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=enable_partition_key,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -2969,7 +2969,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
                 3. verify the result
         expected: full text search failed and return error
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -2979,30 +2979,30 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=enable_partition_key,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -3116,7 +3116,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
                 3. verify the result
         expected: hybrid search successfully and result is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -3126,31 +3126,31 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
                 is_partition_key=enable_partition_key,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
-                tokenizer_params=tokenizer_params,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="dense_emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="neural_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),

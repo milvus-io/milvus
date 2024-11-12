@@ -3133,7 +3133,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 				Value: strconv.Itoa(testMaxVarCharLength),
 			},
 			{
-				Key:   "enable_tokenizer",
+				Key:   "enable_analyzer",
 				Value: "true",
 			},
 		},
