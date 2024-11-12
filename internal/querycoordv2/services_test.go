@@ -214,6 +214,7 @@ func (suite *ServiceSuite) SetupTest() {
 		distController:      suite.distController,
 		ctx:                 context.Background(),
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		proxyClientManager:  suite.proxyManager,
 	}
 
 	suite.server.registerMetricsRequest()
