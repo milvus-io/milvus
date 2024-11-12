@@ -12091,6 +12091,13 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 6. compare results through the re-calculated distances
         for i in range(len(score_answer[:limit])):
             delta = math.fabs(score_answer[i] - hybrid_res[0].distances[i])
+            if delta >= hybrid_search_epsilon:
+                # print id and distance for debug
+                # answer and hybrid search result
+                for i1 in range(len(score_answer)):
+                    log.info("answer id: %d, distance: %f" % (ids_answer[i1], score_answer[i1]))
+                for i2 in range(len(hybrid_res[0].ids)):
+                    log.info("hybrid search res id: %d, distance: %f" % (hybrid_res[0].ids[i2], hybrid_res[0].distances[i2]))
             assert delta < hybrid_search_epsilon
 
     @pytest.mark.tags(CaseLabel.L1)

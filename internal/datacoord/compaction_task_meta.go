@@ -63,7 +63,7 @@ func newCompactionTaskMeta(ctx context.Context, catalog metastore.DataCoordCatal
 		ctx:             ctx,
 		catalog:         catalog,
 		compactionTasks: make(map[int64]map[int64]*datapb.CompactionTask, 0),
-		taskStats:       expirable.NewLRU[UniqueID, *metricsinfo.CompactionTask](1024, nil, time.Minute*60),
+		taskStats:       expirable.NewLRU[UniqueID, *metricsinfo.CompactionTask](32, nil, time.Minute*15),
 	}
 	if err := csm.reloadFromKV(); err != nil {
 		return nil, err
@@ -178,10 +178,6 @@ func (csm *compactionTaskMeta) DropCompactionTask(task *datapb.CompactionTask) e
 
 func (csm *compactionTaskMeta) TaskStatsJSON() string {
 	tasks := csm.taskStats.Values()
-	if len(tasks) == 0 {
-		return ""
-	}
-
 	ret, err := json.Marshal(tasks)
 	if err != nil {
 		return ""

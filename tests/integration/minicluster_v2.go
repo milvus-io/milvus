@@ -464,14 +464,23 @@ func (cluster *MiniClusterV2) Stop() error {
 	if cluster.clientConn != nil {
 		cluster.clientConn.Close()
 	}
-	cluster.RootCoord.Stop()
-	log.Info("mini cluster rootCoord stopped")
-	cluster.DataCoord.Stop()
-	log.Info("mini cluster dataCoord stopped")
-	cluster.QueryCoord.Stop()
-	log.Info("mini cluster queryCoord stopped")
-	cluster.Proxy.Stop()
-	log.Info("mini cluster proxy stopped")
+	if cluster.RootCoord != nil {
+		cluster.RootCoord.Stop()
+		log.Info("mini cluster rootCoord stopped")
+	}
+
+	if cluster.DataCoord != nil {
+		cluster.DataCoord.Stop()
+		log.Info("mini cluster dataCoord stopped")
+	}
+	if cluster.QueryCoord != nil {
+		cluster.QueryCoord.Stop()
+		log.Info("mini cluster queryCoord stopped")
+	}
+	if cluster.Proxy != nil {
+		cluster.Proxy.Stop()
+		log.Info("mini cluster proxy stopped")
+	}
 
 	cluster.StopAllDataNodes()
 	cluster.StopAllStreamingNodes()

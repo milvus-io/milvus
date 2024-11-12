@@ -109,6 +109,7 @@ func (suite *OpsServiceSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 		suite.cluster,
+		suite.nodeMgr,
 	)
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.jobScheduler = job.NewScheduler()

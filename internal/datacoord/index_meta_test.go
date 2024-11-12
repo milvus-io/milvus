@@ -1543,7 +1543,7 @@ func TestBuildIndexTaskStatsJSON(t *testing.T) {
 	}
 
 	actualJSON := im.TaskStatsJSON()
-	assert.Equal(t, "", actualJSON)
+	assert.Equal(t, "[]", actualJSON)
 
 	im.segmentBuildInfo.Add(si1)
 	im.segmentBuildInfo.Add(si2)

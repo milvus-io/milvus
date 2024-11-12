@@ -9,6 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -734,7 +735,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	t.fillInFieldInfo()
 
 	if t.requery {
-		err = t.Requery()
+		err = t.Requery(sp)
 		if err != nil {
 			log.Warn("failed to requery", zap.Error(err))
 			return err
@@ -819,7 +820,7 @@ func (t *searchTask) estimateResultSize(nq int64, topK int64) (int64, error) {
 	//return int64(sizePerRecord) * nq * topK, nil
 }
 
-func (t *searchTask) Requery() error {
+func (t *searchTask) Requery(span trace.Span) error {
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Retrieve,
@@ -864,7 +865,7 @@ func (t *searchTask) Requery() error {
 		fastSkip:     true,
 		reQuery:      true,
 	}
-	queryResult, err := t.node.(*Proxy).query(t.ctx, qt)
+	queryResult, err := t.node.(*Proxy).query(t.ctx, qt, span)
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Milvus WebUI - Query Component</title>
+    <meta name="description" content="Milvus Management WebUI">
+    <link href="./static/css/bootstrap.min.css" rel="stylesheet">
+    <link href="./static/css/style.css" rel="stylesheet">
+    <script src="./static/js/jquery.min.js"></script>
+    <script src="./static/js/bootstrap.min.js"></script>
+    <script src="./static/js/bootstrap.bundle.min.js"></script>
+    <script src="./static/js/render.js"></script>
+    <script src="./static/js/common.js"></script>
+    <script src="./static/js/mockdata.js"></script>
+</head>
+<body>
+<div class="container-fluid">
+    <div id="header"></div>
+    <div class="row">
+        <div class="col-md-2">
+        </div>
+        <div class="col-md-8">
+            <h3>Target Segments</h3>
+            <table class="table table-bordered">
+                <thead class="thead-light">
+                <tr>
+                    <th scope="col">Segment ID</th>
+                    <th scope="col">Collection ID</th>
+                    <th scope="col">Partition ID</th>
+                    <th scope="col">Channel</th>
+                    <th scope="col">Num of Rows</th>
+                    <th scope="col">State</th>
+                    <th scope="col">Target Scope</th>
+                </tr>
+                </thead>
+                <tbody id="dataSegmentsTableBody"></tbody>
+            </table>
+            <div style="display: flex; justify-content: space-between;">
+                <div id="segment_totalCount"></div>
+                <div id="segmentPaginationControls"></div>
+            </div>
+
+            <h3>Target Channels</h3>
+            <table class="table table-bordered">
+                <thead class="thead-light">
+                <tr>
+                    <th scope="col">Channel Name</th>
+                    <th scope="col">Collection ID</th>
+                    <th scope="col">Node ID</th>
+                    <th scope="col">Version</th>
+                    <th scope="col">Unflushed Segments</th>
+                    <th scope="col">Flushed Segments</th>
+                    <th scope="col">Dropped Segments</th>
+                    <th scope="col">Target Scope</th>
+                </tr>
+                </thead>
+                <tbody id="dataChannelsTableBody"></tbody>
+            </table>
+
+            <div style="display: flex; justify-content: space-between;">
+                <div id="channel_totalCount"></div>
+                <div id="channelPaginationControls"></div>
+            </div>
+        </div>
+
+        <div class="col-md-2">
+        </div>
+    </div>
+    <div id="footer"></div>
+</div>
+
+<script>
+    $(document).ready(function(){
+        $('#header').load("header.html");
+        $('#footer').load("footer.html");
+    });
+
+    let targetTableStartPage = 0
+    let pageSize = 10
+    fetchAndRenderTargets(targetTableStartPage, pageSize)
+</script>
+
+</body>
+</html>

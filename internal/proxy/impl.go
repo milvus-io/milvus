@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
@@ -3020,6 +3021,14 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
 			).Inc()
+			user, _ := GetCurUserFromContext(ctx)
+			traceID := ""
+			if sp != nil {
+				traceID = sp.SpanContext().TraceID().String()
+			}
+			if node.slowQueries != nil {
+				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithSearchRequest(request, user, span, traceID))
+			}
 		}
 	}()
 
@@ -3230,6 +3239,14 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.HybridSearchLabel,
 			).Inc()
+			user, _ := GetCurUserFromContext(ctx)
+			traceID := ""
+			if sp != nil {
+				traceID = sp.SpanContext().TraceID().String()
+			}
+			if node.slowQueries != nil {
+				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithSearchRequest(newSearchReq, user, span, traceID))
+			}
 		}
 	}()
 
@@ -3471,7 +3488,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 }
 
 // Query get the records by primary keys.
-func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryResults, error) {
+func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, error) {
 	request := qt.request
 	method := "Query"
 
@@ -3513,6 +3530,15 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.QueryLabel,
 			).Inc()
+			user, _ := GetCurUserFromContext(ctx)
+			traceID := ""
+			if sp != nil {
+				traceID = sp.SpanContext().TraceID().String()
+			}
+
+			if node.slowQueries != nil {
+				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithQueryRequest(request, user, span, traceID))
+			}
 		}
 	}()
 
@@ -3628,7 +3654,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		request.GetCollectionName(),
 	).Inc()
 
-	res, err := node.query(ctx, qt)
+	res, err := node.query(ctx, qt, sp)
 	if err != nil || !merr.Ok(res.Status) {
 		return res, err
 	}
@@ -6483,6 +6509,9 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 
 	// Hook request that executed by proxy
 	router.GET(http.HookConfigsPath, getConfigs(paramtable.GetHookParams().GetAll()))
+
+	// Slow query request that executed by proxy
+	router.GET(http.SlowQueryPath, getSlowQuery(node))
 
 	// QueryCoord requests that are forwarded from proxy
 	router.GET(http.QCTargetPath, getQueryComponentMetrics(node, metricsinfo.QueryTarget))

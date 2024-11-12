@@ -2744,7 +2744,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			node:   node,
 		}
 
-		err := qt.Requery()
+		err := qt.Requery(nil)
 		assert.NoError(t, err)
 		assert.Len(t, qt.result.Results.FieldsData, 2)
 		for _, field := range qt.result.Results.FieldsData {
@@ -2773,7 +2773,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			node:    node,
 		}
 
-		err := qt.Requery()
+		err := qt.Requery(nil)
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
 	})
@@ -2807,7 +2807,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			node:   node,
 		}
 
-		err := qt.Requery()
+		err := qt.Requery(nil)
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
 	})

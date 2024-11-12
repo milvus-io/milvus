@@ -1,4 +1,4 @@
-var sysmetrics = `{
+const sysmetrics = `{
   "nodes_info": [
     {
       "identifier": 1,
@@ -341,7 +341,40 @@ var sysmetrics = `{
   ]
 }`
 
-var clientInfos = `[
+const nodeRequests = `
+[
+  {
+    "node_name": "querynode1",
+    "QPS": 0,
+    "read_request_count": 0,
+    "write_request_count": 0,
+    "delete_request_count": 0
+  },
+  {
+    "node_name": "datanode1",
+    "QPS": 0,
+    "read_request_count": 0,
+    "write_request_count": 0,
+    "delete_request_count": 0
+  },
+  {
+    "node_name": "indexnode1",
+    "QPS": 0,
+    "read_request_count": 0,
+    "write_request_count": 0,
+    "delete_request_count": 0
+  },
+  {
+    "node_name": "proxy1",
+    "QPS": 0,
+    "read_request_count": 0,
+    "write_request_count": 0,
+    "delete_request_count": 0
+  }
+]
+`
+
+const clientInfos = `[
   {
     "sdk_type": "python",
     "sdk_version": "1.0.0",
@@ -364,7 +397,7 @@ var clientInfos = `[
   }
 ]`
 
-var dependencies = `
+const dependencies = `
 {
   "metastore": {
     "health_status": true,
@@ -386,7 +419,7 @@ var dependencies = `
 }
 `
 
-var mconfigs = `
+const mconfigs = `
 {
     "MILVUS_GIT_BUILD_TAGS": "v2.2-testing-20240702-811-g38211f2b81-dev",
     "MILVUS_GIT_COMMIT": "38211f2b81",
@@ -412,7 +445,223 @@ var mconfigs = `
 }
 `;
 
-var qcTargets = `
+const collections =`
+{
+  "status": {
+    "error_code": "Success",
+    "reason": ""
+  },
+  "collection_names": [
+    "collection1",
+    "collection2",
+    "collection3",
+    "collection4",
+    "collection5",
+    "collection6",
+    "collection7",
+    "collection8",
+    "collection9",
+    "collection10"
+  ],
+  "collection_ids": [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+  ],
+  "created_timestamps": [
+    1633036800, 1633123200, 1633209600, 1633296000, 1633382400, 1633468800, 1633555200, 1633641600, 1633728000, 1633814400
+  ],
+  "created_utc_timestamps": [
+    1633036800, 1633123200, 1633209600, 1633296000, 1633382400, 1633468800, 1633555200, 1633641600, 1633728000, 1633814400
+  ],
+  "inMemory_percentages": [
+    100, 90, 80, 70, 60, 50, 40, 30, 20, 10
+  ],
+  "query_service_available": [
+    true, false, false, false, false, false, false, false, false, false
+  ]
+}
+`
+
+const collectionRequest = `
+[
+  {
+    "collection_name": "collection1",
+    "search_QPS": 10,
+    "query_QPS": 5,
+    "write_throughput": 20,
+    "delete_QPS": 2
+  },
+  {
+    "collection_name": "collection2",
+    "search_QPS": 15,
+    "query_QPS": 7,
+    "write_throughput": 25,
+    "delete_QPS": 3
+  },
+  {
+    "collection_name": "collection3",
+    "search_QPS": 20,
+    "query_QPS": 10,
+    "write_throughput": 30,
+    "delete_QPS": 4
+  },
+  {
+    "collection_name": "collection4",
+    "search_QPS": 25,
+    "query_QPS": 12,
+    "write_throughput": 35,
+    "delete_QPS": 5
+  },
+  {
+    "collection_name": "collection5",
+    "search_QPS": 30,
+    "query_QPS": 15,
+    "write_throughput": 40,
+    "delete_QPS": 6
+  },
+  {
+    "collection_name": "collection6",
+    "search_QPS": 35,
+    "query_QPS": 17,
+    "write_throughput": 45,
+    "delete_QPS": 7
+  },
+  {
+    "collection_name": "collection7",
+    "search_QPS": 40,
+    "query_QPS": 20,
+    "write_throughput": 50,
+    "delete_QPS": 8
+  },
+  {
+    "collection_name": "collection8",
+    "search_QPS": 45,
+    "query_QPS": 22,
+    "write_throughput": 55,
+    "delete_QPS": 9
+  },
+  {
+    "collection_name": "collection9",
+    "search_QPS": 50,
+    "query_QPS": 25,
+    "write_throughput": 60,
+    "delete_QPS": 10
+  },
+  {
+    "collection_name": "collection10",
+    "search_QPS": 55,
+    "query_QPS": 27,
+    "write_throughput": 65,
+    "delete_QPS": 11
+  }
+]
+`
+
+const describeCollectionResp = `
+{
+  "status": {
+    "error_code": 0,
+    "reason": "Success"
+  },
+  "schema": {
+    "name": "example_collection",
+    "description": "This is an example collection schema",
+    "fields": [
+      {
+        "name": "field1",
+        "data_type": "INT64",
+        "is_primary_key": true,
+        "auto_id": false
+      },
+      {
+        "name": "field2",
+        "data_type": "FLOAT",
+        "is_primary_key": false,
+        "auto_id": false
+      }
+    ]
+  },
+  "collectionID": 12345,
+  "virtual_channel_names": ["vchan1", "vchan2"],
+  "physical_channel_names": ["pchan1", "pchan2"],
+  "created_timestamp": 1633036800,
+  "created_utc_timestamp": 1633036800,
+  "shards_num": 2,
+  "aliases": ["alias1", "alias2"],
+  "start_positions": [
+    {
+      "key": "start_key",
+      "data": "start_data"
+    }
+  ],
+  "consistency_level": 0,
+  "collection_name": "example_collection",
+  "properties": [
+    {
+      "key": "property_key",
+      "value": "property_value"
+    }
+  ],
+  "db_name": "example_db",
+  "num_partitions": 1,
+  "db_id": 1
+}
+`
+
+const databases = `
+{
+  "status": {
+    "error_code": "Success",
+    "reason": ""
+  },
+  "db_names": [
+    "database_1",
+    "database_2",
+    "database_3",
+    "database_4",
+    "database_5",
+    "database_6",
+    "database_7",
+    "database_8",
+    "database_9",
+    "database_10"
+  ],
+  "created_timestamp": [
+    1633036800,
+    1633123200,
+    1633209600,
+    1633296000,
+    1633382400,
+    1633468800,
+    1633555200,
+    1633641600,
+    1633728000,
+    1633814400
+  ],
+  "db_ids": [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+  ]
+}
+`
+
+const describeDatabaseResp = `
+{
+  "status": {
+    "error_code": 0,
+    "reason": "Success"
+  },
+  "db_name": "example_db",
+  "dbID": 1,
+  "created_timestamp": 1633036800,
+  "properties": [
+    {
+      "key": "property_key",
+      "value": "property_value"
+    }
+  ]
+}
+`
+
+const qcCurrentTargets = `
 [
   {
     "collection_id": 1,
@@ -442,7 +691,7 @@ var qcTargets = `
         ],
         "resource_group": "rg1",
         "loaded_insert_row_count": 1000,
-        "mem_size": 2048,
+        "mem_size": 2048
       }
     ],
     "dm_channels": [
@@ -451,10 +700,18 @@ var qcTargets = `
         "version": 1,
         "collection_id": 1,
         "channel_name": "channel1",
-        "unflushed_segment_ids": [1],
-        "flushed_segment_ids": [2],
-        "dropped_segment_ids": [3],
-        "level_zero_segment_ids": [4],
+        "unflushed_segment_ids": [
+          1
+        ],
+        "flushed_segment_ids": [
+          2
+        ],
+        "dropped_segment_ids": [
+          3
+        ],
+        "level_zero_segment_ids": [
+          4
+        ],
         "partition_stats_versions": {
           "1": 1
         }
@@ -464,7 +721,44 @@ var qcTargets = `
 ]
 `
 
-var qcDist =`
+const qcNextTargets = `
+[
+  {
+    "collection_id": 1,
+    "segments": [
+      {
+        "segment_id": 2,
+        "collection_id": 1,
+        "partition_id": 1,
+        "channel": "channel2",
+        "num_of_rows": 1000,
+        "state": "Sealed",
+        "is_importing": false,
+        "compacted": false,
+        "level": "L0",
+        "is_sorted": true,
+        "node_id": 1,
+        "is_invisible": false,
+        "loaded_timestamp": 1633072800,
+        "index": [
+          {
+            "field_id": 1,
+            "index_id": 1,
+            "build_id": 1,
+            "index_size": 1024,
+            "is_loaded": true
+          }
+        ],
+        "resource_group": "rg1",
+        "loaded_insert_row_count": 1000,
+        "mem_size": 2048
+      }
+    ]
+  }
+]
+`;
+
+const qcDist = `
 {
   "segments": [
     {
@@ -493,6 +787,9 @@ var qcDist =`
       "resource_group": "rg1",
       "loaded_insert_row_count": 1000,
       "mem_size": 2048,
+      "flushed_rows": 1000,
+      "sync_buffer_rows": 0,
+      "syncing_rows": 0
     }
   ],
   "dm_channels": [
@@ -507,18 +804,24 @@ var qcDist =`
       "level_zero_segment_ids": [4],
       "partition_stats_versions": {
         "1": 1
-      }
+      },
+      "watch_state": "Healthy",
+      "start_watch_ts": 1633072800
     }
   ],
   "leader_views": [
     {
-      "node_id": 1,
+      "leader_id": 1,
       "collection_id": 1,
-      "channel_name": "channel1",
-      "segments": [
+      "node_id": 1,
+      "channel": "channel1",
+      "version": 1,
+      "sealed_segments": [
         {
           "segment_id": 1,
+          "collection_id": 1,
           "partition_id": 1,
+          "channel": "channel1",
           "num_of_rows": 1000,
           "state": "Sealed",
           "is_importing": false,
@@ -540,52 +843,63 @@ var qcDist =`
           "resource_group": "rg1",
           "loaded_insert_row_count": 1000,
           "mem_size": 2048,
+          "flushed_rows": 1000,
+          "sync_buffer_rows": 0,
+          "syncing_rows": 0
         }
-      ]
+      ],
+      "growing_segments": [],
+      "target_version": 1,
+      "num_of_growing_rows": 0,
+      "unserviceable_error": ""
     }
   ]
 }
 `
 
-var qcReplica = `
+const qcReplica = `
 [
   {
     "ID": 1,
     "CollectionID": 1,
-    "RWNodes": [1, 2],
-    "ResourceGroup": "rg1",
-    "RONodes": [3],
-    "ChannelToRWNodes": {
+    "rw_nodes": [1, 2],
+    "resource_group": "rg1",
+    "ro_nodes": [3],
+    "channel_to_rw_nodes": {
       "channel1": [1, 2]
     }
   },
   {
     "ID": 2,
     "CollectionID": 2,
-    "RWNodes": [4, 5],
-    "ResourceGroup": "rg2",
-    "RONodes": [6],
-    "ChannelToRWNodes": {
+    "rw_nodes": [4, 5],
+    "resource_group": "rg2",
+    "ro_nodes": [6],
+    "channel_to_rw_nodes": {
       "channel2": [4, 5]
     }
   }
 ]
-`
+`;
 
-var qcResourceGroup = `
+const qcResourceGroup = `
 [
   {
-    "Name": "rg1",
-    "Nodes": [1, 2]
+    "name": "rg1",
+    "nodes": [1, 2],
+    "cfg": {
+        "requests":{},
+        "limits":{"node_num":1000000}
+    }
   },
   {
-    "Name": "rg2",
-    "Nodes": [3, 4]
+    "name": "rg2",
+    "nodes": [3, 4]
   }
 ]
-`
+`;
 
-var qcTasks = `
+const qcTasks = `
 [
   {
     "task_name": "balance_checker-ChannelTask[1]-ch1",
@@ -598,7 +912,7 @@ var qcTasks = `
       "type:Grow node id : 1 channel name:channel_1"
     ],
     "step": 1,
-    "reason": "some reason"
+    "reason": ""
   },
   {
     "task_name": "index_checker-SegmentTask[2]-54321",
@@ -611,7 +925,7 @@ var qcTasks = `
       "type:Grow node id: 2 segment id:123 scope:DataScope_Streaming"
     ],
     "step": 2,
-    "reason": "another reason"
+    "reason": ""
   },
   {
     "task_name": "leader_checker-LeaderSegmentTask[3]-1",
@@ -627,9 +941,9 @@ var qcTasks = `
     "reason": "yet another reason"
   }
 ]
-`
+`;
 
-var qn_segments = `
+const qnSegments = `
 [
   {
     "segment_id": 1,
@@ -656,7 +970,7 @@ var qn_segments = `
     ],
     "resource_group": "rg1",
     "loaded_insert_row_count": 1000,
-    "mem_size": 2048,
+    "mem_size": 2048
   },
   {
     "segment_id": 2,
@@ -683,12 +997,12 @@ var qn_segments = `
     ],
     "resource_group": "rg2",
     "loaded_insert_row_count": 2000,
-    "mem_size": 4096,
+    "mem_size": 4096
   }
 ]
-`
+`;
 
-var qn_channels = `
+const qnChannels = `
 [
   {
     "name": "channel1",
@@ -696,7 +1010,7 @@ var qn_channels = `
     "assign_state": "assigned",
     "latest_time_tick": "2023-10-01 12:00:00",
     "node_id": 1,
-    "collection_id": 1,
+    "collection_id": 1
   },
   {
     "name": "channel2",
@@ -704,26 +1018,39 @@ var qn_channels = `
     "assign_state": "assigned",
     "latest_time_tick": "2023-10-01 12:05:00",
     "node_id": 2,
-    "collection_id": 2,
+    "collection_id": 2
   }
 ]
-`
+`;
 
-var dc_dist = `
+const dc_dist = `
 {
   "segments": [
     {
       "segment_id": 1,
-      "collection_id": 100,
-      "partition_id": 10,
+      "collection_id": 1,
+      "partition_id": 1,
       "channel": "channel1",
       "num_of_rows": 1000,
-      "state": "flushed",
+      "state": "Growing",
       "is_importing": false,
       "compacted": false,
       "level": "L1",
       "is_sorted": true,
       "node_id": 1
+    },
+    {
+      "segment_id": 3,
+      "collection_id": 2,
+      "partition_id": 2,
+      "channel": "channel2",
+      "num_of_rows": 2000,
+      "state": "Growing",
+      "is_importing": true,
+      "compacted": true,
+      "level": "L2",
+      "is_sorted": false,
+      "node_id": 2
     }
   ],
   "dm_channels": [
@@ -737,12 +1064,23 @@ var dc_dist = `
       "dropped_segment_ids": [7, 8, 9],
       "watch_state": "success",
       "start_watch_ts": 123456789
-    }
+    },
+     {
+      "node_id": 1,
+      "version": 1,
+      "collection_id": 100,
+      "channel_name": "channel3",
+      "unflushed_segment_ids": [1, 2, 3],
+      "flushed_segment_ids": [4, 5, 6],
+      "dropped_segment_ids": [7, 8, 9],
+      "watch_state": "to_watch",
+      "start_watch_ts": 123456789
+    } 
   ]
 }
-`
+`;
 
-var dc_build_index_task = `
+const dc_build_index_task = `
 [
   {
     "index_id": 1,
@@ -767,7 +1105,7 @@ var dc_build_index_task = `
   }
 ]`
 
-var dc_compaction_task = `
+const dc_compaction_task = `
 [
   {
     "plan_id": 1,
@@ -795,7 +1133,7 @@ var dc_compaction_task = `
   }
 ]`
 
-var dn_sync_task = `
+const dn_sync_task = `
 [
   {
     "segment_id": 1,
@@ -822,7 +1160,7 @@ var dn_sync_task = `
 ]
 `
 
-var dc_import_task = `
+const dc_import_task = `
 [
   {
     "job_id": 1,
@@ -840,9 +1178,9 @@ var dc_import_task = `
     "task_id": 6,
     "collection_id": 7,
     "node_id": 8,
-    "state": "ImportTaskStateCompleted",
+    "state": "Completed",
     "reason": "",
-    "task_type": "Completed",
+    "task_type": "ImportTask",
     "created_time": "2023-10-01T00:00:00Z",
     "complete_time": "2023-10-01T01:00:00Z"
   },
@@ -860,7 +1198,7 @@ var dc_import_task = `
 ]
 `
 
-var dn_segments = `
+const dn_segments = `
 [
   {
     "segment_id": 1,
@@ -868,7 +1206,7 @@ var dn_segments = `
     "partition_id": 1,
     "channel": "channel1",
     "num_of_rows": 1000,
-    "state": "active",
+    "state": "Growing",
     "is_importing": false,
     "compacted": false,
     "level": "L1",
@@ -884,7 +1222,7 @@ var dn_segments = `
     "partition_id": 2,
     "channel": "channel2",
     "num_of_rows": 2000,
-    "state": "inactive",
+    "state": "Sealed",
     "is_importing": true,
     "compacted": true,
     "level": "L2",
@@ -897,7 +1235,7 @@ var dn_segments = `
 ]
 `
 
-var dn_channels = `
+const dn_channels = `
 [
   {
     "name": "channel1",
@@ -919,3 +1257,114 @@ var dn_channels = `
   }
 ]
 `
+
+const slowQueries = `[
+  {
+    "role": "proxy",
+    "database": "test_db",
+    "collection": "test_collection",
+    "partitions": "partition1,partition2",
+    "consistency_level": "Bounded",
+    "use_default_consistency": true,
+    "guarantee_timestamp": 123456789,
+    "duration": "1.1s",
+    "user": "test_user",
+    "query_params": {
+      "search_params": [
+        {
+          "dsl": ["dsl1"],
+          "search_params": ["param2=value2"],
+          "nq": [10]
+        }
+      ],
+      "output_fields": "field1,field2"
+    },
+    "type": "Search",
+    "trace_id": "729b10a6a7f32ddd7ab5c16dd30f60dc",
+    "time": "2024-11-05 08:14:05"
+  },
+  {
+    "role": "proxy",
+    "database": "test_db",
+    "collection": "test_collection",
+    "partitions": "partition1,partition2",
+    "consistency_level": "Bounded",
+    "use_default_consistency": true,
+    "guarantee_timestamp": 123456789,
+    "duration": "1.2s",
+    "user": "test_user",
+    "query_params": {
+      "expr": "expr1",
+      "output_fields": "field1,field2"
+    },
+    "type": "Query",
+    "trace_id": "232955b7f33b135708d34c3c761b57e7",
+    "time": "2024-11-05 08:14:05"
+  },
+  {
+    "role": "proxy",
+    "database": "test_db",
+    "collection": "test_collection",
+    "partitions": "partition1,partition2",
+    "consistency_level": "Bounded",
+    "use_default_consistency": true,
+    "guarantee_timestamp": 123456789,
+    "duration": "1.3s",
+    "user": "test_user",
+    "query_params": {
+      "search_params": [
+        {
+          "dsl": ["dsl2"],
+          "search_params": ["param3=value3"],
+          "nq": [20]
+        }
+      ],
+      "output_fields": "field3,field4"
+    },
+    "type": "HybridSearch",
+    "trace_id": "3a4b5c6d7e8f9a0b1c2d3e4f5g6h7i8j",
+    "time": "2024-11-05 08:14:05"
+  },
+  {
+    "role": "proxy",
+    "database": "test_db",
+    "collection": "test_collection",
+    "partitions": "partition1,partition2",
+    "consistency_level": "Bounded",
+    "use_default_consistency": true,
+    "guarantee_timestamp": 123456789,
+    "duration": "1.4s",
+    "user": "test_user",
+    "query_params": {
+      "expr": "expr2",
+      "output_fields": "field5,field6"
+    },
+    "type": "Query",
+    "trace_id": "4b5c6d7e8f9a0b1c2d3e4f5g6h7i8j9k",
+    "time": "2024-11-05 08:14:05"
+  },
+  {
+    "role": "proxy",
+    "database": "test_db",
+    "collection": "test_collection",
+    "partitions": "partition1,partition2",
+    "consistency_level": "Bounded",
+    "use_default_consistency": true,
+    "guarantee_timestamp": 123456789,
+    "duration": "1.5s",
+    "user": "test_user",
+    "query_params": {
+      "search_params": [
+        {
+          "dsl": ["dsl3"],
+          "search_params": ["param4=value4"],
+          "nq": [30]
+        }
+      ],
+      "output_fields": "field7,field8"
+    },
+    "type": "Search",
+    "trace_id": "5c6d7e8f9a0b1c2d3e4f5g6h7i8j9k0l",
+    "time": "2024-11-05 08:14:05"
+  }
+]`;
