@@ -54,25 +54,25 @@ func (_c *MockShardClientManager_Close_Call) RunAndReturn(run func()) *MockShard
 	return _c
 }
 
-// GetClient provides a mock function with given fields: ctx, nodeID
-func (_m *MockShardClientManager) GetClient(ctx context.Context, nodeID int64) (types.QueryNodeClient, error) {
-	ret := _m.Called(ctx, nodeID)
+// GetClient provides a mock function with given fields: ctx, nodeInfo1
+func (_m *MockShardClientManager) GetClient(ctx context.Context, nodeInfo1 nodeInfo) (types.QueryNodeClient, error) {
+	ret := _m.Called(ctx, nodeInfo1)
 
 	var r0 types.QueryNodeClient
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) (types.QueryNodeClient, error)); ok {
-		return rf(ctx, nodeID)
+	if rf, ok := ret.Get(0).(func(context.Context, nodeInfo) (types.QueryNodeClient, error)); ok {
+		return rf(ctx, nodeInfo1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64) types.QueryNodeClient); ok {
-		r0 = rf(ctx, nodeID)
+	if rf, ok := ret.Get(0).(func(context.Context, nodeInfo) types.QueryNodeClient); ok {
+		r0 = rf(ctx, nodeInfo1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(types.QueryNodeClient)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
-		r1 = rf(ctx, nodeID)
+	if rf, ok := ret.Get(1).(func(context.Context, nodeInfo) error); ok {
+		r1 = rf(ctx, nodeInfo1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -87,14 +87,14 @@ type MockShardClientManager_GetClient_Call struct {
 
 // GetClient is a helper method to define mock.On call
 //   - ctx context.Context
-//   - nodeID int64
-func (_e *MockShardClientManager_Expecter) GetClient(ctx interface{}, nodeID interface{}) *MockShardClientManager_GetClient_Call {
-	return &MockShardClientManager_GetClient_Call{Call: _e.mock.On("GetClient", ctx, nodeID)}
+//   - nodeInfo1 nodeInfo
+func (_e *MockShardClientManager_Expecter) GetClient(ctx interface{}, nodeInfo1 interface{}) *MockShardClientManager_GetClient_Call {
+	return &MockShardClientManager_GetClient_Call{Call: _e.mock.On("GetClient", ctx, nodeInfo1)}
 }
 
-func (_c *MockShardClientManager_GetClient_Call) Run(run func(ctx context.Context, nodeID int64)) *MockShardClientManager_GetClient_Call {
+func (_c *MockShardClientManager_GetClient_Call) Run(run func(ctx context.Context, nodeInfo1 nodeInfo)) *MockShardClientManager_GetClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64))
+		run(args[0].(context.Context), args[1].(nodeInfo))
 	})
 	return _c
 }
@@ -104,7 +104,40 @@ func (_c *MockShardClientManager_GetClient_Call) Return(_a0 types.QueryNodeClien
 	return _c
 }
 
-func (_c *MockShardClientManager_GetClient_Call) RunAndReturn(run func(context.Context, int64) (types.QueryNodeClient, error)) *MockShardClientManager_GetClient_Call {
+func (_c *MockShardClientManager_GetClient_Call) RunAndReturn(run func(context.Context, nodeInfo) (types.QueryNodeClient, error)) *MockShardClientManager_GetClient_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ReleaseClientRef provides a mock function with given fields: nodeID
+func (_m *MockShardClientManager) ReleaseClientRef(nodeID int64) {
+	_m.Called(nodeID)
+}
+
+// MockShardClientManager_ReleaseClientRef_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReleaseClientRef'
+type MockShardClientManager_ReleaseClientRef_Call struct {
+	*mock.Call
+}
+
+// ReleaseClientRef is a helper method to define mock.On call
+//   - nodeID int64
+func (_e *MockShardClientManager_Expecter) ReleaseClientRef(nodeID interface{}) *MockShardClientManager_ReleaseClientRef_Call {
+	return &MockShardClientManager_ReleaseClientRef_Call{Call: _e.mock.On("ReleaseClientRef", nodeID)}
+}
+
+func (_c *MockShardClientManager_ReleaseClientRef_Call) Run(run func(nodeID int64)) *MockShardClientManager_ReleaseClientRef_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockShardClientManager_ReleaseClientRef_Call) Return() *MockShardClientManager_ReleaseClientRef_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardClientManager_ReleaseClientRef_Call) RunAndReturn(run func(int64)) *MockShardClientManager_ReleaseClientRef_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -138,49 +171,6 @@ func (_c *MockShardClientManager_SetClientCreatorFunc_Call) Return() *MockShardC
 }
 
 func (_c *MockShardClientManager_SetClientCreatorFunc_Call) RunAndReturn(run func(queryNodeCreatorFunc)) *MockShardClientManager_SetClientCreatorFunc_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// UpdateShardLeaders provides a mock function with given fields: oldLeaders, newLeaders
-func (_m *MockShardClientManager) UpdateShardLeaders(oldLeaders map[string][]nodeInfo, newLeaders map[string][]nodeInfo) error {
-	ret := _m.Called(oldLeaders, newLeaders)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(map[string][]nodeInfo, map[string][]nodeInfo) error); ok {
-		r0 = rf(oldLeaders, newLeaders)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockShardClientManager_UpdateShardLeaders_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateShardLeaders'
-type MockShardClientManager_UpdateShardLeaders_Call struct {
-	*mock.Call
-}
-
-// UpdateShardLeaders is a helper method to define mock.On call
-//   - oldLeaders map[string][]nodeInfo
-//   - newLeaders map[string][]nodeInfo
-func (_e *MockShardClientManager_Expecter) UpdateShardLeaders(oldLeaders interface{}, newLeaders interface{}) *MockShardClientManager_UpdateShardLeaders_Call {
-	return &MockShardClientManager_UpdateShardLeaders_Call{Call: _e.mock.On("UpdateShardLeaders", oldLeaders, newLeaders)}
-}
-
-func (_c *MockShardClientManager_UpdateShardLeaders_Call) Run(run func(oldLeaders map[string][]nodeInfo, newLeaders map[string][]nodeInfo)) *MockShardClientManager_UpdateShardLeaders_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(map[string][]nodeInfo), args[1].(map[string][]nodeInfo))
-	})
-	return _c
-}
-
-func (_c *MockShardClientManager_UpdateShardLeaders_Call) Return(_a0 error) *MockShardClientManager_UpdateShardLeaders_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockShardClientManager_UpdateShardLeaders_Call) RunAndReturn(run func(map[string][]nodeInfo, map[string][]nodeInfo) error) *MockShardClientManager_UpdateShardLeaders_Call {
 	_c.Call.Return(run)
 	return _c
 }

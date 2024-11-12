@@ -78,8 +78,8 @@ func TestQueryTask_all(t *testing.T) {
 	}, nil).Maybe()
 
 	mgr := NewMockShardClientManager(t)
+	mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
-	mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
 	lb := NewLBPolicyImpl(mgr)
 
 	defer rc.Close()
