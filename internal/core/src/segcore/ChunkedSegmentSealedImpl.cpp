@@ -2105,7 +2105,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
             field_binlog_config->GetIndexType(),
             index_metric,
             knowhere::Version::GetCurrentVersion().VersionNumber());
-        auto num_chunk = fields_.at(field_id)->num_chunks();
+        auto num_chunk = vec_data->num_chunks();
         for (int i = 0; i < num_chunk; ++i) {
             auto dataset = knowhere::GenDataSet(
                 vec_data->chunk_row_nums(i), dim, vec_data->Data(i));
