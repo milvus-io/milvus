@@ -74,6 +74,9 @@ func (t *mixCompactionTask) processPipelining() bool {
 
 	err = t.sessions.Compaction(context.TODO(), t.GetTaskProto().GetNodeID(), t.GetPlan())
 	if err != nil {
+		// Compaction tasks may be refused by DataNode because of slot limit. In this case, the node id is reset
+		//  to enable a retry in compaction.checkCompaction().
+		// This is tricky, we should remove the reassignment here.
 		log.Warn("mixCompactionTask failed to notify compaction tasks to DataNode", zap.Error(err))
 		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		return false

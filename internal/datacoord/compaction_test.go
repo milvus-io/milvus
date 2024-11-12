@@ -453,7 +453,7 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 		Type: datapb.CompactionType_MixCompaction,
 	}, nil, nil, nil)
 	task1.slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-	node, useSlot := s.handler.pickAnyNode(nodeSlots, task1)
+	node, useSlot := pickAnyNode(nodeSlots, task1)
 	s.Equal(int64(101), node)
 	nodeSlots[node] = nodeSlots[node] - useSlot
 
@@ -462,7 +462,7 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 	}, nil, nil, nil)
 	task2.slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
 
-	node, useSlot = s.handler.pickAnyNode(nodeSlots, task2)
+	node, useSlot = pickAnyNode(nodeSlots, task2)
 	s.Equal(int64(100), node)
 	nodeSlots[node] = nodeSlots[node] - useSlot
 
@@ -471,11 +471,11 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 	}, nil, nil, nil)
 	task3.slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
 
-	node, useSlot = s.handler.pickAnyNode(nodeSlots, task3)
+	node, useSlot = pickAnyNode(nodeSlots, task3)
 	s.Equal(int64(101), node)
 	nodeSlots[node] = nodeSlots[node] - useSlot
 
-	node, useSlot = s.handler.pickAnyNode(map[int64]int64{}, &mixCompactionTask{})
+	node, useSlot = pickAnyNode(map[int64]int64{}, &mixCompactionTask{})
 	s.Equal(int64(NullNodeID), node)
 }
 
@@ -489,7 +489,7 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNodeSlotUsageShouldNotBeZero() {
 		Type: datapb.CompactionType_MixCompaction,
 	}, nil, nil, nil)
 	task1.slotUsage = 0
-	nodeID, useSlot := s.handler.pickAnyNode(nodeSlots, task1)
+	nodeID, useSlot := pickAnyNode(nodeSlots, task1)
 	s.Equal(int64(NullNodeID), nodeID)
 	s.Equal(int64(0), useSlot)
 }
@@ -516,11 +516,11 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNodeForClusteringTask() {
 	executingTasks[1] = task1
 	executingTasks[2] = task2
 	s.handler.executingTasks = executingTasks
-	node, useSlot := s.handler.pickAnyNode(nodeSlots, task1)
+	node, useSlot := pickAnyNode(nodeSlots, task1)
 	s.Equal(int64(101), node)
 	nodeSlots[node] = nodeSlots[node] - useSlot
 
-	node, useSlot = s.handler.pickAnyNode(nodeSlots, task2)
+	node, useSlot = pickAnyNode(nodeSlots, task2)
 	s.Equal(int64(NullNodeID), node)
 }
 

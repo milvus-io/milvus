@@ -291,23 +291,12 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 			if slots == nil {
 				slots = c.cluster.QuerySlots()
 			}
-			nodeID, useSlot := c.pickAnyNode(slots, t)
-			if nodeID == NullNodeID {
+			id := assignNodeID(slots, t)
+			if id == NullNodeID {
 				log.RatedWarn(10, "not enough slots for compaction task", zap.Int64("planID", t.GetTaskProto().GetPlanID()))
 				selected = selected[:len(selected)-1]
 				excluded = append(excluded, t)
 				break // 3. no avaiable slots
-			}
-
-			err = t.SetNodeID(nodeID)
-			if err != nil {
-				log.Info("compactionHandler assignNodeID failed",
-					zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("vchannel", t.GetTaskProto().GetChannel()), zap.Error(err))
-			} else {
-				// update the input nodeSlots
-				slots[nodeID] = slots[nodeID] - useSlot
-				log.Info("compactionHandler assignNodeID success",
-					zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("vchannel", t.GetTaskProto().GetChannel()), zap.Any("nodeID", nodeID))
 			}
 		}
 
@@ -633,9 +622,52 @@ func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (Com
 	return task, nil
 }
 
+func assignNodeID(slots map[int64]int64, t CompactionTask) int64 {
+	if len(slots) == 0 {
+		return NullNodeID
+	}
+
+	nodeID, useSlot := pickAnyNode(slots, t)
+	if nodeID == NullNodeID {
+		log.Info("compactionHandler cannot find datanode for compaction task",
+			zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("type", t.GetTaskProto().GetType().String()), zap.String("vchannel", t.GetTaskProto().GetChannel()))
+		return NullNodeID
+	}
+	err := t.SetNodeID(nodeID)
+	if err != nil {
+		log.Info("compactionHandler assignNodeID failed",
+			zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("vchannel", t.GetTaskProto().GetChannel()), zap.Error(err))
+		return NullNodeID
+	}
+	// update the input nodeSlots
+	slots[nodeID] = slots[nodeID] - useSlot
+	log.Info("compactionHandler assignNodeID success",
+		zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("vchannel", t.GetTaskProto().GetChannel()), zap.Any("nodeID", nodeID))
+	return nodeID
+}
+
 func (c *compactionPlanHandler) checkCompaction() error {
 	// Get executing executingTasks before GetCompactionState from DataNode to prevent false failure,
 	//  for DC might add new task while GetCompactionState.
+
+	// Assign node id if needed
+	var slots map[int64]int64
+	c.executingGuard.RLock()
+	for _, t := range c.executingTasks {
+		if t.NeedReAssignNodeID() {
+			if slots == nil {
+				slots = c.cluster.QuerySlots()
+			}
+			id := assignNodeID(slots, t)
+			if id == NullNodeID {
+				break
+			}
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Inc()
+		}
+	}
+	c.executingGuard.RUnlock()
+
 	var finishedTasks []CompactionTask
 	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
@@ -658,7 +690,7 @@ func (c *compactionPlanHandler) checkCompaction() error {
 	return nil
 }
 
-func (c *compactionPlanHandler) pickAnyNode(nodeSlots map[int64]int64, task CompactionTask) (nodeID int64, useSlot int64) {
+func pickAnyNode(nodeSlots map[int64]int64, task CompactionTask) (nodeID int64, useSlot int64) {
 	nodeID = NullNodeID
 	var maxSlots int64 = -1
 
