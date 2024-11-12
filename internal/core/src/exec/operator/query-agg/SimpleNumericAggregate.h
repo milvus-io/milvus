@@ -41,6 +41,16 @@ protected:
             }
         }
     }
+
+    template <bool tableHasNulls, typename TData = TResult,
+            typename TValue = TInput, typename UpdateSingleValue>
+    void updateGroups(char** groups,
+                      const TargetBitmapView& rows,
+                      const VectorPtr& vector,
+                      UpdateSingleValue updateSingleValue,
+                      bool mayPushdown){
+
+    }
 };
 
 }

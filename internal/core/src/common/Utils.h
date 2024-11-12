@@ -327,5 +327,15 @@ inline std::string lowerString(const std::string& str) {
     return ret;
 }
 
+template <typename T>
+T checkPlus(const T& a, const T& b, const char* typeName = "integer"){
+    T result;
+    bool overflow = __builtin_add_overflow(a, b, &result);
+    if (UNLIKELY(overflow)) {
+        VELOX_ARITHMETIC_ERROR("{} overflow: {} + {}", typeName, a, b);
+    }
+    return result;
+}
+
 }  // namespace milvus
 

@@ -697,7 +697,7 @@ public:
         AssertInfo(names_.size() == columns_types_.size(),
                    "Name count:{} and column count:{} must be the same",
                    names_.size(),
-                   columns_types_.size())
+                   columns_types_.size());
     };
 
     static const std::shared_ptr<const RowType> None;

@@ -43,11 +43,6 @@ private:
     // so larger values need not be represented.
     int32_t rowSizeOffset_ = 0;
 
-    // Number of null accumulators in the current state of the aggregation
-    // operator for this aggregate. If 0, clearing the null as part of update
-    // is not needed.
-    uint64_t numNulls_ = 0;
-
 public:
     DataType resultType() const {
         return result_type_;
@@ -128,6 +123,10 @@ protected:
       int32_t rowSizeOffset);
 
     virtual void initializeNewGroupsInternal(char** groups, folly::Range<const vector_size_t*> indices) = 0;
+    // Number of null accumulators in the current state of the aggregation
+    // operator for this aggregate. If 0, clearing the null as part of update
+    // is not needed.
+    uint64_t numNulls_ = 0;
 };
 
 using AggregateFunctionFactory = std::function<std::unique_ptr<Aggregate>(plan::AggregationNode::Step step,

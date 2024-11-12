@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 #pragma once
 #include "SimpleNumericAggregate.h"
+#include "common/Utils.h"
 
 namespace milvus{
 namespace exec {
@@ -38,8 +39,41 @@ public:
             });
     }
 
+    void addRawInput(char** groups, const TargetBitmapView& activeRows,
+                     const std::vector<VectorPtr>& input, bool mayPushDown) override {
+
+    }
+
     void initializeNewGroupsInternal(char** groups, folly::Range<const vector_size_t*> indices) override {
 
+    }
+
+protected:
+    template <typename TData, typename TValue = TInput>
+    void updateInternal(char** groups, const TargetBitmapView& activeRows,
+                        const std::vector<VectorPtr>& input, bool mayPushDown) {
+        const auto& input_column = input[0];
+        if (Aggregate::numNulls_) {
+            BaseAggregate::template updateGroups<true, TData, TValue>(groups, activeRows, input_column,
+                    &updateSingleValue<TData>, false);
+        } else {
+            BaseAggregate::template updateGroups<false, TData, TValue>(groups, activeRows, input_column,
+                    &updateSingleValue<TData>, false);
+        }
+    }
+
+private:
+    template<typename TData>
+#if defined(FOLLY_DISABLE_UNDEFINED_BEHAVIOR_SANITIZER)
+    FOLLY_DISABLE_UNDEFINED_BEHAVIOR_SANITIZER("signed-integer-overflow")
+#endif
+    static void updateSingleValue(TData& result, TData value) {
+        if constexpr (std::is_same_v<TData, double> || std::is_same_v<TData, float>||
+                std::is_same_v<TData, int64_t> && Overflow) {
+            result += value;
+        } else {
+            result = checkPlus(result, value);
+        }
     }
 };
 }
