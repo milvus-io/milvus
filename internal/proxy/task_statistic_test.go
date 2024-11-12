@@ -80,8 +80,8 @@ func (s *StatisticTaskSuite) SetupTest() {
 
 	s.qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	mgr := NewMockShardClientManager(s.T())
+	mgr.EXPECT().ReleaseClientRef(mock.Anything).Maybe()
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil).Maybe()
-	mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.lb = NewLBPolicyImpl(mgr)
 
 	err := InitMetaCache(context.Background(), s.rc, s.qc, mgr)

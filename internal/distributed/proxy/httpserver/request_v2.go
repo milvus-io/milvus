@@ -157,7 +157,7 @@ type SearchReqV2 struct {
 	Filter           string        `json:"filter"`
 	GroupByField     string        `json:"groupingField"`
 	GroupSize        int32         `json:"groupSize"`
-	GroupStrictSize  bool          `json:"groupStrictSize"`
+	StrictGroupSize  bool          `json:"strictGroupSize"`
 	Limit            int32         `json:"limit"`
 	Offset           int32         `json:"offset"`
 	OutputFields     []string      `json:"outputFields"`
@@ -194,7 +194,7 @@ type HybridSearchReq struct {
 	Limit            int32          `json:"limit"`
 	GroupByField     string         `json:"groupingField"`
 	GroupSize        int32          `json:"groupSize"`
-	GroupStrictSize  bool           `json:"groupStrictSize"`
+	StrictGroupSize  bool           `json:"strictGroupSize"`
 	OutputFields     []string       `json:"outputFields"`
 	ConsistencyLevel string         `json:"consistencyLevel"`
 }

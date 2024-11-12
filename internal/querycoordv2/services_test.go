@@ -157,6 +157,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 		suite.cluster,
+		suite.nodeMgr,
 	)
 	suite.targetObserver.Start()
 	for _, node := range suite.nodes {
@@ -214,6 +215,7 @@ func (suite *ServiceSuite) SetupTest() {
 		distController:      suite.distController,
 		ctx:                 context.Background(),
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		proxyClientManager:  suite.proxyManager,
 	}
 
 	suite.server.registerMetricsRequest()

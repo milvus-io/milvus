@@ -981,6 +981,53 @@ func (_c *MockCache_InvalidateShardLeaderCache_Call) RunAndReturn(run func([]int
 	return _c
 }
 
+// ListShardLocation provides a mock function with given fields:
+func (_m *MockCache) ListShardLocation() map[int64]nodeInfo {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListShardLocation")
+	}
+
+	var r0 map[int64]nodeInfo
+	if rf, ok := ret.Get(0).(func() map[int64]nodeInfo); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64]nodeInfo)
+		}
+	}
+
+	return r0
+}
+
+// MockCache_ListShardLocation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListShardLocation'
+type MockCache_ListShardLocation_Call struct {
+	*mock.Call
+}
+
+// ListShardLocation is a helper method to define mock.On call
+func (_e *MockCache_Expecter) ListShardLocation() *MockCache_ListShardLocation_Call {
+	return &MockCache_ListShardLocation_Call{Call: _e.mock.On("ListShardLocation")}
+}
+
+func (_c *MockCache_ListShardLocation_Call) Run(run func()) *MockCache_ListShardLocation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCache_ListShardLocation_Call) Return(_a0 map[int64]nodeInfo) *MockCache_ListShardLocation_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCache_ListShardLocation_Call) RunAndReturn(run func() map[int64]nodeInfo) *MockCache_ListShardLocation_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RefreshPolicyInfo provides a mock function with given fields: op
 func (_m *MockCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
 	ret := _m.Called(op)

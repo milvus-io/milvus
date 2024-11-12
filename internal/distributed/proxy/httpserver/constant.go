@@ -154,6 +154,6 @@ const (
 	ParamRangeFilter     = "range_filter"
 	ParamGroupByField    = "group_by_field"
 	ParamGroupSize       = "group_size"
-	ParamGroupStrictSize = "group_strict_size"
+	ParamStrictGroupSize = "strict_group_size"
 	BoundedTimestamp     = 2
 )
