@@ -78,7 +78,7 @@ func (t *mixCompactionTask) processPipelining() bool {
 		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		return false
 	}
-	log.Warn("mixCompactionTask notify compaction tasks to DataNode")
+	log.Info("mixCompactionTask notify compaction tasks to DataNode")
 
 	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
 	if err != nil {
