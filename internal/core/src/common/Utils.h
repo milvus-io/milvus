@@ -317,4 +317,15 @@ int comparePrimitiveAsc(const T& left, const T& right) {
     }
     return left < right ? -1 : left == right ? 0 : 1;
 }
+
+inline std::string lowerString(const std::string& str) {
+    std::string ret;
+    ret.reserve(str.size());
+    std::transform(str.begin(), str.end(), ret.begin(), [](unsigned char c) {
+        return std::tolower(c);
+    });
+    return ret;
+}
+
 }  // namespace milvus
+

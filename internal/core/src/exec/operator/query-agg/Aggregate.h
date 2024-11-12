@@ -12,6 +12,12 @@
 
 #include "common/Types.h"
 #include "plan/PlanNode.h"
+#include "AggregateUtil.h"
+#include "expr/FunctionSignature.h"
+#include "plan/PlanNode.h"
+#include "exec/QueryContext.h"
+#include <folly/Synchronized.h>
+
 
 namespace milvus{
 namespace exec{
@@ -123,6 +129,31 @@ protected:
 
     virtual void initializeNewGroupsInternal(char** groups, folly::Range<const vector_size_t*> indices) = 0;
 };
+
+using AggregateFunctionFactory = std::function<std::unique_ptr<Aggregate>(plan::AggregationNode::Step step,
+                                                                          const std::vector<DataType>& argTypes,
+                                                                          DataType resultType,
+                                                                          const QueryConfig& config)>;
+
+struct AggregateFunctionEntry {
+    std::vector<expr::AggregateFunctionSignaturePtr> signatures;
+    AggregateFunctionFactory factory;
+};
+
+using AggregateFunctionMap = folly::Synchronized<std::unordered_map<std::string, AggregateFunctionEntry>>;
+
+AggregateFunctionMap& aggregateFunctions();
+
+/// Register an aggregate function with the specified name and signatures. If
+/// registerCompanionFunctions is true, also register companion aggregate and
+/// scalar functions with it. When functions with `name` already exist, if
+/// overwrite is true, existing registration will be replaced. Otherwise, return
+/// false without overwriting the registry.
+AggregateRegistrationResult registerAggregateFunction(const std::string& name,
+                                                      const std::vector<std::shared_ptr<expr::AggregateFunctionSignature>>& signatures,
+                                                      const AggregateFunctionFactory& factory,
+                                                      bool registerCompanionFunctions,
+                                                      bool overwrite);
 
 bool isRawInput(milvus::plan::AggregationNode::Step step);
 

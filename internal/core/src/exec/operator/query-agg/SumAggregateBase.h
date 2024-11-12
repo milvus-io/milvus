@@ -31,11 +31,15 @@ public:
         return 1;
     }
 
-    void extractValues(char** groups, int32_t numGroups, VectorPtr* result) {
+    void extractValues(char** groups, int32_t numGroups, VectorPtr* result) override{
         BaseAggregate::template doExtractValues<TAccumulator>(
             groups, numGroups, result, [&](char* group) {
                 return (ResultType)(*BaseAggregate::Aggregate::template value<TAccumulator>(group));
             });
+    }
+
+    void initializeNewGroupsInternal(char** groups, folly::Range<const vector_size_t*> indices) override {
+
     }
 };
 }

@@ -43,6 +43,35 @@ AggregateRegistrationResult registerSum(
         .intermediateType(DataType::INT64)
         .intermediateType(DataType::INT64).build());
     }
+    return exec::registerAggregateFunction(name,
+                                           signatures,
+                                           [name](plan::AggregationNode::Step step,
+                                                   const std::vector<DataType>& argumentTypes,
+                                                   DataType resultType,
+                                                   const QueryConfig& config)->std::unique_ptr<Aggregate>{
+                                                        AssertInfo(argumentTypes.size()==1, "function:{} only accept one argument", name);
+                                                        auto inputType = argumentTypes[0];
+                                                        switch (inputType) {
+                                                            case DataType::INT8:
+                                                                return std::make_unique<T<int8_t, int64_t, int64_t>>(DataType::INT64);
+                                                            case DataType::INT16:
+                                                                return std::make_unique<T<int16_t, int64_t, int64_t>>(DataType::INT64);
+                                                            case DataType::INT32:
+                                                                return std::make_unique<T<int32_t, int64_t, int64_t>>(DataType::INT64);
+                                                            case DataType::INT64:
+                                                                return std::make_unique<T<int64_t, int64_t, int64_t>>(DataType::INT64);
+                                                            case DataType::DOUBLE:
+                                                                return std::make_unique<T<double, double, double>>(DataType::DOUBLE);
+                                                            case DataType::FLOAT:
+                                                                return std::make_unique<T<float, double, double>>(DataType::DOUBLE);
+                                                            default:
+                                                                PanicInfo(DataTypeInvalid, "Unknown input type for {} aggregation {}",
+                                                                          name,
+                                                                          GetDataTypeName(inputType));
+                                                        }
+                                                   },
+                                           withCompanionFunctions,
+                                           overwrite);
 };
 
 

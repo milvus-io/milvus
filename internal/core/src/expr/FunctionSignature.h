@@ -51,6 +51,8 @@ private:
     DataType intermediateType_;
 };
 
+using AggregateFunctionSignaturePtr = std::shared_ptr<AggregateFunctionSignature>;
+
 class AggregateFunctionSignatureBuilder {
 public:
     AggregateFunctionSignatureBuilder& returnType(DataType returnType) {
