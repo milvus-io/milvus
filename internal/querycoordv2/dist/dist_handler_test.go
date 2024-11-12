@@ -66,6 +66,7 @@ func (suite *DistHandlerSuite) SetupSuite() {
 	suite.scheduler.EXPECT().GetExecutedFlag(mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetDmChannel(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	suite.target.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything).Return(1011).Maybe()
 }
 
 func (suite *DistHandlerSuite) TestBasic() {
@@ -97,14 +98,16 @@ func (suite *DistHandlerSuite) TestBasic() {
 
 		LeaderViews: []*querypb.LeaderView{
 			{
-				Collection: 1,
-				Channel:    "test-channel-1",
+				Collection:    1,
+				Channel:       "test-channel-1",
+				TargetVersion: 1011,
 			},
 		},
 		LastModifyTs: 1,
 	}, nil)
 
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target)
+	syncTargetVersionFn := func(collectionID int64) {}
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, syncTargetVersionFn)
 	defer suite.handler.stop()
 
 	time.Sleep(10 * time.Second)
@@ -119,7 +122,8 @@ func (suite *DistHandlerSuite) TestGetDistributionFailed() {
 	}))
 	suite.client.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("fake error"))
 
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target)
+	syncTargetVersionFn := func(collectionID int64) {}
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, syncTargetVersionFn)
 	defer suite.handler.stop()
 
 	time.Sleep(10 * time.Second)

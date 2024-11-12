@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -78,15 +79,22 @@ func (suite *TargetObserverSuite) SetupTest() {
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 
 	// meta
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 1,
+	}))
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 2,
+	}))
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	suite.meta = meta.NewMeta(idAllocator, store, session.NewNodeManager())
+	suite.meta = meta.NewMeta(idAllocator, store, nodeMgr)
 
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.distMgr = meta.NewDistributionManager()
 	suite.cluster = session.NewMockCluster(suite.T())
-	suite.observer = NewTargetObserver(suite.meta, suite.targetMgr, suite.distMgr, suite.broker, suite.cluster)
+	suite.observer = NewTargetObserver(suite.meta, suite.targetMgr, suite.distMgr, suite.broker, suite.cluster, nodeMgr)
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
 
@@ -125,6 +133,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.observer.Start()
 }
 
@@ -171,6 +180,7 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 	suite.broker.EXPECT().
 		GetRecoveryInfoV2(mock.Anything, mock.Anything).
 		Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
+
 	suite.Eventually(func() bool {
 		return len(suite.targetMgr.GetSealedSegmentsByCollection(suite.collectionID, meta.NextTarget)) == 3 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(suite.collectionID, meta.NextTarget)) == 2
@@ -200,6 +210,10 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 			},
 		},
 	)
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
 	// Able to update current if it's not empty
 	suite.Eventually(func() bool {
@@ -272,7 +286,8 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 	// meta
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	suite.meta = meta.NewMeta(idAllocator, store, session.NewNodeManager())
+	nodeMgr := session.NewNodeManager()
+	suite.meta = meta.NewMeta(idAllocator, store, nodeMgr)
 
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
@@ -284,6 +299,7 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 		suite.distMgr,
 		suite.broker,
 		suite.cluster,
+		nodeMgr,
 	)
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)

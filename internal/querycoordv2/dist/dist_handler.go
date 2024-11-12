@@ -18,6 +18,7 @@ package dist
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -39,6 +40,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
+type TriggerUpdateTargetVersion = func(collectionID int64)
+
 type distHandler struct {
 	nodeID       int64
 	c            chan struct{}
@@ -51,6 +54,8 @@ type distHandler struct {
 	mu           sync.Mutex
 	stopOnce     sync.Once
 	lastUpdateTs int64
+
+	syncTargetVersionFn TriggerUpdateTargetVersion
 }
 
 func (dh *distHandler) start(ctx context.Context) {
@@ -221,12 +226,35 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 			NumOfGrowingRows:       lview.GetNumOfGrowingRows(),
 			PartitionStatsVersions: lview.PartitionStatsVersions,
 		}
-		// check leader serviceable
-		// todo by weiliu1031: serviceable status should be maintained by delegator, to avoid heavy check here
-		if err := utils.CheckLeaderAvailable(dh.nodeManager, dh.target, view); err != nil {
-			view.UnServiceableError = err
-		}
 		updates = append(updates, view)
+
+		// check leader serviceable
+		if err := utils.CheckDelegatorDataReady(dh.nodeManager, dh.target, view, meta.CurrentTarget); err != nil {
+			view.UnServiceableError = err
+			log.Info("leader is not available due to distribution not ready",
+				zap.Int64("collectionID", view.CollectionID),
+				zap.Int64("nodeID", view.ID),
+				zap.String("channel", view.Channel),
+				zap.Error(err))
+			continue
+		}
+
+		// if target version hasn't been synced, delegator will get empty readable segment list
+		// so shard leader should be unserviceable until target version is synced
+		currentTargetVersion := dh.target.GetCollectionTargetVersion(lview.GetCollection(), meta.CurrentTarget)
+		if lview.TargetVersion <= 0 {
+			err := merr.WrapErrServiceInternal(fmt.Sprintf("target version mismatch, collection: %d, channel: %s,  current target version: %v, leader version: %v",
+				lview.GetCollection(), lview.GetChannel(), currentTargetVersion, lview.TargetVersion))
+
+			// segment and channel already loaded, trigger target observer to check target version
+			dh.syncTargetVersionFn(lview.GetCollection())
+			view.UnServiceableError = err
+			log.Info("leader is not available due to target version not ready",
+				zap.Int64("collectionID", view.CollectionID),
+				zap.Int64("nodeID", view.ID),
+				zap.String("channel", view.Channel),
+				zap.Error(err))
+		}
 	}
 
 	dh.dist.LeaderViewManager.Update(resp.GetNodeID(), updates...)
@@ -272,15 +300,17 @@ func newDistHandler(
 	scheduler task.Scheduler,
 	dist *meta.DistributionManager,
 	targetMgr meta.TargetManagerInterface,
+	syncTargetVersionFn TriggerUpdateTargetVersion,
 ) *distHandler {
 	h := &distHandler{
-		nodeID:      nodeID,
-		c:           make(chan struct{}),
-		client:      client,
-		nodeManager: nodeManager,
-		scheduler:   scheduler,
-		dist:        dist,
-		target:      targetMgr,
+		nodeID:              nodeID,
+		c:                   make(chan struct{}),
+		client:              client,
+		nodeManager:         nodeManager,
+		scheduler:           scheduler,
+		dist:                dist,
+		target:              targetMgr,
+		syncTargetVersionFn: syncTargetVersionFn,
 	}
 	h.wg.Add(1)
 	go h.start(ctx)
