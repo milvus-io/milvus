@@ -88,6 +88,39 @@ func (_c *MockLBBalancer_Close_Call) RunAndReturn(run func()) *MockLBBalancer_Cl
 	return _c
 }
 
+// RegisterNodeInfo provides a mock function with given fields: nodeInfos
+func (_m *MockLBBalancer) RegisterNodeInfo(nodeInfos []nodeInfo) {
+	_m.Called(nodeInfos)
+}
+
+// MockLBBalancer_RegisterNodeInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RegisterNodeInfo'
+type MockLBBalancer_RegisterNodeInfo_Call struct {
+	*mock.Call
+}
+
+// RegisterNodeInfo is a helper method to define mock.On call
+//   - nodeInfos []nodeInfo
+func (_e *MockLBBalancer_Expecter) RegisterNodeInfo(nodeInfos interface{}) *MockLBBalancer_RegisterNodeInfo_Call {
+	return &MockLBBalancer_RegisterNodeInfo_Call{Call: _e.mock.On("RegisterNodeInfo", nodeInfos)}
+}
+
+func (_c *MockLBBalancer_RegisterNodeInfo_Call) Run(run func(nodeInfos []nodeInfo)) *MockLBBalancer_RegisterNodeInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]nodeInfo))
+	})
+	return _c
+}
+
+func (_c *MockLBBalancer_RegisterNodeInfo_Call) Return() *MockLBBalancer_RegisterNodeInfo_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockLBBalancer_RegisterNodeInfo_Call) RunAndReturn(run func([]nodeInfo)) *MockLBBalancer_RegisterNodeInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SelectNode provides a mock function with given fields: ctx, availableNodes, nq
 func (_m *MockLBBalancer) SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
 	ret := _m.Called(ctx, availableNodes, nq)

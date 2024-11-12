@@ -20,23 +20,28 @@ import (
 // CreateConsumeServer create a new consumer.
 // Expected message sequence:
 // CreateConsumeServer:
-// -> ConsumeResponse 1
-// -> ConsumeResponse 2
-// -> ConsumeResponse 3
+// <- CreateVChannelConsumer 1
+// -> CreateVChannelConsuemr 1
+// -> ConsumeMessage 1.1
+// <- CreateVChannelConsumer 2
+// -> ConsumeMessage 1.2
+// -> CreateVChannelConsumer 2
+// -> ConsumeMessage 2.1
+// -> ConsumeMessage 2.2
+// -> ConsumeMessage 1.3
+// <- CloseVChannelConsumer 1
+// -> CloseVChannelConsumer 1
+// -> ConsumeMessage 2.3
+// <- CloseVChannelConsumer 2
+// -> CloseVChannelConsumer 2
 // CloseConsumer:
 func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb.StreamingNodeHandlerService_ConsumeServer) (*ConsumeServer, error) {
 	createReq, err := contextutil.GetCreateConsumer(streamServer.Context())
 	if err != nil {
 		return nil, status.NewInvaildArgument("create consumer request is required")
 	}
+
 	l, err := walManager.GetAvailableWAL(types.NewPChannelInfoFromProto(createReq.GetPchannel()))
-	if err != nil {
-		return nil, err
-	}
-	scanner, err := l.Read(streamServer.Context(), wal.ReadOption{
-		DeliverPolicy: createReq.GetDeliverPolicy(),
-		MessageFilter: createReq.DeliverFilters,
-	})
 	if err != nil {
 		return nil, err
 	}
@@ -46,14 +51,42 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 	if err := consumeServer.SendCreated(&streamingpb.CreateConsumerResponse{
 		WalName: l.WALName(),
 	}); err != nil {
+		return nil, errors.Wrap(err, "at send created")
+	}
+
+	req, err := streamServer.Recv()
+	if err != nil {
+		return nil, errors.New("receive create consumer request failed")
+	}
+	createVChannelReq := req.GetCreateVchannelConsumer()
+	if createVChannelReq == nil {
+		return nil, errors.New("The first message must be  create vchannel consumer request")
+	}
+	scanner, err := l.Read(streamServer.Context(), wal.ReadOption{
+		VChannel:      createVChannelReq.GetVchannel(),
+		DeliverPolicy: createVChannelReq.GetDeliverPolicy(),
+		MessageFilter: createVChannelReq.GetDeliverFilters(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: consumerID should be generated after we enabling multi-vchannel consuming on same grpc stream.
+	consumerID := int64(1)
+	if err := consumeServer.SendCreateVChannelConsumer(&streamingpb.CreateVChannelConsumerResponse{
+		Response: &streamingpb.CreateVChannelConsumerResponse_ConsumerId{
+			ConsumerId: consumerID,
+		},
+	}); err != nil {
 		// release the scanner to avoid resource leak.
 		if err := scanner.Close(); err != nil {
 			log.Warn("close scanner failed at create consume server", zap.Error(err))
 		}
-		return nil, errors.Wrap(err, "at send created")
+		return nil, err
 	}
 	metrics := newConsumerMetrics(l.Channel().Name)
 	return &ConsumeServer{
+		consumerID:    1,
 		scanner:       scanner,
 		consumeServer: consumeServer,
 		logger:        log.With(zap.String("channel", l.Channel().Name), zap.Int64("term", l.Channel().Term)), // Add trace info for all log.
@@ -64,6 +97,7 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 
 // ConsumeServer is a ConsumeServer of log messages.
 type ConsumeServer struct {
+	consumerID    int64
 	scanner       wal.Scanner
 	consumeServer *consumeGrpcServerHelper
 	logger        *log.MLogger
@@ -151,6 +185,7 @@ func (c *ConsumeServer) sendImmutableMessage(msg message.ImmutableMessage) (err 
 
 	// Send Consumed message to client and do metrics.
 	if err := c.consumeServer.SendConsumeMessage(&streamingpb.ConsumeMessageReponse{
+		ConsumerId: c.consumerID,
 		Message: &messagespb.ImmutableMessage{
 			Id: &messagespb.MessageID{
 				Id: msg.MessageID().Marshal(),

@@ -36,7 +36,9 @@ func TestWalAdaptorReadFail(t *testing.T) {
 		})
 
 	lAdapted := adaptImplsToWAL(l, nil, func() {})
-	scanner, err := lAdapted.Read(context.Background(), wal.ReadOption{})
+	scanner, err := lAdapted.Read(context.Background(), wal.ReadOption{
+		VChannel: "test",
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, scanner)
 	assert.ErrorIs(t, scanner.Error(), expectedErr)
@@ -91,7 +93,7 @@ func TestWALAdaptor(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 
-			scanner, err := lAdapted.Read(context.Background(), wal.ReadOption{})
+			scanner, err := lAdapted.Read(context.Background(), wal.ReadOption{VChannel: "test"})
 			if err != nil {
 				assertShutdownError(t, err)
 				return
@@ -121,7 +123,7 @@ func TestWALAdaptor(t *testing.T) {
 	lAdapted.AppendAsync(context.Background(), msg, func(mi *wal.AppendResult, err error) {
 		assertShutdownError(t, err)
 	})
-	_, err = lAdapted.Read(context.Background(), wal.ReadOption{})
+	_, err = lAdapted.Read(context.Background(), wal.ReadOption{VChannel: "test"})
 	assertShutdownError(t, err)
 }
 

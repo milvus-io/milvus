@@ -139,13 +139,13 @@ func newMockedConsumerImpl(t *testing.T, ctx context.Context, h message.Handler)
 	})
 
 	opts := &ConsumerOptions{
+		VChannel: "test-1",
 		Assignment: &types.PChannelInfoAssigned{
 			Channel: types.PChannelInfo{Name: "test", Term: 1},
 			Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
 		},
 		DeliverPolicy: options.DeliverPolicyAll(),
 		DeliverFilters: []options.DeliverFilter{
-			options.DeliverFilterVChannel("test-1"),
 			options.DeliverFilterTimeTickGT(100),
 		},
 		MessageHandler: h,
@@ -155,6 +155,15 @@ func newMockedConsumerImpl(t *testing.T, ctx context.Context, h message.Handler)
 		Response: &streamingpb.ConsumeResponse_Create{
 			Create: &streamingpb.CreateConsumerResponse{
 				WalName: walimplstest.WALName,
+			},
+		},
+	}
+	recvCh <- &streamingpb.ConsumeResponse{
+		Response: &streamingpb.ConsumeResponse_CreateVchannel{
+			CreateVchannel: &streamingpb.CreateVChannelConsumerResponse{
+				Response: &streamingpb.CreateVChannelConsumerResponse_ConsumerId{
+					ConsumerId: 1,
+				},
 			},
 		},
 	}

@@ -130,10 +130,6 @@ func (s *WriteSuite) TestInsert() {
 
 		cases := []badCase{
 			{
-				tag:   "missing_column",
-				input: NewColumnBasedInsertOption(collName).WithInt64Column("id", []int64{1}),
-			},
-			{
 				tag: "row_count_not_match",
 				input: NewColumnBasedInsertOption(collName).WithInt64Column("id", []int64{1}).
 					WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
@@ -261,10 +257,6 @@ func (s *WriteSuite) TestUpsert() {
 		}
 
 		cases := []badCase{
-			{
-				tag:   "missing_column",
-				input: NewColumnBasedInsertOption(collName).WithInt64Column("id", []int64{1}),
-			},
 			{
 				tag: "row_count_not_match",
 				input: NewColumnBasedInsertOption(collName).WithInt64Column("id", []int64{1}).

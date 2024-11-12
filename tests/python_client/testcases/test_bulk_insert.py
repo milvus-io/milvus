@@ -1477,7 +1477,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("entities", [1000])  # 1000
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("sparse_format", ["doc", "coo"])
-    def test_with_all_field_json_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, sparse_format):
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_with_all_field_json_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, sparse_format, nullable):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -1489,14 +1490,14 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self._connect()
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
-            cf.gen_int64_field(name=df.int_field),
-            cf.gen_float_field(name=df.float_field),
-            cf.gen_string_field(name=df.string_field),
-            cf.gen_json_field(name=df.json_field),
-            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
-            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
-            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
+            cf.gen_int64_field(name=df.int_field, nullable=nullable),
+            cf.gen_float_field(name=df.float_field, nullable=nullable),
+            cf.gen_string_field(name=df.string_field, nullable=nullable),
+            cf.gen_json_field(name=df.json_field, nullable=nullable),
+            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
+            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
+            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable),
+            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL, nullable=nullable),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
             cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim),
             cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=dim),
@@ -1528,14 +1529,14 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             for i in range(entities):
                 row = {
                     df.pk_field: i,
-                    df.int_field: 1,
-                    df.float_field: 1.0,
-                    df.string_field: "string",
-                    df.json_field: json_value[i%len(json_value)],
-                    df.array_int_field: [1, 2],
-                    df.array_float_field: [1.0, 2.0],
-                    df.array_string_field: ["string1", "string2"],
-                    df.array_bool_field: [True, False],
+                    df.int_field: 1 if not (nullable and random.random() < 0.5) else None,
+                    df.float_field: 1.0 if not (nullable and random.random() < 0.5) else None,
+                    df.string_field: "string" if not (nullable and random.random() < 0.5) else None,
+                    df.json_field: json_value[i%len(json_value)] if not (nullable and random.random() < 0.5) else None,
+                    df.array_int_field: [1, 2] if not (nullable and random.random() < 0.5) else None,
+                    df.array_float_field: [1.0, 2.0] if not (nullable and random.random() < 0.5) else None,
+                    df.array_string_field: ["string1", "string2"] if not (nullable and random.random() < 0.5) else None,
+                    df.array_bool_field: [True, False] if not (nullable and random.random() < 0.5) else None,
                     df.float_vec_field: cf.gen_vectors(1, dim)[0],
                     df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type="FLOAT16_VECTOR")[0],
                     df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type="BFLOAT16_VECTOR")[0],
@@ -1606,13 +1607,17 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [128])  # 128
     @pytest.mark.parametrize("entities", [1000])  # 1000
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_with_all_field_numpy_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field):
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_with_all_field_numpy_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, nullable):
         """
         """
+        if nullable is True:
+            pytest.skip("not support bulk writer numpy files in field(int_scalar) which has 'None' data")
+
         self._connect()
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
-            cf.gen_int64_field(name=df.int_field),
+            cf.gen_int64_field(name=df.int_field, nullable=nullable),
             cf.gen_float_field(name=df.float_field),
             cf.gen_string_field(name=df.string_field),
             cf.gen_json_field(name=df.json_field),
@@ -1646,7 +1651,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             for i in range(entities):
                 row = {
                     df.pk_field: i,
-                    df.int_field: 1,
+                    df.int_field: 1 if not (nullable and random.random() < 0.5) else None,
                     df.float_field: 1.0,
                     df.string_field: "string",
                     df.json_field: json_value[i%len(json_value)],
@@ -1720,20 +1725,21 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("entities", [1000])  # 1000
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("sparse_format", ["doc", "coo"])
-    def test_with_all_field_parquet_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, sparse_format):
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_with_all_field_parquet_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, sparse_format, nullable):
         """
         """
         self._connect()
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
-            cf.gen_int64_field(name=df.int_field),
-            cf.gen_float_field(name=df.float_field),
-            cf.gen_string_field(name=df.string_field),
-            cf.gen_json_field(name=df.json_field),
-            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
-            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
-            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
+            cf.gen_int64_field(name=df.int_field, nullable=nullable),
+            cf.gen_float_field(name=df.float_field, nullable=nullable),
+            cf.gen_string_field(name=df.string_field, nullable=nullable),
+            cf.gen_json_field(name=df.json_field, nullable=nullable),
+            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
+            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
+            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable),
+            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL, nullable=nullable),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
             cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim),
             cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=dim),
@@ -1765,14 +1771,14 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             for i in range(entities):
                 row = {
                     df.pk_field: i,
-                    df.int_field: 1,
-                    df.float_field: 1.0,
-                    df.string_field: "string",
-                    df.json_field: json_value[i%len(json_value)],
-                    df.array_int_field: [1, 2],
-                    df.array_float_field: [1.0, 2.0],
-                    df.array_string_field: ["string1", "string2"],
-                    df.array_bool_field: [True, False],
+                    df.int_field: 1 if not (nullable and random.random() < 0.5) else None,
+                    df.float_field: 1.0 if not (nullable and random.random() < 0.5) else None,
+                    df.string_field: "string" if not (nullable and random.random() < 0.5) else None,
+                    df.json_field: json_value[i%len(json_value)] if not (nullable and random.random() < 0.5) else None,
+                    df.array_int_field: [1, 2] if not (nullable and random.random() < 0.5) else None,
+                    df.array_float_field: [1.0, 2.0] if not (nullable and random.random() < 0.5) else None,
+                    df.array_string_field: ["string1", "string2"] if not (nullable and random.random() < 0.5) else None,
+                    df.array_bool_field: [True, False] if not (nullable and random.random() < 0.5) else None,
                     df.float_vec_field: cf.gen_vectors(1, dim)[0],
                     df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type="FLOAT16_VECTOR")[0],
                     df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type="BFLOAT16_VECTOR")[0],
