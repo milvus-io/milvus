@@ -80,6 +80,72 @@ class ParamInfo:
 
 param_info = ParamInfo()
 
+en_vocabularies_distribution = {
+    "hello": 0.01,
+    "milvus": 0.01,
+    "vector": 0.01,
+    "database": 0.01
+}
+
+zh_vocabularies_distribution = {
+    "你好": 0.01,
+    "向量": 0.01,
+    "数据": 0.01,
+    "库": 0.01
+}
+
+def patch_faker_text(fake_instance, vocabularies_distribution):
+    """
+    Monkey patch the text() method of a Faker instance to include custom vocabulary.
+    Each word in vocabularies_distribution has an independent chance to be inserted.
+
+    Args:
+        fake_instance: Faker instance to patch
+        vocabularies_distribution: Dictionary where:
+            - key: word to insert
+            - value: probability (0-1) of inserting this word into each sentence
+
+    Example:
+        vocabularies_distribution = {
+            "hello": 0.1,    # 10% chance to insert "hello" in each sentence
+            "milvus": 0.1,   # 10% chance to insert "milvus" in each sentence
+        }
+    """
+    original_text = fake_instance.text
+
+    def new_text(nb_sentences=100, *args, **kwargs):
+        sentences = []
+        # Split original text into sentences
+        original_sentences = original_text(nb_sentences).split('.')
+        original_sentences = [s.strip() for s in original_sentences if s.strip()]
+
+        for base_sentence in original_sentences:
+            words = base_sentence.split()
+
+            # Independently decide whether to insert each word
+            for word, probability in vocabularies_distribution.items():
+                if random.random() < probability:
+                    # Choose random position to insert the word
+                    insert_pos = random.randint(0, len(words))
+                    words.insert(insert_pos, word)
+
+            # Reconstruct the sentence
+            base_sentence = ' '.join(words)
+
+            # Ensure proper capitalization
+            base_sentence = base_sentence[0].upper() + base_sentence[1:]
+            sentences.append(base_sentence)
+
+        return '. '.join(sentences) + '.'
+
+
+
+    # Replace the original text method with our custom one
+    fake_instance.text = new_text
+
+
+
+
 
 def get_bm25_ground_truth(corpus, queries, top_k=100, language="en"):
     """
@@ -147,6 +213,14 @@ def custom_tokenizer(language="en"):
         )
     return tokenizer
 
+def manual_check_text_match(df, word, col):
+    id_list = []
+    for i in range(len(df)):
+        row = df.iloc[i]
+        # log.info(f"word :{word}, row: {row[col]}")
+        if word in row[col]:
+            id_list.append(row["id"])
+    return id_list
 
 def analyze_documents(texts, language="en"):
 
@@ -188,8 +262,8 @@ def check_token_overlap(text_a, text_b, language="en"):
 
 def split_dataframes(df, fields, language="en"):
     df_copy = df.copy()
-    tokenizer = custom_tokenizer(language)
     for col in fields:
+        tokenizer = custom_tokenizer(language)
         texts = df[col].to_list()
         tokenized = tokenizer.tokenize(texts, return_as="tuple")
         new_texts = []
@@ -703,15 +777,15 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
 
 def gen_all_datatype_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                        auto_id=False, dim=ct.default_dim, enable_dynamic_field=True, **kwargs):
-    tokenizer_params = {
-        "tokenizer": "default",
+    analyzer_params = {
+        "tokenizer": "standard",
     }
     fields = [
         gen_int64_field(),
         gen_float_field(),
         gen_string_field(),
-        gen_string_field(name="text", max_length=2000, enable_tokenizer=True, enable_match=True,
-                         tokenizer_params=tokenizer_params),
+        gen_string_field(name="text", max_length=2000, enable_analyzer=True, enable_match=True,
+                         analyzer_params=analyzer_params),
         gen_json_field(),
         gen_array_field(name="array_int", element_type=DataType.INT64),
         gen_array_field(name="array_float", element_type=DataType.FLOAT),
@@ -1725,7 +1799,7 @@ def get_text_field_name(schema=None):
         schema = gen_default_collection_schema()
     fields = schema.fields
     for field in fields:
-        if field.dtype == DataType.VARCHAR and field.params.get("enable_tokenizer", False):
+        if field.dtype == DataType.VARCHAR and field.params.get("enable_analyzer", False):
             return field.name
     return None
 
@@ -1826,7 +1900,7 @@ def gen_varchar_data(length: int, nb: int, text_mode=False):
 def gen_data_by_collection_field(field, nb=None, start=None):
     # if nb is None, return one data, else return a list of data
     data_type = field.dtype
-    enable_tokenizer = field.params.get("enable_tokenizer", False)
+    enable_analyzer = field.params.get("enable_analyzer", False)
     if data_type == DataType.BOOL:
         if nb is None:
             return random.choice([True, False])
@@ -1862,8 +1936,8 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         max_length = min(20, max_length-1)
         length = random.randint(0, max_length)
         if nb is None:
-            return gen_varchar_data(length=length, nb=1, text_mode=enable_tokenizer)[0]
-        return gen_varchar_data(length=length, nb=nb, text_mode=enable_tokenizer)
+            return gen_varchar_data(length=length, nb=1, text_mode=enable_analyzer)[0]
+        return gen_varchar_data(length=length, nb=nb, text_mode=enable_analyzer)
     if data_type == DataType.JSON:
         if nb is None:
             return {"name": fake.name(), "address": fake.address()}
@@ -2947,6 +3021,8 @@ def get_activate_func_from_metric_type(metric_type):
         activate_function = lambda x: (1 + x) * 0.5
     elif metric_type == "IP":
         activate_function = lambda x: 0.5 + math.atan(x)/ math.pi
+    elif metric_type == "BM25":
+        activate_function = lambda x: 2 * math.atan(x) / math.pi
     else:
         activate_function  = lambda x: 1.0 - 2*math.atan(x) / math.pi
     return activate_function

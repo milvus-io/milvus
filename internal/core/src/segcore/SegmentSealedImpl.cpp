@@ -821,66 +821,36 @@ const Schema&
 SegmentSealedImpl::get_schema() const {
     return *schema_;
 }
-
 std::vector<SegOffset>
 SegmentSealedImpl::search_pk(const PkType& pk, Timestamp timestamp) const {
-    auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
-    AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
-    auto pk_column = fields_.at(pk_field_id);
-    std::vector<SegOffset> pk_offsets;
-    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
-        case DataType::INT64: {
-            auto target = std::get<int64_t>(pk);
-            // get int64 pks
-            auto src = reinterpret_cast<const int64_t*>(pk_column->Data());
-            auto it =
-                std::lower_bound(src,
-                                 src + pk_column->NumRows(),
-                                 target,
-                                 [](const int64_t& elem, const int64_t& value) {
-                                     return elem < value;
-                                 });
-            for (; it != src + pk_column->NumRows() && *it == target; it++) {
-                auto offset = it - src;
-                if (insert_record_.timestamps_[offset] <= timestamp) {
-                    pk_offsets.emplace_back(it - src);
-                }
-            }
-            break;
-        }
-        case DataType::VARCHAR: {
-            auto target = std::get<std::string>(pk);
-            // get varchar pks
-            auto var_column = std::dynamic_pointer_cast<
-                SingleChunkVariableColumn<std::string>>(pk_column);
-            auto views = var_column->Views();
-            auto it = std::lower_bound(views.begin(), views.end(), target);
-            for (; it != views.end() && *it == target; it++) {
-                auto offset = std::distance(views.begin(), it);
-                if (insert_record_.timestamps_[offset] <= timestamp) {
-                    pk_offsets.emplace_back(offset);
-                }
-            }
-            break;
-        }
-        default: {
-            PanicInfo(
-                DataTypeInvalid,
-                fmt::format(
-                    "unsupported type {}",
-                    schema_->get_fields().at(pk_field_id).get_data_type()));
-        }
+    if (!is_sorted_by_pk_) {
+        return insert_record_.search_pk(pk, timestamp);
     }
-
-    return pk_offsets;
+    return search_sorted_pk(pk, [this, timestamp](int64_t offset) {
+        return insert_record_.timestamps_[offset] <= timestamp;
+    });
 }
 
 std::vector<SegOffset>
 SegmentSealedImpl::search_pk(const PkType& pk, int64_t insert_barrier) const {
+    if (!is_sorted_by_pk_) {
+        return insert_record_.search_pk(pk, insert_barrier);
+    }
+    return search_sorted_pk(pk, [insert_barrier](int64_t offset) {
+        return offset < insert_barrier;
+    });
+}
+
+template <typename Condition>
+std::vector<SegOffset>
+SegmentSealedImpl::search_sorted_pk(const PkType& pk,
+                                    Condition condition) const {
+    AssertInfo(is_sorted_by_pk_, "segment is not sorted");
     auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
     auto pk_column = fields_.at(pk_field_id);
     std::vector<SegOffset> pk_offsets;
+
     switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
         case DataType::INT64: {
             auto target = std::get<int64_t>(pk);
@@ -893,9 +863,11 @@ SegmentSealedImpl::search_pk(const PkType& pk, int64_t insert_barrier) const {
                                  [](const int64_t& elem, const int64_t& value) {
                                      return elem < value;
                                  });
-            for (; it != src + pk_column->NumRows() && *it == target; it++) {
-                if (it - src < insert_barrier) {
-                    pk_offsets.emplace_back(it - src);
+
+            for (; it != src + pk_column->NumRows() && *it == target; ++it) {
+                auto offset = it - src;
+                if (condition(offset)) {
+                    pk_offsets.emplace_back(offset);
                 }
             }
             break;
@@ -905,14 +877,13 @@ SegmentSealedImpl::search_pk(const PkType& pk, int64_t insert_barrier) const {
             // get varchar pks
             auto var_column = std::dynamic_pointer_cast<
                 SingleChunkVariableColumn<std::string>>(pk_column);
-            auto views = var_column->Views();
-            auto it = std::lower_bound(views.begin(), views.end(), target);
-            while (it != views.end() && *it == target) {
-                auto offset = std::distance(views.begin(), it);
-                if (offset < insert_barrier) {
+            auto offset = var_column->binary_search_string(target);
+            for (; offset != -1 && offset < var_column->NumRows() &&
+                   var_column->RawAt(offset) == target;
+                 ++offset) {
+                if (condition(offset)) {
                     pk_offsets.emplace_back(offset);
                 }
-                ++it;
             }
             break;
         }
@@ -2043,13 +2014,13 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
         index = std::make_unique<index::TextMatchIndex>(
             std::numeric_limits<int64_t>::max(),
             "milvus_tokenizer",
-            field_meta.get_tokenizer_params());
+            field_meta.get_analyzer_params().c_str());
     } else {
         // build text index using mmap.
         index = std::make_unique<index::TextMatchIndex>(
             cfg.GetMmapPath(),
             "milvus_tokenizer",
-            field_meta.get_tokenizer_params());
+            field_meta.get_analyzer_params().c_str());
     }
 
     {
@@ -2098,7 +2069,7 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     index->Reload();
 
     index->RegisterTokenizer("milvus_tokenizer",
-                             field_meta.get_tokenizer_params());
+                             field_meta.get_analyzer_params().c_str());
 
     text_indexes_[field_id] = std::move(index);
 }
@@ -2109,7 +2080,7 @@ SegmentSealedImpl::LoadTextIndex(FieldId field_id,
     std::unique_lock lck(mutex_);
     const auto& field_meta = schema_->operator[](field_id);
     index->RegisterTokenizer("milvus_tokenizer",
-                             field_meta.get_tokenizer_params());
+                             field_meta.get_analyzer_params().c_str());
     text_indexes_[field_id] = std::move(index);
 }
 

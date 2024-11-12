@@ -10,9 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <string>
 
 #include "common/Schema.h"
-#include "segcore/segment_c.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
@@ -80,23 +80,19 @@ TEST(ParseJson, Naive) {
 TEST(ParseTokenizerParams, NoTokenizerParams) {
     TypeParams params{{"k", "v"}};
     auto p = ParseTokenizerParams(params);
-    ASSERT_EQ(0, p.size());
+    ASSERT_EQ("{}", std::string(p));
 }
 
 TEST(ParseTokenizerParams, Default) {
-    TypeParams params{{"tokenizer_params", R"({"tokenizer": "default"})"}};
+    TypeParams params{{"analyzer_params", R"({"tokenizer": "standard"})"}};
     auto p = ParseTokenizerParams(params);
-    ASSERT_EQ(1, p.size());
-    auto iter = p.find("tokenizer");
-    ASSERT_NE(p.end(), iter);
-    ASSERT_EQ("default", iter->second);
+    ASSERT_EQ(params.at("analyzer_params"), p);
 }
 
 TEST(TextMatch, Index) {
     using Index = index::TextMatchIndex;
-    auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
-                                         "milvus_tokenizer",
-                                         std::map<std::string, std::string>{});
+    auto index = std::make_unique<Index>(
+        std::numeric_limits<int64_t>::max(), "milvus_tokenizer", "{}");
     index->CreateReader();
     index->AddText("football, basketball, pingpang", 0);
     index->AddText("swimming, football", 1);
@@ -252,8 +248,8 @@ TEST(TextMatch, SealedNaive) {
 TEST(TextMatch, GrowingJieBa) {
     auto schema = GenTestSchema({
         {"enable_match", "true"},
-        {"enable_tokenizer", "true"},
-        {"tokenizer_params", R"({"tokenizer": "jieba"})"},
+        {"enable_analyzer", "true"},
+        {"analyzer_params", R"({"tokenizer": "jieba"})"},
     });
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     std::vector<std::string> raw_str = {"青铜时代", "黄金时代"};
@@ -329,8 +325,8 @@ TEST(TextMatch, GrowingJieBa) {
 TEST(TextMatch, SealedJieBa) {
     auto schema = GenTestSchema({
         {"enable_match", "true"},
-        {"enable_tokenizer", "true"},
-        {"tokenizer_params", R"({"tokenizer": "jieba"})"},
+        {"enable_analyzer", "true"},
+        {"analyzer_params", R"({"tokenizer": "jieba"})"},
     });
     auto seg = CreateSealedSegment(schema, empty_index_meta);
     std::vector<std::string> raw_str = {"青铜时代", "黄金时代"};

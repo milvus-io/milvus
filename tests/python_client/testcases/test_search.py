@@ -29,6 +29,11 @@ from faker import Faker
 Faker.seed(19530)
 fake_en = Faker("en_US")
 fake_zh = Faker("zh_CN")
+
+# patch faker to generate text with specific distribution
+cf.patch_faker_text(fake_en, cf.en_vocabularies_distribution)
+cf.patch_faker_text(fake_zh, cf.zh_vocabularies_distribution)
+
 pd.set_option("expand_frame_repr", False)
 
 
@@ -4803,6 +4808,73 @@ class TestCollectionSearch(TestcaseBase):
         self.init_collection_wrap(c_name, schema=binary_schema,
                                   check_task=CheckTasks.err_res,
                                   check_items={"err_code": 999, "err_msg": f"invalid dimension: {dim}."})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #37547")
+    def test_search_verify_expr_cache(self, is_flush):
+        """
+        target: test search case to test expr cache
+        method: 1. create collection with a double datatype field
+                2. search with expr "doubleField == 0"
+                3. drop this collection
+                4. create collection with same collection name and same field name but modify the type of double field
+                   as varchar datatype
+                5. search with expr "doubleField == 0" again
+        expected: 1. search successfully with limit(topK) for the first collection
+                  2. report error for the second collection with the same name
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, is_flush=is_flush)[0:5]
+        collection_name = collection_w.name
+        # 2. generate search data
+        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim)
+        # 3. search with expr "nullableFid == 0"
+        search_exp = f"{ct.default_float_field_name} == 0"
+        output_fields = [default_int64_field_name, default_float_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            search_exp,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": 1,
+                                         "output_fields": output_fields})
+        # 4. drop collection
+        collection_w.drop()
+        # 5. create the same collection name with same field name but varchar field type
+        int64_field = cf.gen_int64_field(is_primary=True)
+        string_field = cf.gen_string_field(ct.default_float_field_name)
+        json_field = cf.gen_json_field()
+        float_vector_field = cf.gen_float_vec_field()
+        fields = [int64_field, string_field, json_field, float_vector_field]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(name=collection_name, schema=schema)
+        int64_values = pd.Series(data=[i for i in range(default_nb)])
+        string_values = pd.Series(data=[str(i) for i in range(default_nb)], dtype="string")
+        json_values = [{"number": i, "string": str(i), "bool": bool(i),
+                        "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(default_nb)]
+        float_vec_values = cf.gen_vectors(default_nb, default_dim)
+        df = pd.DataFrame({
+            ct.default_int64_field_name: int64_values,
+            ct.default_float_field_name: string_values,
+            ct.default_json_field_name: json_values,
+            ct.default_float_vec_field_name: float_vec_values
+        })
+        collection_w.insert(df)
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+        collection_w.load()
+        collection_w.flush()
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            search_exp,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1100,
+                                         "err_msg": "failed to create query plan: cannot parse expression: float == 0, "
+                                                    "error: comparisons between VarChar and Int64 are not supported: "
+                                                    "invalid parameter"})
 
 
 class TestSearchBase(TestcaseBase):
@@ -13274,6 +13346,74 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          "limit": default_limit,
                                          "output_fields": output_fields})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #37547")
+    def test_search_none_data_expr_cache(self, is_flush):
+        """
+        target: test search case with none data to test expr cache
+        method: 1. create collection with double datatype as nullable field
+                2. search with expr "nullableFid == 0"
+                3. drop this collection
+                4. create collection with same collection name and same field name but modify the type of nullable field
+                   as varchar datatype
+                5. search with expr "nullableFid == 0" again
+        expected: 1. search successfully with limit(topK) for the first collection
+                  2. report error for the second collection with the same name
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, is_flush=is_flush,
+                                         nullable_fields={ct.default_float_field_name: 0.5})[0:5]
+        collection_name = collection_w.name
+        # 2. generate search data
+        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim)
+        # 3. search with expr "nullableFid == 0"
+        search_exp = f"{ct.default_float_field_name} == 0"
+        output_fields = [default_int64_field_name, default_float_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            search_exp,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": 1,
+                                         "output_fields": output_fields})
+        # 4. drop collection
+        collection_w.drop()
+        # 5. create the same collection name with same field name but varchar field type
+        int64_field = cf.gen_int64_field(is_primary=True)
+        string_field = cf.gen_string_field(ct.default_float_field_name, nullable=True)
+        json_field = cf.gen_json_field()
+        float_vector_field = cf.gen_float_vec_field()
+        fields = [int64_field, string_field, json_field, float_vector_field]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(name=collection_name, schema=schema)
+        int64_values = pd.Series(data=[i for i in range(default_nb)])
+        string_values = pd.Series(data=[str(i) for i in range(default_nb)], dtype="string")
+        json_values = [{"number": i, "string": str(i), "bool": bool(i),
+                        "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(default_nb)]
+        float_vec_values = cf.gen_vectors(default_nb, default_dim)
+        df = pd.DataFrame({
+            ct.default_int64_field_name: int64_values,
+            ct.default_float_field_name: None,
+            ct.default_json_field_name: json_values,
+            ct.default_float_vec_field_name: float_vec_values
+        })
+        collection_w.insert(df)
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+        collection_w.load()
+        collection_w.flush()
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            search_exp,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1100,
+                                         "err_msg": "failed to create query plan: cannot parse expression: float == 0, "
+                                                    "error: comparisons between VarChar and Int64 are not supported: "
+                                                    "invalid parameter"})
+
 
 class TestSearchWithTextMatchFilter(TestcaseBase):
     """
@@ -13285,8 +13425,8 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
-    @pytest.mark.parametrize("tokenizer", ["jieba", "default"])
-    def test_search_with_text_match_filter_normal(
+    @pytest.mark.parametrize("tokenizer", ["standard"])
+    def test_search_with_text_match_filter_normal_en(
         self, tokenizer, enable_inverted_index, enable_partition_key
     ):
         """
@@ -13296,7 +13436,7 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
                 3. verify the result
         expected: text match successfully and result is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -13306,34 +13446,34 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
                 is_partition_key=enable_partition_key,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
 				enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="float32_emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -13442,3 +13582,163 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
                         r = r.to_dict()
                         assert any([token in r["entity"][field] for token in top_10_tokens])
 
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("enable_partition_key", [True, False])
+    @pytest.mark.parametrize("enable_inverted_index", [True, False])
+    @pytest.mark.parametrize("tokenizer", ["jieba"])
+    @pytest.mark.xfail(reason="unstable case")
+    def test_search_with_text_match_filter_normal_zh(
+        self, tokenizer, enable_inverted_index, enable_partition_key
+    ):
+        """
+        target: test text match normal
+        method: 1. enable text match and insert data with varchar
+                2. get the most common words and query with text match
+                3. verify the result
+        expected: text match successfully and result is correct
+        """
+        analyzer_params = {
+            "tokenizer": tokenizer,
+        }
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="word",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_analyzer=True,
+				enable_match=True,
+                is_partition_key=enable_partition_key,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_analyzer=True,
+				enable_match=True,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(
+                name="paragraph",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_analyzer=True,
+				enable_match=True,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_analyzer=True,
+				enable_match=True,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(name="float32_emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        data_size = 5000
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
+        log.info(f"collection {collection_w.describe()}")
+        fake = fake_en
+        if tokenizer == "jieba":
+            language = "zh"
+            fake = fake_zh
+        else:
+            language = "en"
+
+        data = [
+            {
+                "id": i,
+                "word": fake.word().lower(),
+                "sentence": fake.sentence().lower(),
+                "paragraph": fake.paragraph().lower(),
+                "text": fake.text().lower(),
+                "float32_emb": [random.random() for _ in range(dim)],
+                "sparse_emb": cf.gen_sparse_vectors(1, dim=10000)[0],
+            }
+            for i in range(data_size)
+        ]
+        df = pd.DataFrame(data)
+        log.info(f"dataframe\n{df}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(
+                data[i : i + batch_size]
+                if i + batch_size < len(df)
+                else data[i : len(df)]
+            )
+            collection_w.flush()
+        collection_w.create_index(
+            "float32_emb",
+            {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},
+        )
+        collection_w.create_index(
+            "sparse_emb",
+            {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"},
+        )
+        if enable_inverted_index:
+            collection_w.create_index("word", {"index_type": "INVERTED"})
+        collection_w.load()
+        # analyze the croup
+        text_fields = ["word", "sentence", "paragraph", "text"]
+        wf_map = {}
+        for field in text_fields:
+            wf_map[field] = cf.analyze_documents(df[field].tolist(), language=language)
+        # search with filter single field for one token
+        df_split = cf.split_dataframes(df, text_fields, language=language)
+        log.info(f"df_split\n{df_split}")
+        for ann_field in ["float32_emb", "sparse_emb"]:
+            log.info(f"ann_field {ann_field}")
+            if ann_field == "float32_emb":
+                search_data = [[random.random() for _ in range(dim)]]
+            elif ann_field == "sparse_emb":
+                search_data = cf.gen_sparse_vectors(1,dim=10000)
+            else:
+                search_data = [[random.random() for _ in range(dim)]]
+            for field in text_fields:
+                token = wf_map[field].most_common()[0][0]
+                expr = f"text_match({field}, '{token}')"
+                manual_result = df_split[
+                    df_split.apply(lambda row: token in row[field], axis=1)
+                ]
+                log.info(f"expr: {expr}, manual_check_result: {len(manual_result)}")
+                res_list, _ = collection_w.search(
+                    data=search_data,
+                    anns_field=ann_field,
+                    param={},
+                    limit=100,
+                    expr=expr, output_fields=["id", field])
+                for res in res_list:
+                    log.info(f"res len {len(res)} res {res}")
+                    assert len(res) > 0
+                    for r in res:
+                        r = r.to_dict()
+                        assert token in r["entity"][field]
+
+            # search with filter single field for multi-token
+            for field in text_fields:
+                # match top 10 most common words
+                top_10_tokens = []
+                for word, count in wf_map[field].most_common(10):
+                    top_10_tokens.append(word)
+                string_of_top_10_words = " ".join(top_10_tokens)
+                expr = f"text_match({field}, '{string_of_top_10_words}')"
+                log.info(f"expr {expr}")
+                res_list, _ = collection_w.search(
+                    data=search_data,
+                    anns_field=ann_field,
+                    param={},
+                    limit=100,
+                    expr=expr, output_fields=["id", field])
+                for res in res_list:
+                    log.info(f"res len {len(res)} res {res}")
+                    assert len(res) > 0
+                    for r in res:
+                        r = r.to_dict()
+                        assert any([token in r["entity"][field] for token in top_10_tokens])

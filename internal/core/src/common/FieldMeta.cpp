@@ -20,20 +20,11 @@
 namespace milvus {
 TokenizerParams
 ParseTokenizerParams(const TypeParams& params) {
-    auto iter = params.find("tokenizer_params");
+    auto iter = params.find("analyzer_params");
     if (iter == params.end()) {
-        return {};
+        return "{}";
     }
-    nlohmann::json j = nlohmann::json::parse(iter->second);
-    std::map<std::string, std::string> ret;
-    for (const auto& [k, v] : j.items()) {
-        try {
-            ret[k] = v.get<std::string>();
-        } catch (std::exception& e) {
-            ret[k] = v.dump();
-        }
-    }
-    return ret;
+    return iter->second;
 }
 
 bool
@@ -48,19 +39,19 @@ FieldMeta::enable_match() const {
 }
 
 bool
-FieldMeta::enable_tokenizer() const {
+FieldMeta::enable_analyzer() const {
     if (!IsStringDataType(type_)) {
         return false;
     }
     if (!string_info_.has_value()) {
         return false;
     }
-    return string_info_->enable_tokenizer;
+    return string_info_->enable_analyzer;
 }
 
 TokenizerParams
-FieldMeta::get_tokenizer_params() const {
-    Assert(enable_tokenizer());
+FieldMeta::get_analyzer_params() const {
+    Assert(enable_analyzer());
     auto params = string_info_->params;
     return ParseTokenizerParams(params);
 }
@@ -118,7 +109,7 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
             return b;
         };
 
-        bool enable_tokenizer = get_bool_value("enable_tokenizer");
+        bool enable_analyzer = get_bool_value("enable_analyzer");
         bool enable_match = get_bool_value("enable_match");
 
         return FieldMeta{name,
@@ -127,7 +118,7 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          max_len,
                          nullable,
                          enable_match,
-                         enable_tokenizer,
+                         enable_analyzer,
                          type_map};
     }
 

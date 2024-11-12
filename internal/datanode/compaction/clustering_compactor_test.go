@@ -171,7 +171,7 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	schema := genCollectionSchema()
 	var segmentID int64 = 1001
-	segWriter, err := NewSegmentWriter(schema, 1000, segmentID, PartitionID, CollectionID, []int64{})
+	segWriter, err := NewSegmentWriter(schema, 1000, compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{})
 	s.Require().NoError(err)
 	for i := 0; i < 10240; i++ {
 		v := storage.Value{
@@ -240,7 +240,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 	schema := genCollectionSchemaWithBM25()
 	var segmentID int64 = 1001
-	segWriter, err := NewSegmentWriter(schema, 1000, segmentID, PartitionID, CollectionID, []int64{102})
+	segWriter, err := NewSegmentWriter(schema, 1000, compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{102})
 	s.Require().NoError(err)
 
 	for i := 0; i < 10240; i++ {
@@ -453,7 +453,7 @@ func (s *ClusteringCompactionTaskSuite) TestGeneratePkStats() {
 
 	s.Run("upload failed", func() {
 		schema := genCollectionSchema()
-		segWriter, err := NewSegmentWriter(schema, 1000, SegmentID, PartitionID, CollectionID, []int64{})
+		segWriter, err := NewSegmentWriter(schema, 1000, compactionBatchSize, SegmentID, PartitionID, CollectionID, []int64{})
 		s.Require().NoError(err)
 		for i := 0; i < 2000; i++ {
 			v := storage.Value{

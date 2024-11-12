@@ -248,7 +248,8 @@ func (s *storageV1Serializer) serializeMergedPkStats(pack *SyncPack) (*storage.B
 		return nil, merr.WrapErrSegmentNotFound(pack.segmentID)
 	}
 
-	return s.inCodec.SerializePkStatsList(lo.Map(segment.GetHistory(), func(pks *storage.PkStatistics, _ int) *storage.PrimaryKeyStats {
+	// Allow to flush empty segment to make streaming service easier to implement rollback transaction.
+	stats := lo.Map(segment.GetHistory(), func(pks *storage.PkStatistics, _ int) *storage.PrimaryKeyStats {
 		return &storage.PrimaryKeyStats{
 			FieldID: s.pkField.GetFieldID(),
 			MaxPk:   pks.MaxPK,
@@ -257,7 +258,11 @@ func (s *storageV1Serializer) serializeMergedPkStats(pack *SyncPack) (*storage.B
 			BF:      pks.PkFilter,
 			PkType:  int64(s.pkField.GetDataType()),
 		}
-	}), segment.NumOfRows())
+	})
+	if len(stats) == 0 {
+		return nil, nil
+	}
+	return s.inCodec.SerializePkStatsList(stats, segment.NumOfRows())
 }
 
 func (s *storageV1Serializer) serializeMergedBM25Stats(pack *SyncPack) (map[int64]*storage.Blob, error) {
@@ -267,8 +272,9 @@ func (s *storageV1Serializer) serializeMergedBM25Stats(pack *SyncPack) (map[int6
 	}
 
 	stats := segment.GetBM25Stats()
+	// Allow to flush empty segment to make streaming service easier to implement rollback transaction.
 	if stats == nil {
-		return nil, fmt.Errorf("searalize empty bm25 stats")
+		return nil, nil
 	}
 
 	fieldBytes, numRow, err := stats.Serialize()

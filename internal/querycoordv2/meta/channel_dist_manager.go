@@ -23,6 +23,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/metrics"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -128,6 +130,13 @@ func (channel *DmChannel) Clone() *DmChannel {
 		Node:         channel.Node,
 		Version:      channel.Version,
 	}
+}
+
+func newDmChannelMetricsFrom(channel *DmChannel) *metricsinfo.DmChannel {
+	dmChannel := metrics.NewDMChannelFrom(channel.VchannelInfo)
+	dmChannel.NodeID = channel.Node
+	dmChannel.Version = channel.Version
+	return dmChannel
 }
 
 type nodeChannels struct {
@@ -289,4 +298,17 @@ func (m *ChannelDistManager) updateCollectionIndex() {
 			}
 		}
 	}
+}
+
+func (m *ChannelDistManager) GetChannelDist() []*metricsinfo.DmChannel {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	var channels []*metricsinfo.DmChannel
+	for _, nodeChannels := range m.channels {
+		for _, channel := range nodeChannels.channels {
+			channels = append(channels, newDmChannelMetricsFrom(channel))
+		}
+	}
+	return channels
 }

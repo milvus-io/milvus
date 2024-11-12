@@ -9,10 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
+	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -80,7 +80,6 @@ func TestSearchInvalidCollectionPartitionName(t *testing.T) {
 
 // test search empty collection -> return empty
 func TestSearchEmptyCollection(t *testing.T) {
-	t.Skip("https://github.com/milvus-io/milvus/issues/33952")
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
@@ -111,7 +110,6 @@ func TestSearchEmptyCollection(t *testing.T) {
 }
 
 func TestSearchEmptySparseCollection(t *testing.T) {
-	t.Skip("https://github.com/milvus-io/milvus/issues/33952")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
 
@@ -976,8 +974,6 @@ func TestSearchWithEmptySparseVector(t *testing.T) {
 
 // test search from empty sparse vectors collection
 func TestSearchFromEmptySparseVector(t *testing.T) {
-	t.Skip("https://github.com/milvus-io/milvus/issues/33952")
-	t.Skip("https://github.com/zilliztech/knowhere/issues/774")
 	idxInverted := index.NewSparseInvertedIndex(entity.IP, 0.1)
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
@@ -1006,7 +1002,6 @@ func TestSearchFromEmptySparseVector(t *testing.T) {
 		insertRes, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, data...))
 		common.CheckErr(t, err, true)
 		require.EqualValues(t, common.DefaultNb, insertRes.InsertCount)
-		prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 		// search vector is or not empty sparse vector
 		vector1, _ := entity.NewSliceSparseEmbedding([]uint32{}, []float32{})

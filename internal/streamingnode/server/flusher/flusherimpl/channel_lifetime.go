@@ -105,10 +105,8 @@ func (c *channelLifetime) Run() error {
 	policy := options.DeliverPolicyStartFrom(messageID)
 	handler := adaptor2.NewMsgPackAdaptorHandler()
 	ro := wal.ReadOption{
-		DeliverPolicy: policy,
-		MessageFilter: []options.DeliverFilter{
-			options.DeliverFilterVChannel(c.vchannel),
-		},
+		VChannel:       c.vchannel,
+		DeliverPolicy:  policy,
 		MesasgeHandler: handler,
 	}
 	scanner, err := c.wal.Read(ctx, ro)
@@ -129,7 +127,9 @@ func (c *channelLifetime) Run() error {
 					BinLogFileCounterIncr: uint64(len(insertLogs)),
 				})
 			}
-		})
+		},
+		func() { go func() { c.Cancel() }() },
+	)
 	if err != nil {
 		return err
 	}

@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+const analyzerParams = "analyzer_params"
+
 // BM25 Runner
 // Input: string
 // Output: map[uint32]float32
@@ -38,6 +40,15 @@ type BM25FunctionRunner struct {
 	schema      *schemapb.FunctionSchema
 	outputField *schemapb.FieldSchema
 	concurrency int
+}
+
+func getAnalyzerParams(field *schemapb.FieldSchema) string {
+	for _, param := range field.GetTypeParams() {
+		if param.Key == analyzerParams {
+			return param.Value
+		}
+	}
+	return "{}"
 }
 
 func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (*BM25FunctionRunner, error) {
@@ -49,17 +60,22 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 		schema:      schema,
 		concurrency: 8,
 	}
+	var params string
 	for _, field := range coll.GetFields() {
 		if field.GetFieldID() == schema.GetOutputFieldIds()[0] {
 			runner.outputField = field
 			break
+		}
+
+		if field.GetFieldID() == schema.GetInputFieldIds()[0] {
+			params = getAnalyzerParams(field)
 		}
 	}
 
 	if runner.outputField == nil {
 		return nil, fmt.Errorf("no output field")
 	}
-	tokenizer, err := ctokenizer.NewTokenizer(map[string]string{})
+	tokenizer, err := ctokenizer.NewTokenizer(params)
 	if err != nil {
 		return nil, err
 	}
@@ -69,8 +85,7 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 }
 
 func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error {
-	// TODO AOIASD Support single Tokenizer concurrency
-	tokenizer, err := ctokenizer.NewTokenizer(map[string]string{})
+	tokenizer, err := v.tokenizer.Clone()
 	if err != nil {
 		return err
 	}

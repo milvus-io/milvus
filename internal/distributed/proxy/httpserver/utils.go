@@ -1489,6 +1489,14 @@ func convertToExtraParams(indexParam IndexParam) ([]*commonpb.KeyValuePair, erro
 	if indexParam.IndexType != "" {
 		params = append(params, &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: indexParam.IndexType})
 	}
+	if indexParam.IndexType == "" {
+		for key, value := range indexParam.Params {
+			if key == common.IndexTypeKey {
+				params = append(params, &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: fmt.Sprintf("%v", value)})
+				break
+			}
+		}
+	}
 	if indexParam.MetricType != "" {
 		params = append(params, &commonpb.KeyValuePair{Key: common.MetricTypeKey, Value: indexParam.MetricType})
 	}
@@ -1500,6 +1508,18 @@ func convertToExtraParams(indexParam IndexParam) ([]*commonpb.KeyValuePair, erro
 		params = append(params, &commonpb.KeyValuePair{Key: common.IndexParamsKey, Value: string(v)})
 	}
 	return params, nil
+}
+
+func getElementTypeParams(param interface{}) (string, error) {
+	if str, ok := param.(string); ok {
+		return str, nil
+	}
+
+	jsonBytes, err := json.Marshal(param)
+	if err != nil {
+		return "", err
+	}
+	return string(jsonBytes), nil
 }
 
 func MetricsHandlerFunc(c *gin.Context) {

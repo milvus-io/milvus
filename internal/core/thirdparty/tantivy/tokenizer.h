@@ -11,13 +11,15 @@ struct Tokenizer {
  public:
     NO_COPY_OR_ASSIGN(Tokenizer);
 
-    explicit Tokenizer(const std::map<std::string, std::string>& params) {
-        RustHashMap m;
-        m.from(params);
-        ptr_ = tantivy_create_tokenizer(m.get_pointer());
+    explicit Tokenizer(std::string&& params) {
+        auto shared_params = std::make_shared<std::string>(std::move(params));
+        ptr_ = tantivy_create_tokenizer(shared_params->c_str());
         if (ptr_ == nullptr) {
             throw std::invalid_argument("invalid tokenizer parameters");
         }
+    }
+
+    explicit Tokenizer(void* _ptr) : ptr_(_ptr) {
     }
 
     ~Tokenizer() {
@@ -32,6 +34,12 @@ struct Tokenizer {
         auto token_stream =
             tantivy_create_token_stream(ptr_, shared_text->c_str());
         return std::make_unique<TokenStream>(token_stream, shared_text);
+    }
+
+    std::unique_ptr<Tokenizer>
+    Clone() {
+        auto newptr = tantivy_clone_tokenizer(ptr_);
+        return std::make_unique<milvus::tantivy::Tokenizer>(newptr);
     }
 
     // CreateTokenStreamCopyText will copy the text and then create token stream based on the text.

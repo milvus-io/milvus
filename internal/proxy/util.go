@@ -697,6 +697,15 @@ func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schem
 	return nil
 }
 
+func wasBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	for _, fun := range coll.GetFunctions() {
+		if fun.GetType() == schemapb.FunctionType_BM25 && field.GetName() == fun.GetInputFieldNames()[0] {
+			return true
+		}
+	}
+	return false
+}
+
 func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
@@ -705,8 +714,8 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 				len(fields), fields[0].DataType.String())
 		}
 		h := typeutil.CreateFieldSchemaHelper(fields[0])
-		if !h.EnableTokenizer() {
-			return fmt.Errorf("BM25 function input field must set enable_tokenizer to true")
+		if !h.EnableAnalyzer() {
+			return fmt.Errorf("BM25 function input field must set enable_analyzer to true")
 		}
 
 	default:
@@ -1069,14 +1078,6 @@ func ValidateObjectName(entity string) error {
 
 func ValidateObjectType(entity string) error {
 	return validateName(entity, "ObjectType")
-}
-
-func ValidatePrincipalName(entity string) error {
-	return validateName(entity, "PrincipalName")
-}
-
-func ValidatePrincipalType(entity string) error {
-	return validateName(entity, "PrincipalType")
 }
 
 func ValidatePrivilege(entity string) error {

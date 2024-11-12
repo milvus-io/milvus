@@ -412,6 +412,179 @@ var mconfigs = `
 }
 `;
 
+var qcTargets = `
+[
+  {
+    "collection_id": 1,
+    "segments": [
+      {
+        "segment_id": 1,
+        "collection_id": 1,
+        "partition_id": 1,
+        "channel": "channel1",
+        "num_of_rows": 1000,
+        "state": "Sealed",
+        "is_importing": false,
+        "compacted": false,
+        "level": "L0",
+        "is_sorted": true,
+        "node_id": 1,
+        "is_invisible": false,
+        "loaded_timestamp": 1633072800,
+        "index": [
+          {
+            "field_id": 1,
+            "index_id": 1,
+            "build_id": 1,
+            "index_size": 1024,
+            "is_loaded": true
+          }
+        ],
+        "resource_group": "rg1",
+        "loaded_insert_row_count": 1000,
+        "mem_size": 2048,
+      }
+    ],
+    "dm_channels": [
+      {
+        "node_id": 1,
+        "version": 1,
+        "collection_id": 1,
+        "channel_name": "channel1",
+        "unflushed_segment_ids": [1],
+        "flushed_segment_ids": [2],
+        "dropped_segment_ids": [3],
+        "level_zero_segment_ids": [4],
+        "partition_stats_versions": {
+          "1": 1
+        }
+      }
+    ]
+  }
+]
+`
+
+var qcDist =`
+{
+  "segments": [
+    {
+      "segment_id": 1,
+      "collection_id": 1,
+      "partition_id": 1,
+      "channel": "channel1",
+      "num_of_rows": 1000,
+      "state": "Sealed",
+      "is_importing": false,
+      "compacted": false,
+      "level": "L0",
+      "is_sorted": true,
+      "node_id": 1,
+      "is_invisible": false,
+      "loaded_timestamp": 1633072800,
+      "index": [
+        {
+          "field_id": 1,
+          "index_id": 1,
+          "build_id": 1,
+          "index_size": 1024,
+          "is_loaded": true
+        }
+      ],
+      "resource_group": "rg1",
+      "loaded_insert_row_count": 1000,
+      "mem_size": 2048,
+    }
+  ],
+  "dm_channels": [
+    {
+      "node_id": 1,
+      "version": 1,
+      "collection_id": 1,
+      "channel_name": "channel1",
+      "unflushed_segment_ids": [1],
+      "flushed_segment_ids": [2],
+      "dropped_segment_ids": [3],
+      "level_zero_segment_ids": [4],
+      "partition_stats_versions": {
+        "1": 1
+      }
+    }
+  ],
+  "leader_views": [
+    {
+      "node_id": 1,
+      "collection_id": 1,
+      "channel_name": "channel1",
+      "segments": [
+        {
+          "segment_id": 1,
+          "partition_id": 1,
+          "num_of_rows": 1000,
+          "state": "Sealed",
+          "is_importing": false,
+          "compacted": false,
+          "level": "L0",
+          "is_sorted": true,
+          "node_id": 1,
+          "is_invisible": false,
+          "loaded_timestamp": 1633072800,
+          "index": [
+            {
+              "field_id": 1,
+              "index_id": 1,
+              "build_id": 1,
+              "index_size": 1024,
+              "is_loaded": true
+            }
+          ],
+          "resource_group": "rg1",
+          "loaded_insert_row_count": 1000,
+          "mem_size": 2048,
+        }
+      ]
+    }
+  ]
+}
+`
+
+var qcReplica = `
+[
+  {
+    "ID": 1,
+    "CollectionID": 1,
+    "RWNodes": [1, 2],
+    "ResourceGroup": "rg1",
+    "RONodes": [3],
+    "ChannelToRWNodes": {
+      "channel1": [1, 2]
+    }
+  },
+  {
+    "ID": 2,
+    "CollectionID": 2,
+    "RWNodes": [4, 5],
+    "ResourceGroup": "rg2",
+    "RONodes": [6],
+    "ChannelToRWNodes": {
+      "channel2": [4, 5]
+    }
+  }
+]
+`
+
+var qcResourceGroup = `
+[
+  {
+    "Name": "rg1",
+    "Nodes": [1, 2]
+  },
+  {
+    "Name": "rg2",
+    "Nodes": [3, 4]
+  }
+]
+`
+
 var qcTasks = `
 [
   {
@@ -456,6 +629,119 @@ var qcTasks = `
 ]
 `
 
+var qn_segments = `
+[
+  {
+    "segment_id": 1,
+    "collection_id": 1,
+    "partition_id": 1,
+    "channel": "channel1",
+    "num_of_rows": 1000,
+    "state": "Sealed",
+    "is_importing": false,
+    "compacted": false,
+    "level": "L1",
+    "is_sorted": true,
+    "node_id": 1,
+    "is_invisible": false,
+    "loaded_timestamp": 1620000000,
+    "index": [
+      {
+        "field_id": 1,
+        "index_id": 1,
+        "build_id": 1,
+        "index_size": 1024,
+        "is_loaded": true
+      }
+    ],
+    "resource_group": "rg1",
+    "loaded_insert_row_count": 1000,
+    "mem_size": 2048,
+  },
+  {
+    "segment_id": 2,
+    "collection_id": 2,
+    "partition_id": 2,
+    "channel": "channel2",
+    "num_of_rows": 2000,
+    "state": "Sealed",
+    "is_importing": false,
+    "compacted": false,
+    "level": "L2",
+    "is_sorted": true,
+    "node_id": 2,
+    "is_invisible": false,
+    "loaded_timestamp": 1620000001,
+    "index": [
+      {
+        "field_id": 2,
+        "index_id": 2,
+        "build_id": 2,
+        "index_size": 2048,
+        "is_loaded": true
+      }
+    ],
+    "resource_group": "rg2",
+    "loaded_insert_row_count": 2000,
+    "mem_size": 4096,
+  }
+]
+`
+
+var qn_channels = `
+[
+  {
+    "name": "channel1",
+    "watch_state": "Healthy",
+    "assign_state": "assigned",
+    "latest_time_tick": "2023-10-01 12:00:00",
+    "node_id": 1,
+    "collection_id": 1,
+  },
+  {
+    "name": "channel2",
+    "watch_state": "Healthy",
+    "assign_state": "assigned",
+    "latest_time_tick": "2023-10-01 12:05:00",
+    "node_id": 2,
+    "collection_id": 2,
+  }
+]
+`
+
+var dc_dist = `
+{
+  "segments": [
+    {
+      "segment_id": 1,
+      "collection_id": 100,
+      "partition_id": 10,
+      "channel": "channel1",
+      "num_of_rows": 1000,
+      "state": "flushed",
+      "is_importing": false,
+      "compacted": false,
+      "level": "L1",
+      "is_sorted": true,
+      "node_id": 1
+    }
+  ],
+  "dm_channels": [
+    {
+      "node_id": 1,
+      "version": 1,
+      "collection_id": 100,
+      "channel_name": "channel1",
+      "unflushed_segment_ids": [1, 2, 3],
+      "flushed_segment_ids": [4, 5, 6],
+      "dropped_segment_ids": [7, 8, 9],
+      "watch_state": "success",
+      "start_watch_ts": 123456789
+    }
+  ]
+}
+`
+
 var dc_build_index_task = `
 [
   {
@@ -485,30 +771,31 @@ var dc_compaction_task = `
 [
   {
     "plan_id": 1,
-    "collection_id": 1001,
+    "collection_id": 1,
     "type": "Merge",
     "state": "Completed",
-    "start_time": 1633036800,
-    "end_time": 1633040400,
-    "total_rows": 100000,
+    "fail_reason": "",
+    "start_time": 1620000000,
+    "end_time": 1620003600,
+    "total_rows": 10000,
     "input_segments": [1, 2, 3],
     "result_segments": [4]
   },
   {
     "plan_id": 2,
-    "collection_id": 1002,
+    "collection_id": 2,
     "type": "Merge",
     "state": "Failed",
     "fail_reason": "Disk full",
-    "start_time": 1633123200,
-    "end_time": 1633126800,
-    "total_rows": 200000,
+    "start_time": 1620007200,
+    "end_time": 1620010800,
+    "total_rows": 20000,
     "input_segments": [5, 6, 7],
-    "result_segments": [8]
+    "result_segments": []
   }
 ]`
 
-var dc_sync_task = `
+var dn_sync_task = `
 [
   {
     "segment_id": 1,
@@ -518,7 +805,8 @@ var dc_sync_task = `
     "ts_to": 1633040400,
     "delta_row_count": 10,
     "flush_size": 1024,
-    "running_time": 100000000
+    "running_time": "100000000",
+    "node_id": 1
   },
   {
     "segment_id": 2,
@@ -528,7 +816,8 @@ var dc_sync_task = `
     "ts_to": 1633126800,
     "delta_row_count": 20,
     "flush_size": 2048,
-    "running_time": 200000000
+    "running_time": "200000000",
+    "node_id": 2
   }
 ]
 `
@@ -567,6 +856,66 @@ var dc_import_task = `
     "task_type": "ImportTask",
     "created_time": "2023-10-01T00:00:00Z",
     "complete_time": "2023-10-01T01:00:00Z"
+  }
+]
+`
+
+var dn_segments = `
+[
+  {
+    "segment_id": 1,
+    "collection_id": 1,
+    "partition_id": 1,
+    "channel": "channel1",
+    "num_of_rows": 1000,
+    "state": "active",
+    "is_importing": false,
+    "compacted": false,
+    "level": "L1",
+    "is_sorted": true,
+    "node_id": 1,
+    "flushed_rows": 1000,
+    "sync_buffer_rows": 0,
+    "syncing_rows": 0
+  },
+  {
+    "segment_id": 2,
+    "collection_id": 2,
+    "partition_id": 2,
+    "channel": "channel2",
+    "num_of_rows": 2000,
+    "state": "inactive",
+    "is_importing": true,
+    "compacted": true,
+    "level": "L2",
+    "is_sorted": false,
+    "node_id": 2,
+    "flushed_rows": 2000,
+    "sync_buffer_rows": 100,
+    "syncing_rows": 50
+  }
+]
+`
+
+var dn_channels = `
+[
+  {
+    "name": "channel1",
+    "watch_state": "Healthy",
+    "assign_state": "assigned",
+    "latest_time_tick": "2023-10-01 12:00:00",
+    "node_id": 1,
+    "collection_id": 1,
+    "check_point_ts": "2023-10-01 12:00:00"
+  },
+  {
+    "name": "channel2",
+    "watch_state": "Healthy",
+    "assign_state": "assigned",
+    "latest_time_tick": "2023-10-01 12:05:00",
+    "node_id": 2,
+    "collection_id": 2,
+    "check_point_ts": "2023-10-01 12:05:00"
   }
 ]
 `

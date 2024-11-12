@@ -160,7 +160,7 @@ class TestCreateIndex(TestBase):
         # create index
         payload = {
             "collectionName": name,
-            "indexParams": [{"fieldName": "word_count", "indexName": "word_count_vector",
+            "indexParams": [{"fieldName": "word_count", "indexName": "word_count_vector", "indexType": "INVERTED",
                              "params": {"index_type": "INVERTED"}}]
         }
         rsp = self.index_client.index_create(payload)
@@ -177,7 +177,7 @@ class TestCreateIndex(TestBase):
         for i in range(len(expected_index)):
             assert expected_index[i]['fieldName'] == actual_index[i]['fieldName']
             assert expected_index[i]['indexName'] == actual_index[i]['indexName']
-            assert expected_index[i]['params']['index_type'] == actual_index[i]['indexType']
+            assert expected_index[i]['indexType'] == actual_index[i]['indexType']
 
     @pytest.mark.parametrize("index_type", ["BIN_FLAT", "BIN_IVF_FLAT"])
     @pytest.mark.parametrize("metric_type", ["JACCARD", "HAMMING"])
@@ -228,7 +228,7 @@ class TestCreateIndex(TestBase):
         index_name = "binary_vector_index"
         payload = {
             "collectionName": name,
-            "indexParams": [{"fieldName": "binary_vector", "indexName": index_name, "metricType": metric_type,
+            "indexParams": [{"fieldName": "binary_vector", "indexName": index_name, "metricType": metric_type, "indexType": index_type,
                              "params": {"index_type": index_type}}]
         }
         if index_type == "BIN_IVF_FLAT":
@@ -247,7 +247,7 @@ class TestCreateIndex(TestBase):
         for i in range(len(expected_index)):
             assert expected_index[i]['fieldName'] == actual_index[i]['fieldName']
             assert expected_index[i]['indexName'] == actual_index[i]['indexName']
-            assert expected_index[i]['params']['index_type'] == actual_index[i]['indexType']
+            assert expected_index[i]['indexType'] == actual_index[i]['indexType']
 
     @pytest.mark.parametrize("insert_round", [1])
     @pytest.mark.parametrize("auto_id", [True])
@@ -255,7 +255,7 @@ class TestCreateIndex(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
-    @pytest.mark.parametrize("tokenizer", ['default', 'jieba'])
+    @pytest.mark.parametrize("tokenizer", ['standard', 'jieba'])
     @pytest.mark.parametrize("index_type", ['SPARSE_INVERTED_INDEX', 'SPARSE_WAND'])
     @pytest.mark.parametrize("bm25_k1", [1.2, 1.5])
     @pytest.mark.parametrize("bm25_b", [0.7, 0.5])
@@ -279,7 +279,7 @@ class TestCreateIndex(TestBase):
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
                     {"fieldName": "document_content", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "1000", "enable_tokenizer": True,
+                     "elementTypeParams": {"max_length": "1000", "enable_analyzer": True,
                                            "analyzer_params": {
                                                "tokenizer": tokenizer,
                                            },
@@ -302,7 +302,7 @@ class TestCreateIndex(TestBase):
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
         assert rsp['code'] == 0
-        if tokenizer == 'default':
+        if tokenizer == 'standard':
             fake = fake_en
         elif tokenizer == 'jieba':
             fake = fake_zh

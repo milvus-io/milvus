@@ -776,11 +776,13 @@ ChunkedSegmentSealedImpl::get_chunk_buffer(FieldId field_id,
         if (field_data->IsNullable()) {
             valid_data.reserve(length);
             for (int i = 0; i < length; i++) {
-                valid_data.push_back(field_data->IsValid(start_offset + i));
+                valid_data.push_back(
+                    field_data->IsValid(chunk_id, start_offset + i));
             }
         }
-        return std::make_pair(field_data->GetBatchBuffer(start_offset, length),
-                              valid_data);
+        return std::make_pair(
+            field_data->GetBatchBuffer(chunk_id, start_offset, length),
+            valid_data);
     }
     PanicInfo(ErrorCode::UnexpectedError,
               "get_chunk_buffer only used for  variable column field");
@@ -863,16 +865,17 @@ ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
 
     auto bitmap_holder = std::shared_ptr<DeletedRecord::TmpBitmap>();
 
-    if (!is_sorted_by_pk_) {
-        bitmap_holder = get_deleted_bitmap(del_barrier,
-                                           ins_barrier,
-                                           deleted_record_,
-                                           insert_record_,
-                                           timestamp);
-    } else {
-        bitmap_holder = get_deleted_bitmap_s(
-            del_barrier, ins_barrier, deleted_record_, timestamp);
-    }
+    auto search_fn = [this](const PkType& pk, int64_t barrier) {
+        return this->search_pk(pk, barrier);
+    };
+    bitmap_holder = get_deleted_bitmap(del_barrier,
+                                       ins_barrier,
+                                       deleted_record_,
+                                       insert_record_,
+                                       timestamp,
+                                       is_sorted_by_pk_,
+                                       search_fn);
+
     if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
         return;
     }
@@ -1182,72 +1185,34 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
 std::vector<SegOffset>
 ChunkedSegmentSealedImpl::search_pk(const PkType& pk,
                                     Timestamp timestamp) const {
-    auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
-    AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
-    auto pk_column = fields_.at(pk_field_id);
-    std::vector<SegOffset> pk_offsets;
-    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
-        case DataType::INT64: {
-            auto target = std::get<int64_t>(pk);
-            // get int64 pks
-            auto num_chunk = pk_column->num_chunks();
-            for (int i = 0; i < num_chunk; ++i) {
-                auto src = reinterpret_cast<const int64_t*>(pk_column->Data(i));
-                auto chunk_row_num = pk_column->chunk_row_nums(i);
-                auto it = std::lower_bound(
-                    src,
-                    src + chunk_row_num,
-                    target,
-                    [](const int64_t& elem, const int64_t& value) {
-                        return elem < value;
-                    });
-                for (; it != src + chunk_row_num && *it == target; it++) {
-                    auto offset = it - src;
-                    if (insert_record_.timestamps_[offset] <= timestamp) {
-                        pk_offsets.emplace_back(offset);
-                    }
-                }
-            }
-            break;
-        }
-        case DataType::VARCHAR: {
-            auto target = std::get<std::string>(pk);
-            // get varchar pks
-            auto var_column =
-                std::dynamic_pointer_cast<ChunkedVariableColumn<std::string>>(
-                    pk_column);
-            auto num_chunk = var_column->num_chunks();
-            for (int i = 0; i < num_chunk; ++i) {
-                auto views = var_column->StringViews(i).first;
-                auto it = std::lower_bound(views.begin(), views.end(), target);
-                for (; it != views.end() && *it == target; it++) {
-                    auto offset = std::distance(views.begin(), it);
-                    if (insert_record_.timestamps_[offset] <= timestamp) {
-                        pk_offsets.emplace_back(offset);
-                    }
-                }
-            }
-            break;
-        }
-        default: {
-            PanicInfo(
-                DataTypeInvalid,
-                fmt::format(
-                    "unsupported type {}",
-                    schema_->get_fields().at(pk_field_id).get_data_type()));
-        }
+    if (!is_sorted_by_pk_) {
+        return insert_record_.search_pk(pk, timestamp);
     }
-
-    return pk_offsets;
+    return search_sorted_pk(pk, [this, timestamp](int64_t offset) {
+        return insert_record_.timestamps_[offset] <= timestamp;
+    });
 }
 
 std::vector<SegOffset>
 ChunkedSegmentSealedImpl::search_pk(const PkType& pk,
                                     int64_t insert_barrier) const {
+    if (!is_sorted_by_pk_) {
+        return insert_record_.search_pk(pk, insert_barrier);
+    }
+    return search_sorted_pk(pk, [insert_barrier](int64_t offset) {
+        return offset < insert_barrier;
+    });
+}
+
+template <typename Condition>
+std::vector<SegOffset>
+ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
+                                           Condition condition) const {
     auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
     auto pk_column = fields_.at(pk_field_id);
     std::vector<SegOffset> pk_offsets;
+
     switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
         case DataType::INT64: {
             auto target = std::get<int64_t>(pk);
@@ -1264,9 +1229,11 @@ ChunkedSegmentSealedImpl::search_pk(const PkType& pk,
                     [](const int64_t& elem, const int64_t& value) {
                         return elem < value;
                     });
-                for (; it != src + chunk_row_num && *it == target; it++) {
-                    auto offset = it - src;
-                    if (offset < insert_barrier) {
+                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
+                for (; it != src + pk_column->NumRows() && *it == target;
+                     ++it) {
+                    auto offset = it - src + num_rows_until_chunk;
+                    if (condition(offset)) {
                         pk_offsets.emplace_back(offset);
                     }
                 }
@@ -1283,12 +1250,17 @@ ChunkedSegmentSealedImpl::search_pk(const PkType& pk,
 
             auto num_chunk = var_column->num_chunks();
             for (int i = 0; i < num_chunk; ++i) {
-                auto views = var_column->StringViews(i).first;
-                auto it = std::lower_bound(views.begin(), views.end(), target);
-                for (; it != views.end() && *it == target; it++) {
-                    auto offset = std::distance(views.begin(), it);
-                    if (offset < insert_barrier) {
-                        pk_offsets.emplace_back(offset);
+                // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
+                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
+                auto string_chunk = std::dynamic_pointer_cast<StringChunk>(
+                    var_column->GetChunk(i));
+                auto offset = string_chunk->binary_search_string(target);
+                for (; offset != -1 && offset < var_column->NumRows() &&
+                       var_column->RawAt(offset) == target;
+                     ++offset) {
+                    auto segment_offset = offset + num_rows_until_chunk;
+                    if (condition(segment_offset)) {
+                        pk_offsets.emplace_back(segment_offset);
                     }
                 }
             }
@@ -1304,75 +1276,6 @@ ChunkedSegmentSealedImpl::search_pk(const PkType& pk,
     }
 
     return pk_offsets;
-}
-
-std::shared_ptr<DeletedRecord::TmpBitmap>
-ChunkedSegmentSealedImpl::get_deleted_bitmap_s(
-    int64_t del_barrier,
-    int64_t insert_barrier,
-    DeletedRecord& delete_record,
-    Timestamp query_timestamp) const {
-    // if insert_barrier and del_barrier have not changed, use cache data directly
-    bool hit_cache = false;
-    int64_t old_del_barrier = 0;
-    auto current = delete_record.clone_lru_entry(
-        insert_barrier, del_barrier, old_del_barrier, hit_cache);
-    if (hit_cache) {
-        return current;
-    }
-
-    auto bitmap = current->bitmap_ptr;
-
-    int64_t start, end;
-    if (del_barrier < old_del_barrier) {
-        // in this case, ts of delete record[current_del_barrier : old_del_barrier] > query_timestamp
-        // so these deletion records do not take effect in query/search
-        // so bitmap corresponding to those pks in delete record[current_del_barrier:old_del_barrier] will be reset to 0
-        // for example, current_del_barrier = 2, query_time = 120, the bitmap will be reset to [0, 1, 1, 0, 0, 0, 0, 0]
-        start = del_barrier;
-        end = old_del_barrier;
-    } else {
-        // the cache is not enough, so update bitmap using new pks in delete record[old_del_barrier:current_del_barrier]
-        // for example, current_del_barrier = 4, query_time = 300, bitmap will be updated to [0, 1, 1, 0, 1, 1, 0, 0]
-        start = old_del_barrier;
-        end = del_barrier;
-    }
-
-    // Avoid invalid calculations when there are a lot of repeated delete pks
-    std::unordered_map<PkType, Timestamp> delete_timestamps;
-    for (auto del_index = start; del_index < end; ++del_index) {
-        auto pk = delete_record.pks()[del_index];
-        auto timestamp = delete_record.timestamps()[del_index];
-
-        delete_timestamps[pk] = timestamp > delete_timestamps[pk]
-                                    ? timestamp
-                                    : delete_timestamps[pk];
-    }
-
-    for (auto& [pk, timestamp] : delete_timestamps) {
-        auto segOffsets = search_pk(pk, insert_barrier);
-        for (auto offset : segOffsets) {
-            int64_t insert_row_offset = offset.get();
-
-            // The deletion record do not take effect in search/query,
-            // and reset bitmap to 0
-            if (timestamp > query_timestamp) {
-                bitmap->reset(insert_row_offset);
-                continue;
-            }
-            // Insert after delete with same pk, delete will not task effect on this insert record,
-            // and reset bitmap to 0
-            if (insert_record_.timestamps_[offset.get()] >= timestamp) {
-                bitmap->reset(insert_row_offset);
-                continue;
-            }
-            // insert data corresponding to the insert_row_offset will be ignored in search/query
-            bitmap->set(insert_row_offset);
-        }
-    }
-
-    delete_record.insert_lru_entry(current);
-    return current;
 }
 
 std::pair<std::vector<OffsetMap::OffsetType>, bool>
@@ -1613,13 +1516,13 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
         index = std::make_unique<index::TextMatchIndex>(
             std::numeric_limits<int64_t>::max(),
             "milvus_tokenizer",
-            field_meta.get_tokenizer_params());
+            field_meta.get_analyzer_params().c_str());
     } else {
         // build text index using mmap.
         index = std::make_unique<index::TextMatchIndex>(
             cfg.GetMmapPath(),
             "milvus_tokenizer",
-            field_meta.get_tokenizer_params());
+            field_meta.get_analyzer_params().c_str());
     }
 
     {
@@ -1669,7 +1572,7 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     index->Reload();
 
     index->RegisterTokenizer("milvus_tokenizer",
-                             field_meta.get_tokenizer_params());
+                             field_meta.get_analyzer_params().c_str());
 
     text_indexes_[field_id] = std::move(index);
 }
@@ -1680,7 +1583,7 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
     std::unique_lock lck(mutex_);
     const auto& field_meta = schema_->operator[](field_id);
     index->RegisterTokenizer("milvus_tokenizer",
-                             field_meta.get_tokenizer_params());
+                             field_meta.get_analyzer_params().c_str());
     text_indexes_[field_id] = std::move(index);
 }
 

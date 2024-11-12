@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"runtime"
 	"sync"
@@ -68,6 +69,7 @@ type TargetManagerInterface interface {
 	SaveCurrentTarget(catalog metastore.QueryCoordCatalog)
 	Recover(catalog metastore.QueryCoordCatalog) error
 	CanSegmentBeMoved(collectionID, segmentID int64) bool
+	GetTargetJSON(scope TargetScope) string
 }
 
 type TargetManager struct {
@@ -157,7 +159,6 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 	partitionIDs := lo.Map(partitions, func(partition *Partition, i int) int64 {
 		return partition.PartitionID
 	})
-	allocatedTarget := NewCollectionTarget(nil, nil, partitionIDs)
 
 	channelInfos := make(map[string][]*datapb.VchannelInfo)
 	segments := make(map[int64]*datapb.SegmentInfo, 0)
@@ -192,7 +193,8 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 		return nil
 	}
 
-	mgr.next.updateCollectionTarget(collectionID, NewCollectionTarget(segments, dmChannels, partitionIDs))
+	allocatedTarget := NewCollectionTarget(segments, dmChannels, partitionIDs)
+	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
 	log.Debug("finish to update next targets for collection",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("PartitionIDs", partitionIDs),
@@ -631,4 +633,29 @@ func (mgr *TargetManager) CanSegmentBeMoved(collectionID, segmentID int64) bool 
 	}
 
 	return false
+}
+
+func (mgr *TargetManager) GetTargetJSON(scope TargetScope) string {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+
+	ret := mgr.getTarget(scope)
+	if ret == nil {
+		return ""
+	}
+
+	v, err := json.Marshal(ret.toQueryCoordCollectionTargets())
+	if err != nil {
+		log.Warn("failed to marshal target", zap.Error(err))
+		return ""
+	}
+	return string(v)
+}
+
+func (mgr *TargetManager) getTarget(scope TargetScope) *target {
+	if scope == CurrentTarget {
+		return mgr.current
+	}
+
+	return mgr.next
 }

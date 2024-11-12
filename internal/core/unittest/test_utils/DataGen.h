@@ -498,6 +498,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                         data[i * repeat_count + j] = str;
                     }
                 }
+                std::sort(data.begin(), data.end());
                 insert_cols(data, N, field_meta);
                 break;
             }

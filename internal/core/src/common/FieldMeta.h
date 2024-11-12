@@ -25,7 +25,7 @@
 
 namespace milvus {
 using TypeParams = std::map<std::string, std::string>;
-using TokenizerParams = std::map<std::string, std::string>;
+using TokenizerParams = std::string;
 
 TokenizerParams
 ParseTokenizerParams(const TypeParams& params);
@@ -64,13 +64,13 @@ class FieldMeta {
               int64_t max_length,
               bool nullable,
               bool enable_match,
-              bool enable_tokenizer,
+              bool enable_analyzer,
               std::map<std::string, std::string>& params)
         : name_(name),
           id_(id),
           type_(type),
           string_info_(StringInfo{
-              max_length, enable_match, enable_tokenizer, std::move(params)}),
+              max_length, enable_match, enable_analyzer, std::move(params)}),
           nullable_(nullable) {
         Assert(IsStringDataType(type_));
     }
@@ -125,10 +125,10 @@ class FieldMeta {
     enable_match() const;
 
     bool
-    enable_tokenizer() const;
+    enable_analyzer() const;
 
     TokenizerParams
-    get_tokenizer_params() const;
+    get_analyzer_params() const;
 
     std::optional<knowhere::MetricType>
     get_metric_type() const {
@@ -203,7 +203,7 @@ class FieldMeta {
     struct StringInfo {
         int64_t max_length;
         bool enable_match;
-        bool enable_tokenizer;
+        bool enable_analyzer;
         std::map<std::string, std::string> params;
     };
     FieldName name_;

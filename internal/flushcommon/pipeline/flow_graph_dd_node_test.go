@@ -22,14 +22,19 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_flusher"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -90,6 +95,56 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 			assert.Equal(t, len(test.inGrowingSegs), len(ddNode.growingSegInfo))
 		})
 	}
+}
+
+func TestFlowGraph_DDNode_OperateFlush(t *testing.T) {
+	h := mock_flusher.NewMockFlushMsgHandler(t)
+	h.EXPECT().HandleCreateSegment(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	h.EXPECT().HandleFlush(mock.Anything, mock.Anything).Return(nil)
+	h.EXPECT().HandleManualFlush(mock.Anything, mock.Anything).Return(nil)
+
+	ddn := ddNode{
+		ctx:          context.Background(),
+		collectionID: 1,
+		vChannelName: "v1",
+		msgHandler:   h,
+	}
+
+	mutableMsg, err := message.NewCreateSegmentMessageBuilderV2().
+		WithHeader(&message.CreateSegmentMessageHeader{}).
+		WithBody(&message.CreateSegmentMessageBody{}).
+		WithVChannel("v1").
+		BuildMutable()
+	assert.NoError(t, err)
+	immutableCreateSegmentMsg := mutableMsg.WithTimeTick(1).IntoImmutableMessage(mock_message.NewMockMessageID(t))
+
+	flushMsg, err := message.NewFlushMessageBuilderV2().
+		WithHeader(&message.FlushMessageHeader{}).
+		WithBody(&message.FlushMessageBody{}).
+		WithVChannel("v1").
+		BuildMutable()
+	assert.NoError(t, err)
+	immutableFlushMsg := flushMsg.WithTimeTick(2).IntoImmutableMessage(mock_message.NewMockMessageID(t))
+
+	manualFlushMsg, err := message.NewManualFlushMessageBuilderV2().
+		WithHeader(&message.ManualFlushMessageHeader{}).
+		WithBody(&message.ManualFlushMessageBody{}).
+		WithVChannel("v1").
+		BuildMutable()
+	assert.NoError(t, err)
+	immutableManualFlushMsg := manualFlushMsg.WithTimeTick(3).IntoImmutableMessage(mock_message.NewMockMessageID(t))
+
+	msg1, err := adaptor.NewCreateSegmentMessageBody(immutableCreateSegmentMsg)
+	assert.NoError(t, err)
+	msg2, err := adaptor.NewFlushMessageBody(immutableFlushMsg)
+	assert.NoError(t, err)
+	msg3, err := adaptor.NewManualFlushMessageBody(immutableManualFlushMsg)
+	assert.NoError(t, err)
+
+	tsMessages := []msgstream.TsMsg{msg1, msg2, msg3}
+	var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
+	outputMsgs := ddn.Operate([]Msg{msgStreamMsg})
+	assert.NotNil(t, outputMsgs)
 }
 
 func TestFlowGraph_DDNode_Operate(t *testing.T) {

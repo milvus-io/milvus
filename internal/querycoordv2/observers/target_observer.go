@@ -26,6 +26,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -85,8 +87,12 @@ type TargetObserver struct {
 	mut                  sync.Mutex                // Guard readyNotifiers
 	readyNotifiers       map[int64][]chan struct{} // CollectionID -> Notifiers
 
-	dispatcher *taskDispatcher[int64]
-	keylocks   *lock.KeyLock[int64]
+	// loadingDispatcher updates targets for collections that are loading (also collections without a current target).
+	loadingDispatcher *taskDispatcher[int64]
+	// loadedDispatcher updates targets for loaded collections.
+	loadedDispatcher *taskDispatcher[int64]
+
+	keylocks *lock.KeyLock[int64]
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -112,8 +118,8 @@ func NewTargetObserver(
 		keylocks:             lock.NewKeyLock[int64](),
 	}
 
-	dispatcher := newTaskDispatcher(result.check)
-	result.dispatcher = dispatcher
+	result.loadingDispatcher = newTaskDispatcher(result.check)
+	result.loadedDispatcher = newTaskDispatcher(result.check)
 	return result
 }
 
@@ -122,7 +128,8 @@ func (ob *TargetObserver) Start() {
 		ctx, cancel := context.WithCancel(context.Background())
 		ob.cancel = cancel
 
-		ob.dispatcher.Start()
+		ob.loadingDispatcher.Start()
+		ob.loadedDispatcher.Start()
 
 		ob.wg.Add(1)
 		go func() {
@@ -142,7 +149,8 @@ func (ob *TargetObserver) Stop() {
 		}
 		ob.wg.Wait()
 
-		ob.dispatcher.Stop()
+		ob.loadingDispatcher.Stop()
+		ob.loadedDispatcher.Stop()
 	})
 }
 
@@ -165,7 +173,13 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 
 		case <-ticker.C:
 			ob.clean()
-			ob.dispatcher.AddTask(ob.meta.GetAll()...)
+			loaded := lo.FilterMap(ob.meta.GetAllCollections(), func(collection *meta.Collection, _ int) (int64, bool) {
+				if collection.GetStatus() == querypb.LoadStatus_Loaded {
+					return collection.GetCollectionID(), true
+				}
+				return 0, false
+			})
+			ob.loadedDispatcher.AddTask(loaded...)
 
 		case req := <-ob.updateChan:
 			log.Info("manually trigger update target",
@@ -215,7 +229,7 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 func (ob *TargetObserver) Check(ctx context.Context, collectionID int64, partitionID int64) bool {
 	result := ob.targetMgr.IsCurrentTargetExist(collectionID, partitionID)
 	if !result {
-		ob.dispatcher.AddTask(collectionID)
+		ob.loadingDispatcher.AddTask(collectionID)
 	}
 	return result
 }
@@ -390,6 +404,10 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 
 	replicas := ob.meta.ReplicaManager.GetByCollection(collectionID)
 	actions := make([]*querypb.SyncAction, 0, 1)
+	var collectionInfo *milvuspb.DescribeCollectionResponse
+	var partitions []int64
+	var indexInfo []*indexpb.IndexInfo
+	var err error
 	for _, replica := range replicas {
 		leaders := ob.distMgr.ChannelDistManager.GetShardLeadersByReplica(replica)
 		for ch, leaderID := range leaders {
@@ -406,7 +424,34 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			if updateVersionAction != nil {
 				actions = append(actions, updateVersionAction)
 			}
-			if !ob.sync(ctx, replica, leaderView, actions) {
+
+			if len(actions) == 0 {
+				continue
+			}
+
+			// init all the meta information
+			if collectionInfo == nil {
+				collectionInfo, err = ob.broker.DescribeCollection(ctx, collectionID)
+				if err != nil {
+					log.Warn("failed to get collection info", zap.Error(err))
+					return false
+				}
+
+				partitions, err = utils.GetPartitions(ob.meta.CollectionManager, collectionID)
+				if err != nil {
+					log.Warn("failed to get partitions", zap.Error(err))
+					return false
+				}
+
+				// Get collection index info
+				indexInfo, err = ob.broker.ListIndexes(ctx, collectionID)
+				if err != nil {
+					log.Warn("fail to get index info of collection", zap.Error(err))
+					return false
+				}
+			}
+
+			if !ob.sync(ctx, replica, leaderView, actions, collectionInfo, partitions, indexInfo) {
 				return false
 			}
 		}
@@ -415,7 +460,9 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 	return true
 }
 
-func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, diffs []*querypb.SyncAction) bool {
+func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, diffs []*querypb.SyncAction,
+	collectionInfo *milvuspb.DescribeCollectionResponse, partitions []int64, indexInfo []*indexpb.IndexInfo,
+) bool {
 	if len(diffs) == 0 {
 		return true
 	}
@@ -426,24 +473,6 @@ func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leade
 		zap.Int64("collectionID", leaderView.CollectionID),
 		zap.String("channel", leaderView.Channel),
 	)
-
-	collectionInfo, err := ob.broker.DescribeCollection(ctx, leaderView.CollectionID)
-	if err != nil {
-		log.Warn("failed to get collection info", zap.Error(err))
-		return false
-	}
-	partitions, err := utils.GetPartitions(ob.meta.CollectionManager, leaderView.CollectionID)
-	if err != nil {
-		log.Warn("failed to get partitions", zap.Error(err))
-		return false
-	}
-
-	// Get collection index info
-	indexInfo, err := ob.broker.ListIndexes(ctx, collectionInfo.GetCollectionID())
-	if err != nil {
-		log.Warn("fail to get index info of collection", zap.Error(err))
-		return false
-	}
 
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(

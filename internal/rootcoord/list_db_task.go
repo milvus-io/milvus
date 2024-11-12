@@ -124,3 +124,7 @@ func (t *listDatabaseTask) Execute(ctx context.Context) error {
 	t.Resp.CreatedTimestamp = createdTimes
 	return nil
 }
+
+func (t *listDatabaseTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(NewClusterLockerKey(false))
+}

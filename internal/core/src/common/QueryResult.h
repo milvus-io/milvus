@@ -66,8 +66,9 @@ struct OffsetDisPairComparator {
 };
 struct VectorIterator {
  public:
-    VectorIterator(int chunk_count, int64_t chunk_rows = -1)
-        : chunk_rows_(chunk_rows) {
+    VectorIterator(int chunk_count,
+                   const std::vector<int64_t>& total_rows_until_chunk = {})
+        : total_rows_until_chunk_(total_rows_until_chunk) {
         iterators_.reserve(chunk_count);
     }
 
@@ -119,7 +120,7 @@ struct VectorIterator {
  private:
     int64_t
     convert_to_segment_offset(int64_t chunk_offset, int chunk_idx) {
-        if (chunk_rows_ == -1) {
+        if (total_rows_until_chunk_.size() == 0) {
             AssertInfo(
                 iterators_.size() == 1,
                 "Wrong state for vectorIterators, which having incorrect "
@@ -129,7 +130,7 @@ struct VectorIterator {
                 iterators_.size());
             return chunk_offset;
         }
-        return chunk_idx * chunk_rows_ + chunk_offset;
+        return total_rows_until_chunk_[chunk_idx] + chunk_offset;
     }
 
  private:
@@ -139,7 +140,7 @@ struct VectorIterator {
                         OffsetDisPairComparator>
         heap_;
     bool sealed = false;
-    int64_t chunk_rows_ = -1;
+    std::vector<int64_t> total_rows_until_chunk_;
     //currently, VectorIterator is guaranteed to be used serially without concurrent problem, in the future
     //we may need to add mutex to protect the variable sealed
 };
@@ -163,7 +164,7 @@ struct SearchResult {
     AssembleChunkVectorIterators(
         int64_t nq,
         int chunk_count,
-        int64_t rows_per_chunk,
+        const std::vector<int64_t>& total_rows_until_chunk,
         const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators) {
         AssertInfo(kw_iterators.size() == nq * chunk_count,
                    "kw_iterators count:{} is not equal to nq*chunk_count:{}, "
@@ -176,7 +177,7 @@ struct SearchResult {
             vec_iter_idx = vec_iter_idx % nq;
             if (vector_iterators.size() < nq) {
                 auto vector_iterator = std::make_shared<VectorIterator>(
-                    chunk_count, rows_per_chunk);
+                    chunk_count, total_rows_until_chunk);
                 vector_iterators.emplace_back(vector_iterator);
             }
             auto kw_iterator = kw_iterators[i];
