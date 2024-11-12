@@ -159,7 +159,8 @@ class TestChunkSegment : public testing::Test {
         auto schema = std::make_shared<Schema>();
         auto int64_fid = schema->AddDebugField("int64", DataType::INT64, true);
         auto pk_fid = schema->AddDebugField("pk", DataType::INT64, true);
-        auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR, true);
+        auto str_fid =
+            schema->AddDebugField("string1", DataType::VARCHAR, true);
         auto str2_fid =
             schema->AddDebugField("string2", DataType::VARCHAR, true);
         schema->AddField(
