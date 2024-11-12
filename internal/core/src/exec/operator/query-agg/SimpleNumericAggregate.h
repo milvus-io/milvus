@@ -49,8 +49,62 @@ protected:
                       const VectorPtr& vector,
                       UpdateSingleValue updateSingleValue,
                       bool mayPushdown){
-
+        auto start = 0;
+        auto column_data = std::dynamic_pointer_cast<ColumnVector>(vector);
+        AssertInfo(column_data!=nullptr, "input column data for upgrading groups should not be nullptr");
+        while(true) {
+            auto next_selected = rows.find_next(start);
+            if (!next_selected.has_value()) {
+                return;
+            }
+            auto selected_idx = next_selected.value();
+            if (column_data->ValidAt(selected_idx)) {
+                continue;
+            }
+            updateNonNullValue<tableHasNulls, TData>(groups[selected_idx], column_data->ValueAt<TData>(), updateSingleValue);
+            start = selected_idx;
+        }
     }
+
+    template <
+            typename TData = TResult,
+            typename TValue = TInput,
+            typename UpdateSingle,
+            typename UpdateDuplicate>
+    void updateOneGroup(
+            char* group,
+            const TargetBitmapView& rows,
+            const VectorPtr& vector,
+            UpdateSingle updateSingleValue,
+            UpdateDuplicate /*updateDuplicateValues*/,
+            bool /*mayPushdown*/,
+            TData initialValue) {
+        auto start = 0;
+        auto column_data = std::dynamic_pointer_cast<ColumnVector>(vector);
+        AssertInfo(column_data!=nullptr, "input column data for upgrading groups should not be nullptr");
+        while(true) {
+            auto next_selected = rows.find_next(start);
+            if (!next_selected.has_value()) {
+                return;
+            }
+            auto selected_idx = next_selected.value();
+            if (column_data->ValidAt(selected_idx)) {
+                continue;
+            }
+            updateNonNullValue<true, TData>(group, column_data->ValueAt<TData>(), updateSingleValue);
+            start = selected_idx;
+        }
+    }
+
+    template<bool tableHasNulls, typename TDataType = TAccumulator, typename Update>
+    inline void
+    updateNonNullValue(char* group, TDataType value, Update updateValue) {
+        if constexpr (tableHasNulls) {
+            Aggregate::clearNull(group);
+        }
+        updateValue(Aggregate::value<TDataType>(group), value);
+    }
+
 };
 
 }

@@ -141,6 +141,11 @@ class ColumnVector final : public SimpleVector {
         return reinterpret_cast<char*>(GetRawData()) + index * size_of_element;
     }
 
+    template <typename T>
+    T ValueAt(size_t index) const {
+        return *(reinterpret_cast<T*>(GetRawData()) + index);
+    }
+
     template<typename T>
     void
     SetValueAt(size_t index, const T& value) {

@@ -41,11 +41,35 @@ public:
 
     void addRawInput(char** groups, const TargetBitmapView& activeRows,
                      const std::vector<VectorPtr>& input, bool mayPushDown) override {
+        updateInternal<TAccumulator>(groups, activeRows, input, mayPushDown);
+    }
 
+    void addSingleGroupRawInput(char* group, const TargetBitmapView& activeRows,
+                                const std::vector<VectorPtr>& input, bool mayPushDown) override {
+        BaseAggregate::template updateOneGroup<TAccumulator>(group, activeRows, input[0],
+                &updateSingleValue<TAccumulator>, &updateDuplicateValues<TAccumulator>, mayPushDown, TAccumulator(0));
     }
 
     void initializeNewGroupsInternal(char** groups, folly::Range<const vector_size_t*> indices) override {
+        Aggregate::setAllNulls(groups, indices);
+        for(auto i: indices) {
+            (*Aggregate::value<TAccumulator>(groups[i])) = 0;
+        }
+    }
 
+    template <typename TData>
+    #if defined(FOLLY_DISABLE_UNDEFINED_BEHAVIOR_SANITIZER)
+        FOLLY_DISABLE_UNDEFINED_BEHAVIOR_SANITIZER("signed-integer-overflow")
+    #endif
+    static void updateDuplicateValues(TData& result, TData value, int n) {
+        if constexpr(
+                (std::is_same_v<TData, int64_t> && Overflow) ||
+                std::is_same_v<TData, double> || std::is_same_v<TData, float>) {
+            result += n * value;
+        } else {
+            result = checkPlus<TData>(result,
+                                      checkedMultiply<TData>(TData(n), value));
+        }
     }
 
 protected:

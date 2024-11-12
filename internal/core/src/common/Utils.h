@@ -337,5 +337,15 @@ T checkPlus(const T& a, const T& b, const char* typeName = "integer"){
     return result;
 }
 
+template <typename T>
+T checkedMultiply(const T& a, const T& b, const char* typeName = "integer") {
+    T result;
+    bool overflow = __builtin_mul_overflow(a, b, &result);
+    if (UNLIKELY(overflow)) {
+        VELOX_ARITHMETIC_ERROR("{} overflow: {} * {}", typeName, a, b);
+    }
+    return result;
+}
+
 }  // namespace milvus
 

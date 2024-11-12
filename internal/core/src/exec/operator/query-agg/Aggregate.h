@@ -65,18 +65,19 @@ public:
     }
 
     virtual void initializeNewGroups(char** groups, folly::Range<const vector_size_t*> indices) {
+        initializeNewGroupsInternal(groups, indices);
         for(auto index : indices) {
             groups[index][initializedByte_] |= initializedMask_;
         }
     }
 
     virtual void addSingleGroupRawInput(char* group, const TargetBitmapView& activeRows,
-                                        const std::vector<VectorPtr>& input, bool mayPushDown) {};
+                                        const std::vector<VectorPtr>& input, bool mayPushDown) = 0;
 
     virtual void addRawInput(char** groups, const TargetBitmapView& activeRows,
-                             const std::vector<VectorPtr>& input, bool mayPushDown) {} ;
+                             const std::vector<VectorPtr>& input, bool mayPushDown) = 0;
 
-    virtual void extractValues(char** groups, int32_t numGroups, VectorPtr* result) {};
+    virtual void extractValues(char** groups, int32_t numGroups, VectorPtr* result) = 0;
 
     template <typename T>
     T* value(char* group) const {
@@ -127,6 +128,25 @@ protected:
     // operator for this aggregate. If 0, clearing the null as part of update
     // is not needed.
     uint64_t numNulls_ = 0;
+
+    inline bool clearNull(char* group) {
+        if (numNulls_) {
+            uint8_t mask = group[nullByte_];
+            if (mask & nullMask_) {
+                group[nullByte_] = mask & ~nullMask_;
+                numNulls_--;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void setAllNulls(char** groups, folly::Range<const vector_size_t*> indices) {
+        for(auto i:indices) {
+            groups[i][nullByte_] = nullMask_;
+        }
+        numNulls_ += indices.size();
+    }
 };
 
 using AggregateFunctionFactory = std::function<std::unique_ptr<Aggregate>(plan::AggregationNode::Step step,
