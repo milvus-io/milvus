@@ -163,7 +163,6 @@ class MilvusUser(MilvusBaseUser):
             {
                 "id": int(time.time()*(10**6)),
                 "text": faker.text(max_nb_chars=300),
-                "dense_emb": self._random_vector(),
             }
             for _ in range(batch_size)
         ]
@@ -308,7 +307,7 @@ def _(parser):
                                 help="How to connect to Milvus (default: %(default)s)")
     milvus_options.add_argument("--milvus-dim", type=int, default=128,
                                 help="Vector dimension for the collection (default: %(default)s)")
-    milvus_options.add_argument("--milvus-collection", type=str, default="test_collection",
+    milvus_options.add_argument("--milvus-collection", type=str, default="test_collection_capacity",
                                 help="Collection name to use (default: %(default)s)")
     milvus_options.add_argument("--milvus-nlist", type=int, default=1024,
                                 help="Number of cluster units (default: %(default)s)")
