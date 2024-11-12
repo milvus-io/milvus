@@ -150,6 +150,7 @@ func (view *LeaderView) Clone() *LeaderView {
 		TargetVersion:          view.TargetVersion,
 		NumOfGrowingRows:       view.NumOfGrowingRows,
 		PartitionStatsVersions: view.PartitionStatsVersions,
+		UnServiceableError:     view.UnServiceableError,
 	}
 }
 

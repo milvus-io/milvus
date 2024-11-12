@@ -157,6 +157,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 		suite.cluster,
+		suite.nodeMgr,
 	)
 	suite.targetObserver.Start()
 	for _, node := range suite.nodes {

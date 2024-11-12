@@ -171,6 +171,7 @@ func (suite *JobSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 		suite.cluster,
+		suite.nodeMgr,
 	)
 	suite.targetObserver.Start()
 	suite.scheduler = NewScheduler()
