@@ -41,13 +41,13 @@ class GroupingSet {
 
     ~GroupingSet();
 
-    void addInput(const RowVectorPtr& input, bool mayPushDown);
+    void addInput(const RowVectorPtr& input);
 
     void initializeGlobalAggregation();
 
-    void addGlobalAggregationInput(const RowVectorPtr& input, bool mayPushDown);
+    void addGlobalAggregationInput(const RowVectorPtr& input);
 
-    void addInputForActiveRows(const RowVectorPtr& input, bool mayPushdown);
+    void addInputForActiveRows(const RowVectorPtr& input);
 
     void createHashTable();
 

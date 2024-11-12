@@ -29,8 +29,8 @@ RowContainer::RowContainer(const std::vector<DataType> &keyTypes,
                            accumulators_(accumulators),
                            nullableKeys_(nullableKeys),
                            hasNormalizedKeys_(hasNormalizedKeys){
-    uint32_t offset = 0;
-    uint32_t nullOffset = 0;
+    int32_t offset = 0;
+    int32_t nullOffset = 0;
     bool isVariableWidth = false;
     for(auto& type: keyTypes_){
         offsets_.push_back(offset);
@@ -43,8 +43,8 @@ RowContainer::RowContainer(const std::vector<DataType> &keyTypes,
     }
     // Make offset at least sizeof pointer so that there is space for a
     // free list next pointer below the bit at 'freeFlagOffset_'.
-    offset = std::max<uint32_t>(offset, sizeof(void*));
-    const uint32_t firstAggregateOffset = offset;
+    offset = std::max<int32_t>(offset, sizeof(void*));
+    const int32_t firstAggregateOffset = offset;
     if (!accumulators.empty()) {
         // This moves nullOffset to the start of the next byte.
         // This is to guarantee the null and initialized bits for an aggregate
@@ -87,7 +87,7 @@ RowContainer::RowContainer(const std::vector<DataType> &keyTypes,
     // A distinct hash table has no aggregates and if the hash table has
     // no nulls, it may be that there are no null flags.
     if (!nullOffsets_.empty()) {
-        // All flags like free and probed flags and null flags for keys and non-keys
+        // All flags like free and null flags for keys and non-keys
         // start as 0. This is also used to mark aggregates as uninitialized on row
         // creation.
         initialNulls_.resize(flagBytes_, 0x0);

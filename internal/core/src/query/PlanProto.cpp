@@ -13,11 +13,9 @@
 
 #include <google/protobuf/text_format.h>
 
-#include <cstdint>
 #include <string>
 #include <vector>
 
-#include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "pb/plan.pb.h"

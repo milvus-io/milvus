@@ -274,7 +274,7 @@ public:
     }
 
 private:
-  HashMode hashMode_ = HashMode::kArray;
+  HashMode hashMode_ = HashMode::kHash;
   int64_t bucketOffsetMask_{0};
   int64_t numBuckets_{0};
   int64_t numDistinct_{0};

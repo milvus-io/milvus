@@ -20,9 +20,9 @@ namespace milvus{
 namespace exec{
 GroupingSet::~GroupingSet(){}
 
-void GroupingSet::addInput(const RowVectorPtr& input, bool mayPushDown) {
+void GroupingSet::addInput(const RowVectorPtr& input) {
     if (isGlobal_) {
-        addGlobalAggregationInput(input, mayPushDown);
+        addGlobalAggregationInput(input);
         return;
     }
     auto numRows = input->size();
@@ -30,7 +30,7 @@ void GroupingSet::addInput(const RowVectorPtr& input, bool mayPushDown) {
 
     active_rows_.resize(numRows);
     active_rows_.set();
-    addInputForActiveRows(input, mayPushDown);
+    addInputForActiveRows(input);
 }
 
 void GroupingSet::initializeGlobalAggregation() {
@@ -81,7 +81,7 @@ void GroupingSet::initializeGlobalAggregation() {
     globalAggregationInitialized_ = true;
 }
 
-void GroupingSet::addGlobalAggregationInput(const milvus::RowVectorPtr& input, bool mayPushDown) {
+void GroupingSet::addGlobalAggregationInput(const milvus::RowVectorPtr& input) {
     initializeGlobalAggregation();
     auto numRows = input->size();
     active_rows_.resize(numRows);
@@ -161,9 +161,8 @@ void GroupingSet::extractGroups(folly::Range<char **> groups, const milvus::RowV
 }
 
 
-void GroupingSet::addInputForActiveRows(const RowVectorPtr& input, 
-    bool mayPushdown) {
-    AssertInfo(!isGlobal_, "Global aggregations should not reach add input for acitve rows");
+void GroupingSet::addInputForActiveRows(const RowVectorPtr& input) {
+    AssertInfo(!isGlobal_, "Global aggregations should not reach add input for active rows");
     if (!hash_table_) {
         createHashTable();
     }
@@ -227,11 +226,7 @@ void GroupingSet::createHashTable(){
 
     auto& rows = *(hash_table_->rows());
     initializeAggregates(aggregates_, rows);
-    auto numColumns = rows.KeyTypes().size() + aggregates_.size();
     lookup_ = std::make_unique<HashLookup>(hash_table_->hashers());
-    if (!isAdaptive_ && hash_table_->hashMode() != BaseHashTable::HashMode::kHash) {
-        hash_table_->forceGenericHashMode();
-    }
 }  
 
 }

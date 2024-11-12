@@ -72,13 +72,13 @@ void PhyAggregationNode::initialize() {
             input_type,
             std::move(hashers),
             std::move(aggregateInfos),
-            aggregationNode_->ignoreNullKeys(),
+            !aggregationNode_->ignoreNullKeys(),
             isRawInput(aggregationNode_->step()));
     aggregationNode_.reset();
 }
 
-void PhyAggregationNode::AddInput(milvus::RowVectorPtr &input) {
-    grouping_set_->addInput(input, false);
+void PhyAggregationNode::AddInput(milvus::RowVectorPtr& input) {
+    grouping_set_->addInput(input);
     numInputRows_ += input->size();
 }
 
