@@ -332,7 +332,7 @@ T checkPlus(const T& a, const T& b, const char* typeName = "integer"){
     T result;
     bool overflow = __builtin_add_overflow(a, b, &result);
     if (UNLIKELY(overflow)) {
-        VELOX_ARITHMETIC_ERROR("{} overflow: {} + {}", typeName, a, b);
+        PanicInfo(DataTypeInvalid, "{} overflow: {} + {}", typeName, a, b);
     }
     return result;
 }
@@ -342,7 +342,7 @@ T checkedMultiply(const T& a, const T& b, const char* typeName = "integer") {
     T result;
     bool overflow = __builtin_mul_overflow(a, b, &result);
     if (UNLIKELY(overflow)) {
-        VELOX_ARITHMETIC_ERROR("{} overflow: {} * {}", typeName, a, b);
+        PanicInfo(DataTypeInvalid, "{} overflow: {} * {}", typeName, a, b);
     }
     return result;
 }

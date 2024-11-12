@@ -61,7 +61,7 @@ protected:
             if (column_data->ValidAt(selected_idx)) {
                 continue;
             }
-            updateNonNullValue<tableHasNulls, TData>(groups[selected_idx], column_data->ValueAt<TData>(), updateSingleValue);
+            updateNonNullValue<tableHasNulls, TData>(groups[selected_idx], column_data->ValueAt<TData>(selected_idx), updateSingleValue);
             start = selected_idx;
         }
     }
@@ -91,7 +91,7 @@ protected:
             if (column_data->ValidAt(selected_idx)) {
                 continue;
             }
-            updateNonNullValue<true, TData>(group, column_data->ValueAt<TData>(), updateSingleValue);
+            updateNonNullValue<true, TData>(group, column_data->ValueAt<TData>(selected_idx), updateSingleValue);
             start = selected_idx;
         }
     }
@@ -102,7 +102,7 @@ protected:
         if constexpr (tableHasNulls) {
             Aggregate::clearNull(group);
         }
-        updateValue(Aggregate::value<TDataType>(group), value);
+        updateValue(*Aggregate::value<TDataType>(group), value);
     }
 
 };

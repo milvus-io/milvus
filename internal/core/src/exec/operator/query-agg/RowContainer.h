@@ -447,6 +447,10 @@ private:
     uint64_t numFreeRows_ = 0;
 };
 
+inline void RowContainer::extractColumn(const char *const *rows, int32_t num_rows, milvus::exec::RowColumn column,
+                                        milvus::vector_size_t result_offset, const milvus::VectorPtr &result) {
+    MILVUS_DYNAMIC_TYPE_DISPATCH(extractColumnTyped, result->type(), rows, {}, num_rows, column, result_offset, result);
+}
 }
 }
 
