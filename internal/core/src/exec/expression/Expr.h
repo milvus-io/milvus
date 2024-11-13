@@ -214,6 +214,20 @@ class SegmentExpr : public Expr {
         }
     }
 
+    void
+    ApplyValidData(const bool* valid_data,
+                   TargetBitmapView res,
+                   TargetBitmapView valid_res,
+                   const int size) {
+        if (valid_data != nullptr) {
+            for (int i = 0; i < size; i++) {
+                if (!valid_data[i]) {
+                    res[i] = valid_res[i] = false;
+                }
+            }
+        }
+    }
+
     int64_t
     GetNextBatchSize() {
         auto current_chunk = is_index_mode_ && use_index_ ? current_index_chunk_
@@ -254,9 +268,9 @@ class SegmentExpr : public Expr {
             std::min(active_count_ - current_data_chunk_pos_, batch_size_);
 
         auto& skip_index = segment_->GetSkipIndex();
+        auto views_info = segment_->get_batch_views<T>(
+            field_id_, 0, current_data_chunk_pos_, need_size);
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
-            auto views_info = segment_->get_batch_views<T>(
-                field_id_, 0, current_data_chunk_pos_, need_size);
             // first is the raw data, second is valid_data
             // use valid_data to see if raw data is null
             func(views_info.first.data(),
@@ -265,6 +279,8 @@ class SegmentExpr : public Expr {
                  res,
                  valid_res,
                  values...);
+        } else {
+            ApplyValidData(views_info.second.data(), res, valid_res, need_size);
         }
         current_data_chunk_pos_ += need_size;
         return need_size;
@@ -303,19 +319,24 @@ class SegmentExpr : public Expr {
             size = std::min(size, batch_size_ - processed_size);
 
             auto& skip_index = segment_->GetSkipIndex();
+            auto chunk = segment_->chunk_data<T>(field_id_, i);
+            const bool* valid_data = chunk.valid_data();
+            if (valid_data != nullptr) {
+                valid_data += data_pos;
+            }
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
-                auto chunk = segment_->chunk_data<T>(field_id_, i);
                 const T* data = chunk.data() + data_pos;
-                const bool* valid_data = chunk.valid_data();
-                if (valid_data != nullptr) {
-                    valid_data += data_pos;
-                }
                 func(data,
                      valid_data,
                      size,
                      res + processed_size,
                      valid_res + processed_size,
                      values...);
+            } else {
+                ApplyValidData(valid_data,
+                               res + processed_size,
+                               valid_res + processed_size,
+                               size);
             }
 
             processed_size += size;
@@ -390,6 +411,27 @@ class SegmentExpr : public Expr {
                          valid_res + processed_size,
                          values...);
                 }
+            } else {
+                const bool* valid_data;
+                if constexpr (std::is_same_v<T, std::string_view> ||
+                              std::is_same_v<T, Json>) {
+                    if (segment_->type() == SegmentType::Sealed) {
+                        valid_data = segment_
+                                         ->get_batch_views<T>(
+                                             field_id_, i, data_pos, size)
+                                         .second.data();
+                    }
+                } else {
+                    auto chunk = segment_->chunk_data<T>(field_id_, i);
+                    valid_data = chunk.valid_data();
+                    if (valid_data != nullptr) {
+                        valid_data += data_pos;
+                    }
+                }
+                ApplyValidData(valid_data,
+                               res + processed_size,
+                               valid_res + processed_size,
+                               size);
             }
 
             processed_size += size;

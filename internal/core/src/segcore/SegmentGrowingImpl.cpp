@@ -155,7 +155,18 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                     .string_data()
                     .data()
                     .end());
-            AddTexts(field_id, texts.data(), num_rows, reserved_offset);
+            FixedVector<bool> texts_valid_data(
+                insert_record_proto->fields_data(data_offset)
+                    .valid_data()
+                    .begin(),
+                insert_record_proto->fields_data(data_offset)
+                    .valid_data()
+                    .end());
+            AddTexts(field_id,
+                     texts.data(),
+                     texts_valid_data.data(),
+                     num_rows,
+                     reserved_offset);
         }
 
         // update average row data size
@@ -880,12 +891,13 @@ SegmentGrowingImpl::CreateTextIndexes() {
 void
 SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
                              const std::string* texts,
+                             const bool* texts_valid_data,
                              size_t n,
                              int64_t offset_begin) {
     std::unique_lock lock(mutex_);
     auto iter = text_indexes_.find(field_id);
     AssertInfo(iter != text_indexes_.end(), "text index not found");
-    iter->second->AddTexts(n, texts, offset_begin);
+    iter->second->AddTexts(n, texts, texts_valid_data, offset_begin);
 }
 
 }  // namespace milvus::segcore

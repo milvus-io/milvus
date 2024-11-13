@@ -19,6 +19,7 @@
 #include "test_utils/GenExprProto.h"
 #include "query/PlanProto.h"
 #include "query/ExecPlanNodeVisitor.h"
+#include "expr/ITypeExpr.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -26,7 +27,8 @@ using namespace milvus::segcore;
 
 namespace {
 SchemaPtr
-GenTestSchema(std::map<std::string, std::string> params = {}) {
+GenTestSchema(std::map<std::string, std::string> params = {},
+              bool nullable = false) {
     auto schema = std::make_shared<Schema>();
     {
         FieldMeta f(FieldName("pk"), FieldId(100), DataType::INT64, false);
@@ -38,7 +40,7 @@ GenTestSchema(std::map<std::string, std::string> params = {}) {
                     FieldId(101),
                     DataType::VARCHAR,
                     65536,
-                    false,
+                    nullable,
                     true,
                     true,
                     params);
@@ -55,6 +57,41 @@ GenTestSchema(std::map<std::string, std::string> params = {}) {
     }
     return schema;
 }
+std::shared_ptr<milvus::plan::FilterBitsNode>
+GetTextMatchExpr(SchemaPtr schema, const std::string& query) {
+    const auto& str_meta = schema->operator[](FieldName("str"));
+    auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                           proto::schema::DataType::VarChar,
+                                           false,
+                                           false);
+
+    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::TextMatch, query);
+    unary_range_expr->set_allocated_column_info(column_info);
+    auto expr = test::GenExpr();
+    expr->set_allocated_unary_range_expr(unary_range_expr);
+
+    auto parser = ProtoParser(*schema);
+    auto typed_expr = parser.ParseExprs(*expr);
+    auto parsed =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
+    return parsed;
+};
+
+std::shared_ptr<milvus::plan::FilterBitsNode>
+GetNotTextMatchExpr(SchemaPtr schema, const std::string& query) {
+    const auto& str_meta = schema->operator[](FieldName("str"));
+    proto::plan::GenericValue val;
+    val.set_string_val(query);
+    auto child_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        milvus::expr::ColumnInfo(str_meta.get_id(), DataType::VARCHAR),
+        proto::plan::OpType::TextMatch,
+        val);
+    auto expr = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, child_expr);
+    auto parsed =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    return parsed;
+};
 }  // namespace
 
 TEST(ParseJson, Naive) {
@@ -94,13 +131,23 @@ TEST(TextMatch, Index) {
     auto index = std::make_unique<Index>(
         std::numeric_limits<int64_t>::max(), "milvus_tokenizer", "{}");
     index->CreateReader();
-    index->AddText("football, basketball, pingpang", 0);
-    index->AddText("swimming, football", 1);
+    index->AddText("football, basketball, pingpang", true, 0);
+    index->AddText("", false, 1);
+    index->AddText("swimming, football", true, 2);
     index->Commit();
     index->Reload();
     auto res = index->MatchQuery("football");
     ASSERT_TRUE(res[0]);
-    ASSERT_TRUE(res[1]);
+    ASSERT_FALSE(res[1]);
+    ASSERT_TRUE(res[2]);
+    auto res1 = index->IsNull();
+    ASSERT_FALSE(res1[0]);
+    ASSERT_TRUE(res1[1]);
+    ASSERT_FALSE(res1[2]);
+    auto res2 = index->IsNotNull();
+    ASSERT_TRUE(res2[0]);
+    ASSERT_FALSE(res2[1]);
+    ASSERT_TRUE(res2[2]);
 }
 
 TEST(TextMatch, GrowingNaive) {
@@ -130,50 +177,127 @@ TEST(TextMatch, GrowingNaive) {
 
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
 
-    auto get_text_match_expr = [&schema](const std::string& query) -> auto {
-        const auto& str_meta = schema->operator[](FieldName("str"));
-        auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
-                                               proto::schema::DataType::VarChar,
-                                               false,
-                                               false);
-        auto unary_range_expr =
-            test::GenUnaryRangeExpr(OpType::TextMatch, query);
-        unary_range_expr->set_allocated_column_info(column_info);
-        auto expr = test::GenExpr();
-        expr->set_allocated_unary_range_expr(unary_range_expr);
-
-        auto parser = ProtoParser(*schema);
-        auto typed_expr = parser.ParseExprs(*expr);
-        auto parsed = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, typed_expr);
-        return parsed;
-    };
-
     {
-        auto expr = get_text_match_expr("football");
+        auto expr = GetTextMatchExpr(schema, "football");
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
+        auto expr1 = GetNotTextMatchExpr(schema, "football");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_FALSE(final[1]);
     }
 
     {
-        auto expr = get_text_match_expr("swimming");
+        auto expr = GetTextMatchExpr(schema, "swimming");
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_TRUE(final[1]);
+        auto expr1 = GetNotTextMatchExpr(schema, "swimming");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_FALSE(final[1]);
     }
 
     {
-        auto expr = get_text_match_expr("basketball, swimming");
+        auto expr = GetTextMatchExpr(schema, "basketball, swimming");
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
+        auto expr1 = GetNotTextMatchExpr(schema, "basketball, swimming");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_FALSE(final[1]);
+    }
+}
+
+TEST(TextMatch, GrowingNaiveNullable) {
+    auto schema = GenTestSchema({}, true);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    std::vector<std::string> raw_str = {
+        "football, basketball, pingpang", "swimming, football", ""};
+    std::vector<bool> raw_str_valid = {true, true, false};
+
+    int64_t N = 3;
+    uint64_t seed = 19190504;
+    auto raw_data = DataGen(schema, N, seed);
+    auto str_col = raw_data.raw_->mutable_fields_data()
+                       ->at(1)
+                       .mutable_scalars()
+                       ->mutable_string_data()
+                       ->mutable_data();
+    auto str_col_valid =
+        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = raw_str[i];
+    }
+    for (int64_t i = 0; i < N; i++) {
+        str_col_valid->at(i) = raw_str_valid[i];
+    }
+
+    seg->PreInsert(N);
+    seg->Insert(0,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
+    {
+        auto expr = GetTextMatchExpr(schema, "football");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_TRUE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetNotTextMatchExpr(schema, "football");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
+    }
+
+    {
+        auto expr = GetTextMatchExpr(schema, "swimming");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_TRUE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetNotTextMatchExpr(schema, "swimming");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
+    }
+
+    {
+        auto expr = GetTextMatchExpr(schema, "basketball, swimming");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_TRUE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetNotTextMatchExpr(schema, "basketball, swimming");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
     }
 }
 
@@ -198,50 +322,121 @@ TEST(TextMatch, SealedNaive) {
     SealedLoadFieldData(raw_data, *seg);
     seg->CreateTextIndex(FieldId(101));
 
-    auto get_text_match_expr = [&schema](const std::string& query) -> auto {
-        const auto& str_meta = schema->operator[](FieldName("str"));
-        auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
-                                               proto::schema::DataType::VarChar,
-                                               false,
-                                               false);
-        auto unary_range_expr =
-            test::GenUnaryRangeExpr(OpType::TextMatch, query);
-        unary_range_expr->set_allocated_column_info(column_info);
-        auto expr = test::GenExpr();
-        expr->set_allocated_unary_range_expr(unary_range_expr);
-
-        auto parser = ProtoParser(*schema);
-        auto typed_expr = parser.ParseExprs(*expr);
-        auto parsed = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, typed_expr);
-        return parsed;
-    };
-
     {
-        auto expr = get_text_match_expr("football");
+        auto expr = GetTextMatchExpr(schema, "football");
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
+        auto expr1 = GetNotTextMatchExpr(schema, "football");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_FALSE(final[1]);
     }
 
     {
-        auto expr = get_text_match_expr("swimming");
+        auto expr = GetTextMatchExpr(schema, "swimming");
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_TRUE(final[1]);
+        auto expr1 = GetNotTextMatchExpr(schema, "swimming");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_FALSE(final[1]);
     }
 
     {
-        auto expr = get_text_match_expr("basketball, swimming");
+        auto expr = GetTextMatchExpr(schema, "basketball, swimming");
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
+        auto expr1 = GetNotTextMatchExpr(schema, "basketball, swimming");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_FALSE(final[1]);
+    }
+}
+
+TEST(TextMatch, SealedNaiveNullable) {
+    auto schema = GenTestSchema({}, true);
+    auto seg = CreateSealedSegment(schema, empty_index_meta);
+    std::vector<std::string> raw_str = {
+        "football, basketball, pingpang", "swimming, football", ""};
+    std::vector<bool> raw_str_valid = {true, true, false};
+
+    int64_t N = 3;
+    uint64_t seed = 19190504;
+    auto raw_data = DataGen(schema, N, seed);
+    auto str_col = raw_data.raw_->mutable_fields_data()
+                       ->at(1)
+                       .mutable_scalars()
+                       ->mutable_string_data()
+                       ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = raw_str[i];
+    }
+    auto str_col_valid =
+        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col_valid->at(i) = raw_str_valid[i];
+    }
+
+    SealedLoadFieldData(raw_data, *seg);
+    seg->CreateTextIndex(FieldId(101));
+    {
+        auto expr = GetTextMatchExpr(schema, "football");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_TRUE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetNotTextMatchExpr(schema, "football");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
+    }
+
+    {
+        auto expr = GetTextMatchExpr(schema, "swimming");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_TRUE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetNotTextMatchExpr(schema, "swimming");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
+    }
+
+    {
+        auto expr = GetTextMatchExpr(schema, "basketball, swimming");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_TRUE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetNotTextMatchExpr(schema, "basketball, swimming");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
     }
 }
 
@@ -275,50 +470,132 @@ TEST(TextMatch, GrowingJieBa) {
 
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
 
-    auto get_text_match_expr = [&schema](const std::string& query) -> auto {
-        const auto& str_meta = schema->operator[](FieldName("str"));
-        auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
-                                               proto::schema::DataType::VarChar,
-                                               false,
-                                               false);
-        auto unary_range_expr =
-            test::GenUnaryRangeExpr(OpType::TextMatch, query);
-        unary_range_expr->set_allocated_column_info(column_info);
-        auto expr = test::GenExpr();
-        expr->set_allocated_unary_range_expr(unary_range_expr);
-
-        auto parser = ProtoParser(*schema);
-        auto typed_expr = parser.ParseExprs(*expr);
-        auto parsed = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, typed_expr);
-        return parsed;
-    };
-
     {
-        auto expr = get_text_match_expr("青铜");
+        auto expr = GetTextMatchExpr(schema, "青铜");
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_FALSE(final[1]);
-    }
-
-    {
-        auto expr = get_text_match_expr("黄金");
-        BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        auto expr1 = GetNotTextMatchExpr(schema, "青铜");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_TRUE(final[1]);
     }
 
     {
-        auto expr = get_text_match_expr("时代");
+        auto expr = GetTextMatchExpr(schema, "黄金");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_TRUE(final[1]);
+        auto expr1 = GetNotTextMatchExpr(schema, "黄金");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_FALSE(final[1]);
+    }
+
+    {
+        auto expr = GetTextMatchExpr(schema, "时代");
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
+        auto expr1 = GetNotTextMatchExpr(schema, "时代");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_FALSE(final[1]);
+    }
+}
+
+TEST(TextMatch, GrowingJieBaNullable) {
+    auto schema = GenTestSchema(
+        {
+            {"enable_match", "true"},
+            {"enable_tokenizer", "true"},
+            {"analyzer_params", R"({"tokenizer": "jieba"})"},
+        },
+        true);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    std::vector<std::string> raw_str = {"青铜时代", "黄金时代", ""};
+    std::vector<bool> raw_str_valid = {true, true, false};
+
+    int64_t N = 3;
+    uint64_t seed = 19190504;
+    auto raw_data = DataGen(schema, N, seed);
+    auto str_col = raw_data.raw_->mutable_fields_data()
+                       ->at(1)
+                       .mutable_scalars()
+                       ->mutable_string_data()
+                       ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = raw_str[i];
+    }
+    auto str_col_valid =
+        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col_valid->at(i) = raw_str_valid[i];
+    }
+
+    seg->PreInsert(N);
+    seg->Insert(0,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
+    {
+        auto expr = GetTextMatchExpr(schema, "青铜");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetNotTextMatchExpr(schema, "青铜");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_TRUE(final[1]);
+        ASSERT_FALSE(final[2]);
+    }
+
+    {
+        auto expr = GetTextMatchExpr(schema, "黄金");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_TRUE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetNotTextMatchExpr(schema, "黄金");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
+    }
+
+    {
+        auto expr = GetTextMatchExpr(schema, "时代");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_TRUE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetNotTextMatchExpr(schema, "时代");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
     }
 }
 
@@ -346,49 +623,126 @@ TEST(TextMatch, SealedJieBa) {
     SealedLoadFieldData(raw_data, *seg);
     seg->CreateTextIndex(FieldId(101));
 
-    auto get_text_match_expr = [&schema](const std::string& query) -> auto {
-        const auto& str_meta = schema->operator[](FieldName("str"));
-        auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
-                                               proto::schema::DataType::VarChar,
-                                               false,
-                                               false);
-        auto unary_range_expr =
-            test::GenUnaryRangeExpr(OpType::TextMatch, query);
-        unary_range_expr->set_allocated_column_info(column_info);
-        auto expr = test::GenExpr();
-        expr->set_allocated_unary_range_expr(unary_range_expr);
-
-        auto parser = ProtoParser(*schema);
-        auto typed_expr = parser.ParseExprs(*expr);
-        auto parsed = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, typed_expr);
-        return parsed;
-    };
-
     {
-        auto expr = get_text_match_expr("青铜");
+        auto expr = GetTextMatchExpr(schema, "青铜");
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_FALSE(final[1]);
-    }
-
-    {
-        auto expr = get_text_match_expr("黄金");
-        BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        auto expr1 = GetNotTextMatchExpr(schema, "青铜");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_TRUE(final[1]);
     }
 
     {
-        auto expr = get_text_match_expr("时代");
+        auto expr = GetTextMatchExpr(schema, "黄金");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_TRUE(final[1]);
+        auto expr1 = GetNotTextMatchExpr(schema, "黄金");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_FALSE(final[1]);
+    }
+
+    {
+        auto expr = GetTextMatchExpr(schema, "时代");
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
+        auto expr1 = GetNotTextMatchExpr(schema, "时代");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_FALSE(final[1]);
+    }
+}
+
+TEST(TextMatch, SealedJieBaNullable) {
+    auto schema = GenTestSchema(
+        {
+            {"enable_match", "true"},
+            {"enable_tokenizer", "true"},
+            {"analyzer_params", R"({"tokenizer": "jieba"})"},
+        },
+        true);
+    auto seg = CreateSealedSegment(schema, empty_index_meta);
+    std::vector<std::string> raw_str = {"青铜时代", "黄金时代", ""};
+    std::vector<bool> raw_str_valid = {true, true, false};
+
+    int64_t N = 3;
+    uint64_t seed = 19190504;
+    auto raw_data = DataGen(schema, N, seed);
+    auto str_col = raw_data.raw_->mutable_fields_data()
+                       ->at(1)
+                       .mutable_scalars()
+                       ->mutable_string_data()
+                       ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = raw_str[i];
+    }
+    auto str_col_valid =
+        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col_valid->at(i) = raw_str_valid[i];
+    }
+
+    SealedLoadFieldData(raw_data, *seg);
+    seg->CreateTextIndex(FieldId(101));
+
+    {
+        auto expr = GetTextMatchExpr(schema, "青铜");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetNotTextMatchExpr(schema, "青铜");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_TRUE(final[1]);
+        ASSERT_FALSE(final[2]);
+    }
+
+    {
+        auto expr = GetTextMatchExpr(schema, "黄金");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_TRUE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetNotTextMatchExpr(schema, "黄金");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
+    }
+
+    {
+        auto expr = GetTextMatchExpr(schema, "时代");
+        BitsetType final;
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_TRUE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetNotTextMatchExpr(schema, "时代");
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
     }
 }
