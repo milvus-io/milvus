@@ -128,9 +128,7 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
-                                                f"the length of a collection name must be less than 255 characters: "
-                                                f"invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
         client_w.insert(client, collection_name, rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
@@ -146,8 +144,7 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 100, ct.err_msg: f"can't find collection collection not found"
-                                               f"[database=default][collection={collection_name}]"}
+        error = {ct.err_code: 100, ct.err_msg: f"can't find collection[database=default][collection={collection_name}]"}
         client_w.insert(client, collection_name, rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
@@ -184,8 +181,9 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i,
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"float vector field 'vector' is illegal, array type mismatch: "
-                                             f"invalid parameter[expected=need float vector][actual=got nil]"}
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"Insert missed an field `vector` to collection "
+                             f"without set nullable==true or set default_value"}
         client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
@@ -204,7 +202,8 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"currently not support vector field as PrimaryField: invalid parameter"}
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"Insert missed an field `id` to collection without set nullable==true or set default_value"}
         client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
@@ -223,9 +222,9 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"Attempt to insert an unexpected field "
-                                             f"to collection without enabling dynamic field"}
-        client_w.insert(client, collection_name, data= rows,
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"Attempt to insert an unexpected field `float` to collection without enabling dynamic field"}
+        client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -262,9 +261,10 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"The Input data type is inconsistent with defined schema, "
-                                             f"please check it."}
-        client_w.insert(client, collection_name, data= rows,
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"The Input data type is inconsistent with defined schema, "
+                             f"{{id}} field should be a int64"}
+        client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -283,9 +283,10 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}. The first character of "
-                                                 f"a partition name must be an underscore or letter."}
-        client_w.insert(client, collection_name, data= rows, partition_name=partition_name,
+        error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}."}
+        if partition_name == " ":
+            error = {ct.err_code: 1, ct.err_msg: f"Invalid partition name: . Partition name should not be empty."}
+        client_w.insert(client, collection_name, data=rows, partition_name=partition_name,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -584,9 +585,7 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
-                                                f"the length of a collection name must be less than 255 characters: "
-                                                f"invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
         client_w.upsert(client, collection_name, rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
@@ -602,13 +601,11 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 100, ct.err_msg: f"can't find collection collection not found"
-                                               f"[database=default][collection={collection_name}]"}
+        error = {ct.err_code: 100, ct.err_msg: f"can't find collection[database=default][collection={collection_name}]"}
         client_w.upsert(client, collection_name, rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1894")
     @pytest.mark.parametrize("data", ["12-s", "12 s", "(mn)", "中文", "%$#", " "])
     def test_milvus_client_upsert_data_invalid_type(self, data):
         """
@@ -621,12 +618,11 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        error = {ct.err_code: 1, ct.err_msg: f"None rows, please provide valid row data."}
+        error = {ct.err_code: 1, ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict'"}
         client_w.upsert(client, collection_name, data,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1895")
     def test_milvus_client_upsert_data_empty(self):
         """
         target: test high level api: client.create_collection
@@ -638,8 +634,9 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        error = {ct.err_code: 1, ct.err_msg: f"None rows, please provide valid row data."}
-        client_w.upsert(client, collection_name, data= "")
+        error = {ct.err_code: 1, ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict'"}
+        client_w.upsert(client, collection_name, data="",
+                        check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_upsert_data_vector_field_missing(self):
@@ -655,9 +652,9 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i,
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"float vector field 'vector' is illegal, array type mismatch: "
-                                             f"invalid parameter[expected=need float vector][actual=got nil]"}
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(10)]
+        error = {ct.err_code: 1,
+                 ct.err_msg: "Insert missed an field `vector` to collection without set nullable==true or set default_value"}
         client_w.upsert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
@@ -675,9 +672,10 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"currently not support vector field as PrimaryField: invalid parameter"}
-        client_w.upsert(client, collection_name, data= rows,
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(20)]
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"Insert missed an field `id` to collection without set nullable==true or set default_value"}
+        client_w.upsert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -690,14 +688,15 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        client_w.create_collection(client, collection_name, default_dim, enable_dynamic_field=False)
+        dim= 32
+        client_w.create_collection(client, collection_name, dim, enable_dynamic_field=False)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"Attempt to insert an unexpected field "
-                                             f"to collection without enabling dynamic field"}
-        client_w.upsert(client, collection_name, data= rows,
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(10)]
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"Attempt to insert an unexpected field `float` to collection without enabling dynamic field"}
+        client_w.upsert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -734,8 +733,8 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"The Input data type is inconsistent with defined schema, "
-                                             f"please check it."}
+        error = {ct.err_code: 1,
+                 ct.err_msg: "The Input data type is inconsistent with defined schema, {id} field should be a int64"}
         client_w.upsert(client, collection_name, data= rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
@@ -755,8 +754,9 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}. The first character of "
-                                                 f"a partition name must be an underscore or letter."}
+        error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}"}
+        if partition_name == " ":
+            error = {ct.err_code: 1, ct.err_msg: f"Invalid partition name: . Partition name should not be empty."}
         client_w.upsert(client, collection_name, data= rows, partition_name=partition_name,
                         check_task=CheckTasks.err_res, check_items=error)
 
