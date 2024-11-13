@@ -761,7 +761,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20}, Node: 1},
 				},
 				2: {
-					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 30}, Node: 2},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 100}, Node: 2},
 				},
 			},
 			expectPlans: []SegmentAssignPlan{
@@ -1100,6 +1100,90 @@ func (suite *ScoreBasedBalancerTestSuite) TestQNMemoryCapacity() {
 			suite.Equal(segmentPlans[0].Segment.NumOfRows, int64(10))
 		})
 	}
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestLimitBalanceSpeed() {
+	nodes := []int64{1, 2}
+	outBoundNodes := []int64{}
+	collectionID := int64(1)
+	replicaID := int64(1)
+	collectionsSegments := []*datapb.SegmentInfo{
+		{ID: 1, PartitionID: 1},
+		{ID: 2, PartitionID: 1},
+		{ID: 3, PartitionID: 1},
+		{ID: 4, PartitionID: 1},
+	}
+	states := []session.State{session.NodeStateNormal, session.NodeStateNormal}
+	distributions := map[int64][]*meta.Segment{
+		1: {
+			{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 100}, Node: 1},
+			{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 100}, Node: 1},
+			{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 100}, Node: 1},
+			{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 100}, Node: 1},
+		},
+	}
+	suite.SetupSuite()
+	defer suite.TearDownTest()
+	balancer := suite.balancer
+
+	// 1. set up target for multi collections
+	collection := utils.CreateTestCollection(collectionID, int32(replicaID))
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		nil, collectionsSegments, nil)
+	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
+	collection.LoadPercentage = 100
+	collection.Status = querypb.LoadStatus_Loaded
+	balancer.meta.CollectionManager.PutCollection(collection)
+	balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(collectionID, collectionID))
+	balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(replicaID, collectionID, nodes))
+	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
+	balancer.targetMgr.UpdateCollectionCurrentTarget(collectionID)
+
+	// 2. set up target for distribution for multi collections
+	for node, s := range distributions {
+		balancer.dist.SegmentDistManager.Update(node, s...)
+	}
+
+	// 3. set up nodes info and resourceManager for balancer
+	for i := range nodes {
+		nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   nodes[i],
+			Address:  "127.0.0.1:0",
+			Hostname: "localhost",
+		})
+		nodeInfo.SetState(states[i])
+		suite.balancer.nodeManager.Add(nodeInfo)
+		suite.balancer.meta.ResourceManager.HandleNodeUp(nodes[i])
+	}
+
+	for i := range outBoundNodes {
+		suite.balancer.meta.ResourceManager.HandleNodeDown(outBoundNodes[i])
+	}
+	utils.RecoverAllCollection(balancer.meta)
+
+	// by default, 2 segment should be moved to new node, but after we limit the balance speed, only 1 segment will be balanced for one round
+	segmentPlans, channelPlans := suite.getCollectionBalancePlans(suite.balancer, collectionID)
+	suite.Len(channelPlans, 0)
+	suite.Len(segmentPlans, 1)
+
+	distributions = map[int64][]*meta.Segment{
+		1: {
+			{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 100}, Node: 1},
+			{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 100}, Node: 1},
+			{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 100}, Node: 1},
+		},
+		2: {
+			{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 100}, Node: 1},
+		},
+	}
+	for node, s := range distributions {
+		balancer.dist.SegmentDistManager.Update(node, s...)
+	}
+
+	// balance for the other segment
+	segmentPlans, channelPlans = suite.getCollectionBalancePlans(suite.balancer, collectionID)
+	suite.Len(channelPlans, 0)
+	suite.Len(segmentPlans, 1)
 }
 
 func TestScoreBasedBalancerSuite(t *testing.T) {

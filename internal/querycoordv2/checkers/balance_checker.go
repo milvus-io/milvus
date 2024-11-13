@@ -40,28 +40,33 @@ import (
 // BalanceChecker checks the cluster distribution and generates balance tasks.
 type BalanceChecker struct {
 	*checkerActivation
-	meta                                 *meta.Meta
-	nodeManager                          *session.NodeManager
-	normalBalanceCollectionsCurrentRound typeutil.UniqueSet
-	scheduler                            task.Scheduler
-	targetMgr                            meta.TargetManagerInterface
-	getBalancerFunc                      GetBalancerFunc
+	meta            *meta.Meta
+	nodeManager     *session.NodeManager
+	scheduler       task.Scheduler
+	targetMgr       meta.TargetManagerInterface
+	dist            *meta.DistributionManager
+	getBalancerFunc GetBalancerFunc
+
+	// balancedCollectionInCurrentRound is used to record all balanced collections in current round
+	balancedCollectionInCurrentRound typeutil.UniqueSet
 }
 
 func NewBalanceChecker(meta *meta.Meta,
+	dist *meta.DistributionManager,
 	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
 	getBalancerFunc GetBalancerFunc,
 ) *BalanceChecker {
 	return &BalanceChecker{
-		checkerActivation:                    newCheckerActivation(),
-		meta:                                 meta,
-		targetMgr:                            targetMgr,
-		nodeManager:                          nodeMgr,
-		normalBalanceCollectionsCurrentRound: typeutil.NewUniqueSet(),
-		scheduler:                            scheduler,
-		getBalancerFunc:                      getBalancerFunc,
+		checkerActivation:                newCheckerActivation(),
+		meta:                             meta,
+		targetMgr:                        targetMgr,
+		nodeManager:                      nodeMgr,
+		scheduler:                        scheduler,
+		getBalancerFunc:                  getBalancerFunc,
+		dist:                             dist,
+		balancedCollectionInCurrentRound: typeutil.NewUniqueSet(),
 	}
 }
 
@@ -86,20 +91,22 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 	// all replicas belonging to loading collection will be skipped
 	loadedCollections := lo.Filter(ids, func(cid int64, _ int) bool {
 		collection := b.meta.GetCollection(cid)
-		return collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded
+		return collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded && b.readyToCheck(cid)
 	})
+
+	// balance large collection first
+	collectionRowCount := b.getCollectionRowCount(loadedCollections)
 	sort.Slice(loadedCollections, func(i, j int) bool {
-		return loadedCollections[i] < loadedCollections[j]
+		if collectionRowCount[loadedCollections[i]] == collectionRowCount[loadedCollections[j]] {
+			return loadedCollections[i] < loadedCollections[j]
+		}
+		return collectionRowCount[loadedCollections[i]] < collectionRowCount[loadedCollections[j]]
 	})
 
 	if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
 		// balance collections influenced by stopping nodes
 		stoppingReplicas := make([]int64, 0)
 		for _, cid := range loadedCollections {
-			// if target and meta isn't ready, skip balance this collection
-			if !b.readyToCheck(cid) {
-				continue
-			}
 			replicas := b.meta.ReplicaManager.GetByCollection(cid)
 			for _, replica := range replicas {
 				if replica.RONodesCount() > 0 {
@@ -119,29 +126,26 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 		return nil
 	}
 
+	collectionToBalance := int64(-1)
 	// iterator one normal collection in one round
-	normalReplicasToBalance := make([]int64, 0)
-	hasUnbalancedCollection := false
 	for _, cid := range loadedCollections {
-		if b.normalBalanceCollectionsCurrentRound.Contain(cid) {
+		if b.balancedCollectionInCurrentRound.Contain(cid) {
 			log.RatedDebug(10, "ScoreBasedBalancer is balancing this collection, skip balancing in this round",
 				zap.Int64("collectionID", cid))
 			continue
 		}
-		hasUnbalancedCollection = true
-		b.normalBalanceCollectionsCurrentRound.Insert(cid)
-		for _, replica := range b.meta.ReplicaManager.GetByCollection(cid) {
-			normalReplicasToBalance = append(normalReplicasToBalance, replica.GetID())
-		}
+		b.balancedCollectionInCurrentRound.Insert(cid)
+		collectionToBalance = cid
 		break
 	}
-
-	if !hasUnbalancedCollection {
-		b.normalBalanceCollectionsCurrentRound.Clear()
-		log.RatedDebug(10, "ScoreBasedBalancer has balanced all "+
-			"collections in one round, clear collectionIDs for this round")
+	// if all collection has been balanced in current round, clear and start next round
+	if len(loadedCollections) == b.balancedCollectionInCurrentRound.Len() {
+		b.balancedCollectionInCurrentRound.Clear()
 	}
-	return normalReplicasToBalance
+
+	return lo.Map(b.meta.ReplicaManager.GetByCollection(collectionToBalance), func(replica *meta.Replica, _ int) int64 {
+		return replica.GetID()
+	})
 }
 
 func (b *BalanceChecker) balanceReplicas(replicaIDs []int64) ([]balance.SegmentAssignPlan, []balance.ChannelAssignPlan) {
@@ -167,7 +171,8 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	replicasToBalance := b.replicasToBalance()
 	segmentPlans, channelPlans := b.balanceReplicas(replicasToBalance)
 	// iterate all collection to find a collection to balance
-	for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.normalBalanceCollectionsCurrentRound.Len() > 0 {
+	for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.balancedCollectionInCurrentRound.Len() > 0 {
+		// try to find next collection for balance
 		replicasToBalance := b.replicasToBalance()
 		segmentPlans, channelPlans = b.balanceReplicas(replicasToBalance)
 	}
@@ -181,4 +186,28 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	task.SetReason("channel unbalanced", tasks...)
 	ret = append(ret, tasks...)
 	return ret
+}
+
+func (b *BalanceChecker) getCollectionRowCount(collectionIDs []int64) map[int64]int64 {
+	computeRowCount := func(collectionID int64) int64 {
+		collectionRowCount := 0
+		// calculate collection sealed segment row count
+		collectionSegments := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID))
+		for _, s := range collectionSegments {
+			collectionRowCount += int(s.GetNumOfRows())
+		}
+
+		// calculate collection growing segment row count
+		collectionViews := b.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(collectionID))
+		for _, view := range collectionViews {
+			collectionRowCount += int(float64(view.NumOfGrowingRows))
+		}
+
+		return int64(collectionRowCount)
+	}
+	collectionRowCount := make(map[int64]int64)
+	for _, collectionID := range collectionIDs {
+		collectionRowCount[collectionID] = computeRowCount(collectionID)
+	}
+	return collectionRowCount
 }

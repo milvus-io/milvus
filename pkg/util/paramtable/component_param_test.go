@@ -355,6 +355,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 0, Params.ClusterLevelLoadReplicaNumber.GetAsInt())
 		assert.Len(t, Params.ClusterLevelLoadResourceGroups.GetAsStrings(), 0)
+		assert.Equal(t, Params.DataPercentLimitInBalance.GetAsFloat(), 0.25)
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {

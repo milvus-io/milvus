@@ -1775,6 +1775,8 @@ type queryCoordConfig struct {
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
 	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
+
+	DataPercentLimitInBalance ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2329,6 +2331,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.ClusterLevelLoadResourceGroups.Init(base.mgr)
+
+	p.DataPercentLimitInBalance = ParamItem{
+		Key:          "queryCoord.dataPercentLimitInBalance",
+		Version:      "2.4.15",
+		DefaultValue: "0.25",
+		Doc:          "collection's data percentage limit on the balance plan to single querynode for each balance",
+		Export:       false,
+	}
+	p.DataPercentLimitInBalance.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

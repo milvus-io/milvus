@@ -569,7 +569,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestStoppedBalance() {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20}, Node: 1},
 				},
 				2: {
-					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 30}, Node: 2},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 100}, Node: 2},
 				},
 			},
 			expectPlans: []SegmentAssignPlan{

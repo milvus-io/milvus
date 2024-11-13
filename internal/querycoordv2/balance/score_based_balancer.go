@@ -92,7 +92,6 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 		return segments[i].GetNumOfRows() > segments[j].GetNumOfRows()
 	})
 
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
 	plans := make([]SegmentAssignPlan, 0, len(segments))
 	for _, s := range segments {
 		func(s *meta.Segment) {
@@ -135,11 +134,37 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 			}
 			targetNode.AddCurrentScoreDelta(scoreChanges)
 		}(s)
-
-		if len(plans) > balanceBatchSize {
-			break
-		}
 	}
+
+	if !manualBalance && len(nodes) > 1 && len(plans) > 1 {
+		collectionRowCount := 0
+		// calculate collection sealed segment row count
+		collectionSegments := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID))
+		for _, s := range collectionSegments {
+			collectionRowCount += int(s.GetNumOfRows())
+		}
+
+		// limit the balance, for each round we only permit to move data at most math.Min(percentageLimit, 1.0/float64(len(nodes))) of collection row count
+		percentageLimit := params.Params.QueryCoordCfg.DataPercentLimitInBalance.GetAsFloat()
+		percentageLimit = math.Min(percentageLimit, 1.0/float64(len(nodes)))
+		rowLimit := int64(float64(collectionRowCount) * percentageLimit)
+		ret := make([]SegmentAssignPlan, 0)
+		nodePlansMap := lo.GroupBy(plans, func(p SegmentAssignPlan) int64 {
+			return p.To
+		})
+		for _, nodePlans := range nodePlansMap {
+			totalRowCount := int64(0)
+			for _, p := range nodePlans {
+				totalRowCount += p.Segment.NumOfRows
+				ret = append(ret, p)
+				if totalRowCount >= rowLimit {
+					break
+				}
+			}
+		}
+		return ret
+	}
+
 	return plans
 }
 
