@@ -832,7 +832,6 @@ func TestCreateVarcharArrayInvalidLength(t *testing.T) {
 	// create collection
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, false, "type param(max_length) should be specified for varChar field")
-
 	// invalid Capacity
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		arrayVarcharField.WithMaxLength(invalidLength)
@@ -855,7 +854,6 @@ func TestCreateVarcharInvalidLength(t *testing.T) {
 	// create collection
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, false, "type param(max_length) should be specified for varChar field")
-
 	// invalid Capacity
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		varcharField.WithMaxLength(invalidLength)

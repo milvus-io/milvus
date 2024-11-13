@@ -104,6 +104,8 @@ const (
 	HTTPReturnFieldPrimaryKey       = "primaryKey"
 	HTTPReturnFieldPartitionKey     = "partitionKey"
 	HTTPReturnFieldClusteringKey    = "clusteringKey"
+	HTTPReturnFieldNullable         = "nullable"
+	HTTPReturnFieldDefaultValue     = "defaultValue"
 	HTTPReturnFieldAutoID           = "autoId"
 	HTTPReturnFieldElementType      = "elementType"
 	HTTPReturnDescription           = "description"

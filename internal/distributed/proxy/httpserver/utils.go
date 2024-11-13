@@ -152,6 +152,9 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 func printFields(fields []*schemapb.FieldSchema) []gin.H {
 	var res []gin.H
 	for _, field := range fields {
+		if field.Name == common.MetaFieldName {
+			continue
+		}
 		fieldDetail := printFieldDetail(field, true)
 		res = append(res, fieldDetail)
 	}
@@ -161,6 +164,9 @@ func printFields(fields []*schemapb.FieldSchema) []gin.H {
 func printFieldsV2(fields []*schemapb.FieldSchema) []gin.H {
 	var res []gin.H
 	for _, field := range fields {
+		if field.Name == common.MetaFieldName {
+			continue
+		}
 		fieldDetail := printFieldDetail(field, false)
 		res = append(res, fieldDetail)
 	}
@@ -175,6 +181,10 @@ func printFieldDetail(field *schemapb.FieldSchema, oldVersion bool) gin.H {
 		HTTPReturnFieldClusteringKey: field.IsClusteringKey,
 		HTTPReturnFieldAutoID:        field.AutoID,
 		HTTPReturnDescription:        field.Description,
+		HTTPReturnFieldNullable:      field.Nullable,
+	}
+	if field.DefaultValue != nil {
+		fieldDetail[HTTPRequestDefaultValue] = field.DefaultValue
 	}
 	if field.GetIsFunctionOutput() {
 		fieldDetail[HTTPReturnFieldIsFunctionOutput] = true
@@ -258,6 +268,9 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 
 	var fieldNames []string
 	for _, field := range collSchema.Fields {
+		if field.IsDynamic {
+			continue
+		}
 		fieldNames = append(fieldNames, field.Name)
 	}
 
@@ -265,6 +278,9 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 		reallyData := map[string]interface{}{}
 		if data.Type == gjson.JSON {
 			for _, field := range collSchema.Fields {
+				if field.IsDynamic {
+					continue
+				}
 				fieldType := field.DataType
 				fieldName := field.Name
 
@@ -279,8 +295,8 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 				}
 
 				dataString := gjson.Get(data.Raw, fieldName).String()
-
-				if field.IsPrimaryKey && field.AutoID {
+				// if has pass pk than just to try to set it
+				if field.IsPrimaryKey && field.AutoID && len(dataString) == 0 {
 					continue
 				}
 
@@ -514,9 +530,13 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 			}
 
 			// fill dynamic schema
-			if collSchema.EnableDynamicField {
-				for mapKey, mapValue := range data.Map() {
-					if !containsString(fieldNames, mapKey) {
+
+			for mapKey, mapValue := range data.Map() {
+				if !containsString(fieldNames, mapKey) {
+					if collSchema.EnableDynamicField {
+						if mapKey == common.MetaFieldName {
+							return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("use the invalid field name(%s) when enable dynamicField", mapKey)), nil, nil
+						}
 						mapValueStr := mapValue.String()
 						switch mapValue.Type {
 						case gjson.True, gjson.False:
@@ -536,6 +556,8 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						default:
 							log.Warn("unknown json type found", zap.Int("mapValue.Type", int(mapValue.Type)))
 						}
+					} else {
+						return merr.WrapErrParameterInvalidMsg("has pass more field without dynamic schema, please check it"), nil, nil
 					}
 				}
 			}
@@ -649,7 +671,7 @@ func convertToIntArray(dataType schemapb.DataType, arr interface{}) []int32 {
 	return res
 }
 
-func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema) ([]*schemapb.FieldData, error) {
+func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema, inInsert bool) ([]*schemapb.FieldData, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
 		return []*schemapb.FieldData{}, fmt.Errorf("no row need to be convert to columns")
@@ -662,8 +684,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 	fieldData := make(map[string]*schemapb.FieldData)
 
 	for _, field := range sch.Fields {
-		// skip auto id pk field
-		if (field.IsPrimaryKey && field.AutoID) || field.IsDynamic {
+		if (field.IsPrimaryKey && field.AutoID && inInsert) || field.IsDynamic {
 			continue
 		}
 		// skip function output field
@@ -738,13 +759,16 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			return nil, err
 		}
 		for idx, field := range sch.Fields {
-			// skip auto id pk field
-			if (field.IsPrimaryKey && field.AutoID) || field.IsDynamic {
-				// remove pk field from candidates set, avoid adding it into dynamic column
-				delete(set, field.Name)
+			if field.IsDynamic {
 				continue
 			}
 			candi, ok := set[field.Name]
+			if field.IsPrimaryKey && field.AutoID && inInsert {
+				if ok {
+					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("no need to pass pk field(%s) when autoid==true in insert", field.Name))
+				}
+				continue
+			}
 			if (field.Nullable || field.DefaultValue != nil) && !ok {
 				continue
 			}
@@ -801,7 +825,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 
 			delete(set, field.Name)
 		}
-
+		// if is not dynamic, but pass more field, will throw err in /internal/distributed/proxy/httpserver/utils.go@checkAndSetData
 		if isDynamic {
 			m := make(map[string]interface{})
 			for name, candi := range set {
@@ -1304,7 +1328,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 					}
 					data, ok := fieldDataList[j].GetScalars().Data.(*schemapb.ScalarField_JsonData)
 					if ok && !fieldDataList[j].IsDynamic {
-						row[fieldDataList[j].FieldName] = data.JsonData.Data[i]
+						row[fieldDataList[j].FieldName] = string(data.JsonData.Data[i])
 					} else {
 						var dataMap map[string]interface{}
 
