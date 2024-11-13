@@ -197,6 +197,21 @@ func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm Chann
 }
 
 func (c *compactionPlanHandler) schedule() []CompactionTask {
+	selected := make([]CompactionTask, 0)
+	if c.queueTasks.Len() == 0 {
+		return selected
+	}
+	var (
+		parallelism = Params.DataCoordCfg.CompactionMaxParallelTasks.GetAsInt()
+		slots       map[int64]int64
+	)
+
+	c.executingGuard.Lock()
+	if len(c.executingTasks) >= parallelism {
+		return selected
+	}
+	c.executingGuard.Unlock()
+
 	l0ChannelExcludes := typeutil.NewSet[string]()
 	mixChannelExcludes := typeutil.NewSet[string]()
 	clusterChannelExcludes := typeutil.NewSet[string]()
@@ -225,21 +240,20 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 			c.queueTasks.Enqueue(t)
 		}
 	}()
-	selected := make([]CompactionTask, 0)
 
 	p := getPrioritizer()
 	if &c.queueTasks.prioritizer != &p {
 		c.queueTasks.UpdatePrioritizer(p)
 	}
 
-	c.executingGuard.Lock()
-	tasksToGo := Params.DataCoordCfg.CompactionMaxParallelTasks.GetAsInt() - len(c.executingTasks)
-	c.executingGuard.Unlock()
-	for len(selected) < tasksToGo && c.queueTasks.Len() > 0 {
+	// The schedule loop will stop if either:
+	// 1. no more task to schedule (the task queue is empty)
+	// 2. the parallelism of running tasks is reached
+	// 3. no avaiable slots
+	for {
 		t, err := c.queueTasks.Dequeue()
 		if err != nil {
-			// Will never go here
-			return selected
+			break // 1. no more task to schedule
 		}
 
 		switch t.GetType() {
@@ -271,11 +285,27 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 			selected = append(selected, t)
 		}
 
+		if t.NeedReAssignNodeID() {
+			if slots == nil {
+				slots = c.cluster.QuerySlots()
+			}
+			id := assignNodeID(slots, t)
+			if id == NullNodeID {
+				log.RatedWarn(10, "not enough slots for compaction task", zap.Int64("planID", t.GetPlanID()))
+				selected = selected[:len(selected)-1]
+				excluded = append(excluded, t)
+				break // 3. no avaiable slots
+			}
+		}
+
 		c.executingGuard.Lock()
 		c.executingTasks[t.GetPlanID()] = t
+		if len(c.executingTasks) >= parallelism {
+			break // 2. the parallelism of running tasks is reached
+		}
 		c.executingGuard.Unlock()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Pending).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Executing).Inc()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetNodeID()), t.GetType().String(), metrics.Executing).Inc()
 	}
 	return selected
 }
@@ -597,49 +627,51 @@ func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (Com
 	return task, nil
 }
 
-func (c *compactionPlanHandler) assignNodeIDs(tasks []CompactionTask) {
-	slots := c.cluster.QuerySlots()
+func assignNodeID(slots map[int64]int64, t CompactionTask) int64 {
 	if len(slots) == 0 {
-		return
+		return NullNodeID
 	}
 
-	for _, t := range tasks {
-		nodeID, useSlot := c.pickAnyNode(slots, t)
-		if nodeID == NullNodeID {
-			log.Info("compactionHandler cannot find datanode for compaction task",
-				zap.Int64("planID", t.GetPlanID()), zap.String("type", t.GetType().String()), zap.String("vchannel", t.GetChannel()))
-			continue
-		}
-		err := t.SetNodeID(nodeID)
-		if err != nil {
-			log.Info("compactionHandler assignNodeID failed",
-				zap.Int64("planID", t.GetPlanID()), zap.String("vchannel", t.GetChannel()), zap.Error(err))
-		} else {
-			// update the input nodeSlots
-			slots[nodeID] = slots[nodeID] - useSlot
-			log.Info("compactionHandler assignNodeID success",
-				zap.Int64("planID", t.GetPlanID()), zap.String("vchannel", t.GetChannel()), zap.Any("nodeID", nodeID))
-			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Executing).Dec()
-			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetNodeID()), t.GetType().String(), metrics.Executing).Inc()
-		}
+	nodeID, useSlot := pickAnyNode(slots, t)
+	if nodeID == NullNodeID {
+		log.Info("compactionHandler cannot find datanode for compaction task",
+			zap.Int64("planID", t.GetPlanID()), zap.String("type", t.GetType().String()), zap.String("vchannel", t.GetChannel()))
+		return NullNodeID
 	}
+	err := t.SetNodeID(nodeID)
+	if err != nil {
+		log.Info("compactionHandler assignNodeID failed",
+			zap.Int64("planID", t.GetPlanID()), zap.String("vchannel", t.GetChannel()), zap.Error(err))
+		return NullNodeID
+	}
+	// update the input nodeSlots
+	slots[nodeID] = slots[nodeID] - useSlot
+	log.Info("compactionHandler assignNodeID success",
+		zap.Int64("planID", t.GetPlanID()), zap.String("vchannel", t.GetChannel()), zap.Any("nodeID", nodeID))
+	return nodeID
 }
 
 func (c *compactionPlanHandler) checkCompaction() error {
 	// Get executing executingTasks before GetCompactionState from DataNode to prevent false failure,
 	//  for DC might add new task while GetCompactionState.
 
-	var needAssignIDTasks []CompactionTask
+	// Assign node id if needed
+	var slots map[int64]int64
 	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
 		if t.NeedReAssignNodeID() {
-			needAssignIDTasks = append(needAssignIDTasks, t)
+			if slots == nil {
+				slots = c.cluster.QuerySlots()
+			}
+			id := assignNodeID(slots, t)
+			if id == NullNodeID {
+				break
+			}
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Executing).Dec()
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetNodeID()), t.GetType().String(), metrics.Executing).Inc()
 		}
 	}
 	c.executingGuard.RUnlock()
-	if len(needAssignIDTasks) > 0 {
-		c.assignNodeIDs(needAssignIDTasks)
-	}
 
 	var finishedTasks []CompactionTask
 	c.executingGuard.RLock()
@@ -663,7 +695,7 @@ func (c *compactionPlanHandler) checkCompaction() error {
 	return nil
 }
 
-func (c *compactionPlanHandler) pickAnyNode(nodeSlots map[int64]int64, task CompactionTask) (nodeID int64, useSlot int64) {
+func pickAnyNode(nodeSlots map[int64]int64, task CompactionTask) (nodeID int64, useSlot int64) {
 	nodeID = NullNodeID
 	var maxSlots int64 = -1
 
