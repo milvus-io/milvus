@@ -11,6 +11,7 @@
 
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <memory>
 
 #include "index/TextMatchIndex.h"
 #include "index/InvertedIndexUtil.h"
@@ -103,6 +104,13 @@ TextMatchIndex::Upload(const Config& config) {
     for (auto& file : remote_paths_to_size) {
         ret.Append(file.first, nullptr, file.second);
     }
+    auto binary_set = Serialize(config);
+    mem_file_manager_->AddFile(binary_set);
+    auto remote_mem_path_to_size =
+        mem_file_manager_->GetRemotePathsToFileSize();
+    for (auto& file : remote_mem_path_to_size) {
+        ret.Append(file.first, nullptr, file.second);
+    }
 
     return ret;
 }
@@ -114,21 +122,76 @@ TextMatchIndex::Load(const Config& config) {
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load text log index");
     auto prefix = disk_file_manager_->GetLocalTextIndexPrefix();
-    disk_file_manager_->CacheTextLogToDisk(index_files.value());
+    auto files_value = index_files.value();
+    auto it = std::find_if(
+        files_value.begin(), files_value.end(), [](const std::string& file) {
+            return file.substr(file.find_last_of('/') + 1) ==
+                   "index_null_offset";
+        });
+    if (it != files_value.end()) {
+        std::vector<std::string> file;
+        file.push_back(*it);
+        files_value.erase(it);
+        auto index_datas = mem_file_manager_->LoadIndexToMemory(file);
+        AssembleIndexDatas(index_datas);
+        BinarySet binary_set;
+        for (auto& [key, data] : index_datas) {
+            auto size = data->DataSize();
+            auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
+            auto buf = std::shared_ptr<uint8_t[]>(
+                (uint8_t*)const_cast<void*>(data->Data()), deleter);
+            binary_set.Append(key, buf, size);
+        }
+        auto index_valid_data = binary_set.GetByName("index_null_offset");
+        null_offset.resize((size_t)index_valid_data->size / sizeof(size_t));
+        memcpy(null_offset.data(),
+               index_valid_data->data.get(),
+               (size_t)index_valid_data->size);
+    }
+    disk_file_manager_->CacheTextLogToDisk(files_value);
     AssertInfo(
         tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());
 }
 
 void
-TextMatchIndex::AddText(const std::string& text, int64_t offset) {
-    AddTexts(1, &text, offset);
+TextMatchIndex::AddText(const std::string& text,
+                        const bool valid,
+                        int64_t offset) {
+    if (!valid) {
+        AddNull(offset);
+        if (shouldTriggerCommit()) {
+            Commit();
+        }
+        return;
+    }
+    wrapper_->add_data(&text, 1, offset);
+    if (shouldTriggerCommit()) {
+        Commit();
+    }
+}
+
+void
+TextMatchIndex::AddNull(int64_t offset) {
+    null_offset.push_back(offset);
+    // still need to add null to make offset is correct
+    std::string empty = "";
+    wrapper_->add_multi_data(&empty, 0, offset);
 }
 
 void
 TextMatchIndex::AddTexts(size_t n,
                          const std::string* texts,
+                         const bool* valids,
                          int64_t offset_begin) {
+    if (valids != nullptr) {
+        for (int i = 0; i < n; i++) {
+            auto offset = i + offset_begin;
+            if (!valids[i]) {
+                null_offset.push_back(offset);
+            }
+        }
+    }
     wrapper_->add_data(texts, n, offset_begin);
     if (shouldTriggerCommit()) {
         Commit();

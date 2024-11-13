@@ -2035,7 +2035,8 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
                 field_id.get());
             auto n = column->NumRows();
             for (size_t i = 0; i < n; i++) {
-                index->AddText(std::string(column->RawAt(i)), i);
+                index->AddText(
+                    std::string(column->RawAt(i)), column->IsValid(i), i);
             }
         } else {  // fetch raw data from index.
             auto field_index_iter = scalar_indexings_.find(field_id);
@@ -2054,9 +2055,9 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
             for (size_t i = 0; i < n; i++) {
                 auto raw = impl->Reverse_Lookup(i);
                 if (!raw.has_value()) {
-                    continue;
+                    index->AddNull(i);
                 }
-                index->AddText(raw.value(), i);
+                index->AddText(raw.value(), true, i);
             }
         }
     }

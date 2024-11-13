@@ -3883,8 +3883,6 @@ TEST(Expr, TestExprNOT) {
                               FixedVector<bool> valid_data) {
         query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
         BitsetType final;
-        return std::make_shared<expr::LogicalUnaryExpr>(
-            expr::LogicalUnaryExpr::OpType::LogicalNot, expr);
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
