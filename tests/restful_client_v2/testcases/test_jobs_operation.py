@@ -100,7 +100,7 @@ class TestCreateImportJob(TestBase):
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         c = Collection(name)
-        c.load(_refresh=True, timeou=120)
+        c.load(_refresh=True, timeout=120)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
@@ -190,7 +190,7 @@ class TestCreateImportJob(TestBase):
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         c = Collection(name)
-        c.load(_refresh=True, timeou=120)
+        c.load(_refresh=True, timeout=120)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
@@ -283,7 +283,7 @@ class TestCreateImportJob(TestBase):
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         c = Collection(name)
-        c.load(_refresh=True, timeou=120)
+        c.load(_refresh=True, timeout=120)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
@@ -375,7 +375,7 @@ class TestCreateImportJob(TestBase):
         time.sleep(10)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True, timeou=120)
+        c.load(_refresh=True, timeout=120)
         assert c.num_entities == 2000
         # assert import data can be queried
         payload = {
@@ -457,7 +457,7 @@ class TestCreateImportJob(TestBase):
         time.sleep(10)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True, timeou=120)
+        c.load(_refresh=True, timeout=120)
         assert c.num_entities == 2000
         # assert import data can be queried
         payload = {
@@ -544,7 +544,7 @@ class TestCreateImportJob(TestBase):
         time.sleep(10)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True, timeou=120)
+        c.load(_refresh=True, timeout=120)
         assert c.num_entities == 2000
         # assert import data can be queried
         payload = {
@@ -670,7 +670,7 @@ class TestCreateImportJob(TestBase):
         time.sleep(10)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True, timeou=120)
+        c.load(_refresh=True, timeout=120)
         assert c.num_entities == 6000
         # assert import data can be queried
         payload = {
@@ -922,7 +922,7 @@ class TestImportJobAdvance(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True, timeou=120)
+        c.load(_refresh=True, timeout=120)
         assert c.num_entities == file_nums * batch_size
         # assert import data can be queried
         payload = {
@@ -1016,7 +1016,7 @@ class TestCreateImportJobAdvance(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True, timeou=120)
+        c.load(_refresh=True, timeout=120)
         assert c.num_entities == file_nums * batch_size * task_num
         # assert import data can be queried
         payload = {
@@ -1107,7 +1107,7 @@ class TestCreateImportJobAdvance(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
         # assert data count
         c = Collection(name)
-        c.load(_refresh=True, timeou=120)
+        c.load(_refresh=True, timeout=120)
         assert c.num_entities == file_nums * batch_size * task_num
         # assert import data can be queried
         payload = {
@@ -1532,7 +1532,7 @@ class TestCreateImportJobNegative(TestBase):
                     assert False, "import job timeout"
         c = Collection(name)
         time.sleep(10)
-        c.load(_refresh=True, timeou=120)
+        c.load(_refresh=True, timeout=120)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
