@@ -199,7 +199,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				zap.Error(err))
 			excludeNodes.Insert(targetNode.nodeID)
 
-			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode, workload.channel)
+			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode.nodeID, workload.channel)
 			return lastErr
 		}
 		defer lb.clientMgr.ReleaseClientRef(targetNode.nodeID)
@@ -212,7 +212,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				zap.Int64("nodeID", targetNode.nodeID),
 				zap.Error(err))
 			excludeNodes.Insert(targetNode.nodeID)
-			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode, workload.channel)
+			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode.nodeID, workload.channel)
 			return lastErr
 		}
 
