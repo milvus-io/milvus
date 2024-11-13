@@ -861,6 +861,65 @@ func (_c *MockDataCoord_GetComponentStates_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// GetDataViewVersions provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) GetDataViewVersions(_a0 context.Context, _a1 *datapb.GetDataViewVersionsRequest) (*datapb.GetDataViewVersionsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDataViewVersions")
+	}
+
+	var r0 *datapb.GetDataViewVersionsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetDataViewVersionsRequest) (*datapb.GetDataViewVersionsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetDataViewVersionsRequest) *datapb.GetDataViewVersionsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetDataViewVersionsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetDataViewVersionsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_GetDataViewVersions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDataViewVersions'
+type MockDataCoord_GetDataViewVersions_Call struct {
+	*mock.Call
+}
+
+// GetDataViewVersions is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.GetDataViewVersionsRequest
+func (_e *MockDataCoord_Expecter) GetDataViewVersions(_a0 interface{}, _a1 interface{}) *MockDataCoord_GetDataViewVersions_Call {
+	return &MockDataCoord_GetDataViewVersions_Call{Call: _e.mock.On("GetDataViewVersions", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_GetDataViewVersions_Call) Run(run func(_a0 context.Context, _a1 *datapb.GetDataViewVersionsRequest)) *MockDataCoord_GetDataViewVersions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.GetDataViewVersionsRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_GetDataViewVersions_Call) Return(_a0 *datapb.GetDataViewVersionsResponse, _a1 error) *MockDataCoord_GetDataViewVersions_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_GetDataViewVersions_Call) RunAndReturn(run func(context.Context, *datapb.GetDataViewVersionsRequest) (*datapb.GetDataViewVersionsResponse, error)) *MockDataCoord_GetDataViewVersions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetFlushAllState provides a mock function with given fields: _a0, _a1
 func (_m *MockDataCoord) GetFlushAllState(_a0 context.Context, _a1 *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
 	ret := _m.Called(_a0, _a1)

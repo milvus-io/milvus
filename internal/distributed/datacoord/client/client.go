@@ -305,6 +305,18 @@ func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	})
 }
 
+// GetDataViewVersions retrieves the data view versions of the target collections.
+func (c *Client) GetDataViewVersions(ctx context.Context, req *datapb.GetDataViewVersionsRequest, opts ...grpc.CallOption) (*datapb.GetDataViewVersionsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+	)
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetDataViewVersionsResponse, error) {
+		return client.GetDataViewVersions(ctx, req)
+	})
+}
+
 // GetRecoveryInfo request segment recovery info of collection/partition
 //
 // ctx is the context to control request deadline and cancellation
