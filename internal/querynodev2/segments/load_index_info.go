@@ -26,13 +26,16 @@ import "C"
 
 import (
 	"context"
+	"fmt"
 	"runtime"
+	"time"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/cgopb"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -197,6 +200,14 @@ func (li *LoadIndexInfo) loadIndex(ctx context.Context) error {
 	var status C.CStatus
 
 	_, _ = GetLoadPool().Submit(func() (any, error) {
+		start := time.Now()
+		defer func() {
+			metrics.QueryNodeCGOCallLatency.WithLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				"AppendIndexV2",
+				"Sync",
+			).Observe(float64(time.Since(start).Milliseconds()))
+		}()
 		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
 			status = C.AppendIndexV3(li.cLoadIndexInfo)
 		} else {

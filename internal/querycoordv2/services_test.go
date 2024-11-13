@@ -157,6 +157,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 		suite.cluster,
+		suite.nodeMgr,
 	)
 	suite.targetObserver.Start()
 	for _, node := range suite.nodes {
@@ -213,6 +214,7 @@ func (suite *ServiceSuite) SetupTest() {
 		getBalancerFunc:     func() balance.Balance { return suite.balancer },
 		distController:      suite.distController,
 		ctx:                 context.Background(),
+		proxyClientManager:  suite.proxyManager,
 	}
 
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)

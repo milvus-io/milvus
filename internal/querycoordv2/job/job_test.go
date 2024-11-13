@@ -171,6 +171,7 @@ func (suite *JobSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 		suite.cluster,
+		suite.nodeMgr,
 	)
 	suite.targetObserver.Start()
 	suite.scheduler = NewScheduler()
@@ -1057,6 +1058,7 @@ func (suite *JobSuite) TestReleaseCollection() {
 			suite.targetObserver,
 
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -1079,6 +1081,7 @@ func (suite *JobSuite) TestReleaseCollection() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -1108,6 +1111,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -1131,6 +1135,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -1156,6 +1161,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -1189,6 +1195,7 @@ func (suite *JobSuite) TestDynamicRelease() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		return job
 	}
@@ -1206,6 +1213,7 @@ func (suite *JobSuite) TestDynamicRelease() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		return job
 	}
@@ -1504,6 +1512,7 @@ func (suite *JobSuite) TestCallReleasePartitionFailed() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(releaseCollectionJob)
 		err := releaseCollectionJob.Wait()
@@ -1523,6 +1532,7 @@ func (suite *JobSuite) TestCallReleasePartitionFailed() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(releasePartitionJob)
 		err = releasePartitionJob.Wait()
@@ -1664,6 +1674,7 @@ func (suite *JobSuite) releaseAll() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()

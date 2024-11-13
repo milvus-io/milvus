@@ -45,7 +45,7 @@ func CheckNodeAvailable(nodeID int64, info *session.NodeInfo) error {
 // 2. All QueryNodes in the distribution are online
 // 3. The last heartbeat response time is within HeartbeatAvailableInterval for all QueryNodes(include leader) in the distribution
 // 4. All segments of the shard in target should be in the distribution
-func CheckLeaderAvailable(nodeMgr *session.NodeManager, targetMgr meta.TargetManagerInterface, leader *meta.LeaderView) error {
+func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.TargetManagerInterface, leader *meta.LeaderView, scope int32) error {
 	log := log.Ctx(context.TODO()).
 		WithRateGroup("utils.CheckLeaderAvailable", 1, 60).
 		With(zap.Int64("leaderID", leader.ID))
@@ -68,7 +68,7 @@ func CheckLeaderAvailable(nodeMgr *session.NodeManager, targetMgr meta.TargetMan
 			return err
 		}
 	}
-	segmentDist := targetMgr.GetSealedSegmentsByChannel(leader.CollectionID, leader.Channel, meta.CurrentTarget)
+	segmentDist := targetMgr.GetSealedSegmentsByChannel(leader.CollectionID, leader.Channel, scope)
 	// Check whether segments are fully loaded
 	for segmentID, info := range segmentDist {
 		_, exist := leader.Segments[segmentID]

@@ -120,6 +120,8 @@ const (
 	lockOp                   = "lock_op"
 	loadTypeName             = "load_type"
 	pathLabelName            = "path"
+	cgoNameLabelName         = `cgo_name`
+	cgoTypeLabelName         = `cgo_type`
 
 	// entities label
 	LoadedLabel         = "loaded"

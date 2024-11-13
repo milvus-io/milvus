@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -560,12 +561,17 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.cluster,
 		suite.server.nodeMgr,
 	)
+
+	syncTargetVersionFn := func(collectionID int64) {
+		suite.server.targetObserver.Check(context.Background(), collectionID, common.AllPartitionsID)
+	}
 	suite.server.distController = dist.NewDistController(
 		suite.server.cluster,
 		suite.server.nodeMgr,
 		suite.server.dist,
 		suite.server.targetMgr,
 		suite.server.taskScheduler,
+		syncTargetVersionFn,
 	)
 	suite.server.checkerController = checkers.NewCheckerController(
 		suite.server.meta,
@@ -582,6 +588,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.dist,
 		suite.broker,
 		suite.server.cluster,
+		suite.server.nodeMgr,
 	)
 	suite.server.collectionObserver = observers.NewCollectionObserver(
 		suite.server.dist,

@@ -154,6 +154,7 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 			return partition.GetPartitionID()
 		})
 	}
+
 	for _, partitionID := range partitions {
 		percentage := s.meta.GetPartitionLoadPercentage(partitionID)
 		if percentage < 0 {
@@ -172,6 +173,7 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 				Status: merr.Status(err),
 			}, nil
 		}
+
 		percentages = append(percentages, int64(percentage))
 	}
 
@@ -330,6 +332,7 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 		s.targetMgr,
 		s.targetObserver,
 		s.checkerController,
+		s.proxyClientManager,
 	)
 	s.jobScheduler.Add(releaseJob)
 	err := releaseJob.Wait()
@@ -452,6 +455,7 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 		s.targetMgr,
 		s.targetObserver,
 		s.checkerController,
+		s.proxyClientManager,
 	)
 	s.jobScheduler.Add(releaseJob)
 	err := releaseJob.Wait()
