@@ -36,14 +36,14 @@ pd.set_option("expand_frame_repr", False)
 prefix = "full_text_search_collection"
 
 
-def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000, tokenizer="standard",
+def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
                             index_type="SPARSE_INVERTED_INDEX"):
     corpus_ids, corpus_lst = [], []
     for key, val in corpus.items():
         corpus_ids.append(key)
         doc = val["title"] + " " + val["text"]
-        if len(doc) > 20000:
-            doc = doc[:20000]
+        if len(doc) > 60000:
+            doc = doc[:60000]
         corpus_lst.append(doc)
     qids, queries_lst = [], []
     for key, val in queries.items():
@@ -71,8 +71,8 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
     }
     fields = [
         FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=10000, is_primary=True),
-        FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=25536,
-                    enable_analyzer=True, analyzer_params=analyzer_params, ),
+        FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535,
+                    enable_analyzer=True, analyzer_params=analyzer_params),
         FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
     ]
     schema = CollectionSchema(fields=fields, description="beir test collection")
@@ -197,7 +197,7 @@ def lucene_full_text_search(corpus, queries, qrels, top_k=1000):
     return ndcg, _map, recall, precision
 
 
-def es_full_text_search(corpus, queries, qrels, top_k=1000, index_name="hello", hostname="localhost", k1=1.2, b=0.75):
+def es_full_text_search(corpus, queries, qrels, top_k=1000, index_name="hello", hostname="localhost"):
     num_docs = len(corpus)
     num_queries = len(queries)
 
@@ -213,8 +213,8 @@ def es_full_text_search(corpus, queries, qrels, top_k=1000, index_name="hello", 
                 "similarity": {
                     "default": {
                         "type": "BM25",
-                        "k1": k1,
-                        "b": b,
+                        "k1": 1.2,
+                        "b": 0.75,
                     }
                 }
             },
