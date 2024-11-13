@@ -59,6 +59,10 @@ PrepareBFSearchParams(const SearchInfo& search_info) {
             search_info.trace_ctx_.traceFlags;
     }
 
+    if (search_info.metric_type_ == knowhere::metric::BM25) {
+        search_cfg[knowhere::meta::BM25_AVGDL] =
+            search_info.search_params_[knowhere::meta::BM25_AVGDL];
+    }
     return search_cfg;
 }
 

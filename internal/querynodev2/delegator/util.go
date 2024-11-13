@@ -56,7 +56,7 @@ func SetBM25Params(req *internalpb.SearchRequest, avgdl float64) error {
 			return merr.WrapErrParameterInvalid("marshalable search plan", "plan with marshal error", err.Error())
 		}
 		req.SerializedExprPlan = serializedExprPlan
-		log.Debug("optimized search params done", zap.Any("queryInfo", queryInfo))
+		log.Debug("add bm25 avgdl to search params done", zap.Any("queryInfo", queryInfo))
 	default:
 		log.Warn("not supported node type", zap.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))
 	}
