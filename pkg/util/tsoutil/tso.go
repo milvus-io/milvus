@@ -95,3 +95,7 @@ func SubByNow(ts uint64) int64 {
 	now := time.Now().UnixMilli()
 	return now - utcT
 }
+
+func PhysicalTimeFormat(ts uint64) string {
+	return PhysicalTime(ts).Format(time.DateTime)
+}

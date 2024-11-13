@@ -109,4 +109,14 @@ const (
 	DNSegmentsPath = "/_dn/segments"
 	// DNChannelsPath is the path to get channels in DataNode.
 	DNChannelsPath = "/_dn/channels"
+
+	// DatabaseListPath is the path to get all databases.
+	DatabaseListPath = "/_db/list"
+	//	DatabaseDescPath is the path to get database description.
+	DatabaseDescPath = "/_db/desc"
+
+	// CollectionListPath is the path to get all collections.
+	CollectionListPath = "/_collection/list"
+	// CollectionDescPath is the path to get collection description.
+	CollectionDescPath = "/_collection/desc"
 )

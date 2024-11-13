@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -216,8 +217,8 @@ func TestGetSyncTaskMetrics(t *testing.T) {
 				SegmentID:     1,
 				BatchRows:     100,
 				SegmentLevel:  "L0",
-				TSFrom:        1000,
-				TSTo:          2000,
+				TSFrom:        "t1",
+				TSTo:          "t2",
 				DeltaRowCount: 10,
 				FlushSize:     1024,
 				RunningTime:   "2h",
@@ -502,7 +503,7 @@ func TestGetChannelsJSON(t *testing.T) {
 				Name:         "channel1",
 				CollectionID: 100,
 				NodeID:       1,
-				CheckpointTS: typeutil.TimestampToString(1000),
+				CheckpointTS: tsoutil.PhysicalTimeFormat(1000),
 			},
 		}
 		channelsBytes, err = json.Marshal(channels)
@@ -678,7 +679,7 @@ func TestGetDistJSON(t *testing.T) {
 		cm.EXPECT().GetChannelWatchInfos().Return(map[int64]map[string]*datapb.ChannelWatchInfo{})
 
 		svr.channelManager = cm
-		expectedJSON := ""
+		expectedJSON := "{}"
 		actualJSON := svr.getDistJSON(ctx, req)
 		assert.Equal(t, expectedJSON, actualJSON)
 	})

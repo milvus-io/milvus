@@ -19,20 +19,33 @@ package proxy
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var contentType = "application/json"
+var (
+	contentType        = "application/json"
+	defaultDB          = "default"
+	httpDBName         = "db_name"
+	HTTPCollectionName = "collection_name"
+)
 
 func getConfigs(configs map[string]string) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -190,5 +203,198 @@ func getDataComponentMetrics(node *Proxy, metricsType string) gin.HandlerFunc {
 			return
 		}
 		c.Data(http.StatusOK, contentType, []byte(resp.GetResponse()))
+	}
+}
+
+// The Get request should be used to get the query parameters, not the body, such as Javascript
+// fetch API only support GET request with query parameter.
+func listCollection(node types.ProxyComponent) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		dbName := c.Query(httpDBName)
+		if len(dbName) == 0 {
+			dbName = defaultDB
+		}
+
+		showCollectionResp, err := node.ShowCollections(c, &milvuspb.ShowCollectionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ShowCollections,
+			},
+			DbName: dbName,
+		})
+		if err := merr.CheckRPCCall(showCollectionResp, err); err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+
+		// Convert the response to Collections struct
+		collections := &metricsinfo.Collections{
+			CollectionIDs: lo.Map(showCollectionResp.CollectionIds, func(t int64, i int) string {
+				return strconv.FormatInt(t, 10)
+			}),
+			CollectionNames: showCollectionResp.CollectionNames,
+			CreatedUtcTimestamps: lo.Map(showCollectionResp.CreatedUtcTimestamps, func(t uint64, i int) string {
+				return typeutil.TimestampToString(t)
+			}),
+			InMemoryPercentages: lo.Map(showCollectionResp.InMemoryPercentages, func(t int64, i int) int {
+				return int(t)
+			}),
+			QueryServiceAvailable: showCollectionResp.QueryServiceAvailable,
+		}
+
+		// Marshal the collections struct to JSON
+		collectionsJSON, err := json.Marshal(collections)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+
+		c.Data(http.StatusOK, contentType, collectionsJSON)
+	}
+}
+
+func describeCollection(node types.ProxyComponent, rootCoord types.RootCoordClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		dbName := c.Query(httpDBName)
+		collectionName := c.Query(HTTPCollectionName)
+		if len(dbName) == 0 {
+			dbName = defaultDB
+		}
+		if len(collectionName) == 0 {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+				mhttp.HTTPReturnMessage: HTTPCollectionName + " is required",
+			})
+			return
+		}
+
+		describeCollectionResp, err := node.DescribeCollection(c, &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_DescribeCollection,
+			},
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		if err := merr.CheckRPCCall(describeCollectionResp, err); err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+
+		describePartitionResp, err := rootCoord.ShowPartitions(c, &milvuspb.ShowPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ShowPartitions,
+			},
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+
+		if err := merr.CheckRPCCall(describePartitionResp, err); err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+
+		// Convert the response to Collection struct
+		collection := &metricsinfo.Collection{
+			CollectionID:         strconv.FormatInt(describeCollectionResp.CollectionID, 10),
+			CollectionName:       describeCollectionResp.CollectionName,
+			CreatedTime:          tsoutil.PhysicalTimeFormat(describeCollectionResp.CreatedUtcTimestamp),
+			ShardsNum:            int(describeCollectionResp.ShardsNum),
+			ConsistencyLevel:     describeCollectionResp.ConsistencyLevel.String(),
+			Aliases:              describeCollectionResp.Aliases,
+			Properties:           funcutil.KeyValuePair2Map(describeCollectionResp.Properties),
+			DBName:               dbName,
+			NumPartitions:        int(describeCollectionResp.NumPartitions),
+			VirtualChannelNames:  describeCollectionResp.VirtualChannelNames,
+			PhysicalChannelNames: describeCollectionResp.PhysicalChannelNames,
+			PartitionInfos:       metricsinfo.NewPartitionInfos(describePartitionResp),
+			EnableDynamicField:   describeCollectionResp.Schema.EnableDynamicField,
+			Fields:               metricsinfo.NewFields(describeCollectionResp.GetSchema()),
+		}
+
+		// Marshal the collection struct to JSON
+		collectionJSON, err := json.Marshal(collection)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+
+		c.Data(http.StatusOK, contentType, collectionJSON)
+	}
+}
+
+func listDatabase(node types.ProxyComponent) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		showDatabaseResp, err := node.ListDatabases(c, &milvuspb.ListDatabasesRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ListDatabases,
+			},
+		})
+		if err := merr.CheckRPCCall(showDatabaseResp, err); err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+
+		// Convert the response to Databases struct
+		databases := metricsinfo.NewDatabases(showDatabaseResp)
+
+		// Marshal the databases struct to JSON
+		databasesJSON, err := json.Marshal(databases)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+
+		c.Data(http.StatusOK, contentType, databasesJSON)
+	}
+}
+
+func describeDatabase(node types.ProxyComponent) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		dbName := c.Query(httpDBName)
+		if len(dbName) == 0 {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+				mhttp.HTTPReturnMessage: httpDBName + " is required",
+			})
+			return
+		}
+
+		describeDatabaseResp, err := node.DescribeDatabase(c, &milvuspb.DescribeDatabaseRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_DescribeDatabase,
+			},
+			DbName: dbName,
+		})
+		if err := merr.CheckRPCCall(describeDatabaseResp, err); err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+
+		// Convert the response to Database struct
+		database := metricsinfo.NewDatabase(describeDatabaseResp)
+
+		// Marshal the database struct to JSON
+		databaseJSON, err := json.Marshal(database)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+
+		c.Data(http.StatusOK, contentType, databaseJSON)
 	}
 }

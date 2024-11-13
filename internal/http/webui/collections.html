@@ -99,7 +99,7 @@
     //         handleError(error);
     //     });
 
-    fetchData(MILVUS_URI + "/databases", databases)
+    fetchData(MILVUS_URI + "/_db/list", listDatabaseData)
         .then(data => {
             databaseData = data;
             renderDatabases(startPage, paginationSize)
