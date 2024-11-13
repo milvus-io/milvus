@@ -266,7 +266,9 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
         os.makedirs('/tmp/ci_logs', exist_ok=True)
         dataset = dataset_name
         if dataset == "all":
-            datasets = ['fever', 'climate-fever', 'scifact']
+            # datasets = ['msmarco', 'climate-fever', 'scifact']
+            datasets = ['msmarco', 'trec-covid', 'nfcorpus', 'nq', 'hotpotqa', 'fiqa', 'arguana', 'webis-touche2020',
+                        'quora', 'dbpedia-entity', 'fever', 'climate-fever', 'scifact']
         else:
             datasets = [dataset]
         for dataset in datasets:
