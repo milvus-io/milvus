@@ -376,9 +376,8 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		})
 		collectionReadyLeaders = append(collectionReadyLeaders, channelReadyLeaders...)
 
-		nodes := lo.Map(channelReadyLeaders, func(view *meta.LeaderView, _ int) int64 { return view.ID })
-		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager, collectionID, nodes)
-		if int32(len(group)) < replicaNum {
+		// to avoid stuck here in dynamic increase replica case, we just check available delegator number
+		if int32(len(collectionReadyLeaders)) < replicaNum {
 			log.RatedInfo(10, "channel not ready",
 				zap.Int("readyReplicaNum", len(channelReadyLeaders)),
 				zap.String("channelName", channel),
