@@ -36,7 +36,7 @@ pd.set_option("expand_frame_repr", False)
 prefix = "full_text_search_collection"
 
 
-def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000, tokenizer="default",
+def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000, tokenizer="standard",
                             index_type="SPARSE_INVERTED_INDEX"):
     corpus_ids, corpus_lst = [], []
     for key, val in corpus.items():
@@ -66,13 +66,13 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
     if has:
         log.info(f"Collection {collection_name} already exists, will drop it")
         utility.drop_collection(collection_name)
-    tokenizer_params = {
-        "tokenizer": tokenizer,
+    analyzer_params = {
+        "type": "english",
     }
     fields = [
         FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=10000, is_primary=True),
         FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=25536,
-                    enable_tokenizer=True, tokenizer_params=tokenizer_params, ),
+                    enable_analyzer=True, analyzer_params=analyzer_params, ),
         FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
     ]
     schema = CollectionSchema(fields=fields, description="beir test collection")
@@ -97,7 +97,7 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
             "index_type": index_type,
             "metric_type": "BM25",
             "params": {
-                "bm25_k1": 1.5,
+                "bm25_k1": 1.2,
                 "bm25_b": 0.75,
             }
         }
@@ -124,6 +124,8 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
         for hit in result_list[i]:
             data[hit.id] = hit.distance
         result_dict[query_data[i]["id"]] = data
+    with open(f"/tmp/ci_logs/milvus_{collection_name}_results.json", "w") as f:
+        json.dump(result_dict, f, indent=4)
 
     ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(
         qrels, result_dict, [1, 10, 100, 1000]
@@ -195,7 +197,7 @@ def lucene_full_text_search(corpus, queries, qrels, top_k=1000):
     return ndcg, _map, recall, precision
 
 
-def es_full_text_search(corpus, queries, qrels, top_k=1000, index_name="hello", hostname="localhost", k1=1.5, b=0.75):
+def es_full_text_search(corpus, queries, qrels, top_k=1000, index_name="hello", hostname="localhost", k1=1.2, b=0.75):
     num_docs = len(corpus)
     num_queries = len(queries)
 
@@ -216,22 +218,13 @@ def es_full_text_search(corpus, queries, qrels, top_k=1000, index_name="hello", 
                     }
                 }
             },
-            # "analysis": {
-            #     "analyzer": {
-            #         "custom_analyzer": {
-            #             "type": "standard",
-            #             "max_token_length": 1_000_000,
-            #             "stopwords": "_english_",
-            #             "filter": ["lowercase", "custom_snowball"]
-            #         }
-            #     },
-            #     "filter": {
-            #         "custom_snowball": {
-            #             "type": "snowball",
-            #             "language": "English"
-            #         }
-            #     }
-            # }
+            "analysis": {
+                "analyzer": {
+                    "custom_analyzer": {
+                        "type": "english",
+                    }
+                },
+            }
         }
     }
     model.initialise()
@@ -244,6 +237,8 @@ def es_full_text_search(corpus, queries, qrels, top_k=1000, index_name="hello", 
     model.es.es.indices.open(index=index_name)
     t0 = time.time()
     results = model.search(corpus=corpus, queries=queries, top_k=top_k)
+    with open(f"/tmp/ci_logs/es_{index_name}_results.json", "w") as f:
+        json.dump(results, f, indent=4)
     tt = time.time() - t0
     log.info(f"ES Search time: {tt}")
     ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(
