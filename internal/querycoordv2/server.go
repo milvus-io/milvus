@@ -459,6 +459,7 @@ func (s *Server) startQueryCoord() error {
 			Address:  node.Address,
 			Hostname: node.HostName,
 			Version:  node.Version,
+			Labels:   node.GetServerLabel(),
 		}))
 		s.taskScheduler.AddExecutor(node.ServerID)
 
@@ -698,6 +699,7 @@ func (s *Server) watchNodes(revision int64) {
 					Address:  addr,
 					Hostname: event.Session.HostName,
 					Version:  event.Session.Version,
+					Labels:   event.Session.GetServerLabel(),
 				}))
 				s.nodeUpEventChan <- nodeID
 				select {
