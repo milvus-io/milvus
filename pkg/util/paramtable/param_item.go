@@ -314,6 +314,7 @@ type ParamGroup struct {
 	Export    bool
 
 	GetFunc func() map[string]string
+	DocFunc func(string) string
 
 	manager *config.Manager
 }
@@ -328,6 +329,13 @@ func (pg *ParamGroup) GetValue() map[string]string {
 	}
 	values := pg.manager.GetBy(config.WithPrefix(pg.KeyPrefix), config.RemovePrefix(pg.KeyPrefix))
 	return values
+}
+
+func (pg *ParamGroup) GetDoc(key string) string {
+	if pg.DocFunc != nil {
+		return pg.DocFunc(key)
+	}
+	return ""
 }
 
 func ParseAsStings(v string) []string {
