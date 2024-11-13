@@ -49,6 +49,7 @@ type Broker interface {
 	ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error)
 	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) ([]*datapb.SegmentInfo, error)
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentIDs ...UniqueID) (map[int64][]*querypb.FieldIndexInfo, error)
+	GetDataViewVersions(ctx context.Context, collectionIDs []int64) (map[int64]int64, error)
 	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
 	DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error)
 	GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, int64, error)
@@ -229,6 +230,26 @@ func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collection
 	}
 
 	return recoveryInfo.Channels, recoveryInfo.Binlogs, nil
+}
+
+// GetDataViewVersions retrieves the data view versions of the target collections.
+func (broker *CoordinatorBroker) GetDataViewVersions(ctx context.Context, collectionIDs []int64) (map[int64]int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	log := log.Ctx(ctx).With(zap.Int("numCollection", len(collectionIDs)))
+
+	req := &datapb.GetDataViewVersionsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_GetRecoveryInfo),
+		),
+		CollectionIDs: collectionIDs,
+	}
+	resp, err := broker.dataCoord.GetDataViewVersions(ctx, req)
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		log.Warn("GetDataViewVersions failed", zap.Error(err))
+		return nil, err
+	}
+	return resp.GetDataViewVersions(), nil
 }
 
 func (broker *CoordinatorBroker) GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {

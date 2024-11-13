@@ -40,6 +40,7 @@ import (
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/dataview"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
@@ -125,6 +126,7 @@ type Server struct {
 	importMeta       ImportMeta
 	importScheduler  ImportScheduler
 	importChecker    ImportChecker
+	viewManager      dataview.ViewManager
 
 	compactionTrigger        trigger
 	compactionHandler        compactionPlanContext
@@ -414,6 +416,8 @@ func (s *Server) initDataCoord() error {
 	}
 	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta)
 	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.importMeta, s.jobManager)
+
+	s.viewManager = dataview.NewDataViewManager(s.pullNewDataView)
 
 	s.syncSegmentsScheduler = newSyncSegmentsScheduler(s.meta, s.channelManager, s.sessionManager)
 
@@ -751,6 +755,7 @@ func (s *Server) startServerLoop() {
 	s.startFlushLoop(s.serverLoopCtx)
 	go s.importScheduler.Start()
 	go s.importChecker.Start()
+	go s.viewManager.Start()
 	s.garbageCollector.start()
 
 	if !(streamingutil.IsStreamingServiceEnabled() || paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()) {
@@ -1091,6 +1096,7 @@ func (s *Server) Stop() error {
 
 	s.importScheduler.Close()
 	s.importChecker.Close()
+	s.viewManager.Close()
 	s.syncSegmentsScheduler.Stop()
 
 	s.stopCompaction()

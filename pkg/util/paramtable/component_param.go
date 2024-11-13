@@ -3318,6 +3318,9 @@ type dataCoordConfig struct {
 
 	EnableStatsTask   ParamItem `refreshable:"true"`
 	TaskCheckInterval ParamItem `refreshable:"true"`
+
+	// data view
+	DataViewUpdateInterval ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4191,6 +4194,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.TaskCheckInterval.Init(base.mgr)
+
+	p.DataViewUpdateInterval = ParamItem{
+		Key:          "dataCoord.dataView.updateInterval",
+		Version:      "2.5.0",
+		Doc:          "The interval (in seconds) for trying to update the data view of all collections.",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.DataViewUpdateInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

@@ -350,6 +350,11 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	return s.dataCoord.SaveBinlogPaths(ctx, req)
 }
 
+// GetDataViewVersions retrieves the data view versions of the target collections.
+func (s *Server) GetDataViewVersions(ctx context.Context, req *datapb.GetDataViewVersionsRequest) (*datapb.GetDataViewVersionsResponse, error) {
+	return s.dataCoord.GetDataViewVersions(ctx, req)
+}
+
 // GetRecoveryInfo gets information for recovering channels
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	return s.dataCoord.GetRecoveryInfo(ctx, req)
