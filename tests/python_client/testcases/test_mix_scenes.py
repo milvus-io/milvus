@@ -873,7 +873,6 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         return [(r[self.primary_field], r[expr_field], real_data[r[self.primary_field]]) for r in res if
                 r[expr_field] != real_data[r[self.primary_field]]]
 
-    # https://github.com/milvus-io/milvus/issues/36221
     @pytest.mark.tags(CaseLabel.L1)
     def test_bitmap_index_query_with_invalid_array_params(self):
         """

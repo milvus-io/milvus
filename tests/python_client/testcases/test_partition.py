@@ -232,7 +232,7 @@ class TestPartitionParams(TestcaseBase):
         self.partition_wrap.init_partition(collection=None, name=partition_name,
                                            check_task=CheckTasks.err_res,
                                            check_items={ct.err_code: 1,
-                                                        ct.err_msg: "must be pymilvus.Collection"})
+                                                        ct.err_msg: "Collection must be of type pymilvus.Collection or String"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_drop(self):
@@ -1003,8 +1003,10 @@ class TestPartitionOperations(TestcaseBase):
 
         data = cf.gen_default_list_data(nb=10, dim=dim)
         # insert data to partition
+        # TODO: update the assert error msg as #37543 fixed
         partition_w.insert(data, check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 65535, ct.err_msg: "but entities field dim"})
+                           check_items={ct.err_code: 65535,
+                                        ct.err_msg: f"float data should divide the dim({ct.default_dim})"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("sync", [True, False])
@@ -1109,7 +1111,8 @@ class TestPartitionOperations(TestcaseBase):
 
         # upsert mismatched data
         upsert_data = cf.gen_default_data_for_upsert(dim=ct.default_dim-1)[0]
-        error = {ct.err_code: 65535, ct.err_msg: "Collection field dim is 128, but entities field dim is 127"}
+        # TODO: update the assert error msg as #37543 fixed
+        error = {ct.err_code: 65535, ct.err_msg: f"float data should divide the dim({ct.default_dim})"}
         partition_w.upsert(upsert_data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
