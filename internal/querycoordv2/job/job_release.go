@@ -23,11 +23,14 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 )
@@ -42,6 +45,7 @@ type ReleaseCollectionJob struct {
 	targetMgr         *meta.TargetManager
 	targetObserver    *observers.TargetObserver
 	checkerController *checkers.CheckerController
+	proxyManager      proxyutil.ProxyClientManagerInterface
 }
 
 func NewReleaseCollectionJob(ctx context.Context,
@@ -53,6 +57,7 @@ func NewReleaseCollectionJob(ctx context.Context,
 	targetMgr *meta.TargetManager,
 	targetObserver *observers.TargetObserver,
 	checkerController *checkers.CheckerController,
+	proxyManager proxyutil.ProxyClientManagerInterface,
 ) *ReleaseCollectionJob {
 	return &ReleaseCollectionJob{
 		BaseJob:           NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
@@ -64,6 +69,7 @@ func NewReleaseCollectionJob(ctx context.Context,
 		targetMgr:         targetMgr,
 		targetObserver:    targetObserver,
 		checkerController: checkerController,
+		proxyManager:      proxyManager,
 	}
 }
 
@@ -98,6 +104,15 @@ func (job *ReleaseCollectionJob) Execute() error {
 	}
 
 	job.targetObserver.ReleaseCollection(req.GetCollectionID())
+
+	// try best discard cache
+	// shall not affect releasing if failed
+	job.proxyManager.InvalidateCollectionMetaCache(job.ctx,
+		&proxypb.InvalidateCollMetaCacheRequest{
+			CollectionID: req.GetCollectionID(),
+		},
+		proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection))
+
 	waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
 	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))
@@ -118,6 +133,7 @@ type ReleasePartitionJob struct {
 	targetMgr         *meta.TargetManager
 	targetObserver    *observers.TargetObserver
 	checkerController *checkers.CheckerController
+	proxyManager      proxyutil.ProxyClientManagerInterface
 }
 
 func NewReleasePartitionJob(ctx context.Context,
@@ -129,6 +145,7 @@ func NewReleasePartitionJob(ctx context.Context,
 	targetMgr *meta.TargetManager,
 	targetObserver *observers.TargetObserver,
 	checkerController *checkers.CheckerController,
+	proxyManager proxyutil.ProxyClientManagerInterface,
 ) *ReleasePartitionJob {
 	return &ReleasePartitionJob{
 		BaseJob:           NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
@@ -140,6 +157,7 @@ func NewReleasePartitionJob(ctx context.Context,
 		targetMgr:         targetMgr,
 		targetObserver:    targetObserver,
 		checkerController: checkerController,
+		proxyManager:      proxyManager,
 	}
 }
 
@@ -181,6 +199,14 @@ func (job *ReleasePartitionJob) Execute() error {
 		}
 		job.targetObserver.ReleaseCollection(req.GetCollectionID())
 		metrics.QueryCoordNumCollections.WithLabelValues().Dec()
+		// try best discard cache
+		// shall not affect releasing if failed
+		job.proxyManager.InvalidateCollectionMetaCache(job.ctx,
+			&proxypb.InvalidateCollMetaCacheRequest{
+				CollectionID: req.GetCollectionID(),
+			},
+			proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection))
+
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
 	} else {
 		err := job.meta.CollectionManager.RemovePartition(req.GetCollectionID(), toRelease...)

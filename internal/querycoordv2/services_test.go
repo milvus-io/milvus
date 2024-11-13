@@ -214,6 +214,7 @@ func (suite *ServiceSuite) SetupTest() {
 		getBalancerFunc:     func() balance.Balance { return suite.balancer },
 		distController:      suite.distController,
 		ctx:                 context.Background(),
+		proxyClientManager:  suite.proxyManager,
 	}
 
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
