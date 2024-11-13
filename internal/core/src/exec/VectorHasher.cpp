@@ -34,35 +34,41 @@ std::vector<std::unique_ptr<VectorHasher>> createVectorHashers(
 }
 
 template<DataType Type>
-void VectorHasher::hashValues(const ColumnVectorPtr& column_data, bool mix, uint64_t* result) {
+void VectorHasher::hashValues(const ColumnVectorPtr& column_data, const TargetBitmapView& activeRows, bool mix, uint64_t* result) {
     if constexpr (Type==DataType::ROW || Type==DataType::ARRAY || Type==DataType::JSON) {
         PanicInfo(milvus::DataTypeInvalid, "NotSupport hash for complext type row/array/json:{}", Type);
     } else {
         using T = typename TypeTraits<Type>::NativeType;
         auto element_data_type = ChannelDataType();
         auto element_size = GetDataTypeSize(element_data_type);
-        auto element_count = column_data->size();
-        for(auto i = 0; i < element_count; i++) {
-            void *raw_value = column_data->RawValueAt(i, element_size);
-            AssertInfo(raw_value != nullptr, "Failed to get raw value pointer from column data");
-            if (!column_data->ValidAt(i)) {
-                result[i] = kNullHash;
+        auto start = 0;
+        do {
+            auto next_valid_op = activeRows.find_next(start);
+            if (!next_valid_op.has_value()){
+                break;
+            }
+            auto next_valid_row = next_valid_op.value();
+            if (!column_data->ValidAt(next_valid_row)) {
+                result[next_valid_row] = mix? milvus::bits::hashMix(result[next_valid_row], kNullHash): kNullHash;
                 continue;
             }
-            auto value = static_cast<T *>(raw_value);
+            void* raw_value = column_data->RawValueAt(next_valid_row, element_size);
+            AssertInfo(raw_value != nullptr, "Failed to get raw value pointer from column data");
+            auto* value = static_cast<T*>(raw_value);
             uint64_t hash_value = kNullHash;
             if constexpr (std::is_floating_point_v<T>) {
                 hash_value = milvus::NaNAwareHash<T>()(*value);
             } else {
                 hash_value = folly::hasher<T>()(*value);
             }
-            result[i] = mix? milvus::bits::hashMix(result[i], hash_value) : hash_value;
-        }
+            result[next_valid_row] = mix? milvus::bits::hashMix(result[next_valid_row], hash_value) : hash_value;
+            start = next_valid_row;
+        } while(true);
     }
 }
 
 void
-VectorHasher::hash(bool mix, std::vector<uint64_t>& result) {
+VectorHasher::hash(bool mix, const TargetBitmapView& activeRows, std::vector<uint64_t>& result) {
     
     // auto element_size = GetDataTypeSize(element_data_type);
     // auto element_count = column_data->size();
@@ -71,7 +77,7 @@ VectorHasher::hash(bool mix, std::vector<uint64_t>& result) {
     //     void* raw_value = column_data->RawValueAt(i, element_size);  
     // }
     auto element_data_type = ChannelDataType();
-    MILVUS_DYNAMIC_TYPE_DISPATCH(hashValues, element_data_type, columnData(), mix, result.data());
+    MILVUS_DYNAMIC_TYPE_DISPATCH(hashValues, element_data_type, columnData(), activeRows, mix, result.data());
     //PanicInfo(DataTypeInvalid, "Unsupported data type for dispatch");
 }
 

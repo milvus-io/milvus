@@ -261,7 +261,7 @@ public:
     }
 
     uint64_t rehashSize() const {
-        return rehashSize(capacity_ - numTombstones_);
+        return rehashSize(capacity_);
     }
 
     static uint64_t newHashTableEntriesNumber(uint64_t numDistinct, uint64_t numNew) {
@@ -278,8 +278,6 @@ private:
   int64_t bucketOffsetMask_{0};
   int64_t numBuckets_{0};
   int64_t numDistinct_{0};
-  // Counts the number of tombstone table slots.
-  int64_t numTombstones_{0};
 
   // Number of slots across all buckets.
   int64_t capacity_{0};

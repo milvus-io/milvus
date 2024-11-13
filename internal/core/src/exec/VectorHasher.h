@@ -41,7 +41,7 @@ public:
     }
 
     void
-    hash(bool mix, std::vector<uint64_t>& result);
+    hash(bool mix, const TargetBitmapView& activeRows, std::vector<uint64_t>& result);
 
     static constexpr uint64_t kNullHash = 1;
 
@@ -61,7 +61,7 @@ static bool typeSupportValueIds(DataType type) {
 }
 
 template<DataType type>
-void hashValues(const ColumnVectorPtr& column_data, bool mix, uint64_t* result);
+void hashValues(const ColumnVectorPtr& column_data, const TargetBitmapView& activeRows, bool mix, uint64_t* result);
 
 void setColumnData(const ColumnVectorPtr& column_data) {
     column_data_ = column_data;
