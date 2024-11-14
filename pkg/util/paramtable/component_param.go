@@ -1241,6 +1241,8 @@ type proxyConfig struct {
 	MaxUserNum                   ParamItem `refreshable:"true"`
 	MaxRoleNum                   ParamItem `refreshable:"true"`
 	MaxTaskNum                   ParamItem `refreshable:"false"`
+	DDLConcurrency               ParamItem `refreshable:"true"`
+	DCLConcurrency               ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval     ParamItem `refreshable:"false"`
 	ReplicaSelectionPolicy       ParamItem `refreshable:"false"`
 	CheckQueryNodeHealthInterval ParamItem `refreshable:"false"`
@@ -1386,6 +1388,24 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxTaskNum.Init(base.mgr)
+
+	p.DDLConcurrency = ParamItem{
+		Key:          "proxy.ddlConcurrency",
+		Version:      "2.5.0",
+		DefaultValue: "16",
+		Doc:          "The concurrent execution number of DDL at proxy.",
+		Export:       true,
+	}
+	p.DDLConcurrency.Init(base.mgr)
+
+	p.DCLConcurrency = ParamItem{
+		Key:          "proxy.dclConcurrency",
+		Version:      "2.5.0",
+		DefaultValue: "16",
+		Doc:          "The concurrent execution number of DCL at proxy.",
+		Export:       true,
+	}
+	p.DCLConcurrency.Init(base.mgr)
 
 	p.GinLogging = ParamItem{
 		Key:          "proxy.ginLogging",
