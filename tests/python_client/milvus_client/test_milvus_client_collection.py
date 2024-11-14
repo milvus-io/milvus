@@ -813,11 +813,11 @@ class TestMilvusClientLoadCollectionInvalid(TestcaseBase):
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = "a".join("a" for i in range(256))
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {collection_name}. "
                                                 f"the length of a collection name must be less than 255 characters: "
                                                 f"invalid parameter"}
         client_w.load_collection(client, collection_name,
-                                    check_task=CheckTasks.err_res, check_items=error)
+                                 check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_load_collection_without_index(self):
@@ -929,8 +929,7 @@ class TestMilvusClientDescribeCollectionInvalid(TestcaseBase):
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = "nonexisted"
-        error = {ct.err_code: 100, ct.err_msg: f"can't find collection collection not "
-                                               f"found[database=default][collection=nonexisted]"}
+        error = {ct.err_code: 100, ct.err_msg: "can't find collection[database=default][collection=nonexisted]"}
         client_w.describe_collection(client, collection_name,
                                      check_task=CheckTasks.err_res, check_items=error)
 
@@ -946,8 +945,7 @@ class TestMilvusClientDescribeCollectionInvalid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim)
         client_w.drop_collection(client, collection_name)
-        error = {ct.err_code: 100, ct.err_msg: f"can't find collection collection not "
-                                               f"found[database=default]"}
+        error = {ct.err_code: 100, ct.err_msg: f"can't find collection[database=default][collection={collection_name}]"}
         client_w.describe_collection(client, collection_name,
                                      check_task=CheckTasks.err_res, check_items=error)
 
@@ -1048,7 +1046,7 @@ class TestMilvusClientRenameCollectionInValid(TestcaseBase):
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 65535, ct.err_msg: f"duplicated new collection name default:{collection_name}"
+        error = {ct.err_code: 65535, ct.err_msg: f"duplicated new collection name default:{collection_name} "
                                                  f"with other collection name or alias"}
         client_w.rename_collection(client, collection_name, collection_name,
                                    check_task=CheckTasks.err_res, check_items=error)
@@ -1065,10 +1063,9 @@ class TestMilvusClientRenameCollectionInValid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim)
         client_w.drop_collection(client, collection_name)
-        error = {ct.err_code: 100, ct.err_msg: f"can't find collection collection not "
-                                               f"found[database=default]"}
+        error = {ct.err_code: 100, ct.err_msg: f"{collection_name}: collection not found[collection=default]"}
         client_w.rename_collection(client, collection_name, "new_collection",
-                                     check_task=CheckTasks.err_res, check_items=error)
+                                   check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientRenameCollectionValid(TestcaseBase):
