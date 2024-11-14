@@ -548,7 +548,9 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			catalog := catalogmocks.NewDataCoordCatalog(s.T())
 			s.mt.catalog = catalog
 			s.mt.statsTaskMeta.catalog = catalog
-			s.mt.segments.SetState(s.segID, commonpb.SegmentState_Flushed)
+			updateStateOp := UpdateStatusOperator(s.segID, commonpb.SegmentState_Flushed)
+			err := s.mt.UpdateSegmentsInfo(updateStateOp)
+			s.NoError(err)
 			catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 
