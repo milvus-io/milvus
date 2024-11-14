@@ -155,7 +155,6 @@ func (ip *Int64PrimaryKey) GetValue() interface{} {
 }
 
 func (ip *Int64PrimaryKey) Size() int64 {
-	// 8 + reflect.ValueOf(Int64PrimaryKey).Type().Size()
 	return 16
 }
 
@@ -256,7 +255,7 @@ func (vcp *VarCharPrimaryKey) Type() schemapb.DataType {
 }
 
 func (vcp *VarCharPrimaryKey) Size() int64 {
-	return int64(8*len(vcp.Value) + 8)
+	return int64(len(vcp.Value) + 8)
 }
 
 func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (PrimaryKey, error) {
