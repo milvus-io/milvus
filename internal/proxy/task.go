@@ -954,13 +954,13 @@ func hasLazyLoadProp(props ...*commonpb.KeyValuePair) bool {
 	return false
 }
 
-func hasPropInDeletekeys(keys []string) bool {
+func hasPropInDeletekeys(keys []string) string {
 	for _, key := range keys {
 		if key == common.MmapEnabledKey || key == common.LazyLoadEnableKey {
-			return true
+			return key
 		}
 	}
-	return false
+	return ""
 }
 
 func validatePartitionKeyIsolation(colName string, isPartitionKeyEnabled bool, props ...*commonpb.KeyValuePair) (bool, error) {
@@ -1012,13 +1012,14 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			}
 		}
 	} else if len(t.GetDeleteKeys()) > 0 {
-		if hasPropInDeletekeys(t.DeleteKeys) {
+		key := hasPropInDeletekeys(t.DeleteKeys)
+		if key != "" {
 			loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
 			if err != nil {
 				return err
 			}
 			if loaded {
-				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+				return merr.WrapErrCollectionLoaded(" %s %s can not delete mmap properties if collection loaded", t.CollectionName, key)
 			}
 		}
 	}
@@ -1145,67 +1146,21 @@ func (t *alterCollectionFieldTask) OnEnqueue() error {
 }
 
 func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
 	}
 
-	isPartitionKeyMode, err := isPartitionKeyMode(ctx, t.GetDbName(), t.CollectionName)
-	if err != nil {
-		return err
+	IsStringType := false
+	indexName := ""
+	for _, field := range collSchema.Fields {
+		if field.GetName() == t.FieldName && typeutil.IsStringType(field.DataType) {
+			IsStringType = true
+			indexName = field.GetName()
+		}
 	}
-	// check if the new partition key isolation is valid to use
-	newIsoValue, err := validatePartitionKeyIsolation(t.CollectionName, isPartitionKeyMode, t.Properties...)
-	if err != nil {
-		return err
-	}
-	collBasicInfo, err := globalMetaCache.GetCollectionInfo(t.ctx, t.GetDbName(), t.CollectionName, collectionID)
-	if err != nil {
-		return err
-	}
-	oldIsoValue := collBasicInfo.partitionKeyIsolation
-
-	log.Info("alter collection field pre check with partition key isolation",
-		zap.String("collectionName", t.CollectionName),
-		zap.String("fieldName", t.FieldName),
-		zap.Bool("isPartitionKeyMode", isPartitionKeyMode),
-		zap.Bool("newIsoValue", newIsoValue),
-		zap.Bool("oldIsoValue", oldIsoValue))
-
-	// if the isolation flag in properties is not set, meta cache will assign partitionKeyIsolation in collection info to false
-	//   - None|false -> false, skip
-	//   - None|false -> true, check if the collection has vector index
-	//   - true -> false, check if the collection has vector index
-	//   - false -> true, check if the collection has vector index
-	//   - true -> true, skip
-	if oldIsoValue != newIsoValue {
-		collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
-		if err != nil {
-			return err
-		}
-
-		hasVecIndex := false
-		indexName := ""
-		indexResponse, err := t.dataCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
-			CollectionID: collectionID,
-			IndexName:    "",
-		})
-		if err != nil {
-			return merr.WrapErrServiceInternal("describe index failed", err.Error())
-		}
-		for _, index := range indexResponse.IndexInfos {
-			for _, field := range collSchema.Fields {
-				if index.FieldID == field.FieldID && typeutil.IsVectorType(field.DataType) {
-					hasVecIndex = true
-					field.GetIndexParams()
-					indexName = field.GetName()
-				}
-			}
-		}
-		if hasVecIndex {
-			return merr.WrapErrIndexDuplicate(indexName,
-				"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
-		}
+	if !IsStringType {
+		return merr.WrapErrParameterInvalid(indexName, "it can not modify the maxlength for non-string types")
 	}
 
 	return nil
