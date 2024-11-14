@@ -1,5 +1,6 @@
 use tantivy::tokenizer::*;
 use serde_json as json;
+use regex;
 
 use crate::error::TantivyError;
 use crate::util::*;
@@ -9,6 +10,7 @@ pub(crate) enum SystemFilter{
     LowerCase(LowerCaser),
     AsciiFolding(AsciiFoldingFilter),
     AlphaNumOnly(AlphaNumOnlyFilter),
+    CnCharOnly(CnCharOnlyFilter),
     Length(RemoveLongFilter),
     Stop(StopWordFilter),
     Decompounder(SplitCompoundWords),
@@ -21,6 +23,7 @@ impl SystemFilter{
             Self::LowerCase(filter) => builder.filter(filter).dynamic(),
             Self::AsciiFolding(filter) => builder.filter(filter).dynamic(),
             Self::AlphaNumOnly(filter) => builder.filter(filter).dynamic(),
+            Self::CnCharOnly(filter)  => builder.filter(filter).dynamic(),
             Self::Length(filter) => builder.filter(filter).dynamic(),
             Self::Stop(filter) => builder.filter(filter).dynamic(),
             Self::Decompounder(filter) => builder.filter(filter).dynamic(),
@@ -51,7 +54,7 @@ fn get_stop_words_filter(params: &json::Map<String, json::Value>)-> Result<Syste
         return Err("stop filter stop_words can't be empty".into());
     }
     let str_list = get_string_list(value.unwrap(), "stop_words filter")?;
-    Ok(SystemFilter::Stop(StopWordFilter::remove(str_list)))
+    Ok(SystemFilter::Stop(StopWordFilter::remove(get_stop_words_list(str_list))))
 }
 
 fn get_decompounder_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, TantivyError>{
@@ -125,6 +128,7 @@ impl From<&str> for SystemFilter{
             "lowercase" => Self::LowerCase(LowerCaser),
             "asciifolding" => Self::AsciiFolding(AsciiFoldingFilter),
             "alphanumonly" => Self::AlphaNumOnly(AlphaNumOnlyFilter),
+            "cncharonly" => Self::CnCharOnly(CnCharOnlyFilter),
             _ => Self::Invalid,
         }
     }
@@ -150,5 +154,54 @@ impl TryFrom<&json::Map<String, json::Value>> for SystemFilter {
             }
             None => Err("no type field in filter params".into()),
         }
+    }
+}
+
+pub struct CnCharOnlyFilter;
+
+pub struct CnCharOnlyFilterStream<T> {
+    regex: regex::Regex,
+    tail: T,
+}
+
+impl TokenFilter for CnCharOnlyFilter{
+    type Tokenizer<T: Tokenizer> = CnCharOnlyFilterWrapper<T>;
+
+    fn transform<T: Tokenizer>(self, tokenizer: T) -> CnCharOnlyFilterWrapper<T> {
+        CnCharOnlyFilterWrapper(tokenizer)
+    }
+}
+
+#[derive(Clone)]
+pub struct CnCharOnlyFilterWrapper<T>(T);
+
+impl<T: Tokenizer> Tokenizer for CnCharOnlyFilterWrapper<T> {
+    type TokenStream<'a> = CnCharOnlyFilterStream<T::TokenStream<'a>>;
+
+    fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
+        CnCharOnlyFilterStream {
+            regex: regex::Regex::new("\\p{Han}+").unwrap(),
+            tail: self.0.token_stream(text),
+        }
+    }
+}
+
+impl<T: TokenStream> TokenStream for CnCharOnlyFilterStream<T> {
+    fn advance(&mut self) -> bool {
+        while self.tail.advance() {
+            if self.regex.is_match(&self.tail.token().text) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn token(&self) -> &Token {
+        self.tail.token()
+    }
+
+    fn token_mut(&mut self) -> &mut Token {
+        self.tail.token_mut()
     }
 }

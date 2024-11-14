@@ -64,7 +64,6 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 	for _, field := range coll.GetFields() {
 		if field.GetFieldID() == schema.GetOutputFieldIds()[0] {
 			runner.outputField = field
-			break
 		}
 
 		if field.GetFieldID() == schema.GetInputFieldIds()[0] {
