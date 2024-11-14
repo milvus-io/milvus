@@ -17,6 +17,8 @@ import (
 
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
 
+	segcore "github.com/milvus-io/milvus/internal/util/segcore"
+
 	segcorepb "github.com/milvus-io/milvus/internal/proto/segcorepb"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
@@ -1358,7 +1360,7 @@ func (_c *MockSegment_ResourceUsageEstimate_Call) RunAndReturn(run func() Resour
 }
 
 // Retrieve provides a mock function with given fields: ctx, plan
-func (_m *MockSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
+func (_m *MockSegment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	ret := _m.Called(ctx, plan)
 
 	if len(ret) == 0 {
@@ -1367,10 +1369,10 @@ func (_m *MockSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 
 	var r0 *segcorepb.RetrieveResults
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *RetrievePlan) (*segcorepb.RetrieveResults, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)); ok {
 		return rf(ctx, plan)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *RetrievePlan) *segcorepb.RetrieveResults); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.RetrievePlan) *segcorepb.RetrieveResults); ok {
 		r0 = rf(ctx, plan)
 	} else {
 		if ret.Get(0) != nil {
@@ -1378,7 +1380,7 @@ func (_m *MockSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *RetrievePlan) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *segcore.RetrievePlan) error); ok {
 		r1 = rf(ctx, plan)
 	} else {
 		r1 = ret.Error(1)
@@ -1394,14 +1396,14 @@ type MockSegment_Retrieve_Call struct {
 
 // Retrieve is a helper method to define mock.On call
 //   - ctx context.Context
-//   - plan *RetrievePlan
+//   - plan *segcore.RetrievePlan
 func (_e *MockSegment_Expecter) Retrieve(ctx interface{}, plan interface{}) *MockSegment_Retrieve_Call {
 	return &MockSegment_Retrieve_Call{Call: _e.mock.On("Retrieve", ctx, plan)}
 }
 
-func (_c *MockSegment_Retrieve_Call) Run(run func(ctx context.Context, plan *RetrievePlan)) *MockSegment_Retrieve_Call {
+func (_c *MockSegment_Retrieve_Call) Run(run func(ctx context.Context, plan *segcore.RetrievePlan)) *MockSegment_Retrieve_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*RetrievePlan))
+		run(args[0].(context.Context), args[1].(*segcore.RetrievePlan))
 	})
 	return _c
 }
@@ -1411,14 +1413,14 @@ func (_c *MockSegment_Retrieve_Call) Return(_a0 *segcorepb.RetrieveResults, _a1 
 	return _c
 }
 
-func (_c *MockSegment_Retrieve_Call) RunAndReturn(run func(context.Context, *RetrievePlan) (*segcorepb.RetrieveResults, error)) *MockSegment_Retrieve_Call {
+func (_c *MockSegment_Retrieve_Call) RunAndReturn(run func(context.Context, *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)) *MockSegment_Retrieve_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// RetrieveByOffsets provides a mock function with given fields: ctx, plan, offsets
-func (_m *MockSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan, offsets []int64) (*segcorepb.RetrieveResults, error) {
-	ret := _m.Called(ctx, plan, offsets)
+// RetrieveByOffsets provides a mock function with given fields: ctx, plan
+func (_m *MockSegment) RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error) {
+	ret := _m.Called(ctx, plan)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RetrieveByOffsets")
@@ -1426,19 +1428,19 @@ func (_m *MockSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan
 
 	var r0 *segcorepb.RetrieveResults
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *RetrievePlan, []int64) (*segcorepb.RetrieveResults, error)); ok {
-		return rf(ctx, plan, offsets)
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error)); ok {
+		return rf(ctx, plan)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *RetrievePlan, []int64) *segcorepb.RetrieveResults); ok {
-		r0 = rf(ctx, plan, offsets)
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.RetrievePlanWithOffsets) *segcorepb.RetrieveResults); ok {
+		r0 = rf(ctx, plan)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*segcorepb.RetrieveResults)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *RetrievePlan, []int64) error); ok {
-		r1 = rf(ctx, plan, offsets)
+	if rf, ok := ret.Get(1).(func(context.Context, *segcore.RetrievePlanWithOffsets) error); ok {
+		r1 = rf(ctx, plan)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1453,15 +1455,14 @@ type MockSegment_RetrieveByOffsets_Call struct {
 
 // RetrieveByOffsets is a helper method to define mock.On call
 //   - ctx context.Context
-//   - plan *RetrievePlan
-//   - offsets []int64
-func (_e *MockSegment_Expecter) RetrieveByOffsets(ctx interface{}, plan interface{}, offsets interface{}) *MockSegment_RetrieveByOffsets_Call {
-	return &MockSegment_RetrieveByOffsets_Call{Call: _e.mock.On("RetrieveByOffsets", ctx, plan, offsets)}
+//   - plan *segcore.RetrievePlanWithOffsets
+func (_e *MockSegment_Expecter) RetrieveByOffsets(ctx interface{}, plan interface{}) *MockSegment_RetrieveByOffsets_Call {
+	return &MockSegment_RetrieveByOffsets_Call{Call: _e.mock.On("RetrieveByOffsets", ctx, plan)}
 }
 
-func (_c *MockSegment_RetrieveByOffsets_Call) Run(run func(ctx context.Context, plan *RetrievePlan, offsets []int64)) *MockSegment_RetrieveByOffsets_Call {
+func (_c *MockSegment_RetrieveByOffsets_Call) Run(run func(ctx context.Context, plan *segcore.RetrievePlanWithOffsets)) *MockSegment_RetrieveByOffsets_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*RetrievePlan), args[2].([]int64))
+		run(args[0].(context.Context), args[1].(*segcore.RetrievePlanWithOffsets))
 	})
 	return _c
 }
@@ -1471,7 +1472,7 @@ func (_c *MockSegment_RetrieveByOffsets_Call) Return(_a0 *segcorepb.RetrieveResu
 	return _c
 }
 
-func (_c *MockSegment_RetrieveByOffsets_Call) RunAndReturn(run func(context.Context, *RetrievePlan, []int64) (*segcorepb.RetrieveResults, error)) *MockSegment_RetrieveByOffsets_Call {
+func (_c *MockSegment_RetrieveByOffsets_Call) RunAndReturn(run func(context.Context, *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error)) *MockSegment_RetrieveByOffsets_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1522,27 +1523,27 @@ func (_c *MockSegment_RowNum_Call) RunAndReturn(run func() int64) *MockSegment_R
 }
 
 // Search provides a mock function with given fields: ctx, searchReq
-func (_m *MockSegment) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
+func (_m *MockSegment) Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error) {
 	ret := _m.Called(ctx, searchReq)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Search")
 	}
 
-	var r0 *SearchResult
+	var r0 *segcore.SearchResult
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *SearchRequest) (*SearchResult, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.SearchRequest) (*segcore.SearchResult, error)); ok {
 		return rf(ctx, searchReq)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *SearchRequest) *SearchResult); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.SearchRequest) *segcore.SearchResult); ok {
 		r0 = rf(ctx, searchReq)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*SearchResult)
+			r0 = ret.Get(0).(*segcore.SearchResult)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *SearchRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *segcore.SearchRequest) error); ok {
 		r1 = rf(ctx, searchReq)
 	} else {
 		r1 = ret.Error(1)
@@ -1558,24 +1559,24 @@ type MockSegment_Search_Call struct {
 
 // Search is a helper method to define mock.On call
 //   - ctx context.Context
-//   - searchReq *SearchRequest
+//   - searchReq *segcore.SearchRequest
 func (_e *MockSegment_Expecter) Search(ctx interface{}, searchReq interface{}) *MockSegment_Search_Call {
 	return &MockSegment_Search_Call{Call: _e.mock.On("Search", ctx, searchReq)}
 }
 
-func (_c *MockSegment_Search_Call) Run(run func(ctx context.Context, searchReq *SearchRequest)) *MockSegment_Search_Call {
+func (_c *MockSegment_Search_Call) Run(run func(ctx context.Context, searchReq *segcore.SearchRequest)) *MockSegment_Search_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*SearchRequest))
+		run(args[0].(context.Context), args[1].(*segcore.SearchRequest))
 	})
 	return _c
 }
 
-func (_c *MockSegment_Search_Call) Return(_a0 *SearchResult, _a1 error) *MockSegment_Search_Call {
+func (_c *MockSegment_Search_Call) Return(_a0 *segcore.SearchResult, _a1 error) *MockSegment_Search_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockSegment_Search_Call) RunAndReturn(run func(context.Context, *SearchRequest) (*SearchResult, error)) *MockSegment_Search_Call {
+func (_c *MockSegment_Search_Call) RunAndReturn(run func(context.Context, *segcore.SearchRequest) (*segcore.SearchResult, error)) *MockSegment_Search_Call {
 	_c.Call.Return(run)
 	return _c
 }

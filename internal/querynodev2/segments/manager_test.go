@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -50,10 +51,10 @@ func (s *ManagerSuite) SetupTest() {
 	s.segments = nil
 
 	for i, id := range s.segmentIDs {
-		schema := GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64, true)
+		schema := mock_segcore.GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64, true)
 		segment, err := NewSegment(
 			context.Background(),
-			NewCollection(s.collectionIDs[i], schema, GenTestIndexMeta(s.collectionIDs[i], schema), &querypb.LoadMetaInfo{
+			NewCollection(s.collectionIDs[i], schema, mock_segcore.GenTestIndexMeta(s.collectionIDs[i], schema), &querypb.LoadMetaInfo{
 				LoadType: querypb.LoadType_LoadCollection,
 			}),
 			s.types[i],

@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -92,9 +93,9 @@ type Segment interface {
 	GetBM25Stats() map[int64]*storage.BM25Stats
 
 	// Read operations
-	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
-	Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error)
-	RetrieveByOffsets(ctx context.Context, plan *RetrievePlan, offsets []int64) (*segcorepb.RetrieveResults, error)
+	Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error)
+	Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)
+	RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error)
 	IsLazyLoad() bool
 	ResetIndexesLazyLoad(lazyState bool)
 

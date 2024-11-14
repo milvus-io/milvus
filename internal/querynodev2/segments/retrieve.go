@@ -54,7 +54,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		}
 		return false
 	}()
-	plan.ignoreNonPk = !anySegIsLazyLoad && len(segments) > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && plan.ShouldIgnoreNonPk()
+	plan.SetIgnoreNonPk(!anySegIsLazyLoad && len(segments) > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && plan.ShouldIgnoreNonPk())
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
