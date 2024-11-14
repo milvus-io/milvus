@@ -21,15 +21,20 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "expr/ITypeExpr.h"
+#include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "mmap/ChunkedColumn.h"
 #include "mmap/Types.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/SearchOnSealed.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/SegmentSealedImpl.h"
+#include "segcore/Types.h"
 #include "test_utils/DataGen.h"
 #include <memory>
 #include <numeric>
@@ -174,7 +179,7 @@ class TestChunkSegment : public testing::Test {
             false,
             false,
             true);
-        test_data_count = 1000;
+        test_data_count = 10000;
 
         auto arrow_i64_field = arrow::field("int64", arrow::int64());
         auto arrow_pk_field = arrow::field("pk", arrow::int64());
@@ -320,6 +325,41 @@ TEST_F(TestChunkSegment, TestCompareExpr) {
                                                fields.at("string2"),
                                                DataType::VARCHAR,
                                                DataType::VARCHAR,
+                                               proto::plan::OpType::Equal);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    final = query::ExecuteQueryExpr(
+        plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
+    ASSERT_EQ(chunk_num * test_data_count, final.count());
+
+    // test with inverted index
+    auto fid = fields.at("int64");
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        milvus::proto::schema::Int64);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
+    index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::INT64;
+    create_index_info.index_type = index::INVERTED_INDEX_TYPE;
+    auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
+        create_index_info, file_manager_ctx);
+    std::vector<int64_t> data(test_data_count * chunk_num);
+    for (int i = 0; i < chunk_num; i++) {
+        auto d = segment->chunk_data<int64_t>(fid, i);
+        std::copy(d.data(),
+                  d.data() + test_data_count,
+                  data.begin() + i * test_data_count);
+    }
+
+    index->BuildWithRawData(data.size(), data.data());
+    segcore::LoadIndexInfo load_index_info;
+    load_index_info.index = std::move(index);
+    load_index_info.field_id = fid.get();
+    segment->LoadIndex(load_index_info);
+
+    expr = std::make_shared<expr::CompareExpr>(fields.at("int64"),
+                                               fields.at("pk"),
+                                               DataType::INT64,
+                                               DataType::INT64,
                                                proto::plan::OpType::Equal);
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     final = query::ExecuteQueryExpr(
