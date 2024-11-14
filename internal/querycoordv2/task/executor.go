@@ -703,7 +703,7 @@ func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int
 		return nil, nil, err
 	}
 	// update the field index params
-	for _, segmentIndex := range indexes {
+	for _, segmentIndex := range indexes[segment.GetID()] {
 		index, found := lo.Find(indexInfos, func(indexInfo *indexpb.IndexInfo) bool {
 			return indexInfo.IndexID == segmentIndex.IndexID
 		})
@@ -720,6 +720,6 @@ func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int
 		segmentIndex.IndexParams = funcutil.Map2KeyValuePair(params)
 	}
 
-	loadInfo := utils.PackSegmentLoadInfo(segment, channel.GetSeekPosition(), indexes)
+	loadInfo := utils.PackSegmentLoadInfo(segment, channel.GetSeekPosition(), indexes[segment.GetID()])
 	return loadInfo, indexInfos, nil
 }
