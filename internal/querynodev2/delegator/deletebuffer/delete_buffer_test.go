@@ -112,7 +112,7 @@ func (s *DoubleCacheBufferSuite) TestPut() {
 	s.Equal(1, len(buffer.ListAfter(12)))
 	entryNum, memorySize := buffer.Size()
 	s.EqualValues(2, entryNum)
-	s.EqualValues(304, memorySize)
+	s.EqualValues(234, memorySize)
 
 	buffer.Put(&Item{
 		Ts: 13,
@@ -133,7 +133,7 @@ func (s *DoubleCacheBufferSuite) TestPut() {
 	s.Equal(1, len(buffer.ListAfter(13)))
 	entryNum, memorySize = buffer.Size()
 	s.EqualValues(2, entryNum)
-	s.EqualValues(304, memorySize)
+	s.EqualValues(234, memorySize)
 }
 
 func TestDoubleCacheDeleteBuffer(t *testing.T) {

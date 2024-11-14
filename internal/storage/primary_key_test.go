@@ -10,8 +10,16 @@ import (
 )
 
 func TestVarCharPrimaryKey(t *testing.T) {
-	pk := NewVarCharPrimaryKey("milvus")
+	t.Run("size", func(t *testing.T) {
+		longString := "The High-Performance Vector Database Built for Scale"
+		pk := NewVarCharPrimaryKey(longString)
+		gotSize := pk.Size()
+		expectSize := len(longString) + 8
 
+		assert.EqualValues(t, expectSize, gotSize)
+	})
+
+	pk := NewVarCharPrimaryKey("milvus")
 	testPk := NewVarCharPrimaryKey("milvus")
 
 	// test GE
