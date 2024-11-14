@@ -71,6 +71,7 @@ func NewClient(ctx context.Context) (types.DataCoordClient, error) {
 	client.grpcClient.SetGetAddrFunc(client.getDataCoordAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetSession(sess)
+
 	if Params.InternalTLSCfg.InternalTLSEnabled.GetAsBool() {
 		client.grpcClient.EnableEncryption()
 		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "Datacoord")

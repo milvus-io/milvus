@@ -72,6 +72,7 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.QueryNodeC
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetNodeID(nodeID)
 	client.grpcClient.SetSession(sess)
+
 	if Params.InternalTLSCfg.InternalTLSEnabled.GetAsBool() {
 		client.grpcClient.EnableEncryption()
 		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "QueryNode")

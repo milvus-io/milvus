@@ -66,7 +66,7 @@ func globalConfigPrefixs() []string {
 
 // support read "milvus.yaml", "default.yaml", "user.yaml" as this order.
 // order: milvus.yaml < default.yaml < user.yaml, do not change the order below
-var defaultYaml = []string{"milvus.yaml", "default.yaml", "user.yaml"}
+var defaultYaml = []string{"milvus.yaml", "_test.yaml", "default.yaml", "user.yaml"}
 
 // BaseTable the basics of paramtable
 type BaseTable struct {
