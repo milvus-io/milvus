@@ -128,8 +128,10 @@ TEST(ParseTokenizerParams, Default) {
 
 TEST(TextMatch, Index) {
     using Index = index::TextMatchIndex;
-    auto index = std::make_unique<Index>(
-        std::numeric_limits<int64_t>::max(), "milvus_tokenizer", "{}");
+    auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
+                                         "unique_id",
+                                         "milvus_tokenizer",
+                                         "{}");
     index->CreateReader();
     index->AddText("football, basketball, pingpang", true, 0);
     index->AddText("", false, 1);

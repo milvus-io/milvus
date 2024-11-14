@@ -23,10 +23,12 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
  public:
     // for growing segment.
     explicit TextMatchIndex(int64_t commit_interval_in_ms,
+                            const char* unique_id,
                             const char* tokenizer_name,
                             const char* analyzer_params);
     // for sealed segment.
     explicit TextMatchIndex(const std::string& path,
+                            const char* unique_id,
                             const char* tokenizer_name,
                             const char* analyzer_params);
     // for building index.
