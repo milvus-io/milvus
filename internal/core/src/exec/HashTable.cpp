@@ -325,7 +325,7 @@ void HashTable<nullableKeys>::groupProbe(milvus::exec::HashLookup &lookup) {
 
 template<bool nullableKeys>
 void HashTable<nullableKeys>::setHashMode(HashMode mode, int32_t numNew) {
-    // set hash mode kArray/kHash/kNormalizedKey
+    // TODO set hash mode kArray/kHash/kNormalizedKey
 }
 
 template <bool nullable>

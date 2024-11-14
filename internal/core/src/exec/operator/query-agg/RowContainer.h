@@ -166,6 +166,10 @@ public:
         return (row[nullByte] & nullMask) != 0;
     }
 
+    static inline const std::string*& strAt(const char* group, int32_t offset) {
+        return *reinterpret_cast<const std::string**>(const_cast<char*>(group + offset));
+    }
+
     template <typename T>
     static inline T valueAt(const char* group, int32_t offset) {
         return *reinterpret_cast<const T*>(group + offset);
@@ -183,12 +187,15 @@ public:
             vector_size_t index) {
         if constexpr (Type == DataType::NONE || Type == DataType::ROW || Type == DataType::JSON || Type == DataType::ARRAY) {
             PanicInfo(DataTypeInvalid, "Cannot support complex data type:[ROW/JSON/ARRAY] in rows container for now");
-        } else if constexpr (Type == DataType::VARCHAR || Type == DataType::STRING) {
-            PanicInfo(DataTypeInvalid, "Cannot support varchar/string types in rows container for now");
         } else {
             using T = typename TypeTraits<Type>::NativeType;
             T* raw_value = static_cast<T*>(column->RawValueAt(index, sizeof(T)));
-            return milvus::comparePrimitiveAsc(*raw_value, valueAt<T>(row, offset));
+            if constexpr (std::is_same_v<T, std::string>) {
+                const std::string& raw = *static_cast<std::string*>(raw_value);
+                return raw == *(strAt(row, offset));
+            } else {
+                return milvus::comparePrimitiveAsc(*raw_value, valueAt<T>(row, offset));
+            }
         }
     }
 
@@ -233,15 +240,19 @@ public:
                               int32_t offset,
                               int32_t nullByte,
                               uint8_t nullMask) {
+        static std::string null_string_val = "";
+        static std::string* null_string_val_ptr = &null_string_val;
         if constexpr (Type == DataType::NONE || Type == DataType::ROW || Type == DataType::JSON || Type == DataType::ARRAY) {
             PanicInfo(DataTypeInvalid, "Cannot support complex data type:[ROW/JSON/ARRAY] in rows container for now");
-        } else if constexpr (Type == DataType::VARCHAR || Type == DataType::STRING) {
-            PanicInfo(DataTypeInvalid, "Cannot support varchar/string types in rows container for now");
         } else {
             using T = typename milvus::TypeTraits<Type>::NativeType;
             if (!column->ValidAt(index)) {
                 row[nullByte]|=nullMask;
-                *reinterpret_cast<T*>(row+offset) = T();
+                if constexpr (std::is_same_v<T, std::string>) {
+                    *reinterpret_cast<std::string**>(row + offset) = null_string_val_ptr;
+                } else {
+                    *reinterpret_cast<T*>(row+offset) = T();
+                }
                 return;
             }
             storeNoNulls<Type>(column, index, row, offset);
@@ -256,11 +267,15 @@ public:
         using T = typename milvus::TypeTraits<Type>::NativeType;
         if constexpr (Type == DataType::NONE || Type == DataType::ROW || Type == DataType::JSON || Type == DataType::ARRAY) {
             PanicInfo(DataTypeInvalid, "Cannot support complex data type:[ROW/JSON/ARRAY] in rows container for now");
-        } else if constexpr (Type == DataType::VARCHAR || Type == DataType::STRING) {
-            PanicInfo(DataTypeInvalid, "Cannot support varchar/string types in rows container for now");
         } else {
             auto raw_val_ptr = column->RawValueAt(index, sizeof(T));
-            *reinterpret_cast<T*>(group + offset) = *(static_cast<T*>(raw_val_ptr));
+            if constexpr (std::is_same_v<T, std::string>) {
+                // the string object and also the underlying char array are both allocated on the heap
+                // must call clear method to deallocate these memory allocated for varchar type to avoid memory leak
+                *reinterpret_cast<std::string**>(group + offset) = new std::string(*static_cast<std::string*>(raw_val_ptr));
+            } else {
+                *reinterpret_cast<T*>(group + offset) = *(static_cast<T*>(raw_val_ptr));
+            }
         }
     }
 
