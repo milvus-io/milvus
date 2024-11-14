@@ -63,7 +63,17 @@ func (s *PrivilegeGroupTestSuite) TestBuiltinPrivilegeGroup() {
 	s.operatePrivilege(ctx, roleName, "ReadWrite", commonpb.ObjectType_Collection.String(), milvuspb.OperatePrivilegeType_Grant)
 	s.operatePrivilege(ctx, roleName, "Admin", commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
 
-	s.validateGrants(ctx, roleName, commonpb.ObjectType_Global.String(), 1)
+	s.operatePrivilege(ctx, roleName, "ClusterReadOnly", commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
+	s.operatePrivilege(ctx, roleName, "ClusterReadWrite", commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
+	s.operatePrivilege(ctx, roleName, "ClusterAdmin", commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
+	s.operatePrivilege(ctx, roleName, "DatabaseReadOnly", commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
+	s.operatePrivilege(ctx, roleName, "DatabaseReadWrite", commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
+	s.operatePrivilege(ctx, roleName, "DatabaseAdmin", commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
+	s.operatePrivilege(ctx, roleName, "CollectionReadOnly", commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
+	s.operatePrivilege(ctx, roleName, "CollectionReadWrite", commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
+	s.operatePrivilege(ctx, roleName, "CollectionAdmin", commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
+
+	s.validateGrants(ctx, roleName, commonpb.ObjectType_Global.String(), 10)
 	s.validateGrants(ctx, roleName, commonpb.ObjectType_Collection.String(), 2)
 }
 
