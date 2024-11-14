@@ -5332,6 +5332,87 @@ func (node *Proxy) validPrivilegeParams(req *milvuspb.OperatePrivilegeRequest) e
 	return nil
 }
 
+func (node *Proxy) validOperatePrivilegeV2Params(req *milvuspb.OperatePrivilegeV2Request) error {
+	if req.Role == nil {
+		return fmt.Errorf("the role in the request is nil")
+	}
+	if err := ValidateRoleName(req.Role.Name); err != nil {
+		return err
+	}
+	if err := ValidatePrivilege(req.Grantor.Privilege.Name); err != nil {
+		return err
+	}
+	if req.Type != milvuspb.OperatePrivilegeType_Grant && req.Type != milvuspb.OperatePrivilegeType_Revoke {
+		return fmt.Errorf("the type in the request not grant or revoke")
+	}
+	if err := ValidateObjectName(req.DbName); err != nil {
+		return err
+	}
+	if err := ValidateObjectName(req.CollectionName); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.OperatePrivilegeV2Request) (*commonpb.Status, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-OperatePrivilegeV2")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+
+	log.Info("OperatePrivilegeV2",
+		zap.Any("req", req))
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	if err := node.validOperatePrivilegeV2Params(req); err != nil {
+		return merr.Status(err), nil
+	}
+	curUser, err := GetCurUserFromContext(ctx)
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	req.Grantor.User = &milvuspb.UserEntity{Name: curUser}
+	request := &milvuspb.OperatePrivilegeRequest{
+		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_OperatePrivilege},
+		Entity: &milvuspb.GrantEntity{
+			Role:       req.Role,
+			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
+			ObjectName: req.CollectionName,
+			DbName:     req.DbName,
+			Grantor:    req.Grantor,
+		},
+		Type:    req.Type,
+		Version: "v2",
+	}
+	req.Grantor.User = &milvuspb.UserEntity{Name: curUser}
+	result, err := node.rootCoord.OperatePrivilege(ctx, request)
+	if err != nil {
+		log.Warn("fail to operate privilege", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	relatedPrivileges := util.RelatedPrivileges[util.PrivilegeNameForMetastore(req.Grantor.Privilege.Name)]
+	if len(relatedPrivileges) != 0 {
+		for _, relatedPrivilege := range relatedPrivileges {
+			relatedReq := proto.Clone(request).(*milvuspb.OperatePrivilegeRequest)
+			relatedReq.Entity.Grantor.Privilege.Name = util.PrivilegeNameForAPI(relatedPrivilege)
+			result, err = node.rootCoord.OperatePrivilege(ctx, relatedReq)
+			if err != nil {
+				log.Warn("fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Error(err))
+				return merr.Status(err), nil
+			}
+			if !merr.Ok(result) {
+				log.Warn("fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Any("result", result))
+				return result, nil
+			}
+		}
+	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
+	}
+	return result, nil
+}
+
 func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-OperatePrivilege")
 	defer sp.End()
@@ -6576,8 +6657,11 @@ func (node *Proxy) CreatePrivilegeGroup(ctx context.Context, req *milvuspb.Creat
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if req.GroupName == "" {
-		return merr.Status(fmt.Errorf("the group name in the drop privilege group request is nil")), nil
+	if err := ValidatePrivilegeGroupName(req.GroupName); err != nil {
+		log.Warn("CreatePrivilegeGroup failed",
+			zap.Error(err),
+		)
+		return getErrResponse(err, "CreatePrivilegeGroup", "", ""), nil
 	}
 	if req.Base == nil {
 		req.Base = &commonpb.MsgBase{}
@@ -6605,8 +6689,11 @@ func (node *Proxy) DropPrivilegeGroup(ctx context.Context, req *milvuspb.DropPri
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if req.GroupName == "" {
-		return merr.Status(fmt.Errorf("the group name in the drop privilege group request is nil")), nil
+	if err := ValidatePrivilegeGroupName(req.GroupName); err != nil {
+		log.Warn("DropPrivilegeGroup failed",
+			zap.Error(err),
+		)
+		return getErrResponse(err, "DropPrivilegeGroup", "", ""), nil
 	}
 	if req.Base == nil {
 		req.Base = &commonpb.MsgBase{}
@@ -6663,8 +6750,11 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if req.GroupName == "" {
-		return merr.Status(fmt.Errorf("the group name in the drop privilege group request is nil")), nil
+	if err := ValidatePrivilegeGroupName(req.GroupName); err != nil {
+		log.Warn("OperatePrivilegeGroup failed",
+			zap.Error(err),
+		)
+		return getErrResponse(err, "OperatePrivilegeGroup", "", ""), nil
 	}
 	for _, priv := range req.GetPrivileges() {
 		if err := ValidatePrivilege(priv.Name); err != nil {

@@ -19,6 +19,8 @@ package util
 import (
 	"strings"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -465,4 +467,13 @@ func IsBuiltinRole(roleName string) bool {
 		}
 	}
 	return false
+}
+
+func GetObjectType(privName string) string {
+	for objectType, privs := range ObjectPrivileges {
+		if lo.Contains(privs, privName) {
+			return objectType
+		}
+	}
+	return ""
 }
