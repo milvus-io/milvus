@@ -784,10 +784,11 @@ tls:
   serverKeyPath: configs/cert/server.key
   caPemPath: configs/cert/ca.pem
 
+# Configure the node-tls enable.
 internaltls:
-  serverPemPath: #path to server.pem
-  serverKeyPath: #path to server.key
-  caPemPath: #path to ca.key
+  serverPemPath: configs/cert/server.pem
+  serverKeyPath: configs/cert/server.key
+  caPemPath: configs/cert/ca.pem
 
 common:
   defaultPartitionName: _default # Name of the default partition when a collection is created
@@ -844,8 +845,8 @@ common:
           privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,RenameCollection,CreateIndex,DropIndex,CreatePartition,DropPartition # Collection level readwrite privileges
         admin:
           privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,RenameCollection,CreateIndex,DropIndex,CreatePartition,DropPartition,CreateAlias,DropAlias # Collection level admin privileges
+    internaltlsEnabled: false
     tlsMode: 0
-    internaltlsEnabled : false
   session:
     ttl: 30 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests

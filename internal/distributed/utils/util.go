@@ -2,10 +2,10 @@ package utils
 
 import (
 	"crypto/x509"
-	"errors"
 	"os"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"

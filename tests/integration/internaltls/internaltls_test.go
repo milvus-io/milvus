@@ -81,18 +81,16 @@ internaltls:
   caPemPath: ../../../configs/cert/ca.pem
 `
 
-// Path to the config file
 const configFilePath = "../../../configs/_test.yaml"
 
 // CreateConfigFile creates the YAML configuration file for tests
 func CreateConfigFile() {
-	// Create config directosry if it doesn't exist
-	// Write config content to user.yaml file
-	err := os.WriteFile(configFilePath, []byte(configContent), 0644)
+	// Write config content to _test.yaml file
+	err := os.WriteFile(configFilePath, []byte(configContent), 0o600)
 	if err != nil {
 		log.Error("Failed to create config file", zap.Error(err))
 	}
-	log.Info("config file created")
+	log.Info(fmt.Sprintf("Config file created: %s", configFilePath))
 }
 
 func (s *InternaltlsTestSuit) SetupSuite() {
@@ -344,7 +342,7 @@ func (s *InternaltlsTestSuit) TearDownSuite() {
 	defer func() {
 		err := os.Remove(configFilePath)
 		if err != nil {
-			log.Error("failed to delete config file:", zap.Error(err))
+			log.Error("Failed to delete config file:", zap.Error(err))
 			return
 		}
 		log.Info(fmt.Sprintf("Config file deleted: %s", configFilePath))
@@ -353,6 +351,5 @@ func (s *InternaltlsTestSuit) TearDownSuite() {
 }
 
 func TestInternalTLS(t *testing.T) {
-	log.Info("About to run...")
 	suite.Run(t, new(InternaltlsTestSuit))
 }

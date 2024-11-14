@@ -64,8 +64,9 @@ func globalConfigPrefixs() []string {
 	return []string{"metastore", "localStorage", "etcd", "tikv", "minio", "pulsar", "kafka", "rocksmq", "log", "grpc", "common", "quotaAndLimits", "trace"}
 }
 
-// support read "milvus.yaml", "default.yaml", "user.yaml" as this order.
-// order: milvus.yaml < default.yaml < user.yaml, do not change the order below
+// support read "milvus.yaml", "_test.yaml", "default.yaml", "user.yaml" as this order.
+// order: milvus.yaml < _test.yaml < default.yaml < user.yaml, do not change the order below.
+// Use _test.yaml only for test related purpose.
 var defaultYaml = []string{"milvus.yaml", "_test.yaml", "default.yaml", "user.yaml"}
 
 // BaseTable the basics of paramtable

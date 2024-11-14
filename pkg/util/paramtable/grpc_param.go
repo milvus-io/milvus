@@ -547,7 +547,7 @@ func (p *InternalTLSConfig) Init(base *BaseTable) {
 	p.InternalTLSEnabled = ParamItem{
 		Key:          "common.security.internaltlsEnabled",
 		Version:      "2.0.0",
-		DefaultValue: "0",
+		DefaultValue: "false",
 		Export:       true,
 	}
 	p.InternalTLSEnabled.Init(base.mgr)
