@@ -219,45 +219,6 @@ func (a *alterCollectionFieldTask) Execute(ctx context.Context) error {
 		core: a.core,
 	})
 
-	// properties needs to be refreshed in the cache
-	aliases := a.core.meta.ListAliasesByID(oldColl.CollectionID)
-	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: a.core},
-		dbName:          a.Req.GetDbName(),
-		collectionNames: append(aliases, a.Req.GetCollectionName()),
-		collectionID:    oldColl.CollectionID,
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
-	})
-
-	oldReplicaNumber, _ := common.DatabaseLevelReplicaNumber(oldColl.Properties)
-	oldResourceGroups, _ := common.DatabaseLevelResourceGroups(oldColl.Properties)
-	newReplicaNumber, _ := common.DatabaseLevelReplicaNumber(newColl.Properties)
-	newResourceGroups, _ := common.DatabaseLevelResourceGroups(newColl.Properties)
-	left, right := lo.Difference(oldResourceGroups, newResourceGroups)
-	rgChanged := len(left) > 0 || len(right) > 0
-	replicaChanged := oldReplicaNumber != newReplicaNumber
-	if rgChanged || replicaChanged {
-		log.Ctx(ctx).Warn("alter collection trigger update load config",
-			zap.Int64("collectionID", oldColl.CollectionID),
-			zap.Int64("oldReplicaNumber", oldReplicaNumber),
-			zap.Int64("newReplicaNumber", newReplicaNumber),
-			zap.Strings("oldResourceGroups", oldResourceGroups),
-			zap.Strings("newResourceGroups", newResourceGroups),
-		)
-		redoTask.AddAsyncStep(NewSimpleStep("", func(ctx context.Context) ([]nestedStep, error) {
-			resp, err := a.core.queryCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
-				CollectionIDs:  []int64{oldColl.CollectionID},
-				ReplicaNumber:  int32(newReplicaNumber),
-				ResourceGroups: newResourceGroups,
-			})
-			if err := merr.CheckRPCCall(resp, err); err != nil {
-				log.Warn("failed to trigger update load config for collection", zap.Int64("collectionID", newColl.CollectionID), zap.Error(err))
-				return nil, err
-			}
-			return nil, nil
-		}))
-	}
-
 	return redoTask.Execute(ctx)
 }
 
