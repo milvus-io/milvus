@@ -162,6 +162,7 @@ class ProbeState {
             tagsInTable_ = table.loadTags(bucketOffset_);
             hits_ = milvus::toBitMask(tagsInTable_ == wantedTags_);
         }
+        PanicInfo(UnexpectedError, "Slots in hash table is not enough for hash operation, fail the request");
     }
 
 

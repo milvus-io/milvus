@@ -122,8 +122,6 @@ char* RowContainer::newRow() {
     return nullptr;
 }
 
-
-
 void RowContainer::store(const milvus::ColumnVectorPtr &column_data, milvus::vector_size_t index, char *row,
                          int32_t column_index) {
     auto numKeys = keyTypes_.size();
