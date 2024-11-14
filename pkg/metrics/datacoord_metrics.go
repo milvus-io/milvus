@@ -142,7 +142,6 @@ var (
 		}, []string{
 			databaseLabelName,
 			collectionIDLabelName,
-			segmentIDLabelName,
 			segmentStateLabelName,
 		})
 	DataCoordSegmentBinLogFileCount = prometheus.NewGaugeVec(
@@ -153,7 +152,6 @@ var (
 			Help:      "number of binlog files for each segment",
 		}, []string{
 			collectionIDLabelName,
-			segmentIDLabelName,
 		})
 
 	DataCoordStoredIndexFilesSize = prometheus.NewGaugeVec(
@@ -166,7 +164,6 @@ var (
 			databaseLabelName,
 			collectionName,
 			collectionIDLabelName,
-			segmentIDLabelName,
 		})
 
 	DataCoordDmlChannelNum = prometheus.NewGaugeVec(
@@ -391,25 +388,6 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(TaskNum)
 
 	registerStreamingCoord(registry)
-}
-
-func CleanupDataCoordSegmentMetrics(dbName string, collectionID int64, segmentID int64) {
-	DataCoordSegmentBinLogFileCount.
-		Delete(
-			prometheus.Labels{
-				collectionIDLabelName: fmt.Sprint(collectionID),
-				segmentIDLabelName:    fmt.Sprint(segmentID),
-			})
-	DataCoordStoredBinlogSize.Delete(prometheus.Labels{
-		databaseLabelName:     dbName,
-		collectionIDLabelName: fmt.Sprint(collectionID),
-		segmentIDLabelName:    fmt.Sprint(segmentID),
-	})
-	DataCoordStoredIndexFilesSize.DeletePartialMatch(prometheus.Labels{
-		databaseLabelName:     dbName,
-		collectionIDLabelName: fmt.Sprint(collectionID),
-		segmentIDLabelName:    fmt.Sprint(segmentID),
-	})
 }
 
 func CleanupDataCoordWithCollectionID(collectionID int64) {
