@@ -15,59 +15,60 @@ from faker import Faker
 faker = Faker()
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
 def setup_collection(environment):
     """在master上执行collection的初始化"""
     logger.info("Setting up collection in master...")
-
-    # 获取配置参数
-    collection_name = environment.parsed_options.milvus_collection
-    connections.connect(uri=environment.host)
-    analyzer_params = {
-        "tokenizer": "standard"
-    }
-    fields = [
-        FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-        FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=25536,
-                    enable_analyzer=True, analyzer_params=analyzer_params, enable_match=True),
-        FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
-    ]
-    schema = CollectionSchema(fields=fields, description="beir test collection")
-    bm25_function = Function(
-        name="text_bm25_emb",
-        function_type=FunctionType.BM25,
-        input_field_names=["text"],
-        output_field_names=["sparse"],
-        params={},
-    )
-    schema.add_function(bm25_function)
-    collection = Collection(collection_name, schema)
-
-    # 创建索引
-    collection.create_index(
-        "sparse",
-        {
-            "index_type": "SPARSE_INVERTED_INDEX",
-            "metric_type": "BM25",
-            "params": {
-                "bm25_k1": 1.5,
-                "bm25_b": 0.75,
-            }
+    try:
+        # 获取配置参数
+        collection_name = environment.parsed_options.milvus_collection
+        connections.connect(uri=environment.host)
+        analyzer_params = {
+            "type": "standard"
         }
-    )
-    collection.load()
-    logger.info("Collection setup completed successfully")
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=25536,
+                        enable_analyzer=True, analyzer_params=analyzer_params, enable_match=True),
+            FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="beir test collection")
+        bm25_function = Function(
+            name="text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["sparse"],
+            params={},
+        )
+        schema.add_function(bm25_function)
+        collection = Collection(collection_name, schema)
+
+        # 创建索引
+        collection.create_index(
+            "sparse",
+            {
+                "index_type": "SPARSE_INVERTED_INDEX",
+                "metric_type": "BM25",
+                "params": {
+                    "bm25_k1": 1.5,
+                    "bm25_b": 0.75,
+                }
+            }
+        )
+        collection.load()
+        logger.info("Collection setup completed successfully")
+    except Exception as e:
+        logger.error(f"Error setting up collection: {str(e)}")
+        raise e
 
 
 @events.init.add_listener
 def on_locust_init(environment, **_kwargs):
-    """初始化事件监听器，仅在master上执行setup"""
-    if isinstance(environment.runner, MasterRunner):
-        logger.info("Initializing in master...")
-        setup_collection(environment)
+    """初始化事件监听器"""
+    setup_collection(environment)
 
     # 为所有runner添加setup状态标记
     environment.setup_completed = False
@@ -189,6 +190,7 @@ class MilvusORMClient:
         """等待collection准备就绪"""
         timeout = 60
         start_time = time.time()
+        print(list_collections())
         is_ready = self.collection_name in list_collections()
         while not is_ready:
             if time.time() - start_time > timeout:
@@ -323,7 +325,7 @@ def _(parser):
                                 help="How to connect to Milvus (default: %(default)s)")
     milvus_options.add_argument("--milvus-dim", type=int, default=128,
                                 help="Vector dimension for the collection (default: %(default)s)")
-    milvus_options.add_argument("--milvus-collection", type=str, default="test_collection_capacity",
+    milvus_options.add_argument("--milvus-collection", type=str, default="test_collection_capacity_demo",
                                 help="Collection name to use (default: %(default)s)")
     milvus_options.add_argument("--milvus-nlist", type=int, default=1024,
                                 help="Number of cluster units (default: %(default)s)")
