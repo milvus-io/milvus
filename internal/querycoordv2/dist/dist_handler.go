@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type TriggerUpdateTargetVersion = func(collectionID int64)
@@ -195,6 +196,8 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 	channels := lo.SliceToMap(resp.GetChannels(), func(channel *querypb.ChannelVersionInfo) (string, *querypb.ChannelVersionInfo) {
 		return channel.GetChannel(), channel
 	})
+
+	collectionsToSync := typeutil.NewUniqueSet()
 	for _, lview := range resp.GetLeaderViews() {
 		segments := make(map[int64]*meta.Segment)
 
@@ -247,9 +250,10 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 			err := merr.WrapErrServiceInternal(fmt.Sprintf("target version mismatch, collection: %d, channel: %s,  current target version: %v, leader version: %v",
 				lview.GetCollection(), lview.GetChannel(), currentTargetVersion, lview.TargetVersion))
 
-			// segment and channel already loaded, trigger target observer to check target version
-			dh.syncTargetVersionFn(lview.GetCollection())
 			view.UnServiceableError = err
+			// make dist handler pull next distribution until all delegator is serviceable
+			dh.lastUpdateTs = 0
+			collectionsToSync.Insert(lview.Collection)
 			log.Info("leader is not available due to target version not ready",
 				zap.Int64("collectionID", view.CollectionID),
 				zap.Int64("nodeID", view.ID),
@@ -259,6 +263,12 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 	}
 
 	dh.dist.LeaderViewManager.Update(resp.GetNodeID(), updates...)
+
+	// segment and channel already loaded, trigger target observer to update
+	collectionsToSync.Range(func(collection int64) bool {
+		dh.syncTargetVersionFn(collection)
+		return true
+	})
 }
 
 func (dh *distHandler) getDistribution(ctx context.Context) (*querypb.GetDataDistributionResponse, error) {
