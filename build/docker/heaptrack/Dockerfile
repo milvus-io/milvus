@@ -33,7 +33,7 @@ RUN cd /opt/heaptrack/build && \
 
 RUN rm -rf /opt/heaptrack
 
-FROM ubuntu:bionic-20200921
+FROM ubuntu:18.04
 
 COPY --from=build /usr/local/bin/heaptrack /opt/heaptrack/bin/heaptrack
 COPY --from=build /usr/local/lib/heaptrack /opt/heaptrack/lib/heaptrack
