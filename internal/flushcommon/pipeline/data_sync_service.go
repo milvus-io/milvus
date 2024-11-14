@@ -224,7 +224,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	unflushed, flushed []*datapb.SegmentInfo, input <-chan *msgstream.MsgPack,
 	wbTaskObserverCallback writebuffer.TaskObserverCallback,
 	dropCallback func(),
-) (*DataSyncService, error) {
+) (dss *DataSyncService, err error) {
 	var (
 		channelName  = info.GetVchan().GetChannelName()
 		collectionID = info.GetVchan().GetCollectionID()
@@ -269,13 +269,10 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	fg := flowgraph.NewTimeTickedFlowGraph(params.Ctx)
 	nodeList := []flowgraph.Node{}
 
-	dmStreamNode, err := newDmInputNode(initCtx, params.DispClient, info.GetVchan().GetSeekPosition(), config, input)
-	if err != nil {
-		return nil, err
-	}
+	dmStreamNode := newDmInputNode(config, input)
 	nodeList = append(nodeList, dmStreamNode)
 
-	ddNode, err := newDDNode(
+	ddNode := newDDNode(
 		params.Ctx,
 		collectionID,
 		channelName,
@@ -285,9 +282,6 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		params.CompactionExecutor,
 		params.MsgHandler,
 	)
-	if err != nil {
-		return nil, err
-	}
 	nodeList = append(nodeList, ddNode)
 
 	if len(info.GetSchema().GetFunctions()) > 0 {
@@ -304,10 +298,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	}
 	nodeList = append(nodeList, writeNode)
 
-	ttNode, err := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
-	if err != nil {
-		return nil, err
-	}
+	ttNode := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
 	nodeList = append(nodeList, ttNode)
 
 	if err := fg.AssembleNodes(nodeList...); err != nil {
@@ -358,7 +349,18 @@ func NewDataSyncService(initCtx context.Context, pipelineParams *util.PipelinePa
 	if metaCache, err = getMetaCacheWithTickler(initCtx, pipelineParams, info, tickler, unflushedSegmentInfos, flushedSegmentInfos); err != nil {
 		return nil, err
 	}
-	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, nil, nil, nil)
+
+	input, err := createNewInputFromDispatcher(initCtx, pipelineParams.DispClient, info.GetVchan().GetChannelName(), info.GetVchan().GetSeekPosition())
+	if err != nil {
+		return nil, err
+	}
+	ds, err := getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, input, nil, nil)
+	if err != nil {
+		// deregister channel if failed to init flowgraph to avoid resource leak.
+		pipelineParams.DispClient.Deregister(info.GetVchan().GetChannelName())
+		return nil, err
+	}
+	return ds, nil
 }
 
 func NewStreamingNodeDataSyncService(

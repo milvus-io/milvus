@@ -140,7 +140,7 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 	ttn.lastUpdateTime.Store(curTs)
 }
 
-func newTTNode(config *nodeConfig, wbManager writebuffer.BufferManager, cpUpdater *util.ChannelCheckpointUpdater) (*ttNode, error) {
+func newTTNode(config *nodeConfig, wbManager writebuffer.BufferManager, cpUpdater *util.ChannelCheckpointUpdater) *ttNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(paramtable.Get().DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
@@ -156,5 +156,5 @@ func newTTNode(config *nodeConfig, wbManager writebuffer.BufferManager, cpUpdate
 		dropCallback:       config.dropCallback,
 	}
 
-	return tt, nil
+	return tt
 }

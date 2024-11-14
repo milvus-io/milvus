@@ -76,7 +76,7 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			ddNode, err := newDDNode(
+			ddNode := newDDNode(
 				context.Background(),
 				collectionID,
 				channelName,
@@ -86,7 +86,6 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 				compaction.NewExecutor(),
 				nil,
 			)
-			require.NoError(t, err)
 			require.NotNil(t, ddNode)
 
 			assert.Equal(t, fmt.Sprintf("ddNode-%s", ddNode.vChannelName), ddNode.Name())

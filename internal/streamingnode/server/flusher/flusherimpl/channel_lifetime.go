@@ -131,6 +131,7 @@ func (c *channelLifetime) Run() error {
 		func() { go func() { c.Cancel() }() },
 	)
 	if err != nil {
+		handler.Close()
 		return err
 	}
 	ds.Start()
