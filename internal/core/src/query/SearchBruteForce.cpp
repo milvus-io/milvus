@@ -71,28 +71,49 @@ PrepareBFSearchParams(const SearchInfo& search_info,
     return search_cfg;
 }
 
+std::pair<knowhere::DataSetPtr, knowhere::DataSetPtr>
+PrepareBFDataSet(const dataset::SearchDataset& query_ds,
+                 const dataset::RawDataset& raw_ds,
+                 DataType data_type) {
+    auto base_dataset =
+        knowhere::GenDataSet(raw_ds.num_raw_data, raw_ds.dim, raw_ds.raw_data);
+    auto query_dataset = knowhere::GenDataSet(
+        query_ds.num_queries, query_ds.dim, query_ds.query_data);
+    if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
+        base_dataset->SetIsSparse(true);
+        query_dataset->SetIsSparse(true);
+    } else if (data_type == DataType::VECTOR_BFLOAT16) {
+        //todo: if knowhere support real fp16/bf16 bf, remove convert
+        base_dataset =
+            knowhere::ConvertFromDataTypeIfNeeded<bfloat16>(base_dataset);
+        query_dataset =
+            knowhere::ConvertFromDataTypeIfNeeded<bfloat16>(query_dataset);
+    } else if (data_type == DataType::VECTOR_FLOAT16) {
+        //todo: if knowhere support real fp16/bf16 bf, remove convert
+        base_dataset =
+            knowhere::ConvertFromDataTypeIfNeeded<float16>(base_dataset);
+        query_dataset =
+            knowhere::ConvertFromDataTypeIfNeeded<float16>(query_dataset);
+    }
+    base_dataset->SetTensorBeginId(raw_ds.begin_id);
+    return std::make_pair(query_dataset, base_dataset);
+};
+
 SubSearchResult
-BruteForceSearch(const dataset::SearchDataset& dataset,
-                 const void* chunk_data_raw,
-                 int64_t chunk_rows,
+BruteForceSearch(const dataset::SearchDataset& query_ds,
+                 const dataset::RawDataset& raw_ds,
                  const SearchInfo& search_info,
                  const std::map<std::string, std::string>& index_info,
                  const BitsetView& bitset,
                  DataType data_type) {
-    SubSearchResult sub_result(dataset.num_queries,
-                               dataset.topk,
-                               dataset.metric_type,
-                               dataset.round_decimal);
-    auto nq = dataset.num_queries;
-    auto dim = dataset.dim;
-    auto topk = dataset.topk;
-
-    auto base_dataset = knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
-    auto query_dataset = knowhere::GenDataSet(nq, dim, dataset.query_data);
-    if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
-        base_dataset->SetIsSparse(true);
-        query_dataset->SetIsSparse(true);
-    }
+    SubSearchResult sub_result(query_ds.num_queries,
+                               query_ds.topk,
+                               query_ds.metric_type,
+                               query_ds.round_decimal);
+    auto topk = query_ds.topk;
+    auto nq = query_ds.num_queries;
+    auto [query_dataset, base_dataset] =
+        PrepareBFDataSet(query_ds, raw_ds, data_type);
     auto search_cfg = PrepareBFSearchParams(search_info, index_info);
     // `range_search_k` is only used as one of the conditions for iterator early termination.
     // not gurantee to return exactly `range_search_k` results, which may be more or less.
@@ -112,10 +133,12 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
             res = knowhere::BruteForce::RangeSearch<float>(
                 base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_FLOAT16) {
-            res = knowhere::BruteForce::RangeSearch<float16>(
+            //todo: if knowhere support real fp16/bf16 bf, change it
+            res = knowhere::BruteForce::RangeSearch<float>(
                 base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_BFLOAT16) {
-            res = knowhere::BruteForce::RangeSearch<bfloat16>(
+            //todo: if knowhere support real fp16/bf16 bf, change it
+            res = knowhere::BruteForce::RangeSearch<float>(
                 base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_BINARY) {
             res = knowhere::BruteForce::RangeSearch<uint8_t>(
@@ -138,7 +161,7 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                       res.what());
         }
         auto result =
-            ReGenRangeSearchResult(res.value(), topk, nq, dataset.metric_type);
+            ReGenRangeSearchResult(res.value(), topk, nq, query_ds.metric_type);
         milvus::tracer::AddEvent("ReGenRangeSearchResult");
         std::copy_n(
             GetDatasetIDs(result), nq * topk, sub_result.get_seg_offsets());
@@ -155,7 +178,8 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                 search_cfg,
                 bitset);
         } else if (data_type == DataType::VECTOR_FLOAT16) {
-            stat = knowhere::BruteForce::SearchWithBuf<float16>(
+            //todo: if knowhere support real fp16/bf16 bf, change it
+            stat = knowhere::BruteForce::SearchWithBuf<float>(
                 base_dataset,
                 query_dataset,
                 sub_result.mutable_seg_offsets().data(),
@@ -163,7 +187,8 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                 search_cfg,
                 bitset);
         } else if (data_type == DataType::VECTOR_BFLOAT16) {
-            stat = knowhere::BruteForce::SearchWithBuf<bfloat16>(
+            //todo: if knowhere support real fp16/bf16 bf, change it
+            stat = knowhere::BruteForce::SearchWithBuf<float>(
                 base_dataset,
                 query_dataset,
                 sub_result.mutable_seg_offsets().data(),
@@ -202,21 +227,15 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
 }
 
 SubSearchResult
-BruteForceSearchIterators(const dataset::SearchDataset& dataset,
-                          const void* chunk_data_raw,
-                          int64_t chunk_rows,
+BruteForceSearchIterators(const dataset::SearchDataset& query_ds,
+                          const dataset::RawDataset& raw_ds,
                           const SearchInfo& search_info,
                           const std::map<std::string, std::string>& index_info,
                           const BitsetView& bitset,
                           DataType data_type) {
-    auto nq = dataset.num_queries;
-    auto dim = dataset.dim;
-    auto base_dataset = knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
-    auto query_dataset = knowhere::GenDataSet(nq, dim, dataset.query_data);
-    if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
-        base_dataset->SetIsSparse(true);
-        query_dataset->SetIsSparse(true);
-    }
+    auto nq = query_ds.num_queries;
+    auto [query_dataset, base_dataset] =
+        PrepareBFDataSet(query_ds, raw_ds, data_type);
     auto search_cfg = PrepareBFSearchParams(search_info, index_info);
 
     knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
@@ -227,11 +246,13 @@ BruteForceSearchIterators(const dataset::SearchDataset& dataset,
                 base_dataset, query_dataset, search_cfg, bitset);
             break;
         case DataType::VECTOR_FLOAT16:
-            iterators_val = knowhere::BruteForce::AnnIterator<float16>(
+            //todo: if knowhere support real fp16/bf16 bf, change it
+            iterators_val = knowhere::BruteForce::AnnIterator<float>(
                 base_dataset, query_dataset, search_cfg, bitset);
             break;
         case DataType::VECTOR_BFLOAT16:
-            iterators_val = knowhere::BruteForce::AnnIterator<bfloat16>(
+            //todo: if knowhere support real fp16/bf16 bf, change it
+            iterators_val = knowhere::BruteForce::AnnIterator<float>(
                 base_dataset, query_dataset, search_cfg, bitset);
             break;
         case DataType::VECTOR_SPARSE_FLOAT:
@@ -251,10 +272,10 @@ BruteForceSearchIterators(const dataset::SearchDataset& dataset,
             "equal to nq:{} for single chunk",
             iterators_val.value().size(),
             nq);
-        SubSearchResult subSearchResult(dataset.num_queries,
-                                        dataset.topk,
-                                        dataset.metric_type,
-                                        dataset.round_decimal,
+        SubSearchResult subSearchResult(query_ds.num_queries,
+                                        query_ds.topk,
+                                        query_ds.metric_type,
+                                        query_ds.round_decimal,
                                         iterators_val.value());
         return std::move(subSearchResult);
     } else {
