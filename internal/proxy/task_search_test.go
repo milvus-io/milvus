@@ -54,9 +54,10 @@ func TestSearchTask_PostExecute(t *testing.T) {
 	var err error
 
 	var (
-		rc  = NewRootCoordMock()
-		qc  = mocks.NewMockQueryCoordClient(t)
-		ctx = context.TODO()
+		rc            = NewRootCoordMock()
+		qc            = mocks.NewMockQueryCoordClient(t)
+		loadInfoCache = NewMockLoadInfoCache(t)
+		ctx           = context.TODO()
 	)
 
 	defer rc.Close()
@@ -67,6 +68,8 @@ func TestSearchTask_PostExecute(t *testing.T) {
 	}, nil).Maybe()
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	require.NoError(t, err)
+
+	loadInfoCache.EXPECT().GetLoadInfo(mock.Anything, mock.Anything).Return(NewLoadInfo(0, nil), nil).Maybe()
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
 		task := &searchTask{
@@ -80,8 +83,9 @@ func TestSearchTask_PostExecute(t *testing.T) {
 				Nq:             1,
 				SearchParams:   getBaseSearchParams(),
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			qc:            qc,
+			tr:            timerecord.NewTimeRecorder("test-search"),
+			loadInfoCache: loadInfoCache,
 		}
 		require.NoError(t, task.OnEnqueue())
 		return task
@@ -192,9 +196,10 @@ func TestSearchTask_PreExecute(t *testing.T) {
 	var err error
 
 	var (
-		rc  = NewRootCoordMock()
-		qc  = mocks.NewMockQueryCoordClient(t)
-		ctx = context.TODO()
+		rc            = NewRootCoordMock()
+		qc            = mocks.NewMockQueryCoordClient(t)
+		loadInfoCache = NewMockLoadInfoCache(t)
+		ctx           = context.TODO()
 	)
 
 	defer rc.Close()
@@ -203,6 +208,8 @@ func TestSearchTask_PreExecute(t *testing.T) {
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	require.NoError(t, err)
+
+	loadInfoCache.EXPECT().GetLoadInfo(mock.Anything, mock.Anything).Return(NewLoadInfo(0, nil), nil).Maybe()
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
 		task := &searchTask{
@@ -213,8 +220,9 @@ func TestSearchTask_PreExecute(t *testing.T) {
 				CollectionName: collName,
 				Nq:             1,
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			qc:            qc,
+			tr:            timerecord.NewTimeRecorder("test-search"),
+			loadInfoCache: loadInfoCache,
 		}
 		require.NoError(t, task.OnEnqueue())
 		return task
@@ -229,8 +237,9 @@ func TestSearchTask_PreExecute(t *testing.T) {
 				CollectionName: collName,
 				Nq:             nq,
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			qc:            qc,
+			tr:            timerecord.NewTimeRecorder("test-search"),
+			loadInfoCache: loadInfoCache,
 		}
 		require.NoError(t, task.OnEnqueue())
 		return task
@@ -2099,9 +2108,10 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 		err error
 		ctx = context.TODO()
 
-		rc = NewRootCoordMock()
-		qc = getQueryCoordClient()
-		qn = getQueryNodeClient()
+		rc            = NewRootCoordMock()
+		qc            = getQueryCoordClient()
+		qn            = getQueryNodeClient()
+		loadInfoCache = NewMockLoadInfoCache(t)
 
 		shardsNum      = int32(2)
 		collectionName = t.Name() + funcutil.GenRandomStr()
@@ -2119,6 +2129,8 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	assert.NoError(t, err)
+
+	loadInfoCache.EXPECT().GetLoadInfo(mock.Anything, mock.Anything).Return(NewLoadInfo(0, nil), nil).Maybe()
 
 	fieldName2Types := map[string]schemapb.DataType{
 		testBoolField:     schemapb.DataType_Bool,
@@ -2206,8 +2218,9 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 			Nq:             2,
 			DslType:        commonpb.DslType_BoolExprV1,
 		},
-		qc: qc,
-		lb: lb,
+		qc:            qc,
+		lb:            lb,
+		loadInfoCache: loadInfoCache,
 	}
 	for i := 0; i < len(fieldName2Types); i++ {
 		task.SearchRequest.OutputFieldsId[i] = int64(common.StartOfUserFieldID + i)
@@ -2625,6 +2638,8 @@ func TestSearchTask_Requery(t *testing.T) {
 		pkField  = "pk"
 		vecField = "vec"
 	)
+	loadInfoCache := NewMockLoadInfoCache(t)
+	loadInfoCache.EXPECT().GetLoadInfo(mock.Anything, mock.Anything).Return(NewLoadInfo(0, nil), nil).Maybe()
 
 	ids := make([]int64, rows)
 	for i := range ids {
@@ -2739,9 +2754,10 @@ func TestSearchTask_Requery(t *testing.T) {
 					Ids: resultIDs,
 				},
 			},
-			schema: schema,
-			tr:     timerecord.NewTimeRecorder("search"),
-			node:   node,
+			schema:        schema,
+			tr:            timerecord.NewTimeRecorder("search"),
+			node:          node,
+			loadInfoCache: loadInfoCache,
 		}
 
 		err := qt.Requery(nil)
@@ -2767,10 +2783,11 @@ func TestSearchTask_Requery(t *testing.T) {
 					SourceID: paramtable.GetNodeID(),
 				},
 			},
-			request: &milvuspb.SearchRequest{},
-			schema:  schema,
-			tr:      timerecord.NewTimeRecorder("search"),
-			node:    node,
+			request:       &milvuspb.SearchRequest{},
+			schema:        schema,
+			tr:            timerecord.NewTimeRecorder("search"),
+			node:          node,
+			loadInfoCache: loadInfoCache,
 		}
 
 		err := qt.Requery(nil)
@@ -2802,9 +2819,10 @@ func TestSearchTask_Requery(t *testing.T) {
 			request: &milvuspb.SearchRequest{
 				CollectionName: collectionName,
 			},
-			schema: schema,
-			tr:     timerecord.NewTimeRecorder("search"),
-			node:   node,
+			schema:        schema,
+			tr:            timerecord.NewTimeRecorder("search"),
+			node:          node,
+			loadInfoCache: loadInfoCache,
 		}
 
 		err := qt.Requery(nil)
@@ -2849,11 +2867,12 @@ func TestSearchTask_Requery(t *testing.T) {
 					Ids: resultIDs,
 				},
 			},
-			requery:   true,
-			schema:    schema,
-			resultBuf: typeutil.NewConcurrentSet[*internalpb.SearchResults](),
-			tr:        timerecord.NewTimeRecorder("search"),
-			node:      node,
+			requery:       true,
+			schema:        schema,
+			resultBuf:     typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+			tr:            timerecord.NewTimeRecorder("search"),
+			node:          node,
+			loadInfoCache: loadInfoCache,
 		}
 		scores := make([]float32, rows)
 		for i := range scores {
@@ -3099,7 +3118,8 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 
 type MaterializedViewTestSuite struct {
 	suite.Suite
-	mockMetaCache *MockCache
+	mockMetaCache     *MockCache
+	mockLoadInfoCache *MockLoadInfoCache
 
 	ctx             context.Context
 	cancelFunc      context.CancelFunc
@@ -3134,6 +3154,9 @@ func (s *MaterializedViewTestSuite) SetupTest() {
 			partitionKeyIsolation: true,
 		}, nil)
 	globalMetaCache = s.mockMetaCache
+
+	s.mockLoadInfoCache = NewMockLoadInfoCache(s.T())
+	s.mockLoadInfoCache.EXPECT().GetLoadInfo(mock.Anything, mock.Anything).Return(NewLoadInfo(s.colID, nil), nil).Maybe()
 }
 
 func (s *MaterializedViewTestSuite) TearDownTest() {
@@ -3151,6 +3174,7 @@ func (s *MaterializedViewTestSuite) getSearchTask() *searchTask {
 			Nq:             1,
 			SearchParams:   getBaseSearchParams(),
 		},
+		loadInfoCache: s.mockLoadInfoCache,
 	}
 	s.NoError(task.OnEnqueue())
 	return task

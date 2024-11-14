@@ -49,9 +49,10 @@ func TestQueryTask_all(t *testing.T) {
 		err error
 		ctx = context.TODO()
 
-		rc = NewRootCoordMock()
-		qc = mocks.NewMockQueryCoordClient(t)
-		qn = getQueryNodeClient()
+		rc            = NewRootCoordMock()
+		qc            = mocks.NewMockQueryCoordClient(t)
+		qn            = getQueryNodeClient()
+		loadInfoCache = NewMockLoadInfoCache(t)
 
 		shardsNum      = common.DefaultShardsNum
 		collectionName = t.Name() + funcutil.GenRandomStr()
@@ -132,6 +133,8 @@ func TestQueryTask_all(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
+	loadInfoCache.EXPECT().GetLoadInfo(mock.Anything, mock.Anything).Return(NewLoadInfo(collectionID, nil), nil).Maybe()
+
 	t.Run("test query task parameters", func(t *testing.T) {
 		task := &queryTask{
 			Condition: NewTaskCondition(ctx),
@@ -162,8 +165,9 @@ func TestQueryTask_all(t *testing.T) {
 					},
 				},
 			},
-			qc: qc,
-			lb: lb,
+			qc:            qc,
+			lb:            lb,
+			loadInfoCache: loadInfoCache,
 		}
 
 		assert.NoError(t, task.OnEnqueue())
@@ -288,9 +292,10 @@ func TestQueryTask_all(t *testing.T) {
 					},
 				},
 			},
-			qc:        qc,
-			lb:        lb,
-			resultBuf: &typeutil.ConcurrentSet[*internalpb.RetrieveResults]{},
+			qc:            qc,
+			lb:            lb,
+			resultBuf:     &typeutil.ConcurrentSet[*internalpb.RetrieveResults]{},
+			loadInfoCache: loadInfoCache,
 		}
 		// simulate scheduler enqueue task
 		enqueTs := uint64(10000)
@@ -339,9 +344,10 @@ func TestQueryTask_all(t *testing.T) {
 				},
 				GuaranteeTimestamp: enqueTs,
 			},
-			qc:        qc,
-			lb:        lb,
-			resultBuf: &typeutil.ConcurrentSet[*internalpb.RetrieveResults]{},
+			qc:            qc,
+			lb:            lb,
+			resultBuf:     &typeutil.ConcurrentSet[*internalpb.RetrieveResults]{},
+			loadInfoCache: loadInfoCache,
 		}
 		qtErr = qt.PreExecute(context.TODO())
 		assert.Nil(t, qtErr)
@@ -1070,13 +1076,18 @@ func Test_createCntPlan(t *testing.T) {
 
 func Test_queryTask_createPlan(t *testing.T) {
 	collSchema := newTestSchema()
+	loadInfoCache := NewMockLoadInfoCache(t)
+
+	loadInfoCache.EXPECT().GetLoadInfo(mock.Anything, mock.Anything).Return(NewLoadInfo(0, nil), nil).Maybe()
+
 	t.Run("match count rule", func(t *testing.T) {
 		schema := newSchemaInfo(collSchema)
 		tsk := &queryTask{
 			request: &milvuspb.QueryRequest{
 				OutputFields: []string{"count(*)"},
 			},
-			schema: schema,
+			schema:        schema,
+			loadInfoCache: loadInfoCache,
 		}
 		err := tsk.createPlan(context.TODO())
 		assert.NoError(t, err)
@@ -1091,7 +1102,9 @@ func Test_queryTask_createPlan(t *testing.T) {
 			request: &milvuspb.QueryRequest{
 				OutputFields: []string{"Int64"},
 			},
-			schema: schema,
+			RetrieveRequest: &internalpb.RetrieveRequest{},
+			schema:          schema,
+			loadInfoCache:   loadInfoCache,
 		}
 		err := tsk.createPlan(context.TODO())
 		assert.Error(t, err)
@@ -1106,6 +1119,8 @@ func Test_queryTask_createPlan(t *testing.T) {
 				OutputFields: []string{"a"},
 				Expr:         "b > 2",
 			},
+			RetrieveRequest: &internalpb.RetrieveRequest{},
+			loadInfoCache:   loadInfoCache,
 		}
 		err := tsk.createPlan(context.TODO())
 		assert.Error(t, err)
@@ -1120,6 +1135,8 @@ func Test_queryTask_createPlan(t *testing.T) {
 				OutputFields: []string{"b"},
 				Expr:         "a > 2",
 			},
+			RetrieveRequest: &internalpb.RetrieveRequest{},
+			loadInfoCache:   loadInfoCache,
 		}
 		err := tsk.createPlan(context.TODO())
 		assert.Error(t, err)
