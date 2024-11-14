@@ -24,26 +24,18 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
       is_sparse_(is_sparse) {
     origin_index_type_ = index_meta_.GetIndexType();
     metric_type_ = index_meta_.GeMetricType();
-    // Currently for dense vector index, if the segment is growing, we use IVFCC
-    // as the index type; if the segment is sealed but its index has not been
-    // built by the index node, we use IVFFLAT as the temp index type and
-    // release it once the index node has finished building the index and query
-    // node has loaded it.
+    // For Dense vector, use IVFFLAT_CC as the growing and temp index type.
+    //
+    // For Sparse vector, use SPARSE_WAND_CC for INDEX_SPARSE_WAND index, or use
+    // SPARSE_INVERTED_INDEX_CC for INDEX_SPARSE_INVERTED_INDEX/other sparse
+    // index types as the growing and temp index type.
 
-    // But for sparse vector index(INDEX_SPARSE_INVERTED_INDEX and
-    // INDEX_SPARSE_WAND), those index themselves can be used as the temp index
-    // type, so we can avoid the extra step of "releast temp and load".
-    // When using HNSW(cardinal) for sparse, we use INDEX_SPARSE_INVERTED_INDEX
-    // as the growing index.
-
-    if (origin_index_type_ ==
-            knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
-        origin_index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
-        index_type_ = origin_index_type_;
+    if (origin_index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
+        index_type_ = knowhere::IndexEnum::INDEX_SPARSE_WAND_CC;
     } else if (is_sparse_) {
-        index_type_ = knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX;
+        index_type_ = knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC;
     } else {
-        index_type_ = support_index_types.at(segment_type);
+        index_type_ = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
     }
     build_params_[knowhere::meta::METRIC_TYPE] = metric_type_;
     build_params_[knowhere::indexparam::NLIST] =
