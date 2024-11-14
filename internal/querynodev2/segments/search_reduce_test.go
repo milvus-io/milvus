@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -24,8 +25,8 @@ func (suite *SearchReduceSuite) TestResult_ReduceSearchResultData() {
 		ids := []int64{1, 2, 3, 4}
 		scores := []float32{-1.0, -2.0, -3.0, -4.0}
 		topks := []int64{int64(len(ids))}
-		data1 := genSearchResultData(nq, topk, ids, scores, topks)
-		data2 := genSearchResultData(nq, topk, ids, scores, topks)
+		data1 := mock_segcore.GenSearchResultData(nq, topk, ids, scores, topks)
+		data2 := mock_segcore.GenSearchResultData(nq, topk, ids, scores, topks)
 		dataArray := make([]*schemapb.SearchResultData, 0)
 		dataArray = append(dataArray, data1)
 		dataArray = append(dataArray, data2)
@@ -43,8 +44,8 @@ func (suite *SearchReduceSuite) TestResult_ReduceSearchResultData() {
 		ids2 := []int64{5, 1, 3, 4}
 		scores2 := []float32{-1.0, -1.0, -3.0, -4.0}
 		topks2 := []int64{int64(len(ids2))}
-		data1 := genSearchResultData(nq, topk, ids1, scores1, topks1)
-		data2 := genSearchResultData(nq, topk, ids2, scores2, topks2)
+		data1 := mock_segcore.GenSearchResultData(nq, topk, ids1, scores1, topks1)
+		data2 := mock_segcore.GenSearchResultData(nq, topk, ids2, scores2, topks2)
 		dataArray := make([]*schemapb.SearchResultData, 0)
 		dataArray = append(dataArray, data1)
 		dataArray = append(dataArray, data2)
@@ -68,8 +69,8 @@ func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {
 		ids2 := []int64{5, 1, 3, 4}
 		scores2 := []float32{-1.0, -1.0, -3.0, -4.0}
 		topks2 := []int64{int64(len(ids2))}
-		data1 := genSearchResultData(nq, topk, ids1, scores1, topks1)
-		data2 := genSearchResultData(nq, topk, ids2, scores2, topks2)
+		data1 := mock_segcore.GenSearchResultData(nq, topk, ids1, scores1, topks1)
+		data2 := mock_segcore.GenSearchResultData(nq, topk, ids2, scores2, topks2)
 		data1.GroupByFieldValue = &schemapb.FieldData{
 			Type: schemapb.DataType_Int8,
 			Field: &schemapb.FieldData_Scalars{
@@ -112,8 +113,8 @@ func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {
 		ids2 := []int64{3, 4}
 		scores2 := []float32{-1.0, -1.0}
 		topks2 := []int64{int64(len(ids2))}
-		data1 := genSearchResultData(nq, topk, ids1, scores1, topks1)
-		data2 := genSearchResultData(nq, topk, ids2, scores2, topks2)
+		data1 := mock_segcore.GenSearchResultData(nq, topk, ids1, scores1, topks1)
+		data2 := mock_segcore.GenSearchResultData(nq, topk, ids2, scores2, topks2)
 		data1.GroupByFieldValue = &schemapb.FieldData{
 			Type: schemapb.DataType_Bool,
 			Field: &schemapb.FieldData_Scalars{
@@ -156,8 +157,8 @@ func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {
 		ids2 := []int64{5, 1, 3, 4}
 		scores2 := []float32{-1.0, -1.0, -3.0, -4.0}
 		topks2 := []int64{int64(len(ids2))}
-		data1 := genSearchResultData(nq, topk, ids1, scores1, topks1)
-		data2 := genSearchResultData(nq, topk, ids2, scores2, topks2)
+		data1 := mock_segcore.GenSearchResultData(nq, topk, ids1, scores1, topks1)
+		data2 := mock_segcore.GenSearchResultData(nq, topk, ids2, scores2, topks2)
 		data1.GroupByFieldValue = &schemapb.FieldData{
 			Type: schemapb.DataType_VarChar,
 			Field: &schemapb.FieldData_Scalars{
@@ -200,8 +201,8 @@ func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {
 		ids2 := []int64{4, 5, 6, 7}
 		scores2 := []float32{-1.0, -1.0, -3.0, -4.0}
 		topks2 := []int64{int64(len(ids2))}
-		data1 := genSearchResultData(nq, topk, ids1, scores1, topks1)
-		data2 := genSearchResultData(nq, topk, ids2, scores2, topks2)
+		data1 := mock_segcore.GenSearchResultData(nq, topk, ids1, scores1, topks1)
+		data2 := mock_segcore.GenSearchResultData(nq, topk, ids2, scores2, topks2)
 		data1.GroupByFieldValue = &schemapb.FieldData{
 			Type: schemapb.DataType_VarChar,
 			Field: &schemapb.FieldData_Scalars{

@@ -61,6 +61,9 @@ packages:
     interfaces:
       StreamingCoordCataLog:
       StreamingNodeCataLog:
+  github.com/milvus-io/milvus/internal/util/segcore:
+    interfaces:
+      CSegment:
   github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer:
     interfaces:
       Discoverer:
@@ -72,6 +75,9 @@ packages:
     interfaces:
       Resolver:
       Builder:
+  github.com/milvus-io/milvus/internal/util/searchutil/optimizers:
+    interfaces:
+      QueryHook:
   google.golang.org/grpc/resolver:
     interfaces:
       ClientConn:

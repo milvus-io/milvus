@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 )
 
 type cntReducer struct{}
@@ -33,7 +34,7 @@ func (r *cntReducer) Reduce(ctx context.Context, results []*internalpb.RetrieveR
 
 type cntReducerSegCore struct{}
 
-func (r *cntReducerSegCore) Reduce(ctx context.Context, results []*segcorepb.RetrieveResults, _ []Segment, _ *RetrievePlan) (*segcorepb.RetrieveResults, error) {
+func (r *cntReducerSegCore) Reduce(ctx context.Context, results []*segcorepb.RetrieveResults, _ []Segment, _ *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	cnt := int64(0)
 	allRetrieveCount := int64(0)
 	for _, res := range results {
