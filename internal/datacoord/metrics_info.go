@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
 )
@@ -91,7 +92,7 @@ func (s *Server) getChannelsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 	channel2Checkpoints := s.meta.GetChannelCheckpoints()
 	for _, channel := range channels {
 		if cp, ok := channel2Checkpoints[channel.Name]; ok {
-			channel.CheckpointTS = typeutil.TimestampToString(cp.GetTimestamp())
+			channel.CheckpointTS = tsoutil.PhysicalTimeFormat(cp.GetTimestamp())
 		} else {
 			log.Warn("channel not found in meta cache", zap.String("channel", channel.Name))
 		}
@@ -139,13 +140,9 @@ func (s *Server) getDistJSON(ctx context.Context, req *milvuspb.GetMetricsReques
 			dmChannel := metrics.NewDMChannelFrom(chInfo.GetVchan())
 			dmChannel.NodeID = nodeID
 			dmChannel.WatchState = chInfo.State.String()
-			dmChannel.StartWatchTS = chInfo.GetStartTs()
+			dmChannel.StartWatchTS = typeutil.TimestampToString(uint64(chInfo.GetStartTs()))
 			channels = append(channels, dmChannel)
 		}
-	}
-
-	if len(segments) == 0 && len(channels) == 0 {
-		return ""
 	}
 
 	dist := &metricsinfo.DataCoordDist{

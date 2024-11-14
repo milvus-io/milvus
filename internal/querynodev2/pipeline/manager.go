@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -170,7 +171,7 @@ func (m *manager) GetChannelStats() []*metricsinfo.Channel {
 		ret = append(ret, &metricsinfo.Channel{
 			Name:           ch,
 			WatchState:     p.Status(),
-			LatestTimeTick: typeutil.TimestampToString(tt),
+			LatestTimeTick: tsoutil.PhysicalTimeFormat(tt),
 			NodeID:         paramtable.GetNodeID(),
 			CollectionID:   p.GetCollectionID(),
 		})

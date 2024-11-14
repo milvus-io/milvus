@@ -14,14 +14,18 @@ package metricsinfo
 import (
 	"encoding/json"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -123,5 +127,63 @@ func NewSlowQueryWithSearchRequest(request *milvuspb.SearchRequest, user string,
 		Type:                  searchType,
 		TraceID:               traceID,
 		Time:                  time.Now().Format(time.DateTime),
+	}
+}
+
+func NewPartitionInfos(partitions *milvuspb.ShowPartitionsResponse) []*PartitionInfo {
+	partitionInfos := make([]*PartitionInfo, len(partitions.PartitionNames))
+
+	for i := range partitions.PartitionNames {
+		partitionInfos[i] = &PartitionInfo{
+			PartitionName:       partitions.PartitionNames[i],
+			PartitionID:         partitions.PartitionIDs[i],
+			CreatedUtcTimestamp: typeutil.TimestampToString(partitions.CreatedUtcTimestamps[i]),
+		}
+	}
+	return partitionInfos
+}
+
+func NewFields(fields *schemapb.CollectionSchema) []*Field {
+	fieldInfos := make([]*Field, len(fields.Fields))
+	for i, f := range fields.Fields {
+		fieldInfos[i] = &Field{
+			FieldID:          strconv.FormatInt(f.FieldID, 10),
+			Name:             f.Name,
+			IsPrimaryKey:     f.IsPrimaryKey,
+			Description:      f.Description,
+			DataType:         f.DataType.String(),
+			TypeParams:       funcutil.KeyValuePair2Map(f.TypeParams),
+			IndexParams:      funcutil.KeyValuePair2Map(f.IndexParams),
+			AutoID:           f.AutoID,
+			ElementType:      f.ElementType.String(),
+			DefaultValue:     f.DefaultValue.String(),
+			IsDynamic:        f.IsDynamic,
+			IsPartitionKey:   f.IsPartitionKey,
+			IsClusteringKey:  f.IsClusteringKey,
+			Nullable:         f.Nullable,
+			IsFunctionOutput: f.IsFunctionOutput,
+		}
+	}
+	return fieldInfos
+}
+
+func NewDatabase(resp *milvuspb.DescribeDatabaseResponse) *Database {
+	return &Database{
+		DBName:           resp.GetDbName(),
+		DBID:             resp.GetDbID(),
+		CreatedTimestamp: typeutil.TimestampToString(uint64(int64(resp.GetCreatedTimestamp()) / int64(time.Millisecond) / int64(time.Nanosecond))),
+		Properties:       funcutil.KeyValuePair2Map(resp.GetProperties()),
+	}
+}
+
+func NewDatabases(resp *milvuspb.ListDatabasesResponse) *Databases {
+	createdTimestamps := make([]string, len(resp.GetCreatedTimestamp()))
+	for i, ts := range resp.GetCreatedTimestamp() {
+		createdTimestamps[i] = typeutil.TimestampToString(uint64(int64(ts) / int64(time.Millisecond) / int64(time.Nanosecond)))
+	}
+	return &Databases{
+		Names:             resp.GetDbNames(),
+		IDs:               lo.Map(resp.GetDbIds(), func(t int64, i int) string { return strconv.FormatInt(t, 10) }),
+		CreatedTimestamps: createdTimestamps,
 	}
 }

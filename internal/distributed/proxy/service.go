@@ -456,13 +456,6 @@ func (s *Server) init() error {
 		}
 	}
 
-	if HTTPParams.Enabled.GetAsBool() {
-		registerHTTPHandlerOnce.Do(func() {
-			log.Info("register Proxy http server")
-			s.registerHTTPServer()
-		})
-	}
-
 	if s.rootCoordClient == nil {
 		var err error
 		log.Debug("create RootCoord client for Proxy")
@@ -528,6 +521,13 @@ func (s *Server) init() error {
 	log.Debug("set QueryCoord client for Proxy")
 	s.proxy.SetQueryCoordClient(s.queryCoordClient)
 	log.Debug("set QueryCoord client for Proxy done")
+
+	if HTTPParams.Enabled.GetAsBool() {
+		registerHTTPHandlerOnce.Do(func() {
+			log.Info("register Proxy http server")
+			s.registerHTTPServer()
+		})
+	}
 
 	log.Debug(fmt.Sprintf("update Proxy's state to %s", commonpb.StateCode_Initializing.String()))
 	s.proxy.UpdateStateCode(commonpb.StateCode_Initializing)

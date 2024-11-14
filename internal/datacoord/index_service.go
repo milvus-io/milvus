@@ -64,14 +64,14 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 		return err
 	}
 	segIndex := &model.SegmentIndex{
-		SegmentID:    segment.ID,
-		CollectionID: segment.CollectionID,
-		PartitionID:  segment.PartitionID,
-		NumRows:      segment.NumOfRows,
-		IndexID:      indexID,
-		BuildID:      buildID,
-		CreateTime:   uint64(segment.ID),
-		WriteHandoff: false,
+		SegmentID:      segment.ID,
+		CollectionID:   segment.CollectionID,
+		PartitionID:    segment.PartitionID,
+		NumRows:        segment.NumOfRows,
+		IndexID:        indexID,
+		BuildID:        buildID,
+		CreatedUTCTime: uint64(time.Now().Unix()),
+		WriteHandoff:   false,
 	}
 	if err = s.meta.indexMeta.AddSegmentIndex(segIndex); err != nil {
 		return err
