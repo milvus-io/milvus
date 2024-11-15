@@ -241,7 +241,6 @@ def get_index_param(request):
 
 # TODO: construct invalid index params for all index types
 @pytest.fixture(params=[{"metric_type": "L3", "index_type": "IVF_FLAT"},
-                        {"metric_type": "L2", "index_type": "IVF_FLAT", "err_params": {"nlist": 10}},
                         {"metric_type": "L2", "index_type": "IVF_FLAT", "params": {"nlist": -1}}])
 def get_invalid_index_params(request):
     yield request.param

@@ -96,9 +96,16 @@ func (m *bufferManager) memoryCheck() {
 	if !paramtable.Get().DataNodeCfg.MemoryForceSyncEnable.GetAsBool() {
 		return
 	}
+	startTime := time.Now()
+	m.mut.RLock()
+	defer func() {
+		dur := time.Since(startTime)
+		if dur > 30*time.Second {
+			log.Warn("memory check takes too long", zap.Duration("time", dur))
+		}
+		m.mut.RUnlock()
+	}()
 
-	m.mut.Lock()
-	defer m.mut.Unlock()
 	for {
 		var total int64
 		var candidate WriteBuffer

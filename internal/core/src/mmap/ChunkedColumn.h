@@ -157,15 +157,18 @@ class ChunkedColumnBase : public ColumnBase {
 
     std::pair<size_t, size_t>
     GetChunkIDByOffset(int64_t offset) const {
-        int chunk_id = 0;
-        for (auto& chunk : chunks_) {
-            if (offset < chunk->RowNums()) {
-                break;
-            }
-            offset -= chunk->RowNums();
-            chunk_id++;
-        }
-        return {chunk_id, offset};
+        AssertInfo(offset < num_rows_,
+                   "offset {} is out of range, num_rows: {}",
+                   offset,
+                   num_rows_);
+
+        auto iter = std::lower_bound(num_rows_until_chunk_.begin(),
+                                     num_rows_until_chunk_.end(),
+                                     offset + 1);
+        size_t chunk_idx =
+            std::distance(num_rows_until_chunk_.begin(), iter) - 1;
+        size_t offset_in_chunk = offset - num_rows_until_chunk_[chunk_idx];
+        return {chunk_idx, offset_in_chunk};
     }
 
     int64_t

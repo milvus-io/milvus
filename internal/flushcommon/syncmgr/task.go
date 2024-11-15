@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -201,7 +202,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		log.Info("segment removed", zap.Int64("segmentID", t.segment.SegmentID()), zap.String("channel", t.channelName))
 	}
 
-	t.execTime = t.tr.RecordSpan()
+	t.execTime = t.tr.ElapseSpan()
 	log.Info("task done", zap.Int64("flushedSize", totalSize), zap.Duration("timeTaken", t.execTime))
 
 	if !t.isFlush {
@@ -422,8 +423,8 @@ func (t *SyncTask) MarshalJSON() ([]byte, error) {
 		SegmentID:     t.segmentID,
 		BatchRows:     t.batchRows,
 		SegmentLevel:  t.level.String(),
-		TSFrom:        t.tsFrom,
-		TSTo:          t.tsTo,
+		TSFrom:        tsoutil.PhysicalTimeFormat(t.tsFrom),
+		TSTo:          tsoutil.PhysicalTimeFormat(t.tsTo),
 		DeltaRowCount: t.deltaRowCount,
 		FlushSize:     t.flushedSize,
 		RunningTime:   t.execTime.String(),

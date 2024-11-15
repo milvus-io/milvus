@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -502,17 +503,7 @@ func (task *LeaderTask) MarshalJSON() ([]byte, error) {
 }
 
 func marshalJSON(task Task) ([]byte, error) {
-	return json.Marshal(&struct {
-		TaskName     string   `json:"task_name,omitempty"`
-		CollectionID int64    `json:"collection_id,omitempty"`
-		Replica      int64    `json:"replica_id,omitempty"`
-		TaskType     string   `json:"task_type,omitempty"`
-		TaskStatus   string   `json:"task_status,omitempty"`
-		Priority     string   `json:"priority,omitempty"`
-		Actions      []string `json:"actions,omitempty"`
-		Step         int      `json:"step,omitempty"`
-		Reason       string   `json:"reason,omitempty"`
-	}{
+	return json.Marshal(&metricsinfo.QueryCoordTask{
 		TaskName:     task.Name(),
 		CollectionID: task.CollectionID(),
 		Replica:      task.ReplicaID(),

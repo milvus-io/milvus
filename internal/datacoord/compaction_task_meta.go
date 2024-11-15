@@ -19,10 +19,12 @@ package datacoord
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -31,20 +33,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func newCompactionTaskStats(task *datapb.CompactionTask) *metricsinfo.CompactionTask {
 	return &metricsinfo.CompactionTask{
-		PlanID:         task.PlanID,
-		CollectionID:   task.CollectionID,
-		Type:           task.Type.String(),
-		State:          task.State.String(),
-		FailReason:     task.FailReason,
-		StartTime:      task.StartTime,
-		EndTime:        task.EndTime,
-		TotalRows:      task.TotalRows,
-		InputSegments:  task.InputSegments,
-		ResultSegments: task.ResultSegments,
+		PlanID:       task.PlanID,
+		CollectionID: task.CollectionID,
+		Type:         task.Type.String(),
+		State:        task.State.String(),
+		FailReason:   task.FailReason,
+		StartTime:    typeutil.TimestampToString(uint64(task.StartTime)),
+		EndTime:      typeutil.TimestampToString(uint64(task.EndTime)),
+		TotalRows:    task.TotalRows,
+		InputSegments: lo.Map(task.InputSegments, func(t int64, i int) string {
+			return strconv.FormatInt(t, 10)
+		}),
+		ResultSegments: lo.Map(task.ResultSegments, func(t int64, i int) string {
+			return strconv.FormatInt(t, 10)
+		}),
 	}
 }
 

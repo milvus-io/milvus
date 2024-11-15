@@ -47,6 +47,9 @@ func SubTimeByWallClock(after, before time.Time) time.Duration {
 }
 
 func TimestampToString(ts uint64) string {
-	ut := time.Unix(int64(ts), 0)
+	if ts <= 0 {
+		return ""
+	}
+	ut := time.UnixMilli(int64(ts))
 	return ut.Format(time.DateTime)
 }

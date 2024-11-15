@@ -27,8 +27,8 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.5.0rc118
-pymilvus[bulk_writer]==2.5.0rc118
+pymilvus==2.5.0rc119
+pymilvus[bulk_writer]==2.5.0rc119
 
 
 # for customize config test

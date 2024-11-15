@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -127,7 +128,7 @@ func (fm *fgManagerImpl) GetChannelsJSON() string {
 		channels = append(channels, &metricsinfo.Channel{
 			Name:           ch,
 			WatchState:     ds.fg.Status(),
-			LatestTimeTick: typeutil.TimestampToString(latestTimeTick),
+			LatestTimeTick: tsoutil.PhysicalTimeFormat(latestTimeTick),
 			NodeID:         paramtable.GetNodeID(),
 			CollectionID:   ds.metacache.Collection(),
 		})

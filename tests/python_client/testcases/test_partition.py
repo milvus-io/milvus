@@ -397,8 +397,8 @@ class TestPartitionParams(TestcaseBase):
         partition_w.load(replica_number=1)
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", check_task=CheckTasks.check_query_results,
                            check_items={'exp_res': [{'int64': 0}]})
-        error = {ct.err_code: 1100, ct.err_msg: "call query coordinator LoadCollection: can't change the replica number"
-                                                " for loaded collection: invalid parameter[expected=1][actual=2]"}
+        error = {ct.err_code: 1100, ct.err_msg: "=can't change the replica number for loaded partitions: "
+                                                "invalid parameter[expected=1][actual=2]"}
         partition_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
 
         partition_w.release()

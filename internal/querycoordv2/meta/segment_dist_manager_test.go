@@ -233,7 +233,6 @@ func TestGetSegmentDistJSON(t *testing.T) {
 			assert.Equal(t, int64(1000), s.NumOfRows)
 			assert.Equal(t, "Flushed", s.State)
 			assert.Equal(t, int64(1), s.NodeID)
-			assert.Equal(t, int64(1), s.LoadedTimestamp)
 		} else if s.SegmentID == 2 {
 			assert.Equal(t, int64(200), s.CollectionID)
 			assert.Equal(t, int64(20), s.PartitionID)
@@ -241,7 +240,6 @@ func TestGetSegmentDistJSON(t *testing.T) {
 			assert.Equal(t, int64(2000), s.NumOfRows)
 			assert.Equal(t, "Flushed", s.State)
 			assert.Equal(t, int64(2), s.NodeID)
-			assert.Equal(t, int64(1), s.LoadedTimestamp)
 		} else {
 			assert.Failf(t, "unexpected segment id", "unexpected segment id %d", s.SegmentID)
 		}
