@@ -159,7 +159,7 @@ class MilvusUser(MilvusBaseUser):
     @task(1)
     def full_text_search(self):
         """full text search"""
-        search_data = test_data.sample(1)["text"].values[0]
+        search_data = [test_data.sample(1)["text"].values[0]]
         logger.debug("Performing vector search")
         self.client.search(data=search_data,
                            anns_field="sparse",
