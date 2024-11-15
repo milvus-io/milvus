@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -135,7 +136,7 @@ func SegmentFromInfo(info *datapb.SegmentInfo) *Segment {
 func newSegmentMetricsFrom(segment *Segment) *metricsinfo.Segment {
 	convertedSegment := metrics.NewSegmentFrom(segment.SegmentInfo)
 	convertedSegment.NodeID = segment.Node
-	convertedSegment.LoadedTimestamp = segment.Version
+	convertedSegment.LoadedTimestamp = tsoutil.PhysicalTimeFormat(segment.LastDeltaTimestamp)
 	convertedSegment.Index = lo.Map(lo.Values(segment.IndexInfo), func(e *querypb.FieldIndexInfo, i int) *metricsinfo.SegmentIndex {
 		return &metricsinfo.SegmentIndex{
 			IndexFieldID: e.FieldID,

@@ -147,7 +147,6 @@ func (s *TargetTestSuit) TestQueryCoordRestart() {
 	s.initCollection(name, 1, 2, 2, 2000)
 
 	ctx := context.Background()
-
 	info, err := s.Cluster.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base:           commonpbutil.NewMsgBase(),
 		CollectionName: name,
@@ -155,6 +154,16 @@ func (s *TargetTestSuit) TestQueryCoordRestart() {
 	s.NoError(err)
 	s.True(merr.Ok(info.GetStatus()))
 	collectionID := info.GetCollectionID()
+
+	// wait until all shards are ready
+	// cause showCollections won't just wait all collection becomes loaded, proxy will use retry to block until all shard are ready
+	s.Eventually(func() bool {
+		resp, err := s.Cluster.QueryCoord.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			CollectionID: collectionID,
+		})
+		return err == nil && merr.Ok(resp.GetStatus()) && len(resp.Shards) == 2
+	}, 60*time.Second, 1*time.Second)
 
 	// trigger old coord stop
 	s.Cluster.StopQueryCoord()

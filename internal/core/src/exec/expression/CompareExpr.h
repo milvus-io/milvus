@@ -162,8 +162,8 @@ class PhyCompareFilterExpr : public Expr {
     GetCurrentRows() {
         if (segment_chunk_reader_.segment_->is_chunked()) {
             auto current_rows =
-                is_left_indexed_ && segment_chunk_reader_.segment_->type() ==
-                                        SegmentType::Sealed
+                is_left_indexed_ && segment_chunk_reader_.segment_->HasRawData(
+                                        left_field_.get())
                     ? left_current_chunk_pos_
                     : segment_chunk_reader_.segment_->num_rows_until_chunk(
                           left_field_, left_current_chunk_id_) +

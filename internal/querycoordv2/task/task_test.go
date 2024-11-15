@@ -18,6 +18,7 @@ package task
 
 import (
 	"context"
+	"encoding/json"
 	"math/rand"
 	"strings"
 	"testing"
@@ -45,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -1837,8 +1839,11 @@ func (suite *TaskSuite) TestGetTasksJSON() {
 	suite.NoError(err)
 
 	actualJSON := scheduler.GetTasksJSON()
-	suite.Contains(actualJSON, "SegmentTask")
-	suite.Contains(actualJSON, "ChannelTask")
+
+	var tasks []*metricsinfo.QueryCoordTask
+	err = json.Unmarshal([]byte(actualJSON), &tasks)
+	suite.NoError(err)
+	suite.Equal(2, len(tasks))
 }
 
 func TestTask(t *testing.T) {

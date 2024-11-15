@@ -126,7 +126,7 @@ function renderDatabases(currentPage, rowsPerPage) {
         tableHTML += '<tr>';
         tableHTML += `<td><a href="#" onclick="describeDatabase('${databaseData.db_names[i]}', ${i}, 'list-db')">${databaseData.db_names[i]}</a></td>`;
         tableHTML += `<td>${databaseData.db_ids? databaseData.db_ids[i] : 0}</td>`;
-        tableHTML += `<td>${databaseData.created_timestamp? formatTimestamp(databaseData.created_timestamp[i]) : ''}</td>`;
+        tableHTML += `<td>${databaseData.created_timestamps[i]}</td>`;
         tableHTML += '</tr>';
 
         // Hidden row for displaying collection details as JSON
@@ -165,7 +165,7 @@ function renderDatabases(currentPage, rowsPerPage) {
 }
 
 function describeDatabase(databaseName, rowIndex, type) {
-    fetchData(`${MILVUS_URI}/database?db_name=${databaseName}`, describeDatabaseResp)
+    fetchData(`${MILVUS_URI}/_db/desc?db_name=${databaseName}`, describeDatabaseData)
         .then(data => {
             // Format data as JSON and insert into the designated row
             const jsonFormattedData = JSON.stringify(data, null, 2);
@@ -182,7 +182,7 @@ function describeDatabase(databaseName, rowIndex, type) {
 }
 
 function describeCollection(databaseName, collectionName, rowIndex, type) {
-    fetchData(`${MILVUS_URI}/collection?db_name${databaseName}&&collection_name=${collectionName}`, describeCollectionResp)
+    fetchData(`${MILVUS_URI}/_collection/desc?db_name=${databaseName}&&collection_name=${collectionName}`, describeCollectionData)
         .then(data => {
             // Format data as JSON and insert into the designated row
             const jsonFormattedData = JSON.stringify(data, null, 2);
@@ -199,7 +199,7 @@ function describeCollection(databaseName, collectionName, rowIndex, type) {
 }
 
 function fetchCollections(databaseName) {
-    fetchData(MILVUS_URI + `/collections?db_name=${databaseName}`, collections )
+    fetchData(MILVUS_URI + `/_collection/list?db_name=${databaseName}`, listCollectionData )
         .then(data => {
             collectionsData = data;
             renderCollections(databaseName, startPage, paginationSize)
@@ -212,7 +212,7 @@ function fetchCollections(databaseName) {
 let collectionsData = null; // Global variable to store fetched data
 function renderCollections(databaseName, currentPage, rowsPerPage) {
     let data = collectionsData;
-    if (!data) {
+    if (!data || !data.collection_names) {
         console.error('No collections data available');
         return;
     }
@@ -229,12 +229,11 @@ function renderCollections(databaseName, currentPage, rowsPerPage) {
     const start = currentPage * rowsPerPage;
     const end = start + rowsPerPage;
     const totalCount = data.collection_names.length;
-    console.log(data)
     for (let i = start; i < end && i < totalCount; i++) {
         tableHTML += '<tr>';
         tableHTML += `<td><a href="#" onclick="describeCollection('${databaseName}', '${data.collection_names[i]}', ${i}, 'list-coll')">${data.collection_names[i]}</a></td>`;
         tableHTML += `<td>${data.collection_ids[i]}</td>`;
-        tableHTML += `<td>${formatTimestamp(data.created_utc_timestamps[i])}</td>`;
+        tableHTML += `<td>${data.created_utc_timestamps[i]}</td>`;
         tableHTML += `<td>${data.inMemory_percentages?  data.inMemory_percentages[i]: 'unknown'}</td>`;
         tableHTML += `<td>${data.query_service_available? data.query_service_available[i] ? 'Yes' : 'No' : 'No'}</td>`;
         tableHTML += '</tr>';
@@ -509,7 +508,7 @@ function renderDependencies(data) {
         const tr = `
             <tr>
                 <td><strong>${key === 'metastore'? 'metastore [' + row['meta_type'] + ']' : 'mq [' + row['mq_type'] + ']'} </strong> </td>
-                <td>${row['health_status']? 'Healthy' : 'Unhealthy:' + row['unhealthy_reason']}</td>
+                <td>${row['health_status']? 'Healthy' :  row['unhealthy_reason']}</td>
                 <td>${row['members_health']? row['members_health'].map(member => `
                     <ul>
                       <li>Endpoint: ${member.endpoint}, Health: ${member.health ? "Healthy" : "Unhealthy"}</li>
@@ -593,7 +592,7 @@ function renderBuildIndexTasks(data) {
         tableHTML += `<td>${indexState}</td>`;
         tableHTML += `<td>${task.index_size}</td>`;
         tableHTML += `<td>${task.index_version}</td>`;
-        tableHTML += `<td>${new Date(task.create_time * 1000).toLocaleString()}</td>`;
+        tableHTML += `<td>${task.create_time}</td>`;
         tableHTML += '</tr>';
     });
 
@@ -636,8 +635,8 @@ function renderCompactionTasks(data) {
         tableHTML += `<td>${new Date(task.start_time * 1000).toLocaleString()}</td>`;
         tableHTML += `<td>${new Date(task.end_time * 1000).toLocaleString()}</td>`;
         tableHTML += `<td>${task.total_rows}</td>`;
-        tableHTML += `<td>${task.input_segments.join(', ')}</td>`;
-        tableHTML += `<td>${task.result_segments.join(', ')}</td>`;
+        tableHTML += `<td>${task.input_segments? task.input_segments.join(', '): ''}</td>`;
+        tableHTML += `<td>${task.result_segments? task.result_segments.join(', '): ''}</td>`;
         tableHTML += '</tr>';
     });
 
@@ -677,8 +676,8 @@ function renderImportTasks(data) {
         tableHTML += `<td>${task.node_id}</td>`;
         tableHTML += `<td>${state}</td>`;
         tableHTML += `<td>${task.task_type}</td>`;
-        tableHTML += `<td>${new Date(task.created_time).toLocaleString()}</td>`;
-        tableHTML += `<td>${new Date(task.complete_time).toLocaleString()}</td>`;
+        tableHTML += `<td>${task.created_time}</td>`;
+        tableHTML += `<td>${task.complete_time}</td>`;
         tableHTML += '</tr>';
     });
 
@@ -711,8 +710,8 @@ function renderSyncTasks(data) {
         tableHTML += `<td>${task.segment_id}</td>`;
         tableHTML += `<td>${task.batch_rows}</td>`;
         tableHTML += `<td>${task.segment_level}</td>`;
-        tableHTML += `<td>${new Date(task.ts_from * 1000).toLocaleString()}</td>`;
-        tableHTML += `<td>${new Date(task.ts_to * 1000).toLocaleString()}</td>`;
+        tableHTML += `<td>${task.ts_from}</td>`;
+        tableHTML += `<td>${task.ts_to}</td>`;
         tableHTML += `<td>${task.delta_row_count}</td>`;
         tableHTML += `<td>${task.flush_size}</td>`;
         tableHTML += `<td>${task.running_time}</td>`;
@@ -797,7 +796,7 @@ function renderChannels(channels, currentPage, rowsPerPage) {
             <td>${channel.watch_state || "N/A"}</td>
             <td>${channel.node_id}</td>
             <td>${channel.latest_time_tick || "N/A"}</td>
-            <td>${formatTimestamp(channel.start_watch_ts) || "N/A"}</td>
+            <td>${channel.start_watch_ts || "N/A"}</td>
             <td>${channel.check_point_ts || "N/A"}</td>
         `;
         table.appendChild(row);
@@ -1114,7 +1113,7 @@ function renderSlowQueries(data) {
         tableHTML += `<td>${query.time}</td>`;
         tableHTML += `<td>${query.trace_id}</td>`;
         tableHTML += `<td>${query.type}</td>`;
-        tableHTML += `<td>${query.user}</td>`;
+        tableHTML += `<td>${query.user || 'unknown'}</td>`;
         tableHTML += `<td>${query.database}</td>`;
         tableHTML += `<td>${query.collection}</td>`;
         tableHTML += `<td>${JSON.stringify(query.query_params)}</td>`;
@@ -1406,7 +1405,7 @@ function renderQueryChannels(channels, currentPage, rowsPerPage) {
                 <td>${channel.collection_id}</td>
                 <td>${channel.leader_id || 'Not Found'}</td>
                 <td>${channel.node_id}</td>
-                <td>${channel.watch_state}</td>
+                <td>${channel.watch_state||''}</td>
                 <td>${channel.from}</td>
             </tr>
         `;

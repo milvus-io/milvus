@@ -445,38 +445,67 @@ const mconfigs = `
 }
 `;
 
-const collections =`
+const listCollectionData =`
 {
-  "status": {
-    "error_code": "Success",
-    "reason": ""
-  },
   "collection_names": [
-    "collection1",
-    "collection2",
-    "collection3",
-    "collection4",
-    "collection5",
-    "collection6",
-    "collection7",
-    "collection8",
-    "collection9",
-    "collection10"
+    "collection_1",
+    "collection_2",
+    "collection_3",
+    "collection_4",
+    "collection_5",
+    "collection_6",
+    "collection_7",
+    "collection_8",
+    "collection_9",
+    "collection_10"
   ],
   "collection_ids": [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10
-  ],
-  "created_timestamps": [
-    1633036800, 1633123200, 1633209600, 1633296000, 1633382400, 1633468800, 1633555200, 1633641600, 1633728000, 1633814400
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10"
   ],
   "created_utc_timestamps": [
-    1633036800, 1633123200, 1633209600, 1633296000, 1633382400, 1633468800, 1633555200, 1633641600, 1633728000, 1633814400
+    "2021-10-01 00:00:00",
+    "2021-10-02 00:00:00",
+    "2021-10-03 00:00:00",
+    "2021-10-04 00:00:00",
+    "2021-10-05 00:00:00",
+    "2021-10-06 00:00:00",
+    "2021-10-07 00:00:00",
+    "2021-10-08 00:00:00",
+    "2021-10-09 00:00:00",
+    "2021-10-10 00:00:00"
   ],
   "inMemory_percentages": [
-    100, 90, 80, 70, 60, 50, 40, 30, 20, 10
+    100,
+    90,
+    80,
+    70,
+    60,
+    50,
+    40,
+    30,
+    20,
+    10
   ],
   "query_service_available": [
-    true, false, false, false, false, false, false, false, false, false
+    true,
+    true,
+    true,
+    true,
+    true,
+    false,
+    false,
+    false,
+    false,
+    false
   ]
 }
 `
@@ -556,63 +585,57 @@ const collectionRequest = `
 ]
 `
 
-const describeCollectionResp = `
+const describeCollectionData = `
 {
-  "status": {
-    "error_code": 0,
-    "reason": "Success"
-  },
-  "schema": {
-    "name": "example_collection",
-    "description": "This is an example collection schema",
-    "fields": [
-      {
-        "name": "field1",
-        "data_type": "INT64",
-        "is_primary_key": true,
-        "auto_id": false
-      },
-      {
-        "name": "field2",
-        "data_type": "FLOAT",
-        "is_primary_key": false,
-        "auto_id": false
-      }
-    ]
-  },
-  "collectionID": 12345,
-  "virtual_channel_names": ["vchan1", "vchan2"],
-  "physical_channel_names": ["pchan1", "pchan2"],
-  "created_timestamp": 1633036800,
-  "created_utc_timestamp": 1633036800,
-  "shards_num": 2,
-  "aliases": ["alias1", "alias2"],
-  "start_positions": [
-    {
-      "key": "start_key",
-      "data": "start_data"
-    }
-  ],
-  "consistency_level": 0,
+  "collection_id": "1",
   "collection_name": "example_collection",
-  "properties": [
+  "created_time": "2021-10-01 00:00:00",
+  "shards_num": 2,
+  "consistency_level": "Strong",
+  "aliases": ["alias1", "alias2"],
+  "properties": {
+    "property_key": "property_value"
+  },
+  "db_name": "example_db",
+  "num_partitions": 3,
+  "virtual_channel_names": ["v_channel1", "v_channel2"],
+  "physical_channel_names": ["p_channel1", "p_channel2"],
+  "partition_infos": [
     {
-      "key": "property_key",
-      "value": "property_value"
+      "partition_name": "partition1",
+      "partition_id": "1",
+      "created_utc_timestamp": "2021-10-01 00:00:00"
     }
   ],
-  "db_name": "example_db",
-  "num_partitions": 1,
-  "db_id": 1
+  "enable_dynamic_field": true,
+  "fields": [
+    {
+      "field_id": "1",
+      "name": "field1",
+      "is_primary_key": true,
+      "description": "description1",
+      "data_type": "int64",
+      "type_params": {
+        "param_key": "param_value"
+      },
+      "index_params": {
+        "index_key": "index_value"
+      },
+      "auto_id": false,
+      "element_type": "element_type1",
+      "default_value": "default_value1",
+      "is_dynamic": false,
+      "is_partition_key": false,
+      "is_clustering_key": false,
+      "nullable": true,
+      "is_function_output": false
+    }
+  ]
 }
 `
 
-const databases = `
+const listDatabaseData = `
 {
-  "status": {
-    "error_code": "Success",
-    "reason": ""
-  },
   "db_names": [
     "database_1",
     "database_2",
@@ -625,33 +648,38 @@ const databases = `
     "database_9",
     "database_10"
   ],
-  "created_timestamp": [
-    1633036800,
-    1633123200,
-    1633209600,
-    1633296000,
-    1633382400,
-    1633468800,
-    1633555200,
-    1633641600,
-    1633728000,
-    1633814400
-  ],
   "db_ids": [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10"
+  ],
+  "created_timestamps": [
+    "2021-10-01 00:00:00",
+    "2021-10-02 00:00:00",
+    "2021-10-03 00:00:00",
+    "2021-10-04 00:00:00",
+    "2021-10-05 00:00:00",
+    "2021-10-06 00:00:00",
+    "2021-10-07 00:00:00",
+    "2021-10-08 00:00:00",
+    "2021-10-09 00:00:00",
+    "2021-10-10 00:00:00"
   ]
 }
 `
 
-const describeDatabaseResp = `
+const describeDatabaseData = `
 {
-  "status": {
-    "error_code": 0,
-    "reason": "Success"
-  },
   "db_name": "example_db",
-  "dbID": 1,
-  "created_timestamp": 1633036800,
+  "db_id": 1,
+  "created_timestamp": "2021-10-01 00:00:00",
   "properties": [
     {
       "key": "property_key",
@@ -679,7 +707,7 @@ const qcCurrentTargets = `
         "is_sorted": true,
         "node_id": 1,
         "is_invisible": false,
-        "loaded_timestamp": 1633072800,
+        "loaded_timestamp": "2021-10-01 00:00:00",
         "index": [
           {
             "field_id": 1,
@@ -701,20 +729,17 @@ const qcCurrentTargets = `
         "collection_id": 1,
         "channel_name": "channel1",
         "unflushed_segment_ids": [
-          1
+          "1"
         ],
         "flushed_segment_ids": [
-          2
+          "2"
         ],
         "dropped_segment_ids": [
-          3
+          "3"
         ],
         "level_zero_segment_ids": [
-          4
-        ],
-        "partition_stats_versions": {
-          "1": 1
-        }
+          "4"
+        ]
       }
     ]
   }
@@ -774,7 +799,7 @@ const qcDist = `
       "is_sorted": true,
       "node_id": 1,
       "is_invisible": false,
-      "loaded_timestamp": 1633072800,
+      "loaded_timestamp": "2021-10-01 00:00:00",
       "index": [
         {
           "field_id": 1,
@@ -798,15 +823,15 @@ const qcDist = `
       "version": 1,
       "collection_id": 1,
       "channel_name": "channel1",
-      "unflushed_segment_ids": [1],
-      "flushed_segment_ids": [2],
-      "dropped_segment_ids": [3],
-      "level_zero_segment_ids": [4],
+      "unflushed_segment_ids": ["1"],
+      "flushed_segment_ids": ["2"],
+      "dropped_segment_ids": ["3"],
+      "level_zero_segment_ids": ["4"],
       "partition_stats_versions": {
         "1": 1
       },
       "watch_state": "Healthy",
-      "start_watch_ts": 1633072800
+      "start_watch_ts": "2021-10-01 00:00:00"
     }
   ],
   "leader_views": [
@@ -830,7 +855,7 @@ const qcDist = `
           "is_sorted": true,
           "node_id": 1,
           "is_invisible": false,
-          "loaded_timestamp": 1633072800,
+          "loaded_timestamp": "2021-10-01 00:00:00",
           "index": [
             {
               "field_id": 1,
@@ -958,7 +983,7 @@ const qnSegments = `
     "is_sorted": true,
     "node_id": 1,
     "is_invisible": false,
-    "loaded_timestamp": 1620000000,
+    "loaded_timestamp": "2021-10-01 00:00:00",
     "index": [
       {
         "field_id": 1,
@@ -985,7 +1010,7 @@ const qnSegments = `
     "is_sorted": true,
     "node_id": 2,
     "is_invisible": false,
-    "loaded_timestamp": 1620000001,
+    "loaded_timestamp": "2021-10-01 00:00:00",
     "index": [
       {
         "field_id": 2,
@@ -1059,22 +1084,22 @@ const dc_dist = `
       "version": 1,
       "collection_id": 100,
       "channel_name": "channel1",
-      "unflushed_segment_ids": [1, 2, 3],
-      "flushed_segment_ids": [4, 5, 6],
-      "dropped_segment_ids": [7, 8, 9],
+      "unflushed_segment_ids": ["1", "2", "3"],
+      "flushed_segment_ids": ["4", "5", "6"],
+      "dropped_segment_ids": ["7", "8", "9"],
       "watch_state": "success",
-      "start_watch_ts": 123456789
+      "start_watch_ts": "2023-10-01 12:05:00"
     },
      {
       "node_id": 1,
       "version": 1,
       "collection_id": 100,
       "channel_name": "channel3",
-      "unflushed_segment_ids": [1, 2, 3],
-      "flushed_segment_ids": [4, 5, 6],
-      "dropped_segment_ids": [7, 8, 9],
+      "unflushed_segment_ids": ["1", "2", "3"],
+      "flushed_segment_ids": ["4", "5", "6"],
+      "dropped_segment_ids": ["7", "8", "9"],
       "watch_state": "to_watch",
-      "start_watch_ts": 123456789
+      "start_watch_ts": "2023-10-01 12:05:00"
     } 
   ]
 }
@@ -1090,7 +1115,7 @@ const dc_build_index_task = `
     "index_state": "Finished",
     "index_size": 1024,
     "index_version": 1,
-    "create_time": 1633036800
+    "create_time": "2023-10-01 12:05:00"
   },
   {
     "index_id": 2,
@@ -1101,7 +1126,7 @@ const dc_build_index_task = `
     "fail_reason": "Disk full",
     "index_size": 2048,
     "index_version": 2,
-    "create_time": 1633123200
+    "create_time": "2023-10-01 12:05:00"
   }
 ]`
 
@@ -1113,11 +1138,11 @@ const dc_compaction_task = `
     "type": "Merge",
     "state": "Completed",
     "fail_reason": "",
-    "start_time": 1620000000,
-    "end_time": 1620003600,
+    "start_time": "2023-10-01 12:05:00",
+    "end_time": "2023-10-01 12:06:00",
     "total_rows": 10000,
-    "input_segments": [1, 2, 3],
-    "result_segments": [4]
+    "input_segments": ["1", "2", "3"],
+    "result_segments": ["4"]
   },
   {
     "plan_id": 2,
@@ -1125,10 +1150,10 @@ const dc_compaction_task = `
     "type": "Merge",
     "state": "Failed",
     "fail_reason": "Disk full",
-    "start_time": 1620007200,
-    "end_time": 1620010800,
+    "start_time": "2023-10-01 12:05:00",
+    "end_time": "2023-10-01 12:06:00",
     "total_rows": 20000,
-    "input_segments": [5, 6, 7],
+    "input_segments": ["5", "6", "7"],
     "result_segments": []
   }
 ]`
@@ -1139,8 +1164,8 @@ const dn_sync_task = `
     "segment_id": 1,
     "batch_rows": 1000,
     "segment_level": "L1",
-    "ts_from": 1633036800,
-    "ts_to": 1633040400,
+    "ts_from": "2023-10-01 12:05:00",
+    "ts_to": "2023-10-01 12:06:00",
     "delta_row_count": 10,
     "flush_size": 1024,
     "running_time": "100000000",
@@ -1150,8 +1175,8 @@ const dn_sync_task = `
     "segment_id": 2,
     "batch_rows": 2000,
     "segment_level": "L2",
-    "ts_from": 1633123200,
-    "ts_to": 1633126800,
+    "ts_from": "2023-10-01 12:05:00",
+    "ts_to": "2023-10-01 12:06:00",
     "delta_row_count": 20,
     "flush_size": 2048,
     "running_time": "200000000",
