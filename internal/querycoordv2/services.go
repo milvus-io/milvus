@@ -924,7 +924,7 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 	}
 
 	if err := utils.CheckCollectionsQueryable(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr); err != nil {
-		return componentutil.CheckHealthRespWithErr(err), nil
+		log.Warn("some collection is not queryable during health check", zap.Error(err))
 	}
 
 	return componentutil.CheckHealthRespWithErr(nil), nil
