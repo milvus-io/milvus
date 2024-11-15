@@ -1424,7 +1424,7 @@ func TestSearchV2(t *testing.T) {
 		Schema:         generateCollectionSchema(schemapb.DataType_Int64),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Times(12)
+	}, nil).Times(11)
 	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
 		TopK:         int64(3),
 		OutputFields: outputFields,
@@ -1465,6 +1465,12 @@ func TestSearchV2(t *testing.T) {
 		Status:         &StatusSuccess,
 	}, nil).Times(10)
 	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status: &commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		},
+	}, nil).Once()
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []requestBodyTestCase{}
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
@@ -1473,7 +1479,7 @@ func TestSearchV2(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"],"consistencyLevel": "Strong"}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
@@ -1481,8 +1487,8 @@ func TestSearchV2(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"range_filter": 0.1}}`),
-		errMsg:      "can only accept json format request, error: invalid search params",
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "searchParams": {"ignoreGrowing": "true"}}`),
+		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go struct field searchParams.searchParams.ignoreGrowing of type bool",
 		errCode:     1801, // ErrIncorrectParameterFormat
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
@@ -1559,6 +1565,17 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path: AdvancedSearchAction,
 		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`], "consistencyLevel":"unknown","rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
+		errMsg:  "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:parameter:'unknown' is incorrect, please check it: invalid parameter",
+		errCode: 1100, // ErrParameterInvalid
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path: AdvancedSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
 			`{"data": [[0.1, 0.2, 0.3]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
 			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
 			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
@@ -1603,6 +1620,24 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [{"1": 0.1}], "annsField": "sparseFloatVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "searchParams": {"params":"a"}}`),
+		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go struct field searchParams.searchParams.params of type map[string]interface {}",
+		errCode:     1801, // ErrIncorrectParameterFormat
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"],"consistencyLevel": "unknown"}`),
+		errMsg:      "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:parameter:'unknown' is incorrect, please check it: invalid parameter",
+		errCode:     1100, // ErrParameterInvalid
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": ["AQ=="], "annsField": "binaryVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
 	})
 
 	for _, testcase := range queryTestCases {
