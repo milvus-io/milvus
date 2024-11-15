@@ -141,7 +141,6 @@ virtual void clear(bool freeTable = false) = 0;
 protected:
   std::vector<std::unique_ptr<VectorHasher>> hashers_;
   std::unique_ptr<RowContainer> rows_;
-  char** table_ = nullptr;
 };
 
 class ProbeState;
@@ -158,7 +157,7 @@ public:
             keyTypes.push_back(hasher->ChannelDataType());
         }
         hashMode_ = HashMode::kHash;
-        rows_ = std::make_unique<RowContainer>(keyTypes, accumulators, nullableKeys, hashMode_ != HashMode::kHash);
+        rows_ = std::make_unique<RowContainer>(keyTypes, accumulators, nullableKeys);
     };
 
     void setHashMode(HashMode mode, int32_t numNew) override;
@@ -242,6 +241,8 @@ public:
     // a power of 2.
     void allocateTables(uint64_t size);
 
+    void extractGroups(char** output_groups, size_t group_count);
+
     template<bool isJoin, bool isNormalizedKey = false>
     void fullProbe(HashLookup& lookup, ProbeState& state, bool extraCheck);
 
@@ -287,6 +288,7 @@ private:
   int8_t sizeBits_;
 
   int64_t numRehashes_{0};
+  char** table_ = nullptr;
 
   HashMode hashMode() const override {
     return hashMode_;

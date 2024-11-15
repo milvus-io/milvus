@@ -36,9 +36,8 @@ RowVectorPtr PhyAggregationNode::GetOutput() {
   auto batch_size = queryConfig->get_expr_batch_size();
   const auto outputRowCount = isGlobal_? 1: batch_size;
   prepareOutput(outputRowCount);
-  const bool hasData = grouping_set_->getOutput(outputRowCount, outputRowCount, resultIterator_, output_);
+  const bool hasData = grouping_set_->getOutput(output_);
   if (!hasData) {
-      resultIterator_.reset();
       if (no_more_input_) {
         finished_ = true;
       }

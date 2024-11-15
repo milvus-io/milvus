@@ -202,7 +202,7 @@ void HashTable<nullableKeys>::allocateTables(uint64_t size) {
     // The total size is 8 bytes per slot, in groups of 16 slots with 16 bytes of
     // tags and 16 * 6 bytes of pointers and a padding of 16 bytes to round up the
     // cache line.
-    // TODO must support memory pool here to avoid OOM
+    // TODO support memory pool here to avoid OOM
     table_ = new char*[capacity_];
     memset(table_, 0, capacity_ * sizeof(char*));
 }
@@ -330,7 +330,12 @@ void HashTable<nullableKeys>::setHashMode(HashMode mode, int32_t numNew) {
 
 template <bool nullable>
 void HashTable<nullable>::clear(bool freeTable) {
-
+    if(table_) {
+        delete[] table_;
+        table_ = nullptr;
+    }
+    rows_->clear();
+    numDistinct_ = 0;
 }
 
 template class HashTable<true>;

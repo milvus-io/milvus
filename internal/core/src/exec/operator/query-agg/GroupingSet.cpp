@@ -95,11 +95,7 @@ void GroupingSet::addGlobalAggregationInput(const milvus::RowVectorPtr& input) {
     tempVectors_.clear();
 }
 
-bool GroupingSet::getGlobalAggregationOutput(milvus::exec::RowContainerIterator &iterator,
-                                             milvus::RowVectorPtr &result) {
-    if (iterator.allocationIndex != 0) {
-        return false;
-    }
+bool GroupingSet::getGlobalAggregationOutput(milvus::RowVectorPtr &result) {
     initializeGlobalAggregation();
     auto groups = lookup_->hits_.data();
     for(auto i = 0; i < aggregates_.size(); i++) {
@@ -107,25 +103,22 @@ bool GroupingSet::getGlobalAggregationOutput(milvus::exec::RowContainerIterator 
         auto resultVector = result->child(aggregates_[i].output_);
         function->extractValues(groups, 1, &resultVector);
     }
-    iterator.allocationIndex = std::numeric_limits<int32_t>::max();
     return true;
 }
 
-bool GroupingSet::getOutput(int32_t maxOutputRows, int32_t maxOutputBytes, milvus::exec::RowContainerIterator &iterator,
-                            milvus::RowVectorPtr &result) {
-    if (isGlobal_) {
-        return getGlobalAggregationOutput(iterator, result);
-    }
-    char* groups[maxOutputRows];
-    const int32_t numGroups = hash_table_?hash_table_->rows()
-            ->listRows(&iterator, maxOutputRows, maxOutputBytes, groups):0;
-    if(numGroups == 0) {
-        if (hash_table_ != nullptr) {
-            hash_table_->clear();
-        }
+bool GroupingSet::getOutput(milvus::RowVectorPtr &result) {
+    if (hash_table_ == nullptr) {
         return false;
     }
-    extractGroups(folly::Range<char**>(groups, numGroups), result);
+    if (isGlobal_) {
+        return getGlobalAggregationOutput(result);
+    }
+    const auto& all_rows = hash_table_->rows()->allRows();
+    if(all_rows.empty()) {
+        hash_table_->clear();
+        return false;
+    }
+    extractGroups(folly::Range<char**>(const_cast<char**>(all_rows.data()), all_rows.size()), result);
     return true;
 }
 

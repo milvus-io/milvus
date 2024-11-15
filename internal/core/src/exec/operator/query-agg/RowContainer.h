@@ -107,28 +107,11 @@ private:
    const uint64_t packedOffsets_;
 };
 
-using normalized_key_t = uint64_t;
-
-struct RowContainerIterator {
-    int32_t allocationIndex = 0;
-    int32_t rowOffset = 0;
-
-    char* rowBegin_{nullptr};
-    inline char* currentRow() const {
-        return rowBegin_;
-    }
-
-    void reset() {
-        *this = {};
-    }
-};
-
 class RowContainer {
 public:
     RowContainer(const std::vector<DataType>& keyTypes,
                  const std::vector<Accumulator>& accumulators,
-                 bool nullableKeys,
-                 bool hasNormalizedKeys);
+                 bool nullableKeys);
 
     // The number of flags (bits) per accumulator, one for null and one for
     // initialized.
@@ -153,13 +136,6 @@ public:
 
     int32_t rowSizeOffset() const {
         return rowSizeOffset_;
-    }
-
-    int32_t listRows(RowContainerIterator* iter,
-                     int32_t maxRows,
-                     uint64_t maxBytes,
-                     char** rows) {
-        return 0;
     }
 
     static inline bool isNullAt(const char* row, int32_t nullByte, uint8_t nullMask) {
@@ -291,22 +267,23 @@ public:
             const VectorPtr& result){
         auto maxRows = numRows + resultOffset;
         AssertInfo(maxRows == result->size(), "extracted rows number should be equal to the size of result vector");
-        if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view>) {
-            PanicInfo(DataTypeInvalid, "Not support extract string values for now");
-        } else {
-            auto result_column_vec = std::dynamic_pointer_cast<ColumnVector>(result);
-            AssertInfo(result_column_vec != nullptr, "Input column to extract result must be of ColumnVector type");
-            for (auto i = 0; i < numRows; i++) {
-                const char *row;
-                if constexpr (useRowNumber) {
-                    auto rowNumber = rowNumbers[i];
-                    row = rowNumber >= 0 ? rows[rowNumber] : nullptr;
-                } else {
-                    row = rows[i];
-                }
-                auto resultIndex = resultOffset + i;
-                if (row == nullptr || isNullAt(row, nullByte, nullMask)) {
-                    result_column_vec->nullAt(resultIndex);
+        auto result_column_vec = std::dynamic_pointer_cast<ColumnVector>(result);
+        AssertInfo(result_column_vec != nullptr, "Input column to extract result must be of ColumnVector type");
+        for (auto i = 0; i < numRows; i++) {
+            const char *row;
+            if constexpr (useRowNumber) {
+                auto rowNumber = rowNumbers[i];
+                row = rowNumber >= 0 ? rows[rowNumber] : nullptr;
+            } else {
+                row = rows[i];
+            }
+            auto resultIndex = resultOffset + i;
+            if (row == nullptr || isNullAt(row, nullByte, nullMask)) {
+                result_column_vec->nullAt(resultIndex);
+            } else {
+                if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view>) {
+                    auto* str_ptr = valueAt<T*>(row, offset);
+                    result_column_vec->SetValueAt<T>(resultIndex, *str_ptr);
                 } else {
                     result_column_vec->SetValueAt<T>(resultIndex, valueAt<T>(row, offset));
                 }
@@ -360,7 +337,6 @@ public:
             PanicInfo(DataTypeInvalid, "Not Support Extract types:[ROW/JSON/ARRAY/NONE]");
         } else {
             using T = typename milvus::TypeTraits<Type>::NativeType;
-
             auto nullMask = column.nullMask();
             auto offset = column.offset();
             if (nullMask) {
@@ -403,6 +379,10 @@ public:
         extractColumn(rows, numRows, columnAt(column_idx), 0, result);
     }
 
+    const std::vector<char*>& allRows() const {
+        return rows_;
+    }
+
     static inline int32_t nullByte(int32_t nullOffset) {
         return nullOffset / 8;
     }
@@ -426,7 +406,13 @@ public:
         return nullMask(accumulatorFlagsOffset) << 1;
     }
 
-
+    void clear() {
+        for (auto row: rows_) {
+            delete row;
+        }
+        numRows_ = 0;
+        numFreeRows_ = 0;
+    }
 
 private:
      // Offset of the pointer to the next free row on a free row.
@@ -434,7 +420,6 @@ private:
 
     const std::vector<DataType> keyTypes_;
     const bool nullableKeys_;
-    const bool hasNormalizedKeys_;
     std::vector<uint32_t> offsets_;
     std::vector<uint32_t> nullOffsets_;
     
@@ -456,10 +441,9 @@ private:
 
     std::vector<Accumulator> accumulators_;
 
-    // Head of linked list of free rows.
-    char* firstFreeRow_ = nullptr;
     uint64_t numRows_ = 0;
     uint64_t numFreeRows_ = 0;
+    std::vector<char*> rows_{};
 };
 
 inline void RowContainer::extractColumn(const char *const *rows, int32_t num_rows, milvus::exec::RowColumn column,

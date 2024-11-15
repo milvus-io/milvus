@@ -58,10 +58,7 @@ class GroupingSet {
     // fit.
     void ensureInputFits(const RowVectorPtr& input);
 
-    bool getOutput(int32_t maxOutputRows,
-                   int32_t maxOutputBytes,
-                   RowContainerIterator& iterator,
-                   RowVectorPtr& result);
+    bool getOutput(RowVectorPtr& result);
 
     bool hasOutput() {
         return noMoreInput_;
@@ -71,7 +68,7 @@ class GroupingSet {
 
     void populateTempVectors(int32_t aggregateIndex, const RowVectorPtr& input);
 
-    bool getGlobalAggregationOutput(RowContainerIterator& iterator, RowVectorPtr& result);
+    bool getGlobalAggregationOutput(RowVectorPtr& result);
 
 private:
     const bool isGlobal_;

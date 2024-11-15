@@ -23,12 +23,10 @@ namespace exec {
 
 RowContainer::RowContainer(const std::vector<DataType> &keyTypes,
                            const std::vector<Accumulator>& accumulators,
-                           bool nullableKeys,
-                           bool hasNormalizedKeys):
+                           bool nullableKeys):
                            keyTypes_(keyTypes),
                            accumulators_(accumulators),
-                           nullableKeys_(nullableKeys),
-                           hasNormalizedKeys_(hasNormalizedKeys){
+                           nullableKeys_(nullableKeys){
     int32_t offset = 0;
     int32_t nullOffset = 0;
     bool isVariableWidth = false;
@@ -109,17 +107,13 @@ RowContainer::RowContainer(const std::vector<DataType> &keyTypes,
 }
 
 char* RowContainer::newRow() {
-    ++numRows_;
-    char* row;
-    if (firstFreeRow_) {
-        row = firstFreeRow_;
-        AssertInfo(milvus::bits::isBitSet(row, freeFlagOffset_), "freeRow must be freed before inserted into the linked list");
-        firstFreeRow_ = nextFree(row);
-        --numFreeRows_;
-    } else {
-        row = new char[fixedRowSize_ + alignment_];
+    char* row = new char[fixedRowSize_ + alignment_];
+    if (rows_.size() < numRows_ + 1) {
+        rows_.resize(numRows_ + 1024);
     }
-    return nullptr;
+    rows_[numRows_] = row;
+    ++numRows_;
+    return row;
 }
 
 void RowContainer::store(const milvus::ColumnVectorPtr &column_data, milvus::vector_size_t index, char *row,
