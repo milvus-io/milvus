@@ -633,7 +633,7 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 		// Apply segment metric update after successful meta update.
 		metricMutation.commit()
 		// Update in-memory meta.
-		m.segments.SetState(segmentID, targetState)
+		m.segments.SetSegment(segmentID, clonedSegment)
 	}
 	log.Info("meta update: setting segment state - complete",
 		zap.Int64("segmentID", segmentID),
