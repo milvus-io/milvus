@@ -79,7 +79,7 @@ class TestInsertParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("data", [pd.DataFrame()])
-    def test_insert_empty_data(self, data):
+    def test_insert_empty_dataframe(self, data):
         """
         target: test insert empty dataFrame()
         method: insert empty
@@ -87,13 +87,14 @@ class TestInsertParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        error = {ct.err_code: 999, ct.err_msg: "The fields don't match with schema fields"}
-        collection_w.insert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999, ct.err_msg: "The fields don't match with schema fields, expected: "
+                                               "['int64', 'float', 'varchar', 'json_field', 'float_vector'], "
+                                               "got []"}
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("data", [[[]]])
-    def test_insert_empty_data(self, data):
+    def test_insert_empty_list_data(self, data):
         """
         target: test insert empty array
         method: insert empty
@@ -101,9 +102,8 @@ class TestInsertParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        error = {ct.err_code: 999, ct.err_msg: "The data don't match with schema fields"}
-        collection_w.insert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999, ct.err_msg: "The data doesn't match with schema fields, expect 5 list, got 1"}
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_dataframe_only_columns(self):
@@ -134,9 +134,8 @@ class TestInsertParams(TestcaseBase):
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_int64_field_name: ' '}, inplace=True)
         error = {ct.err_code: 999,
-                 ct.err_msg: "The name of field don't match, expected: int64"}
-        collection_w.insert(
-            data=df, check_task=CheckTasks.err_res, check_items=error)
+                 ct.err_msg: "The name of field doesn't match, expected: int64, got  "}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_invalid_field_name_dataframe(self):
@@ -149,12 +148,10 @@ class TestInsertParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(10)
-        df.rename(
-            columns={ct.default_int64_field_name: invalid_field_name}, inplace=True)
+        df.rename(columns={ct.default_int64_field_name: invalid_field_name}, inplace=True)
         error = {ct.err_code: 999,
-                 ct.err_msg: f"The name of field don't match, expected: int64, got {invalid_field_name}"}
-        collection_w.insert(
-            data=df, check_task=CheckTasks.err_res, check_items=error)
+                 ct.err_msg: f"The name of field doesn't match, expected: int64, got {invalid_field_name}"}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_numpy_data(self):
@@ -260,9 +257,8 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_float_field_name: "int"}, inplace=True)
-        error = {ct.err_code: 999, ct.err_msg: "The name of field don't match, expected: float, got int"}
-        collection_w.insert(
-            data=df, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999, ct.err_msg: "The name of field doesn't match, expected: float, got int"}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="Currently not check in pymilvus")
@@ -337,9 +333,8 @@ class TestInsertParams(TestcaseBase):
             field_data = cf.gen_data_by_collection_field(fields, nb=nb)
             data.append(field_data)
         data.append([1 for _ in range(nb)])
-        error = {ct.err_code: 999, ct.err_msg: "The data don't match with schema fields"}
-        collection_w.insert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999, ct.err_msg: "The data doesn't match with schema fields"}
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_fields_less(self):
@@ -532,7 +527,7 @@ class TestInsertOperation(TestcaseBase):
             field_data = cf.gen_data_by_collection_field(field, nb=nb)
             if field.dtype != DataType.FLOAT_VECTOR:
                 data.append(field_data)
-        error = {ct.err_code: 999, ct.err_msg: f"The data don't match with schema fields, "
+        error = {ct.err_code: 999, ct.err_msg: f"The data doesn't match with schema fields, "
                                                f"expect {len(fields)} list, got {len(data)}"}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
@@ -2028,7 +2023,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, with_json=False)
         data = cf.gen_default_binary_dataframe_data()[0]
         error = {ct.err_code: 999,
-                 ct.err_msg: "The name of field don't match, expected: float_vector, got binary_vector"}
+                 ct.err_msg: "The name of field doesn't match, expected: float_vector, got binary_vector"}
         collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
