@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <map>
 #include <random>
 
 #include "common/Utils.h"
@@ -98,6 +99,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
 
         auto base = milvus::segcore::GenerateRandomSparseFloatVector(nb);
         auto query = milvus::segcore::GenerateRandomSparseFloatVector(nq);
+        auto index_info = std::map<std::string, std::string>{};
         SearchInfo search_info;
         search_info.topk_ = topk;
         search_info.metric_type_ = metric_type;
@@ -108,6 +110,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                               base.get(),
                                               nb,
                                               search_info,
+                                              index_info,
                                               bitset_view,
                                               DataType::VECTOR_SPARSE_FLOAT));
             return;
@@ -116,6 +119,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                        base.get(),
                                        nb,
                                        search_info,
+                                       index_info,
                                        bitset_view,
                                        DataType::VECTOR_SPARSE_FLOAT);
         for (int i = 0; i < nq; i++) {
@@ -130,6 +134,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                         base.get(),
                                         nb,
                                         search_info,
+                                        index_info,
                                         bitset_view,
                                         DataType::VECTOR_SPARSE_FLOAT);
         for (int i = 0; i < nq; i++) {
@@ -143,6 +148,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                                  base.get(),
                                                  nb,
                                                  search_info,
+                                                 index_info,
                                                  bitset_view,
                                                  DataType::VECTOR_SPARSE_FLOAT);
         auto iterators = result3.chunk_iterators();

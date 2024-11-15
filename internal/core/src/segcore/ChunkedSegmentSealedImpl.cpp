@@ -940,9 +940,12 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         AssertInfo(num_rows_.has_value(), "Can't get row count value");
         auto row_count = num_rows_.value();
         auto vec_data = fields_.at(field_id);
+        auto index_info =
+            col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
         query::SearchOnSealed(*schema_,
                               vec_data,
                               search_info,
+                              index_info,
                               query_data,
                               query_count,
                               row_count,

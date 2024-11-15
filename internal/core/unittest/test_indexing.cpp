@@ -173,6 +173,7 @@ TEST(Indexing, BinaryBruteForce) {
     };
 
     SearchInfo search_info;
+    auto index_info = std::map<std::string, std::string>{};
     search_info.topk_ = topk;
     search_info.round_decimal_ = round_decimal;
     search_info.metric_type_ = metric_type;
@@ -180,6 +181,7 @@ TEST(Indexing, BinaryBruteForce) {
                                               bin_vec.data(),
                                               N,
                                               search_info,
+                                              index_info,
                                               nullptr,
                                               DataType::VECTOR_BINARY);
 

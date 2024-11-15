@@ -122,6 +122,7 @@ class TestFloatSearchBruteForce : public ::testing::Test {
 
         auto base = GenFloatVecs(dim, nb, metric_type);
         auto query = GenFloatVecs(dim, nq, metric_type);
+        auto index_info = std::map<std::string, std::string>{};
 
         dataset::SearchDataset dataset{
             metric_type, nq, topk, -1, dim, query.data()};
@@ -137,6 +138,7 @@ class TestFloatSearchBruteForce : public ::testing::Test {
                                        base.data(),
                                        nb,
                                        search_info,
+                                       index_info,
                                        bitset_view,
                                        DataType::VECTOR_FLOAT);
         for (int i = 0; i < nq; i++) {
