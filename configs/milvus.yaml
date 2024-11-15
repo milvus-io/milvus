@@ -286,6 +286,8 @@ proxy:
   ginLogging: true
   ginLogSkipPaths: / # skip url path for gin log
   maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
+  ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
+  dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   accessLog:
     enable: false # Whether to enable the access log feature.
