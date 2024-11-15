@@ -626,7 +626,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 			})
 		} else {
-			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
+			HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
 		}
 	}
 }
