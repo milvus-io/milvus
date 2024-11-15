@@ -24,7 +24,7 @@ pub(crate) fn standard_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
 }
 
 fn chinese_analyzer(stop_words: Vec<String>) -> TextAnalyzer{
-    let builder = jieba_builder().filter(CnCharOnlyFilter);
+    let builder = jieba_builder().filter(CnAlphaNumOnlyFilter);
     if stop_words.len() > 0{
         return builder.filter(StopWordFilter::remove(stop_words)).build();
     }
@@ -275,17 +275,17 @@ mod tests {
         }"#;
 
         let tokenizer = create_tokenizer(&params.to_string());
-        assert!(tokenizer.is_ok());
+        assert!(tokenizer.is_ok(),  "error: {}", tokenizer.err().unwrap().reason());
         let mut bining = tokenizer.unwrap();
-
-        let regex = regex::Regex::new("\\p{Han}+").unwrap();
-
         let mut stream = bining.token_stream("系统安全;,'';lxyz密码");
+        
+        let mut results = Vec::<String>::new();
         while stream.advance(){
             let token = stream.token();
-            let text = token.text.clone();
-            print!("test token :{} symbol: {}\n", text.as_str(), regex.is_match(text.as_str()))
+            results.push(token.text.clone());
         }
+
+        print!("test tokens :{:?}\n", results)
     }
 
 }
