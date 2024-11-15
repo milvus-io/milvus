@@ -458,9 +458,9 @@ func (m *BM25Stats) Deserialize(bs []byte) error {
 }
 
 func (m *BM25Stats) BuildIDF(tf []byte) (idf []byte) {
-	dim := typeutil.SparseFloatRowElementCount(tf)
+	numElements := typeutil.SparseFloatRowElementCount(tf)
 	idf = make([]byte, len(tf))
-	for idx := 0; idx < dim; idx++ {
+	for idx := 0; idx < numElements; idx++ {
 		key := typeutil.SparseFloatRowIndexAt(tf, idx)
 		value := typeutil.SparseFloatRowValueAt(tf, idx)
 		nq := m.rowsWithToken[key]
