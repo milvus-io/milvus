@@ -71,12 +71,11 @@ func (n *shardClient) getClient(ctx context.Context) (types.QueryNodeClient, err
 	}
 }
 
-func (n *shardClient) DecRef() bool {
-	if n.refCnt.Dec() == 0 {
-		n.Close()
-		return true
+func (n *shardClient) DecRef() {
+	ret := n.refCnt.Dec()
+	if ret <= 0 {
+		log.Warn("unexpected client ref count zero, please check  the release call", zap.Int64("refCount", ret), zap.Stack("caller"))
 	}
-	return false
 }
 
 func (n *shardClient) IncRef() {
@@ -94,6 +93,9 @@ func (n *shardClient) close() {
 	n.clients = nil
 }
 
+// Notice: close client should only be called by shard client manager. and after close, the client must be removed from the manager.
+// 1. the client hasn't been used for a long time
+// 2. shard client manager has been closed.
 func (n *shardClient) Close() {
 	n.Lock()
 	defer n.Unlock()
@@ -137,8 +139,8 @@ func (n *shardClient) initClients(ctx context.Context) error {
 
 // roundRobinSelectClient selects a client in a round-robin manner
 func (n *shardClient) roundRobinSelectClient() (types.QueryNodeClient, error) {
-	n.Lock()
-	defer n.Unlock()
+	n.RLock()
+	defer n.RUnlock()
 	if n.isClosed {
 		return nil, errClosed
 	}
@@ -159,6 +161,11 @@ type shardClientMgr interface {
 	SetClientCreatorFunc(creator queryNodeCreatorFunc)
 }
 
+const (
+	defaultPurgeInterval   = 600 * time.Second
+	defaultPurgeExpiredAge = 3
+)
+
 type shardClientMgrImpl struct {
 	clients struct {
 		sync.RWMutex
@@ -167,6 +174,9 @@ type shardClientMgrImpl struct {
 	clientCreator queryNodeCreatorFunc
 
 	closeCh chan struct{}
+
+	purgeInterval   time.Duration
+	purgeExpiredAge int
 }
 
 // SessionOpt provides a way to set params in SessionManager
@@ -187,8 +197,10 @@ func newShardClientMgr(options ...shardClientMgrOpt) *shardClientMgrImpl {
 			sync.RWMutex
 			data map[UniqueID]*shardClient
 		}{data: make(map[UniqueID]*shardClient)},
-		clientCreator: defaultQueryNodeClientCreator,
-		closeCh:       make(chan struct{}),
+		clientCreator:   defaultQueryNodeClientCreator,
+		closeCh:         make(chan struct{}),
+		purgeInterval:   defaultPurgeInterval,
+		purgeExpiredAge: defaultPurgeExpiredAge,
 	}
 	for _, opt := range options {
 		opt(s)
@@ -227,9 +239,14 @@ func (c *shardClientMgrImpl) GetClient(ctx context.Context, info nodeInfo) (type
 	return client.getClient(ctx)
 }
 
+// PurgeClient purges client if it is not used for a long time
 func (c *shardClientMgrImpl) PurgeClient() {
-	ticker := time.NewTicker(600 * time.Second)
+	ticker := time.NewTicker(c.purgeInterval)
 	defer ticker.Stop()
+
+	// record node's age, if node reach 3 consecutive failures, try to purge it
+	nodeAges := make(map[int64]int, 0)
+
 	for {
 		select {
 		case <-c.closeCh:
@@ -239,8 +256,16 @@ func (c *shardClientMgrImpl) PurgeClient() {
 			c.clients.Lock()
 			for nodeID, client := range c.clients.data {
 				if _, ok := shardLocations[nodeID]; !ok {
-					client.DecRef()
-					delete(c.clients.data, nodeID)
+					nodeAges[nodeID] += 1
+					if nodeAges[nodeID] > c.purgeExpiredAge {
+						if client.refCnt.Load() <= 1 {
+							client.Close()
+							delete(c.clients.data, nodeID)
+							log.Info("remove client due to not used for long time", zap.Int64("nodeID", nodeID))
+						}
+					}
+				} else {
+					nodeAges[nodeID] = 0
 				}
 			}
 			c.clients.Unlock()
