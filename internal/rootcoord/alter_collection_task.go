@@ -218,6 +218,14 @@ func (a *alterCollectionFieldTask) Execute(ctx context.Context) error {
 		},
 		core: a.core,
 	})
+	collectionNames := []string{}
+	redoTask.AddSyncStep(&expireCacheStep{
+		baseStep:        baseStep{core: a.core},
+		dbName:          a.Req.GetDbName(),
+		collectionNames: append(collectionNames, a.Req.GetCollectionName()),
+		collectionID:    oldColl.CollectionID,
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
+	})
 
 	return redoTask.Execute(ctx)
 }
