@@ -1153,14 +1153,16 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 
 	IsStringType := false
 	indexName := ""
+	var dataType int32
 	for _, field := range collSchema.Fields {
 		if field.GetName() == t.FieldName && typeutil.IsStringType(field.DataType) {
 			IsStringType = true
 			indexName = field.GetName()
+			dataType = int32(field.DataType)
 		}
 	}
 	if !IsStringType {
-		return merr.WrapErrParameterInvalid(indexName, "it can not modify the maxlength for non-string types")
+		return merr.WrapErrParameterInvalid(indexName, "%s can not modify the maxlength for non-string types", schemapb.DataType_name[dataType])
 	}
 
 	return nil
