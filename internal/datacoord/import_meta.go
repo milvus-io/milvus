@@ -17,12 +17,12 @@
 package datacoord
 
 import (
-	"encoding/json"
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"golang.org/x/exp/maps"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"

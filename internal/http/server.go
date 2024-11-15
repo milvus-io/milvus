@@ -18,7 +18,6 @@ package http
 
 import (
 	"embed"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -29,6 +28,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/http/healthz"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/expr"

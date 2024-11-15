@@ -18,7 +18,6 @@ package meta
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"runtime"
 	"sync"
@@ -27,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"

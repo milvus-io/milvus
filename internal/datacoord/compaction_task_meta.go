@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"encoding/json"
 	"strconv"
 	"sync"
 	"time"
@@ -28,6 +27,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"

@@ -17,12 +17,12 @@
 package proxy
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
