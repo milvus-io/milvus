@@ -546,12 +546,12 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 		s.Run("normal case", func() {
 			catalog := catalogmocks.NewDataCoordCatalog(s.T())
+			catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			s.mt.catalog = catalog
 			s.mt.statsTaskMeta.catalog = catalog
 			updateStateOp := UpdateStatusOperator(s.segID, commonpb.SegmentState_Flushed)
 			err := s.mt.UpdateSegmentsInfo(updateStateOp)
 			s.NoError(err)
-			catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 
 			s.NoError(st.SetJobInfo(s.mt))
