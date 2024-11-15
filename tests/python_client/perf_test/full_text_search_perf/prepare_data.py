@@ -26,7 +26,7 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000_000):
         Collection(name=collection_name).drop()
 
     analyzer_params = {
-        "tokenizer": "standard",
+        "type": "english",
     }
     fields = [
         FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
