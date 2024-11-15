@@ -1090,7 +1090,6 @@ class TestUpsertWithFullTextSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("nullable", [False, True])
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/37021")
     def test_upsert_for_full_text_search(self, tokenizer, nullable):
         """
         target: test upsert data for full text search
@@ -1261,7 +1260,6 @@ class TestUpsertWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nullable", [False])
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/37021")
     def test_upsert_for_full_text_search_with_no_varchar_data(self, tokenizer, nullable):
         """
         target: test upsert data for full text search with no varchar data
@@ -2327,8 +2325,13 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 3. verify the result
         expected: full text search successfully and result is correct
         """
+        if tokenizer == "jieba":
+            lang_type = "chinese"
+        else:
+            lang_type = "english"
+
         analyzer_params = {
-                "tokenizer": tokenizer,
+                "type": lang_type,
         }
         dim = 128
         fields = [
