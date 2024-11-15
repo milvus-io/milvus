@@ -31,7 +31,7 @@ def setup_collection(environment):
     collection_name = environment.parsed_options.milvus_collection
     connections.connect(uri=environment.host)
     analyzer_params = {
-        "tokenizer": "standard"
+        "type": "english",
     }
     fields = [
         FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
@@ -141,7 +141,7 @@ class MilvusUser(MilvusBaseUser):
     """Main Milvus user class that defines the test tasks"""
 
     @tag('insert')
-    @task(4)
+    @task(1)
     def insert(self):
         """Insert random vectors"""
         batch_size = 1000
@@ -156,7 +156,7 @@ class MilvusUser(MilvusBaseUser):
         self.client.insert(data)
 
     @tag('fts')
-    @task(4)
+    @task(1)
     def full_text_search(self):
         """full text search"""
         search_data = test_data.sample(1)["text"].values[0]
@@ -166,7 +166,7 @@ class MilvusUser(MilvusBaseUser):
                            top_k=self.top_k)
 
     @tag('text_match')
-    @task(2)
+    @task(1)
     def text_match(self):
         """Text Match"""
         search_data = faker.sentence()
