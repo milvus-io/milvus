@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // ComponentInfos defines the interface of all component infos
@@ -90,7 +89,7 @@ type SlowQuery struct {
 	Partitions            string       `json:"partitions,omitempty"`
 	ConsistencyLevel      string       `json:"consistency_level,omitempty"`
 	UseDefaultConsistency bool         `json:"use_default_consistency,omitempty"`
-	GuaranteeTimestamp    uint64       `json:"guarantee_timestamp,omitempty"`
+	GuaranteeTimestamp    uint64       `json:"guarantee_timestamp,omitempty,string"`
 	Duration              string       `json:"duration,omitempty"`
 	User                  string       `json:"user,omitempty"`
 	QueryParams           *QueryParams `json:"query_params,omitempty"`
@@ -99,25 +98,24 @@ type SlowQuery struct {
 }
 
 type DmChannel struct {
-	NodeID                 int64           `json:"node_id,omitempty"`
-	Version                int64           `json:"version,omitempty"`
-	CollectionID           int64           `json:"collection_id,omitempty"`
-	ChannelName            string          `json:"channel_name,omitempty"`
-	UnflushedSegmentIds    []int64         `json:"unflushed_segment_ids,omitempty"`
-	FlushedSegmentIds      []int64         `json:"flushed_segment_ids,omitempty"`
-	DroppedSegmentIds      []int64         `json:"dropped_segment_ids,omitempty"`
-	LevelZeroSegmentIds    []int64         `json:"level_zero_segment_ids,omitempty"`
-	PartitionStatsVersions map[int64]int64 `json:"partition_stats_versions,omitempty"`
-	WatchState             string          `json:"watch_state,omitempty"`
-	StartWatchTS           int64           `json:"start_watch_ts,omitempty"`
+	NodeID              int64    `json:"node_id,omitempty"`
+	Version             int64    `json:"version,omitempty,string"`
+	CollectionID        int64    `json:"collection_id,omitempty,string"`
+	ChannelName         string   `json:"channel_name,omitempty"`
+	UnflushedSegmentIds []string `json:"unflushed_segment_ids,omitempty"`
+	FlushedSegmentIds   []string `json:"flushed_segment_ids,omitempty"`
+	DroppedSegmentIds   []string `json:"dropped_segment_ids,omitempty"`
+	LevelZeroSegmentIds []string `json:"level_zero_segment_ids,omitempty"`
+	WatchState          string   `json:"watch_state,omitempty"`
+	StartWatchTS        string   `json:"start_watch_ts,omitempty"`
 }
 
 type Segment struct {
-	SegmentID    int64  `json:"segment_id,omitempty"`
-	CollectionID int64  `json:"collection_id,omitempty"`
-	PartitionID  int64  `json:"partition_id,omitempty"`
+	SegmentID    int64  `json:"segment_id,omitempty,string"`
+	CollectionID int64  `json:"collection_id,omitempty,string"`
+	PartitionID  int64  `json:"partition_id,omitempty,string"`
 	Channel      string `json:"channel,omitempty"`
-	NumOfRows    int64  `json:"num_of_rows,omitempty"`
+	NumOfRows    int64  `json:"num_of_rows,omitempty,string"`
 	State        string `json:"state,omitempty"`
 	IsImporting  bool   `json:"is_importing,omitempty"`
 	Compacted    bool   `json:"compacted,omitempty"`
@@ -127,42 +125,54 @@ type Segment struct {
 
 	// load related
 	IsInvisible          bool            `json:"is_invisible,omitempty"`
-	LoadedTimestamp      int64           `json:"loaded_timestamp,omitempty"`
+	LoadedTimestamp      string          `json:"loaded_timestamp,omitempty,string"`
 	Index                []*SegmentIndex `json:"index,omitempty"`
 	ResourceGroup        string          `json:"resource_group,omitempty"`
-	LoadedInsertRowCount int64           `json:"loaded_insert_row_count,omitempty"` // inert row count for growing segment that excludes the deleted row count in QueryNode
-	MemSize              int64           `json:"mem_size,omitempty"`                // memory size of segment in QueryNode
+	LoadedInsertRowCount int64           `json:"loaded_insert_row_count,omitempty,string"` // inert row count for growing segment that excludes the deleted row count in QueryNode
+	MemSize              int64           `json:"mem_size,omitempty,string"`                // memory size of segment in QueryNode
 
 	// flush related
-	FlushedRows    int64 `json:"flushed_rows,omitempty"`
-	SyncBufferRows int64 `json:"sync_buffer_rows,omitempty"`
-	SyncingRows    int64 `json:"syncing_rows,omitempty"`
+	FlushedRows    int64 `json:"flushed_rows,omitempty,string"`
+	SyncBufferRows int64 `json:"sync_buffer_rows,omitempty,string"`
+	SyncingRows    int64 `json:"syncing_rows,omitempty,string"`
 }
 
 type SegmentIndex struct {
-	IndexFieldID int64 `json:"field_id,omitempty"`
-	IndexID      int64 `json:"index_id,omitempty"`
-	BuildID      int64 `json:"build_id,omitempty"`
-	IndexSize    int64 `json:"index_size,omitempty"`
-	IsLoaded     bool  `json:"is_loaded,omitempty"`
+	IndexFieldID int64 `json:"field_id,omitempty,string"`
+	IndexID      int64 `json:"index_id,omitempty,string"`
+	BuildID      int64 `json:"build_id,omitempty,string"`
+	IndexSize    int64 `json:"index_size,omitempty,string"`
+	IsLoaded     bool  `json:"is_loaded,omitempty,string"`
 }
 
 type QueryCoordTarget struct {
-	CollectionID int64        `json:"collection_id,omitempty"`
+	CollectionID int64        `json:"collection_id,omitempty,string"`
 	Segments     []*Segment   `json:"segments,omitempty"`
 	DMChannels   []*DmChannel `json:"dm_channels,omitempty"`
 }
 
+type QueryCoordTask struct {
+	TaskName     string   `json:"task_name,omitempty"`
+	CollectionID int64    `json:"collection_id,omitempty,string"`
+	Replica      int64    `json:"replica_id,omitempty,string"`
+	TaskType     string   `json:"task_type,omitempty"`
+	TaskStatus   string   `json:"task_status,omitempty"`
+	Priority     string   `json:"priority,omitempty"`
+	Actions      []string `json:"actions,omitempty"`
+	Step         int      `json:"step,omitempty"`
+	Reason       string   `json:"reason,omitempty"`
+}
+
 type LeaderView struct {
-	LeaderID           int64      `json:"leader_id,omitempty"`
-	CollectionID       int64      `json:"collection_id,omitempty"`
+	LeaderID           int64      `json:"leader_id,omitempty,string"`
+	CollectionID       int64      `json:"collection_id,omitempty,string"`
 	NodeID             int64      `json:"node_id,omitempty"`
 	Channel            string     `json:"channel,omitempty"`
-	Version            int64      `json:"version,omitempty"`
+	Version            int64      `json:"version,omitempty,string"`
 	SealedSegments     []*Segment `json:"sealed_segments,omitempty"`
 	GrowingSegments    []*Segment `json:"growing_segments,omitempty"`
-	TargetVersion      int64      `json:"target_version,omitempty"`
-	NumOfGrowingRows   int64      `json:"num_of_growing_rows,omitempty"`
+	TargetVersion      int64      `json:"target_version,omitempty,string"`
+	NumOfGrowingRows   int64      `json:"num_of_growing_rows,omitempty,string"`
 	UnServiceableError string     `json:"unserviceable_error,omitempty"`
 }
 
@@ -179,8 +189,8 @@ type ResourceGroup struct {
 }
 
 type Replica struct {
-	ID               int64              `json:"ID,omitempty"`
-	CollectionID     int64              `json:"collectionID,omitempty"`
+	ID               int64              `json:"ID,omitempty,string"`
+	CollectionID     int64              `json:"collectionID,omitempty,string"`
 	RWNodes          []int64            `json:"rw_nodes,omitempty"`
 	ResourceGroup    string             `json:"resource_group,omitempty"`
 	RONodes          []int64            `json:"ro_nodes,omitempty"`
@@ -192,8 +202,8 @@ type Channel struct {
 	Name           string `json:"name,omitempty"`
 	WatchState     string `json:"watch_state,omitempty"`
 	LatestTimeTick string `json:"latest_time_tick,omitempty"` // a time string that indicates the latest time tick of the channel is received
-	NodeID         int64  `json:"node_id,omitempty"`
-	CollectionID   int64  `json:"collection_id,omitempty"`
+	NodeID         int64  `json:"node_id,omitempty,string"`
+	CollectionID   int64  `json:"collection_id,omitempty,string"`
 	CheckpointTS   string `json:"check_point_ts,omitempty"` // a time string, format like "2006-01-02 15:04:05"
 }
 
@@ -290,16 +300,28 @@ type DataNodeConfiguration struct {
 	FlushInsertBufferSize int64 `json:"flush_insert_buffer_size"`
 }
 
+type IndexTaskStats struct {
+	IndexID        int64  `json:"index_id,omitempty,string"`
+	CollectionID   int64  `json:"collection_id,omitempty,string"`
+	SegmentID      int64  `json:"segment_id,omitempty,string"`
+	BuildID        int64  `json:"build_id,omitempty,string"`
+	IndexState     string `json:"index_state,omitempty"`
+	FailReason     string `json:"fail_reason,omitempty"`
+	IndexSize      uint64 `json:"index_size,omitempty,string"`
+	IndexVersion   int64  `json:"index_version,omitempty,string"`
+	CreatedUTCTime string `json:"create_time,omitempty"`
+}
+
 type SyncTask struct {
-	SegmentID     int64              `json:"segment_id,omitempty"`
-	BatchRows     int64              `json:"batch_rows,omitempty"`
-	SegmentLevel  string             `json:"segment_level,omitempty"`
-	TSFrom        typeutil.Timestamp `json:"ts_from,omitempty"`
-	TSTo          typeutil.Timestamp `json:"ts_to,omitempty"`
-	DeltaRowCount int64              `json:"delta_row_count,omitempty"`
-	FlushSize     int64              `json:"flush_size,omitempty"`
-	RunningTime   string             `json:"running_time,omitempty"`
-	NodeID        int64              `json:"node_id,omitempty"`
+	SegmentID     int64  `json:"segment_id,omitempty,string"`
+	BatchRows     int64  `json:"batch_rows,omitempty,string"`
+	SegmentLevel  string `json:"segment_level,omitempty,string"`
+	TSFrom        string `json:"ts_from,omitempty"`
+	TSTo          string `json:"ts_to,omitempty"`
+	DeltaRowCount int64  `json:"delta_row_count,omitempty,string"`
+	FlushSize     int64  `json:"flush_size,omitempty,string"`
+	RunningTime   string `json:"running_time,omitempty"`
+	NodeID        int64  `json:"node_id,omitempty,string"`
 }
 
 // DataNodeInfos implements ComponentInfos
@@ -343,10 +365,10 @@ type DataCoordInfos struct {
 }
 
 type ImportTask struct {
-	JobID        int64  `json:"job_id,omitempty"`
-	TaskID       int64  `json:"task_id,omitempty"`
-	CollectionID int64  `json:"collection_id,omitempty"`
-	NodeID       int64  `json:"node_id,omitempty"`
+	JobID        int64  `json:"job_id,omitempty,string"`
+	TaskID       int64  `json:"task_id,omitempty,string"`
+	CollectionID int64  `json:"collection_id,omitempty,string"`
+	NodeID       int64  `json:"node_id,omitempty,string"`
 	State        string `json:"state,omitempty"`
 	Reason       string `json:"reason,omitempty"`
 	TaskType     string `json:"task_type,omitempty"`
@@ -355,16 +377,16 @@ type ImportTask struct {
 }
 
 type CompactionTask struct {
-	PlanID         int64   `json:"plan_id,omitempty"`
-	CollectionID   int64   `json:"collection_id,omitempty"`
-	Type           string  `json:"type,omitempty"`
-	State          string  `json:"state,omitempty"`
-	FailReason     string  `json:"fail_reason,omitempty"`
-	StartTime      int64   `json:"start_time,omitempty"`
-	EndTime        int64   `json:"end_time,omitempty"`
-	TotalRows      int64   `json:"total_rows,omitempty"`
-	InputSegments  []int64 `json:"input_segments,omitempty"`
-	ResultSegments []int64 `json:"result_segments,omitempty"`
+	PlanID         int64    `json:"plan_id,omitempty"`
+	CollectionID   int64    `json:"collection_id,omitempty"`
+	Type           string   `json:"type,omitempty"`
+	State          string   `json:"state,omitempty"`
+	FailReason     string   `json:"fail_reason,omitempty"`
+	StartTime      string   `json:"start_time,omitempty"`
+	EndTime        string   `json:"end_time,omitempty"`
+	TotalRows      int64    `json:"total_rows,omitempty,string"`
+	InputSegments  []string `json:"input_segments,omitempty"`
+	ResultSegments []string `json:"result_segments,omitempty"`
 }
 
 // RootCoordConfiguration records the configuration of RootCoord.
@@ -376,4 +398,68 @@ type RootCoordConfiguration struct {
 type RootCoordInfos struct {
 	BaseComponentInfos
 	SystemConfigurations RootCoordConfiguration `json:"system_configurations"`
+}
+
+type Collections struct {
+	CollectionNames      []string ` json:"collection_names,omitempty"`
+	CollectionIDs        []string `json:"collection_ids,omitempty"`
+	CreatedUtcTimestamps []string `json:"created_utc_timestamps,omitempty"`
+	// Load percentage on querynode when type is InMemory
+	InMemoryPercentages []int `json:"inMemory_percentages,omitempty"`
+	// Indicate whether query service is available
+	QueryServiceAvailable []bool `json:"query_service_available,omitempty"`
+}
+
+type PartitionInfo struct {
+	PartitionName       string `json:"partition_name,omitempty"`
+	PartitionID         int64  `json:"partition_id,omitempty,string"`
+	CreatedUtcTimestamp string `json:"created_utc_timestamp,omitempty"`
+}
+
+type Field struct {
+	FieldID          string            `json:"field_id,omitempty,string"`
+	Name             string            `json:"name,omitempty"`
+	IsPrimaryKey     bool              `json:"is_primary_key,omitempty"`
+	Description      string            `json:"description,omitempty"`
+	DataType         string            `json:"data_type,omitempty"`
+	TypeParams       map[string]string `json:"type_params,omitempty"`
+	IndexParams      map[string]string `json:"index_params,omitempty"`
+	AutoID           bool              `json:"auto_id,omitempty"`
+	ElementType      string            `json:"element_type,omitempty"`
+	DefaultValue     string            `json:"default_value,omitempty"`
+	IsDynamic        bool              `json:"is_dynamic,omitempty"`
+	IsPartitionKey   bool              `json:"is_partition_key,omitempty"`
+	IsClusteringKey  bool              `json:"is_clustering_key,omitempty"`
+	Nullable         bool              `json:"nullable,omitempty"`
+	IsFunctionOutput bool              `json:"is_function_output,omitempty"`
+}
+
+type Collection struct {
+	CollectionID         string            `json:"collection_id,omitempty,string"`
+	CollectionName       string            `json:"collection_name,omitempty"`
+	CreatedTime          string            `json:"created_time,omitempty"`
+	ShardsNum            int               `json:"shards_num,omitempty"`
+	ConsistencyLevel     string            `json:"consistency_level,omitempty"`
+	Aliases              []string          `json:"aliases,omitempty"`
+	Properties           map[string]string `json:"properties,omitempty"`
+	DBName               string            `json:"db_name,omitempty,string"`
+	NumPartitions        int               `json:"num_partitions,omitempty,string"`
+	VirtualChannelNames  []string          `json:"virtual_channel_names,omitempty"`
+	PhysicalChannelNames []string          `json:"physical_channel_names,omitempty"`
+	PartitionInfos       []*PartitionInfo  `json:"partition_infos,omitempty"`
+	EnableDynamicField   bool              `json:"enable_dynamic_field,omitempty"`
+	Fields               []*Field          `json:"fields,omitempty"`
+}
+
+type Database struct {
+	DBName           string            `json:"db_name,omitempty"`
+	DBID             int64             `json:"dbID,omitempty"`
+	CreatedTimestamp string            `json:"created_timestamp,omitempty"`
+	Properties       map[string]string `json:"properties,omitempty"`
+}
+
+type Databases struct {
+	Names             []string `json:"db_names,omitempty"`
+	IDs               []string `json:"db_ids,omitempty"`
+	CreatedTimestamps []string `json:"created_timestamps,omitempty"`
 }

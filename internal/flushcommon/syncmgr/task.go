@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -422,8 +423,8 @@ func (t *SyncTask) MarshalJSON() ([]byte, error) {
 		SegmentID:     t.segmentID,
 		BatchRows:     t.batchRows,
 		SegmentLevel:  t.level.String(),
-		TSFrom:        t.tsFrom,
-		TSTo:          t.tsTo,
+		TSFrom:        tsoutil.PhysicalTimeFormat(t.tsFrom),
+		TSTo:          tsoutil.PhysicalTimeFormat(t.tsTo),
 		DeltaRowCount: t.deltaRowCount,
 		FlushSize:     t.flushedSize,
 		RunningTime:   t.execTime.String(),

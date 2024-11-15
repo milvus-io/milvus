@@ -106,9 +106,8 @@ func (lb *LBPolicyImpl) GetShardLeaders(ctx context.Context, dbName string, coll
 		var err error
 		shardLeaders, err = globalMetaCache.GetShards(ctx, withCache, dbName, collName, collectionID)
 		if err != nil {
-			return !errors.Is(err, merr.ErrCollectionLoaded), err
+			return !errors.Is(err, merr.ErrCollectionNotLoaded), err
 		}
-
 		return false, nil
 	})
 

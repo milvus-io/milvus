@@ -1,6 +1,10 @@
 package metrics
 
 import (
+	"strconv"
+
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
@@ -23,12 +27,19 @@ func NewSegmentFrom(segment *datapb.SegmentInfo) *metricsinfo.Segment {
 
 func NewDMChannelFrom(channel *datapb.VchannelInfo) *metricsinfo.DmChannel {
 	return &metricsinfo.DmChannel{
-		CollectionID:           channel.GetCollectionID(),
-		ChannelName:            channel.GetChannelName(),
-		UnflushedSegmentIds:    channel.GetUnflushedSegmentIds(),
-		FlushedSegmentIds:      channel.GetFlushedSegmentIds(),
-		DroppedSegmentIds:      channel.GetDroppedSegmentIds(),
-		LevelZeroSegmentIds:    channel.GetLevelZeroSegmentIds(),
-		PartitionStatsVersions: channel.GetPartitionStatsVersions(),
+		CollectionID: channel.GetCollectionID(),
+		ChannelName:  channel.GetChannelName(),
+		UnflushedSegmentIds: lo.Map(channel.GetUnflushedSegmentIds(), func(t int64, i int) string {
+			return strconv.FormatInt(t, 10)
+		}),
+		FlushedSegmentIds: lo.Map(channel.GetFlushedSegmentIds(), func(t int64, i int) string {
+			return strconv.FormatInt(t, 10)
+		}),
+		DroppedSegmentIds: lo.Map(channel.GetDroppedSegmentIds(), func(t int64, i int) string {
+			return strconv.FormatInt(t, 10)
+		}),
+		LevelZeroSegmentIds: lo.Map(channel.GetLevelZeroSegmentIds(), func(t int64, i int) string {
+			return strconv.FormatInt(t, 10)
+		}),
 	}
 }

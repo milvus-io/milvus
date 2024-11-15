@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -63,29 +64,17 @@ type indexMeta struct {
 	segmentIndexes map[UniqueID]map[UniqueID]*model.SegmentIndex
 }
 
-type indexTaskStats struct {
-	IndexID      UniqueID `json:"index_id,omitempty"`
-	CollectionID UniqueID `json:"collection_id,omitempty"`
-	SegmentID    UniqueID `json:"segment_id,omitempty"`
-	BuildID      UniqueID `json:"build_id,omitempty"`
-	IndexState   string   `json:"index_state,omitempty"`
-	FailReason   string   `json:"fail_reason,omitempty"`
-	IndexSize    uint64   `json:"index_size,omitempty"`
-	IndexVersion int64    `json:"index_version,omitempty"`
-	CreateTime   uint64   `json:"create_time,omitempty"`
-}
-
-func newIndexTaskStats(s *model.SegmentIndex) *indexTaskStats {
-	return &indexTaskStats{
-		IndexID:      s.IndexID,
-		CollectionID: s.CollectionID,
-		SegmentID:    s.SegmentID,
-		BuildID:      s.BuildID,
-		IndexState:   s.IndexState.String(),
-		FailReason:   s.FailReason,
-		IndexSize:    s.IndexSize,
-		IndexVersion: s.IndexVersion,
-		CreateTime:   s.CreateTime,
+func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
+	return &metricsinfo.IndexTaskStats{
+		IndexID:        s.IndexID,
+		CollectionID:   s.CollectionID,
+		SegmentID:      s.SegmentID,
+		BuildID:        s.BuildID,
+		IndexState:     s.IndexState.String(),
+		FailReason:     s.FailReason,
+		IndexSize:      s.IndexSize,
+		IndexVersion:   s.IndexVersion,
+		CreatedUTCTime: typeutil.TimestampToString(s.CreatedUTCTime),
 	}
 }
 
@@ -94,7 +83,7 @@ type segmentBuildInfo struct {
 	// buildID -> segmentIndex
 	buildID2SegmentIndex map[UniqueID]*model.SegmentIndex
 	// taskStats records the task stats of the segment
-	taskStats *expirable.LRU[UniqueID, *indexTaskStats]
+	taskStats *expirable.LRU[UniqueID, *metricsinfo.IndexTaskStats]
 }
 
 func newSegmentIndexBuildInfo() *segmentBuildInfo {
@@ -102,7 +91,7 @@ func newSegmentIndexBuildInfo() *segmentBuildInfo {
 		// build ID -> segment index
 		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
 		// build ID -> task stats
-		taskStats: expirable.NewLRU[UniqueID, *indexTaskStats](64, nil, time.Minute*30),
+		taskStats: expirable.NewLRU[UniqueID, *metricsinfo.IndexTaskStats](64, nil, time.Minute*30),
 	}
 }
 
@@ -124,7 +113,7 @@ func (m *segmentBuildInfo) List() map[UniqueID]*model.SegmentIndex {
 	return m.buildID2SegmentIndex
 }
 
-func (m *segmentBuildInfo) GetTaskStats() []*indexTaskStats {
+func (m *segmentBuildInfo) GetTaskStats() []*metricsinfo.IndexTaskStats {
 	return m.taskStats.Values()
 }
 
