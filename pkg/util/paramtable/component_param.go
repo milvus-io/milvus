@@ -2970,7 +2970,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Key:          "queryNode.levelZeroForwardPolicy",
 		Version:      "2.4.12",
 		Doc:          "delegator level zero deletion forward policy, possible option[\"FilterByBF\", \"RemoteLoad\"]",
-		DefaultValue: "FilterByBF",
+		DefaultValue: "RemoteLoad",
 		Export:       true,
 	}
 	p.LevelZeroForwardPolicy.Init(base.mgr)
