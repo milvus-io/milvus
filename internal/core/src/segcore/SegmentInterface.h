@@ -211,6 +211,13 @@ class SegmentInternalInterface : public SegmentInterface {
         return *ptr;
     }
 
+    // union(segment_id, field_id) as unique id
+    virtual std::string
+    GetUniqueFieldId(int64_t field_id) const {
+        return std::to_string(get_segment_id()) + "_" +
+               std::to_string(field_id);
+    }
+
     std::unique_ptr<SearchResult>
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_group,

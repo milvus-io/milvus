@@ -405,7 +405,7 @@ inline SegmentGrowingPtr
 CreateGrowingSegment(
     SchemaPtr schema,
     IndexMetaPtr indexMeta,
-    int64_t segment_id = -1,
+    int64_t segment_id = 0,
     const SegcoreConfig& conf = SegcoreConfig::default_config()) {
     return std::make_unique<SegmentGrowingImpl>(
         schema, indexMeta, conf, segment_id);
