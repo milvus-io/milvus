@@ -356,9 +356,7 @@ func (kc *Catalog) collectMetrics(s *datapb.SegmentInfo) {
 	cnt += statsFieldFn(s.GetStatslogs())
 	cnt += statsFieldFn(s.GetDeltalogs())
 
-	metrics.DataCoordSegmentBinLogFileCount.
-		WithLabelValues(fmt.Sprint(s.CollectionID), fmt.Sprint(s.GetID())).
-		Set(float64(cnt))
+	metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(fmt.Sprint(s.CollectionID)).Set(float64(cnt))
 }
 
 func (kc *Catalog) hasBinlogPrefix(segment *datapb.SegmentInfo) (bool, error) {
