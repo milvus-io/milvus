@@ -114,6 +114,7 @@ func KafkaHealthCheck(clusterStatus *pcommon.MQClusterStatus) {
 		clusterStatus.Reason = fmt.Sprintf("failed to create Kafka producer: %v", err)
 		return
 	}
+	defer producer.Close()
 
 	metadata, err := producer.GetMetadata(nil, false, 3000)
 	if err != nil {
