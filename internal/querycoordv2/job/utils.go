@@ -90,9 +90,7 @@ func loadPartitions(ctx context.Context,
 	for _, replica := range replicas {
 		for _, node := range replica.GetNodes() {
 			status, err := cluster.LoadPartitions(ctx, node, loadReq)
-			// There is no need to rollback LoadPartitions as the load job will fail
-			// and the Delegator will not be created,
-			// resulting in search and query requests failing due to the absence of Delegator.
+			// TODO: rollback LoadPartitions if failed
 			if err != nil {
 				return err
 			}
