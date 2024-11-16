@@ -172,11 +172,12 @@ class TestBase(Base):
         self.vector_client.db_name = db_name
         self.import_job_client.db_name = db_name
 
-    def wait_load_completed(self, collection_name, db_name="default", timeout=60):
+    def wait_load_completed(self, collection_name, db_name="default", timeout=5):
         t0 = time.time()
         while True and time.time() - t0 < timeout:
             rsp = self.collection_client.collection_describe(collection_name, db_name=db_name)
             if "data" in rsp and "load" in rsp["data"] and rsp["data"]["load"] == "LoadStateLoaded":
+                logger.info(f"collection {collection_name} load completed in {time.time() - t0} seconds")
                 break
             else:
-                time.sleep(5)
+                time.sleep(1)
