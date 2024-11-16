@@ -203,7 +203,6 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode.nodeID, workload.channel)
 			return lastErr
 		}
-		defer lb.clientMgr.ReleaseClientRef(targetNode.nodeID)
 
 		err = workload.exec(ctx, targetNode.nodeID, client, workload.channel)
 		if err != nil {

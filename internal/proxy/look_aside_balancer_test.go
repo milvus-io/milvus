@@ -43,7 +43,6 @@ type LookAsideBalancerSuite struct {
 
 func (suite *LookAsideBalancerSuite) SetupTest() {
 	suite.clientMgr = NewMockShardClientManager(suite.T())
-	suite.clientMgr.EXPECT().ReleaseClientRef(mock.Anything).Maybe()
 	suite.balancer = NewLookAsideBalancer(suite.clientMgr)
 	suite.balancer.Start(context.Background())
 
@@ -309,7 +308,6 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 		},
 	}, nil).Maybe()
 	suite.clientMgr.ExpectedCalls = nil
-	suite.clientMgr.EXPECT().ReleaseClientRef(mock.Anything).Maybe()
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ni nodeInfo) (types.QueryNodeClient, error) {
 		if ni.nodeID == 1 {
 			return qn, nil
@@ -373,7 +371,6 @@ func (suite *LookAsideBalancerSuite) TestGetClientFailed() {
 
 	// test get shard client from client mgr return nil
 	suite.clientMgr.ExpectedCalls = nil
-	suite.clientMgr.EXPECT().ReleaseClientRef(mock.Anything).Maybe()
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, errors.New("shard client not found"))
 	// expected stopping the health check after failure times reaching the limit
 	suite.Eventually(func() bool {
@@ -385,7 +382,6 @@ func (suite *LookAsideBalancerSuite) TestNodeRecover() {
 	// mock qn down for a while and then recover
 	qn3 := mocks.NewMockQueryNodeClient(suite.T())
 	suite.clientMgr.ExpectedCalls = nil
-	suite.clientMgr.EXPECT().ReleaseClientRef(mock.Anything)
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn3, nil)
 	qn3.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
@@ -424,7 +420,6 @@ func (suite *LookAsideBalancerSuite) TestNodeOffline() {
 	// mock qn down for a while and then recover
 	qn3 := mocks.NewMockQueryNodeClient(suite.T())
 	suite.clientMgr.ExpectedCalls = nil
-	suite.clientMgr.EXPECT().ReleaseClientRef(mock.Anything)
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn3, nil)
 	qn3.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
