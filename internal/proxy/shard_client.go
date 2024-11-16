@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type queryNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)
@@ -32,19 +33,27 @@ var errClosed = errors.New("client is closed")
 type shardClient struct {
 	sync.RWMutex
 	info     nodeInfo
-	isClosed bool
-	clients  []types.QueryNodeClient
-	idx      atomic.Int64
 	poolSize int
-	pooling  bool
+	clients  []types.QueryNodeClient
+	creator  queryNodeCreatorFunc
 
 	initialized atomic.Bool
-	creator     queryNodeCreatorFunc
+	isClosed    bool
 
-	refCnt *atomic.Int64
+	idx          atomic.Int64
+	lastActiveTs *atomic.Int64
+}
+
+func newShardClient(info nodeInfo, creator queryNodeCreatorFunc) *shardClient {
+	return &shardClient{
+		info:         info,
+		creator:      creator,
+		lastActiveTs: atomic.NewInt64(time.Now().UnixNano()),
+	}
 }
 
 func (n *shardClient) getClient(ctx context.Context) (types.QueryNodeClient, error) {
+	n.lastActiveTs.Store(time.Now().UnixNano())
 	if !n.initialized.Load() {
 		n.Lock()
 		if !n.initialized.Load() {
@@ -52,7 +61,6 @@ func (n *shardClient) getClient(ctx context.Context) (types.QueryNodeClient, err
 				n.Unlock()
 				return nil, err
 			}
-			n.initialized.Store(true)
 		}
 		n.Unlock()
 	}
@@ -66,78 +74,36 @@ func (n *shardClient) getClient(ctx context.Context) (types.QueryNodeClient, err
 		if err != nil {
 			return nil, err
 		}
-		n.IncRef()
 		return client, nil
 	}
 }
 
-func (n *shardClient) DecRef() {
-	ret := n.refCnt.Dec()
-	if ret <= 0 {
-		log.Warn("unexpected client ref count zero, please check  the release call", zap.Int64("refCount", ret), zap.Stack("caller"))
-	}
-}
-
-func (n *shardClient) IncRef() {
-	n.refCnt.Inc()
-}
-
-func (n *shardClient) close() {
-	n.isClosed = true
-
-	for _, client := range n.clients {
-		if err := client.Close(); err != nil {
-			log.Warn("close grpc client failed", zap.Error(err))
-		}
-	}
-	n.clients = nil
-}
-
-// Notice: close client should only be called by shard client manager. and after close, the client must be removed from the manager.
-// 1. the client hasn't been used for a long time
-// 2. shard client manager has been closed.
-func (n *shardClient) Close() {
-	n.Lock()
-	defer n.Unlock()
-	n.close()
-}
-
-func newShardClient(info nodeInfo, creator queryNodeCreatorFunc) (*shardClient, error) {
-	num := paramtable.Get().ProxyCfg.QueryNodePoolingSize.GetAsInt()
-	if num <= 0 {
-		num = 1
-	}
-
-	return &shardClient{
-		info: nodeInfo{
-			nodeID:  info.nodeID,
-			address: info.address,
-		},
-		poolSize: num,
-		creator:  creator,
-		refCnt:   atomic.NewInt64(1),
-	}, nil
-}
-
 func (n *shardClient) initClients(ctx context.Context) error {
-	clients := make([]types.QueryNodeClient, 0, n.poolSize)
-	for i := 0; i < n.poolSize; i++ {
+	poolSize := paramtable.Get().ProxyCfg.QueryNodePoolingSize.GetAsInt()
+	if poolSize <= 0 {
+		poolSize = 1
+	}
+
+	clients := make([]types.QueryNodeClient, 0, poolSize)
+	for i := 0; i < poolSize; i++ {
 		client, err := n.creator(ctx, n.info.address, n.info.nodeID)
 		if err != nil {
 			// Roll back already created clients
 			for _, c := range clients {
 				c.Close()
 			}
+			log.Info("failed to create client for node", zap.Int64("nodeID", n.info.nodeID), zap.Error(err))
 			return errors.Wrap(err, fmt.Sprintf("create client for node=%d failed", n.info.nodeID))
 		}
 		clients = append(clients, client)
 	}
 
+	n.initialized.Store(true)
+	n.poolSize = poolSize
 	n.clients = clients
 	return nil
 }
 
-// roundRobinSelectClient selects a client in a round-robin manner
 func (n *shardClient) roundRobinSelectClient() (types.QueryNodeClient, error) {
 	n.RLock()
 	defer n.RUnlock()
@@ -154,30 +120,46 @@ func (n *shardClient) roundRobinSelectClient() (types.QueryNodeClient, error) {
 	return nextClient, nil
 }
 
+// Notice: close client should only be called by shard client manager. and after close, the client must be removed from the manager.
+// 1. the client hasn't been used for a long time
+// 2. shard client manager has been closed.
+func (n *shardClient) Close() {
+	n.Lock()
+	defer n.Unlock()
+	n.close()
+}
+
+func (n *shardClient) close() {
+	n.isClosed = true
+
+	for _, client := range n.clients {
+		if err := client.Close(); err != nil {
+			log.Warn("close grpc client failed", zap.Error(err))
+		}
+	}
+	n.clients = nil
+}
+
+// roundRobinSelectClient selects a client in a round-robin manner
 type shardClientMgr interface {
 	GetClient(ctx context.Context, nodeInfo nodeInfo) (types.QueryNodeClient, error)
-	ReleaseClientRef(nodeID int64)
 	Close()
 	SetClientCreatorFunc(creator queryNodeCreatorFunc)
 }
 
-const (
-	defaultPurgeInterval   = 600 * time.Second
-	defaultPurgeExpiredAge = 3
-)
-
 type shardClientMgrImpl struct {
-	clients struct {
-		sync.RWMutex
-		data map[UniqueID]*shardClient
-	}
+	clients       *typeutil.ConcurrentMap[UniqueID, *shardClient]
 	clientCreator queryNodeCreatorFunc
-
-	closeCh chan struct{}
+	closeCh       chan struct{}
 
 	purgeInterval   time.Duration
-	purgeExpiredAge int
+	expiredDuration time.Duration
 }
+
+const (
+	defaultPurgeInterval   = 600 * time.Second
+	defaultExpiredDuration = 60 * time.Minute
+)
 
 // SessionOpt provides a way to set params in SessionManager
 type shardClientMgrOpt func(s shardClientMgr)
@@ -193,14 +175,11 @@ func defaultQueryNodeClientCreator(ctx context.Context, addr string, nodeID int6
 // NewShardClientMgr creates a new shardClientMgr
 func newShardClientMgr(options ...shardClientMgrOpt) *shardClientMgrImpl {
 	s := &shardClientMgrImpl{
-		clients: struct {
-			sync.RWMutex
-			data map[UniqueID]*shardClient
-		}{data: make(map[UniqueID]*shardClient)},
+		clients:         typeutil.NewConcurrentMap[UniqueID, *shardClient](),
 		clientCreator:   defaultQueryNodeClientCreator,
 		closeCh:         make(chan struct{}),
 		purgeInterval:   defaultPurgeInterval,
-		purgeExpiredAge: defaultPurgeExpiredAge,
+		expiredDuration: defaultExpiredDuration,
 	}
 	for _, opt := range options {
 		opt(s)
@@ -215,27 +194,7 @@ func (c *shardClientMgrImpl) SetClientCreatorFunc(creator queryNodeCreatorFunc) 
 }
 
 func (c *shardClientMgrImpl) GetClient(ctx context.Context, info nodeInfo) (types.QueryNodeClient, error) {
-	c.clients.RLock()
-	client, ok := c.clients.data[info.nodeID]
-	c.clients.RUnlock()
-
-	if !ok {
-		c.clients.Lock()
-		// Check again after acquiring the lock
-		client, ok = c.clients.data[info.nodeID]
-		if !ok {
-			// Create a new client if it doesn't exist
-			newClient, err := newShardClient(info, c.clientCreator)
-			if err != nil {
-				c.clients.Unlock()
-				return nil, err
-			}
-			c.clients.data[info.nodeID] = newClient
-			client = newClient
-		}
-		c.clients.Unlock()
-	}
-
+	client, _ := c.clients.GetOrInsert(info.nodeID, newShardClient(info, c.clientCreator))
 	return client.getClient(ctx)
 }
 
@@ -244,50 +203,34 @@ func (c *shardClientMgrImpl) PurgeClient() {
 	ticker := time.NewTicker(c.purgeInterval)
 	defer ticker.Stop()
 
-	// record node's age, if node reach 3 consecutive failures, try to purge it
-	nodeAges := make(map[int64]int, 0)
-
 	for {
 		select {
 		case <-c.closeCh:
 			return
 		case <-ticker.C:
 			shardLocations := globalMetaCache.ListShardLocation()
-			c.clients.Lock()
-			for nodeID, client := range c.clients.data {
-				if _, ok := shardLocations[nodeID]; !ok {
-					nodeAges[nodeID] += 1
-					if nodeAges[nodeID] > c.purgeExpiredAge {
-						if client.refCnt.Load() <= 1 {
-							client.Close()
-							delete(c.clients.data, nodeID)
-							log.Info("remove client due to not used for long time", zap.Int64("nodeID", nodeID))
-						}
+			now := time.Now().UnixNano()
+			c.clients.Range(func(key UniqueID, value *shardClient) bool {
+				if _, ok := shardLocations[key]; !ok {
+					// if the client is not used for more than 1 hour, and it's not a delegator anymore, should remove it
+					if now-value.lastActiveTs.Load() > c.expiredDuration.Nanoseconds() {
+						value.Close()
+						c.clients.Remove(key)
+						log.Info("remove idle node client", zap.Int64("nodeID", key))
 					}
-				} else {
-					nodeAges[nodeID] = 0
 				}
-			}
-			c.clients.Unlock()
+				return true
+			})
 		}
-	}
-}
-
-func (c *shardClientMgrImpl) ReleaseClientRef(nodeID int64) {
-	c.clients.RLock()
-	defer c.clients.RUnlock()
-	if client, ok := c.clients.data[nodeID]; ok {
-		client.DecRef()
 	}
 }
 
 // Close release clients
 func (c *shardClientMgrImpl) Close() {
-	c.clients.Lock()
-	defer c.clients.Unlock()
 	close(c.closeCh)
-	for _, s := range c.clients.data {
-		s.Close()
-	}
-	c.clients.data = make(map[UniqueID]*shardClient)
+	c.clients.Range(func(key UniqueID, value *shardClient) bool {
+		value.Close()
+		c.clients.Remove(key)
+		return true
+	})
 }
