@@ -870,12 +870,12 @@ func TestMeta_GetSegmentIndexes(t *testing.T) {
 	m := createMeta(catalog, withIndexMeta(createIndexMeta(catalog)))
 
 	t.Run("success", func(t *testing.T) {
-		segIndexes := m.indexMeta.GetSegmentIndexes(10000, segID)
+		segIndexes := m.indexMeta.GetSegmentIndexes(collID, segID)
 		assert.Equal(t, 1, len(segIndexes))
 	})
 
 	t.Run("segment not exist", func(t *testing.T) {
-		segIndexes := m.indexMeta.GetSegmentIndexes(10000, segID+100)
+		segIndexes := m.indexMeta.GetSegmentIndexes(collID, segID+100)
 		assert.Equal(t, 0, len(segIndexes))
 	})
 
