@@ -146,15 +146,15 @@ minio:
   cloudProvider: aws
   # The JSON content contains the gcs service account credentials.
   # Used only for the "gcpnative" cloud provider.
-  gcpCredentialJSON: 
+  gcpCredentialJSON:
   # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
   # Leave it empty if you want to use AWS default endpoint
-  iamEndpoint: 
+  iamEndpoint:
   logLevel: fatal # Log level for aws sdk log. Supported level:  off, fatal, error, warn, info, debug, trace
   region:  # Specify minio storage system location region
   useVirtualHost: false # Whether use virtual host mode for bucket
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
-  # The maximum number of objects requested per batch in minio ListObjects rpc, 
+  # The maximum number of objects requested per batch in minio ListObjects rpc,
   # 0 means using oss client by default, decrease these configration if ListObjects timeout
   listObjectsMaxKeys: 0
 
@@ -201,10 +201,10 @@ pulsar:
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:
 #   brokerList: localhost:9092
-#   saslUsername: 
-#   saslPassword: 
-#   saslMechanisms: 
-#   securityProtocol: 
+#   saslUsername:
+#   saslPassword:
+#   saslMechanisms:
+#   securityProtocol:
 #   ssl:
 #     enabled: false # whether to enable ssl mode
 #     tlsCert:  # path to client's public key (PEM) used for authentication
@@ -411,9 +411,9 @@ queryNode:
   cache:
     memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
-    # options: async, sync, disable. 
-    # Specifies the necessity for warming up the chunk cache. 
-    # 1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the 
+    # options: async, sync, disable.
+    # Specifies the necessity for warming up the chunk cache.
+    # 1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the
     # chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
     # for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
     # 2. If set to "disable" original vector data will only be loaded into the chunk cache during search/query.
@@ -424,8 +424,8 @@ queryNode:
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
     chunkCache: true # Enable mmap for chunk cache (raw vector retrieving).
-    # Enable memory mapping (mmap) to optimize the handling of growing raw data. 
-    # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
+    # Enable memory mapping (mmap) to optimize the handling of growing raw data.
+    # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
     growingMmapEnabled: false
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
@@ -528,7 +528,7 @@ dataCoord:
     # The max idle time of segment in seconds, 10*60.
     maxIdleTime: 600
     minSizeFromIdleToSealed: 16 # The min size in MB of segment which can be idle from sealed.
-    # The max number of binlog (which is equal to the binlog file num of primary key) for one segment, 
+    # The max number of binlog (which is equal to the binlog file num of primary key) for one segment,
     # the segment will be sealed if the number of binlog file reaches to max value.
     maxBinlogFileNumber: 32
     smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
@@ -537,16 +537,16 @@ dataCoord:
     compactableProportion: 0.85
     # over (compactableProportion * segment max # of rows) rows.
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
-    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
+    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%.
     expansionRate: 1.25
   sealPolicy:
     channel:
-      # The size threshold in MB, if the total size of growing segments of each shard 
+      # The size threshold in MB, if the total size of growing segments of each shard
       # exceeds this threshold, the largest growing segment will be sealed.
       growingSegmentsMemSize: 4096
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
-  # Switch value to control if to enable segment compaction. 
+  # Switch value to control if to enable segment compaction.
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
   enableCompaction: true
   compaction:
@@ -554,7 +554,7 @@ dataCoord:
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true
     indexBasedCompaction: true
-    # compaction task prioritizer, options: [default, level, mix]. 
+    # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.
     # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
@@ -742,7 +742,7 @@ msgChannel:
 
 # Configures the system log output.
 log:
-  # Milvus log level. Option: debug, info, warn, error, panic, and fatal. 
+  # Milvus log level. Option: debug, info, warn, error, panic, and fatal.
   # It is recommended to use debug level under test and development environments, and info level in production environment.
   level: info
   file:
@@ -750,7 +750,7 @@ log:
     # The default value is set empty, indicating to output log files to standard output (stdout) and standard error (stderr).
     # If this parameter is set to a valid local path, Milvus writes and stores log files in this path.
     # Set this parameter as the path that you have permission to write.
-    rootPath: 
+    rootPath:
     maxSize: 300 # The maximum size of a log file, unit: MB.
     maxAge: 10 # The maximum retention time before a log file is automatically cleared, unit: day. The minimum value is 1.
     maxBackups: 20 # The maximum number of log files to back up, unit: day. The minimum value is 1.
@@ -809,7 +809,7 @@ common:
     authorizationEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
-    superUsers: 
+    superUsers:
     defaultRootPassword: Milvus # default password for root user
     tlsMode: 0
   session:
@@ -824,8 +824,8 @@ common:
   storage:
     scheme: s3
     enablev2: false
-  # Whether to disable the internal time messaging mechanism for the system. 
-  # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches. 
+  # Whether to disable the internal time messaging mechanism for the system.
+  # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
   # This helps Milvus-CDC synchronize incremental data
   ttMsgEnabled: true
   traceLogMode: 0 # trace request info
@@ -1068,10 +1068,10 @@ streamingNode:
 # Any configuration related to the streaming service.
 streaming:
   walBalancer:
-    # The interval of balance task trigger at background, 1 min by default. 
+    # The interval of balance task trigger at background, 1 min by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     triggerInterval: 1m
-    # The initial interval of balance task trigger backoff, 50 ms by default. 
+    # The initial interval of balance task trigger backoff, 50 ms by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     backoffInitialInterval: 50ms
     backoffMultiplier: 2 # The multiplier of balance task trigger backoff, 2 by default

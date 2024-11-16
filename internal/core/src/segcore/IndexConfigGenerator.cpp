@@ -24,10 +24,10 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
       is_sparse_(is_sparse) {
     origin_index_type_ = index_meta_.GetIndexType();
     metric_type_ = index_meta_.GeMetricType();
-    // For Dense vector, use IVFFLAT_CC as the growing and temp index type.
+    // For Dense vector, use INDEX_FAISS_IVFFLAT_CC as the growing and temp index type.
     //
-    // For Sparse vector, use SPARSE_WAND_CC for INDEX_SPARSE_WAND index, or use
-    // SPARSE_INVERTED_INDEX_CC for INDEX_SPARSE_INVERTED_INDEX/other sparse
+    // For Sparse vector, use INDEX_SPARSE_WAND_CC for INDEX_SPARSE_WAND index, or use
+    // INDEX_SPARSE_INVERTED_INDEX_CC for INDEX_SPARSE_INVERTED_INDEX/other sparse
     // index types as the growing and temp index type.
 
     if (origin_index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
