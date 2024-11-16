@@ -20,11 +20,12 @@ import (
 	"context"
 	"time"
 
+	"go.opentelemetry.io/otel"
+
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -71,34 +72,20 @@ func waitCollectionReleased(dist *meta.DistributionManager, checkerController *c
 func loadPartitions(ctx context.Context,
 	meta *meta.Meta,
 	cluster session.Cluster,
-	broker meta.Broker,
-	withSchema bool,
 	collection int64,
 	partitions ...int64,
 ) error {
-	var err error
-	var schema *schemapb.CollectionSchema
-	if withSchema {
-		collectionInfo, err := broker.DescribeCollection(ctx, collection)
-		if err != nil {
-			return err
-		}
-		schema = collectionInfo.GetSchema()
-	}
-	indexes, err := broker.ListIndexes(ctx, collection)
-	if err != nil {
-		return err
-	}
+	_, span := otel.Tracer(typeutil.QueryCoordRole).Start(ctx, "loadPartitions")
+	defer span.End()
+	start := time.Now()
 
 	replicas := meta.ReplicaManager.GetByCollection(collection)
 	loadReq := &querypb.LoadPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadPartitions,
 		},
-		CollectionID:  collection,
-		PartitionIDs:  partitions,
-		Schema:        schema,
-		IndexInfoList: indexes,
+		CollectionID: collection,
+		PartitionIDs: partitions,
 	}
 	for _, replica := range replicas {
 		for _, node := range replica.GetNodes() {
@@ -114,6 +101,9 @@ func loadPartitions(ctx context.Context,
 			}
 		}
 	}
+
+	log.Ctx(ctx).Info("load partitions done", zap.Int64("collectionID", collection),
+		zap.Int64s("partitionIDs", partitions), zap.Duration("dur", time.Since(start)))
 	return nil
 }
 

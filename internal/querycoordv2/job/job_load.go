@@ -194,7 +194,7 @@ func (job *LoadCollectionJob) Execute() error {
 	}
 
 	// 3. loadPartitions on QueryNodes
-	err = loadPartitions(job.ctx, job.meta, job.cluster, job.broker, true, req.GetCollectionID(), lackPartitionIDs...)
+	err = loadPartitions(job.ctx, job.meta, job.cluster, req.GetCollectionID(), lackPartitionIDs...)
 	if err != nil {
 		return err
 	}
@@ -399,11 +399,9 @@ func (job *LoadPartitionJob) Execute() error {
 		job.undo.IsReplicaCreated = true
 	}
 
-	// 3. loadPartitions on QueryNodes
-	err = loadPartitions(job.ctx, job.meta, job.cluster, job.broker, true, req.GetCollectionID(), lackPartitionIDs...)
-	if err != nil {
-		return err
-	}
+	// 3. For the load collection job, the list of partitions in the QueryNode
+	// is passed during the initialization of the collection object,
+	// so there is no need to load partitions at this point.
 
 	// 4. put collection/partitions meta
 	partitions := lo.Map(lackPartitionIDs, func(partID int64, _ int) *meta.Partition {
