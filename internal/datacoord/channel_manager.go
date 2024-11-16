@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -454,7 +455,18 @@ func (m *ChannelManagerImpl) AdvanceChannelState(ctx context.Context) {
 	updatedStandbys := false
 	updatedStandbys = m.advanceStandbys(ctx, standbys)
 	updatedToCheckes := m.advanceToChecks(ctx, toChecks)
-	updatedToNotifies := m.advanceToNotifies(ctx, toNotifies)
+
+	var (
+		updatedToNotifies bool
+		maxNum            = len(m.store.GetNodes()) * paramtable.Get().DataCoordCfg.MaxConcurrentChannelTaskNumPerDN.GetAsInt()
+		executingNum      = len(toChecks)
+		toNotifyNum       = maxNum - executingNum
+	)
+
+	if toNotifyNum > 0 {
+		toNotifies = lo.Slice(toNotifies, 0, toNotifyNum)
+		updatedToNotifies = m.advanceToNotifies(ctx, toNotifies)
+	}
 
 	if updatedStandbys || updatedToCheckes || updatedToNotifies {
 		m.lastActiveTimestamp = time.Now()
