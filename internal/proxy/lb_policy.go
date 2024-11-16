@@ -67,9 +67,10 @@ const (
 )
 
 type LBPolicyImpl struct {
-	getBalancer func() LBBalancer
-	clientMgr   shardClientMgr
-	balancerMap map[string]LBBalancer
+	getBalancer    func() LBBalancer
+	clientMgr      shardClientMgr
+	balancerMap    map[string]LBBalancer
+	retryOnReplica int
 }
 
 func NewLBPolicyImpl(clientMgr shardClientMgr) *LBPolicyImpl {
@@ -77,18 +78,21 @@ func NewLBPolicyImpl(clientMgr shardClientMgr) *LBPolicyImpl {
 	balancerMap[LookAside] = NewLookAsideBalancer(clientMgr)
 	balancerMap[RoundRobin] = NewRoundRobinBalancer()
 
+	balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 	getBalancer := func() LBBalancer {
-		balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 		if _, ok := balancerMap[balancePolicy]; !ok {
 			return balancerMap[LookAside]
 		}
 		return balancerMap[balancePolicy]
 	}
 
+	retryOnReplica := Params.ProxyCfg.RetryTimesOnReplica.GetAsInt()
+
 	return &LBPolicyImpl{
-		getBalancer: getBalancer,
-		clientMgr:   clientMgr,
-		balancerMap: balancerMap,
+		getBalancer:    getBalancer,
+		clientMgr:      clientMgr,
+		balancerMap:    balancerMap,
+		retryOnReplica: retryOnReplica,
 	}
 }
 
@@ -231,12 +235,11 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 	}
 
 	// let every request could retry at least twice, which could retry after update shard leader cache
-	retryTimes := Params.ProxyCfg.RetryTimesOnReplica.GetAsInt()
 	wg, ctx := errgroup.WithContext(ctx)
 	for k, v := range dml2leaders {
 		channel := k
 		nodes := v
-		channelRetryTimes := retryTimes
+		channelRetryTimes := lb.retryOnReplica
 		if len(nodes) > 0 {
 			channelRetryTimes *= len(nodes)
 		}
