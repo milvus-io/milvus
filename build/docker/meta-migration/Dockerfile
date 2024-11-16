@@ -10,7 +10,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 
-FROM ubuntu:focal-20220426
+FROM ubuntu:20.04
 
 COPY ./bin/meta-migration /milvus/bin/
 
