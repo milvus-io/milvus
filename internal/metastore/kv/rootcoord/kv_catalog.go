@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -343,6 +346,28 @@ func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID type
 	return partitions, nil
 }
 
+func (kc *Catalog) batchListPartitionsAfter210(ctx context.Context, ts typeutil.Timestamp) (map[int64][]*model.Partition, error) {
+	_, values, err := kc.Snapshot.LoadWithPrefix(PartitionMetaPrefix, ts)
+	if err != nil {
+		return nil, err
+	}
+
+	ret := make(map[int64][]*model.Partition)
+	for i := 0; i < len(values); i++ {
+		partitionMeta := &pb.PartitionInfo{}
+		err := proto.Unmarshal([]byte(values[i]), partitionMeta)
+		if err != nil {
+			return nil, err
+		}
+		collectionID := partitionMeta.GetCollectionId()
+		if ret[collectionID] == nil {
+			ret[collectionID] = make([]*model.Partition, 0)
+		}
+		ret[collectionID] = append(ret[collectionID], model.UnmarshalPartitionModel(partitionMeta))
+	}
+	return ret, nil
+}
+
 func fieldVersionAfter210(collMeta *pb.CollectionInfo) bool {
 	return len(collMeta.GetSchema().GetFields()) <= 0
 }
@@ -363,6 +388,32 @@ func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil
 		fields = append(fields, model.UnmarshalFieldModel(partitionMeta))
 	}
 	return fields, nil
+}
+
+func (kc *Catalog) batchListFieldsAfter210(ctx context.Context, ts typeutil.Timestamp) (map[int64][]*model.Field, error) {
+	keys, values, err := kc.Snapshot.LoadWithPrefix(FieldMetaPrefix, ts)
+	if err != nil {
+		return nil, err
+	}
+
+	ret := make(map[int64][]*model.Field)
+	for i := 0; i < len(values); i++ {
+		fieldMeta := &schemapb.FieldSchema{}
+		err := proto.Unmarshal([]byte(values[i]), fieldMeta)
+		if err != nil {
+			return nil, err
+		}
+
+		collectionID, err := strconv.ParseInt(strings.Split(keys[i], "/")[2], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		if ret[collectionID] == nil {
+			ret[collectionID] = make([]*model.Field, 0)
+		}
+		ret[collectionID] = append(ret[collectionID], model.UnmarshalFieldModel(fieldMeta))
+	}
+	return ret, nil
 }
 
 func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *pb.CollectionInfo,
@@ -387,6 +438,41 @@ func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *p
 	collection.Fields = fields
 
 	return collection, nil
+}
+
+func (kc *Catalog) batchAppendPartitionAndFieldsInfo(ctx context.Context, collMeta []*pb.CollectionInfo,
+	ts typeutil.Timestamp,
+) ([]*model.Collection, error) {
+	var partitionMetaMap map[int64][]*model.Partition
+	var fieldMetaMap map[int64][]*model.Field
+	ret := make([]*model.Collection, 0)
+	for _, coll := range collMeta {
+		collection := model.UnmarshalCollectionModel(coll)
+		if partitionVersionAfter210(coll) || fieldVersionAfter210(coll) {
+			if len(partitionMetaMap) == 0 {
+				var err error
+				partitionMetaMap, err = kc.batchListPartitionsAfter210(ctx, ts)
+				if err != nil {
+					return nil, err
+				}
+
+				fieldMetaMap, err = kc.batchListFieldsAfter210(ctx, ts)
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			if partitionMetaMap[collection.CollectionID] != nil {
+				collection.Partitions = partitionMetaMap[collection.CollectionID]
+			}
+			if fieldMetaMap[collection.CollectionID] != nil {
+				collection.Fields = fieldMetaMap[collection.CollectionID]
+			}
+		}
+		ret = append(ret, collection)
+	}
+
+	return ret, nil
 }
 
 func (kc *Catalog) GetCollectionByID(ctx context.Context, dbID int64, ts typeutil.Timestamp, collectionID typeutil.UniqueID) (*model.Collection, error) {
@@ -640,23 +726,28 @@ func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 		return nil, err
 	}
 
-	colls := make([]*model.Collection, 0, len(vals))
+	start := time.Now()
+	colls := make([]*pb.CollectionInfo, 0, len(vals))
 	for _, val := range vals {
-		collMeta := pb.CollectionInfo{}
-		err := proto.Unmarshal([]byte(val), &collMeta)
+		collMeta := &pb.CollectionInfo{}
+		err := proto.Unmarshal([]byte(val), collMeta)
 		if err != nil {
 			log.Warn("unmarshal collection info failed", zap.Error(err))
 			continue
 		}
-		kc.fixDefaultDBIDConsistency(ctx, &collMeta, ts)
-		collection, err := kc.appendPartitionAndFieldsInfo(ctx, &collMeta, ts)
-		if err != nil {
-			return nil, err
-		}
-		colls = append(colls, collection)
+		kc.fixDefaultDBIDConsistency(ctx, collMeta, ts)
+		colls = append(colls, collMeta)
+	}
+	log.Info("unmarshal all collection details cost", zap.Int64("db", dbID), zap.Duration("cost", time.Since(start)))
+
+	start = time.Now()
+	ret, err := kc.batchAppendPartitionAndFieldsInfo(ctx, colls, ts)
+	log.Info("append partition and fields info cost", zap.Int64("db", dbID), zap.Duration("cost", time.Since(start)))
+	if err != nil {
+		return nil, err
 	}
 
-	return colls, nil
+	return ret, nil
 }
 
 // fixDefaultDBIDConsistency fix dbID consistency for collectionInfo.
