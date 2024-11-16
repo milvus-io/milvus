@@ -219,14 +219,6 @@ func (s *SegmentsInfo) SetRowCount(segmentID UniqueID, rowCount int64) {
 	}
 }
 
-// SetState sets Segment State info for SegmentInfo with provided segmentID
-// if SegmentInfo not found, do nothing
-func (s *SegmentsInfo) SetState(segmentID UniqueID, state commonpb.SegmentState) {
-	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.Clone(SetState(state))
-	}
-}
-
 // SetDmlPosition sets DmlPosition info (checkpoint for recovery) for SegmentInfo with provided segmentID
 // if SegmentInfo not found, do nothing
 func (s *SegmentsInfo) SetDmlPosition(segmentID UniqueID, pos *msgpb.MsgPosition) {
