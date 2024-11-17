@@ -89,7 +89,7 @@ const (
 	DescribeAliasTaskName         = "DescribeAliasTask"
 	ListAliasesTaskName           = "ListAliasesTask"
 	AlterCollectionTaskName       = "AlterCollectionTask"
-	AlterCollectionFieldTaskName  = "AlterColeectionFieldTask"
+	AlterCollectionFieldTaskName  = "AlterCollectionFieldTask"
 	UpsertTaskName                = "UpsertTask"
 	CreateResourceGroupTaskName   = "CreateResourceGroupTask"
 	UpdateResourceGroupsTaskName  = "UpdateResourceGroupsTask"
