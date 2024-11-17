@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
@@ -59,9 +60,16 @@ func TestPurgeClient(t *testing.T) {
 		nodeID: 1,
 	}
 
+	returnEmptyResult := atomic.NewBool(false)
+
 	cache := NewMockCache(t)
-	cache.EXPECT().ListShardLocation().Return(map[int64]nodeInfo{
-		1: node,
+	cache.EXPECT().ListShardLocation().RunAndReturn(func() map[int64]nodeInfo {
+		if returnEmptyResult.Load() {
+			return map[int64]nodeInfo{}
+		}
+		return map[int64]nodeInfo{
+			1: node,
+		}
 	})
 	globalMetaCache = cache
 
@@ -104,8 +112,7 @@ func TestPurgeClient(t *testing.T) {
 	assert.Equal(t, s.clients.Len(), 1)
 	assert.True(t, time.Now().UnixNano()-qnClient.lastActiveTs.Load() > 3*time.Second.Nanoseconds())
 
-	cache.ExpectedCalls = nil
-	cache.EXPECT().ListShardLocation().Return(map[int64]nodeInfo{})
+	returnEmptyResult.Store(true)
 	time.Sleep(2 * time.Second)
 	// remove client from shard location, expected client should be purged
 	assert.Equal(t, s.clients.Len(), 0)
