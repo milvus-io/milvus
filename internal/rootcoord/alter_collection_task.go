@@ -50,7 +50,7 @@ func (a *alterCollectionTask) Prepare(ctx context.Context) error {
 func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	// Now we only support alter properties of collection
 	if a.Req.GetProperties() == nil && a.Req.GetDeleteKeys() == nil {
-		return errors.New("only support alter collection properties, but collection properties or deletekeys is empty")
+		return errors.New("The collection properties to alter and keys to delete must not be empty at the same time")
 	}
 
 	if len(a.Req.GetProperties()) > 0 && len(a.Req.GetDeleteKeys()) > 0 {
@@ -259,7 +259,7 @@ func UpdateFieldProperties(coll *model.Collection, fieldName string, updatedProp
 			return nil
 		}
 	}
-	return merr.WrapErrParameterInvalidMsg("%s does not exist in collection", fieldName)
+	return merr.WrapErrParameterInvalidMsg("field %s does not exist in collection", fieldName)
 }
 
 func UpdateFieldPropertyParams(oldProps, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
