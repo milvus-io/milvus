@@ -405,7 +405,7 @@ type Collections struct {
 	CollectionIDs        []string `json:"collection_ids,omitempty"`
 	CreatedUtcTimestamps []string `json:"created_utc_timestamps,omitempty"`
 	// Load percentage on querynode when type is InMemory
-	InMemoryPercentages []int `json:"inMemory_percentages,omitempty"`
+	InMemoryPercentages []string `json:"inMemory_percentages,omitempty"`
 	// Indicate whether query service is available
 	QueryServiceAvailable []bool `json:"query_service_available,omitempty"`
 }
