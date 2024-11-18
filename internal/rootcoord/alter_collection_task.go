@@ -89,7 +89,7 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 		baseStep:        baseStep{core: a.core},
 		dbName:          a.Req.GetDbName(),
 		collectionNames: append(aliases, a.Req.GetCollectionName()),
-		collectionID:    oldColl.CollectionID,
+		collectionID:    InvalidCollectionID,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
 	})
 
