@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -159,8 +160,8 @@ func TestListCollection(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?db_name=default", nil)
 
-		mockProxy := mocks.NewMockProxy(t)
-		mockProxy.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
+		mockRoortCoordClient := mocks.NewMockRootCoordClient(t)
+		mockRoortCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
 			Status:                &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			CollectionIds:         []int64{1, 2},
 			CollectionNames:       []string{"collection1", "collection2"},
@@ -169,7 +170,15 @@ func TestListCollection(t *testing.T) {
 			QueryServiceAvailable: []bool{true, true},
 		}, nil)
 
-		handler := listCollection(mockProxy)
+		mockQueryCoordClient := mocks.NewMockQueryCoordClient(t)
+		mockQueryCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status:                &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:         []int64{1},
+			InMemoryPercentages:   []int64{100, 100},
+			QueryServiceAvailable: []bool{true, true},
+		}, nil)
+
+		handler := listCollection(mockRoortCoordClient, mockQueryCoordClient)
 		handler(c)
 
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -177,17 +186,34 @@ func TestListCollection(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "collection2")
 	})
 
-	t.Run("list collections with error", func(t *testing.T) {
+	t.Run("list collections with error in RC response", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?db_name=default", nil)
 
-		mockProxy := mocks.NewMockProxy(t)
-		mockProxy.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+		mockRoortCoordClient := mocks.NewMockRootCoordClient(t)
+		mockRoortCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
 
-		handler := listCollection(mockProxy)
+		handler := listCollection(mockRoortCoordClient, nil)
 		handler(c)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "error")
+	})
 
+	t.Run("list collections with error in QC response", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest("GET", "/?db_name=default", nil)
+
+		mockRoortCoordClient := mocks.NewMockRootCoordClient(t)
+		mockRoortCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
+		mockQueryCoordClient := mocks.NewMockQueryCoordClient(t)
+		mockQueryCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+
+		handler := listCollection(mockRoortCoordClient, mockQueryCoordClient)
+		handler(c)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		assert.Contains(t, w.Body.String(), "error")
 	})

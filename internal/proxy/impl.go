@@ -6540,7 +6540,7 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	router.GET(http.DatabaseDescPath, describeDatabase(node))
 
 	// Collection requests
-	router.GET(http.CollectionListPath, listCollection(node))
+	router.GET(http.CollectionListPath, listCollection(node.rootCoord, node.queryCoord))
 	router.GET(http.CollectionDescPath, describeCollection(node, node.rootCoord))
 }
 

@@ -112,15 +112,18 @@ func (t *listDatabaseTask) Execute(ctx context.Context) error {
 	}
 
 	dbNames := make([]string, 0, len(ret))
+	dbIDs := make([]int64, 0, len(ret))
 	createdTimes := make([]uint64, 0, len(ret))
 	for _, db := range ret {
 		if !isVisibleDBForCurUser(db.Name, visibleDBs) {
 			continue
 		}
 		dbNames = append(dbNames, db.Name)
+		dbIDs = append(dbIDs, db.ID)
 		createdTimes = append(createdTimes, db.CreatedTime)
 	}
 	t.Resp.DbNames = dbNames
+	t.Resp.DbIds = dbIDs
 	t.Resp.CreatedTimestamp = createdTimes
 	return nil
 }
