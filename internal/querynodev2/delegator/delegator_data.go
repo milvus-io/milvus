@@ -397,7 +397,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		// force l0 segment to load on delegator
 		if targetNodeID != paramtable.GetNodeID() {
 			targetNodeID = paramtable.GetNodeID()
-			log.Debug("unexpected L0 segment load on non-delegator node, force to load on delegator", zap.Int64("nodeIDInReq", req.GetDstNodeID()))
+			log.Info("unexpected L0 segment load on non-delegator node, force to load on delegator", zap.Int64("nodeIDInReq", req.GetDstNodeID()))
 		}
 	}
 	// add common log fields
