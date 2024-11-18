@@ -378,9 +378,8 @@ func parseArrayData(fieldName string, elementType schemapb.DataType, fieldDataLi
 		for _, fd := range fieldDataList {
 			strs := fd.GetStringData().GetData()
 			bytesData := make([]string, 0, len(strs))
-			for _, str := range strs {
-				bytesData = append(bytesData, str)
-			}
+			bytesData = append(bytesData, strs...)
+
 			data = append(data, bytesData)
 		}
 
