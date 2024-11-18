@@ -164,7 +164,7 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     get_element_offset(int64_t index) override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
         int64_t offset = 0;
-        for (int i = 0; i < index - 1; i++) {
+        for (int i = 0; i < index; i++) {
             offset += vec_[i].size();
         }
         return offset;
