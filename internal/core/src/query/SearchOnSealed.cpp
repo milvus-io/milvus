@@ -81,6 +81,7 @@ void
 SearchOnSealed(const Schema& schema,
                std::shared_ptr<ChunkedColumnBase> column,
                const SearchInfo& search_info,
+               const std::map<std::string, std::string>& index_info,
                const void* query_data,
                int64_t num_queries,
                int64_t row_count,
@@ -137,6 +138,7 @@ SearchOnSealed(const Schema& schema,
                                                     vec_data,
                                                     chunk_size,
                                                     search_info,
+                                                    index_info,
                                                     bitset_view,
                                                     data_type);
             final_qr.merge(sub_qr);
@@ -145,6 +147,7 @@ SearchOnSealed(const Schema& schema,
                                            vec_data,
                                            chunk_size,
                                            search_info,
+                                           index_info,
                                            bitset_view,
                                            data_type);
             for (auto& o : sub_qr.mutable_seg_offsets()) {
@@ -177,6 +180,7 @@ void
 SearchOnSealed(const Schema& schema,
                const void* vec_data,
                const SearchInfo& search_info,
+               const std::map<std::string, std::string>& index_info,
                const void* query_data,
                int64_t num_queries,
                int64_t row_count,
@@ -200,13 +204,23 @@ SearchOnSealed(const Schema& schema,
     auto data_type = field.get_data_type();
     CheckBruteForceSearchParam(field, search_info);
     if (search_info.group_by_field_id_.has_value()) {
-        auto sub_qr = BruteForceSearchIterators(
-            dataset, vec_data, row_count, search_info, bitset, data_type);
+        auto sub_qr = BruteForceSearchIterators(dataset,
+                                                vec_data,
+                                                row_count,
+                                                search_info,
+                                                index_info,
+                                                bitset,
+                                                data_type);
         result.AssembleChunkVectorIterators(
             num_queries, 1, {0}, sub_qr.chunk_iterators());
     } else {
-        auto sub_qr = BruteForceSearch(
-            dataset, vec_data, row_count, search_info, bitset, data_type);
+        auto sub_qr = BruteForceSearch(dataset,
+                                       vec_data,
+                                       row_count,
+                                       search_info,
+                                       index_info,
+                                       bitset,
+                                       data_type);
         result.distances_ = std::move(sub_qr.mutable_distances());
         result.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
     }

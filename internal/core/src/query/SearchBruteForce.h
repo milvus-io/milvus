@@ -28,6 +28,7 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                  const void* chunk_data_raw,
                  int64_t chunk_rows,
                  const SearchInfo& search_info,
+                 const std::map<std::string, std::string>& index_info,
                  const BitsetView& bitset,
                  DataType data_type);
 
@@ -36,6 +37,7 @@ BruteForceSearchIterators(const dataset::SearchDataset& dataset,
                           const void* chunk_data_raw,
                           int64_t chunk_rows,
                           const SearchInfo& search_info,
+                          const std::map<std::string, std::string>& index_info,
                           const BitsetView& bitset,
                           DataType data_type);
 

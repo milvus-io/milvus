@@ -985,9 +985,18 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
         AssertInfo(num_rows_.has_value(), "Can't get row count value");
         auto row_count = num_rows_.value();
         auto vec_data = fields_.at(field_id);
+
+        // get index params for bm25 brute force
+        std::map<std::string, std::string> index_info;
+        if (search_info.metric_type_ == knowhere::metric::BM25) {
+            auto index_info =
+                col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
+        }
+
         query::SearchOnSealed(*schema_,
                               vec_data->Data(),
                               search_info,
+                              index_info,
                               query_data,
                               query_count,
                               row_count,
