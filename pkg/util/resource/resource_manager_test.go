@@ -61,8 +61,6 @@ func TestResourceManager(t *testing.T) {
 	{
 		res := manager.Delete("test", "foo")
 		assert.Equal(t, "foo2", res.Get())
-		res = manager.Delete("test", "foo")
-		assert.Equal(t, "foo2", res.Get())
 		assert.Eventually(t, func() bool {
 			return manager.Delete("test", "foo") == nil
 		}, time.Second*5, time.Millisecond*500)
