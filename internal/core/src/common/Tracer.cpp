@@ -134,6 +134,28 @@ StartSpan(const std::string& name, const std::shared_ptr<trace::Span>& span) {
 }
 
 thread_local std::shared_ptr<trace::Span> local_span;
+
+std::string
+GetTraceID() {
+    // !!! The span is not sent by the calling context, but saved in the thread local now.
+    // So we cannot get the accurate trace id if the thread is switched to execute another task.
+    // Because we don't use folly thread pool to yield multi task,
+    // the trace id is almost accurate by now.
+    // It's safe to access local_span without mutex, because the span is not sent to other threads.
+    if (local_span == nullptr) {
+        return std::string();
+    }
+    auto ctx = local_span->GetContext();
+    auto trace_id = ctx.trace_id();
+    // The span is noop if the trace is off, 00000000... will be returned,
+    // so return "0" string directly to distinguish from the no local span.
+    if (!trace_id.IsValid()) {
+        return "0";
+    }
+    auto rep = trace_id.Id();
+    return BytesToHexStr(rep.data(), rep.size());
+}
+
 void
 SetRootSpan(std::shared_ptr<trace::Span> span) {
     if (enable_trace.load()) {
