@@ -191,6 +191,7 @@ func (dh *distHandler) updateChannelsDistribution(resp *querypb.GetDataDistribut
 }
 
 func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionResponse) {
+	log := log.Ctx(context.TODO()).WithRateGroup(fmt.Sprintf("updateLeaderView-%d", dh.nodeID), 1, 60)
 	updates := make([]*meta.LeaderView, 0, len(resp.GetLeaderViews()))
 
 	channels := lo.SliceToMap(resp.GetChannels(), func(channel *querypb.ChannelVersionInfo) (string, *querypb.ChannelVersionInfo) {
@@ -235,7 +236,7 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 		// check leader serviceable
 		if err := utils.CheckDelegatorDataReady(dh.nodeManager, dh.target, view, meta.CurrentTarget); err != nil {
 			view.UnServiceableError = err
-			log.Info("leader is not available due to distribution not ready",
+			log.RatedInfo(10, "leader is not available due to distribution not ready",
 				zap.Int64("collectionID", view.CollectionID),
 				zap.Int64("nodeID", view.ID),
 				zap.String("channel", view.Channel),
