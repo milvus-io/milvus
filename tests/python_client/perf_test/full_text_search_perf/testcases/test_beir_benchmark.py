@@ -110,7 +110,7 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
         "params": {},
     }
     result_list = []
-    q_batch_size = 1
+    q_batch_size = 1000
     start_time = time.time()
     for i in range(0, len(texts_to_search), q_batch_size):
         result = hello_bm25.search(texts_to_search[i:i + q_batch_size], "sparse", search_params, limit=top_k,
