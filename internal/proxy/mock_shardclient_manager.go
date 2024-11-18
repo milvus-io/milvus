@@ -113,39 +113,6 @@ func (_c *MockShardClientManager_GetClient_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
-// ReleaseClientRef provides a mock function with given fields: nodeID
-func (_m *MockShardClientManager) ReleaseClientRef(nodeID int64) {
-	_m.Called(nodeID)
-}
-
-// MockShardClientManager_ReleaseClientRef_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReleaseClientRef'
-type MockShardClientManager_ReleaseClientRef_Call struct {
-	*mock.Call
-}
-
-// ReleaseClientRef is a helper method to define mock.On call
-//   - nodeID int64
-func (_e *MockShardClientManager_Expecter) ReleaseClientRef(nodeID interface{}) *MockShardClientManager_ReleaseClientRef_Call {
-	return &MockShardClientManager_ReleaseClientRef_Call{Call: _e.mock.On("ReleaseClientRef", nodeID)}
-}
-
-func (_c *MockShardClientManager_ReleaseClientRef_Call) Run(run func(nodeID int64)) *MockShardClientManager_ReleaseClientRef_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
-	})
-	return _c
-}
-
-func (_c *MockShardClientManager_ReleaseClientRef_Call) Return() *MockShardClientManager_ReleaseClientRef_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockShardClientManager_ReleaseClientRef_Call) RunAndReturn(run func(int64)) *MockShardClientManager_ReleaseClientRef_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // SetClientCreatorFunc provides a mock function with given fields: creator
 func (_m *MockShardClientManager) SetClientCreatorFunc(creator queryNodeCreatorFunc) {
 	_m.Called(creator)
