@@ -17,11 +17,11 @@
 package storage
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )

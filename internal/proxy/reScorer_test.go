@@ -1,12 +1,12 @@
 package proxy
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/json"
 )
 
 func TestRescorer(t *testing.T) {

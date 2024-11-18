@@ -17,7 +17,6 @@
 package proxy
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	mhttp "github.com/milvus-io/milvus/internal/http"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"

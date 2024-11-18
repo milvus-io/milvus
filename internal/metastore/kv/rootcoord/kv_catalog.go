@@ -2,7 +2,6 @@ package rootcoord
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/cockroachdb/errors"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"

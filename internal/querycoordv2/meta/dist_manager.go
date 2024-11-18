@@ -17,10 +17,9 @@
 package meta
 
 import (
-	"encoding/json"
-
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )

@@ -17,7 +17,6 @@
 package storage
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -26,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )

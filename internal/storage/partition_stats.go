@@ -17,9 +17,10 @@
 package storage
 
 import (
-	"encoding/json"
 	"path"
 	"strconv"
+
+	"github.com/milvus-io/milvus/internal/json"
 )
 
 type SegmentStats struct {

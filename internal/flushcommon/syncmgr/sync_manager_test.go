@@ -2,7 +2,6 @@ package syncmgr
 
 import (
 	"context"
-	"encoding/json"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -22,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"

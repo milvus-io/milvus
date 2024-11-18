@@ -17,10 +17,11 @@
 package storage
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/json"
 )
 
 func TestVarCharFieldValue(t *testing.T) {
