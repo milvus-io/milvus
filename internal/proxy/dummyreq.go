@@ -17,7 +17,7 @@
 package proxy
 
 import (
-	"encoding/json"
+	"github.com/milvus-io/milvus/internal/json"
 )
 
 type dummyRequestType struct {

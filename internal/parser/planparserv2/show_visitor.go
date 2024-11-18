@@ -1,10 +1,9 @@
 package planparserv2
 
 import (
-	"encoding/json"
-
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/log"
 )

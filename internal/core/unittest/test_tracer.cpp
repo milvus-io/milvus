@@ -115,3 +115,22 @@ TEST(Tracer, Hex) {
     delete[] ctx->traceID;
     delete[] ctx->spanID;
 }
+
+TEST(Tracer, GetTraceID) {
+    auto trace_id = GetTraceID();
+    ASSERT_TRUE(trace_id.empty());
+
+    auto config = std::make_shared<TraceConfig>();
+    config->exporter = "stdout";
+    config->nodeID = 1;
+    initTelemetry(*config);
+
+    auto span = StartSpan("test");
+    SetRootSpan(span);
+    trace_id = GetTraceID();
+    ASSERT_TRUE(trace_id.size() == 32);
+
+    CloseRootSpan();
+    trace_id = GetTraceID();
+    ASSERT_TRUE(trace_id.empty());
+}

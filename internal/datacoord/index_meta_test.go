@@ -19,7 +19,6 @@ package datacoord
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -29,6 +28,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/json"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"

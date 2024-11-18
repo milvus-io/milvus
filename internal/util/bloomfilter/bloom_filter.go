@@ -16,14 +16,14 @@
 package bloomfilter
 
 import (
-	"encoding/json"
-
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
 	"github.com/greatroar/blobloom"
 	"github.com/pingcap/log"
 	"github.com/zeebo/xxh3"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/json"
 )
 
 type BFType int

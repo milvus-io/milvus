@@ -17,7 +17,6 @@
 package proxy
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -25,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	management "github.com/milvus-io/milvus/internal/http"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"

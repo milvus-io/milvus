@@ -17,7 +17,6 @@
 package meta
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -27,6 +26,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"

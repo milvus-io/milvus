@@ -14,31 +14,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package json
+package kafka
 
 import (
-	gojson "encoding/json"
+	"runtime"
+	"sync"
 
-	"github.com/bytedance/sonic"
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 )
 
 var (
-	json = sonic.ConfigStd
-	// Marshal is exported by gin/json package.
-	Marshal = json.Marshal
-	// Unmarshal is exported by gin/json package.
-	Unmarshal = json.Unmarshal
-	// MarshalIndent is exported by gin/json package.
-	MarshalIndent = json.MarshalIndent
-	// NewDecoder is exported by gin/json package.
-	NewDecoder = json.NewDecoder
-	// NewEncoder is exported by gin/json package.
-	NewEncoder = json.NewEncoder
+	kafkaCPool atomic.Pointer[conc.Pool[any]]
+	initOnce   sync.Once
 )
 
-type (
-	Delim      = gojson.Delim
-	Decoder    = gojson.Decoder
-	Number     = gojson.Number
-	RawMessage = gojson.RawMessage
-)
+func initPool() {
+	pool := conc.NewPool[any](
+		hardware.GetCPUNum(),
+		conc.WithPreAlloc(false),
+		conc.WithDisablePurge(false),
+		conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
+	)
+
+	kafkaCPool.Store(pool)
+	log.Info("init dynamicPool done", zap.Int("size", hardware.GetCPUNum()))
+}
+
+// GetSQPool returns the singleton pool instance for search/query operations.
+func getPool() *conc.Pool[any] {
+	initPool()
+	return kafkaCPool.Load()
+}
