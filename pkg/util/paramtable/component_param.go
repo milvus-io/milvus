@@ -4247,6 +4247,7 @@ type dataNodeConfig struct {
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
 	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
+	UseMergeSort             ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -4577,6 +4578,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.L0CompactionMaxBatchSize.Init(base.mgr)
+
+	p.UseMergeSort = ParamItem{
+		Key:          "dataNode.compaction.useMergeSort",
+		Version:      "2.5.0",
+		Doc:          "Whether to enable mergeSort mode when performing mixCompaction.",
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.UseMergeSort.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",
