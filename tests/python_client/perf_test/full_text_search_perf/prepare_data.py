@@ -70,7 +70,7 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000_000):
             "index_type": "SPARSE_INVERTED_INDEX",
             "metric_type": "BM25",
             "params": {
-                "bm25_k1": 1.5,
+                "bm25_k1": 1.2,
                 "bm25_b": 0.75,
             }
         }
