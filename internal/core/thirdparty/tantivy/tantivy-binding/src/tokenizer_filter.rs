@@ -47,7 +47,7 @@ fn get_length_filter(params: &json::Map<String, json::Value>) -> Result<SystemFi
         return Err("lenth max param was none or not uint".into())
     }
     let limit = limit_str.unwrap().as_u64().unwrap() as usize;
-    Ok(SystemFilter::Length(RemoveLongFilter::limit(limit)))
+    Ok(SystemFilter::Length(RemoveLongFilter::limit(limit+1)))
 }
 
 fn get_stop_words_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, TantivyError>{
