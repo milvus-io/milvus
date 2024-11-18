@@ -62,15 +62,24 @@ func (s *ColumnJSONBytesSuite) TestAttrMethods() {
 		fd := column.FieldData()
 		s.NotNil(fd)
 		s.Equal(fd.GetFieldName(), columnName)
+
+		result, err := FieldDataColumn(fd, 0, -1)
+		s.NoError(err)
+		parsed, ok := result.(*ColumnJSONBytes)
+		if s.True(ok) {
+			s.Equal(columnName, parsed.Name())
+			s.Equal(entity.FieldTypeJSON, parsed.Type())
+			s.Equal(v, parsed.Data())
+		}
 	})
 
 	s.Run("test_column_valuer_by_idx", func() {
-		_, err := column.ValueByIdx(-1)
+		_, err := column.Value(-1)
 		s.Error(err)
-		_, err = column.ValueByIdx(columnLen)
+		_, err = column.Value(columnLen)
 		s.Error(err)
 		for i := 0; i < columnLen; i++ {
-			v, err := column.ValueByIdx(i)
+			v, err := column.Value(i)
 			s.NoError(err)
 			s.Equal(column.values[i], v)
 		}
@@ -81,7 +90,7 @@ func (s *ColumnJSONBytesSuite) TestAttrMethods() {
 		err := column.AppendValue(item)
 		s.NoError(err)
 		s.Equal(columnLen+1, column.Len())
-		val, err := column.ValueByIdx(columnLen)
+		val, err := column.Value(columnLen)
 		s.NoError(err)
 		s.Equal(item, val)
 
