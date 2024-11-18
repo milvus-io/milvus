@@ -1236,7 +1236,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-     auto index_info = std::map<std::string, std::string>{};
+    auto index_info = std::map<std::string, std::string>{};
 
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
