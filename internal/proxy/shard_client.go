@@ -40,15 +40,17 @@ type shardClient struct {
 	initialized atomic.Bool
 	isClosed    bool
 
-	idx          atomic.Int64
-	lastActiveTs *atomic.Int64
+	idx             atomic.Int64
+	lastActiveTs    *atomic.Int64
+	expiredDuration time.Duration
 }
 
-func newShardClient(info nodeInfo, creator queryNodeCreatorFunc) *shardClient {
+func newShardClient(info nodeInfo, creator queryNodeCreatorFunc, expiredDuration time.Duration) *shardClient {
 	return &shardClient{
-		info:         info,
-		creator:      creator,
-		lastActiveTs: atomic.NewInt64(time.Now().UnixNano()),
+		info:            info,
+		creator:         creator,
+		lastActiveTs:    atomic.NewInt64(time.Now().UnixNano()),
+		expiredDuration: expiredDuration,
 	}
 }
 
@@ -123,10 +125,18 @@ func (n *shardClient) roundRobinSelectClient() (types.QueryNodeClient, error) {
 // Notice: close client should only be called by shard client manager. and after close, the client must be removed from the manager.
 // 1. the client hasn't been used for a long time
 // 2. shard client manager has been closed.
-func (n *shardClient) Close() {
+func (n *shardClient) Close(force bool) bool {
 	n.Lock()
 	defer n.Unlock()
-	n.close()
+	if force || n.isExpired() {
+		n.close()
+	}
+
+	return n.isClosed
+}
+
+func (n *shardClient) isExpired() bool {
+	return time.Now().UnixNano()-n.lastActiveTs.Load() > n.expiredDuration.Nanoseconds()
 }
 
 func (n *shardClient) close() {
@@ -194,7 +204,7 @@ func (c *shardClientMgrImpl) SetClientCreatorFunc(creator queryNodeCreatorFunc) 
 }
 
 func (c *shardClientMgrImpl) GetClient(ctx context.Context, info nodeInfo) (types.QueryNodeClient, error) {
-	client, _ := c.clients.GetOrInsert(info.nodeID, newShardClient(info, c.clientCreator))
+	client, _ := c.clients.GetOrInsert(info.nodeID, newShardClient(info, c.clientCreator, c.expiredDuration))
 	return client.getClient(ctx)
 }
 
@@ -209,14 +219,15 @@ func (c *shardClientMgrImpl) PurgeClient() {
 			return
 		case <-ticker.C:
 			shardLocations := globalMetaCache.ListShardLocation()
-			now := time.Now().UnixNano()
 			c.clients.Range(func(key UniqueID, value *shardClient) bool {
 				if _, ok := shardLocations[key]; !ok {
 					// if the client is not used for more than 1 hour, and it's not a delegator anymore, should remove it
-					if now-value.lastActiveTs.Load() > c.expiredDuration.Nanoseconds() {
-						value.Close()
-						c.clients.Remove(key)
-						log.Info("remove idle node client", zap.Int64("nodeID", key))
+					if value.isExpired() {
+						closed := value.Close(false)
+						if closed {
+							c.clients.Remove(key)
+							log.Info("remove idle node client", zap.Int64("nodeID", key))
+						}
 					}
 				}
 				return true
@@ -229,7 +240,7 @@ func (c *shardClientMgrImpl) PurgeClient() {
 func (c *shardClientMgrImpl) Close() {
 	close(c.closeCh)
 	c.clients.Range(func(key UniqueID, value *shardClient) bool {
-		value.Close()
+		value.Close(true)
 		c.clients.Remove(key)
 		return true
 	})

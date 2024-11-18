@@ -45,14 +45,21 @@ func TestShardClient(t *testing.T) {
 	creator := func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error) {
 		return qn, nil
 	}
-	shardClient := newShardClient(nodeInfo, creator)
+	shardClient := newShardClient(nodeInfo, creator, 3*time.Second)
 	assert.Equal(t, len(shardClient.clients), 0)
 	assert.Equal(t, false, shardClient.initialized.Load())
+	assert.Equal(t, false, shardClient.isClosed)
 
 	ctx := context.Background()
 	_, err := shardClient.getClient(ctx)
 	assert.Nil(t, err)
 	assert.Equal(t, len(shardClient.clients), paramtable.Get().ProxyCfg.QueryNodePoolingSize.GetAsInt())
+
+	// test close
+	closed := shardClient.Close(false)
+	assert.False(t, closed)
+	closed = shardClient.Close(true)
+	assert.True(t, closed)
 }
 
 func TestPurgeClient(t *testing.T) {
