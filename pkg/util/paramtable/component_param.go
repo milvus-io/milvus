@@ -80,6 +80,7 @@ type ComponentParam struct {
 	HTTPCfg        httpConfig
 	LogCfg         logConfig
 	RoleCfg        roleConfig
+	RbacConfig     rbacConfig
 	StreamingCfg   streamingConfig
 
 	RootCoordGrpcServerCfg     GrpcServerConfig
@@ -134,6 +135,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
+	p.RbacConfig.init(bt)
 	p.GpuConfig.init(bt)
 	p.KnowhereConfig.init(bt)
 
