@@ -19,6 +19,7 @@
 #include <cmath>
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
+#include <cstdlib>
 
 #include "Constants.h"
 #include "common/EasyAssert.h"
@@ -324,25 +325,30 @@ inline GeneratedData DataGen(SchemaPtr schema,
                              int repeat_count = 1,
                              int array_len = 10,
                              bool random_pk = false,
-                             bool random_val = true) {
+                             bool random_val = true,
+                             bool random_valid = false) {
     using std::vector;
     std::default_random_engine random(seed);
     std::normal_distribution<> distr(0, 1);
     int offset = 0;
 
     auto insert_data = std::make_unique<InsertRecordProto>();
-    auto insert_cols = [&insert_data](
-                           auto& data, int64_t count, auto& field_meta) {
-        FixedVector<bool> valid_data(count);
-        if (field_meta.is_nullable()) {
-            for (int i = 0; i < count; ++i) {
-                valid_data[i] = i % 2 == 0 ? true : false;
+    auto insert_cols =
+        [&insert_data](
+            auto& data, int64_t count, auto& field_meta, bool random_valid) {
+            FixedVector<bool> valid_data(count);
+            if (field_meta.is_nullable()) {
+                for (int i = 0; i < count; ++i) {
+                    int x = i;
+                    if (random_valid)
+                        x = rand();
+                    valid_data[i] = x % 2 == 0 ? true : false;
+                }
             }
-        }
-        auto array = milvus::segcore::CreateDataArrayFrom(
-            data.data(), valid_data.data(), count, field_meta);
-        insert_data->mutable_fields_data()->AddAllocated(array.release());
-    };
+            auto array = milvus::segcore::CreateDataArrayFrom(
+                data.data(), valid_data.data(), count, field_meta);
+            insert_data->mutable_fields_data()->AddAllocated(array.release());
+        };
 
     for (auto field_id : schema->get_field_ids()) {
         auto field_meta = schema->operator[](field_id);
@@ -373,7 +379,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                     std::copy(
                         data.begin(), data.end(), final.begin() + dim * n);
                 }
-                insert_cols(final, N, field_meta);
+                insert_cols(final, N, field_meta, random_valid);
                 break;
             }
             case DataType::VECTOR_BINARY: {
@@ -383,7 +389,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                 for (auto& x : data) {
                     x = random();
                 }
-                insert_cols(data, N, field_meta);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             case DataType::VECTOR_FLOAT16: {
@@ -392,7 +398,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                 for (auto& x : final) {
                     x = float16(distr(random) + offset);
                 }
-                insert_cols(final, N, field_meta);
+                insert_cols(final, N, field_meta, random_valid);
                 break;
             }
             case DataType::VECTOR_SPARSE_FLOAT: {
@@ -411,7 +417,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                 for (auto& x : final) {
                     x = bfloat16(distr(random) + offset);
                 }
-                insert_cols(final, N, field_meta);
+                insert_cols(final, N, field_meta, random_valid);
                 break;
             }
             case DataType::BOOL: {
@@ -419,7 +425,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                 for (int i = 0; i < N; ++i) {
                     data[i] = i % 2 == 0 ? true : false;
                 }
-                insert_cols(data, N, field_meta);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             case DataType::INT64: {
@@ -432,7 +438,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                         data[i] = i / repeat_count;
                     }
                 }
-                insert_cols(data, N, field_meta);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             case DataType::INT32: {
@@ -445,7 +451,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                         x = i / repeat_count;
                     data[i] = x;
                 }
-                insert_cols(data, N, field_meta);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             case DataType::INT16: {
@@ -458,7 +464,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                         x = i / repeat_count;
                     data[i] = x;
                 }
-                insert_cols(data, N, field_meta);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             case DataType::INT8: {
@@ -471,7 +477,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                         x = i / repeat_count;
                     data[i] = x;
                 }
-                insert_cols(data, N, field_meta);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             case DataType::FLOAT: {
@@ -479,7 +485,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                 for (auto& x : data) {
                     x = distr(random);
                 }
-                insert_cols(data, N, field_meta);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             case DataType::DOUBLE: {
@@ -487,7 +493,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                 for (auto& x : data) {
                     x = distr(random);
                 }
-                insert_cols(data, N, field_meta);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             case DataType::VARCHAR: {
@@ -499,7 +505,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                     }
                 }
                 std::sort(data.begin(), data.end());
-                insert_cols(data, N, field_meta);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             case DataType::JSON: {
@@ -513,7 +519,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                                "}";
                     data[i] = str;
                 }
-                insert_cols(data, N, field_meta);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             case DataType::ARRAY: {
@@ -619,7 +625,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                         throw std::runtime_error("unsupported data type");
                     }
                 }
-                insert_cols(data, N, field_meta);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             default: {
