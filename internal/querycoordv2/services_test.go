@@ -346,7 +346,6 @@ func (suite *ServiceSuite) TestLoadCollection() {
 	// Test load all collections
 	for _, collection := range suite.collections {
 		suite.expectGetRecoverInfo(collection)
-		suite.expectLoadPartitions()
 
 		req := &querypb.LoadCollectionRequest{
 			CollectionID: collection,
@@ -1824,7 +1823,7 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 func (suite *ServiceSuite) loadAll() {
 	ctx := context.Background()
 	for _, collection := range suite.collections {
-		suite.expectLoadPartitions()
+		suite.expectDescribeCollection()
 		suite.expectGetRecoverInfo(collection)
 		if suite.loadTypes[collection] == querypb.LoadType_LoadCollection {
 			req := &querypb.LoadCollectionRequest{
@@ -1851,6 +1850,7 @@ func (suite *ServiceSuite) loadAll() {
 			suite.NotNil(suite.meta.GetCollection(collection))
 			suite.targetMgr.UpdateCollectionCurrentTarget(collection)
 		} else {
+			suite.expectLoadPartitions()
 			req := &querypb.LoadPartitionsRequest{
 				CollectionID:  collection,
 				PartitionIDs:  suite.partitions[collection],
@@ -1962,12 +1962,13 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 }
 
 func (suite *ServiceSuite) expectLoadPartitions() {
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-		Return(nil, nil)
-	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).
-		Return(nil, nil)
 	suite.cluster.EXPECT().LoadPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(merr.Success(), nil)
+}
+
+func (suite *ServiceSuite) expectDescribeCollection() {
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+		Return(nil, nil)
 }
 
 func (suite *ServiceSuite) getAllSegments(collection int64) []int64 {

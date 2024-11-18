@@ -20,9 +20,8 @@ import (
 	"context"
 	"time"
 
-	"go.opentelemetry.io/otel"
-
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
