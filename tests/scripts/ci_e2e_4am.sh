@@ -100,14 +100,7 @@ else
   pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m L0 -n 6 --timeout 360 --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
 fi
 
-if [[ "${MILVUS_HELM_RELEASE_NAME}" != *"msop"* ]]; then
-  if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-    timeout "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m BulkInsert -n 6 --timeout 360 --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
-  else
-    pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m BulkInsert -n 6 --timeout 360 --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
-  fi
-fi
 
 cd ${ROOT}/tests/python_client
 
@@ -130,3 +123,14 @@ fi
 #   pytest testcases/test_concurrent.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --count 5 -n 5 \
 #                                      --html=${CI_LOG_PATH}/report_concurrent.html --self-contained-html
 # fi
+
+# Run import restful api test
+cd ${ROOT}/tests/restful_client_v2
+if [[ "${MILVUS_HELM_RELEASE_NAME}" != *"msop"* ]]; then
+  if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+
+    timeout "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m BulkInsert -n 6 --timeout 360 --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
+  else
+    pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m BulkInsert -n 6 --timeout 360 --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
+  fi
+fi
