@@ -174,7 +174,7 @@ func (s *Server) startGrpcLoop() {
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	s.grpcServer = grpc.NewServer(
+	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
@@ -201,7 +201,11 @@ func (s *Server) startGrpcLoop() {
 			}),
 			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
 		)),
-		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()))
+		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
+	}
+
+	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("DataCoord"))
+	s.grpcServer = grpc.NewServer(grpcOpts...)
 	indexpb.RegisterIndexCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
 	// register the streaming coord grpc service.
