@@ -7,7 +7,7 @@ class MilvusUser(HttpUser):
     host = "http://10.100.36.174:9200"
 
 
-    @tag('full_text_search')
+    @tag('fts')
     @task
     def full_text_search(self):
         search_data = test_data.sample(1)["text"].values[0]
