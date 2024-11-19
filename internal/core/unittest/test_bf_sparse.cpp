@@ -103,21 +103,21 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
         SearchInfo search_info;
         search_info.topk_ = topk;
         search_info.metric_type_ = metric_type;
-        dataset::SearchDataset dataset{
+        dataset::SearchDataset query_dataset{
             metric_type, nq, topk, -1, kTestSparseDim, query.get()};
+        auto raw_dataset =
+            query::dataset::RawDataset{0, kTestSparseDim, nb, base.get()};
         if (!is_supported_sparse_float_metric(metric_type)) {
-            ASSERT_ANY_THROW(BruteForceSearch(dataset,
-                                              base.get(),
-                                              nb,
+            ASSERT_ANY_THROW(BruteForceSearch(query_dataset,
+                                              raw_dataset,
                                               search_info,
                                               index_info,
                                               bitset_view,
                                               DataType::VECTOR_SPARSE_FLOAT));
             return;
         }
-        auto result = BruteForceSearch(dataset,
-                                       base.get(),
-                                       nb,
+        auto result = BruteForceSearch(query_dataset,
+                                       raw_dataset,
                                        search_info,
                                        index_info,
                                        bitset_view,
@@ -130,9 +130,8 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
 
         search_info.search_params_[RADIUS] = 0.1;
         search_info.search_params_[RANGE_FILTER] = 0.5;
-        auto result2 = BruteForceSearch(dataset,
-                                        base.get(),
-                                        nb,
+        auto result2 = BruteForceSearch(query_dataset,
+                                        raw_dataset,
                                         search_info,
                                         index_info,
                                         bitset_view,
@@ -144,9 +143,8 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
             AssertMatch(ref, ans);
         }
 
-        auto result3 = BruteForceSearchIterators(dataset,
-                                                 base.get(),
-                                                 nb,
+        auto result3 = BruteForceSearchIterators(query_dataset,
+                                                 raw_dataset,
                                                  search_info,
                                                  index_info,
                                                  bitset_view,
