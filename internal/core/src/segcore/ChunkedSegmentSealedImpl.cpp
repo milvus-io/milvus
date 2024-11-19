@@ -1239,8 +1239,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
                         return elem < value;
                     });
                 auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
-                for (; it != src + pk_column->NumRows() && *it == target;
-                     ++it) {
+                for (; it != src + chunk_row_num && *it == target; ++it) {
                     auto offset = it - src + num_rows_until_chunk;
                     if (condition(offset)) {
                         pk_offsets.emplace_back(offset);
@@ -1264,7 +1263,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
                 auto string_chunk = std::dynamic_pointer_cast<StringChunk>(
                     var_column->GetChunk(i));
                 auto offset = string_chunk->binary_search_string(target);
-                for (; offset != -1 && offset < var_column->NumRows() &&
+                for (; offset != -1 && offset < string_chunk->RowNums() &&
                        var_column->RawAt(offset) == target;
                      ++offset) {
                     auto segment_offset = offset + num_rows_until_chunk;
