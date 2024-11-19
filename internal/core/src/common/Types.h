@@ -215,6 +215,7 @@ using GroupByValueType = std::variant<std::monostate,
                                       bool,
                                       std::string>;
 using ContainsType = proto::plan::JSONContainsExpr_JSONOp;
+using NullExprType = proto::plan::NullExpr_NullOp;
 
 inline bool
 IsPrimaryKeyDataType(DataType data_type) {
