@@ -359,16 +359,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	}
 
 	for _, segment := range loaded {
-		log := log.With(
-			zap.Int64("segmentID", segment.ID()),
-		)
-		deletedPks, deletedTss := sd.GetLevel0Deletions(segment.Partition(), pkoracle.NewCandidateKey(segment.ID(), segment.Partition(), segments.SegmentTypeGrowing))
-		if len(deletedPks) == 0 {
-			continue
-		}
-
-		log.Info("forwarding L0 delete records...", zap.Int("deletionCount", len(deletedPks)))
-		err = segment.Delete(ctx, deletedPks, deletedTss)
+		err = sd.addL0ForGrowing(ctx, segment)
 		if err != nil {
 			log.Warn("failed to forward L0 deletions to growing segment",
 				zap.Error(err),
