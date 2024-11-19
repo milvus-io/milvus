@@ -59,6 +59,7 @@ type searchTask struct {
 	tr                     *timerecord.TimeRecorder
 	collectionName         string
 	schema                 *schemaInfo
+	loadInfo               *LoadInfo
 	requery                bool
 	partitionKeyMode       bool
 	enableMaterializedView bool
@@ -76,6 +77,7 @@ type searchTask struct {
 	qc              types.QueryCoordClient
 	node            types.ProxyComponent
 	lb              LBPolicy
+	loadInfoCache   LoadInfoCache
 	queryChannelsTs map[string]Timestamp
 	queryInfos      []*planpb.QueryInfo
 	relatedDataSize int64
@@ -160,7 +162,12 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	t.request.OutputFields, t.userOutputFields, t.userDynamicFields, err = translateOutputFields(t.request.OutputFields, t.schema, false)
+	t.loadInfo, err = t.loadInfoCache.GetLoadInfo(t.ctx, collID)
+	if err != nil {
+		return err
+	}
+
+	t.request.OutputFields, t.userOutputFields, t.userDynamicFields, err = translateOutputFields(t.request.OutputFields, t.schema, t.loadInfo, false)
 	if err != nil {
 		log.Warn("translate output fields failed", zap.Error(err))
 		return err
@@ -524,7 +531,19 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	}
 
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
-	plan, planErr := planparserv2.CreateSearchPlan(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues)
+	plan, planErr := planparserv2.CreateSearchPlan(
+		t.schema.schemaHelper,
+		dsl,
+		annsFieldName,
+		searchInfo.planInfo,
+		exprTemplateValues,
+		func(field *schemapb.FieldSchema) error {
+			if !t.loadInfo.IsFieldLoaded(field.GetFieldID()) {
+				return merr.WrapErrParameterInvalidMsg("Field %s is not loaded", field.GetName())
+			}
+			return nil
+		},
+	)
 	if planErr != nil {
 		log.Warn("failed to create query plan", zap.Error(planErr),
 			zap.String("dsl", dsl), // may be very large if large term passed.
@@ -857,13 +876,14 @@ func (t *searchTask) Requery(span trace.Span) error {
 			ReqID:        paramtable.GetNodeID(),
 			PartitionIDs: t.GetPartitionIDs(), // use search partitionIDs
 		},
-		request:      queryReq,
-		plan:         plan,
-		qc:           t.node.(*Proxy).queryCoord,
-		lb:           t.node.(*Proxy).lbPolicy,
-		channelsMvcc: channelsMvcc,
-		fastSkip:     true,
-		reQuery:      true,
+		request:       queryReq,
+		plan:          plan,
+		qc:            t.node.(*Proxy).queryCoord,
+		lb:            t.node.(*Proxy).lbPolicy,
+		channelsMvcc:  channelsMvcc,
+		fastSkip:      true,
+		reQuery:       true,
+		loadInfoCache: t.loadInfoCache,
 	}
 	queryResult, err := t.node.(*Proxy).query(t.ctx, qt, span)
 	if err != nil {

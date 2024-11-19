@@ -15,9 +15,11 @@ import (
 	planparserv2 "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+// FieldValidator function type for validate field schema injection
+type FieldValidator func(*schemapb.FieldSchema) error
 
 var (
 	exprCache   = expirable.NewLRU[string, any](1024, nil, time.Minute*10)
@@ -79,7 +81,7 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	return
 }
 
-func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
+func handleExpr(schema *typeutil.SchemaHelper, exprStr string, validators ...FieldValidator) interface{} {
 	if isEmptyExpression(exprStr) {
 		return trueLiteral
 	}
@@ -88,12 +90,16 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
 		return err
 	}
 
-	visitor := NewParserVisitor(schema)
+	visitor := NewParserVisitor(schema, validators...)
 	return ast.Accept(visitor)
 }
 
-func ParseExpr(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.Expr, error) {
-	ret := handleExpr(schema, exprStr)
+func ParseExpr(schema *typeutil.SchemaHelper,
+	exprStr string,
+	exprTemplateValues map[string]*schemapb.TemplateValue,
+	validators ...FieldValidator,
+) (*planpb.Expr, error) {
+	ret := handleExpr(schema, exprStr, validators...)
 
 	if err := getError(ret); err != nil {
 		return nil, fmt.Errorf("cannot parse expression: %s, error: %s", exprStr, err)
@@ -183,12 +189,12 @@ func convertHanToASCII(s string) string {
 	return builder.String()
 }
 
-func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, error) {
+func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, exprTemplateValues map[string]*schemapb.TemplateValue, validators ...FieldValidator) (*planpb.PlanNode, error) {
 	parse := func() (*planpb.Expr, error) {
 		if len(exprStr) <= 0 {
 			return nil, nil
 		}
-		return ParseExpr(schema, exprStr, exprTemplateValues)
+		return ParseExpr(schema, exprStr, exprTemplateValues, validators...)
 	}
 
 	expr, err := parse()
@@ -201,10 +207,13 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 		log.Info("CreateSearchPlan failed", zap.Error(err))
 		return nil, err
 	}
-	// plan ok with schema, check ann field
-	if !schema.IsFieldLoaded(vectorField.GetFieldID()) {
-		return nil, merr.WrapErrParameterInvalidMsg("ann field \"%s\" not loaded", vectorFieldName)
+
+	for _, validator := range validators {
+		if err := validator(vectorField); err != nil {
+			return nil, err
+		}
 	}
+
 	fieldID := vectorField.FieldID
 	dataType := vectorField.DataType
 

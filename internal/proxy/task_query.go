@@ -73,6 +73,8 @@ type queryTask struct {
 	allQueryCnt          int64
 	totalRelatedDataSize int64
 	mustUsePartitionKey  bool
+
+	loadInfoCache LoadInfoCache
 }
 
 type queryParams struct {
@@ -252,7 +254,12 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 		}
 	}
 
-	t.request.OutputFields, t.userOutputFields, t.userDynamicFields, err = translateOutputFields(t.request.OutputFields, t.schema, true)
+	loadInfo, err := t.loadInfoCache.GetLoadInfo(ctx, t.CollectionID)
+	if err != nil {
+		return err
+	}
+
+	t.request.OutputFields, t.userOutputFields, t.userDynamicFields, err = translateOutputFields(t.request.OutputFields, t.schema, loadInfo, true)
 	if err != nil {
 		return err
 	}

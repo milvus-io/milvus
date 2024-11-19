@@ -128,15 +128,19 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	if globalMetaCache != nil {
 		switch msgType {
-		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
+		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias:
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
 				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
 			}
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+				node.loadInfoCache.Expire(ctx, collectionID)
 			}
 			log.Info("complete to invalidate collection meta cache with collection name", zap.String("collectionName", collectionName))
+		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
+			node.loadInfoCache.Expire(ctx, collectionID)
+			log.Info("complete to invalidate collection load cache with collection name", zap.Int64("collectionID", collectionID))
 		case commonpb.MsgType_DropPartition:
 			if collectionName != "" && request.GetPartitionName() != "" {
 				globalMetaCache.RemovePartition(ctx, request.GetDbName(), request.GetCollectionName(), request.GetPartitionName())
@@ -2997,6 +3001,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		lb:                     node.lbPolicy,
 		enableMaterializedView: node.enableMaterializedView,
 		mustUsePartitionKey:    Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
+		loadInfoCache:          node.loadInfoCache,
 	}
 
 	log := log.Ctx(ctx).With( // TODO: it might cause some cpu consumption
@@ -3219,6 +3224,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		node:                node,
 		lb:                  node.lbPolicy,
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
+		loadInfoCache:       node.loadInfoCache,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -3621,6 +3627,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		qc:                  node.queryCoord,
 		lb:                  node.lbPolicy,
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
+		loadInfoCache:       node.loadInfoCache,
 	}
 
 	subLabel := GetCollectionRateSubLabel(request)

@@ -126,7 +126,7 @@ type schemaInfo struct {
 	schemaHelper         *typeutil.SchemaHelper
 }
 
-func newSchemaInfoWithLoadFields(schema *schemapb.CollectionSchema, loadFields []int64) *schemaInfo {
+func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
 	fieldMap := typeutil.NewConcurrentMap[string, int64]()
 	hasPartitionkey := false
 	var pkField *schemapb.FieldSchema
@@ -140,7 +140,7 @@ func newSchemaInfoWithLoadFields(schema *schemapb.CollectionSchema, loadFields [
 		}
 	}
 	// schema shall be verified before
-	schemaHelper, _ := typeutil.CreateSchemaHelperWithLoadFields(schema, loadFields)
+	schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
 	return &schemaInfo{
 		CollectionSchema:     schema,
 		fieldMap:             fieldMap,
@@ -148,10 +148,6 @@ func newSchemaInfoWithLoadFields(schema *schemapb.CollectionSchema, loadFields [
 		pkField:              pkField,
 		schemaHelper:         schemaHelper,
 	}
-}
-
-func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
-	return newSchemaInfoWithLoadFields(schema, nil)
 }
 
 func (s *schemaInfo) MapFieldID(name string) (int64, bool) {
@@ -247,10 +243,6 @@ func (s *schemaInfo) validateLoadFields(names []string, fields []*schemapb.Field
 		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain clustering key field %s", names, clusteringKeyField.GetName())
 	}
 	return nil
-}
-
-func (s *schemaInfo) IsFieldLoaded(fieldID int64) bool {
-	return s.schemaHelper.IsFieldLoaded(fieldID)
 }
 
 // partitionInfos contains the cached collection partition informations.
@@ -448,11 +440,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, err
 	}
 
-	loadFields, err := m.getCollectionLoadFields(ctx, collection.CollectionID)
-	if err != nil {
-		return nil, err
-	}
-
 	// check partitionID, createdTimestamp and utcstamp has sam element numbers
 	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) || len(partitions.PartitionNames) != len(partitions.CreatedUtcTimestamps) {
 		return nil, merr.WrapErrParameterInvalidMsg("partition names and timestamps number is not aligned, response: %s", partitions.String())
@@ -485,7 +472,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, err
 	}
 
-	schemaInfo := newSchemaInfoWithLoadFields(collection.Schema, loadFields)
+	schemaInfo := newSchemaInfo(collection.Schema)
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:                collection.CollectionID,
 		schema:                schemaInfo,

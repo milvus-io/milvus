@@ -108,6 +108,8 @@ type Proxy struct {
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
+	loadInfoCache LoadInfoCache
+
 	session  *sessionutil.Session
 	shardMgr shardClientMgr
 
@@ -300,6 +302,9 @@ func (node *Proxy) Init() error {
 		return err
 	}
 	log.Debug("init meta cache done", zap.String("role", typeutil.ProxyRole))
+
+	node.loadInfoCache = NewLoadInfoCache(node.queryCoord)
+	log.Debug("init load info cache done", zap.String("role", typeutil.ProxyRole))
 
 	node.enableMaterializedView = Params.CommonCfg.EnableMaterializedView.GetAsBool()
 

@@ -1573,6 +1573,9 @@ func TestProxy(t *testing.T) {
 		}
 	}
 
+	loadInfoCache := NewMockLoadInfoCache(t)
+	loadInfoCache.EXPECT().GetLoadInfo(mock.Anything, mock.Anything).Return(NewLoadInfo(0, nil), nil).Maybe()
+
 	constructSearchRequest := func(nq int) *milvuspb.SearchRequest {
 		plg := constructVectorsPlaceholderGroup(nq)
 		plgBs, err := proto.Marshal(plg)

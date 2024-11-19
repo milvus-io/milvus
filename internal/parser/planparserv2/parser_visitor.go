@@ -15,11 +15,15 @@ import (
 
 type ParserVisitor struct {
 	parser.BasePlanVisitor
-	schema *typeutil.SchemaHelper
+	schema     *typeutil.SchemaHelper
+	validators []FieldValidator
 }
 
-func NewParserVisitor(schema *typeutil.SchemaHelper) *ParserVisitor {
-	return &ParserVisitor{schema: schema}
+func NewParserVisitor(schema *typeutil.SchemaHelper, validators ...FieldValidator) *ParserVisitor {
+	return &ParserVisitor{
+		schema:     schema,
+		validators: validators,
+	}
 }
 
 // VisitParens unpack the parentheses.
@@ -31,6 +35,11 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 	field, err := v.schema.GetFieldFromNameDefaultJSON(identifier)
 	if err != nil {
 		return nil, err
+	}
+	for _, validator := range v.validators {
+		if err := validator(field); err != nil {
+			return nil, err
+		}
 	}
 	var nestedPath []string
 	if identifier != field.Name {

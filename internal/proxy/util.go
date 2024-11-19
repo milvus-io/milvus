@@ -1201,7 +1201,7 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 //	output_fields=["*"] 	 ==> [A,B,C,D]
 //	output_fields=["*",A] 	 ==> [A,B,C,D]
 //	output_fields=["*",C]    ==> [A,B,C,D]
-func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary bool) ([]string, []string, []string, error) {
+func translateOutputFields(outputFields []string, schema *schemaInfo, loadInfo *LoadInfo, addPrimary bool) ([]string, []string, []string, error) {
 	var primaryFieldName string
 	var dynamicField *schemapb.FieldSchema
 	allFieldNameMap := make(map[string]int64)
@@ -1227,7 +1227,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 		if outputFieldName == "*" {
 			for fieldName, fieldID := range allFieldNameMap {
 				// skip Cold field
-				if schema.IsFieldLoaded(fieldID) {
+				if loadInfo.IsFieldLoaded(fieldID) {
 					resultFieldNameMap[fieldName] = true
 					userOutputFieldsMap[fieldName] = true
 				}
@@ -1235,7 +1235,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 			useAllDyncamicFields = true
 		} else {
 			if fieldID, ok := allFieldNameMap[outputFieldName]; ok {
-				if schema.IsFieldLoaded(fieldID) {
+				if loadInfo.IsFieldLoaded(fieldID) {
 					resultFieldNameMap[outputFieldName] = true
 					userOutputFieldsMap[outputFieldName] = true
 				} else {
@@ -1243,7 +1243,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 				}
 			} else {
 				if schema.EnableDynamicField {
-					if schema.IsFieldLoaded(dynamicField.GetFieldID()) {
+					if loadInfo.IsFieldLoaded(dynamicField.GetFieldID()) {
 						schemaH, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
 						if err != nil {
 							return nil, nil, nil, err
