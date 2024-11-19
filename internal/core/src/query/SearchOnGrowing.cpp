@@ -136,31 +136,23 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 std::min(active_count, (chunk_id + 1) * vec_size_per_chunk);
             auto size_per_chunk = element_end - element_begin;
 
-            auto sub_view = bitset.subview(element_begin, size_per_chunk);
+            auto sub_data = query::dataset::RawDataset{
+                element_begin, dim, size_per_chunk, chunk_data};
             if (info.group_by_field_id_.has_value()) {
                 auto sub_qr = BruteForceSearchIterators(search_dataset,
-                                                        chunk_data,
-                                                        size_per_chunk,
+                                                        sub_data,
                                                         info,
                                                         index_info,
-                                                        sub_view,
+                                                        bitset,
                                                         data_type);
                 final_qr.merge(sub_qr);
             } else {
                 auto sub_qr = BruteForceSearch(search_dataset,
-                                               chunk_data,
-                                               size_per_chunk,
+                                               sub_data,
                                                info,
                                                index_info,
-                                               sub_view,
+                                               bitset,
                                                data_type);
-
-                // convert chunk uid to segment uid
-                for (auto& x : sub_qr.mutable_seg_offsets()) {
-                    if (x != -1) {
-                        x += chunk_id * vec_size_per_chunk;
-                    }
-                }
                 final_qr.merge(sub_qr);
             }
         }

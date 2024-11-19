@@ -443,7 +443,7 @@ func (s *CoordinatorBrokerDataCoordSuite) TestGetIndexInfo() {
 
 		infos, err := s.broker.GetIndexInfo(ctx, collectionID, segmentID)
 		s.NoError(err)
-		s.ElementsMatch(indexIDs, lo.Map(infos, func(info *querypb.FieldIndexInfo, _ int) int64 {
+		s.ElementsMatch(indexIDs, lo.Map(infos[segmentID], func(info *querypb.FieldIndexInfo, _ int) int64 {
 			return info.GetIndexID()
 		}))
 		s.resetMock()

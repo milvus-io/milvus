@@ -1254,9 +1254,9 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     search_info.topk_ = topk;
     search_info.round_decimal_ = round_decimal;
     search_info.metric_type_ = metric_type;
+    auto raw_dataset = query::dataset::RawDataset{0, dim, N, vec_col.data()};
     auto sub_result = BruteForceSearch(search_dataset,
-                                       vec_col.data(),
-                                       N,
+                                       raw_dataset,
                                        search_info,
                                        index_info,
                                        nullptr,

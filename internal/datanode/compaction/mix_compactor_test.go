@@ -283,6 +283,8 @@ func (s *MixCompactionTaskSuite) TestCompactTwoToOneWithBM25() {
 }
 
 func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
+	paramtable.Get().Save("dataNode.compaction.useMergeSort", "true")
+	defer paramtable.Get().Reset("dataNode.compaction.useMergeSort")
 	segments := []int64{1001, 1002, 1003}
 	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)

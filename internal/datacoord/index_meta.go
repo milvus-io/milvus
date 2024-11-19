@@ -623,26 +623,24 @@ func (m *indexMeta) IsUnIndexedSegment(collectionID UniqueID, segID UniqueID) bo
 	return false
 }
 
-func (m *indexMeta) getSegmentIndexes(segID UniqueID) map[UniqueID]*model.SegmentIndex {
+func (m *indexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
 	m.RLock()
 	defer m.RUnlock()
-
-	ret := make(map[UniqueID]*model.SegmentIndex, 0)
-	segIndexInfos, ok := m.segmentIndexes[segID]
-	if !ok || len(segIndexInfos) == 0 {
-		return ret
+	segmentsIndexes := make(map[int64]map[UniqueID]*model.SegmentIndex)
+	for _, segmentID := range segIDs {
+		segmentsIndexes[segmentID] = m.getSegmentIndexes(collectionID, segmentID)
 	}
-
-	for _, segIdx := range segIndexInfos {
-		ret[segIdx.IndexID] = model.CloneSegmentIndex(segIdx)
-	}
-	return ret
+	return segmentsIndexes
 }
 
 func (m *indexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
 	m.RLock()
 	defer m.RUnlock()
+	return m.getSegmentIndexes(collectionID, segID)
+}
 
+// Note: thread-unsafe, don't call it outside indexMeta
+func (m *indexMeta) getSegmentIndexes(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
 	ret := make(map[UniqueID]*model.SegmentIndex, 0)
 	segIndexInfos, ok := m.segmentIndexes[segID]
 	if !ok || len(segIndexInfos) == 0 {
