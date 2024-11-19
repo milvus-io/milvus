@@ -1057,6 +1057,54 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
+func (s *DelegatorDataSuite) TestLoadSegmentsForL0() {
+	s.Run("load l0 segments on delegator", func() {
+		// Test load l0 segments on delegator, even if the destination node is not the delegator itself
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			s.loader.ExpectedCalls = nil
+		}()
+
+		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.AnythingOfType("int64"), mock.Anything).
+			Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+				return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+			})
+		}, func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) error {
+			return nil
+		})
+
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		workers[1] = worker1
+
+		worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(100)), // won't use that node because it's an L0 segment
+			DstNodeID:    100,                                                     // won't use that node because it's an L0 segment
+			CollectionID: s.collectionID,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:     100,
+					PartitionID:   500,
+					Level:         datapb.SegmentLevel_L0,
+					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				},
+			},
+		})
+
+		s.NoError(err)
+	})
+}
+
 func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 	s.genCollectionWithFunction()
 
