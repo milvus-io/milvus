@@ -184,7 +184,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     double scalar_cost =
         std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
             .count();
-    monitor::internal_core_search_latency_scalar.Observe(scalar_cost);
+    monitor::internal_core_search_latency_scalar.Observe(scalar_cost / 1000);
 
     // if bitset_holder is all 1's, we got empty result
     if (bitset_holder->all()) {
@@ -225,7 +225,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     double vector_cost =
         std::chrono::duration<double, std::micro>(vector_end - vector_start)
             .count();
-    monitor::internal_core_search_latency_vector.Observe(vector_cost);
+    monitor::internal_core_search_latency_vector.Observe(vector_cost / 1000);
 
     double total_cost =
         std::chrono::duration<double, std::micro>(vector_end - scalar_start)
