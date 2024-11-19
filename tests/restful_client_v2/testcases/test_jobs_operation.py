@@ -1248,6 +1248,7 @@ class TestCreateImportJobNegative(TestBase):
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
         rsp = self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # create import job
         payload = {
@@ -1308,6 +1309,7 @@ class TestCreateImportJobNegative(TestBase):
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
         rsp = self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # upload file to storage
         data = [{
@@ -1354,6 +1356,7 @@ class TestCreateImportJobNegative(TestBase):
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
         rsp = self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # upload file to storage
         data = [{
@@ -1407,6 +1410,7 @@ class TestCreateImportJobNegative(TestBase):
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
         rsp = self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
         # create new user
         username = "test_user"
         password = "12345678"
@@ -1482,6 +1486,7 @@ class TestCreateImportJobNegative(TestBase):
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
         rsp = self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
 
         # upload file to storage
         data = []

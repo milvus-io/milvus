@@ -172,7 +172,7 @@ class TestBase(Base):
         self.vector_client.db_name = db_name
         self.import_job_client.db_name = db_name
 
-    def wait_load_completed(self, collection_name, db_name="default", timeout=5):
+    def wait_load_completed(self, collection_name, db_name="default", timeout=10):
         t0 = time.time()
         while True and time.time() - t0 < timeout:
             rsp = self.collection_client.collection_describe(collection_name, db_name=db_name)
@@ -181,3 +181,6 @@ class TestBase(Base):
                 break
             else:
                 time.sleep(1)
+        else:
+            logger.info(f"collection {collection_name} load timeout in {timeout} seconds")
+            raise Exception(f"collection {collection_name} load timeout in {timeout} seconds")
