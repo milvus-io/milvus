@@ -19,6 +19,7 @@ package pipeline
 import (
 	"fmt"
 	"reflect"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -69,10 +70,13 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 		Set(float64(tsoutil.SubByNow(streamMsgPack.EndTs)))
 
 	// Get collection from collection manager
+	start := time.Now()
 	collection := fNode.manager.Collection.Get(fNode.collectionID)
 	if collection == nil {
 		log.Fatal("collection not found in meta", zap.Int64("collectionID", fNode.collectionID))
 	}
+	log.Info("sheep debug, filterNode, get collection done", zap.Int64("collectionID", fNode.collectionID),
+		zap.Duration("dur", time.Since(start)))
 
 	out := &insertNodeMsg{
 		insertMsgs: []*InsertMsg{},
@@ -84,6 +88,7 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 	}
 
 	// add msg to out if msg pass check of filter
+	start2 := time.Now()
 	for _, msg := range streamMsgPack.Msgs {
 		err := fNode.filtrate(collection, msg)
 		if err != nil {
@@ -97,13 +102,24 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 			out.append(msg)
 		}
 	}
+	log.Info("sheep debug, filterNode, filtrate all msg done", zap.Int64("collectionID", fNode.collectionID),
+		zap.Int("msgCnt", len(streamMsgPack.Msgs)), zap.Duration("dur", time.Since(start2)))
+
+	start3 := time.Now()
 	fNode.delegator.TryCleanExcludedSegments(streamMsgPack.EndTs)
+	log.Info("sheep debug, filterNode, TryCleanExcludedSegments done", zap.Int64("collectionID", fNode.collectionID),
+		zap.Duration("dur", time.Since(start3)))
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Inc()
 	return out
 }
 
 // filtrate message with filter policy
 func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
+	start := time.Now()
+	defer func() {
+		log.Info("sheep debug, filterNode, filtrate msg done", zap.Int64("collectionID", fNode.collectionID),
+			zap.Int("msgSize", msg.Size()), zap.Duration("dur", time.Since(start)))
+	}()
 	switch msg.Type() {
 	case commonpb.MsgType_Insert:
 		insertMsg := msg.(*msgstream.InsertMsg)
@@ -116,11 +132,14 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 		}
 
 		// check segment whether excluded
+		start2 := time.Now()
 		ok := fNode.delegator.VerifyExcludedSegments(insertMsg.SegmentID, insertMsg.EndTimestamp)
 		if !ok {
 			m := fmt.Sprintf("Segment excluded, id: %d", insertMsg.GetSegmentID())
 			return merr.WrapErrSegmentLack(insertMsg.GetSegmentID(), m)
 		}
+		log.Info("sheep debug, filterNode, VerifyExcludedSegments done", zap.Int64("collectionID", fNode.collectionID),
+			zap.Duration("dur", time.Since(start2)))
 		return nil
 
 	case commonpb.MsgType_Delete:
