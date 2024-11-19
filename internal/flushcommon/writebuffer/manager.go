@@ -62,7 +62,7 @@ func NewManager(syncMgr syncmgr.SyncManager) BufferManager {
 
 type bufferManager struct {
 	syncMgr syncmgr.SyncManager
-	buffers typeutil.ConcurrentMap[string, WriteBuffer]
+	buffers *typeutil.ConcurrentMap[string, WriteBuffer]
 
 	wg sync.WaitGroup
 	ch lifetime.SafeChan
@@ -97,13 +97,11 @@ func (m *bufferManager) memoryCheck() {
 		return
 	}
 	startTime := time.Now()
-	m.mut.RLock()
 	defer func() {
 		dur := time.Since(startTime)
 		if dur > 30*time.Second {
 			log.Warn("memory check takes too long", zap.Duration("time", dur))
 		}
-		m.mut.RUnlock()
 	}()
 
 	for {

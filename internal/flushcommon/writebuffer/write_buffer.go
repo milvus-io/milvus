@@ -68,7 +68,7 @@ type checkpointCandidate struct {
 }
 
 type checkpointCandidates struct {
-	candidates typeutil.ConcurrentMap[string, *checkpointCandidate]
+	candidates *typeutil.ConcurrentMap[string, *checkpointCandidate]
 }
 
 func getCandidatesKey(segmentID int64, timestamp uint64) string {
@@ -86,7 +86,7 @@ func (c *checkpointCandidates) Remove(segmentID int64, timestamp uint64) {
 }
 
 func (c *checkpointCandidates) Add(segmentID int64, position *msgpb.MsgPosition, source string) {
-	c.candidates.Add(getCandidatesKey(segmentID, position.GetTimestamp()), &checkpointCandidate{segmentID, position, source})
+	c.candidates.Insert(getCandidatesKey(segmentID, position.GetTimestamp()), &checkpointCandidate{segmentID, position, source})
 }
 
 func (c *checkpointCandidates) GetEarliestWithDefault(def *checkpointCandidate) *checkpointCandidate {
