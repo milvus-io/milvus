@@ -68,50 +68,35 @@ type checkpointCandidate struct {
 }
 
 type checkpointCandidates struct {
-	candidates map[string]*checkpointCandidate
-	mu         sync.RWMutex
+	candidates typeutil.ConcurrentMap[string, *checkpointCandidate]
+}
+
+func getCandidatesKey(segmentID int64, timestamp uint64) string {
+	return fmt.Sprintf("%d-%d", segmentID, timestamp)
 }
 
 func newCheckpointCandiates() *checkpointCandidates {
 	return &checkpointCandidates{
-		candidates: make(map[string]*checkpointCandidate),
+		candidates: typeutil.NewConcurrentMap[string, *checkpointCandidate](), // segmentID-ts
 	}
 }
 
 func (c *checkpointCandidates) Remove(segmentID int64, timestamp uint64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.candidates, fmt.Sprintf("%d-%d", segmentID, timestamp))
-}
-
-func (c *checkpointCandidates) RemoveChannel(channel string, timestamp uint64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.candidates, fmt.Sprintf("%s-%d", channel, timestamp))
+	c.candidates.Remove(getCandidatesKey(segmentID, timestamp))
 }
 
 func (c *checkpointCandidates) Add(segmentID int64, position *msgpb.MsgPosition, source string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.candidates[fmt.Sprintf("%d-%d", segmentID, position.GetTimestamp())] = &checkpointCandidate{segmentID, position, source}
-}
-
-func (c *checkpointCandidates) AddChannel(channel string, position *msgpb.MsgPosition, source string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.candidates[fmt.Sprintf("%s-%d", channel, position.GetTimestamp())] = &checkpointCandidate{-1, position, source}
+	c.candidates.Add(getCandidatesKey(segmentID, position.GetTimestamp()), &checkpointCandidate{segmentID, position, source})
 }
 
 func (c *checkpointCandidates) GetEarliestWithDefault(def *checkpointCandidate) *checkpointCandidate {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	var result *checkpointCandidate = def
-	for _, candidate := range c.candidates {
+	c.candidates.Range(func(_ string, candidate *checkpointCandidate) bool {
 		if result == nil || candidate.position.GetTimestamp() < result.position.GetTimestamp() {
 			result = candidate
 		}
-	}
+		return true
+	})
 	return result
 }
 
@@ -126,8 +111,6 @@ func NewWriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syncm
 
 // writeBufferBase is the common component for buffering data
 type writeBufferBase struct {
-	mut sync.RWMutex
-
 	collectionID int64
 	channelName  string
 
@@ -136,7 +119,8 @@ type writeBufferBase struct {
 	estSizePerRecord int
 	metaCache        metacache.MetaCache
 
-	buffers map[int64]*segmentBuffer // segmentID => segmentBuffer
+	bufferGuard sync.RWMutex
+	buffers     map[int64]*segmentBuffer // segmentID => segmentBuffer
 
 	syncPolicies   []SyncPolicy
 	syncCheckpoint *checkpointCandidates
@@ -201,23 +185,23 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 }
 
 func (wb *writeBufferBase) HasSegment(segmentID int64) bool {
-	wb.mut.RLock()
-	defer wb.mut.RUnlock()
+	wb.bufferGuard.RLock()
+	defer wb.bufferGuard.RUnlock()
 
 	_, ok := wb.buffers[segmentID]
 	return ok
 }
 
 func (wb *writeBufferBase) SealSegments(ctx context.Context, segmentIDs []int64) error {
-	wb.mut.RLock()
-	defer wb.mut.RUnlock()
+	wb.bufferGuard.RLock()
+	defer wb.bufferGuard.RUnlock()
 
 	return wb.sealSegments(ctx, segmentIDs)
 }
 
 func (wb *writeBufferBase) DropPartitions(partitionIDs []int64) {
-	wb.mut.RLock()
-	defer wb.mut.RUnlock()
+	wb.bufferGuard.RLock()
+	defer wb.bufferGuard.RUnlock()
 
 	wb.dropPartitions(partitionIDs)
 }
@@ -231,8 +215,8 @@ func (wb *writeBufferBase) GetFlushTimestamp() uint64 {
 }
 
 func (wb *writeBufferBase) MemorySize() int64 {
-	wb.mut.RLock()
-	defer wb.mut.RUnlock()
+	wb.bufferGuard.RLock()
+	defer wb.bufferGuard.RUnlock()
 
 	var size int64
 	for _, segBuf := range wb.buffers {
@@ -243,8 +227,8 @@ func (wb *writeBufferBase) MemorySize() int64 {
 
 func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 	log := wb.logger
-	wb.mut.Lock()
-	defer wb.mut.Unlock()
+	wb.bufferGuard.Lock()
+	defer wb.bufferGuard.Unlock()
 
 	// need valid checkpoint before triggering syncing
 	if wb.checkpoint == nil {
@@ -263,8 +247,8 @@ func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 
 func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 	log := wb.cpRatedLogger
-	wb.mut.RLock()
-	defer wb.mut.RUnlock()
+	wb.bufferGuard.RLock()
+	defer wb.bufferGuard.RUnlock()
 
 	candidates := lo.MapToSlice(wb.buffers, func(_ int64, buf *segmentBuffer) *checkpointCandidate {
 		return &checkpointCandidate{buf.segmentID, buf.EarliestPosition(), "segment buffer"}
@@ -641,8 +625,8 @@ func (wb *writeBufferBase) getEstBatchSize() uint {
 func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 	log := wb.logger
 	// sink all data and call Drop for meta writer
-	wb.mut.Lock()
-	defer wb.mut.Unlock()
+	wb.bufferGuard.Lock()
+	defer wb.bufferGuard.Unlock()
 	if !drop {
 		return
 	}
