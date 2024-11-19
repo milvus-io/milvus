@@ -17,62 +17,18 @@
 package column
 
 import (
-	"fmt"
-
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
-// ColumnVarCharArray generated columns type for VarChar
-type ColumnVarCharArray struct {
-	ColumnBase
-	name   string
-	values [][][]byte
+// columnArrayBase implement `Column` interface
+// it provided specified `FieldData` behavior for Array columns.
+type columnArrayBase[T any] struct {
+	*genericColumnBase[[]T]
+	elementType entity.FieldType
 }
 
-// Name returns column name
-func (c *ColumnVarCharArray) Name() string {
-	return c.name
-}
-
-// Type returns column entity.FieldType
-func (c *ColumnVarCharArray) Type() entity.FieldType {
-	return entity.FieldTypeArray
-}
-
-// Len returns column values length
-func (c *ColumnVarCharArray) Len() int {
-	return len(c.values)
-}
-
-func (c *ColumnVarCharArray) Slice(start, end int) Column {
-	l := c.Len()
-	if start > l {
-		start = l
-	}
-	if end == -1 || end > l {
-		end = l
-	}
-	return &ColumnVarCharArray{
-		ColumnBase: c.ColumnBase,
-		name:       c.name,
-		values:     c.values[start:end],
-	}
-}
-
-// Get returns value at index as interface{}.
-func (c *ColumnVarCharArray) Get(idx int) (interface{}, error) {
-	var r []string // use default value
-	if idx < 0 || idx >= c.Len() {
-		return r, errors.New("index out of range")
-	}
-	return c.values[idx], nil
-}
-
-// FieldData return column data mapped to schemapb.FieldData
-func (c *ColumnVarCharArray) FieldData() *schemapb.FieldData {
+func (c *columnArrayBase[T]) FieldData() *schemapb.FieldData {
 	fd := &schemapb.FieldData{
 		Type:      schemapb.DataType_Array,
 		FieldName: c.name,
@@ -80,24 +36,15 @@ func (c *ColumnVarCharArray) FieldData() *schemapb.FieldData {
 
 	data := make([]*schemapb.ScalarField, 0, c.Len())
 	for _, arr := range c.values {
-		converted := make([]string, 0, c.Len())
-		for i := 0; i < len(arr); i++ {
-			converted = append(converted, string(arr[i]))
-		}
-		data = append(data, &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_StringData{
-				StringData: &schemapb.StringArray{
-					Data: converted,
-				},
-			},
-		})
+		data = append(data, slice2Scalar(arr, c.elementType))
 	}
+
 	fd.Field = &schemapb.FieldData_Scalars{
 		Scalars: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_ArrayData{
 				ArrayData: &schemapb.ArrayArray{
 					Data:        data,
-					ElementType: schemapb.DataType_VarChar,
+					ElementType: schemapb.DataType(c.elementType),
 				},
 			},
 		},
@@ -105,36 +52,162 @@ func (c *ColumnVarCharArray) FieldData() *schemapb.FieldData {
 	return fd
 }
 
-// ValueByIdx returns value of the provided index
-// error occurs when index out of range
-func (c *ColumnVarCharArray) ValueByIdx(idx int) ([][]byte, error) {
-	var r [][]byte // use default value
-	if idx < 0 || idx >= c.Len() {
-		return r, errors.New("index out of range")
+func (c *columnArrayBase[T]) ElementType() entity.FieldType {
+	return c.elementType
+}
+
+func (c *columnArrayBase[T]) slice(start, end int) *columnArrayBase[T] {
+	return &columnArrayBase[T]{
+		genericColumnBase: c.genericColumnBase.slice(start, end),
+		elementType:       c.elementType,
 	}
-	return c.values[idx], nil
 }
 
-// AppendValue append value into column
-func (c *ColumnVarCharArray) AppendValue(i interface{}) error {
-	v, ok := i.([][]byte)
-	if !ok {
-		return fmt.Errorf("invalid type, expected []string, got %T", i)
+func newArrayBase[T any](fieldName string, data [][]T, elementType entity.FieldType) *columnArrayBase[T] {
+	return &columnArrayBase[T]{
+		genericColumnBase: &genericColumnBase[[]T]{
+			name:      fieldName,
+			fieldType: entity.FieldTypeArray,
+			values:    data,
+		},
+		elementType: elementType,
 	}
-	c.values = append(c.values, v)
-
-	return nil
 }
 
-// Data returns column data
-func (c *ColumnVarCharArray) Data() [][][]byte {
-	return c.values
+/* bool array */
+
+type ColumnBoolArray struct {
+	*columnArrayBase[bool]
 }
 
-// NewColumnVarChar auto generated constructor
-func NewColumnVarCharArray(name string, values [][][]byte) *ColumnVarCharArray {
+func NewColumnBoolArray(fieldName string, data [][]bool) *ColumnBoolArray {
+	return &ColumnBoolArray{
+		columnArrayBase: newArrayBase[bool](fieldName, data, entity.FieldTypeBool),
+	}
+}
+
+func (c *ColumnBoolArray) Slice(start, end int) Column {
+	return &ColumnBoolArray{
+		columnArrayBase: c.columnArrayBase.slice(start, end),
+	}
+}
+
+/* int8 array */
+
+type ColumnInt8Array struct {
+	*columnArrayBase[int8]
+}
+
+func NewColumnInt8Array(fieldName string, data [][]int8) *ColumnInt8Array {
+	return &ColumnInt8Array{
+		columnArrayBase: newArrayBase(fieldName, data, entity.FieldTypeInt8),
+	}
+}
+
+func (c *ColumnInt8Array) Slice(start, end int) Column {
+	return &ColumnInt8Array{
+		columnArrayBase: c.columnArrayBase.slice(start, end),
+	}
+}
+
+/* int16 array */
+
+type ColumnInt16Array struct {
+	*columnArrayBase[int16]
+}
+
+func NewColumnInt16Array(fieldName string, data [][]int16) *ColumnInt16Array {
+	return &ColumnInt16Array{
+		columnArrayBase: newArrayBase(fieldName, data, entity.FieldTypeInt16),
+	}
+}
+
+func (c *ColumnInt16Array) Slice(start, end int) Column {
+	return &ColumnInt16Array{
+		columnArrayBase: c.columnArrayBase.slice(start, end),
+	}
+}
+
+/* int32 array */
+
+type ColumnInt32Array struct {
+	*columnArrayBase[int32]
+}
+
+func NewColumnInt32Array(fieldName string, data [][]int32) *ColumnInt32Array {
+	return &ColumnInt32Array{
+		columnArrayBase: newArrayBase(fieldName, data, entity.FieldTypeInt32),
+	}
+}
+
+func (c *ColumnInt32Array) Slice(start, end int) Column {
+	return &ColumnInt32Array{
+		columnArrayBase: c.columnArrayBase.slice(start, end),
+	}
+}
+
+/* int64 array */
+
+type ColumnInt64Array struct {
+	*columnArrayBase[int64]
+}
+
+func NewColumnInt64Array(fieldName string, data [][]int64) *ColumnInt64Array {
+	return &ColumnInt64Array{
+		columnArrayBase: newArrayBase(fieldName, data, entity.FieldTypeInt64),
+	}
+}
+
+func (c *ColumnInt64Array) Slice(start, end int) Column {
+	return &ColumnInt64Array{
+		columnArrayBase: c.columnArrayBase.slice(start, end),
+	}
+}
+
+/* float32 array */
+
+type ColumnFloatArray struct {
+	*columnArrayBase[float32]
+}
+
+func NewColumnFloatArray(fieldName string, data [][]float32) *ColumnFloatArray {
+	return &ColumnFloatArray{
+		columnArrayBase: newArrayBase(fieldName, data, entity.FieldTypeFloat),
+	}
+}
+
+func (c *ColumnFloatArray) Slice(start, end int) Column {
+	return &ColumnFloatArray{
+		columnArrayBase: c.columnArrayBase.slice(start, end),
+	}
+}
+
+/* float64 array */
+
+type ColumnDoubleArray struct {
+	*columnArrayBase[float64]
+}
+
+func NewColumnDoubleArray(fieldName string, data [][]float64) *ColumnDoubleArray {
+	return &ColumnDoubleArray{
+		columnArrayBase: newArrayBase(fieldName, data, entity.FieldTypeDouble),
+	}
+}
+
+func (c *ColumnDoubleArray) Slice(start, end int) Column {
+	return &ColumnDoubleArray{
+		columnArrayBase: c.columnArrayBase.slice(start, end),
+	}
+}
+
+/* varchar array */
+
+type ColumnVarCharArray struct {
+	*columnArrayBase[string]
+}
+
+func NewColumnVarCharArray(fieldName string, data [][]string) *ColumnVarCharArray {
 	return &ColumnVarCharArray{
-		name:   name,
-		values: values,
+		columnArrayBase: newArrayBase(fieldName, data, entity.FieldTypeVarChar),
 	}
 }
