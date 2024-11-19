@@ -34,6 +34,8 @@ expr:
 	| expr BOR expr											                     # BitOr
 	| expr AND expr											                     # LogicalAnd
 	| expr OR expr											                     # LogicalOr
+	| ISNULL '(' Identifier ')' 												 # IsNull
+	| ISNOTNULL '(' Identifier ')'                                               # IsNotNull
 	| EXISTS expr                                                                # Exists;
 
 // typeName: ty = (BOOL | INT8 | INT16 | INT32 | INT64 | FLOAT | DOUBLE);
@@ -73,6 +75,9 @@ BXOR: '^';
 
 AND: '&&' | 'and' | 'AND';
 OR: '||' | 'or' | 'OR';
+
+ISNULL: 'is_null' | 'IS_NULL';
+ISNOTNULL: 'is_not_null' | 'IS_NOT_NULL';
 
 BNOT: '~';
 NOT: '!' | 'not' | 'NOT';

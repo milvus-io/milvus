@@ -5138,6 +5138,215 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeBenchExpr) {
     }
 }
 
+TEST(Expr, TestExprNull) {
+    auto schema = std::make_shared<Schema>();
+    auto int8_fid = schema->AddDebugField("int8", DataType::INT8, true);
+    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
+    auto int16_fid = schema->AddDebugField("int16", DataType::INT16, true);
+    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
+    auto int32_fid = schema->AddDebugField("int32", DataType::INT32, true);
+    auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64, true);
+    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
+    auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
+    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR, true);
+    auto float_fid = schema->AddDebugField("float", DataType::FLOAT, true);
+    auto float_1_fid = schema->AddDebugField("float1", DataType::FLOAT);
+    auto double_fid = schema->AddDebugField("double", DataType::DOUBLE, true);
+    auto double_1_fid = schema->AddDebugField("double1", DataType::DOUBLE);
+    schema->set_primary_field_id(str1_fid);
+
+    std::map<DataType, FieldId> fids = {{DataType::INT8, int8_fid},
+                                        {DataType::INT16, int16_fid},
+                                        {DataType::INT32, int32_fid},
+                                        {DataType::INT64, int64_fid},
+                                        {DataType::VARCHAR, str2_fid},
+                                        {DataType::FLOAT, float_fid},
+                                        {DataType::DOUBLE, double_fid}};
+
+    std::map<DataType, FieldId> fids_not_nullable = {
+        {DataType::INT8, int8_1_fid},
+        {DataType::INT16, int16_1_fid},
+        {DataType::INT32, int32_1_fid},
+        {DataType::INT64, int64_1_fid},
+        {DataType::VARCHAR, str1_fid},
+        {DataType::FLOAT, float_1_fid},
+        {DataType::DOUBLE, double_1_fid}};
+
+    auto seg = CreateSealedSegment(schema);
+    FixedVector<bool> valid_data_i8;
+    FixedVector<bool> valid_data_i16;
+    FixedVector<bool> valid_data_i32;
+    FixedVector<bool> valid_data_i64;
+    FixedVector<bool> valid_data_str;
+    FixedVector<bool> valid_data_float;
+    FixedVector<bool> valid_data_double;
+
+    int N = 1000;
+    auto raw_data = DataGen(schema, N);
+    valid_data_i8 = raw_data.get_col_valid(int8_fid);
+    valid_data_i16 = raw_data.get_col_valid(int16_fid);
+    valid_data_i32 = raw_data.get_col_valid(int32_fid);
+    valid_data_i64 = raw_data.get_col_valid(int64_fid);
+    valid_data_str = raw_data.get_col_valid(str2_fid);
+    valid_data_float = raw_data.get_col_valid(float_fid);
+    valid_data_double = raw_data.get_col_valid(double_fid);
+
+    FixedVector<bool> valid_data_all_true(N, true);
+
+    // load field data
+    auto fields = schema->get_fields();
+    for (auto field_data : raw_data.raw_->fields_data()) {
+        int64_t field_id = field_data.field_id();
+
+        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
+        auto field_meta = fields.at(FieldId(field_id));
+        info.channel->push(
+            CreateFieldDataFromDataArray(N, &field_data, field_meta));
+        info.channel->close();
+
+        seg->LoadFieldData(FieldId(field_id), info);
+    }
+
+    auto build_nullable_expr = [&](DataType data_type,
+                                   NullExprType op) -> expr::TypedExprPtr {
+        return std::make_shared<expr::NullExpr>(
+            expr::ColumnInfo(fids[data_type], data_type, {}, true), op);
+    };
+
+    auto build_not_nullable_expr = [&](DataType data_type,
+                                       NullExprType op) -> expr::TypedExprPtr {
+        return std::make_shared<expr::NullExpr>(
+            expr::ColumnInfo(
+                fids_not_nullable[data_type], data_type, {}, false),
+            op);
+    };
+
+    auto test_is_null_ans = [=, &seg](expr::TypedExprPtr expr,
+                                      FixedVector<bool> valid_data) {
+        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
+        BitsetType final;
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+        EXPECT_EQ(final.size(), N);
+        for (int i = 0; i < N; i++) {
+            EXPECT_NE(final[i], valid_data[i]);
+        }
+    };
+
+    auto test_is_not_null_ans = [=, &seg](expr::TypedExprPtr expr,
+                                          FixedVector<bool> valid_data) {
+        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
+        BitsetType final;
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+        EXPECT_EQ(final.size(), N);
+        for (int i = 0; i < N; i++) {
+            EXPECT_EQ(final[i], valid_data[i]);
+        }
+    };
+
+    auto expr = build_nullable_expr(DataType::INT8,
+                                    proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_i8);
+    expr = build_nullable_expr(DataType::INT16,
+                               proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_i16);
+    expr = build_nullable_expr(DataType::INT32,
+                               proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_i32);
+    expr = build_nullable_expr(DataType::INT64,
+                               proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_i64);
+    expr = build_nullable_expr(DataType::FLOAT,
+                               proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_float);
+    expr = build_nullable_expr(DataType::DOUBLE,
+                               proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_double);
+    expr = build_nullable_expr(DataType::FLOAT,
+                               proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_float);
+    expr = build_nullable_expr(DataType::DOUBLE,
+                               proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_double);
+    expr = build_nullable_expr(DataType::INT8,
+                               proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_i8);
+    expr = build_nullable_expr(DataType::INT16,
+                               proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_i16);
+    expr = build_nullable_expr(DataType::INT32,
+                               proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_i32);
+    expr = build_nullable_expr(DataType::INT64,
+                               proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_i64);
+    expr = build_nullable_expr(DataType::FLOAT,
+                               proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_float);
+    expr = build_nullable_expr(DataType::DOUBLE,
+                               proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_double);
+    expr = build_nullable_expr(DataType::FLOAT,
+                               proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_float);
+    expr = build_nullable_expr(DataType::DOUBLE,
+                               proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_double);
+    //not nullable expr
+    expr = build_not_nullable_expr(DataType::INT8,
+                                   proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::INT16,
+                                   proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::INT32,
+                                   proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::INT64,
+                                   proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::FLOAT,
+                                   proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::DOUBLE,
+                                   proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::FLOAT,
+                                   proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::DOUBLE,
+                                   proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::INT8,
+                                   proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::INT16,
+                                   proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::INT32,
+                                   proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::INT64,
+                                   proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::FLOAT,
+                                   proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::DOUBLE,
+                                   proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::FLOAT,
+                                   proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::DOUBLE,
+                                   proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_all_true);
+}
+
 TEST_P(ExprTest, TestCompareExprBenchTest) {
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
