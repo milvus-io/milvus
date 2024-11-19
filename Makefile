@@ -30,8 +30,8 @@ endif
 use_asan = OFF
 ifeq ($(USE_ASAN), ON)
 	use_asan =${USE_ASAN}
-	CGO_LDFLAGS := $(shell go env CGO_LDFLAGS) -fsanitize=address -fno-omit-frame-pointer
-	CGO_CFLAGS := $(shell go env CGO_CFLAGS) -fsanitize=address -fno-omit-frame-pointer
+	CGO_LDFLAGS := $(shell go env CGO_LDFLAGS) -fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address
+	CGO_CFLAGS := $(shell go env CGO_CFLAGS) -fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address
 	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),use_asan
 endif
 

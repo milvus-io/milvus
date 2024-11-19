@@ -137,7 +137,6 @@ while getopts "p:d:t:s:f:n:i:y:a:x:o:ulrcghzmebZ" arg; do
     if [[ ${ENV_VAL} == 'ON' ]]; then
         echo "Set USE_ASAN to ON"
         USE_ASAN="ON"
-        BUILD_TYPE=Debug
     fi
     ;;
   y)
