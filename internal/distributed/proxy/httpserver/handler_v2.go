@@ -976,6 +976,9 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 
 func generateSearchParams(ctx context.Context, c *gin.Context, reqSearchParams searchParams) []*commonpb.KeyValuePair {
 	var searchParams []*commonpb.KeyValuePair
+	if reqSearchParams.Params == nil {
+		reqSearchParams.Params = make(map[string]any)
+	}
 	bs, _ := json.Marshal(reqSearchParams.Params)
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: Params, Value: string(bs)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.IgnoreGrowing, Value: strconv.FormatBool(reqSearchParams.IgnoreGrowing)})
