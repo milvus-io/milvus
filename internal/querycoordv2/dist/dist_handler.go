@@ -24,7 +24,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -156,7 +155,7 @@ func (dh *distHandler) updateSegmentsDistribution(resp *querypb.GetDataDistribut
 			}
 		}
 		updates = append(updates, &meta.Segment{
-			SegmentInfo:        proto.Clone(segmentInfo).(*datapb.SegmentInfo),
+			SegmentInfo:        segmentInfo,
 			Node:               resp.GetNodeID(),
 			Version:            s.GetVersion(),
 			LastDeltaTimestamp: s.GetLastDeltaTimestamp(),
