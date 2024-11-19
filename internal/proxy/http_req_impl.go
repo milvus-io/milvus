@@ -210,7 +210,9 @@ func getDataComponentMetrics(node *Proxy, metricsType string) gin.HandlerFunc {
 
 // The Get request should be used to get the query parameters, not the body, such as Javascript
 // fetch API only support GET request with query parameter.
-func listCollection(rootCoord types.RootCoordClient, queryCoord types.QueryCoordClient) gin.HandlerFunc {
+func listCollection(node *Proxy) gin.HandlerFunc {
+	rootCoord := node.rootCoord
+	queryCoord := node.queryCoord
 	return func(c *gin.Context) {
 		dbName := c.Query(httpDBName)
 		if len(dbName) == 0 {
@@ -290,7 +292,8 @@ func listCollection(rootCoord types.RootCoordClient, queryCoord types.QueryCoord
 	}
 }
 
-func describeCollection(node types.ProxyComponent, rootCoord types.RootCoordClient) gin.HandlerFunc {
+func describeCollection(node *Proxy) gin.HandlerFunc {
+	rootCoord := node.rootCoord
 	return func(c *gin.Context) {
 		dbName := c.Query(httpDBName)
 		collectionName := c.Query(HTTPCollectionName)
@@ -304,7 +307,7 @@ func describeCollection(node types.ProxyComponent, rootCoord types.RootCoordClie
 			return
 		}
 
-		describeCollectionResp, err := node.DescribeCollection(c, &milvuspb.DescribeCollectionRequest{
+		describeCollectionResp, err := rootCoord.DescribeCollection(c, &milvuspb.DescribeCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_DescribeCollection,
 			},

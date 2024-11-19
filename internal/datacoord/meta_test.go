@@ -1375,7 +1375,7 @@ func TestMeta_GetSegmentsJSON(t *testing.T) {
 		},
 	}
 
-	segments := m.getSegmentsMetrics()
+	segments := m.getSegmentsMetrics(0)
 
 	// Check the length of the segments
 	assert.Equal(t, 2, len(segments))

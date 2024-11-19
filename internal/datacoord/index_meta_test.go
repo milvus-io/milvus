@@ -1567,3 +1567,113 @@ func TestBuildIndexTaskStatsJSON(t *testing.T) {
 	im.segmentBuildInfo.Remove(si1.BuildID)
 	assert.Equal(t, 1, len(im.segmentBuildInfo.List()))
 }
+
+func TestMeta_GetIndexJSON(t *testing.T) {
+	m := &indexMeta{
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			1: {
+				1: &model.Index{
+					CollectionID: 1,
+					FieldID:      1,
+					IndexID:      1,
+					IndexName:    "index1",
+					IsDeleted:    false,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "param1",
+							Value: "value1",
+						},
+					},
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "param1",
+							Value: "value1",
+						},
+					},
+					IsAutoIndex: true,
+					UserIndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "param1",
+							Value: "value1",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	actualJSON := m.GetIndexJSON(0)
+	var actualIndex []*metricsinfo.Index
+	err := json.Unmarshal([]byte(actualJSON), &actualIndex)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), actualIndex[0].CollectionID)
+	assert.Equal(t, int64(1), actualIndex[0].FieldID)
+	assert.Equal(t, int64(1), actualIndex[0].IndexID)
+	assert.Equal(t, map[string]string{"param1": "value1"}, actualIndex[0].IndexParams)
+	assert.Equal(t, map[string]string{"param1": "value1"}, actualIndex[0].UserIndexParams)
+}
+
+func TestMeta_GetSegmentIndexStatus(t *testing.T) {
+	var (
+		collID  = UniqueID(1)
+		partID  = UniqueID(2)
+		indexID = UniqueID(10)
+		fieldID = UniqueID(100)
+		segID   = UniqueID(1000)
+		buildID = UniqueID(10000)
+	)
+
+	m := &indexMeta{}
+	m.indexes = map[UniqueID]map[UniqueID]*model.Index{
+		collID: {
+			indexID: {
+				CollectionID: collID,
+				FieldID:      fieldID,
+				IndexID:      indexID,
+				IndexName:    "test_index",
+				IsDeleted:    false,
+			},
+		},
+	}
+	m.segmentIndexes = map[UniqueID]map[UniqueID]*model.SegmentIndex{
+		segID: {
+			indexID: {
+				SegmentID:      segID,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        10250,
+				IndexID:        indexID,
+				BuildID:        buildID,
+				NodeID:         1,
+				IndexVersion:   0,
+				IndexState:     commonpb.IndexState_Finished,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreatedUTCTime: 12,
+				IndexFileKeys:  nil,
+				IndexSize:      0,
+			},
+		},
+		segID + 1: {},
+	}
+
+	t.Run("index exists", func(t *testing.T) {
+		isIndexed, segmentIndexes := m.GetSegmentIndexedFields(collID, segID)
+		assert.True(t, isIndexed)
+		assert.Len(t, segmentIndexes, 1)
+		assert.Equal(t, indexID, segmentIndexes[0].IndexID)
+		assert.Equal(t, buildID, segmentIndexes[0].BuildID)
+	})
+
+	t.Run("index does not exist", func(t *testing.T) {
+		isIndexed, segmentIndexes := m.GetSegmentIndexedFields(collID+1, segID)
+		assert.False(t, isIndexed)
+		assert.Empty(t, segmentIndexes)
+	})
+
+	t.Run("segment does not exist", func(t *testing.T) {
+		isIndexed, segmentIndexes := m.GetSegmentIndexedFields(collID, segID+1)
+		assert.False(t, isIndexed)
+		assert.Empty(t, segmentIndexes)
+	})
+}

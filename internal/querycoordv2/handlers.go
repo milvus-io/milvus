@@ -18,11 +18,13 @@ package querycoordv2
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -289,6 +291,36 @@ func (s *Server) getChannelsFromQueryNode(ctx context.Context, req *milvuspb.Get
 func (s *Server) getSegmentsFromQueryNode(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
 	segments, err := getMetrics[*metricsinfo.Segment](ctx, s, req)
 	return metricsinfo.MarshalGetMetricsValues(segments, err)
+}
+
+func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+	v := jsonReq.Get(metricsinfo.MetricRequestParamINKey)
+	if !v.Exists() {
+		// default to get all segments from dataanode
+		return s.getSegmentsFromQueryNode(ctx, req)
+	}
+
+	in := v.String()
+	if in == "qn" {
+		// TODO: support filter by collection id
+		return s.getSegmentsFromQueryNode(ctx, req)
+	}
+
+	if in == "qc" {
+		v = jsonReq.Get(metricsinfo.MetricRequestParamCollectionIDKey)
+		collectionID := int64(0)
+		if v.Exists() {
+			collectionID = v.Int()
+		}
+		filteredSegments := s.dist.SegmentDistManager.GetSegmentDist(collectionID)
+		bs, err := json.Marshal(filteredSegments)
+		if err != nil {
+			log.Warn("marshal segment value failed", zap.Int64("collectionID", collectionID), zap.String("err", err.Error()))
+			return "", nil
+		}
+		return string(bs), nil
+	}
+	return "", fmt.Errorf("invalid param value in=[%s], it should be qc or qn", in)
 }
 
 // TODO(dragondriver): add more detail metrics
