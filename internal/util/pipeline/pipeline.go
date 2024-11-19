@@ -88,7 +88,9 @@ func (p *pipeline) process() {
 		}
 
 		input := <-curNode.InputChannel
+		start := time.Now()
 		output := curNode.node.Operate(input)
+		log.Info("sheep debug, Operate done", zap.String("node", curNode.node.Name()), zap.Duration("dur", time.Since(start)))
 		if curNode.Checker != nil {
 			curNode.Checker.Check()
 		}

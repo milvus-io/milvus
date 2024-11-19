@@ -124,6 +124,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 				panic(err)
 			}
 			newGrowingSegment = true
+			log.Info("sheep debug, new segment done", zap.String("vchannelName", sd.vchannelName),
+				zap.Int64("segmentID", segmentID), zap.Duration("dur", tr.RecordSpan()))
 		}
 
 		err := growing.Insert(context.Background(), insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)
@@ -139,10 +141,15 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			// panic here, insert failure
 			panic(err)
 		}
+		log.Info("sheep debug, insert done", zap.String("vchannelName", sd.vchannelName),
+			zap.Int64("segmentID", segmentID), zap.Duration("dur", tr.RecordSpan()))
 		growing.UpdateBloomFilter(insertData.PrimaryKeys)
 
 		if newGrowingSegment {
+			start := time.Now()
 			sd.growingSegmentLock.Lock()
+			log.Info("sheep debug, lock growingSegmentLock", zap.String("vchannelName", sd.vchannelName),
+				zap.Int64("segmentID", segmentID), zap.Duration("dur", time.Since(start)))
 			// check whether segment has been excluded
 			if ok := sd.VerifyExcludedSegments(segmentID, typeutil.MaxTimestamp); !ok {
 				log.Warn("try to insert data into released segment, skip it", zap.Int64("segmentID", segmentID))
@@ -150,6 +157,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 				growing.Release(context.Background())
 				continue
 			}
+			log.Info("sheep debug, VerifyExcludedSegments", zap.String("vchannelName", sd.vchannelName),
+				zap.Int64("segmentID", segmentID), zap.Duration("dur", tr.RecordSpan()))
 
 			if !sd.pkOracle.Exists(growing, paramtable.GetNodeID()) {
 				// register created growing segment after insert, avoid to add empty growing to delegator
@@ -158,6 +167,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					sd.idfOracle.Register(segmentID, insertData.BM25Stats, segments.SegmentTypeGrowing)
 				}
 				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
+				log.Info("sheep debug, Put segment", zap.String("vchannelName", sd.vchannelName),
+					zap.Int64("segmentID", segmentID), zap.Duration("dur", tr.RecordSpan()))
 				sd.addGrowing(SegmentEntry{
 					NodeID:        paramtable.GetNodeID(),
 					SegmentID:     segmentID,
@@ -168,6 +179,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			}
 
 			sd.growingSegmentLock.Unlock()
+			log.Info("sheep debug, unlock", zap.String("vchannelName", sd.vchannelName),
+				zap.Int64("segmentID", segmentID), zap.Duration("dur", time.Since(start)))
 		} else if sd.idfOracle != nil {
 			sd.idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
 		}
