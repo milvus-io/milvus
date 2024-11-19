@@ -21,96 +21,42 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
-var _ (Column) = (*ColumnJSONBytes)(nil)
+var _ (Column) = (*ColumnVarChar)(nil)
 
-// ColumnJSONBytes column type for JSON.
-// all items are marshaled json bytes.
 type ColumnJSONBytes struct {
-	ColumnBase
-	name      string
-	values    [][]byte
+	*genericColumnBase[[]byte]
 	isDynamic bool
 }
 
-// Name returns column name.
-func (c *ColumnJSONBytes) Name() string {
-	return c.name
-}
-
-// Type returns column entity.FieldType.
-func (c *ColumnJSONBytes) Type() entity.FieldType {
-	return entity.FieldTypeJSON
-}
-
-// Len returns column values length.
-func (c *ColumnJSONBytes) Len() int {
-	return len(c.values)
+func NewColumnJSONBytes(name string, values [][]byte) *ColumnJSONBytes {
+	return &ColumnJSONBytes{
+		genericColumnBase: &genericColumnBase[[]byte]{
+			name:      name,
+			fieldType: entity.FieldTypeJSON,
+			values:    values,
+		},
+	}
 }
 
 func (c *ColumnJSONBytes) Slice(start, end int) Column {
-	l := c.Len()
-	if start > l {
-		start = l
-	}
-	if end == -1 || end > l {
-		end = l
-	}
 	return &ColumnJSONBytes{
-		ColumnBase: c.ColumnBase,
-		name:       c.name,
-		values:     c.values[start:end],
+		genericColumnBase: c.genericColumnBase.slice(start, end),
 	}
 }
 
-// Get returns value at index as interface{}.
-func (c *ColumnJSONBytes) Get(idx int) (interface{}, error) {
-	if idx < 0 || idx > c.Len() {
-		return nil, errors.New("index out of range")
-	}
-	return c.values[idx], nil
+func (c *ColumnJSONBytes) WithIsDynamic(isDynamic bool) *ColumnJSONBytes {
+	c.isDynamic = isDynamic
+	return c
 }
 
-func (c *ColumnJSONBytes) GetAsString(idx int) (string, error) {
-	bs, err := c.ValueByIdx(idx)
-	if err != nil {
-		return "", err
-	}
-	return string(bs), nil
-}
-
-// FieldData return column data mapped to schemapb.FieldData.
 func (c *ColumnJSONBytes) FieldData() *schemapb.FieldData {
-	fd := &schemapb.FieldData{
-		Type:      schemapb.DataType_JSON,
-		FieldName: c.name,
-		IsDynamic: c.isDynamic,
-	}
-
-	fd.Field = &schemapb.FieldData_Scalars{
-		Scalars: &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_JsonData{
-				JsonData: &schemapb.JSONArray{
-					Data: c.values,
-				},
-			},
-		},
-	}
-
+	fd := c.genericColumnBase.FieldData()
+	fd.IsDynamic = c.isDynamic
 	return fd
-}
-
-// ValueByIdx returns value of the provided index.
-func (c *ColumnJSONBytes) ValueByIdx(idx int) ([]byte, error) {
-	if idx < 0 || idx >= c.Len() {
-		return nil, errors.New("index out of range")
-	}
-	return c.values[idx], nil
 }
 
 // AppendValue append value into column.
@@ -140,22 +86,4 @@ func (c *ColumnJSONBytes) AppendValue(i interface{}) error {
 	c.values = append(c.values, v)
 
 	return nil
-}
-
-// Data returns column data.
-func (c *ColumnJSONBytes) Data() [][]byte {
-	return c.values
-}
-
-func (c *ColumnJSONBytes) WithIsDynamic(isDynamic bool) *ColumnJSONBytes {
-	c.isDynamic = isDynamic
-	return c
-}
-
-// NewColumnJSONBytes composes a Column with json bytes.
-func NewColumnJSONBytes(name string, values [][]byte) *ColumnJSONBytes {
-	return &ColumnJSONBytes{
-		name:   name,
-		values: values,
-	}
 }

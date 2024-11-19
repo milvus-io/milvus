@@ -260,7 +260,6 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 							log.RatedInfo(10, "get client failed", zap.Int64("node", node), zap.Error(err))
 							return struct{}{}, nil
 						}
-						defer b.clientMgr.ReleaseClientRef(node)
 
 						resp, err := qn.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 						if err != nil {

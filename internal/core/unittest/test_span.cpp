@@ -33,7 +33,7 @@ TEST(Span, Naive) {
         schema->AddDebugField("nullable", DataType::INT64, true);
     schema->set_primary_field_id(i64_fid);
 
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, 0, 1, 10, false, true, true);
     auto segment = CreateGrowingSegment(schema, empty_index_meta, -1);
     segment->PreInsert(N);
     segment->Insert(0,

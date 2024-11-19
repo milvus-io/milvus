@@ -478,6 +478,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		ID:           targetNode,
 		CollectionID: suite.collection,
 		Segments:     map[int64]*querypb.SegmentDist{},
+		Channel:      channel.ChannelName,
 	}
 	for _, segment := range suite.loadSegments {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
@@ -531,7 +532,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 				InsertChannel: channel.ChannelName,
 			},
 		}, nil)
-		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, merr.WrapErrIndexNotFoundForSegment(segment))
+		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, merr.WrapErrIndexNotFoundForSegments([]int64{segment}))
 	}
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
 
@@ -577,6 +578,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 		ID:           targetNode,
 		CollectionID: suite.collection,
 		Segments:     map[int64]*querypb.SegmentDist{},
+		Channel:      channel.ChannelName,
 	}
 	for _, segment := range suite.loadSegments {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
@@ -1141,6 +1143,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		ID:           targetNode,
 		CollectionID: suite.collection,
 		Segments:     map[int64]*querypb.SegmentDist{},
+		Channel:      channel.ChannelName,
 	}
 	for _, segment := range suite.loadSegments[1:] {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}

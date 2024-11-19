@@ -42,25 +42,6 @@ type Column interface {
 	GetAsBool(int) (bool, error)
 }
 
-// ColumnBase adds conversion methods support for fixed-type columns.
-type ColumnBase struct{}
-
-func (b ColumnBase) GetAsInt64(_ int) (int64, error) {
-	return 0, errors.New("conversion between fixed-type column not support")
-}
-
-func (b ColumnBase) GetAsString(_ int) (string, error) {
-	return "", errors.New("conversion between fixed-type column not support")
-}
-
-func (b ColumnBase) GetAsDouble(_ int) (float64, error) {
-	return 0, errors.New("conversion between fixed-type column not support")
-}
-
-func (b ColumnBase) GetAsBool(_ int) (bool, error) {
-	return false, errors.New("conversion between fixed-type column not support")
-}
-
 var errFieldDataTypeNotMatch = errors.New("FieldData type not matched")
 
 // IDColumns converts schemapb.IDs to corresponding column
@@ -393,13 +374,12 @@ func parseArrayData(fieldName string, elementType schemapb.DataType, fieldDataLi
 		return NewColumnDoubleArray(fieldName, data), nil
 
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		var data [][][]byte
+		var data [][]string
 		for _, fd := range fieldDataList {
 			strs := fd.GetStringData().GetData()
-			bytesData := make([][]byte, 0, len(strs))
-			for _, str := range strs {
-				bytesData = append(bytesData, []byte(str))
-			}
+			bytesData := make([]string, 0, len(strs))
+			bytesData = append(bytesData, strs...)
+
 			data = append(data, bytesData)
 		}
 
@@ -426,106 +406,5 @@ func getIntData(fd *schemapb.FieldData) (*schemapb.ScalarField_IntData, bool) {
 		return nil, false
 	default:
 		return nil, false
-	}
-}
-
-// FieldDataColumn converts schemapb.FieldData to vector Column
-func FieldDataVector(fd *schemapb.FieldData) (Column, error) {
-	switch fd.GetType() {
-	case schemapb.DataType_FloatVector:
-		vectors := fd.GetVectors()
-		x, ok := vectors.GetData().(*schemapb.VectorField_FloatVector)
-		if !ok {
-			return nil, errFieldDataTypeNotMatch
-		}
-		data := x.FloatVector.GetData()
-		dim := int(vectors.GetDim())
-		vector := make([][]float32, 0, len(data)/dim) // shall not have remanunt
-		for i := 0; i < len(data)/dim; i++ {
-			v := make([]float32, dim)
-			copy(v, data[i*dim:(i+1)*dim])
-			vector = append(vector, v)
-		}
-		return NewColumnFloatVector(fd.GetFieldName(), dim, vector), nil
-	case schemapb.DataType_BinaryVector:
-		vectors := fd.GetVectors()
-		x, ok := vectors.GetData().(*schemapb.VectorField_BinaryVector)
-		if !ok {
-			return nil, errFieldDataTypeNotMatch
-		}
-		data := x.BinaryVector
-		if data == nil {
-			return nil, errFieldDataTypeNotMatch
-		}
-		dim := int(vectors.GetDim())
-		blen := dim / 8
-		vector := make([][]byte, 0, len(data)/blen)
-		for i := 0; i < len(data)/blen; i++ {
-			v := make([]byte, blen)
-			copy(v, data[i*blen:(i+1)*blen])
-			vector = append(vector, v)
-		}
-		return NewColumnBinaryVector(fd.GetFieldName(), dim, vector), nil
-	case schemapb.DataType_Float16Vector:
-		vectors := fd.GetVectors()
-		x, ok := vectors.GetData().(*schemapb.VectorField_Float16Vector)
-		if !ok {
-			return nil, errFieldDataTypeNotMatch
-		}
-		data := x.Float16Vector
-		dim := int(vectors.GetDim())
-		vector := make([][]byte, 0, len(data)/dim) // shall not have remanunt
-		for i := 0; i < len(data)/dim; i++ {
-			v := make([]byte, dim)
-			copy(v, data[i*dim:(i+1)*dim])
-			vector = append(vector, v)
-		}
-		return NewColumnFloat16Vector(fd.GetFieldName(), dim, vector), nil
-	case schemapb.DataType_BFloat16Vector:
-		vectors := fd.GetVectors()
-		x, ok := vectors.GetData().(*schemapb.VectorField_Bfloat16Vector)
-		if !ok {
-			return nil, errFieldDataTypeNotMatch
-		}
-		data := x.Bfloat16Vector
-		dim := int(vectors.GetDim())
-		vector := make([][]byte, 0, len(data)/dim) // shall not have remanunt
-		for i := 0; i < len(data)/dim; i++ {
-			v := make([]byte, dim)
-			copy(v, data[i*dim:(i+1)*dim])
-			vector = append(vector, v)
-		}
-		return NewColumnBFloat16Vector(fd.GetFieldName(), dim, vector), nil
-	default:
-		return nil, errors.New("unsupported data type")
-	}
-}
-
-// defaultValueColumn will return the empty scalars column which will be fill with default value
-func DefaultValueColumn(name string, dataType entity.FieldType) (Column, error) {
-	switch dataType {
-	case entity.FieldTypeBool:
-		return NewColumnBool(name, nil), nil
-	case entity.FieldTypeInt8:
-		return NewColumnInt8(name, nil), nil
-	case entity.FieldTypeInt16:
-		return NewColumnInt16(name, nil), nil
-	case entity.FieldTypeInt32:
-		return NewColumnInt32(name, nil), nil
-	case entity.FieldTypeInt64:
-		return NewColumnInt64(name, nil), nil
-	case entity.FieldTypeFloat:
-		return NewColumnFloat(name, nil), nil
-	case entity.FieldTypeDouble:
-		return NewColumnDouble(name, nil), nil
-	case entity.FieldTypeString:
-		return NewColumnString(name, nil), nil
-	case entity.FieldTypeVarChar:
-		return NewColumnVarChar(name, nil), nil
-	case entity.FieldTypeJSON:
-		return NewColumnJSONBytes(name, nil), nil
-
-	default:
-		return nil, fmt.Errorf("default value unsupported data type %s", dataType)
 	}
 }

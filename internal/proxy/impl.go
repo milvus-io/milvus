@@ -128,24 +128,42 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	if globalMetaCache != nil {
 		switch msgType {
-		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
+		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias:
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
 				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
 			}
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+				for _, name := range aliasName {
+					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+				}
 			}
-			log.Info("complete to invalidate collection meta cache with collection name", zap.String("collectionName", collectionName))
-		case commonpb.MsgType_DropPartition:
-			if collectionName != "" && request.GetPartitionName() != "" {
-				globalMetaCache.RemovePartition(ctx, request.GetDbName(), request.GetCollectionName(), request.GetPartitionName())
-			} else {
-				log.Warn("invalidate collection meta cache failed. collectionName or partitionName is empty",
-					zap.String("collectionName", collectionName),
-					zap.String("partitionName", request.GetPartitionName()))
-				return merr.Status(merr.WrapErrPartitionNotFound(request.GetPartitionName(), "partition name not specified")), nil
+			log.Info("complete to invalidate collection meta cache with collection name", zap.String("type", request.GetBase().GetMsgType().String()))
+		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
+			// All the request from query use collectionID
+			if request.CollectionID != UniqueID(0) {
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+				for _, name := range aliasName {
+					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+				}
 			}
+			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
+		case commonpb.MsgType_CreatePartition, commonpb.MsgType_DropPartition:
+			if request.GetPartitionName() == "" {
+				log.Warn("invalidate collection meta cache failed. partitionName is empty")
+				return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
+			}
+			// no need to deprecate shard cache because shard won't change when create or drop partition
+			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
+			// drop all the alias as well
+			if request.CollectionID != UniqueID(0) {
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+				for _, name := range aliasName {
+					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+				}
+			}
+			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
 		default:
@@ -153,9 +171,13 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
+				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
 			}
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+				for _, name := range aliasName {
+					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+				}
 			}
 		}
 	}
@@ -6540,7 +6562,7 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	router.GET(http.DatabaseDescPath, describeDatabase(node))
 
 	// Collection requests
-	router.GET(http.CollectionListPath, listCollection(node))
+	router.GET(http.CollectionListPath, listCollection(node.rootCoord, node.queryCoord))
 	router.GET(http.CollectionDescPath, describeCollection(node, node.rootCoord))
 }
 

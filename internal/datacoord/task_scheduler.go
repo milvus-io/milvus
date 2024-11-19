@@ -111,7 +111,7 @@ func (s *taskScheduler) Stop() {
 func (s *taskScheduler) reloadFromMeta() {
 	segments := s.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
-		for _, segIndex := range s.meta.indexMeta.getSegmentIndexes(segment.ID) {
+		for _, segIndex := range s.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
 			if segIndex.IsDeleted {
 				continue
 			}

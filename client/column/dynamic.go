@@ -41,7 +41,7 @@ func (c *ColumnDynamic) Name() string {
 // Get returns element at idx as interface{}.
 // Overrides internal json column behavior, returns raw json data.
 func (c *ColumnDynamic) Get(idx int) (interface{}, error) {
-	bs, err := c.ColumnJSONBytes.ValueByIdx(idx)
+	bs, err := c.ColumnJSONBytes.Value(idx)
 	if err != nil {
 		return 0, err
 	}
@@ -53,7 +53,7 @@ func (c *ColumnDynamic) Get(idx int) (interface{}, error) {
 }
 
 func (c *ColumnDynamic) GetAsInt64(idx int) (int64, error) {
-	bs, err := c.ColumnJSONBytes.ValueByIdx(idx)
+	bs, err := c.ColumnJSONBytes.Value(idx)
 	if err != nil {
 		return 0, err
 	}
@@ -68,7 +68,7 @@ func (c *ColumnDynamic) GetAsInt64(idx int) (int64, error) {
 }
 
 func (c *ColumnDynamic) GetAsString(idx int) (string, error) {
-	bs, err := c.ColumnJSONBytes.ValueByIdx(idx)
+	bs, err := c.ColumnJSONBytes.Value(idx)
 	if err != nil {
 		return "", err
 	}
@@ -83,7 +83,7 @@ func (c *ColumnDynamic) GetAsString(idx int) (string, error) {
 }
 
 func (c *ColumnDynamic) GetAsBool(idx int) (bool, error) {
-	bs, err := c.ColumnJSONBytes.ValueByIdx(idx)
+	bs, err := c.ColumnJSONBytes.Value(idx)
 	if err != nil {
 		return false, err
 	}
@@ -98,7 +98,7 @@ func (c *ColumnDynamic) GetAsBool(idx int) (bool, error) {
 }
 
 func (c *ColumnDynamic) GetAsDouble(idx int) (float64, error) {
-	bs, err := c.ColumnJSONBytes.ValueByIdx(idx)
+	bs, err := c.ColumnJSONBytes.Value(idx)
 	if err != nil {
 		return 0, err
 	}

@@ -22,9 +22,11 @@
 
 #include "AckResponder.h"
 #include "InsertRecord.h"
+#include "common/FieldMeta.h"
 #include "common/Schema.h"
 #include "common/IndexMeta.h"
 #include "IndexConfigGenerator.h"
+#include "knowhere/config.h"
 #include "log/Log.h"
 #include "segcore/SegcoreConfig.h"
 #include "index/VectorIndex.h"
@@ -427,6 +429,11 @@ class IndexingRecord {
         auto ptr = dynamic_cast<const VectorFieldIndexing*>(&field_indexing);
         AssertInfo(ptr, "invalid indexing");
         return *ptr;
+    }
+
+    const FieldIndexMeta&
+    get_field_index_meta(FieldId fieldId) const {
+        return index_meta_->GetFieldIndexMeta(fieldId);
     }
 
     bool
