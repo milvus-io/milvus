@@ -460,12 +460,13 @@ func constructSearchRequest(
 
 func TestTranslateOutputFields(t *testing.T) {
 	const (
-		idFieldName             = "id"
-		tsFieldName             = "timestamp"
-		floatVectorFieldName    = "float_vector"
-		binaryVectorFieldName   = "binary_vector"
-		float16VectorFieldName  = "float16_vector"
-		bfloat16VectorFieldName = "bfloat16_vector"
+		idFieldName                = "id"
+		tsFieldName                = "timestamp"
+		floatVectorFieldName       = "float_vector"
+		binaryVectorFieldName      = "binary_vector"
+		float16VectorFieldName     = "float16_vector"
+		bfloat16VectorFieldName    = "bfloat16_vector"
+		sparseFloatVectorFieldName = "sparse_float_vector"
 	)
 	var outputFields []string
 	var userOutputFields []string
@@ -483,6 +484,15 @@ func TestTranslateOutputFields(t *testing.T) {
 			{Name: binaryVectorFieldName, FieldID: 101, DataType: schemapb.DataType_BinaryVector},
 			{Name: float16VectorFieldName, FieldID: 102, DataType: schemapb.DataType_Float16Vector},
 			{Name: bfloat16VectorFieldName, FieldID: 103, DataType: schemapb.DataType_BFloat16Vector},
+			{Name: sparseFloatVectorFieldName, FieldID: 104, DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25",
+				Type:             schemapb.FunctionType_BM25,
+				OutputFieldNames: []string{sparseFloatVectorFieldName},
+				// omit other fields for brevity
+			},
 		},
 	}
 	schema := newSchemaInfo(collSchema)
@@ -511,6 +521,7 @@ func TestTranslateOutputFields(t *testing.T) {
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName}, userOutputFields)
 	assert.ElementsMatch(t, []string{}, userDynamicFields)
 
+	// sparse_float_vector is a BM25 function output field, so it should not be included in the output fields
 	outputFields, userOutputFields, userDynamicFields, err = translateOutputFields([]string{"*"}, schema, false)
 	assert.Equal(t, nil, err)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
@@ -534,6 +545,14 @@ func TestTranslateOutputFields(t *testing.T) {
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
 	assert.ElementsMatch(t, []string{}, userDynamicFields)
+
+	// sparse_float_vector is a BM25 function output field, so it should not be included in the output fields
+	_, _, _, err = translateOutputFields([]string{"*", sparseFloatVectorFieldName}, schema, false)
+	assert.Error(t, err)
+	_, _, _, err = translateOutputFields([]string{sparseFloatVectorFieldName}, schema, false)
+	assert.Error(t, err)
+	_, _, _, err = translateOutputFields([]string{sparseFloatVectorFieldName}, schema, true)
+	assert.Error(t, err)
 
 	//=========================================================================
 	outputFields, userOutputFields, userDynamicFields, err = translateOutputFields([]string{}, schema, true)
@@ -578,7 +597,7 @@ func TestTranslateOutputFields(t *testing.T) {
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
 	assert.ElementsMatch(t, []string{}, userDynamicFields)
 
-	outputFields, userOutputFields, userDynamicFields, err = translateOutputFields([]string{"A"}, schema, true)
+	_, _, _, err = translateOutputFields([]string{"A"}, schema, true)
 	assert.Error(t, err)
 
 	t.Run("enable dynamic schema", func(t *testing.T) {
