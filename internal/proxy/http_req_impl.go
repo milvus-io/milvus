@@ -17,7 +17,6 @@
 package proxy
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -28,6 +27,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	mhttp "github.com/milvus-io/milvus/internal/http"
+	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -45,6 +46,7 @@ var (
 	defaultDB          = "default"
 	httpDBName         = "db_name"
 	HTTPCollectionName = "collection_name"
+	UnknownData        = "unknown"
 )
 
 func getConfigs(configs map[string]string) gin.HandlerFunc {
@@ -208,39 +210,71 @@ func getDataComponentMetrics(node *Proxy, metricsType string) gin.HandlerFunc {
 
 // The Get request should be used to get the query parameters, not the body, such as Javascript
 // fetch API only support GET request with query parameter.
-func listCollection(node types.ProxyComponent) gin.HandlerFunc {
+func listCollection(rootCoord types.RootCoordClient, queryCoord types.QueryCoordClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		dbName := c.Query(httpDBName)
 		if len(dbName) == 0 {
 			dbName = defaultDB
 		}
 
-		showCollectionResp, err := node.ShowCollections(c, &milvuspb.ShowCollectionsRequest{
+		rootCollectionListResp, err := rootCoord.ShowCollections(c, &milvuspb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_ShowCollections,
 			},
 			DbName: dbName,
 		})
-		if err := merr.CheckRPCCall(showCollectionResp, err); err != nil {
+
+		if err := merr.CheckRPCCall(rootCollectionListResp, err); err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				mhttp.HTTPReturnMessage: err.Error(),
 			})
 			return
 		}
 
+		queryCollectionListResp, err := queryCoord.ShowCollections(c, &querypb.ShowCollectionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ShowCollections,
+			},
+		})
+
+		if err := merr.CheckRPCCall(queryCollectionListResp, err); err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+
+		collectionID2Offset := make(map[int64]int, len(queryCollectionListResp.CollectionIDs))
+		for collectionID, offset := range queryCollectionListResp.CollectionIDs {
+			collectionID2Offset[offset] = collectionID
+		}
+
 		// Convert the response to Collections struct
 		collections := &metricsinfo.Collections{
-			CollectionIDs: lo.Map(showCollectionResp.CollectionIds, func(t int64, i int) string {
+			CollectionIDs: lo.Map(rootCollectionListResp.CollectionIds, func(t int64, i int) string {
 				return strconv.FormatInt(t, 10)
 			}),
-			CollectionNames: showCollectionResp.CollectionNames,
-			CreatedUtcTimestamps: lo.Map(showCollectionResp.CreatedUtcTimestamps, func(t uint64, i int) string {
+			CollectionNames: rootCollectionListResp.CollectionNames,
+			CreatedUtcTimestamps: lo.Map(rootCollectionListResp.CreatedUtcTimestamps, func(t uint64, i int) string {
 				return typeutil.TimestampToString(t)
 			}),
-			InMemoryPercentages: lo.Map(showCollectionResp.InMemoryPercentages, func(t int64, i int) int {
-				return int(t)
+			InMemoryPercentages: lo.Map(rootCollectionListResp.CollectionIds, func(collectionID int64, i int) string {
+				offset, ok := collectionID2Offset[collectionID]
+				if !ok {
+					return UnknownData
+				}
+
+				loadPercentage := queryCollectionListResp.InMemoryPercentages[offset]
+				return strconv.FormatInt(loadPercentage, 10)
 			}),
-			QueryServiceAvailable: showCollectionResp.QueryServiceAvailable,
+			QueryServiceAvailable: lo.Map(rootCollectionListResp.CollectionIds, func(collectionID int64, i int) bool {
+				offset, ok := collectionID2Offset[collectionID]
+				if !ok {
+					return false
+				}
+
+				return queryCollectionListResp.QueryServiceAvailable[offset]
+			}),
 		}
 
 		// Marshal the collections struct to JSON

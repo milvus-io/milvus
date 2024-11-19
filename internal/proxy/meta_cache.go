@@ -75,7 +75,6 @@ type Cache interface {
 	ListShardLocation() map[int64]nodeInfo
 	RemoveCollection(ctx context.Context, database, collectionName string)
 	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string
-	RemovePartition(ctx context.Context, database, collectionName string, partitionName string)
 
 	// GetCredentialInfo operate credential cache
 	GetCredentialInfo(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
@@ -418,21 +417,6 @@ func (m *MetaCache) getCollection(database, collectionName string, collectionID 
 	return nil, false
 }
 
-func (m *MetaCache) getCollectionShardLeader(database, collectionName string) *shardLeaders {
-	m.leaderMut.RLock()
-	defer m.leaderMut.RUnlock()
-
-	db, ok := m.collLeader[database]
-	if !ok {
-		return nil
-	}
-
-	if leaders, ok := db[collectionName]; ok {
-		return leaders
-	}
-	return nil
-}
-
 func (m *MetaCache) update(ctx context.Context, database, collectionName string, collectionID UniqueID) (*collectionInfo, error) {
 	if collInfo, ok := m.getCollection(database, collectionName, collectionID); ok {
 		return collInfo, nil
@@ -497,7 +481,9 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	}
 
 	log.Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName),
-		zap.String("actual collection Name", collection.Schema.GetName()), zap.Int64("collectionID", collection.CollectionID))
+		zap.String("actual collection Name", collection.Schema.GetName()), zap.Int64("collectionID", collection.CollectionID),
+		zap.Strings("partition", partitions.PartitionNames),
+	)
 	return m.collInfo[database][collectionName], nil
 }
 
@@ -856,6 +842,7 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 	if dbOk {
 		delete(m.collInfo[database], collectionName)
 	}
+	log.Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))
 }
 
 func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string {
@@ -870,34 +857,8 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID Uniq
 			}
 		}
 	}
+	log.Debug("remove collection by id", zap.Int64("id", collectionID), zap.Strings("collection", collNames))
 	return collNames
-}
-
-func (m *MetaCache) RemovePartition(ctx context.Context, database, collectionName, partitionName string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	var ok bool
-	var collInfo *collectionInfo
-
-	db, dbOk := m.collInfo[database]
-	if dbOk {
-		collInfo, ok = db[collectionName]
-	}
-
-	if !ok {
-		return
-	}
-
-	partInfo := m.collInfo[database][collectionName].partInfo
-	if partInfo == nil {
-		return
-	}
-	filteredInfos := lo.Filter(partInfo.partitionInfos, func(info *partitionInfo, idx int) bool {
-		return info.name != partitionName
-	})
-
-	m.collInfo[database][collectionName].partInfo = parsePartitionsInfo(filteredInfos, collInfo.schema.hasPartitionKeyField)
 }
 
 // GetCredentialInfo returns the credential related to provided username
@@ -953,10 +914,20 @@ func (m *MetaCache) UpdateCredential(credInfo *internalpb.CredentialInfo) {
 func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]nodeInfo, error) {
 	method := "GetShards"
 	log := log.Ctx(ctx).With(
+		zap.String("db", database),
 		zap.String("collectionName", collectionName),
 		zap.Int64("collectionID", collectionID))
 
-	cacheShardLeaders := m.getCollectionShardLeader(database, collectionName)
+	// check cache first
+	m.leaderMut.RLock()
+	var cacheShardLeaders *shardLeaders
+	db, ok := m.collLeader[database]
+	if !ok {
+		cacheShardLeaders = nil
+	} else {
+		cacheShardLeaders = db[collectionName]
+	}
+	m.leaderMut.RUnlock()
 	if withCache {
 		if cacheShardLeaders != nil {
 			metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
@@ -1002,11 +973,16 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		m.collLeader[database] = make(map[string]*shardLeaders)
 	}
 	m.collLeader[database][collectionName] = newShardLeaders
-
 	iterator := newShardLeaders.GetReader()
 	ret := iterator.Shuffle()
 	m.leaderMut.Unlock()
-
+	nodeInfos := make([]string, 0)
+	for _, shardLeader := range newShardLeaders.shardLeaders {
+		for _, nodeInfo := range shardLeader {
+			nodeInfos = append(nodeInfos, fmt.Sprintf("nodeID: %d, nodeAddr: %s", nodeInfo.nodeID, nodeInfo.address))
+		}
+	}
+	log.Debug("fill new collection shard leader", zap.Strings("nodeInfos", nodeInfos))
 	metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return ret, nil
 }
@@ -1027,20 +1003,6 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 	return shard2QueryNodes
 }
 
-// DeprecateShardCache clear the shard leader cache of a collection
-func (m *MetaCache) DeprecateShardCache(database, collectionName string) {
-	log.Info("clearing shard cache for collection", zap.String("collectionName", collectionName))
-	m.leaderMut.Lock()
-	defer m.leaderMut.Unlock()
-	dbInfo, ok := m.collLeader[database]
-	if ok {
-		delete(dbInfo, collectionName)
-		if len(dbInfo) == 0 {
-			delete(m.collLeader, database)
-		}
-	}
-}
-
 // used for Garbage collection shard client
 func (m *MetaCache) ListShardLocation() map[int64]nodeInfo {
 	m.leaderMut.RLock()
@@ -1059,11 +1021,25 @@ func (m *MetaCache) ListShardLocation() map[int64]nodeInfo {
 	return shardLeaderInfo
 }
 
+// DeprecateShardCache clear the shard leader cache of a collection
+func (m *MetaCache) DeprecateShardCache(database, collectionName string) {
+	log.Info("deprecate shard cache for collection", zap.String("collectionName", collectionName))
+	m.leaderMut.Lock()
+	defer m.leaderMut.Unlock()
+	dbInfo, ok := m.collLeader[database]
+	if ok {
+		delete(dbInfo, collectionName)
+		if len(dbInfo) == 0 {
+			delete(m.collLeader, database)
+		}
+	}
+}
+
+// InvalidateShardLeaderCache called when Shard leader balance happened
 func (m *MetaCache) InvalidateShardLeaderCache(collections []int64) {
 	log.Info("Invalidate shard cache for collections", zap.Int64s("collectionIDs", collections))
 	m.leaderMut.Lock()
 	defer m.leaderMut.Unlock()
-
 	collectionSet := typeutil.NewUniqueSet(collections...)
 	for dbName, dbInfo := range m.collLeader {
 		for collectionName, shardLeaders := range dbInfo {
@@ -1202,6 +1178,7 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 }
 
 func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
+	log.Debug("remove database", zap.String("name", database))
 	m.mu.Lock()
 	delete(m.collInfo, database)
 	delete(m.dbInfo, database)

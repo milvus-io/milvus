@@ -985,9 +985,18 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
         AssertInfo(num_rows_.has_value(), "Can't get row count value");
         auto row_count = num_rows_.value();
         auto vec_data = fields_.at(field_id);
+
+        // get index params for bm25 brute force
+        std::map<std::string, std::string> index_info;
+        if (search_info.metric_type_ == knowhere::metric::BM25) {
+            auto index_info =
+                col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
+        }
+
         query::SearchOnSealed(*schema_,
                               vec_data->Data(),
                               search_info,
+                              index_info,
                               query_data,
                               query_count,
                               row_count,
@@ -2009,16 +2018,19 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     const auto& field_meta = schema_->operator[](field_id);
     auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
     std::unique_ptr<index::TextMatchIndex> index;
+    std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
     if (!cfg.GetScalarIndexEnableMmap()) {
         // build text index in ram.
         index = std::make_unique<index::TextMatchIndex>(
             std::numeric_limits<int64_t>::max(),
+            unique_id.c_str(),
             "milvus_tokenizer",
             field_meta.get_analyzer_params().c_str());
     } else {
         // build text index using mmap.
         index = std::make_unique<index::TextMatchIndex>(
             cfg.GetMmapPath(),
+            unique_id.c_str(),
             "milvus_tokenizer",
             field_meta.get_analyzer_params().c_str());
     }

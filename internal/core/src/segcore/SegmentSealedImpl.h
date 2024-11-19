@@ -390,7 +390,7 @@ inline SegmentSealedUPtr
 CreateSealedSegment(
     SchemaPtr schema,
     IndexMetaPtr index_meta = nullptr,
-    int64_t segment_id = -1,
+    int64_t segment_id = 0,
     const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
     bool TEST_skip_index_for_retrieve = false,
     bool is_sorted_by_pk = false,

@@ -11,6 +11,7 @@ pub(crate) enum SystemFilter{
     AsciiFolding(AsciiFoldingFilter),
     AlphaNumOnly(AlphaNumOnlyFilter),
     CnCharOnly(CnCharOnlyFilter),
+    CnAlphaNumOnly(CnAlphaNumOnlyFilter),
     Length(RemoveLongFilter),
     Stop(StopWordFilter),
     Decompounder(SplitCompoundWords),
@@ -24,6 +25,7 @@ impl SystemFilter{
             Self::AsciiFolding(filter) => builder.filter(filter).dynamic(),
             Self::AlphaNumOnly(filter) => builder.filter(filter).dynamic(),
             Self::CnCharOnly(filter)  => builder.filter(filter).dynamic(),
+            Self::CnAlphaNumOnly(filter) => builder.filter(filter).dynamic(),
             Self::Length(filter) => builder.filter(filter).dynamic(),
             Self::Stop(filter) => builder.filter(filter).dynamic(),
             Self::Decompounder(filter) => builder.filter(filter).dynamic(),
@@ -45,7 +47,7 @@ fn get_length_filter(params: &json::Map<String, json::Value>) -> Result<SystemFi
         return Err("lenth max param was none or not uint".into())
     }
     let limit = limit_str.unwrap().as_u64().unwrap() as usize;
-    Ok(SystemFilter::Length(RemoveLongFilter::limit(limit)))
+    Ok(SystemFilter::Length(RemoveLongFilter::limit(limit+1)))
 }
 
 fn get_stop_words_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, TantivyError>{
@@ -129,6 +131,7 @@ impl From<&str> for SystemFilter{
             "asciifolding" => Self::AsciiFolding(AsciiFoldingFilter),
             "alphanumonly" => Self::AlphaNumOnly(AlphaNumOnlyFilter),
             "cncharonly" => Self::CnCharOnly(CnCharOnlyFilter),
+            "cnalphanumonly" => Self::CnAlphaNumOnly(CnAlphaNumOnlyFilter),
             _ => Self::Invalid,
         }
     }
@@ -187,6 +190,54 @@ impl<T: Tokenizer> Tokenizer for CnCharOnlyFilterWrapper<T> {
 }
 
 impl<T: TokenStream> TokenStream for CnCharOnlyFilterStream<T> {
+    fn advance(&mut self) -> bool {
+        while self.tail.advance() {
+            if self.regex.is_match(&self.tail.token().text) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn token(&self) -> &Token {
+        self.tail.token()
+    }
+
+    fn token_mut(&mut self) -> &mut Token {
+        self.tail.token_mut()
+    }
+}
+
+pub struct CnAlphaNumOnlyFilter;
+
+pub struct CnAlphaNumOnlyFilterStream<T> {
+    regex: regex::Regex,
+    tail: T,
+}
+
+impl TokenFilter for CnAlphaNumOnlyFilter{
+    type Tokenizer<T: Tokenizer> = CnAlphaNumOnlyFilterWrapper<T>;
+
+    fn transform<T: Tokenizer>(self, tokenizer: T) -> CnAlphaNumOnlyFilterWrapper<T> {
+        CnAlphaNumOnlyFilterWrapper(tokenizer)
+    }
+}
+#[derive(Clone)]
+pub struct CnAlphaNumOnlyFilterWrapper<T>(T);
+
+impl<T: Tokenizer> Tokenizer for CnAlphaNumOnlyFilterWrapper<T> {
+    type TokenStream<'a> = CnAlphaNumOnlyFilterStream<T::TokenStream<'a>>;
+
+    fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
+        CnAlphaNumOnlyFilterStream {
+            regex: regex::Regex::new(r"[\p{Han}a-zA-Z0-9]+").unwrap(),
+            tail: self.0.token_stream(text),
+        }
+    }
+}
+
+impl<T: TokenStream> TokenStream for CnAlphaNumOnlyFilterStream<T> {
     fn advance(&mut self) -> bool {
         while self.tail.advance() {
             if self.regex.is_match(&self.tail.token().text) {

@@ -19,7 +19,6 @@ package datacoord
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -29,6 +28,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/json"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -870,12 +870,12 @@ func TestMeta_GetSegmentIndexes(t *testing.T) {
 	m := createMeta(catalog, withIndexMeta(createIndexMeta(catalog)))
 
 	t.Run("success", func(t *testing.T) {
-		segIndexes := m.indexMeta.getSegmentIndexes(segID)
+		segIndexes := m.indexMeta.GetSegmentIndexes(collID, segID)
 		assert.Equal(t, 1, len(segIndexes))
 	})
 
 	t.Run("segment not exist", func(t *testing.T) {
-		segIndexes := m.indexMeta.getSegmentIndexes(segID + 100)
+		segIndexes := m.indexMeta.GetSegmentIndexes(collID, segID+100)
 		assert.Equal(t, 0, len(segIndexes))
 	})
 

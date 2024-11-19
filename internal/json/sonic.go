@@ -36,4 +36,9 @@ var (
 	NewEncoder = json.NewEncoder
 )
 
-type Number = gojson.Number
+type (
+	Delim      = gojson.Delim
+	Decoder    = gojson.Decoder
+	Number     = gojson.Number
+	RawMessage = gojson.RawMessage
+)

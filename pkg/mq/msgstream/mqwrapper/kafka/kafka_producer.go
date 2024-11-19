@@ -44,11 +44,15 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqcommon.ProducerMes
 		header := kafka.Header{Key: key, Value: []byte(value)}
 		headers = append(headers, header)
 	}
-	err := kp.p.Produce(&kafka.Message{
-		TopicPartition: kafka.TopicPartition{Topic: &kp.topic, Partition: mqwrapper.DefaultPartitionIdx},
-		Value:          message.Payload,
-		Headers:        headers,
-	}, kp.deliveryChan)
+	var err error
+	getPool().Submit(func() (any, error) {
+		err = kp.p.Produce(&kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &kp.topic, Partition: mqwrapper.DefaultPartitionIdx},
+			Value:          message.Payload,
+			Headers:        headers,
+		}, kp.deliveryChan)
+		return nil, err
+	})
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
 		return nil, err

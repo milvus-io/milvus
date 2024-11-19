@@ -19,7 +19,6 @@ package datacoord
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"sync"
@@ -33,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -623,26 +623,24 @@ func (m *indexMeta) IsUnIndexedSegment(collectionID UniqueID, segID UniqueID) bo
 	return false
 }
 
-func (m *indexMeta) getSegmentIndexes(segID UniqueID) map[UniqueID]*model.SegmentIndex {
+func (m *indexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
 	m.RLock()
 	defer m.RUnlock()
-
-	ret := make(map[UniqueID]*model.SegmentIndex, 0)
-	segIndexInfos, ok := m.segmentIndexes[segID]
-	if !ok || len(segIndexInfos) == 0 {
-		return ret
+	segmentsIndexes := make(map[int64]map[UniqueID]*model.SegmentIndex)
+	for _, segmentID := range segIDs {
+		segmentsIndexes[segmentID] = m.getSegmentIndexes(collectionID, segmentID)
 	}
-
-	for _, segIdx := range segIndexInfos {
-		ret[segIdx.IndexID] = model.CloneSegmentIndex(segIdx)
-	}
-	return ret
+	return segmentsIndexes
 }
 
 func (m *indexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
 	m.RLock()
 	defer m.RUnlock()
+	return m.getSegmentIndexes(collectionID, segID)
+}
 
+// Note: thread-unsafe, don't call it outside indexMeta
+func (m *indexMeta) getSegmentIndexes(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
 	ret := make(map[UniqueID]*model.SegmentIndex, 0)
 	segIndexInfos, ok := m.segmentIndexes[segID]
 	if !ok || len(segIndexInfos) == 0 {
@@ -883,7 +881,7 @@ func (m *indexMeta) SetStoredIndexFileSizeMetric(collections map[UniqueID]*colle
 		coll, ok := collections[segmentIdx.CollectionID]
 		if ok {
 			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName, coll.Schema.GetName(),
-				fmt.Sprint(segmentIdx.CollectionID), fmt.Sprint(segmentIdx.SegmentID)).Set(float64(segmentIdx.IndexSize))
+				fmt.Sprint(segmentIdx.CollectionID)).Set(float64(segmentIdx.IndexSize))
 			total += segmentIdx.IndexSize
 		}
 	}

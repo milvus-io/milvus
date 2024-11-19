@@ -2111,7 +2111,6 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	mgr := NewMockShardClientManager(t)
-	mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
 	lb := NewLBPolicyImpl(mgr)
 

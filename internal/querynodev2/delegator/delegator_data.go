@@ -359,16 +359,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	}
 
 	for _, segment := range loaded {
-		log := log.With(
-			zap.Int64("segmentID", segment.ID()),
-		)
-		deletedPks, deletedTss := sd.GetLevel0Deletions(segment.Partition(), pkoracle.NewCandidateKey(segment.ID(), segment.Partition(), segments.SegmentTypeGrowing))
-		if len(deletedPks) == 0 {
-			continue
-		}
-
-		log.Info("forwarding L0 delete records...", zap.Int("deletionCount", len(deletedPks)))
-		err = segment.Delete(ctx, deletedPks, deletedTss)
+		err = sd.addL0ForGrowing(ctx, segment)
 		if err != nil {
 			log.Warn("failed to forward L0 deletions to growing segment",
 				zap.Error(err),
@@ -412,9 +403,16 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	log := sd.getLogger(ctx)
 
 	targetNodeID := req.GetDstNodeID()
+	if len(req.GetInfos()) > 0 && req.GetInfos()[0].Level == datapb.SegmentLevel_L0 {
+		// force l0 segment to load on delegator
+		if targetNodeID != paramtable.GetNodeID() {
+			targetNodeID = paramtable.GetNodeID()
+			log.Info("unexpected L0 segment load on non-delegator node, force to load on delegator", zap.Int64("nodeIDInReq", req.GetDstNodeID()))
+		}
+	}
 	// add common log fields
 	log = log.With(
-		zap.Int64("workID", req.GetDstNodeID()),
+		zap.Int64("workID", targetNodeID),
 		zap.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
 	)
 
@@ -424,7 +422,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 
-	req.Base.TargetID = req.GetDstNodeID()
+	req.Base.TargetID = targetNodeID
 	log.Debug("worker loads segments...")
 
 	sLoad := func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {

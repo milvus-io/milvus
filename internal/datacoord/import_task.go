@@ -17,10 +17,9 @@
 package datacoord
 
 import (
-	"encoding/json"
-
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"

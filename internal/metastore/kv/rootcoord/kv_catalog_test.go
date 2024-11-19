@@ -2,7 +2,6 @@ package rootcoord
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -21,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
@@ -197,7 +197,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, PartitionMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(pm)}, nil)
+			Return([]string{"rootcoord/partitions/1/1"}, []string{string(pm)}, nil)
 
 		fieldMeta := &schemapb.FieldSchema{}
 		fm, err := proto.Marshal(fieldMeta)
@@ -207,7 +207,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(fm)}, nil)
+			Return([]string{"rootcoord/fields/1/1"}, []string{string(fm)}, nil)
 
 		functionMeta := &schemapb.FunctionSchema{}
 		fcm, err := proto.Marshal(functionMeta)
@@ -216,7 +216,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FunctionMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(fcm)}, nil)
+			Return([]string{"rootcoord/functions/1/1"}, []string{string(fcm)}, nil)
 
 		kc := Catalog{Snapshot: kv}
 		ret, err := kc.ListCollections(ctx, testDb, ts)
@@ -247,7 +247,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, PartitionMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(pm)}, nil)
+			Return([]string{"rootcoord/partitions/1/1"}, []string{string(pm)}, nil)
 
 		fieldMeta := &schemapb.FieldSchema{}
 		fm, err := proto.Marshal(fieldMeta)
@@ -257,7 +257,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(fm)}, nil)
+			Return([]string{"rootcoord/fields/1/1"}, []string{string(fm)}, nil)
 
 		functionMeta := &schemapb.FunctionSchema{}
 		fcm, err := proto.Marshal(functionMeta)
@@ -266,7 +266,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FunctionMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(fcm)}, nil)
+			Return([]string{"rootcoord/functions/1/1"}, []string{string(fcm)}, nil)
 
 		kv.On("MultiSaveAndRemove", mock.Anything, mock.Anything, ts).Return(nil)
 		kc := Catalog{Snapshot: kv}

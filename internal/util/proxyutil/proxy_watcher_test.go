@@ -18,7 +18,6 @@ package proxyutil
 
 import (
 	"context"
-	"encoding/json"
 	"path"
 	"strconv"
 	"testing"
@@ -27,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"

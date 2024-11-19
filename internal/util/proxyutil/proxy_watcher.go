@@ -18,7 +18,6 @@ package proxyutil
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"path"
 	"sync"
@@ -30,6 +29,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"

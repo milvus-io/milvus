@@ -1,12 +1,12 @@
 package storage
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 )
 
 func TestVarCharPrimaryKey(t *testing.T) {

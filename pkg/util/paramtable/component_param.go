@@ -80,6 +80,7 @@ type ComponentParam struct {
 	HTTPCfg        httpConfig
 	LogCfg         logConfig
 	RoleCfg        roleConfig
+	RbacConfig     rbacConfig
 	StreamingCfg   streamingConfig
 
 	RootCoordGrpcServerCfg     GrpcServerConfig
@@ -134,6 +135,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
+	p.RbacConfig.init(bt)
 	p.GpuConfig.init(bt)
 	p.KnowhereConfig.init(bt)
 
@@ -3193,12 +3195,13 @@ user-task-polling:
 // --- datacoord ---
 type dataCoordConfig struct {
 	// --- CHANNEL ---
-	WatchTimeoutInterval         ParamItem `refreshable:"false"`
-	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
-	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
-	ChannelBalanceInterval       ParamItem `refreshable:"true"`
-	ChannelCheckInterval         ParamItem `refreshable:"true"`
-	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
+	WatchTimeoutInterval             ParamItem `refreshable:"false"`
+	LegacyVersionWithoutRPCWatch     ParamItem `refreshable:"false"`
+	ChannelBalanceSilentDuration     ParamItem `refreshable:"true"`
+	ChannelBalanceInterval           ParamItem `refreshable:"true"`
+	ChannelCheckInterval             ParamItem `refreshable:"true"`
+	ChannelOperationRPCTimeout       ParamItem `refreshable:"true"`
+	MaxConcurrentChannelTaskNumPerDN ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
@@ -3367,6 +3370,15 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ChannelOperationRPCTimeout.Init(base.mgr)
+
+	p.MaxConcurrentChannelTaskNumPerDN = ParamItem{
+		Key:          "dataCoord.channel.maxConcurrentChannelTaskNumPerDN",
+		Version:      "2.5",
+		DefaultValue: "32",
+		Doc:          "The maximum concurrency for each DataNode executing channel tasks (watch, release).",
+		Export:       true,
+	}
+	p.MaxConcurrentChannelTaskNumPerDN.Init(base.mgr)
 
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
@@ -4235,6 +4247,7 @@ type dataNodeConfig struct {
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
 	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
+	UseMergeSort             ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -4565,6 +4578,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.L0CompactionMaxBatchSize.Init(base.mgr)
+
+	p.UseMergeSort = ParamItem{
+		Key:          "dataNode.compaction.useMergeSort",
+		Version:      "2.5.0",
+		Doc:          "Whether to enable mergeSort mode when performing mixCompaction.",
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.UseMergeSort.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",

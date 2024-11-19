@@ -4631,10 +4631,9 @@ class TestQueryTextMatch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
-    @pytest.mark.parametrize("tokenizer", ["jieba"])
-    @pytest.mark.xfail(reason="unstable")
+    @pytest.mark.parametrize("lang_type", ["chinese"])
     def test_query_text_match_zh_normal(
-            self, tokenizer, enable_inverted_index, enable_partition_key
+            self, lang_type, enable_inverted_index, enable_partition_key
     ):
         """
         target: test text match normal
@@ -4644,7 +4643,7 @@ class TestQueryTextMatch(TestcaseBase):
         expected: text match successfully and result is correct
         """
         analyzer_params = {
-            "tokenizer": tokenizer,
+            "type": lang_type,
         }
         dim = 128
         fields = [
@@ -4690,7 +4689,7 @@ class TestQueryTextMatch(TestcaseBase):
             name=cf.gen_unique_str(prefix), schema=schema
         )
         fake = fake_en
-        if tokenizer == "jieba":
+        if lang_type == "chinese":
             language = "zh"
             fake = fake_zh
         else:
@@ -4763,7 +4762,7 @@ class TestQueryTextMatch(TestcaseBase):
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
             for r in res:
-                assert any([token in r[field] for token in top_10_tokens])
+                assert any([token in r[field] for token in top_10_tokens]), f"top 10 tokens {top_10_tokens} not in {r[field]}"
 
 
 
