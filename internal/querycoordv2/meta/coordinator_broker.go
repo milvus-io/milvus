@@ -48,7 +48,7 @@ type Broker interface {
 	GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error)
 	ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error)
 	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) ([]*datapb.SegmentInfo, error)
-	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error)
+	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentIDs ...UniqueID) (map[int64][]*querypb.FieldIndexInfo, error)
 	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
 	DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error)
 	GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, int64, error)
@@ -306,13 +306,13 @@ func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...Uniq
 	return ret, nil
 }
 
-func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error) {
+func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentIDs ...UniqueID) (map[int64][]*querypb.FieldIndexInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collectionID),
-		zap.Int64("segmentID", segmentID),
+		zap.Int64s("segmentIDs", segmentIDs),
 	)
 
 	// during rolling upgrade, query coord may connect to datacoord with version 2.2, which will return merr.ErrServiceUnimplemented
@@ -322,7 +322,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 	retry.Do(ctx, func() error {
 		resp, err = broker.dataCoord.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
 			CollectionID: collectionID,
-			SegmentIDs:   []int64{segmentID},
+			SegmentIDs:   segmentIDs,
 		})
 
 		if errors.Is(err, merr.ErrServiceUnimplemented) {
@@ -337,32 +337,30 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 	}
 
 	if resp.GetSegmentInfo() == nil {
-		err = merr.WrapErrIndexNotFoundForSegment(segmentID)
-		log.Warn("failed to get segment index info",
+		err = merr.WrapErrIndexNotFoundForSegments(segmentIDs)
+		log.Warn("failed to get segments index info",
 			zap.Error(err))
 		return nil, err
 	}
 
-	segmentInfo, ok := resp.GetSegmentInfo()[segmentID]
-	if !ok || len(segmentInfo.GetIndexInfos()) == 0 {
-		return nil, merr.WrapErrIndexNotFoundForSegment(segmentID)
-	}
-
-	indexes := make([]*querypb.FieldIndexInfo, 0)
-	for _, info := range segmentInfo.GetIndexInfos() {
-		indexes = append(indexes, &querypb.FieldIndexInfo{
-			FieldID:             info.GetFieldID(),
-			EnableIndex:         true, // deprecated, but keep it for compatibility
-			IndexName:           info.GetIndexName(),
-			IndexID:             info.GetIndexID(),
-			BuildID:             info.GetBuildID(),
-			IndexParams:         info.GetIndexParams(),
-			IndexFilePaths:      info.GetIndexFilePaths(),
-			IndexSize:           int64(info.GetSerializedSize()),
-			IndexVersion:        info.GetIndexVersion(),
-			NumRows:             info.GetNumRows(),
-			CurrentIndexVersion: info.GetCurrentIndexVersion(),
-		})
+	indexes := make(map[int64][]*querypb.FieldIndexInfo, 0)
+	for segmentID, segmentInfo := range resp.GetSegmentInfo() {
+		indexes[segmentID] = make([]*querypb.FieldIndexInfo, 0)
+		for _, info := range segmentInfo.GetIndexInfos() {
+			indexes[segmentID] = append(indexes[segmentID], &querypb.FieldIndexInfo{
+				FieldID:             info.GetFieldID(),
+				EnableIndex:         true, // deprecated, but keep it for compatibility
+				IndexName:           info.GetIndexName(),
+				IndexID:             info.GetIndexID(),
+				BuildID:             info.GetBuildID(),
+				IndexParams:         info.GetIndexParams(),
+				IndexFilePaths:      info.GetIndexFilePaths(),
+				IndexSize:           int64(info.GetSerializedSize()),
+				IndexVersion:        info.GetIndexVersion(),
+				NumRows:             info.GetNumRows(),
+				CurrentIndexVersion: info.GetCurrentIndexVersion(),
+			})
+		}
 	}
 
 	return indexes, nil

@@ -737,12 +737,12 @@ func TestMeta_GetSegmentIndexes(t *testing.T) {
 	m := createMeta(catalog, nil, createIndexMeta(catalog))
 
 	t.Run("success", func(t *testing.T) {
-		segIndexes := m.indexMeta.getSegmentIndexes(segID)
+		segIndexes := m.indexMeta.GetSegmentIndexes(collID, segID)
 		assert.Equal(t, 1, len(segIndexes))
 	})
 
 	t.Run("segment not exist", func(t *testing.T) {
-		segIndexes := m.indexMeta.getSegmentIndexes(segID + 100)
+		segIndexes := m.indexMeta.GetSegmentIndexes(collID, segID+100)
 		assert.Equal(t, 0, len(segIndexes))
 	})
 
