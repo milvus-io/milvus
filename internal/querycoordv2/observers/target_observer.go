@@ -238,7 +238,7 @@ func (ob *TargetObserver) Check(ctx context.Context, collectionID int64, partiti
 }
 
 func (ob *TargetObserver) TriggerUpdateCurrentTarget(collectionID int64) {
-	ob.dispatcher.AddTask(collectionID)
+	ob.loadingDispatcher.AddTask(collectionID)
 }
 
 func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
