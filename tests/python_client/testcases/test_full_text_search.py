@@ -952,7 +952,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         # query with expr
         res, _ = collection_w.query(
             expr="id >= 0",
-            output_fields=["text_sparse_emb", "text"]
+            output_fields=["text"]
         )
         assert len(res) == len(data)
 
@@ -965,7 +965,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
             anns_field="text_sparse_emb",
             param={},
             limit=limit,
-            output_fields=["id", "text", "text_sparse_emb"])
+            output_fields=["id", "text"])
         assert len(res_list) == nq
         for i in range(nq):
             assert len(res_list[i]) == limit
@@ -1536,7 +1536,7 @@ class TestDeleteWithFullTextSearch(TestcaseBase):
             anns_field="text_sparse_emb",
             param={},
             limit=100,
-            output_fields=["id", "text", "text_sparse_emb"])
+            output_fields=["id", "text"])
         for i in range(len(res_list)):
             query_text = search_data[i]
             result_texts = [r.text for r in res_list[i]]
@@ -2262,7 +2262,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             param={},
             limit=limit + offset,
             offset=0,
-            output_fields=["id", "text", "text_sparse_emb"])
+            output_fields=["id", "text"])
         full_res_id_list = []
         for i in range(nq):
             res = full_res_list[i]
@@ -2278,7 +2278,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             param={},
             limit=limit,
             offset=offset,
-            output_fields=["id", "text", "text_sparse_emb"])
+            output_fields=["id", "text"])
 
         # verify correctness
         for i in range(nq):
@@ -2462,7 +2462,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             param={},
             limit=limit + offset,
             offset=0,
-            output_fields=["id", "text", "text_sparse_emb"])
+            output_fields=["id", "text"])
         full_res_id_list = []
         for i in range(nq):
             res = full_res_list[i]
@@ -2478,7 +2478,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             param={},
             limit=limit,
             offset=offset,
-            output_fields=["id", "text", "text_sparse_emb"])
+            output_fields=["id", "text"])
 
         # verify correctness
         for i in range(nq):
@@ -2637,7 +2637,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             param={
             },
             limit=limit,  # get a wider range of search result
-            output_fields=["id", "text", "text_sparse_emb"])
+            output_fields=["id", "text"])
 
         distance_list = []
         for i in range(nq):
@@ -2660,7 +2660,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 }
             },
             limit=limit,
-            output_fields=["id", "text", "text_sparse_emb"])
+            output_fields=["id", "text"])
         # verify correctness
         for i in range(nq):
             log.info(f"res: {len(res_list[i])}")
@@ -2804,7 +2804,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             param={
                 "metric_type": "BM25",
             },
-            output_fields=["id", "text", "text_sparse_emb"],
+            output_fields=["id", "text"],
             limit=limit
         )
         iter_result = []
@@ -2948,7 +2948,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
             anns_field="text_sparse_emb",
             param={},
             limit=limit,
-            output_fields=["id", "text", "text_sparse_emb"],
+            output_fields=["id", "text"],
         )
         assert len(res) == nq
         for r in res:
@@ -3089,7 +3089,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
             anns_field="text_sparse_emb",
             param={},
             limit=limit,
-            output_fields=["id", "text", "text_sparse_emb"],
+            output_fields=["id", "text"],
             check_task=CheckTasks.err_res,
             check_items=error
         )
