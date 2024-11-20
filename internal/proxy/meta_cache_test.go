@@ -57,6 +57,25 @@ type MockRootCoordClientInterface struct {
 	listPolicy func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error)
 }
 
+func EqualSchema(t *testing.T, expect, actual *schemapb.CollectionSchema) {
+	assert.Equal(t, expect.AutoID, actual.AutoID)
+	assert.Equal(t, expect.Description, actual.Description)
+	assert.Equal(t, expect.Name, actual.Name)
+	assert.Equal(t, expect.EnableDynamicField, actual.EnableDynamicField)
+	assert.Equal(t, len(expect.Fields), len(actual.Fields))
+	for i := range expect.Fields {
+		assert.Equal(t, expect.Fields[i], actual.Fields[i])
+	}
+	assert.Equal(t, len(expect.Functions), len(actual.Functions))
+	for i := range expect.Functions {
+		assert.Equal(t, expect.Functions[i], actual.Functions[i])
+	}
+	assert.Equal(t, len(expect.Properties), len(actual.Properties))
+	for i := range expect.Properties {
+		assert.Equal(t, expect.Properties[i], actual.Properties[i])
+	}
+}
+
 func (m *MockRootCoordClientInterface) IncAccessCount() {
 	atomic.AddInt32(&m.AccessCount, 1)
 }
@@ -212,7 +231,7 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 	assert.NoError(t, err)
-	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
+	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
 		AutoID:    true,
 		Fields:    []*schemapb.FieldSchema{},
 		Functions: []*schemapb.FunctionSchema{},
@@ -225,7 +244,7 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection2")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
-	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
+	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
 		AutoID:    true,
 		Fields:    []*schemapb.FieldSchema{},
 		Functions: []*schemapb.FunctionSchema{},
@@ -240,7 +259,7 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
-	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
+	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
 		AutoID:    true,
 		Fields:    []*schemapb.FieldSchema{},
 		Functions: []*schemapb.FunctionSchema{},
@@ -300,7 +319,7 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 	assert.NoError(t, err)
-	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
+	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
 		AutoID:    true,
 		Fields:    []*schemapb.FieldSchema{},
 		Functions: []*schemapb.FunctionSchema{},
@@ -313,7 +332,7 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection2")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
-	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
+	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
 		AutoID:    true,
 		Fields:    []*schemapb.FieldSchema{},
 		Functions: []*schemapb.FunctionSchema{},
@@ -328,7 +347,7 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
-	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
+	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
 		AutoID:    true,
 		Fields:    []*schemapb.FieldSchema{},
 		Functions: []*schemapb.FunctionSchema{},
@@ -354,7 +373,7 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 
 	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.NoError(t, err)
-	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
+	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
 		AutoID:    true,
 		Fields:    []*schemapb.FieldSchema{},
 		Functions: []*schemapb.FunctionSchema{},
@@ -364,7 +383,7 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	rootCoord.Error = true
 	// should be cached with no error
 	assert.NoError(t, err)
-	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
+	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
 		AutoID:    true,
 		Fields:    []*schemapb.FieldSchema{},
 		Functions: []*schemapb.FunctionSchema{},
@@ -429,7 +448,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 			// GetCollectionSchema will never fail
 			schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
 			assert.NoError(t, err)
-			assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
+			EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
 				AutoID:    true,
 				Fields:    []*schemapb.FieldSchema{},
 				Functions: []*schemapb.FunctionSchema{},
