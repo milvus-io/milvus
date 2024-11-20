@@ -81,6 +81,8 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 
 	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 }
 
 func (suite *RowCountBasedBalancerTestSuite) TearDownTest() {
