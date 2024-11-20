@@ -134,7 +134,7 @@ class MilvusBaseUser(User):
         return np.random.random([self.dim]).tolist()
 
     def wait_time(self):
-        return 0.1
+        return 0
 
 
 class MilvusUser(MilvusBaseUser):
