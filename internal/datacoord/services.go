@@ -116,11 +116,13 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	sealedSegmentIDs := make([]int64, 0)
 	if !streamingutil.IsStreamingServiceEnabled() {
 		var err error
-		if sealedSegmentIDs, err = s.segmentManager.SealAllSegments(ctx, req.GetCollectionID(), req.GetSegmentIDs()); err != nil {
-			return &datapb.FlushResponse{
-				Status: merr.Status(errors.Wrapf(err, "failed to flush collection %d",
-					req.GetCollectionID())),
-			}, nil
+		for _, channel := range coll.VChannelNames {
+			if sealedSegmentIDs, err = s.segmentManager.SealAllSegments(ctx, channel, req.GetSegmentIDs()); err != nil {
+				return &datapb.FlushResponse{
+					Status: merr.Status(errors.Wrapf(err, "failed to flush collection %d",
+						req.GetCollectionID())),
+				}, nil
+			}
 		}
 	}
 	sealedSegmentsIDDict := make(map[UniqueID]bool)
@@ -540,10 +542,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		// Set segment state
 		if req.GetDropped() {
 			// segmentManager manages growing segments
-			s.segmentManager.DropSegment(ctx, req.GetSegmentID())
+			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
 			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
 		} else if req.GetFlushed() {
-			s.segmentManager.DropSegment(ctx, req.GetSegmentID())
+			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
 			// set segment to SegmentState_Flushing
 			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushing))
 		}
@@ -1492,10 +1494,7 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 
 	s.updateSegmentStatistics(segmentStats)
 
-	if err := s.segmentManager.ExpireAllocations(channel, ts); err != nil {
-		log.Warn("failed to expire allocations", zap.Error(err))
-		return err
-	}
+	s.segmentManager.ExpireAllocations(channel, ts)
 
 	flushableIDs, err := s.segmentManager.GetFlushableSegments(ctx, channel, ts)
 	if err != nil {

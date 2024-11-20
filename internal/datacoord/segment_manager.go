@@ -80,14 +80,14 @@ type Manager interface {
 	AllocNewGrowingSegment(ctx context.Context, collectionID, partitionID, segmentID UniqueID, channelName string) (*SegmentInfo, error)
 
 	// DropSegment drops the segment from manager.
-	DropSegment(ctx context.Context, segmentID UniqueID)
+	DropSegment(ctx context.Context, channel string, segmentID UniqueID)
 	// SealAllSegments seals all segments of collection with collectionID and return sealed segments.
 	// If segIDs is not empty, also seals segments in segIDs.
-	SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error)
+	SealAllSegments(ctx context.Context, channel string, segIDs []UniqueID) ([]UniqueID, error)
 	// GetFlushableSegments returns flushable segment ids
 	GetFlushableSegments(ctx context.Context, channel string, ts Timestamp) ([]UniqueID, error)
 	// ExpireAllocations notifies segment status to expire old allocations
-	ExpireAllocations(channel string, ts Timestamp) error
+	ExpireAllocations(channel string, ts Timestamp)
 	// DropSegmentsOfChannel drops all segments in a channel
 	DropSegmentsOfChannel(ctx context.Context, channel string)
 }
@@ -109,11 +109,14 @@ var _ Manager = (*SegmentManager)(nil)
 
 // SegmentManager handles L1 segment related logic
 type SegmentManager struct {
-	meta                *meta
-	mu                  lock.RWMutex
-	allocator           allocator.Allocator
-	helper              allocHelper
-	segments            []UniqueID
+	meta      *meta
+	allocator allocator.Allocator
+	helper    allocHelper
+
+	channelLock      *lock.KeyLock[string]
+	channel2Segments *typeutil.ConcurrentMap[string, typeutil.UniqueSet]
+
+	// Policies
 	estimatePolicy      calUpperLimitPolicy
 	allocPolicy         AllocatePolicy
 	segmentSealPolicies []SegmentSealPolicy
@@ -214,7 +217,8 @@ func newSegmentManager(meta *meta, allocator allocator.Allocator, opts ...allocO
 		meta:                meta,
 		allocator:           allocator,
 		helper:              defaultAllocHelper(),
-		segments:            make([]UniqueID, 0),
+		channelLock:         lock.NewKeyLock[string](),
+		channel2Segments:    typeutil.NewConcurrentMap[string, typeutil.UniqueSet](),
 		estimatePolicy:      defaultCalUpperLimitPolicy(),
 		allocPolicy:         defaultAllocatePolicy(),
 		segmentSealPolicies: defaultSegmentSealPolicy(),
@@ -224,49 +228,52 @@ func newSegmentManager(meta *meta, allocator allocator.Allocator, opts ...allocO
 	for _, opt := range opts {
 		opt.apply(manager)
 	}
-	manager.loadSegmentsFromMeta()
-	if err := manager.maybeResetLastExpireForSegments(); err != nil {
+	latestTs, err := manager.genLastExpireTsForSegments()
+	if err != nil {
 		return nil, err
 	}
+	manager.loadSegmentsFromMeta(latestTs)
 	return manager, nil
 }
 
 // loadSegmentsFromMeta generate corresponding segment status for each segment from meta
-func (s *SegmentManager) loadSegmentsFromMeta() {
-	segments := s.meta.GetUnFlushedSegments()
-	segmentsID := make([]UniqueID, 0, len(segments))
-	for _, segment := range segments {
-		if segment.Level != datapb.SegmentLevel_L0 {
-			segmentsID = append(segmentsID, segment.GetID())
+func (s *SegmentManager) loadSegmentsFromMeta(latestTs Timestamp) {
+	unflushed := s.meta.GetUnFlushedSegments()
+	unflushed = lo.Filter(unflushed, func(segment *SegmentInfo, _ int) bool {
+		return segment.Level != datapb.SegmentLevel_L0
+	})
+	channel2Segments := lo.GroupBy(unflushed, func(segment *SegmentInfo) string {
+		return segment.GetInsertChannel()
+	})
+	for channel, segmentInfos := range channel2Segments {
+		segments := typeutil.NewUniqueSet()
+		for _, segment := range segmentInfos {
+			// for all sealed and growing segments, need to reset last expire
+			if segment != nil && segment.GetState() == commonpb.SegmentState_Growing {
+				s.meta.SetLastExpire(segment.GetID(), latestTs)
+			}
+			segments.Insert(segment.GetID())
 		}
+		s.channel2Segments.Insert(channel, segments)
 	}
-	s.segments = segmentsID
 }
 
-func (s *SegmentManager) maybeResetLastExpireForSegments() error {
-	// for all sealed and growing segments, need to reset last expire
-	if len(s.segments) > 0 {
-		var latestTs uint64
-		allocateErr := retry.Do(context.Background(), func() error {
-			ts, tryErr := s.genExpireTs(context.Background())
+func (s *SegmentManager) genLastExpireTsForSegments() (Timestamp, error) {
+	var latestTs uint64
+	allocateErr := retry.Do(context.Background(), func() error {
+		ts, tryErr := s.genExpireTs(context.Background())
+		if tryErr != nil {
 			log.Warn("failed to get ts from rootCoord for globalLastExpire", zap.Error(tryErr))
-			if tryErr != nil {
-				return tryErr
-			}
-			latestTs = ts
-			return nil
-		}, retry.Attempts(Params.DataCoordCfg.AllocLatestExpireAttempt.GetAsUint()), retry.Sleep(200*time.Millisecond))
-		if allocateErr != nil {
-			log.Warn("cannot allocate latest lastExpire from rootCoord", zap.Error(allocateErr))
-			return errors.New("global max expire ts is unavailable for segment manager")
+			return tryErr
 		}
-		for _, sID := range s.segments {
-			if segment := s.meta.GetSegment(sID); segment != nil && segment.GetState() == commonpb.SegmentState_Growing {
-				s.meta.SetLastExpire(sID, latestTs)
-			}
-		}
+		latestTs = ts
+		return nil
+	}, retry.Attempts(Params.DataCoordCfg.AllocLatestExpireAttempt.GetAsUint()), retry.Sleep(200*time.Millisecond))
+	if allocateErr != nil {
+		log.Warn("cannot allocate latest lastExpire from rootCoord", zap.Error(allocateErr))
+		return 0, errors.New("global max expire ts is unavailable for segment manager")
 	}
-	return nil
+	return latestTs, nil
 }
 
 // AllocSegment allocate segment per request collcation, partication, channel and rows
@@ -280,38 +287,34 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		With(zap.Int64("requestRows", requestRows))
 	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Alloc-Segment")
 	defer sp.End()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+
+	s.channelLock.Lock(channelName)
+	defer s.channelLock.Unlock(channelName)
 
 	// filter segments
-	validSegments := make(map[UniqueID]struct{})
-	invalidSegments := make(map[UniqueID]struct{})
-	segments := make([]*SegmentInfo, 0)
-	for _, segmentID := range s.segments {
+	segmentInfos := make([]*SegmentInfo, 0)
+	segments, _ := s.channel2Segments.GetOrInsert(channelName, typeutil.NewUniqueSet())
+	segments.Range(func(segmentID int64) bool {
 		segment := s.meta.GetHealthySegment(segmentID)
 		if segment == nil {
-			invalidSegments[segmentID] = struct{}{}
-			continue
+			log.Warn("failed to get segment, remove it", zap.String("channel", channelName), zap.Int64("segmentID", segmentID))
+			segments.Remove(segmentID)
+			return true
 		}
 
-		validSegments[segmentID] = struct{}{}
-		if !satisfy(segment, collectionID, partitionID, channelName) || !isGrowing(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
-			continue
+		if !isGrowing(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
+			return true
 		}
-		segments = append(segments, segment)
-	}
-
-	if len(invalidSegments) > 0 {
-		log.Warn("Failed to get segments infos from meta, clear them", zap.Int64s("segmentIDs", lo.Keys(invalidSegments)))
-	}
-	s.segments = lo.Keys(validSegments)
+		segmentInfos = append(segmentInfos, segment)
+		return true
+	})
 
 	// Apply allocation policy.
 	maxCountPerSegment, err := s.estimateMaxNumOfRows(collectionID)
 	if err != nil {
 		return nil, err
 	}
-	newSegmentAllocations, existedSegmentAllocations := s.allocPolicy(segments,
+	newSegmentAllocations, existedSegmentAllocations := s.allocPolicy(segmentInfos,
 		requestRows, int64(maxCountPerSegment), datapb.SegmentLevel_L1)
 
 	// create new segments and add allocations
@@ -344,11 +347,6 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	return allocations, nil
 }
 
-func satisfy(segment *SegmentInfo, collectionID, partitionID UniqueID, channel string) bool {
-	return segment.GetCollectionID() == collectionID && segment.GetPartitionID() == partitionID &&
-		segment.GetInsertChannel() == channel
-}
-
 func isGrowing(segment *SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Growing
 }
@@ -366,6 +364,8 @@ func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
 
 // AllocNewGrowingSegment allocates segment for streaming node.
 func (s *SegmentManager) AllocNewGrowingSegment(ctx context.Context, collectionID, partitionID, segmentID UniqueID, channelName string) (*SegmentInfo, error) {
+	s.channelLock.Lock(channelName)
+	defer s.channelLock.Unlock(channelName)
 	return s.openNewSegmentWithGivenSegmentID(ctx, collectionID, partitionID, segmentID, channelName)
 }
 
@@ -404,7 +404,8 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, c
 		log.Error("failed to add segment to DataCoord", zap.Error(err))
 		return nil, err
 	}
-	s.segments = append(s.segments, segmentID)
+	segments, _ := s.channel2Segments.GetOrInsert(channelName, typeutil.NewUniqueSet())
+	segments.Insert(segmentID)
 	log.Info("datacoord: estimateTotalRows: ",
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
@@ -424,17 +425,17 @@ func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error
 }
 
 // DropSegment drop the segment from manager.
-func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
+func (s *SegmentManager) DropSegment(ctx context.Context, channel string, segmentID UniqueID) {
 	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Drop-Segment")
 	defer sp.End()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, id := range s.segments {
-		if id == segmentID {
-			s.segments = append(s.segments[:i], s.segments[i+1:]...)
-			break
-		}
+
+	s.channelLock.Lock(channel)
+	defer s.channelLock.Unlock(channel)
+
+	if segments, ok := s.channel2Segments.Get(channel); ok {
+		segments.Remove(segmentID)
 	}
+
 	segment := s.meta.GetHealthySegment(segmentID)
 	if segment == nil {
 		log.Warn("Failed to get segment", zap.Int64("id", segmentID))
@@ -447,23 +448,29 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 }
 
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments
-func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error) {
+func (s *SegmentManager) SealAllSegments(ctx context.Context, channel string, segIDs []UniqueID) ([]UniqueID, error) {
 	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Seal-Segments")
 	defer sp.End()
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var ret []UniqueID
-	segCandidates := s.segments
+	s.channelLock.Lock(channel)
+	defer s.channelLock.Unlock(channel)
+
+	segments, ok := s.channel2Segments.Get(channel)
+	if !ok {
+		return nil, nil
+	}
+	segCandidates := segments.Collect()
 	if len(segIDs) != 0 {
 		segCandidates = segIDs
 	}
 
+	var ret []UniqueID
+
 	sealedSegments := s.meta.GetSegments(segCandidates, func(segment *SegmentInfo) bool {
-		return segment.CollectionID == collectionID && isSegmentHealthy(segment) && segment.State == commonpb.SegmentState_Sealed
+		return isSegmentHealthy(segment) && segment.State == commonpb.SegmentState_Sealed
 	})
 	growingSegments := s.meta.GetSegments(segCandidates, func(segment *SegmentInfo) bool {
-		return segment.CollectionID == collectionID && isSegmentHealthy(segment) && segment.State == commonpb.SegmentState_Growing
+		return isSegmentHealthy(segment) && segment.State == commonpb.SegmentState_Growing
 	})
 	ret = append(ret, sealedSegments...)
 
@@ -480,37 +487,54 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel string, t Timestamp) ([]UniqueID, error) {
 	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Get-Segments")
 	defer sp.End()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+
+	s.channelLock.Lock(channel)
+	defer s.channelLock.Unlock(channel)
+
 	// TODO:move tryToSealSegment and dropEmptySealedSegment outside
 	if err := s.tryToSealSegment(t, channel); err != nil {
 		return nil, err
 	}
 
+	// TODO: It's too frequent; perhaps each channel could check once per minute instead.
 	s.cleanupSealedSegment(t, channel)
 
-	ret := make([]UniqueID, 0, len(s.segments))
-	for _, id := range s.segments {
-		info := s.meta.GetHealthySegment(id)
-		if info == nil || info.InsertChannel != channel {
-			continue
+	segments, ok := s.channel2Segments.Get(channel)
+	if !ok {
+		return nil, nil
+	}
+
+	ret := make([]UniqueID, 0, segments.Len())
+	segments.Range(func(segmentID int64) bool {
+		info := s.meta.GetHealthySegment(segmentID)
+		if info == nil {
+			return true
 		}
 		if s.flushPolicy(info, t) {
-			ret = append(ret, id)
+			ret = append(ret, segmentID)
 		}
-	}
+		return true
+	})
 
 	return ret, nil
 }
 
 // ExpireAllocations notify segment status to expire old allocations
-func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, id := range s.segments {
+func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) {
+	s.channelLock.Lock(channel)
+	defer s.channelLock.Unlock(channel)
+
+	segments, ok := s.channel2Segments.Get(channel)
+	if !ok {
+		return
+	}
+
+	segments.Range(func(id int64) bool {
 		segment := s.meta.GetHealthySegment(id)
-		if segment == nil || segment.InsertChannel != channel {
-			continue
+		if segment == nil {
+			log.Warn("failed to get segment, remove it", zap.String("channel", channel), zap.Int64("segmentID", id))
+			segments.Remove(id)
+			return true
 		}
 		allocations := make([]*Allocation, 0, len(segment.allocations))
 		for i := 0; i < len(segment.allocations); i++ {
@@ -522,28 +546,33 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 			}
 		}
 		s.meta.SetAllocations(segment.GetID(), allocations)
-	}
-	return nil
+		return true
+	})
 }
 
 func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
-	valids := make([]int64, 0, len(s.segments))
-	for _, id := range s.segments {
+	segments, ok := s.channel2Segments.Get(channel)
+	if !ok {
+		return
+	}
+	segments.Range(func(id int64) bool {
 		segment := s.meta.GetHealthySegment(id)
-		if segment == nil || segment.InsertChannel != channel {
-			valids = append(valids, id)
-			continue
+		if segment == nil {
+			log.Warn("failed to get segment, remove it", zap.String("channel", channel), zap.Int64("segmentID", id))
+			segments.Remove(id)
+			return true
 		}
-
 		if isEmptySealedSegment(segment, ts) {
 			log.Info("remove empty sealed segment", zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id))
-			s.meta.SetState(id, commonpb.SegmentState_Dropped)
-			continue
+			if err := s.meta.SetState(id, commonpb.SegmentState_Dropped); err != nil {
+				log.Warn("failed to set segment state to dropped", zap.String("channel", channel),
+					zap.Int64("segmentID", id), zap.Error(err))
+			} else {
+				segments.Remove(id)
+			}
 		}
-
-		valids = append(valids, id)
-	}
-	s.segments = valids
+		return true
+	})
 }
 
 func isEmptySealedSegment(segment *SegmentInfo, ts Timestamp) bool {
@@ -552,29 +581,43 @@ func isEmptySealedSegment(segment *SegmentInfo, ts Timestamp) bool {
 
 // tryToSealSegment applies segment & channel seal policies
 func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
+	segments, ok := s.channel2Segments.Get(channel)
+	if !ok {
+		return nil
+	}
+
 	channelInfo := make(map[string][]*SegmentInfo)
 	sealedSegments := make(map[int64]struct{})
-	for _, id := range s.segments {
+
+	var setStateErr error
+	segments.Range(func(id int64) bool {
 		info := s.meta.GetHealthySegment(id)
-		if info == nil || info.InsertChannel != channel {
-			continue
+		if info == nil {
+			return true
 		}
 		channelInfo[info.InsertChannel] = append(channelInfo[info.InsertChannel], info)
 		if info.State != commonpb.SegmentState_Growing {
-			continue
+			return true
 		}
 		// change shouldSeal to segment seal policy logic
 		for _, policy := range s.segmentSealPolicies {
 			if shouldSeal, reason := policy.ShouldSeal(info, ts); shouldSeal {
 				log.Info("Seal Segment for policy matched", zap.Int64("segmentID", info.GetID()), zap.String("reason", reason))
 				if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
-					return err
+					setStateErr = err
+					return false
 				}
 				sealedSegments[id] = struct{}{}
 				break
 			}
 		}
+		return true
+	})
+
+	if setStateErr != nil {
+		return setStateErr
 	}
+
 	for channel, segmentInfos := range channelInfo {
 		for _, policy := range s.channelSealPolicies {
 			vs, reason := policy(channel, segmentInfos, ts)
@@ -599,24 +642,25 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 
 // DropSegmentsOfChannel drops all segments in a channel
 func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.channelLock.Lock(channel)
+	defer s.channelLock.Unlock(channel)
 
-	validSegments := make([]int64, 0, len(s.segments))
-	for _, sid := range s.segments {
+	segments, ok := s.channel2Segments.Get(channel)
+	if !ok {
+		return
+	}
+	segments.Range(func(sid int64) bool {
 		segment := s.meta.GetHealthySegment(sid)
 		if segment == nil {
-			continue
-		}
-		if segment.GetInsertChannel() != channel {
-			validSegments = append(validSegments, sid)
-			continue
+			log.Warn("failed to get segment, remove it", zap.String("channel", channel), zap.Int64("segmentID", sid))
+			segments.Remove(sid)
+			return true
 		}
 		s.meta.SetAllocations(sid, nil)
 		for _, allocation := range segment.allocations {
 			putAllocation(allocation)
 		}
-	}
-
-	s.segments = validSegments
+		return true
+	})
+	s.channel2Segments.Remove(channel)
 }
