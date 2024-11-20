@@ -1641,7 +1641,7 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 	case datapb.GcCommand_Resume:
 		if err := s.garbageCollector.Resume(ctx); err != nil {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
+			status.Reason = fmt.Sprintf("failed to resume gc, %s", err.Error())
 			return status, nil
 		}
 	default:
