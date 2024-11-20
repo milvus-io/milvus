@@ -65,7 +65,7 @@ pull_request_rules:
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=Code Checker MacOS 12'
+      - 'status-success=Code Checker MacOS 13'
       # - 'status-success=Code Checker Amazonlinux 2023'
       - 'status-success=cpu-e2e'
       # - 'status-success=codecov/patch'
@@ -82,7 +82,7 @@ pull_request_rules:
       - or: *WHEN_CPP_UNIT_TEST_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
-      - 'status-success=Code Checker MacOS 12'
+      - 'status-success=Code Checker MacOS 13'
       # - 'status-success=Code Checker CentOS 7'
       - 'status-success=cpu-e2e'
       # - 'status-success=codecov/patch'
@@ -130,7 +130,7 @@ pull_request_rules:
       - or: *BRANCHES
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=Code Checker MacOS 12'
+      - 'status-success=Code Checker MacOS 13'
       # - 'status-success=Code Checker Amazonlinux 2023'
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or:
@@ -146,7 +146,7 @@ pull_request_rules:
       - *2X_BRANCH
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=Code Checker MacOS 12'
+      - 'status-success=Code Checker MacOS 13'
       - -files~=^(?!internal\/.*_test\.go).*$
     actions:
       label:
@@ -265,7 +265,7 @@ pull_request_rules:
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=Code Checker MacOS 12'
+      - 'status-success=Code Checker MacOS 13'
       # - 'status-success=Code Checker Amazonlinux 2023'
       - *source_code_files
     actions:
@@ -281,7 +281,7 @@ pull_request_rules:
       - or: *WHEN_CPP_UNIT_TEST_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
-      - 'status-success=Code Checker MacOS 12'
+      - 'status-success=Code Checker MacOS 13'
       - *source_code_files
     actions:
       label:
@@ -315,7 +315,7 @@ pull_request_rules:
           - 'status-success!=cpp-unit-test'
           - 'status-success!=UT for Go'
           - 'status-success!=Integration Test'
-          - 'status-success!=Code Checker MacOS 12'
+          - 'status-success!=Code Checker MacOS 13'
           # - 'status-success!=Code Checker Amazonlinux 2023'
     actions:
       label:
@@ -336,7 +336,7 @@ pull_request_rules:
           - 'status-success!=UT for Cpp'
           - 'status-success!=UT for Go'
           - 'status-success!=Integration Test'
-          - 'status-success!=Code Checker MacOS 12'
+          - 'status-success!=Code Checker MacOS 13'
           # - 'status-success!=Code Checker CentOS 7'
     actions:
       label:
