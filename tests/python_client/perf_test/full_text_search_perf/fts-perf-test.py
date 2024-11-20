@@ -19,9 +19,13 @@ faker = Faker()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-test_data = pd.read_parquet("/dataset/wikipedia-22-12-en-text/test.parquet")
-
+try:
+    test_data = pd.read_parquet("/dataset/wikipedia-22-12-en-text/test.parquet")
+except Exception as e:
+    logger.error(f"Error loading test data: {str(e)}")
+    test_data = pd.DataFrame({
+        "text": [faker.text() for i in range(1000)]
+    })
 
 def setup_collection(environment):
     """在master上执行collection的初始化"""
@@ -106,6 +110,7 @@ class MilvusBaseUser(User):
 
         # Configuration from command line args
         self.top_k = environment.parsed_options.milvus_topk
+        self.drop_ratio_search = environment.parsed_options.drop_ratio_search
         self.mode = environment.parsed_options.milvus_mode
         self.collection_name = environment.parsed_options.milvus_collection
 
@@ -163,6 +168,9 @@ class MilvusUser(MilvusBaseUser):
         logger.debug("Performing vector search")
         self.client.search(data=search_data,
                            anns_field="sparse",
+                           param={
+                               "drop_ratio_search": self.drop_ratio_search,
+                           },
                            top_k=self.top_k)
 
     @tag('text_match')
@@ -355,4 +363,6 @@ def _(parser):
                                 help="How to connect to Milvus (default: %(default)s)")
     milvus_options.add_argument("--milvus-collection", type=str, default="test_full_text_search_perf",
                                 help="Collection name to use (default: %(default)s)")
+    milvus_options.add_argument("--drop_ratio_search", type=str, default=0.0,
+                                help="drop_ratio_search (default: %(default)s)")
 
