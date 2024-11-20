@@ -298,6 +298,10 @@ func WriteYaml(w io.Writer) {
 			header: "\n# Configure the proxy tls enable.",
 		},
 		{
+			name:   "internaltls",
+			header: "\n# Configure the node-tls enable.",
+		},
+		{
 			name: "common",
 		},
 		{
