@@ -119,8 +119,8 @@ type writeBufferBase struct {
 	estSizePerRecord int
 	metaCache        metacache.MetaCache
 
-	bufferGuard sync.RWMutex
-	buffers     map[int64]*segmentBuffer // segmentID => segmentBuffer
+	mut     sync.RWMutex
+	buffers map[int64]*segmentBuffer // segmentID => segmentBuffer
 
 	syncPolicies   []SyncPolicy
 	syncCheckpoint *checkpointCandidates
@@ -185,23 +185,23 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 }
 
 func (wb *writeBufferBase) HasSegment(segmentID int64) bool {
-	wb.bufferGuard.RLock()
-	defer wb.bufferGuard.RUnlock()
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
 
 	_, ok := wb.buffers[segmentID]
 	return ok
 }
 
 func (wb *writeBufferBase) SealSegments(ctx context.Context, segmentIDs []int64) error {
-	wb.bufferGuard.RLock()
-	defer wb.bufferGuard.RUnlock()
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
 
 	return wb.sealSegments(ctx, segmentIDs)
 }
 
 func (wb *writeBufferBase) DropPartitions(partitionIDs []int64) {
-	wb.bufferGuard.RLock()
-	defer wb.bufferGuard.RUnlock()
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
 
 	wb.dropPartitions(partitionIDs)
 }
@@ -215,8 +215,8 @@ func (wb *writeBufferBase) GetFlushTimestamp() uint64 {
 }
 
 func (wb *writeBufferBase) MemorySize() int64 {
-	wb.bufferGuard.RLock()
-	defer wb.bufferGuard.RUnlock()
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
 
 	var size int64
 	for _, segBuf := range wb.buffers {
@@ -227,8 +227,8 @@ func (wb *writeBufferBase) MemorySize() int64 {
 
 func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 	log := wb.logger
-	wb.bufferGuard.Lock()
-	defer wb.bufferGuard.Unlock()
+	wb.mut.Lock()
+	defer wb.mut.Unlock()
 
 	// need valid checkpoint before triggering syncing
 	if wb.checkpoint == nil {
@@ -247,8 +247,8 @@ func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 
 func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 	log := wb.cpRatedLogger
-	wb.bufferGuard.RLock()
-	defer wb.bufferGuard.RUnlock()
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
 
 	candidates := lo.MapToSlice(wb.buffers, func(_ int64, buf *segmentBuffer) *checkpointCandidate {
 		return &checkpointCandidate{buf.segmentID, buf.EarliestPosition(), "segment buffer"}
@@ -625,8 +625,8 @@ func (wb *writeBufferBase) getEstBatchSize() uint {
 func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 	log := wb.logger
 	// sink all data and call Drop for meta writer
-	wb.bufferGuard.Lock()
-	defer wb.bufferGuard.Unlock()
+	wb.mut.Lock()
+	defer wb.mut.Unlock()
 	if !drop {
 		return
 	}

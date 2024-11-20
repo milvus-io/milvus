@@ -152,8 +152,8 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream
 }
 
 func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
-	wb.bufferGuard.Lock()
-	defer wb.bufferGuard.Unlock()
+	wb.mut.Lock()
+	defer wb.mut.Unlock()
 
 	// buffer insert data and add segment if not exists
 	for _, inData := range insertData {
