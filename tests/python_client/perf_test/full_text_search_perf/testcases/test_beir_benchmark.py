@@ -37,7 +37,7 @@ prefix = "full_text_search_collection"
 
 
 def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
-                            index_type="SPARSE_INVERTED_INDEX"):
+                            index_type="SPARSE_INVERTED_INDEX", drop_ratio_search=0.0):
     corpus_ids, corpus_lst = [], []
     for key, val in corpus.items():
         corpus_ids.append(key)
@@ -107,7 +107,9 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
     texts_to_search = [q["document"] for q in query_data]
     search_params = {
         "metric_type": "BM25",
-        "params": {},
+        "params": {
+            "drop_ratio_search": drop_ratio_search
+        },
     }
     result_list = []
     q_batch_size = 1000
@@ -297,16 +299,16 @@ def es_full_text_search(corpus, queries, qrels, top_k=1000, index_name="hello", 
         batch_size=100
     )
     es_bm25_settings = {
-    "settings": {
-        "index": {
-            "similarity": {
-                "default": {
-                    "type": "BM25",
-                    "k1": 1.2,
-                    "b": 0.75,
+        "settings": {
+            "index": {
+                "similarity": {
+                    "default": {
+                        "type": "BM25",
+                        "k1": 1.2,
+                        "b": 0.75,
+                    }
                 }
-            }
-            },
+                },
         }
     }
     model.initialise()
@@ -343,7 +345,7 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
-    def test_search_with_full_text_search(self, dataset_name, index_type, es_host, dataset_dir):
+    def test_beir_vs_es(self, dataset_name, index_type, es_host, dataset_dir):
         self._connect()
         result = []
         os.makedirs('/tmp/ci_logs', exist_ok=True)
@@ -388,3 +390,42 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
         with open('/tmp/ci_logs/full_data.json', 'w') as json_file:
             json.dump(result, json_file, indent=4)
 
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_milvus_with_different_config(self, dataset_name, dataset_dir,):
+        self._connect()
+        result = []
+        os.makedirs('/tmp/ci_logs', exist_ok=True)
+        dataset = dataset_name
+        if dataset == "all":
+            datasets = ['msmarco', 'trec-covid', 'nfcorpus', 'nq', 'hotpotqa', 'fiqa', 'arguana', 'webis-touche2020',
+                        'quora', 'dbpedia-entity', 'fever', 'climate-fever', 'scifact']
+        else:
+            datasets = [dataset]
+        for dataset in datasets:
+            BASE_URL = f"https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{dataset}.zip"
+            data_path = beir.util.download_and_unzip(BASE_URL, out_dir=dataset_dir)
+            split = "test" if dataset != "msmarco" else "dev"
+            corpus, queries, qrels = GenericDataLoader(data_folder=data_path).load(split=split)
+
+            for index_type in ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"]:
+                for drop_ratio_search in [0.0, 0.32, 0.6]:
+                    collection_name = dataset.replace("-", "_") + "_full_text_search" + f"_index_type_{index_type}"   # collection name should not contain "-"
+                    top_k = 10
+                    milvus_full_text_search_result = milvus_full_text_search(collection_name, corpus, queries, qrels,
+                                                                             top_k=top_k,
+                                                                             index_type=index_type,
+                                                                             drop_ratio_search=drop_ratio_search)
+
+                    log.info(f"result for dataset {dataset}")
+                    log.info(f"milvus full text search result {milvus_full_text_search_result}")
+                    tmp = {
+                        "dataset": dataset,
+                        f"milvus_{index_type}_{drop_ratio_search}_full_text_search_result": milvus_full_text_search_result,
+                    }
+                    result.append(tmp)
+                    with open(f'/tmp/ci_logs/{dataset}_{index_type}_{drop_ratio_search}', 'w') as json_file:
+                        json.dump(tmp, json_file, indent=4)
+        # save result
+        with open(f'/tmp/ci_logs/milvus_full_data.json', 'w') as json_file:
+            json.dump(result, json_file, indent=4)
