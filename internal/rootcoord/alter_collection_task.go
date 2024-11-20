@@ -84,7 +84,7 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	})
 
 	// properties needs to be refreshed in the cache
-	aliases := a.core.meta.ListAliasesByID(oldColl.CollectionID)
+	aliases := a.core.meta.ListAliasesByID(ctx, oldColl.CollectionID)
 	redoTask.AddSyncStep(&expireCacheStep{
 		baseStep:        baseStep{core: a.core},
 		dbName:          a.Req.GetDbName(),
