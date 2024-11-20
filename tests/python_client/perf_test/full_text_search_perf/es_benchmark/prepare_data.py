@@ -113,7 +113,7 @@ if __name__ == '__main__':
         df = pd.read_parquet(f)
         df = df[['id', 'text']]
         documents = df.to_dict('records')
-        batch_size = 10000
+        batch_size = 100000
 
         for start in range(0, len(documents), batch_size):
             t0 = time.time()
