@@ -230,7 +230,7 @@ func (s *Server) startGrpcLoop() {
 	ctx, cancel := context.WithCancel(s.loopCtx)
 	defer cancel()
 
-	s.grpcServer = grpc.NewServer(
+	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
@@ -256,7 +256,10 @@ func (s *Server) startGrpcLoop() {
 			}),
 		)),
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
-	)
+	}
+
+	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("QueryCoord"))
+	s.grpcServer = grpc.NewServer(grpcOpts...)
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)

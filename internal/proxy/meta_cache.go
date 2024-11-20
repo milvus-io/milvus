@@ -252,6 +252,10 @@ func (s *schemaInfo) IsFieldLoaded(fieldID int64) bool {
 	return s.schemaHelper.IsFieldLoaded(fieldID)
 }
 
+func (s *schemaInfo) CanRetrieveRawFieldData(field *schemapb.FieldSchema) bool {
+	return s.schemaHelper.CanRetrieveRawFieldData(field)
+}
+
 // partitionInfos contains the cached collection partition informations.
 type partitionInfos struct {
 	partitionInfos        []*partitionInfo

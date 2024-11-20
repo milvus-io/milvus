@@ -83,6 +83,8 @@ type ComponentParam struct {
 	RbacConfig     rbacConfig
 	StreamingCfg   streamingConfig
 
+	InternalTLSCfg InternalTLSConfig
+
 	RootCoordGrpcServerCfg     GrpcServerConfig
 	ProxyGrpcServerCfg         GrpcServerConfig
 	QueryCoordGrpcServerCfg    GrpcServerConfig
@@ -138,6 +140,8 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.RbacConfig.init(bt)
 	p.GpuConfig.init(bt)
 	p.KnowhereConfig.init(bt)
+
+	p.InternalTLSCfg.Init(bt)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
 	p.ProxyGrpcServerCfg.Init("proxy", bt)
