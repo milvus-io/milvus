@@ -73,7 +73,6 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
-	log.Info("node workload status", zap.Int64("collectionID", collectionID), zap.Stringers("nodes", lo.Values(nodeItemsMap)))
 
 	queue := newPriorityQueue()
 	for _, item := range nodeItemsMap {
@@ -348,6 +347,11 @@ func (b *ScoreBasedBalancer) genSegmentPlan(br *balanceReport, replica *meta.Rep
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
+
+	log.Info("node workload status",
+		zap.Int64("collectionID", replica.GetCollectionID()),
+		zap.Int64("replicaID", replica.GetID()),
+		zap.Stringers("nodes", lo.Values(nodeItemsMap)))
 
 	// list all segment which could be balanced, and calculate node's score
 	for _, node := range onlineNodes {

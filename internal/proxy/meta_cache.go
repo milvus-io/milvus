@@ -981,9 +981,9 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 	ret := iterator.Shuffle()
 	m.leaderMut.Unlock()
 	nodeInfos := make([]string, 0)
-	for _, shardLeader := range newShardLeaders.shardLeaders {
+	for ch, shardLeader := range newShardLeaders.shardLeaders {
 		for _, nodeInfo := range shardLeader {
-			nodeInfos = append(nodeInfos, fmt.Sprintf("nodeID: %d, nodeAddr: %s", nodeInfo.nodeID, nodeInfo.address))
+			nodeInfos = append(nodeInfos, fmt.Sprintf("channel %s, nodeID: %d, nodeAddr: %s", ch, nodeInfo.nodeID, nodeInfo.address))
 		}
 	}
 	log.Debug("fill new collection shard leader", zap.Strings("nodeInfos", nodeInfos))
