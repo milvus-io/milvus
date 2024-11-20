@@ -1,5 +1,5 @@
 import os
-
+from elasticsearch import Elasticsearch
 from common.common_type import CaseLabel
 from common import common_func as cf
 from base.client_base import TestcaseBase
@@ -41,7 +41,7 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
     corpus_ids, corpus_lst = [], []
     for key, val in corpus.items():
         corpus_ids.append(key)
-        doc = val["text"]
+        doc = val.get("title", "") + " " + val.get("text", "")
         if len(doc) > 60000:
             doc = doc[:60000]
         corpus_lst.append(doc)
@@ -67,7 +67,7 @@ def milvus_full_text_search(collection_name, corpus, queries, qrels, top_k=1000,
         log.info(f"Collection {collection_name} already exists, will drop it")
         utility.drop_collection(collection_name)
     analyzer_params = {
-        "tokenizer": "whitespace",
+        "type": "english",
     }
     fields = [
         FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=10000, is_primary=True),
@@ -180,7 +180,7 @@ def lucene_full_text_search(corpus, queries, qrels, top_k=1000):
     queries_list = [query_data[i]["document"] for i in range(len(query_data))]
     corpus_tokens = bm25s.tokenize(corpus_list, leave=False)
     query_tokens = bm25s.tokenize(queries_list, leave=False)
-    model = bm25s.BM25(method="lucene", k1=1.5, b=0.75)
+    model = bm25s.BM25(method="lucene", k1=1.2, b=0.75)
     model.index(corpus_tokens, leave_progress=False)
     t0 = time.time()
     queried_results, queried_scores = model.retrieve(
@@ -195,6 +195,92 @@ def lucene_full_text_search(corpus, queries, qrels, top_k=1000):
         qrels, lucene_results_dict, [1, 10, 100, 1000]
     )
     log.info(f"Lucene NDCG: {ndcg}, MAP: {_map}, Recall: {recall}, Precision: {precision}")
+
+    return ndcg, _map, recall, precision
+def es_single_field_full_text_search(corpus, queries, qrels, top_k=1000, index_name="hello", hostname="localhost"):
+    num_docs = len(corpus)
+    num_queries = len(queries)
+
+    print("=" * 50)
+    print(f"Corpus Size: {num_docs:,}")
+    print(f"Queries Size: {num_queries:,}")
+
+    es = Elasticsearch(["http://10.100.36.174:9200"])
+    index_settings = {
+        "settings": {
+            "similarity": {
+                "default": {
+                    "type": "BM25",
+                    "k1": 1.5,
+                    "b": 0.75
+                }
+            }
+        },
+        "mappings": {
+            "properties": {
+                "document": {
+                    "type": "text",
+                    "analyzer": "english"
+                }
+            }
+        }
+    }
+
+    if es.indices.exists(index=index_name):
+        es.indices.delete(index=index_name)
+    es.indices.create(index=index_name, body=index_settings)
+    corpus_ids, corpus_lst = [], []
+    for key, val in corpus.items():
+        corpus_ids.append(key)
+        corpus_lst.append(val["title"] + " " + val["text"])
+    qids, queries_lst = [], []
+    for key, val in queries.items():
+        qids.append(key)
+        queries_lst.append(val)
+    corpus_data = [
+        {"id": str(corpus_id), "document": doc}
+        for corpus_id, doc in zip(corpus_ids, corpus_lst)
+    ]
+    query_data = [
+        {"id": str(qid), "document": query}
+        for qid, query in zip(qids, queries_lst)
+    ]
+
+    bulk_data = []
+    for doc in corpus_data:
+        bulk_data.append({"index": {"_index": index_name, "_id": doc["id"]}})
+        bulk_data.append({"document": doc["document"]})
+
+    es.bulk(body=bulk_data, refresh=True)
+    result_list = []
+    for query in query_data:
+        query_text = query["document"]
+        search_body = {
+            "query": {
+                "match": {
+                    "document": {
+                        "query": query_text,
+                        "operator": "or"
+                    }
+                }
+            },
+            "size": top_k
+        }
+        response = es.search(index=index_name, body=search_body)
+        result_list.append(response)
+    result_dict = {}
+    for i in range(len(query_data)):
+        data = {}
+        for hit in result_list[i]["hits"]["hits"]:
+            data[hit["_id"]] = hit["_score"]
+        result_dict[query_data[i]["id"]] = data
+    with open(f"/tmp/ci_logs/es_single_field_{index_name}_results.json", "w") as f:
+        json.dump(result_dict, f, indent=4)
+    ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(
+        qrels, result_dict, [1, 10, 100, 1000]
+    )
+    log.info(f"ES Single Field NDCG: {ndcg}, MAP: {_map}, Recall: {recall}, Precision: {precision}")
+    es.indices.delete(index=index_name)
 
     return ndcg, _map, recall, precision
 
@@ -220,18 +306,9 @@ def es_full_text_search(corpus, queries, qrels, top_k=1000, index_name="hello", 
                     "b": 0.75,
                 }
             }
-        },
-        "analysis": {
-            "analyzer": {
-                "rebuilt_whitespace": {
-                  "tokenizer": "whitespace",
-                  "filter": [
-                  ]
-                }
-  }
+            },
         }
     }
-}
     model.initialise()
     t0 = time.time()
     model.index(corpus)
@@ -280,19 +357,25 @@ class TestSearchWithFullTextSearchBenchmark(TestcaseBase):
         for dataset in datasets:
             BASE_URL = f"https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{dataset}.zip"
             out_dir = "/Users/zilliz/workspace/milvus/tests/python_client/datasets"
-            data_path = beir.util.download_and_unzip(BASE_URL, out_dir=out_dir)
+            data_path = beir.util.download_and_unzip(BASE_URL, out_dir=dataset_dir)
             split = "test" if dataset != "msmarco" else "dev"
             corpus, queries, qrels = GenericDataLoader(data_folder=data_path).load(split=split)
             collection_name = dataset.replace("-", "_") + "_full_text_search"  # collection name should not contain "-"
             top_k = 10
+            es_single_full_text_search_result = es_single_field_full_text_search(corpus, queries, qrels, top_k=top_k,
+                                                                                 index_name=collection_name,
+                                                                                 hostname=es_host)
             milvus_full_text_search_result = milvus_full_text_search(collection_name, corpus, queries, qrels,
                                                                      top_k=top_k, index_type=index_type)
             es_full_text_search_result = es_full_text_search(corpus, queries, qrels, top_k=top_k,
                                                              index_name=collection_name, hostname=es_host)
+
+
             # es_full_text_search_result = lucene_full_text_search(corpus, queries, qrels, top_k=top_k)
             log.info(f"result for dataset {dataset}")
             log.info(f"milvus full text search result {milvus_full_text_search_result}")
             log.info(f"es full text search result {es_full_text_search_result}")
+            log.info(f"es single full text search result {es_single_full_text_search_result}")
             tmp = {
                 "dataset": dataset,
                 "milvus_full_text_search_result": milvus_full_text_search_result,
