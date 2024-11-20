@@ -170,7 +170,8 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		zap.Int64s("sealSegments", sealedSegmentIDs),
 		zap.Int("flushedSegmentsCount", len(flushSegmentIDs)),
 		zap.Time("timeOfSeal", timeOfSeal),
-		zap.Time("flushTs", tsoutil.PhysicalTime(ts)))
+		zap.Uint64("flushTs", ts),
+		zap.Time("flushTs in time", tsoutil.PhysicalTime(ts)))
 
 	return &datapb.FlushResponse{
 		Status:          merr.Success(),
@@ -1227,7 +1228,8 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 // GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
 func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collection", req.GetCollectionID()),
-		zap.Time("flushTs", tsoutil.PhysicalTime(req.GetFlushTs()))).
+		zap.Uint64("flushTs", req.GetFlushTs()),
+		zap.Time("flushTs in time", tsoutil.PhysicalTime(req.GetFlushTs()))).
 		WithRateGroup("dc.GetFlushState", 1, 60)
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &milvuspb.GetFlushStateResponse{

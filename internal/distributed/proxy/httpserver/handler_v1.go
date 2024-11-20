@@ -728,7 +728,7 @@ func (h *HandlersV1) insert(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		insertReq := req.(*milvuspb.InsertRequest)
-		insertReq.FieldsData, err = anyToColumns(httpReq.Data, collSchema)
+		insertReq.FieldsData, err = anyToColumns(httpReq.Data, collSchema, true)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with insert data", zap.Any("data", httpReq.Data), zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -827,7 +827,7 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		upsertReq := req.(*milvuspb.UpsertRequest)
-		upsertReq.FieldsData, err = anyToColumns(httpReq.Data, collSchema)
+		upsertReq.FieldsData, err = anyToColumns(httpReq.Data, collSchema, false)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with upsert data", zap.Any("data", httpReq.Data), zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{

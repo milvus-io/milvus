@@ -157,6 +157,9 @@ func printFieldsV2(fields []*schemapb.FieldSchema) []gin.H {
 func printFieldDetails(fields []*schemapb.FieldSchema, oldVersion bool) []gin.H {
 	var res []gin.H
 	for _, field := range fields {
+		if field.Name == common.MetaFieldName {
+			continue
+		}
 		fieldDetail := gin.H{
 			HTTPReturnFieldName:          field.Name,
 			HTTPReturnFieldPrimaryKey:    field.IsPrimaryKey,
@@ -229,6 +232,9 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 
 	var fieldNames []string
 	for _, field := range collSchema.Fields {
+		if field.IsDynamic {
+			continue
+		}
 		fieldNames = append(fieldNames, field.Name)
 	}
 
@@ -236,15 +242,16 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 		reallyData := map[string]interface{}{}
 		if data.Type == gjson.JSON {
 			for _, field := range collSchema.Fields {
+				if field.IsDynamic {
+					continue
+				}
 				fieldType := field.DataType
 				fieldName := field.Name
 
 				dataString := gjson.Get(data.Raw, fieldName).String()
 
-				if field.IsPrimaryKey && field.AutoID {
-					if dataString != "" {
-						return merr.WrapErrParameterInvalid("", "set primary key but autoID == true"), reallyDataArray
-					}
+				// if has pass pk than just to try to set it
+				if field.IsPrimaryKey && field.AutoID && len(dataString) == 0 {
 					continue
 				}
 
@@ -478,9 +485,12 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 			}
 
 			// fill dynamic schema
-			if collSchema.EnableDynamicField {
-				for mapKey, mapValue := range data.Map() {
-					if !containsString(fieldNames, mapKey) {
+			for mapKey, mapValue := range data.Map() {
+				if !containsString(fieldNames, mapKey) {
+					if collSchema.EnableDynamicField {
+						if mapKey == common.MetaFieldName {
+							return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("use the invalid field name(%s) when enable dynamicField", mapKey)), nil
+						}
 						mapValueStr := mapValue.String()
 						switch mapValue.Type {
 						case gjson.True, gjson.False:
@@ -500,6 +510,8 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						default:
 							log.Warn("unknown json type found", zap.Int("mapValue.Type", int(mapValue.Type)))
 						}
+					} else {
+						return merr.WrapErrParameterInvalidMsg("has pass more field without dynamic schema, please check it"), nil
 					}
 				}
 			}
@@ -613,7 +625,7 @@ func convertToIntArray(dataType schemapb.DataType, arr interface{}) []int32 {
 	return res
 }
 
-func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema) ([]*schemapb.FieldData, error) {
+func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema, inInsert bool) ([]*schemapb.FieldData, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
 		return []*schemapb.FieldData{}, fmt.Errorf("no row need to be convert to columns")
@@ -625,8 +637,7 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 	nameDims := make(map[string]int64)
 	fieldData := make(map[string]*schemapb.FieldData)
 	for _, field := range sch.Fields {
-		// skip auto id pk field
-		if (field.IsPrimaryKey && field.AutoID) || field.IsDynamic {
+		if (field.IsPrimaryKey && field.AutoID && inInsert) || field.IsDynamic {
 			continue
 		}
 		var data interface{}
@@ -697,13 +708,16 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 			return nil, err
 		}
 		for idx, field := range sch.Fields {
-			// skip auto id pk field
-			if (field.IsPrimaryKey && field.AutoID) || field.IsDynamic {
-				// remove pk field from candidates set, avoid adding it into dynamic column
-				delete(set, field.Name)
+			if field.IsDynamic {
 				continue
 			}
 			candi, ok := set[field.Name]
+			if field.IsPrimaryKey && field.AutoID && inInsert {
+				if ok {
+					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("no need to pass pk field(%s) when autoid==true in insert", field.Name))
+				}
+				continue
+			}
 			if !ok {
 				return nil, fmt.Errorf("row %d does not has field %s", idx, field.Name)
 			}
@@ -751,7 +765,7 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 
 			delete(set, field.Name)
 		}
-
+		// if is not dynamic, but pass more field, will throw err in /internal/distributed/proxy/httpserver/utils.go@checkAndSetData
 		if isDynamic {
 			m := make(map[string]interface{})
 			for name, candi := range set {
@@ -1203,7 +1217,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				case schemapb.DataType_JSON:
 					data, ok := fieldDataList[j].GetScalars().Data.(*schemapb.ScalarField_JsonData)
 					if ok && !fieldDataList[j].IsDynamic {
-						row[fieldDataList[j].FieldName] = data.JsonData.Data[i]
+						row[fieldDataList[j].FieldName] = string(data.JsonData.Data[i])
 					} else {
 						var dataMap map[string]interface{}
 
@@ -1313,4 +1327,16 @@ func convertToExtraParams(indexParam IndexParam) ([]*commonpb.KeyValuePair, erro
 		params = append(params, &commonpb.KeyValuePair{Key: common.IndexParamsKey, Value: string(v)})
 	}
 	return params, nil
+}
+
+func convertConsistencyLevel(reqConsistencyLevel string) (commonpb.ConsistencyLevel, bool, error) {
+	if reqConsistencyLevel != "" {
+		level, ok := commonpb.ConsistencyLevel_value[reqConsistencyLevel]
+		if !ok {
+			return 0, false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("parameter:'%s' is incorrect, please check it", reqConsistencyLevel))
+		}
+		return commonpb.ConsistencyLevel(level), false, nil
+	}
+	// ConsistencyLevel_Bounded default in PyMilvus
+	return commonpb.ConsistencyLevel_Bounded, true, nil
 }

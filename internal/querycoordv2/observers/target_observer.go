@@ -386,16 +386,16 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		channelReadyLeaders := lo.Filter(ob.distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel)), func(leader *meta.LeaderView, _ int) bool {
 			return utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, leader, meta.NextTarget) == nil
 		})
-		collectionReadyLeaders = append(collectionReadyLeaders, channelReadyLeaders...)
 
 		// to avoid stuck here in dynamic increase replica case, we just check available delegator number
-		if int32(len(collectionReadyLeaders)) < replicaNum {
+		if int32(len(channelReadyLeaders)) < replicaNum {
 			log.RatedInfo(10, "channel not ready",
 				zap.Int("readyReplicaNum", len(channelReadyLeaders)),
 				zap.String("channelName", channel),
 			)
 			return false
 		}
+		collectionReadyLeaders = append(collectionReadyLeaders, channelReadyLeaders...)
 	}
 
 	var collectionInfo *milvuspb.DescribeCollectionResponse

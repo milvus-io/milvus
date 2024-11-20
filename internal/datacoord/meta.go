@@ -416,7 +416,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 			coll, ok := m.collections[segment.GetCollectionID()]
 			if ok {
 				metrics.DataCoordStoredBinlogSize.WithLabelValues(coll.DatabaseName,
-					fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID()), segment.GetState().String()).Set(float64(segmentSize))
+					fmt.Sprint(segment.GetCollectionID()), segment.GetState().String()).Set(float64(segmentSize))
 			} else {
 				log.Warn("not found database name", zap.Int64("collectionID", segment.GetCollectionID()))
 			}
@@ -515,10 +515,6 @@ func (m *meta) DropSegment(segmentID UniqueID) error {
 		return err
 	}
 	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String()).Dec()
-	coll, ok := m.collections[segment.CollectionID]
-	if ok {
-		metrics.CleanupDataCoordSegmentMetrics(coll.DatabaseName, segment.CollectionID, segment.ID)
-	}
 
 	m.segments.DropSegment(segmentID)
 	log.Info("meta update: dropping segment - complete",
@@ -633,7 +629,7 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 		// Apply segment metric update after successful meta update.
 		metricMutation.commit()
 		// Update in-memory meta.
-		m.segments.SetState(segmentID, targetState)
+		m.segments.SetSegment(segmentID, clonedSegment)
 	}
 	log.Info("meta update: setting segment state - complete",
 		zap.Int64("segmentID", segmentID),

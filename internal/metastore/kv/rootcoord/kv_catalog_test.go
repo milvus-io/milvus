@@ -197,7 +197,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, PartitionMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(pm)}, nil)
+			Return([]string{"rootcoord/partitions/1/1"}, []string{string(pm)}, nil)
 
 		fieldMeta := &schemapb.FieldSchema{}
 		fm, err := proto.Marshal(fieldMeta)
@@ -207,7 +207,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(fm)}, nil)
+			Return([]string{"rootcoord/fields/1/1"}, []string{string(fm)}, nil)
 		kc := Catalog{Snapshot: kv}
 
 		ret, err := kc.ListCollections(ctx, testDb, ts)
@@ -238,7 +238,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, PartitionMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(pm)}, nil)
+			Return([]string{"rootcoord/partitions/1/1"}, []string{string(pm)}, nil)
 
 		fieldMeta := &schemapb.FieldSchema{}
 		fm, err := proto.Marshal(fieldMeta)
@@ -248,7 +248,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(fm)}, nil)
+			Return([]string{"rootcoord/fields/1/1"}, []string{string(fm)}, nil)
 		kv.On("MultiSaveAndRemoveWithPrefix", mock.Anything, mock.Anything, ts).Return(nil)
 		kc := Catalog{Snapshot: kv}
 
