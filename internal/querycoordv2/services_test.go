@@ -348,6 +348,7 @@ func (suite *ServiceSuite) TestLoadCollection() {
 	for _, collection := range suite.collections {
 		suite.expectGetRecoverInfo(collection)
 		suite.expectDescribeCollection()
+		suite.expectLoadPartitions()
 
 		req := &querypb.LoadCollectionRequest{
 			CollectionID: collection,
@@ -1101,6 +1102,7 @@ func (suite *ServiceSuite) TestRefreshCollection() {
 	suite.loadAll()
 
 	suite.expectListIndexes()
+	suite.expectLoadPartitions()
 
 	// Test refresh all collections again when collections are loaded. This time should fail with collection not 100% loaded.
 	for _, collection := range suite.collections {
@@ -1834,6 +1836,7 @@ func (suite *ServiceSuite) loadAll() {
 	for _, collection := range suite.collections {
 		suite.expectDescribeCollection()
 		suite.expectGetRecoverInfo(collection)
+		suite.expectLoadPartitions()
 		if suite.loadTypes[collection] == querypb.LoadType_LoadCollection {
 			req := &querypb.LoadCollectionRequest{
 				CollectionID:  collection,
@@ -1859,7 +1862,6 @@ func (suite *ServiceSuite) loadAll() {
 			suite.NotNil(suite.meta.GetCollection(collection))
 			suite.targetMgr.UpdateCollectionCurrentTarget(collection)
 		} else {
-			suite.expectLoadPartitions()
 			req := &querypb.LoadPartitionsRequest{
 				CollectionID:  collection,
 				PartitionIDs:  suite.partitions[collection],
