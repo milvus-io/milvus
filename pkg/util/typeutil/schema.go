@@ -444,6 +444,20 @@ func (helper *SchemaHelper) GetFunctionByOutputField(field *schemapb.FieldSchema
 	return nil, fmt.Errorf("function not exist")
 }
 
+// As of now, only BM25 function output field is not supported to retrieve raw field data
+func (helper *SchemaHelper) CanRetrieveRawFieldData(field *schemapb.FieldSchema) bool {
+	if !field.IsFunctionOutput {
+		return true
+	}
+
+	f, err := helper.GetFunctionByOutputField(field)
+	if err != nil {
+		return false
+	}
+
+	return f.GetType() != schemapb.FunctionType_BM25
+}
+
 func (helper *SchemaHelper) GetCollectionName() string {
 	return helper.schema.Name
 }
