@@ -33,6 +33,7 @@ type PullNewDataViewFunction func(collectionID int64) (*DataView, error)
 type ViewManager interface {
 	Get(collectionID int64) (*DataView, error)
 	GetVersion(collectionID int64) int64
+	Remove(collectionID int64)
 
 	Start()
 	Close()
@@ -63,8 +64,12 @@ func (m *dataViewManager) Get(collectionID int64) (*DataView, error) {
 	if err != nil {
 		return nil, err
 	}
-	m.currentViews.GetOrInsert(collectionID, view)
-	return view, nil
+
+	v, ok := m.currentViews.GetOrInsert(collectionID, view)
+	if !ok {
+		log.Info("update new data view", zap.Int64("collectionID", collectionID), zap.Int64("version", view.Version))
+	}
+	return v, nil
 }
 
 func (m *dataViewManager) GetVersion(collectionID int64) int64 {
@@ -72,6 +77,12 @@ func (m *dataViewManager) GetVersion(collectionID int64) int64 {
 		return view.Version
 	}
 	return InitialDataViewVersion
+}
+
+func (m *dataViewManager) Remove(collectionID int64) {
+	if view, ok := m.currentViews.GetAndRemove(collectionID); ok {
+		log.Info("data view removed", zap.Int64("collectionID", collectionID), zap.Int64("version", view.Version))
+	}
 }
 
 func (m *dataViewManager) Start() {
@@ -100,35 +111,36 @@ func (m *dataViewManager) Close() {
 }
 
 func (m *dataViewManager) update(view *DataView) {
-	_, ok := m.currentViews.GetOrInsert(view.CollectionID, view)
-	if ok {
-		log.Info("update new data view", zap.Int64("collectionID", view.CollectionID), zap.Int64("version", view.Version))
-	}
+	m.currentViews.Insert(view.CollectionID, view)
+	log.Info("update new data view", zap.Int64("collectionID", view.CollectionID), zap.Int64("version", view.Version))
 }
 
 func (m *dataViewManager) TryUpdateDataView(collectionID int64) {
 	newView, err := m.pullFn(collectionID)
 	if err != nil {
 		log.Warn("pull new data view failed", zap.Int64("collectionID", collectionID), zap.Error(err))
-		// notify to trigger pull again
+		// notify to trigger retry
 		NotifyUpdate(collectionID)
 		return
 	}
 
 	currentView, ok := m.currentViews.Get(collectionID)
 	if !ok {
-		m.currentViews.GetOrInsert(collectionID, newView)
+		// update due to data view is empty
+		m.update(newView)
 		return
 	}
 	// no-op if the incoming version is less than the current version.
 	if newView.Version <= currentView.Version {
+		log.Warn("stale version, skip update", zap.Int64("collectionID", collectionID),
+			zap.Int64("new", newView.Version), zap.Int64("current", currentView.Version))
 		return
 	}
 
-	// check if channel info has been updated.
 	for channel, new := range newView.Channels {
 		current, ok := currentView.Channels[channel]
 		if !ok {
+			// update due to channel info is empty
 			m.update(newView)
 			return
 		}
@@ -137,22 +149,25 @@ func (m *dataViewManager) TryUpdateDataView(collectionID int64) {
 			!funcutil.SliceSetEqual(new.GetFlushedSegmentIds(), current.GetFlushedSegmentIds()) ||
 			!funcutil.SliceSetEqual(new.GetIndexedSegmentIds(), current.GetIndexedSegmentIds()) ||
 			!funcutil.SliceSetEqual(new.GetDroppedSegmentIds(), current.GetDroppedSegmentIds()) {
+			// update due to segments list changed
 			m.update(newView)
 			return
 		}
 		if !typeutil.MapEqual(new.GetPartitionStatsVersions(), current.GetPartitionStatsVersions()) {
+			// update due to partition stats changed
 			m.update(newView)
 			return
 		}
 		// TODO: It might be too frequent.
 		if new.GetSeekPosition().GetTimestamp() > current.GetSeekPosition().GetTimestamp() {
+			// update due to channel cp advanced
 			m.update(newView)
 			return
 		}
 	}
 
-	// check if segment info has been updated.
 	if !typeutil.MapEqual(newView.Segments, currentView.Segments) {
-		m.currentViews.GetOrInsert(collectionID, newView)
+		// update due to segments list changed
+		m.update(newView)
 	}
 }
