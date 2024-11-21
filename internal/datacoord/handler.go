@@ -474,5 +474,8 @@ func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) er
 	// clean collection info cache when meet drop collection info
 	h.s.meta.DropCollection(collectionID)
 
+	// clean data view
+	h.s.viewManager.Remove(collectionID)
+
 	return nil
 }

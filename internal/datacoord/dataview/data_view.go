@@ -18,7 +18,7 @@ package dataview
 
 import "github.com/milvus-io/milvus/internal/proto/datapb"
 
-const InitialDataViewVersion = 0
+const InitialDataViewVersion int64 = 0
 
 type DataView struct {
 	CollectionID int64
