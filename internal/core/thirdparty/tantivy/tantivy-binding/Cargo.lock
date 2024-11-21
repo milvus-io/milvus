@@ -612,9 +612,9 @@ dependencies = [
 
 [[package]]
 name = "lazy_static"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "levenshtein_automata"
@@ -781,7 +781,7 @@ checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 [[package]]
 name = "ownedbytes"
 version = "0.6.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix#e2de49f01bbb9b9ba946a08ae05a8f495a691fbb"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
 dependencies = [
  "stable_deref_trait",
 ]
@@ -1106,7 +1106,7 @@ dependencies = [
 [[package]]
 name = "tantivy"
 version = "0.21.1"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix#e2de49f01bbb9b9ba946a08ae05a8f495a691fbb"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
 dependencies = [
  "aho-corasick",
  "arc-swap",
@@ -1122,6 +1122,7 @@ dependencies = [
  "fs4",
  "htmlescape",
  "itertools",
+ "lazy_static",
  "levenshtein_automata",
  "log",
  "lru",
@@ -1152,6 +1153,7 @@ dependencies = [
  "time",
  "uuid",
  "winapi",
+ "zstd-sys",
 ]
 
 [[package]]
@@ -1175,7 +1177,7 @@ dependencies = [
 [[package]]
 name = "tantivy-bitpacker"
 version = "0.5.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix#e2de49f01bbb9b9ba946a08ae05a8f495a691fbb"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
 dependencies = [
  "bitpacking",
 ]
@@ -1183,7 +1185,7 @@ dependencies = [
 [[package]]
 name = "tantivy-columnar"
 version = "0.2.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix#e2de49f01bbb9b9ba946a08ae05a8f495a691fbb"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
 dependencies = [
  "fastdivide",
  "fnv",
@@ -1198,7 +1200,7 @@ dependencies = [
 [[package]]
 name = "tantivy-common"
 version = "0.6.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix#e2de49f01bbb9b9ba946a08ae05a8f495a691fbb"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -1221,7 +1223,7 @@ dependencies = [
 [[package]]
 name = "tantivy-query-grammar"
 version = "0.21.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix#e2de49f01bbb9b9ba946a08ae05a8f495a691fbb"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
 dependencies = [
  "nom",
 ]
@@ -1229,7 +1231,7 @@ dependencies = [
 [[package]]
 name = "tantivy-sstable"
 version = "0.2.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix#e2de49f01bbb9b9ba946a08ae05a8f495a691fbb"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
 dependencies = [
  "tantivy-common",
  "tantivy-fst",
@@ -1239,7 +1241,7 @@ dependencies = [
 [[package]]
 name = "tantivy-stacker"
 version = "0.2.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix#e2de49f01bbb9b9ba946a08ae05a8f495a691fbb"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
 dependencies = [
  "murmurhash32",
  "tantivy-common",
@@ -1248,7 +1250,7 @@ dependencies = [
 [[package]]
 name = "tantivy-tokenizer-api"
 version = "0.2.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix#e2de49f01bbb9b9ba946a08ae05a8f495a691fbb"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
 dependencies = [
  "serde",
 ]
