@@ -112,7 +112,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	}
 	timeOfSeal, _ := tsoutil.ParseTS(ts)
 
-	sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, req.GetCollectionID(), req.GetSegmentIDs())
+	sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, coll.VChannelNames, req.GetSegmentIDs())
 	if err != nil {
 		return &datapb.FlushResponse{
 			Status: merr.Status(errors.Wrapf(err, "failed to flush collection %d",
@@ -507,10 +507,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		// Set segment state
 		if req.GetDropped() {
 			// segmentManager manages growing segments
-			s.segmentManager.DropSegment(ctx, req.GetSegmentID())
+			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetPartitionID(), req.GetSegmentID())
 			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
 		} else if req.GetFlushed() {
-			s.segmentManager.DropSegment(ctx, req.GetSegmentID())
+			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetPartitionID(), req.GetSegmentID())
 			// set segment to SegmentState_Flushing
 			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushing))
 		}
@@ -1446,10 +1446,7 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 
 	s.updateSegmentStatistics(segmentStats)
 
-	if err := s.segmentManager.ExpireAllocations(channel, ts); err != nil {
-		log.Warn("failed to expire allocations", zap.Error(err))
-		return err
-	}
+	s.segmentManager.ExpireAllocations(channel, ts)
 
 	flushableIDs, err := s.segmentManager.GetFlushableSegments(ctx, channel, ts)
 	if err != nil {
