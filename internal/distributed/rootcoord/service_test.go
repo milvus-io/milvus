@@ -142,13 +142,13 @@ func TestRun(t *testing.T) {
 
 		mockDataCoord := mocks.NewMockDataCoordClient(t)
 		mockDataCoord.EXPECT().Close().Return(nil)
-		svr.newDataCoordClient = func(_ context.Context) types.DataCoordClient {
+		svr.newDataCoordClient = func() types.DataCoordClient {
 			return mockDataCoord
 		}
 
 		mockQueryCoord := mocks.NewMockQueryCoordClient(t)
 		mockQueryCoord.EXPECT().Close().Return(nil)
-		svr.newQueryCoordClient = func(_ context.Context) types.QueryCoordClient {
+		svr.newQueryCoordClient = func() types.QueryCoordClient {
 			return mockQueryCoord
 		}
 
@@ -238,7 +238,7 @@ func TestServerRun_DataCoordClientInitErr(t *testing.T) {
 
 		mockDataCoord := mocks.NewMockDataCoordClient(t)
 		mockDataCoord.EXPECT().Close().Return(nil)
-		server.newDataCoordClient = func(_ context.Context) types.DataCoordClient {
+		server.newDataCoordClient = func() types.DataCoordClient {
 			return mockDataCoord
 		}
 		err = server.Prepare()
@@ -268,7 +268,7 @@ func TestServerRun_DataCoordClientStartErr(t *testing.T) {
 
 		mockDataCoord := mocks.NewMockDataCoordClient(t)
 		mockDataCoord.EXPECT().Close().Return(nil)
-		server.newDataCoordClient = func(_ context.Context) types.DataCoordClient {
+		server.newDataCoordClient = func() types.DataCoordClient {
 			return mockDataCoord
 		}
 		err = server.Prepare()
@@ -298,7 +298,7 @@ func TestServerRun_QueryCoordClientInitErr(t *testing.T) {
 
 		mockQueryCoord := mocks.NewMockQueryCoordClient(t)
 		mockQueryCoord.EXPECT().Close().Return(nil)
-		server.newQueryCoordClient = func(_ context.Context) types.QueryCoordClient {
+		server.newQueryCoordClient = func() types.QueryCoordClient {
 			return mockQueryCoord
 		}
 		err = server.Prepare()
@@ -328,7 +328,7 @@ func TestServer_QueryCoordClientStartErr(t *testing.T) {
 
 		mockQueryCoord := mocks.NewMockQueryCoordClient(t)
 		mockQueryCoord.EXPECT().Close().Return(nil)
-		server.newQueryCoordClient = func(_ context.Context) types.QueryCoordClient {
+		server.newQueryCoordClient = func() types.QueryCoordClient {
 			return mockQueryCoord
 		}
 		err = server.Prepare()
