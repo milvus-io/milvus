@@ -303,6 +303,7 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 		c.executingGuard.Lock()
 		c.executingTasks[t.GetTaskProto().GetPlanID()] = t
 		if len(c.executingTasks) >= parallelism {
+			c.executingGuard.Unlock()
 			break // 2. the parallelism of running tasks is reached
 		}
 		c.executingGuard.Unlock()
