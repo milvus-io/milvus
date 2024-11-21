@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/dataview"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -787,6 +788,39 @@ func TestServer_GcConfirm(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.False(t, resp.GetGcFinished())
+	})
+}
+
+func TestGetDataViewVersions(t *testing.T) {
+	t.Run("server not healthy", func(t *testing.T) {
+		svr := newTestServer(t)
+		closeTestServer(t, svr)
+		resp, err := svr.GetDataViewVersions(context.TODO(), &datapb.GetDataViewVersionsRequest{})
+		assert.NoError(t, err)
+		err = merr.Error(resp.GetStatus())
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	})
+
+	t.Run("normal", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		pullFn := func(collectionID int64) (*dataview.DataView, error) {
+			return &dataview.DataView{
+				CollectionID: collectionID,
+				Version:      time.Now().UnixNano(),
+			}, nil
+		}
+		manager := dataview.NewDataViewManager(pullFn)
+		svr.viewManager = manager
+
+		req := &datapb.GetDataViewVersionsRequest{
+			CollectionIDs: []int64{100, 200, 300},
+		}
+		resp, err := svr.GetDataViewVersions(context.TODO(), req)
+		assert.NoError(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetCode())
+		assert.EqualValues(t, 3, len(resp.GetDataViewVersions()))
 	})
 }
 
