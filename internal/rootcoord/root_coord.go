@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -1175,13 +1176,19 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	return t.Rsp, nil
 }
 
-// getRealCollectionName get origin collection name to avoid the alias name
-func (c *Core) getRealCollectionName(ctx context.Context, db, collection string) string {
-	realName, err := c.meta.DescribeAlias(ctx, db, collection, 0)
-	if err != nil {
-		return collection
+// getCollectionIDStr get collectionID string to avoid the alias name
+func (c *Core) getCollectionIDStr(ctx context.Context, db, collectionName string, collectionID int64) string {
+	// When neither the collection name nor the collectionID exists, no error is returned at this point.
+	// An error will be returned during the execution phase.
+	if collectionID != 0 {
+		return strconv.FormatInt(collectionID, 10)
 	}
-	return realName
+
+	coll, err := c.meta.GetCollectionByName(ctx, db, collectionName, typeutil.MaxTimestamp)
+	if err != nil {
+		return "-1"
+	}
+	return strconv.FormatInt(coll.CollectionID, 10)
 }
 
 func (c *Core) describeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest, allowUnavailable bool) (*model.Collection, error) {

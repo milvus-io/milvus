@@ -68,50 +68,35 @@ type checkpointCandidate struct {
 }
 
 type checkpointCandidates struct {
-	candidates map[string]*checkpointCandidate
-	mu         sync.RWMutex
+	candidates *typeutil.ConcurrentMap[string, *checkpointCandidate]
+}
+
+func getCandidatesKey(segmentID int64, timestamp uint64) string {
+	return fmt.Sprintf("%d-%d", segmentID, timestamp)
 }
 
 func newCheckpointCandiates() *checkpointCandidates {
 	return &checkpointCandidates{
-		candidates: make(map[string]*checkpointCandidate),
+		candidates: typeutil.NewConcurrentMap[string, *checkpointCandidate](), // segmentID-ts
 	}
 }
 
 func (c *checkpointCandidates) Remove(segmentID int64, timestamp uint64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.candidates, fmt.Sprintf("%d-%d", segmentID, timestamp))
-}
-
-func (c *checkpointCandidates) RemoveChannel(channel string, timestamp uint64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.candidates, fmt.Sprintf("%s-%d", channel, timestamp))
+	c.candidates.Remove(getCandidatesKey(segmentID, timestamp))
 }
 
 func (c *checkpointCandidates) Add(segmentID int64, position *msgpb.MsgPosition, source string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.candidates[fmt.Sprintf("%d-%d", segmentID, position.GetTimestamp())] = &checkpointCandidate{segmentID, position, source}
-}
-
-func (c *checkpointCandidates) AddChannel(channel string, position *msgpb.MsgPosition, source string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.candidates[fmt.Sprintf("%s-%d", channel, position.GetTimestamp())] = &checkpointCandidate{-1, position, source}
+	c.candidates.Insert(getCandidatesKey(segmentID, position.GetTimestamp()), &checkpointCandidate{segmentID, position, source})
 }
 
 func (c *checkpointCandidates) GetEarliestWithDefault(def *checkpointCandidate) *checkpointCandidate {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	var result *checkpointCandidate = def
-	for _, candidate := range c.candidates {
+	c.candidates.Range(func(_ string, candidate *checkpointCandidate) bool {
 		if result == nil || candidate.position.GetTimestamp() < result.position.GetTimestamp() {
 			result = candidate
 		}
-	}
+		return true
+	})
 	return result
 }
 
@@ -126,8 +111,6 @@ func NewWriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syncm
 
 // writeBufferBase is the common component for buffering data
 type writeBufferBase struct {
-	mut sync.RWMutex
-
 	collectionID int64
 	channelName  string
 
@@ -136,6 +119,7 @@ type writeBufferBase struct {
 	estSizePerRecord int
 	metaCache        metacache.MetaCache
 
+	mut     sync.RWMutex
 	buffers map[int64]*segmentBuffer // segmentID => segmentBuffer
 
 	syncPolicies   []SyncPolicy
