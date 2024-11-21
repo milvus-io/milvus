@@ -40,7 +40,7 @@ import (
 
 type StreamPipeline interface {
 	Pipeline
-	ConsumeMsgStream(position *msgpb.MsgPosition) error
+	ConsumeMsgStream(ctx context.Context, position *msgpb.MsgPosition) error
 	Status() string
 }
 
@@ -85,7 +85,7 @@ func (p *streamPipeline) Status() string {
 	return "Healthy"
 }
 
-func (p *streamPipeline) ConsumeMsgStream(position *msgpb.MsgPosition) error {
+func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.MsgPosition) error {
 	var err error
 	if position == nil {
 		log.Error("seek stream to nil position")
@@ -101,7 +101,7 @@ func (p *streamPipeline) ConsumeMsgStream(position *msgpb.MsgPosition) error {
 			zap.Uint64("timestamp", position.GetTimestamp()),
 		)
 		handler := adaptor.NewMsgPackAdaptorHandler()
-		p.scanner = streaming.WAL().Read(context.Background(), streaming.ReadOption{
+		p.scanner = streaming.WAL().Read(ctx, streaming.ReadOption{
 			VChannel:      position.GetChannelName(),
 			DeliverPolicy: options.DeliverPolicyStartFrom(startFrom),
 			DeliverFilters: []options.DeliverFilter{
@@ -117,7 +117,7 @@ func (p *streamPipeline) ConsumeMsgStream(position *msgpb.MsgPosition) error {
 	}
 
 	start := time.Now()
-	p.input, err = p.dispatcher.Register(context.TODO(), p.vChannel, position, common.SubscriptionPositionUnknown)
+	p.input, err = p.dispatcher.Register(ctx, p.vChannel, position, common.SubscriptionPositionUnknown)
 	if err != nil {
 		log.Error("dispatcher register failed", zap.String("channel", position.ChannelName))
 		return WrapErrRegDispather(err)
