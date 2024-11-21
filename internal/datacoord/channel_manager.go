@@ -449,6 +449,7 @@ func (m *ChannelManagerImpl) AdvanceChannelState(ctx context.Context) {
 	standbys := m.store.GetNodeChannelsBy(WithAllNodes(), WithChannelStates(Standby))
 	toNotifies := m.store.GetNodeChannelsBy(WithoutBufferNode(), WithChannelStates(ToWatch, ToRelease))
 	toChecks := m.store.GetNodeChannelsBy(WithoutBufferNode(), WithChannelStates(Watching, Releasing))
+	maxNum := len(m.store.GetNodes()) * paramtable.Get().DataCoordCfg.MaxConcurrentChannelTaskNumPerDN.GetAsInt()
 	m.mu.RUnlock()
 
 	// Processing standby channels
@@ -458,7 +459,6 @@ func (m *ChannelManagerImpl) AdvanceChannelState(ctx context.Context) {
 
 	var (
 		updatedToNotifies bool
-		maxNum            = len(m.store.GetNodes()) * paramtable.Get().DataCoordCfg.MaxConcurrentChannelTaskNumPerDN.GetAsInt()
 		executingNum      = len(toChecks)
 		toNotifyNum       = maxNum - executingNum
 	)
