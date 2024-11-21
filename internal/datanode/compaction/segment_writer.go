@@ -287,13 +287,14 @@ type SegmentWriter struct {
 	tsFrom  typeutil.Timestamp
 	tsTo    typeutil.Timestamp
 
-	pkstats      *storage.PrimaryKeyStats
-	segmentID    int64
-	partitionID  int64
-	collectionID int64
-	sch          *schemapb.CollectionSchema
-	rowCount     *atomic.Int64
-	syncedSize   *atomic.Int64
+	pkstats       *storage.PrimaryKeyStats
+	segmentID     int64
+	partitionID   int64
+	collectionID  int64
+	sch           *schemapb.CollectionSchema
+	rowCount      *atomic.Int64
+	syncedSize    *atomic.Int64
+	maxBinlogSize uint64
 }
 
 func (w *SegmentWriter) GetRowNum() int64 {
@@ -341,12 +342,12 @@ func (w *SegmentWriter) Finish() (*storage.Blob, error) {
 }
 
 func (w *SegmentWriter) IsFull() bool {
-	return w.writer.WrittenMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
+	return w.writer.WrittenMemorySize() > w.maxBinlogSize
 }
 
 func (w *SegmentWriter) FlushAndIsFull() bool {
 	w.writer.Flush()
-	return w.writer.WrittenMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
+	return w.writer.WrittenMemorySize() > w.maxBinlogSize
 }
 
 func (w *SegmentWriter) IsEmpty() bool {
@@ -418,13 +419,14 @@ func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, segID, par
 		tsFrom:  math.MaxUint64,
 		tsTo:    0,
 
-		pkstats:      stats,
-		sch:          sch,
-		segmentID:    segID,
-		partitionID:  partID,
-		collectionID: collID,
-		rowCount:     atomic.NewInt64(0),
-		syncedSize:   atomic.NewInt64(0),
+		pkstats:       stats,
+		sch:           sch,
+		segmentID:     segID,
+		partitionID:   partID,
+		collectionID:  collID,
+		rowCount:      atomic.NewInt64(0),
+		syncedSize:    atomic.NewInt64(0),
+		maxBinlogSize: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 	}
 
 	return &segWriter, nil
