@@ -165,19 +165,23 @@ func (_c *MockCache_GetCollectionID_Call) RunAndReturn(run func(context.Context,
 }
 
 // GetCollectionInfo provides a mock function with given fields: ctx, database, collectionName, collectionID
-func (_m *MockCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionBasicInfo, error) {
+func (_m *MockCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionInfo, error) {
 	ret := _m.Called(ctx, database, collectionName, collectionID)
 
-	var r0 *collectionBasicInfo
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionInfo")
+	}
+
+	var r0 *collectionInfo
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64) (*collectionBasicInfo, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64) (*collectionInfo, error)); ok {
 		return rf(ctx, database, collectionName, collectionID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64) *collectionBasicInfo); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64) *collectionInfo); ok {
 		r0 = rf(ctx, database, collectionName, collectionID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*collectionBasicInfo)
+			r0 = ret.Get(0).(*collectionInfo)
 		}
 	}
 
@@ -211,12 +215,12 @@ func (_c *MockCache_GetCollectionInfo_Call) Run(run func(ctx context.Context, da
 	return _c
 }
 
-func (_c *MockCache_GetCollectionInfo_Call) Return(_a0 *collectionBasicInfo, _a1 error) *MockCache_GetCollectionInfo_Call {
+func (_c *MockCache_GetCollectionInfo_Call) Return(_a0 *collectionInfo, _a1 error) *MockCache_GetCollectionInfo_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockCache_GetCollectionInfo_Call) RunAndReturn(run func(context.Context, string, string, int64) (*collectionBasicInfo, error)) *MockCache_GetCollectionInfo_Call {
+func (_c *MockCache_GetCollectionInfo_Call) RunAndReturn(run func(context.Context, string, string, int64) (*collectionInfo, error)) *MockCache_GetCollectionInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1149,42 +1153,6 @@ func (_c *MockCache_RemoveDatabase_Call) Return() *MockCache_RemoveDatabase_Call
 }
 
 func (_c *MockCache_RemoveDatabase_Call) RunAndReturn(run func(context.Context, string)) *MockCache_RemoveDatabase_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// RemovePartition provides a mock function with given fields: ctx, database, collectionName, partitionName
-func (_m *MockCache) RemovePartition(ctx context.Context, database string, collectionName string, partitionName string) {
-	_m.Called(ctx, database, collectionName, partitionName)
-}
-
-// MockCache_RemovePartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemovePartition'
-type MockCache_RemovePartition_Call struct {
-	*mock.Call
-}
-
-// RemovePartition is a helper method to define mock.On call
-//   - ctx context.Context
-//   - database string
-//   - collectionName string
-//   - partitionName string
-func (_e *MockCache_Expecter) RemovePartition(ctx interface{}, database interface{}, collectionName interface{}, partitionName interface{}) *MockCache_RemovePartition_Call {
-	return &MockCache_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, database, collectionName, partitionName)}
-}
-
-func (_c *MockCache_RemovePartition_Call) Run(run func(ctx context.Context, database string, collectionName string, partitionName string)) *MockCache_RemovePartition_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string))
-	})
-	return _c
-}
-
-func (_c *MockCache_RemovePartition_Call) Return() *MockCache_RemovePartition_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockCache_RemovePartition_Call) RunAndReturn(run func(context.Context, string, string, string)) *MockCache_RemovePartition_Call {
 	_c.Call.Return(run)
 	return _c
 }
