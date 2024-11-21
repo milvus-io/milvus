@@ -275,11 +275,14 @@ func (m *ReplicaManager) RemoveCollection(collectionID typeutil.UniqueID) error 
 	if err != nil {
 		return err
 	}
-	// Remove all replica of collection and remove collection from collIDToReplicaIDs.
-	for _, replica := range m.coll2Replicas[collectionID].replicas {
-		delete(m.replicas, replica.GetID())
+
+	if collReplicas, ok := m.coll2Replicas[collectionID]; ok {
+		// Remove all replica of collection and remove collection from collIDToReplicaIDs.
+		for _, replica := range collReplicas.replicas {
+			delete(m.replicas, replica.GetID())
+		}
+		delete(m.coll2Replicas, collectionID)
 	}
-	delete(m.coll2Replicas, collectionID)
 	return nil
 }
 
