@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/fullstorydev/grpchan/inprocgrpc"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
@@ -14,27 +15,28 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // localClient is a client that can access local server directly
 type localClient struct {
-	queryCoordClient *queryCoordLocalClientImpl
-	dataCoordClient  *dataCoordLocalClientImpl
-	rootCoordClient  *rootCoordLocalClientImpl
+	queryCoordClient *syncutil.Future[types.QueryCoordClient]
+	dataCoordClient  *syncutil.Future[types.DataCoordClient]
+	rootCoordClient  *syncutil.Future[types.RootCoordClient]
 }
 
 var (
 	enableLocal  *LocalClientRoleConfig // a global map to store all can be local accessible roles.
-	glocalClient *localClient
+	glocalClient *localClient           // !!! WARNING: local client will ignore all interceptor of grpc client and server.
 )
 
 func init() {
 	enableLocal = &LocalClientRoleConfig{}
 	glocalClient = &localClient{
-		queryCoordClient: newQueryCoordLocalClient(),
-		dataCoordClient:  newDataCoordLocalClient(),
-		rootCoordClient:  newRootCoordLocalClient(),
+		queryCoordClient: syncutil.NewFuture[types.QueryCoordClient](),
+		dataCoordClient:  syncutil.NewFuture[types.DataCoordClient](),
+		rootCoordClient:  syncutil.NewFuture[types.RootCoordClient](),
 	}
 }
 
@@ -58,7 +60,10 @@ func RegisterQueryCoordServer(server querypb.QueryCoordServer) {
 	if !enableLocal.EnableQueryCoord {
 		return
 	}
-	glocalClient.queryCoordClient.setReadyServer(server)
+	channel := &inprocgrpc.Channel{}
+	channel.RegisterService(&querypb.QueryCoord_ServiceDesc, server)
+	newLocalClient := querypb.NewQueryCoordClient(channel)
+	glocalClient.queryCoordClient.Set(&nopCloseQueryCoordClient{newLocalClient})
 	log.Info("register query coord server", zap.Any("enableLocalClient", enableLocal))
 }
 
@@ -67,7 +72,10 @@ func RegisterDataCoordServer(server datapb.DataCoordServer) {
 	if !enableLocal.EnableDataCoord {
 		return
 	}
-	glocalClient.dataCoordClient.setReadyServer(server)
+	channel := &inprocgrpc.Channel{}
+	channel.RegisterService(&datapb.DataCoord_ServiceDesc, server)
+	newLocalClient := datapb.NewDataCoordClient(channel)
+	glocalClient.dataCoordClient.Set(&nopCloseDataCoordClient{newLocalClient})
 	log.Info("register data coord server", zap.Any("enableLocalClient", enableLocal))
 }
 
@@ -76,45 +84,81 @@ func RegisterRootCoordServer(server rootcoordpb.RootCoordServer) {
 	if !enableLocal.EnableRootCoord {
 		return
 	}
-	glocalClient.rootCoordClient.setReadyServer(server)
+	channel := &inprocgrpc.Channel{}
+	channel.RegisterService(&rootcoordpb.RootCoord_ServiceDesc, server)
+	newLocalClient := rootcoordpb.NewRootCoordClient(channel)
+	glocalClient.rootCoordClient.Set(&nopCloseRootCoordClient{newLocalClient})
 	log.Info("register root coord server", zap.Any("enableLocalClient", enableLocal))
 }
 
 // GetQueryCoordClient return query coord client
 func GetQueryCoordClient(ctx context.Context) types.QueryCoordClient {
+	var client types.QueryCoordClient
+	var err error
 	if enableLocal.EnableQueryCoord {
-		return glocalClient.queryCoordClient
+		client, err = glocalClient.queryCoordClient.GetWithContext(ctx)
+	} else {
+		// TODO: we should make a singleton here. but most unittest rely on a dedicated client.
+		client, err = qcc.NewClient(ctx)
 	}
-	// TODO: we should make a singleton here. but most unittest rely on a dedicated client.
-	queryCoordClient, err := qcc.NewClient(ctx)
 	if err != nil {
 		panic(fmt.Sprintf("get query coord client failed: %v", err))
 	}
-	return queryCoordClient
+	return client
 }
 
 // GetDataCoordClient return data coord client
 func GetDataCoordClient(ctx context.Context) types.DataCoordClient {
+	var client types.DataCoordClient
+	var err error
 	if enableLocal.EnableDataCoord {
-		return glocalClient.dataCoordClient
+		client, err = glocalClient.dataCoordClient.GetWithContext(ctx)
+	} else {
+		// TODO: we should make a singleton here. but most unittest rely on a dedicated client.
+		client, err = dcc.NewClient(ctx)
 	}
-	// TODO: we should make a singleton here. but most unittest rely on a dedicated client.
-	dataCoordClient, err := dcc.NewClient(ctx)
 	if err != nil {
 		panic(fmt.Sprintf("get data coord client failed: %v", err))
 	}
-	return dataCoordClient
+	return client
 }
 
 // GetRootCoordClient return root coord client
 func GetRootCoordClient(ctx context.Context) types.RootCoordClient {
+	var client types.RootCoordClient
+	var err error
 	if enableLocal.EnableRootCoord {
-		return glocalClient.rootCoordClient
+		client, err = glocalClient.rootCoordClient.GetWithContext(ctx)
+	} else {
+		// TODO: we should make a singleton here. but most unittest rely on a dedicated client.
+		client, err = rcc.NewClient(ctx)
 	}
-	// TODO: we should make a singleton here. but most unittest rely on a dedicated client.
-	rootCoordClient, err := rcc.NewClient(ctx)
 	if err != nil {
 		panic(fmt.Sprintf("get root coord client failed: %v", err))
 	}
-	return rootCoordClient
+	return client
+}
+
+type nopCloseQueryCoordClient struct {
+	querypb.QueryCoordClient
+}
+
+func (n *nopCloseQueryCoordClient) Close() error {
+	return nil
+}
+
+type nopCloseDataCoordClient struct {
+	datapb.DataCoordClient
+}
+
+func (n *nopCloseDataCoordClient) Close() error {
+	return nil
+}
+
+type nopCloseRootCoordClient struct {
+	rootcoordpb.RootCoordClient
+}
+
+func (n *nopCloseRootCoordClient) Close() error {
+	return nil
 }
