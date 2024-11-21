@@ -1682,19 +1682,19 @@ func TestRootCoord_RBACError(t *testing.T) {
 	})
 	t.Run("operate user role failed", func(t *testing.T) {
 		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 			return nil, nil
 		}
-		mockMeta.SelectUserFunc = func(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
+		mockMeta.SelectUserFunc = func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
 			return nil, nil
 		}
 		resp, err := c.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{RoleName: "foo", Username: "bar", Type: milvuspb.OperateUserRoleType_AddUserToRole})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 			return nil, errors.New("mock error")
 		}
-		mockMeta.SelectUserFunc = func(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
+		mockMeta.SelectUserFunc = func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
 			return nil, errors.New("mock error")
 		}
 	})
@@ -1745,10 +1745,10 @@ func TestRootCoord_RBACError(t *testing.T) {
 		}
 
 		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 			return nil, nil
 		}
-		mockMeta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+		mockMeta.ListPrivilegeGroupsFunc = func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
 			return nil, nil
 		}
 		{
@@ -1765,7 +1765,7 @@ func TestRootCoord_RBACError(t *testing.T) {
 			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 		}
 
-		mockMeta.SelectUserFunc = func(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
+		mockMeta.SelectUserFunc = func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
 			return nil, nil
 		}
 		resp, err := c.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{Entity: &milvuspb.GrantEntity{
@@ -1779,23 +1779,23 @@ func TestRootCoord_RBACError(t *testing.T) {
 		}, Type: milvuspb.OperatePrivilegeType_Grant})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 			return nil, errors.New("mock error")
 		}
-		mockMeta.SelectUserFunc = func(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
+		mockMeta.SelectUserFunc = func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
 			return nil, errors.New("mock error")
 		}
 	})
 
 	t.Run("operate privilege group failed", func(t *testing.T) {
 		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+		mockMeta.ListPrivilegeGroupsFunc = func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
 			return nil, errors.New("mock error")
 		}
-		mockMeta.CreatePrivilegeGroupFunc = func(groupName string) error {
+		mockMeta.CreatePrivilegeGroupFunc = func(ctx context.Context, groupName string) error {
 			return errors.New("mock error")
 		}
-		mockMeta.GetPrivilegeGroupRolesFunc = func(groupName string) ([]*milvuspb.RoleEntity, error) {
+		mockMeta.GetPrivilegeGroupRolesFunc = func(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error) {
 			return nil, errors.New("mock error")
 		}
 		{
@@ -1832,7 +1832,7 @@ func TestRootCoord_RBACError(t *testing.T) {
 			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		}
 		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 			return nil, nil
 		}
 		{
@@ -1845,21 +1845,21 @@ func TestRootCoord_RBACError(t *testing.T) {
 			assert.NoError(t, err)
 			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		}
-		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 			return nil, errors.New("mock error")
 		}
 	})
 
 	t.Run("select grant success", func(t *testing.T) {
 		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 			return []*milvuspb.RoleResult{
 				{
 					Role: &milvuspb.RoleEntity{Name: "foo"},
 				},
 			}, nil
 		}
-		mockMeta.SelectGrantFunc = func(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+		mockMeta.SelectGrantFunc = func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
 			return []*milvuspb.GrantEntity{
 				{
 					Role: &milvuspb.RoleEntity{Name: "foo"},
@@ -1874,11 +1874,11 @@ func TestRootCoord_RBACError(t *testing.T) {
 			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		}
 
-		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 			return nil, errors.New("mock error")
 		}
 
-		mockMeta.SelectGrantFunc = func(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+		mockMeta.SelectGrantFunc = func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
 			return nil, errors.New("mock error")
 		}
 	})
@@ -1889,13 +1889,13 @@ func TestRootCoord_RBACError(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.ListPolicyFunc = func(tenant string) ([]string, error) {
+		mockMeta.ListPolicyFunc = func(ctx context.Context, tenant string) ([]string, error) {
 			return []string{}, nil
 		}
 		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		mockMeta.ListPolicyFunc = func(tenant string) ([]string, error) {
+		mockMeta.ListPolicyFunc = func(ctx context.Context, tenant string) ([]string, error) {
 			return []string{}, errors.New("mock error")
 		}
 	})
@@ -1909,13 +1909,13 @@ func TestRootCoord_BuiltinRoles(t *testing.T) {
 	t.Run("init builtin roles success", func(t *testing.T) {
 		c := newTestCore(withHealthyCode(), withInvalidMeta())
 		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.CreateRoleFunc = func(tenant string, entity *milvuspb.RoleEntity) error {
+		mockMeta.CreateRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
 			return nil
 		}
-		mockMeta.OperatePrivilegeFunc = func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+		mockMeta.OperatePrivilegeFunc = func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 			return nil
 		}
-		mockMeta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+		mockMeta.ListPrivilegeGroupsFunc = func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
 			return nil, nil
 		}
 		err := c.initBuiltinRoles()
@@ -1929,7 +1929,7 @@ func TestRootCoord_BuiltinRoles(t *testing.T) {
 	t.Run("init builtin roles fail to create role", func(t *testing.T) {
 		c := newTestCore(withHealthyCode(), withInvalidMeta())
 		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.CreateRoleFunc = func(tenant string, entity *milvuspb.RoleEntity) error {
+		mockMeta.CreateRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
 			return merr.ErrPrivilegeNotPermitted
 		}
 		err := c.initBuiltinRoles()
@@ -1938,10 +1938,10 @@ func TestRootCoord_BuiltinRoles(t *testing.T) {
 	t.Run("init builtin roles fail to operate privileg", func(t *testing.T) {
 		c := newTestCore(withHealthyCode(), withInvalidMeta())
 		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.CreateRoleFunc = func(tenant string, entity *milvuspb.RoleEntity) error {
+		mockMeta.CreateRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
 			return nil
 		}
-		mockMeta.OperatePrivilegeFunc = func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+		mockMeta.OperatePrivilegeFunc = func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 			return merr.ErrPrivilegeNotPermitted
 		}
 		err := c.initBuiltinRoles()
@@ -1974,8 +1974,8 @@ func TestCore_InitRBAC(t *testing.T) {
 	t.Run("init default role and public role privilege", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		c := newTestCore(withHealthyCode(), withMeta(meta))
-		meta.EXPECT().CreateRole(mock.Anything, mock.Anything).Return(nil).Twice()
-		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+		meta.EXPECT().CreateRole(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
 
 		Params.Save(Params.RoleCfg.Enabled.Key, "false")
 		Params.Save(Params.ProxyCfg.EnablePublicPrivilege.Key, "true")
@@ -1993,8 +1993,8 @@ func TestCore_InitRBAC(t *testing.T) {
 		builtinRoles := `{"db_admin": {"privileges": [{"object_type": "Global", "object_name": "*", "privilege": "CreateCollection", "db_name": "*"}]}}`
 		meta := mockrootcoord.NewIMetaTable(t)
 		c := newTestCore(withHealthyCode(), withMeta(meta))
-		meta.EXPECT().CreateRole(mock.Anything, mock.Anything).Return(nil).Times(3)
-		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		meta.EXPECT().CreateRole(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(3)
+		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 		Params.Save(Params.RoleCfg.Enabled.Key, "true")
 		Params.Save(Params.RoleCfg.Roles.Key, builtinRoles)

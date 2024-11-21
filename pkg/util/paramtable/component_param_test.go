@@ -329,8 +329,8 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 1000, Params.SegmentCheckInterval.GetAsInt())
 		assert.Equal(t, 1000, Params.ChannelCheckInterval.GetAsInt())
-		params.Save(Params.BalanceCheckInterval.Key, "10000")
-		assert.Equal(t, 10000, Params.BalanceCheckInterval.GetAsInt())
+		params.Save(Params.BalanceCheckInterval.Key, "3000")
+		assert.Equal(t, 3000, Params.BalanceCheckInterval.GetAsInt())
 		assert.Equal(t, 10000, Params.IndexCheckInterval.GetAsInt())
 		assert.Equal(t, 3, Params.CollectionRecoverTimesLimit.GetAsInt())
 		assert.Equal(t, true, Params.AutoBalance.GetAsBool())

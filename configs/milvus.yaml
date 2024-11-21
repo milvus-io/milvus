@@ -355,7 +355,7 @@ queryCoord:
   balanceCostThreshold: 0.001 # the threshold of balance cost, if the difference of cluster's cost after executing the balance plan is less than this value, the plan will not be executed
   checkSegmentInterval: 1000
   checkChannelInterval: 1000
-  checkBalanceInterval: 10000
+  checkBalanceInterval: 3000
   checkIndexInterval: 10000
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
@@ -562,7 +562,7 @@ dataCoord:
     # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
     taskPrioritizer: default
-    taskQueueCapacity: 256 # compaction task queue size
+    taskQueueCapacity: 100000 # compaction task queue size
     rpcTimeout: 10
     maxParallelTaskNum: 10
     dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)

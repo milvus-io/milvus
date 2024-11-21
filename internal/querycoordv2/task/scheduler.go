@@ -144,8 +144,8 @@ type Scheduler interface {
 	Dispatch(node int64)
 	RemoveByNode(node int64)
 	GetExecutedFlag(nodeID int64) <-chan struct{}
-	GetChannelTaskNum() int
-	GetSegmentTaskNum() int
+	GetChannelTaskNum(filters ...TaskFilter) int
+	GetSegmentTaskNum(filters ...TaskFilter) int
 	GetTasksJSON() string
 
 	GetSegmentTaskDelta(nodeID int64, collectionID int64) int
@@ -559,18 +559,68 @@ func (scheduler *taskScheduler) GetExecutedFlag(nodeID int64) <-chan struct{} {
 	return executor.GetExecutedFlag()
 }
 
-func (scheduler *taskScheduler) GetChannelTaskNum() int {
-	scheduler.rwmutex.RLock()
-	defer scheduler.rwmutex.RUnlock()
+type TaskFilter func(task Task) bool
 
-	return len(scheduler.channelTasks)
+func WithCollectionID2TaskFilter(collectionID int64) TaskFilter {
+	return func(task Task) bool {
+		return task.CollectionID() == collectionID
+	}
 }
 
-func (scheduler *taskScheduler) GetSegmentTaskNum() int {
+func WithTaskTypeFilter(taskType Type) TaskFilter {
+	return func(task Task) bool {
+		return GetTaskType(task) == taskType
+	}
+}
+
+func (scheduler *taskScheduler) GetChannelTaskNum(filters ...TaskFilter) int {
 	scheduler.rwmutex.RLock()
 	defer scheduler.rwmutex.RUnlock()
 
-	return len(scheduler.segmentTasks)
+	if len(filters) == 0 {
+		return len(scheduler.channelTasks)
+	}
+
+	// rewrite this with for loop
+	counter := 0
+	for _, task := range scheduler.channelTasks {
+		allMatch := true
+		for _, filter := range filters {
+			if !filter(task) {
+				allMatch = false
+				break
+			}
+		}
+		if allMatch {
+			counter++
+		}
+	}
+	return counter
+}
+
+func (scheduler *taskScheduler) GetSegmentTaskNum(filters ...TaskFilter) int {
+	scheduler.rwmutex.RLock()
+	defer scheduler.rwmutex.RUnlock()
+
+	if len(filters) == 0 {
+		return len(scheduler.segmentTasks)
+	}
+
+	// rewrite this with for loop
+	counter := 0
+	for _, task := range scheduler.segmentTasks {
+		allMatch := true
+		for _, filter := range filters {
+			if !filter(task) {
+				allMatch = false
+				break
+			}
+		}
+		if allMatch {
+			counter++
+		}
+	}
+	return counter
 }
 
 // GetTasksJSON returns the JSON string of all tasks.

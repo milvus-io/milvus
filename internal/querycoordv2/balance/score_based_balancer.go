@@ -73,7 +73,6 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
-	log.Info("node workload status", zap.Int64("collectionID", collectionID), zap.Stringers("nodes", lo.Values(nodeItemsMap)))
 
 	queue := newPriorityQueue()
 	for _, item := range nodeItemsMap {
@@ -308,16 +307,18 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) (segmentPlans
 		)
 		br.AddRecord(StrRecordf("executing stopping balance: %v", roNodes))
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, rwNodes, roNodes)...)
-		if len(channelPlans) == 0 {
+		if b.permitBalanceChannel(replica.GetCollectionID()) {
+			channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, rwNodes, roNodes)...)
+		}
+		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
 			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, rwNodes, roNodes)...)
 		}
 	} else {
-		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) {
 			channelPlans = append(channelPlans, b.genChannelPlan(br, replica, rwNodes)...)
 		}
 
-		if len(channelPlans) == 0 {
+		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
 			segmentPlans = append(segmentPlans, b.genSegmentPlan(br, replica, rwNodes)...)
 		}
 	}
@@ -348,6 +349,11 @@ func (b *ScoreBasedBalancer) genSegmentPlan(br *balanceReport, replica *meta.Rep
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
+
+	log.Info("node workload status",
+		zap.Int64("collectionID", replica.GetCollectionID()),
+		zap.Int64("replicaID", replica.GetID()),
+		zap.Stringers("nodes", lo.Values(nodeItemsMap)))
 
 	// list all segment which could be balanced, and calculate node's score
 	for _, node := range onlineNodes {

@@ -76,6 +76,8 @@ func (suite *ScoreBasedBalancerTestSuite) SetupTest() {
 
 	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 }
 
 func (suite *ScoreBasedBalancerTestSuite) TearDownTest() {
@@ -603,6 +605,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceWithExecutingTask() {
 			for i, node := range c.nodes {
 				suite.mockScheduler.EXPECT().GetSegmentTaskDelta(node, int64(1)).Return(c.deltaCounts[i]).Maybe()
 				suite.mockScheduler.EXPECT().GetSegmentTaskDelta(node, int64(-1)).Return(c.deltaCounts[i]).Maybe()
+				suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
+				suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 			}
 
 			// 4. balance and verify result
@@ -1117,4 +1121,91 @@ func (suite *ScoreBasedBalancerTestSuite) getCollectionBalancePlans(balancer *Sc
 		channelPlans = append(channelPlans, cPlans...)
 	}
 	return segmentPlans, channelPlans
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestBalanceSegmentAndChannel() {
+	nodes := []int64{1, 2, 3}
+	collectionID := int64(1)
+	replicaID := int64(1)
+	collectionsSegments := []*datapb.SegmentInfo{
+		{ID: 1, PartitionID: 1}, {ID: 2, PartitionID: 1}, {ID: 3, PartitionID: 1},
+	}
+	states := []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal}
+
+	balancer := suite.balancer
+
+	collection := utils.CreateTestCollection(collectionID, int32(replicaID))
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		nil, collectionsSegments, nil)
+	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
+	collection.LoadPercentage = 100
+	collection.Status = querypb.LoadStatus_Loaded
+	balancer.meta.CollectionManager.PutCollection(collection)
+	balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(collectionID, collectionID))
+	balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(replicaID, collectionID, nodes))
+	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
+	balancer.targetMgr.UpdateCollectionCurrentTarget(collectionID)
+
+	for i := range nodes {
+		nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   nodes[i],
+			Address:  "127.0.0.1:0",
+			Hostname: "localhost",
+			Version:  common.Version,
+		})
+		nodeInfo.SetState(states[i])
+		suite.balancer.nodeManager.Add(nodeInfo)
+		suite.balancer.meta.ResourceManager.HandleNodeUp(nodes[i])
+	}
+	utils.RecoverAllCollection(balancer.meta)
+
+	// set unbalance segment distribution
+	balancer.dist.SegmentDistManager.Update(1, []*meta.Segment{
+		{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 10}, Node: 1},
+		{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 10}, Node: 1},
+		{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 10}, Node: 1},
+	}...)
+
+	// expect to generate 2 balance segment task
+	suite.mockScheduler.ExpectedCalls = nil
+	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	segmentPlans, _ := suite.getCollectionBalancePlans(balancer, collectionID)
+	suite.Equal(len(segmentPlans), 2)
+
+	// mock balance channel is executing, expect to generate 0 balance segment task
+	suite.mockScheduler.ExpectedCalls = nil
+	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(1).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	segmentPlans, _ = suite.getCollectionBalancePlans(balancer, collectionID)
+	suite.Equal(len(segmentPlans), 0)
+
+	// set unbalance channel distribution
+	balancer.dist.ChannelDistManager.Update(1, []*meta.DmChannel{
+		{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel1"}, Node: 1},
+		{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel2"}, Node: 1},
+		{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel3"}, Node: 1},
+	}...)
+
+	// expect to generate 2 balance segment task
+	suite.mockScheduler.ExpectedCalls = nil
+	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	_, channelPlans := suite.getCollectionBalancePlans(balancer, collectionID)
+	suite.Equal(len(channelPlans), 2)
+
+	// mock balance channel is executing, expect to generate 0 balance segment task
+	suite.mockScheduler.ExpectedCalls = nil
+	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(1).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	_, channelPlans = suite.getCollectionBalancePlans(balancer, collectionID)
+	suite.Equal(len(channelPlans), 0)
 }

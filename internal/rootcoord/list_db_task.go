@@ -58,7 +58,7 @@ func (t *listDatabaseTask) Execute(ctx context.Context) error {
 			privilegeDBs.Insert(util.AnyWord)
 			return privilegeDBs, nil
 		}
-		userRoles, err := t.core.meta.SelectUser("", &milvuspb.UserEntity{
+		userRoles, err := t.core.meta.SelectUser(ctx, "", &milvuspb.UserEntity{
 			Name: curUser,
 		}, true)
 		if err != nil {
@@ -72,7 +72,7 @@ func (t *listDatabaseTask) Execute(ctx context.Context) error {
 				privilegeDBs.Insert(util.AnyWord)
 				return privilegeDBs, nil
 			}
-			entities, err := t.core.meta.SelectGrant("", &milvuspb.GrantEntity{
+			entities, err := t.core.meta.SelectGrant(ctx, "", &milvuspb.GrantEntity{
 				Role:   role,
 				DbName: util.AnyWord,
 			})
