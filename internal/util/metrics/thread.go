@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 )
 
-// theadWatcher is the utiltiy to update milvus process thread number metrics.
+// theadWatcher is the utility to update milvus process thread number metrics.
 // the os thread number metrics is not accurate since it only returns thread number used by golang "normal" runtime
 // and the crucial threads number in cpp side is not included.
 type threadWatcher struct {
