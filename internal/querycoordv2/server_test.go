@@ -89,6 +89,7 @@ type ServerSuite struct {
 	tikvCli *txnkv.Client
 	server  *Server
 	nodes   []*mocks.MockQueryNode
+	ctx     context.Context
 }
 
 var testMeta string
@@ -125,6 +126,7 @@ func (suite *ServerSuite) SetupSuite() {
 		1001: 3,
 	}
 	suite.nodes = make([]*mocks.MockQueryNode, 3)
+	suite.ctx = context.Background()
 }
 
 func (suite *ServerSuite) SetupTest() {
@@ -144,13 +146,13 @@ func (suite *ServerSuite) SetupTest() {
 		suite.Require().NoError(err)
 		ok := suite.waitNodeUp(suite.nodes[i], 5*time.Second)
 		suite.Require().True(ok)
-		suite.server.meta.ResourceManager.HandleNodeUp(suite.nodes[i].ID)
+		suite.server.meta.ResourceManager.HandleNodeUp(suite.ctx, suite.nodes[i].ID)
 		suite.expectLoadAndReleasePartitions(suite.nodes[i])
 	}
 
 	suite.loadAll()
 	for _, collection := range suite.collections {
-		suite.True(suite.server.meta.Exist(collection))
+		suite.True(suite.server.meta.Exist(suite.ctx, collection))
 		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loaded)
 	}
 }
@@ -181,7 +183,7 @@ func (suite *ServerSuite) TestRecover() {
 	suite.NoError(err)
 
 	for _, collection := range suite.collections {
-		suite.True(suite.server.meta.Exist(collection))
+		suite.True(suite.server.meta.Exist(suite.ctx, collection))
 	}
 
 	suite.True(suite.server.nodeMgr.IsStoppingNode(suite.nodes[0].ID))
@@ -201,7 +203,7 @@ func (suite *ServerSuite) TestNodeUp() {
 			return false
 		}
 		for _, collection := range suite.collections {
-			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(collection, node1.ID)
+			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(suite.ctx, collection, node1.ID)
 			if replica == nil {
 				return false
 			}
@@ -230,7 +232,7 @@ func (suite *ServerSuite) TestNodeUp() {
 			return false
 		}
 		for _, collection := range suite.collections {
-			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(collection, node2.ID)
+			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(suite.ctx, collection, node2.ID)
 			if replica == nil {
 				return true
 			}
@@ -249,7 +251,7 @@ func (suite *ServerSuite) TestNodeUp() {
 			return false
 		}
 		for _, collection := range suite.collections {
-			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(collection, node2.ID)
+			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(suite.ctx, collection, node2.ID)
 			if replica == nil {
 				return false
 			}
@@ -279,7 +281,7 @@ func (suite *ServerSuite) TestNodeDown() {
 			return false
 		}
 		for _, collection := range suite.collections {
-			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(collection, downNode.ID)
+			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(suite.ctx, collection, downNode.ID)
 			if replica != nil {
 				return false
 			}
@@ -525,7 +527,7 @@ func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, 
 }
 
 func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status querypb.LoadStatus) {
-	collection := suite.server.meta.GetCollection(collectionID)
+	collection := suite.server.meta.GetCollection(suite.ctx, collectionID)
 	if collection != nil {
 		collection := collection.Clone()
 		collection.LoadPercentage = 0
@@ -533,9 +535,9 @@ func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status quer
 			collection.LoadPercentage = 100
 		}
 		collection.CollectionLoadInfo.Status = status
-		suite.server.meta.PutCollection(collection)
+		suite.server.meta.PutCollection(suite.ctx, collection)
 
-		partitions := suite.server.meta.GetPartitionsByCollection(collectionID)
+		partitions := suite.server.meta.GetPartitionsByCollection(suite.ctx, collectionID)
 		for _, partition := range partitions {
 			partition := partition.Clone()
 			partition.LoadPercentage = 0
@@ -543,7 +545,7 @@ func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status quer
 				partition.LoadPercentage = 100
 			}
 			partition.PartitionLoadInfo.Status = status
-			suite.server.meta.PutPartition(partition)
+			suite.server.meta.PutPartition(suite.ctx, partition)
 		}
 	}
 }

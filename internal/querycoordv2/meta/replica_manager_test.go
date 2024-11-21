@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"context"
 	"testing"
 
 	"github.com/samber/lo"
@@ -62,6 +63,7 @@ type ReplicaManagerSuite struct {
 	kv          kv.MetaKv
 	catalog     metastore.QueryCoordCatalog
 	mgr         *ReplicaManager
+	ctx         context.Context
 }
 
 func (suite *ReplicaManagerSuite) SetupSuite() {
@@ -86,6 +88,7 @@ func (suite *ReplicaManagerSuite) SetupSuite() {
 			spawnConfig: map[string]int{"RG1": 1, "RG2": 1, "RG3": 1},
 		},
 	}
+	suite.ctx = context.Background()
 }
 
 func (suite *ReplicaManagerSuite) SetupTest() {
@@ -114,16 +117,17 @@ func (suite *ReplicaManagerSuite) TearDownTest() {
 
 func (suite *ReplicaManagerSuite) TestSpawn() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	mgr.idAllocator = ErrorIDAllocator()
-	_, err := mgr.Spawn(1, map[string]int{DefaultResourceGroupName: 1}, nil)
+	_, err := mgr.Spawn(ctx, 1, map[string]int{DefaultResourceGroupName: 1}, nil)
 	suite.Error(err)
 
-	replicas := mgr.GetByCollection(1)
+	replicas := mgr.GetByCollection(ctx, 1)
 	suite.Len(replicas, 0)
 
 	mgr.idAllocator = suite.idAllocator
-	replicas, err = mgr.Spawn(1, map[string]int{DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	replicas, err = mgr.Spawn(ctx, 1, map[string]int{DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
 	suite.NoError(err)
 	for _, replica := range replicas {
 		suite.Len(replica.replicaPB.GetChannelNodeInfos(), 0)
@@ -131,7 +135,7 @@ func (suite *ReplicaManagerSuite) TestSpawn() {
 
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
 	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
-	replicas, err = mgr.Spawn(2, map[string]int{DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	replicas, err = mgr.Spawn(ctx, 2, map[string]int{DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
 	suite.NoError(err)
 	for _, replica := range replicas {
 		suite.Len(replica.replicaPB.GetChannelNodeInfos(), 2)
@@ -140,14 +144,15 @@ func (suite *ReplicaManagerSuite) TestSpawn() {
 
 func (suite *ReplicaManagerSuite) TestGet() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	for collectionID, collectionCfg := range suite.collections {
-		replicas := mgr.GetByCollection(collectionID)
+		replicas := mgr.GetByCollection(ctx, collectionID)
 		replicaNodes := make(map[int64][]int64)
 		nodes := make([]int64, 0)
 		for _, replica := range replicas {
 			suite.Equal(collectionID, replica.GetCollectionID())
-			suite.Equal(replica, mgr.Get(replica.GetID()))
+			suite.Equal(replica, mgr.Get(ctx, replica.GetID()))
 			suite.Equal(len(replica.replicaPB.GetNodes()), replica.RWNodesCount())
 			suite.Equal(replica.replicaPB.GetNodes(), replica.GetNodes())
 			replicaNodes[replica.GetID()] = replica.GetNodes()
@@ -162,7 +167,7 @@ func (suite *ReplicaManagerSuite) TestGet() {
 
 		for replicaID, nodes := range replicaNodes {
 			for _, node := range nodes {
-				replica := mgr.GetByCollectionAndNode(collectionID, node)
+				replica := mgr.GetByCollectionAndNode(ctx, collectionID, node)
 				suite.Equal(replicaID, replica.GetID())
 			}
 		}
@@ -171,6 +176,7 @@ func (suite *ReplicaManagerSuite) TestGet() {
 
 func (suite *ReplicaManagerSuite) TestGetByNode() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	randomNodeID := int64(11111)
 	testReplica1 := newReplica(&querypb.Replica{
@@ -185,18 +191,19 @@ func (suite *ReplicaManagerSuite) TestGetByNode() {
 		Nodes:         []int64{randomNodeID},
 		ResourceGroup: DefaultResourceGroupName,
 	})
-	mgr.Put(testReplica1, testReplica2)
+	mgr.Put(ctx, testReplica1, testReplica2)
 
-	replicas := mgr.GetByNode(randomNodeID)
+	replicas := mgr.GetByNode(ctx, randomNodeID)
 	suite.Len(replicas, 2)
 }
 
 func (suite *ReplicaManagerSuite) TestRecover() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	// Clear data in memory, and then recover from meta store
 	suite.clearMemory()
-	mgr.Recover(lo.Keys(suite.collections))
+	mgr.Recover(ctx, lo.Keys(suite.collections))
 	suite.TestGet()
 
 	// Test recover from 2.1 meta store
@@ -210,8 +217,8 @@ func (suite *ReplicaManagerSuite) TestRecover() {
 	suite.kv.Save(querycoord.ReplicaMetaPrefixV1+"/2100", string(value))
 
 	suite.clearMemory()
-	mgr.Recover(append(lo.Keys(suite.collections), 1000))
-	replica := mgr.Get(2100)
+	mgr.Recover(ctx, append(lo.Keys(suite.collections), 1000))
+	replica := mgr.Get(ctx, 2100)
 	suite.NotNil(replica)
 	suite.EqualValues(1000, replica.GetCollectionID())
 	suite.EqualValues([]int64{1, 2, 3}, replica.GetNodes())
@@ -223,25 +230,27 @@ func (suite *ReplicaManagerSuite) TestRecover() {
 
 func (suite *ReplicaManagerSuite) TestRemove() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	for collection := range suite.collections {
-		err := mgr.RemoveCollection(collection)
+		err := mgr.RemoveCollection(ctx, collection)
 		suite.NoError(err)
 
-		replicas := mgr.GetByCollection(collection)
+		replicas := mgr.GetByCollection(ctx, collection)
 		suite.Empty(replicas)
 	}
 
 	// Check whether the replicas are also removed from meta store
-	mgr.Recover(lo.Keys(suite.collections))
+	mgr.Recover(ctx, lo.Keys(suite.collections))
 	for collection := range suite.collections {
-		replicas := mgr.GetByCollection(collection)
+		replicas := mgr.GetByCollection(ctx, collection)
 		suite.Empty(replicas)
 	}
 }
 
 func (suite *ReplicaManagerSuite) TestNodeManipulate() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	// add node into rg.
 	rgs := map[string]typeutil.UniqueSet{
@@ -256,10 +265,10 @@ func (suite *ReplicaManagerSuite) TestNodeManipulate() {
 		for rg := range cfg.spawnConfig {
 			rgsOfCollection[rg] = rgs[rg]
 		}
-		mgr.RecoverNodesInCollection(collectionID, rgsOfCollection)
+		mgr.RecoverNodesInCollection(ctx, collectionID, rgsOfCollection)
 		for rg := range cfg.spawnConfig {
 			for _, node := range rgs[rg].Collect() {
-				replica := mgr.GetByCollectionAndNode(collectionID, node)
+				replica := mgr.GetByCollectionAndNode(ctx, collectionID, node)
 				suite.Contains(replica.GetNodes(), node)
 			}
 		}
@@ -267,11 +276,11 @@ func (suite *ReplicaManagerSuite) TestNodeManipulate() {
 
 	// Check these modifications are applied to meta store
 	suite.clearMemory()
-	mgr.Recover(lo.Keys(suite.collections))
+	mgr.Recover(ctx, lo.Keys(suite.collections))
 	for collectionID, cfg := range suite.collections {
 		for rg := range cfg.spawnConfig {
 			for _, node := range rgs[rg].Collect() {
-				replica := mgr.GetByCollectionAndNode(collectionID, node)
+				replica := mgr.GetByCollectionAndNode(ctx, collectionID, node)
 				suite.Contains(replica.GetNodes(), node)
 			}
 		}
@@ -280,9 +289,10 @@ func (suite *ReplicaManagerSuite) TestNodeManipulate() {
 
 func (suite *ReplicaManagerSuite) spawnAll() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	for id, cfg := range suite.collections {
-		replicas, err := mgr.Spawn(id, cfg.spawnConfig, nil)
+		replicas, err := mgr.Spawn(ctx, id, cfg.spawnConfig, nil)
 		suite.NoError(err)
 		totalSpawn := 0
 		rgsOfCollection := make(map[string]typeutil.UniqueSet)
@@ -290,26 +300,27 @@ func (suite *ReplicaManagerSuite) spawnAll() {
 			totalSpawn += spawnNum
 			rgsOfCollection[rg] = suite.rgs[rg]
 		}
-		mgr.RecoverNodesInCollection(id, rgsOfCollection)
+		mgr.RecoverNodesInCollection(ctx, id, rgsOfCollection)
 		suite.Len(replicas, totalSpawn)
 	}
 }
 
 func (suite *ReplicaManagerSuite) TestResourceGroup() {
 	mgr := NewReplicaManager(suite.idAllocator, suite.catalog)
-	replicas1, err := mgr.Spawn(int64(1000), map[string]int{DefaultResourceGroupName: 1}, nil)
+	ctx := suite.ctx
+	replicas1, err := mgr.Spawn(ctx, int64(1000), map[string]int{DefaultResourceGroupName: 1}, nil)
 	suite.NoError(err)
 	suite.NotNil(replicas1)
 	suite.Len(replicas1, 1)
 
-	replica2, err := mgr.Spawn(int64(2000), map[string]int{DefaultResourceGroupName: 1}, nil)
+	replica2, err := mgr.Spawn(ctx, int64(2000), map[string]int{DefaultResourceGroupName: 1}, nil)
 	suite.NoError(err)
 	suite.NotNil(replica2)
 	suite.Len(replica2, 1)
 
-	replicas := mgr.GetByResourceGroup(DefaultResourceGroupName)
+	replicas := mgr.GetByResourceGroup(ctx, DefaultResourceGroupName)
 	suite.Len(replicas, 2)
-	rgNames := mgr.GetResourceGroupByCollection(int64(1000))
+	rgNames := mgr.GetResourceGroupByCollection(ctx, int64(1000))
 	suite.Len(rgNames, 1)
 	suite.True(rgNames.Contain(DefaultResourceGroupName))
 }
@@ -326,6 +337,7 @@ type ReplicaManagerV2Suite struct {
 	kv          kv.MetaKv
 	catalog     metastore.QueryCoordCatalog
 	mgr         *ReplicaManager
+	ctx         context.Context
 }
 
 func (suite *ReplicaManagerV2Suite) SetupSuite() {
@@ -375,6 +387,7 @@ func (suite *ReplicaManagerV2Suite) SetupSuite() {
 
 	idAllocator := RandomIncrementIDAllocator()
 	suite.mgr = NewReplicaManager(idAllocator, suite.catalog)
+	suite.ctx = context.Background()
 }
 
 func (suite *ReplicaManagerV2Suite) TearDownSuite() {
@@ -383,32 +396,34 @@ func (suite *ReplicaManagerV2Suite) TearDownSuite() {
 
 func (suite *ReplicaManagerV2Suite) TestSpawn() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	for id, cfg := range suite.collections {
-		replicas, err := mgr.Spawn(id, cfg.spawnConfig, nil)
+		replicas, err := mgr.Spawn(ctx, id, cfg.spawnConfig, nil)
 		suite.NoError(err)
 		rgsOfCollection := make(map[string]typeutil.UniqueSet)
 		for rg := range cfg.spawnConfig {
 			rgsOfCollection[rg] = suite.rgs[rg]
 		}
-		mgr.RecoverNodesInCollection(id, rgsOfCollection)
+		mgr.RecoverNodesInCollection(ctx, id, rgsOfCollection)
 		for rg := range cfg.spawnConfig {
 			for _, node := range suite.rgs[rg].Collect() {
-				replica := mgr.GetByCollectionAndNode(id, node)
+				replica := mgr.GetByCollectionAndNode(ctx, id, node)
 				suite.Contains(replica.GetNodes(), node)
 			}
 		}
 		suite.Len(replicas, cfg.getTotalSpawn())
-		replicas = mgr.GetByCollection(id)
+		replicas = mgr.GetByCollection(ctx, id)
 		suite.Len(replicas, cfg.getTotalSpawn())
 	}
 	suite.testIfBalanced()
 }
 
 func (suite *ReplicaManagerV2Suite) testIfBalanced() {
+	ctx := suite.ctx
 	// If balanced
 	for id := range suite.collections {
-		replicas := suite.mgr.GetByCollection(id)
+		replicas := suite.mgr.GetByCollection(ctx, id)
 		rgToReplica := make(map[string][]*Replica, 0)
 		for _, r := range replicas {
 			rgToReplica[r.GetResourceGroup()] = append(rgToReplica[r.GetResourceGroup()], r)
@@ -440,22 +455,24 @@ func (suite *ReplicaManagerV2Suite) testIfBalanced() {
 }
 
 func (suite *ReplicaManagerV2Suite) TestTransferReplica() {
+	ctx := suite.ctx
 	// param error
-	err := suite.mgr.TransferReplica(10086, "RG4", "RG5", 1)
+	err := suite.mgr.TransferReplica(ctx, 10086, "RG4", "RG5", 1)
 	suite.Error(err)
-	err = suite.mgr.TransferReplica(1005, "RG4", "RG5", 0)
+	err = suite.mgr.TransferReplica(ctx, 1005, "RG4", "RG5", 0)
 	suite.Error(err)
-	err = suite.mgr.TransferReplica(1005, "RG4", "RG4", 1)
+	err = suite.mgr.TransferReplica(ctx, 1005, "RG4", "RG4", 1)
 	suite.Error(err)
 
-	err = suite.mgr.TransferReplica(1005, "RG4", "RG5", 1)
+	err = suite.mgr.TransferReplica(ctx, 1005, "RG4", "RG5", 1)
 	suite.NoError(err)
 	suite.recoverReplica(2, true)
 	suite.testIfBalanced()
 }
 
 func (suite *ReplicaManagerV2Suite) TestTransferReplicaAndAddNode() {
-	suite.mgr.TransferReplica(1005, "RG4", "RG5", 1)
+	ctx := suite.ctx
+	suite.mgr.TransferReplica(ctx, 1005, "RG4", "RG5", 1)
 	suite.recoverReplica(1, false)
 	suite.rgs["RG5"].Insert(16, 17, 18)
 	suite.recoverReplica(2, true)
@@ -470,6 +487,7 @@ func (suite *ReplicaManagerV2Suite) TestTransferNode() {
 }
 
 func (suite *ReplicaManagerV2Suite) recoverReplica(k int, clearOutbound bool) {
+	ctx := suite.ctx
 	// need at least two times to recover the replicas.
 	// transfer node between replicas need set to outbound and then set to incoming.
 	for i := 0; i < k; i++ {
@@ -479,16 +497,16 @@ func (suite *ReplicaManagerV2Suite) recoverReplica(k int, clearOutbound bool) {
 			for rg := range cfg.spawnConfig {
 				rgsOfCollection[rg] = suite.rgs[rg]
 			}
-			suite.mgr.RecoverNodesInCollection(id, rgsOfCollection)
+			suite.mgr.RecoverNodesInCollection(ctx, id, rgsOfCollection)
 		}
 
 		// clear all outbound nodes
 		if clearOutbound {
 			for id := range suite.collections {
-				replicas := suite.mgr.GetByCollection(id)
+				replicas := suite.mgr.GetByCollection(ctx, id)
 				for _, r := range replicas {
 					outboundNodes := r.GetRONodes()
-					suite.mgr.RemoveNode(r.GetID(), outboundNodes...)
+					suite.mgr.RemoveNode(ctx, r.GetID(), outboundNodes...)
 				}
 			}
 		}
@@ -502,9 +520,10 @@ func TestReplicaManager(t *testing.T) {
 
 func TestGetReplicasJSON(t *testing.T) {
 	catalog := mocks.NewQueryCoordCatalog(t)
-	catalog.EXPECT().SaveReplica(mock.Anything).Return(nil)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
 	idAllocator := RandomIncrementIDAllocator()
 	replicaManager := NewReplicaManager(idAllocator, catalog)
+	ctx := context.Background()
 
 	// Add some replicas to the ReplicaManager
 	replica1 := newReplica(&querypb.Replica{
@@ -520,13 +539,13 @@ func TestGetReplicasJSON(t *testing.T) {
 		Nodes:         []int64{4, 5, 6},
 	})
 
-	err := replicaManager.put(replica1)
+	err := replicaManager.put(ctx, replica1)
 	assert.NoError(t, err)
 
-	err = replicaManager.put(replica2)
+	err = replicaManager.put(ctx, replica2)
 	assert.NoError(t, err)
 
-	jsonOutput := replicaManager.GetReplicasJSON()
+	jsonOutput := replicaManager.GetReplicasJSON(ctx)
 	var replicas []*metricsinfo.Replica
 	err = json.Unmarshal([]byte(jsonOutput), &replicas)
 	assert.NoError(t, err)

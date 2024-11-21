@@ -90,7 +90,7 @@ func loadPartitions(ctx context.Context,
 		return err
 	}
 
-	replicas := meta.ReplicaManager.GetByCollection(collection)
+	replicas := meta.ReplicaManager.GetByCollection(ctx, collection)
 	loadReq := &querypb.LoadPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadPartitions,
@@ -124,7 +124,7 @@ func releasePartitions(ctx context.Context,
 	partitions ...int64,
 ) {
 	log := log.Ctx(ctx).With(zap.Int64("collection", collection), zap.Int64s("partitions", partitions))
-	replicas := meta.ReplicaManager.GetByCollection(collection)
+	replicas := meta.ReplicaManager.GetByCollection(ctx, collection)
 	releaseReq := &querypb.ReleasePartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ReleasePartitions,

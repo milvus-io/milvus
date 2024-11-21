@@ -209,15 +209,15 @@ func (s *Server) registerMetricsRequest() {
 		if v.Exists() {
 			scope = meta.TargetScope(v.Int())
 		}
-		return s.targetMgr.GetTargetJSON(scope), nil
+		return s.targetMgr.GetTargetJSON(ctx, scope), nil
 	}
 
 	QueryReplicasAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-		return s.meta.GetReplicasJSON(), nil
+		return s.meta.GetReplicasJSON(ctx), nil
 	}
 
 	QueryResourceGroupsAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-		return s.meta.GetResourceGroupsJSON(), nil
+		return s.meta.GetResourceGroupsJSON(ctx), nil
 	}
 
 	QuerySegmentsAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
@@ -421,26 +421,26 @@ func (s *Server) initMeta() error {
 	)
 
 	log.Info("recover meta...")
-	err := s.meta.CollectionManager.Recover(s.broker)
+	err := s.meta.CollectionManager.Recover(s.ctx, s.broker)
 	if err != nil {
 		log.Warn("failed to recover collections", zap.Error(err))
 		return err
 	}
-	collections := s.meta.GetAll()
+	collections := s.meta.GetAll(s.ctx)
 	log.Info("recovering collections...", zap.Int64s("collections", collections))
 
 	// We really update the metric after observers think the collection loaded.
 	metrics.QueryCoordNumCollections.WithLabelValues().Set(0)
 
-	metrics.QueryCoordNumPartitions.WithLabelValues().Set(float64(len(s.meta.GetAllPartitions())))
+	metrics.QueryCoordNumPartitions.WithLabelValues().Set(float64(len(s.meta.GetAllPartitions(s.ctx))))
 
-	err = s.meta.ReplicaManager.Recover(collections)
+	err = s.meta.ReplicaManager.Recover(s.ctx, collections)
 	if err != nil {
 		log.Warn("failed to recover replicas", zap.Error(err))
 		return err
 	}
 
-	err = s.meta.ResourceManager.Recover()
+	err = s.meta.ResourceManager.Recover(s.ctx)
 	if err != nil {
 		log.Warn("failed to recover resource groups", zap.Error(err))
 		return err
@@ -452,7 +452,7 @@ func (s *Server) initMeta() error {
 		LeaderViewManager:  meta.NewLeaderViewManager(),
 	}
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
-	err = s.targetMgr.Recover(s.store)
+	err = s.targetMgr.Recover(s.ctx, s.store)
 	if err != nil {
 		log.Warn("failed to recover collection targets", zap.Error(err))
 	}
@@ -609,7 +609,7 @@ func (s *Server) Stop() error {
 	// save target to meta store, after querycoord restart, make it fast to recover current target
 	// should save target after target observer stop, incase of target changed
 	if s.targetMgr != nil {
-		s.targetMgr.SaveCurrentTarget(s.store)
+		s.targetMgr.SaveCurrentTarget(s.ctx, s.store)
 	}
 
 	if s.replicaObserver != nil {
@@ -773,7 +773,7 @@ func (s *Server) watchNodes(revision int64) {
 				)
 				s.nodeMgr.Stopping(nodeID)
 				s.checkerController.Check()
-				s.meta.ResourceManager.HandleNodeStopping(nodeID)
+				s.meta.ResourceManager.HandleNodeStopping(s.ctx, nodeID)
 
 			case sessionutil.SessionDelEvent:
 				nodeID := event.Session.ServerID
@@ -833,7 +833,7 @@ func (s *Server) handleNodeUp(node int64) {
 	s.taskScheduler.AddExecutor(node)
 	s.distController.StartDistInstance(s.ctx, node)
 	// need assign to new rg and replica
-	s.meta.ResourceManager.HandleNodeUp(node)
+	s.meta.ResourceManager.HandleNodeUp(s.ctx, node)
 }
 
 func (s *Server) handleNodeDown(node int64) {
@@ -848,18 +848,18 @@ func (s *Server) handleNodeDown(node int64) {
 	// Clear tasks
 	s.taskScheduler.RemoveByNode(node)
 
-	s.meta.ResourceManager.HandleNodeDown(node)
+	s.meta.ResourceManager.HandleNodeDown(s.ctx, node)
 }
 
 func (s *Server) checkNodeStateInRG() {
-	for _, rgName := range s.meta.ListResourceGroups() {
-		rg := s.meta.ResourceManager.GetResourceGroup(rgName)
+	for _, rgName := range s.meta.ListResourceGroups(s.ctx) {
+		rg := s.meta.ResourceManager.GetResourceGroup(s.ctx, rgName)
 		for _, node := range rg.GetNodes() {
 			info := s.nodeMgr.Get(node)
 			if info == nil {
-				s.meta.ResourceManager.HandleNodeDown(node)
+				s.meta.ResourceManager.HandleNodeDown(s.ctx, node)
 			} else if info.IsStoppingState() {
-				s.meta.ResourceManager.HandleNodeStopping(node)
+				s.meta.ResourceManager.HandleNodeStopping(s.ctx, node)
 			}
 		}
 	}
@@ -917,7 +917,7 @@ func (s *Server) watchLoadConfigChanges() {
 	replicaNumHandler := config.NewHandler("watchReplicaNumberChanges", func(e *config.Event) {
 		log.Info("watch load config changes", zap.String("key", e.Key), zap.String("value", e.Value), zap.String("type", e.EventType))
 
-		collectionIDs := s.meta.GetAll()
+		collectionIDs := s.meta.GetAll(s.ctx)
 		if len(collectionIDs) == 0 {
 			log.Warn("no collection loaded, skip to trigger update load config")
 			return
@@ -944,7 +944,7 @@ func (s *Server) watchLoadConfigChanges() {
 
 	rgHandler := config.NewHandler("watchResourceGroupChanges", func(e *config.Event) {
 		log.Info("watch load config changes", zap.String("key", e.Key), zap.String("value", e.Value), zap.String("type", e.EventType))
-		collectionIDs := s.meta.GetAll()
+		collectionIDs := s.meta.GetAll(s.ctx)
 		if len(collectionIDs) == 0 {
 			log.Warn("no collection loaded, skip to trigger update load config")
 			return

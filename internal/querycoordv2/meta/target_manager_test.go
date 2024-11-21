@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -60,6 +61,8 @@ type TargetManagerSuite struct {
 	broker  *MockBroker
 	// Test object
 	mgr *TargetManager
+
+	ctx context.Context
 }
 
 func (suite *TargetManagerSuite) SetupSuite() {
@@ -110,6 +113,7 @@ func (suite *TargetManagerSuite) SetupTest() {
 		config.EtcdTLSMinVersion.GetValue())
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
+	suite.ctx = context.Background()
 
 	// meta
 	suite.catalog = querycoord.NewCatalog(suite.kv)
@@ -141,14 +145,14 @@ func (suite *TargetManagerSuite) SetupTest() {
 		}
 		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(dmChannels, allSegments, nil)
 
-		suite.meta.PutCollection(&Collection{
+		suite.meta.PutCollection(suite.ctx, &Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
 				CollectionID:  collection,
 				ReplicaNumber: 1,
 			},
 		})
 		for _, partition := range suite.partitions[collection] {
-			suite.meta.PutPartition(&Partition{
+			suite.meta.PutPartition(suite.ctx, &Partition{
 				PartitionLoadInfo: &querypb.PartitionLoadInfo{
 					CollectionID: collection,
 					PartitionID:  partition,
@@ -156,7 +160,7 @@ func (suite *TargetManagerSuite) SetupTest() {
 			})
 		}
 
-		suite.mgr.UpdateCollectionNextTarget(collection)
+		suite.mgr.UpdateCollectionNextTarget(suite.ctx, collection)
 	}
 }
 
@@ -165,35 +169,37 @@ func (suite *TargetManagerSuite) TearDownSuite() {
 }
 
 func (suite *TargetManagerSuite) TestUpdateCurrentTarget() {
+	ctx := suite.ctx
 	collectionID := int64(1000)
 	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]),
-		suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
-	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+		suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 
-	suite.mgr.UpdateCollectionCurrentTarget(collectionID)
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
+	suite.mgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
 	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]),
-		suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+		suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 }
 
 func (suite *TargetManagerSuite) TestUpdateNextTarget() {
+	ctx := suite.ctx
 	collectionID := int64(1003)
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 
-	suite.meta.PutCollection(&Collection{
+	suite.meta.PutCollection(ctx, &Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  collectionID,
 			ReplicaNumber: 1,
 		},
 	})
-	suite.meta.PutPartition(&Partition{
+	suite.meta.PutPartition(ctx, &Partition{
 		PartitionLoadInfo: &querypb.PartitionLoadInfo{
 			CollectionID: collectionID,
 			PartitionID:  1,
@@ -225,62 +231,64 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
-	suite.mgr.UpdateCollectionNextTarget(collectionID)
-	suite.assertSegments([]int64{11, 12}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
-	suite.assertChannels([]string{"channel-1", "channel-2"}, suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+	suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.assertSegments([]int64{11, 12}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels([]string{"channel-1", "channel-2"}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 
 	suite.broker.ExpectedCalls = nil
 	// test getRecoveryInfoV2 failed , then retry getRecoveryInfoV2 succeed
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nil, nil, errors.New("fake error")).Times(1)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
-	err := suite.mgr.UpdateCollectionNextTarget(collectionID)
+	err := suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
 	suite.NoError(err)
 
-	err = suite.mgr.UpdateCollectionNextTarget(collectionID)
+	err = suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
 	suite.NoError(err)
 }
 
 func (suite *TargetManagerSuite) TestRemovePartition() {
+	ctx := suite.ctx
 	collectionID := int64(1000)
-	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]), suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
-	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]), suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 
-	suite.mgr.RemovePartition(collectionID, 100)
-	suite.assertSegments(append([]int64{3, 4}, suite.level0Segments...), suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
-	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+	suite.mgr.RemovePartition(ctx, collectionID, 100)
+	suite.assertSegments(append([]int64{3, 4}, suite.level0Segments...), suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 }
 
 func (suite *TargetManagerSuite) TestRemoveCollection() {
+	ctx := suite.ctx
 	collectionID := int64(1000)
-	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]), suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
-	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]), suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 
-	suite.mgr.RemoveCollection(collectionID)
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+	suite.mgr.RemoveCollection(ctx, collectionID)
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 
 	collectionID = int64(1001)
-	suite.mgr.UpdateCollectionCurrentTarget(collectionID)
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
-	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]), suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+	suite.mgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]), suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 
-	suite.mgr.RemoveCollection(collectionID)
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+	suite.mgr.RemoveCollection(ctx, collectionID)
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 }
 
 func (suite *TargetManagerSuite) getAllSegment(collectionID int64, partitionIDs []int64) []int64 {
@@ -325,6 +333,7 @@ func (suite *TargetManagerSuite) assertSegments(expected []int64, actual map[int
 }
 
 func (suite *TargetManagerSuite) TestGetCollectionTargetVersion() {
+	ctx := suite.ctx
 	t1 := time.Now().UnixNano()
 	target := NewCollectionTarget(nil, nil, nil)
 	t2 := time.Now().UnixNano()
@@ -335,28 +344,29 @@ func (suite *TargetManagerSuite) TestGetCollectionTargetVersion() {
 
 	collectionID := suite.collections[0]
 	t3 := time.Now().UnixNano()
-	suite.mgr.UpdateCollectionNextTarget(collectionID)
+	suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
 	t4 := time.Now().UnixNano()
 
-	collectionVersion := suite.mgr.GetCollectionTargetVersion(collectionID, NextTarget)
+	collectionVersion := suite.mgr.GetCollectionTargetVersion(ctx, collectionID, NextTarget)
 	suite.True(t3 <= collectionVersion)
 	suite.True(t4 >= collectionVersion)
 }
 
 func (suite *TargetManagerSuite) TestGetSegmentByChannel() {
+	ctx := suite.ctx
 	collectionID := int64(1003)
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 
-	suite.meta.PutCollection(&Collection{
+	suite.meta.PutCollection(ctx, &Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  collectionID,
 			ReplicaNumber: 1,
 		},
 	})
-	suite.meta.PutPartition(&Partition{
+	suite.meta.PutPartition(ctx, &Partition{
 		PartitionLoadInfo: &querypb.PartitionLoadInfo{
 			CollectionID: collectionID,
 			PartitionID:  1,
@@ -391,17 +401,17 @@ func (suite *TargetManagerSuite) TestGetSegmentByChannel() {
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
-	suite.mgr.UpdateCollectionNextTarget(collectionID)
-	suite.Len(suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget), 2)
-	suite.Len(suite.mgr.GetSealedSegmentsByChannel(collectionID, "channel-1", NextTarget), 1)
-	suite.Len(suite.mgr.GetSealedSegmentsByChannel(collectionID, "channel-2", NextTarget), 1)
-	suite.Len(suite.mgr.GetGrowingSegmentsByChannel(collectionID, "channel-1", NextTarget), 4)
-	suite.Len(suite.mgr.GetGrowingSegmentsByChannel(collectionID, "channel-2", NextTarget), 1)
-	suite.Len(suite.mgr.GetDroppedSegmentsByChannel(collectionID, "channel-1", NextTarget), 3)
-	suite.Len(suite.mgr.GetGrowingSegmentsByCollection(collectionID, NextTarget), 5)
-	suite.Len(suite.mgr.GetSealedSegmentsByPartition(collectionID, 1, NextTarget), 2)
-	suite.NotNil(suite.mgr.GetSealedSegment(collectionID, 11, NextTarget))
-	suite.NotNil(suite.mgr.GetDmChannel(collectionID, "channel-1", NextTarget))
+	suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.Len(suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget), 2)
+	suite.Len(suite.mgr.GetSealedSegmentsByChannel(ctx, collectionID, "channel-1", NextTarget), 1)
+	suite.Len(suite.mgr.GetSealedSegmentsByChannel(ctx, collectionID, "channel-2", NextTarget), 1)
+	suite.Len(suite.mgr.GetGrowingSegmentsByChannel(ctx, collectionID, "channel-1", NextTarget), 4)
+	suite.Len(suite.mgr.GetGrowingSegmentsByChannel(ctx, collectionID, "channel-2", NextTarget), 1)
+	suite.Len(suite.mgr.GetDroppedSegmentsByChannel(ctx, collectionID, "channel-1", NextTarget), 3)
+	suite.Len(suite.mgr.GetGrowingSegmentsByCollection(ctx, collectionID, NextTarget), 5)
+	suite.Len(suite.mgr.GetSealedSegmentsByPartition(ctx, collectionID, 1, NextTarget), 2)
+	suite.NotNil(suite.mgr.GetSealedSegment(ctx, collectionID, 11, NextTarget))
+	suite.NotNil(suite.mgr.GetDmChannel(ctx, collectionID, "channel-1", NextTarget))
 }
 
 func (suite *TargetManagerSuite) TestGetTarget() {
@@ -535,19 +545,20 @@ func (suite *TargetManagerSuite) TestGetTarget() {
 }
 
 func (suite *TargetManagerSuite) TestRecover() {
+	ctx := suite.ctx
 	collectionID := int64(1003)
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
-	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
-	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 
-	suite.meta.PutCollection(&Collection{
+	suite.meta.PutCollection(ctx, &Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  collectionID,
 			ReplicaNumber: 1,
 		},
 	})
-	suite.meta.PutPartition(&Partition{
+	suite.meta.PutPartition(ctx, &Partition{
 		PartitionLoadInfo: &querypb.PartitionLoadInfo{
 			CollectionID: collectionID,
 			PartitionID:  1,
@@ -582,16 +593,16 @@ func (suite *TargetManagerSuite) TestRecover() {
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
-	suite.mgr.UpdateCollectionNextTarget(collectionID)
-	suite.mgr.UpdateCollectionCurrentTarget(collectionID)
+	suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.mgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
-	suite.mgr.SaveCurrentTarget(suite.catalog)
+	suite.mgr.SaveCurrentTarget(ctx, suite.catalog)
 
 	// clear target in memory
 	version := suite.mgr.current.getCollectionTarget(collectionID).GetTargetVersion()
 	suite.mgr.current.removeCollectionTarget(collectionID)
 	// try to recover
-	suite.mgr.Recover(suite.catalog)
+	suite.mgr.Recover(ctx, suite.catalog)
 
 	target := suite.mgr.current.getCollectionTarget(collectionID)
 	suite.NotNil(target)
@@ -600,20 +611,21 @@ func (suite *TargetManagerSuite) TestRecover() {
 	suite.Equal(target.GetTargetVersion(), version)
 
 	// after recover, target info should be cleaned up
-	targets, err := suite.catalog.GetCollectionTargets()
+	targets, err := suite.catalog.GetCollectionTargets(ctx)
 	suite.NoError(err)
 	suite.Len(targets, 0)
 }
 
 func (suite *TargetManagerSuite) TestGetTargetJSON() {
+	ctx := suite.ctx
 	collectionID := int64(1003)
-	suite.meta.PutCollection(&Collection{
+	suite.meta.PutCollection(ctx, &Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  collectionID,
 			ReplicaNumber: 1,
 		},
 	})
-	suite.meta.PutPartition(&Partition{
+	suite.meta.PutPartition(ctx, &Partition{
 		PartitionLoadInfo: &querypb.PartitionLoadInfo{
 			CollectionID: collectionID,
 			PartitionID:  1,
@@ -648,10 +660,10 @@ func (suite *TargetManagerSuite) TestGetTargetJSON() {
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
-	suite.NoError(suite.mgr.UpdateCollectionNextTarget(collectionID))
-	suite.True(suite.mgr.UpdateCollectionCurrentTarget(collectionID))
+	suite.NoError(suite.mgr.UpdateCollectionNextTarget(ctx, collectionID))
+	suite.True(suite.mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
 
-	jsonStr := suite.mgr.GetTargetJSON(CurrentTarget)
+	jsonStr := suite.mgr.GetTargetJSON(ctx, CurrentTarget)
 	assert.NotEmpty(suite.T(), jsonStr)
 
 	var currentTarget []*metricsinfo.QueryCoordTarget

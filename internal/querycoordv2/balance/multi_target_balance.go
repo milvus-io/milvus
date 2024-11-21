@@ -1,6 +1,7 @@
 package balance
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"math/rand"
@@ -468,7 +469,7 @@ type MultiTargetBalancer struct {
 	targetMgr meta.TargetManagerInterface
 }
 
-func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) (segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan) {
+func (b *MultiTargetBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan) {
 	log := log.With(
 		zap.Int64("collection", replica.GetCollectionID()),
 		zap.Int64("replica id", replica.GetID()),
@@ -510,32 +511,32 @@ func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) (segmentPlan
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
 		if b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, rwNodes, roNodes)...)
+			channelPlans = append(channelPlans, b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)...)
 		}
 		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, rwNodes, roNodes)...)
+			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)...)
 		}
 	} else {
 		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genChannelPlan(br, replica, rwNodes)...)
+			channelPlans = append(channelPlans, b.genChannelPlan(ctx, br, replica, rwNodes)...)
 		}
 
 		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = b.genSegmentPlan(replica, rwNodes)
+			segmentPlans = b.genSegmentPlan(ctx, replica, rwNodes)
 		}
 	}
 
 	return segmentPlans, channelPlans
 }
 
-func (b *MultiTargetBalancer) genSegmentPlan(replica *meta.Replica, rwNodes []int64) []SegmentAssignPlan {
+func (b *MultiTargetBalancer) genSegmentPlan(ctx context.Context, replica *meta.Replica, rwNodes []int64) []SegmentAssignPlan {
 	// get segments distribution on replica level and global level
 	nodeSegments := make(map[int64][]*meta.Segment)
 	globalNodeSegments := make(map[int64][]*meta.Segment)
 	for _, node := range rwNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
+			return b.targetMgr.CanSegmentBeMoved(ctx, segment.GetCollectionID(), segment.GetID())
 		})
 		nodeSegments[node] = segments
 		globalNodeSegments[node] = b.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(node))

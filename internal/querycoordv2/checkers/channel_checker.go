@@ -70,9 +70,9 @@ func (c *ChannelChecker) Description() string {
 	return "DmChannelChecker checks the lack of DmChannels, or some DmChannels are redundant"
 }
 
-func (c *ChannelChecker) readyToCheck(collectionID int64) bool {
-	metaExist := (c.meta.GetCollection(collectionID) != nil)
-	targetExist := c.targetMgr.IsNextTargetExist(collectionID) || c.targetMgr.IsCurrentTargetExist(collectionID, common.AllPartitionsID)
+func (c *ChannelChecker) readyToCheck(ctx context.Context, collectionID int64) bool {
+	metaExist := (c.meta.GetCollection(ctx, collectionID) != nil)
+	targetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID) || c.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
 
 	return metaExist && targetExist
 }
@@ -81,11 +81,11 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 	if !c.IsActive() {
 		return nil
 	}
-	collectionIDs := c.meta.CollectionManager.GetAll()
+	collectionIDs := c.meta.CollectionManager.GetAll(ctx)
 	tasks := make([]task.Task, 0)
 	for _, cid := range collectionIDs {
-		if c.readyToCheck(cid) {
-			replicas := c.meta.ReplicaManager.GetByCollection(cid)
+		if c.readyToCheck(ctx, cid) {
+			replicas := c.meta.ReplicaManager.GetByCollection(ctx, cid)
 			for _, r := range replicas {
 				tasks = append(tasks, c.checkReplica(ctx, r)...)
 			}
@@ -105,7 +105,7 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 		channelOnQN := c.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(nodeID))
 		collectionChannels := lo.GroupBy(channelOnQN, func(ch *meta.DmChannel) int64 { return ch.CollectionID })
 		for collectionID, channels := range collectionChannels {
-			replica := c.meta.ReplicaManager.GetByCollectionAndNode(collectionID, nodeID)
+			replica := c.meta.ReplicaManager.GetByCollectionAndNode(ctx, collectionID, nodeID)
 			if replica == nil {
 				reduceTasks := c.createChannelReduceTasks(ctx, channels, meta.NilReplica)
 				task.SetReason("dirty channel exists", reduceTasks...)
@@ -119,7 +119,7 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica) []task.Task {
 	ret := make([]task.Task, 0)
 
-	lacks, redundancies := c.getDmChannelDiff(replica.GetCollectionID(), replica.GetID())
+	lacks, redundancies := c.getDmChannelDiff(ctx, replica.GetCollectionID(), replica.GetID())
 	tasks := c.createChannelLoadTask(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, replica)
 	task.SetReason("lacks of channel", tasks...)
 	ret = append(ret, tasks...)
@@ -139,10 +139,10 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 }
 
 // GetDmChannelDiff get channel diff between target and dist
-func (c *ChannelChecker) getDmChannelDiff(collectionID int64,
+func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int64,
 	replicaID int64,
 ) (toLoad, toRelease []*meta.DmChannel) {
-	replica := c.meta.Get(replicaID)
+	replica := c.meta.Get(ctx, replicaID)
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
 		return
@@ -154,8 +154,8 @@ func (c *ChannelChecker) getDmChannelDiff(collectionID int64,
 		distMap.Insert(ch.GetChannelName())
 	}
 
-	nextTargetMap := c.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
-	currentTargetMap := c.targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
+	nextTargetMap := c.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTarget)
+	currentTargetMap := c.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
 
 	// get channels which exists on dist, but not exist on current and next
 	for _, ch := range dist {
@@ -179,7 +179,7 @@ func (c *ChannelChecker) getDmChannelDiff(collectionID int64,
 
 func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int64) []*meta.DmChannel {
 	log := log.Ctx(ctx).WithRateGroup("ChannelChecker.findRepeatedChannels", 1, 60)
-	replica := c.meta.Get(replicaID)
+	replica := c.meta.Get(ctx, replicaID)
 	ret := make([]*meta.DmChannel, 0)
 
 	if replica == nil {
@@ -232,7 +232,7 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 		if len(rwNodes) == 0 {
 			rwNodes = replica.GetRWNodes()
 		}
-		plan := c.getBalancerFunc().AssignChannel([]*meta.DmChannel{ch}, rwNodes, false)
+		plan := c.getBalancerFunc().AssignChannel(ctx, []*meta.DmChannel{ch}, rwNodes, false)
 		plans = append(plans, plan...)
 	}
 
@@ -264,7 +264,7 @@ func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels 
 }
 
 func (c *ChannelChecker) getTraceCtx(ctx context.Context, collectionID int64) context.Context {
-	coll := c.meta.GetCollection(collectionID)
+	coll := c.meta.GetCollection(ctx, collectionID)
 	if coll == nil || coll.LoadSpan == nil {
 		return ctx
 	}
