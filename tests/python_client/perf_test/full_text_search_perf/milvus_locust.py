@@ -15,7 +15,7 @@ from faker import Faker
 faker = Faker()
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -178,26 +178,30 @@ class MilvusUser(MilvusBaseUser):
 
         self.client.insert(data)
 
-    @tag('sparse')
+    @tag('sparse', 'search')
     @task(4)
     def full_text_search(self):
         """full text search"""
         search_data = [faker.text(max_nb_chars=300)]
-        logger.debug("Performing vector search")
+        logger.debug("Performing sparse vector search")
         self.client.search(data=search_data,
                            anns_field="sparse",
-                           top_k=self.top_k)
+                           top_k=self.top_k,
+                           search_type="full-text-search"
+                           )
 
-    @tag('dense')
+    @tag('dense', 'search')
     @task(4)
     def dense_search(self):
         """full text search"""
+        logger.debug("Performing dense vector search")
         search_data = [self._random_vector()]
         self.client.search(data=search_data,
                            anns_field="dense_emb",
-                           top_k=self.top_k)
+                           top_k=self.top_k,
+                           search_type="dense-search")
 
-    @tag('text_match')
+    @tag('text_match', 'query')
     @task(2)
     def text_match(self):
         """Text Match"""
@@ -254,11 +258,12 @@ class MilvusORMClient:
                     exception=e
                 )
 
-    def search(self, data, anns_field, top_k, param=None, output_fields=None):
+    def search(self, data, anns_field, top_k, param=None, output_fields=None, search_type="dense-search"):
         if param is None:
             param = {}
         if output_fields is None:
             output_fields = ["id"]
+        name = search_type
         start = time.time()
         try:
             res = self.collection.search(
@@ -276,7 +281,7 @@ class MilvusORMClient:
                     raise Exception("Empty results")
             events.request.fire(
                 request_type=self.request_type,
-                name="Search",
+                name=name,
                 response_time=total_time,
                 response_length=0,
                 exception=None
@@ -285,7 +290,7 @@ class MilvusORMClient:
             logger.error(f"Search error: {str(e)}")
             events.request.fire(
                 request_type=self.request_type,
-                name="Search",
+                name=name,
                 response_time=(time.time() - start) * 1000,
                 response_length=0,
                 exception=e
