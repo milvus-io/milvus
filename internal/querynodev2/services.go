@@ -457,6 +457,14 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 			return merr.Status(err), nil
 		}
 
+		if len(req.GetInfos()) > 0 && req.GetInfos()[0].Level == datapb.SegmentLevel_L0 {
+			// force l0 segment to load on delegator
+			if req.DstNodeID != node.GetNodeID() {
+				log.Info("unexpected L0 segment load on non-delegator node, force to load on delegator")
+				req.DstNodeID = node.GetNodeID()
+			}
+		}
+
 		req.NeedTransfer = false
 		err := delegator.LoadSegments(ctx, req)
 		if err != nil {

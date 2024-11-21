@@ -403,13 +403,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	log := sd.getLogger(ctx)
 
 	targetNodeID := req.GetDstNodeID()
-	if len(req.GetInfos()) > 0 && req.GetInfos()[0].Level == datapb.SegmentLevel_L0 {
-		// force l0 segment to load on delegator
-		if targetNodeID != paramtable.GetNodeID() {
-			targetNodeID = paramtable.GetNodeID()
-			log.Info("unexpected L0 segment load on non-delegator node, force to load on delegator", zap.Int64("nodeIDInReq", req.GetDstNodeID()))
-		}
-	}
 	// add common log fields
 	log = log.With(
 		zap.Int64("workID", targetNodeID),
