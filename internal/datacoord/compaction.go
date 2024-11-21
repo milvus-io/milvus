@@ -337,15 +337,16 @@ func (c *compactionPlanHandler) loadMeta() {
 					zap.String("state", task.GetState().String()))
 				continue
 			} else {
-				// TODO: how to deal with the create failed tasks, leave it in meta forever?
 				t, err := c.createCompactTask(task)
 				if err != nil {
-					log.Warn("compactionPlanHandler loadMeta create compactionTask failed",
+					log.Info("compactionPlanHandler loadMeta create compactionTask failed, try to clean it",
 						zap.Int64("planID", task.GetPlanID()),
 						zap.String("type", task.GetType().String()),
 						zap.String("state", task.GetState().String()),
 						zap.Error(err),
 					)
+					// ignore the drop error
+					c.meta.DropCompactionTask(task)
 					continue
 				}
 				if t.NeedReAssignNodeID() {
