@@ -251,7 +251,7 @@ message LoadPartitionsRequest {
     bool refresh = 8;
     // resource group names
     repeated string resource_groups = 9;
-    repeated index.IndexInfo index_info_list = 10;
+    repeated index.IndexInfo index_info_list = 10; // deprecated
     repeated int64 load_fields = 11;
 }
 

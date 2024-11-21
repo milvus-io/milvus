@@ -19,6 +19,7 @@ package querycoordv2
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -344,6 +345,7 @@ func (suite *ServiceSuite) TestLoadCollection() {
 	// Test load all collections
 	for _, collection := range suite.collections {
 		suite.expectGetRecoverInfo(collection)
+		suite.expectDescribeCollection()
 		suite.expectLoadPartitions()
 
 		req := &querypb.LoadCollectionRequest{
@@ -913,6 +915,7 @@ func (suite *ServiceSuite) TestLoadPartition() {
 	// Test load all partitions
 	for _, collection := range suite.collections {
 		suite.expectLoadPartitions()
+		suite.expectDescribeCollection()
 		suite.expectGetRecoverInfo(collection)
 
 		req := &querypb.LoadPartitionsRequest{
@@ -1096,6 +1099,9 @@ func (suite *ServiceSuite) TestRefreshCollection() {
 	// Test load all collections
 	suite.loadAll()
 
+	suite.expectListIndexes()
+	suite.expectLoadPartitions()
+
 	// Test refresh all collections again when collections are loaded. This time should fail with collection not 100% loaded.
 	for _, collection := range suite.collections {
 		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loading)
@@ -1115,7 +1121,11 @@ func (suite *ServiceSuite) TestRefreshCollection() {
 
 		readyCh, err := server.targetObserver.UpdateNextTarget(id)
 		suite.NoError(err)
-		<-readyCh
+		select {
+		case <-time.After(30 * time.Second):
+			suite.Fail(fmt.Sprintf("update next target timeout, collection=%d", id))
+		case <-readyCh:
+		}
 
 		// Now the refresh must be done
 		collection := server.meta.CollectionManager.GetCollection(id)
@@ -1802,8 +1812,9 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 func (suite *ServiceSuite) loadAll() {
 	ctx := context.Background()
 	for _, collection := range suite.collections {
-		suite.expectLoadPartitions()
+		suite.expectDescribeCollection()
 		suite.expectGetRecoverInfo(collection)
+		suite.expectLoadPartitions()
 		if suite.loadTypes[collection] == querypb.LoadType_LoadCollection {
 			req := &querypb.LoadCollectionRequest{
 				CollectionID:  collection,
@@ -1940,12 +1951,18 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 }
 
 func (suite *ServiceSuite) expectLoadPartitions() {
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-		Return(nil, nil)
-	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).
-		Return(nil, nil)
 	suite.cluster.EXPECT().LoadPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(merr.Success(), nil)
+}
+
+func (suite *ServiceSuite) expectDescribeCollection() {
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+		Return(nil, nil)
+}
+
+func (suite *ServiceSuite) expectListIndexes() {
+	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).
+		Return(nil, nil)
 }
 
 func (suite *ServiceSuite) getAllSegments(collection int64) []int64 {
