@@ -50,26 +50,26 @@ def setup_collection(environment):
     # 创建索引
     indexes = [index.to_dict() for index in collection.indexes]
     indexed_fields = [index['field'] for index in indexes]
-    if "sparse" not in indexed_fields:
-        collection.create_index(
-            "sparse",
-            {
-                "index_type": "SPARSE_INVERTED_INDEX",
-                "metric_type": "BM25",
-                "params": {
-                    "bm25_k1": 1.5,
-                    "bm25_b": 0.75,
-                }
+    # if "sparse" not in indexed_fields:
+    collection.create_index(
+        "sparse",
+        {
+            "index_type": "SPARSE_INVERTED_INDEX",
+            "metric_type": "BM25",
+            "params": {
+                "bm25_k1": 1.5,
+                "bm25_b": 0.75,
             }
-        )
-    if "dense_emb" not in indexed_fields:
-        collection.create_index(
-            "dense_emb",
-            {
-                "index_type": "HNSW",
-                "metric_type": "COSINE"
-            }
-        )
+        }
+    )
+    # if "dense_emb" not in indexed_fields:
+    collection.create_index(
+        "dense_emb",
+        {
+            "index_type": "HNSW",
+            "metric_type": "COSINE"
+        }
+    )
     collection.load()
     logger.info("Collection setup completed successfully")
 
