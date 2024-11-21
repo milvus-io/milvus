@@ -124,9 +124,8 @@ func (c *GRPCClientBase[T]) Call(ctx context.Context, caller func(client T) (any
 
 	ret, err := c.callOnce(ctx, caller)
 	if err != nil {
-		traceErr := fmt.Errorf("err: %s\n, %s", err.Error(), tracer.StackTrace())
-		log.Error("GRPCClientBase[T] Call grpc first call get error ", zap.Error(traceErr))
-		return nil, traceErr
+		log.Error("GRPCClientBase[T] Call grpc first call get error ", zap.Error(err))
+		return nil, err
 	}
 	return ret, err
 }
