@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -806,13 +807,35 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	return resp, nil
 }
 
+// GetDataViewVersions retrieves the data view versions of the target collections.
+func (s *Server) GetDataViewVersions(ctx context.Context, req *datapb.GetDataViewVersionsRequest) (*datapb.GetDataViewVersionsResponse, error) {
+	log := log.Ctx(ctx).With(zap.Int("numCollections", len(req.GetCollectionIDs())))
+	log.Info("GetDataViewVersions request received")
+	resp := &datapb.GetDataViewVersionsResponse{
+		Status: merr.Success(),
+	}
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.GetDataViewVersionsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	versions := make(map[int64]int64, len(req.GetCollectionIDs()))
+	for _, id := range req.GetCollectionIDs() {
+		versions[id] = s.viewManager.GetVersion(id)
+	}
+
+	resp.DataViewVersions = versions
+	log.Info("GetDataViewVersions done")
+	return resp, nil
+}
+
 // GetRecoveryInfoV2 get recovery info for segment
 // Called by: QueryCoord.
 func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
-	log := log.Ctx(ctx)
 	collectionID := req.GetCollectionID()
 	partitionIDs := req.GetPartitionIDs()
-	log = log.With(
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("partitionIDs", partitionIDs),
 	)
@@ -825,13 +848,21 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			Status: merr.Status(err),
 		}, nil
 	}
-	channels := s.channelManager.GetChannelsByCollectionID(collectionID)
-	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
-	flushedIDs := make(typeutil.UniqueSet)
-	for _, ch := range channels {
-		channelInfo := s.handler.GetQueryVChanPositions(ch, partitionIDs...)
+
+	dataView, err := s.viewManager.Get(req.GetCollectionID())
+	if err != nil {
+		log.Warn("get data view failed in GetRecoveryInfoV2", zap.Error(err))
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	channelInfos := make([]*datapb.VchannelInfo, 0, len(dataView.Channels))
+	for _, info := range dataView.Channels {
+		channelInfo := typeutil.Clone(info)
+		// retrieve target partition stats versions
+		channelInfo.PartitionStatsVersions = lo.PickByKeys(channelInfo.PartitionStatsVersions, req.GetPartitionIDs())
 		channelInfos = append(channelInfos, channelInfo)
-		log.Info("datacoord append channelInfo in GetRecoveryInfo",
+		log.Info("datacoord append channelInfo in GetRecoveryInfoV2",
 			zap.String("channel", channelInfo.GetChannelName()),
 			zap.Int("# of unflushed segments", len(channelInfo.GetUnflushedSegmentIds())),
 			zap.Int("# of flushed segments", len(channelInfo.GetFlushedSegmentIds())),
@@ -839,42 +870,16 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			zap.Int("# of indexed segments", len(channelInfo.GetIndexedSegmentIds())),
 			zap.Int("# of l0 segments", len(channelInfo.GetLevelZeroSegmentIds())),
 		)
-		flushedIDs.Insert(channelInfo.GetFlushedSegmentIds()...)
 	}
 
 	segmentInfos := make([]*datapb.SegmentInfo, 0)
-	for id := range flushedIDs {
+	for id := range dataView.Segments {
 		segment := s.meta.GetSegment(id)
 		if segment == nil {
-			err := merr.WrapErrSegmentNotFound(id)
+			err = merr.WrapErrSegmentNotFound(id)
 			log.Warn("failed to get segment", zap.Int64("segmentID", id))
 			resp.Status = merr.Status(err)
 			return resp, nil
-		}
-		// Skip non-flushing, non-flushed and dropped segments.
-		if segment.State != commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Flushing && segment.State != commonpb.SegmentState_Dropped {
-			continue
-		}
-		// Also skip bulk insert segments.
-		if segment.GetIsImporting() {
-			continue
-		}
-
-		if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-			segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
-				ID:            segment.ID,
-				PartitionID:   segment.PartitionID,
-				CollectionID:  segment.CollectionID,
-				InsertChannel: segment.InsertChannel,
-				NumOfRows:     segment.NumOfRows,
-				Level:         segment.GetLevel(),
-			})
-			continue
-		}
-
-		binlogs := segment.GetBinlogs()
-		if len(binlogs) == 0 && segment.GetLevel() != datapb.SegmentLevel_L0 {
-			continue
 		}
 		rowCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
 		if rowCount != segment.NumOfRows && rowCount > 0 {
@@ -885,7 +890,6 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		} else {
 			rowCount = segment.NumOfRows
 		}
-
 		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
 			ID:            segment.ID,
 			PartitionID:   segment.PartitionID,
@@ -899,6 +903,68 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 	resp.Channels = channelInfos
 	resp.Segments = segmentInfos
 	return resp, nil
+}
+
+func (s *Server) pullNewDataView(collectionID int64) (*dataview.DataView, error) {
+	version := time.Now().UnixNano()
+	log := log.With(
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("version", version),
+	)
+
+	channels := s.channelManager.GetChannelsByCollectionID(collectionID)
+	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
+	flushedIDs := make(typeutil.UniqueSet)
+
+	for _, ch := range channels {
+		channelInfo := s.handler.GetQueryVChanPositions(ch, allPartitionID)
+		channelInfos = append(channelInfos, channelInfo)
+		log.Info("datacoord append channelInfo in pullNewDataView",
+			zap.String("channel", channelInfo.GetChannelName()),
+			zap.Int("# of unflushed segments", len(channelInfo.GetUnflushedSegmentIds())),
+			zap.Int("# of flushed segments", len(channelInfo.GetFlushedSegmentIds())),
+			zap.Int("# of dropped segments", len(channelInfo.GetDroppedSegmentIds())),
+			zap.Int("# of indexed segments", len(channelInfo.GetIndexedSegmentIds())),
+			zap.Int("# of l0 segments", len(channelInfo.GetLevelZeroSegmentIds())),
+		)
+		flushedIDs.Insert(channelInfo.GetFlushedSegmentIds()...)
+	}
+
+	segments := make([]int64, 0)
+	for id := range flushedIDs {
+		segment := s.meta.GetSegment(id)
+		if segment == nil {
+			err := merr.WrapErrSegmentNotFound(id)
+			log.Warn("failed to get segment", zap.Int64("segmentID", id))
+			return nil, err
+		}
+		// Skip non-flushing, non-flushed and dropped segments.
+		if segment.State != commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Flushing && segment.State != commonpb.SegmentState_Dropped {
+			continue
+		}
+		// Also skip bulk insert segments.
+		if segment.GetIsImporting() {
+			continue
+		}
+
+		binlogs := segment.GetBinlogs()
+		if len(binlogs) == 0 && segment.GetLevel() != datapb.SegmentLevel_L0 {
+			continue
+		}
+		segments = append(segments, id)
+	}
+
+	newDV := &dataview.DataView{
+		CollectionID: collectionID,
+		Channels: lo.KeyBy(channelInfos, func(v *datapb.VchannelInfo) string {
+			return v.GetChannelName()
+		}),
+		Segments: lo.SliceToMap(segments, func(id int64) (int64, struct{}) {
+			return id, struct{}{}
+		}),
+		Version: version,
+	}
+	return newDV, nil
 }
 
 // GetFlushedSegments returns all segment matches provided criterion and in state Flushed or Dropped (compacted but not GCed yet)

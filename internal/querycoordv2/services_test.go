@@ -1096,6 +1096,8 @@ func (suite *ServiceSuite) TestRefreshCollection() {
 		suite.ErrorIs(err, merr.ErrCollectionNotLoaded)
 	}
 
+	suite.expectGetDataViewVersions()
+
 	// Test load all collections
 	suite.loadAll()
 
@@ -1922,6 +1924,17 @@ func (suite *ServiceSuite) assertSegments(collection int64, segments []*querypb.
 	}
 
 	return true
+}
+
+func (suite *ServiceSuite) expectGetDataViewVersions() {
+	suite.broker.EXPECT().GetDataViewVersions(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, collectionIDs []int64) (map[int64]int64, error) {
+			versions := make(map[int64]int64)
+			for _, collectionID := range collectionIDs {
+				versions[collectionID] = observers.InitialDataViewVersion
+			}
+			return versions, nil
+		})
 }
 
 func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {

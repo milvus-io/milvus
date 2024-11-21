@@ -182,6 +182,14 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 	suite.broker.EXPECT().
 		GetRecoveryInfoV2(mock.Anything, mock.Anything).
 		Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
+	suite.broker.EXPECT().GetDataViewVersions(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, collectionIDs []int64) (map[int64]int64, error) {
+			versions := make(map[int64]int64)
+			for _, collectionID := range collectionIDs {
+				versions[collectionID] = InitialDataViewVersion
+			}
+			return versions, nil
+		})
 
 	suite.Eventually(func() bool {
 		return len(suite.targetMgr.GetSealedSegmentsByCollection(suite.collectionID, meta.NextTarget)) == 3 &&
