@@ -37,18 +37,18 @@ type dropCollectionTask struct {
 	Req *milvuspb.DropCollectionRequest
 }
 
-func (t *dropCollectionTask) validate() error {
+func (t *dropCollectionTask) validate(ctx context.Context) error {
 	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_DropCollection); err != nil {
 		return err
 	}
-	if t.core.meta.IsAlias(t.Req.GetDbName(), t.Req.GetCollectionName()) {
+	if t.core.meta.IsAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName()) {
 		return fmt.Errorf("cannot drop the collection via alias = %s", t.Req.CollectionName)
 	}
 	return nil
 }
 
 func (t *dropCollectionTask) Prepare(ctx context.Context) error {
-	return t.validate()
+	return t.validate(ctx)
 }
 
 func (t *dropCollectionTask) Execute(ctx context.Context) error {
@@ -68,7 +68,7 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	// meta cache of all aliases should also be cleaned.
-	aliases := t.core.meta.ListAliasesByID(collMeta.CollectionID)
+	aliases := t.core.meta.ListAliasesByID(ctx, collMeta.CollectionID)
 
 	ts := t.GetTs()
 

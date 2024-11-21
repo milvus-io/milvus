@@ -72,36 +72,36 @@ type mockMetaTable struct {
 	CreateAliasFunc                  func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
 	AlterAliasFunc                   func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
 	DropAliasFunc                    func(ctx context.Context, dbName string, alias string, ts Timestamp) error
-	IsAliasFunc                      func(dbName, name string) bool
+	IsAliasFunc                      func(ctx context.Context, dbName, name string) bool
 	DescribeAliasFunc                func(ctx context.Context, dbName, alias string, ts Timestamp) (string, error)
 	ListAliasesFunc                  func(ctx context.Context, dbName, collectionName string, ts Timestamp) ([]string, error)
-	ListAliasesByIDFunc              func(collID UniqueID) []string
+	ListAliasesByIDFunc              func(ctx context.Context, collID UniqueID) []string
 	GetCollectionIDByNameFunc        func(name string) (UniqueID, error)
 	GetPartitionByNameFunc           func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error)
-	GetCollectionVirtualChannelsFunc func(colID int64) []string
+	GetCollectionVirtualChannelsFunc func(ctx context.Context, colID int64) []string
 	AlterCollectionFunc              func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error
 	RenameCollectionFunc             func(ctx context.Context, oldName string, newName string, ts Timestamp) error
-	AddCredentialFunc                func(credInfo *internalpb.CredentialInfo) error
-	GetCredentialFunc                func(username string) (*internalpb.CredentialInfo, error)
-	DeleteCredentialFunc             func(username string) error
-	AlterCredentialFunc              func(credInfo *internalpb.CredentialInfo) error
-	ListCredentialUsernamesFunc      func() (*milvuspb.ListCredUsersResponse, error)
-	CreateRoleFunc                   func(tenant string, entity *milvuspb.RoleEntity) error
-	DropRoleFunc                     func(tenant string, roleName string) error
-	OperateUserRoleFunc              func(tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error
-	SelectRoleFunc                   func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error)
-	SelectUserFunc                   func(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error)
-	OperatePrivilegeFunc             func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
-	SelectGrantFunc                  func(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
-	DropGrantFunc                    func(tenant string, role *milvuspb.RoleEntity) error
-	ListPolicyFunc                   func(tenant string) ([]string, error)
-	ListUserRoleFunc                 func(tenant string) ([]string, error)
+	AddCredentialFunc                func(ctx context.Context, credInfo *internalpb.CredentialInfo) error
+	GetCredentialFunc                func(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
+	DeleteCredentialFunc             func(ctx context.Context, username string) error
+	AlterCredentialFunc              func(ctx context.Context, credInfo *internalpb.CredentialInfo) error
+	ListCredentialUsernamesFunc      func(ctx context.Context) (*milvuspb.ListCredUsersResponse, error)
+	CreateRoleFunc                   func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
+	DropRoleFunc                     func(ctx context.Context, tenant string, roleName string) error
+	OperateUserRoleFunc              func(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error
+	SelectRoleFunc                   func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error)
+	SelectUserFunc                   func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error)
+	OperatePrivilegeFunc             func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
+	SelectGrantFunc                  func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
+	DropGrantFunc                    func(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error
+	ListPolicyFunc                   func(ctx context.Context, tenant string) ([]string, error)
+	ListUserRoleFunc                 func(ctx context.Context, tenant string) ([]string, error)
 	DescribeDatabaseFunc             func(ctx context.Context, dbName string) (*model.Database, error)
-	CreatePrivilegeGroupFunc         func(groupName string) error
-	DropPrivilegeGroupFunc           func(groupName string) error
-	ListPrivilegeGroupsFunc          func() ([]*milvuspb.PrivilegeGroupInfo, error)
-	OperatePrivilegeGroupFunc        func(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error
-	GetPrivilegeGroupRolesFunc       func(groupName string) ([]*milvuspb.RoleEntity, error)
+	CreatePrivilegeGroupFunc         func(ctx context.Context, groupName string) error
+	DropPrivilegeGroupFunc           func(ctx context.Context, groupName string) error
+	ListPrivilegeGroupsFunc          func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)
+	OperatePrivilegeGroupFunc        func(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error
+	GetPrivilegeGroupRolesFunc       func(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error)
 }
 
 func (m mockMetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error) {
@@ -160,8 +160,8 @@ func (m mockMetaTable) DropAlias(ctx context.Context, dbName, alias string, ts T
 	return m.DropAliasFunc(ctx, dbName, alias, ts)
 }
 
-func (m mockMetaTable) IsAlias(dbName, name string) bool {
-	return m.IsAliasFunc(dbName, name)
+func (m mockMetaTable) IsAlias(ctx context.Context, dbName, name string) bool {
+	return m.IsAliasFunc(ctx, dbName, name)
 }
 
 func (m mockMetaTable) DescribeAlias(ctx context.Context, dbName, alias string, ts Timestamp) (string, error) {
@@ -172,8 +172,8 @@ func (m mockMetaTable) ListAliases(ctx context.Context, dbName, collectionName s
 	return m.ListAliasesFunc(ctx, dbName, collectionName, ts)
 }
 
-func (m mockMetaTable) ListAliasesByID(collID UniqueID) []string {
-	return m.ListAliasesByIDFunc(collID)
+func (m mockMetaTable) ListAliasesByID(ctx context.Context, collID UniqueID) []string {
+	return m.ListAliasesByIDFunc(ctx, collID)
 }
 
 func (m mockMetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error {
@@ -192,88 +192,88 @@ func (m mockMetaTable) GetPartitionByName(collID UniqueID, partitionName string,
 	return m.GetPartitionByNameFunc(collID, partitionName, ts)
 }
 
-func (m mockMetaTable) GetCollectionVirtualChannels(colID int64) []string {
-	return m.GetCollectionVirtualChannelsFunc(colID)
+func (m mockMetaTable) GetCollectionVirtualChannels(ctx context.Context, colID int64) []string {
+	return m.GetCollectionVirtualChannelsFunc(ctx, colID)
 }
 
-func (m mockMetaTable) AddCredential(credInfo *internalpb.CredentialInfo) error {
-	return m.AddCredentialFunc(credInfo)
+func (m mockMetaTable) AddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
+	return m.AddCredentialFunc(ctx, credInfo)
 }
 
-func (m mockMetaTable) GetCredential(username string) (*internalpb.CredentialInfo, error) {
-	return m.GetCredentialFunc(username)
+func (m mockMetaTable) GetCredential(ctx context.Context, username string) (*internalpb.CredentialInfo, error) {
+	return m.GetCredentialFunc(ctx, username)
 }
 
-func (m mockMetaTable) DeleteCredential(username string) error {
-	return m.DeleteCredentialFunc(username)
+func (m mockMetaTable) DeleteCredential(ctx context.Context, username string) error {
+	return m.DeleteCredentialFunc(ctx, username)
 }
 
-func (m mockMetaTable) AlterCredential(credInfo *internalpb.CredentialInfo) error {
-	return m.AlterCredentialFunc(credInfo)
+func (m mockMetaTable) AlterCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
+	return m.AlterCredentialFunc(ctx, credInfo)
 }
 
-func (m mockMetaTable) ListCredentialUsernames() (*milvuspb.ListCredUsersResponse, error) {
-	return m.ListCredentialUsernamesFunc()
+func (m mockMetaTable) ListCredentialUsernames(ctx context.Context) (*milvuspb.ListCredUsersResponse, error) {
+	return m.ListCredentialUsernamesFunc(ctx)
 }
 
-func (m mockMetaTable) CreateRole(tenant string, entity *milvuspb.RoleEntity) error {
-	return m.CreateRoleFunc(tenant, entity)
+func (m mockMetaTable) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+	return m.CreateRoleFunc(ctx, tenant, entity)
 }
 
-func (m mockMetaTable) DropRole(tenant string, roleName string) error {
-	return m.DropRoleFunc(tenant, roleName)
+func (m mockMetaTable) DropRole(ctx context.Context, tenant string, roleName string) error {
+	return m.DropRoleFunc(ctx, tenant, roleName)
 }
 
-func (m mockMetaTable) OperateUserRole(tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
-	return m.OperateUserRoleFunc(tenant, userEntity, roleEntity, operateType)
+func (m mockMetaTable) OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
+	return m.OperateUserRoleFunc(ctx, tenant, userEntity, roleEntity, operateType)
 }
 
-func (m mockMetaTable) SelectRole(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
-	return m.SelectRoleFunc(tenant, entity, includeUserInfo)
+func (m mockMetaTable) SelectRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+	return m.SelectRoleFunc(ctx, tenant, entity, includeUserInfo)
 }
 
-func (m mockMetaTable) SelectUser(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
-	return m.SelectUserFunc(tenant, entity, includeRoleInfo)
+func (m mockMetaTable) SelectUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
+	return m.SelectUserFunc(ctx, tenant, entity, includeRoleInfo)
 }
 
-func (m mockMetaTable) OperatePrivilege(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
-	return m.OperatePrivilegeFunc(tenant, entity, operateType)
+func (m mockMetaTable) OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+	return m.OperatePrivilegeFunc(ctx, tenant, entity, operateType)
 }
 
-func (m mockMetaTable) SelectGrant(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
-	return m.SelectGrantFunc(tenant, entity)
+func (m mockMetaTable) SelectGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+	return m.SelectGrantFunc(ctx, tenant, entity)
 }
 
-func (m mockMetaTable) DropGrant(tenant string, role *milvuspb.RoleEntity) error {
-	return m.DropGrantFunc(tenant, role)
+func (m mockMetaTable) DropGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
+	return m.DropGrantFunc(ctx, tenant, role)
 }
 
-func (m mockMetaTable) ListPolicy(tenant string) ([]string, error) {
-	return m.ListPolicyFunc(tenant)
+func (m mockMetaTable) ListPolicy(ctx context.Context, tenant string) ([]string, error) {
+	return m.ListPolicyFunc(ctx, tenant)
 }
 
-func (m mockMetaTable) ListUserRole(tenant string) ([]string, error) {
-	return m.ListUserRoleFunc(tenant)
+func (m mockMetaTable) ListUserRole(ctx context.Context, tenant string) ([]string, error) {
+	return m.ListUserRoleFunc(ctx, tenant)
 }
 
-func (m mockMetaTable) CreatePrivilegeGroup(groupName string) error {
-	return m.CreatePrivilegeGroupFunc(groupName)
+func (m mockMetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string) error {
+	return m.CreatePrivilegeGroupFunc(ctx, groupName)
 }
 
-func (m mockMetaTable) DropPrivilegeGroup(groupName string) error {
-	return m.DropPrivilegeGroupFunc(groupName)
+func (m mockMetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) error {
+	return m.DropPrivilegeGroupFunc(ctx, groupName)
 }
 
-func (m mockMetaTable) ListPrivilegeGroups() ([]*milvuspb.PrivilegeGroupInfo, error) {
-	return m.ListPrivilegeGroupsFunc()
+func (m mockMetaTable) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
+	return m.ListPrivilegeGroupsFunc(ctx)
 }
 
-func (m mockMetaTable) OperatePrivilegeGroup(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
-	return m.OperatePrivilegeGroupFunc(groupName, privileges, operateType)
+func (m mockMetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
+	return m.OperatePrivilegeGroupFunc(ctx, groupName, privileges, operateType)
 }
 
-func (m mockMetaTable) GetPrivilegeGroupRoles(groupName string) ([]*milvuspb.RoleEntity, error) {
-	return m.GetPrivilegeGroupRolesFunc(groupName)
+func (m mockMetaTable) GetPrivilegeGroupRoles(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error) {
+	return m.GetPrivilegeGroupRolesFunc(ctx, groupName)
 }
 
 func newMockMetaTable() *mockMetaTable {
@@ -498,49 +498,49 @@ func withInvalidMeta() Opt {
 	meta.DropAliasFunc = func(ctx context.Context, dbName string, alias string, ts Timestamp) error {
 		return errors.New("error mock DropAlias")
 	}
-	meta.AddCredentialFunc = func(credInfo *internalpb.CredentialInfo) error {
+	meta.AddCredentialFunc = func(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
 		return errors.New("error mock AddCredential")
 	}
-	meta.GetCredentialFunc = func(username string) (*internalpb.CredentialInfo, error) {
+	meta.GetCredentialFunc = func(ctx context.Context, username string) (*internalpb.CredentialInfo, error) {
 		return nil, errors.New("error mock GetCredential")
 	}
-	meta.DeleteCredentialFunc = func(username string) error {
+	meta.DeleteCredentialFunc = func(ctx context.Context, username string) error {
 		return errors.New("error mock DeleteCredential")
 	}
-	meta.AlterCredentialFunc = func(credInfo *internalpb.CredentialInfo) error {
+	meta.AlterCredentialFunc = func(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
 		return errors.New("error mock AlterCredential")
 	}
-	meta.ListCredentialUsernamesFunc = func() (*milvuspb.ListCredUsersResponse, error) {
+	meta.ListCredentialUsernamesFunc = func(ctx context.Context) (*milvuspb.ListCredUsersResponse, error) {
 		return nil, errors.New("error mock ListCredentialUsernames")
 	}
-	meta.CreateRoleFunc = func(tenant string, entity *milvuspb.RoleEntity) error {
+	meta.CreateRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
 		return errors.New("error mock CreateRole")
 	}
-	meta.DropRoleFunc = func(tenant string, roleName string) error {
+	meta.DropRoleFunc = func(ctx context.Context, tenant string, roleName string) error {
 		return errors.New("error mock DropRole")
 	}
-	meta.OperateUserRoleFunc = func(tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
+	meta.OperateUserRoleFunc = func(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
 		return errors.New("error mock OperateUserRole")
 	}
-	meta.SelectUserFunc = func(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
+	meta.SelectUserFunc = func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
 		return nil, errors.New("error mock SelectUser")
 	}
-	meta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+	meta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 		return nil, errors.New("error mock SelectRole")
 	}
-	meta.OperatePrivilegeFunc = func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+	meta.OperatePrivilegeFunc = func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 		return errors.New("error mock OperatePrivilege")
 	}
-	meta.SelectGrantFunc = func(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+	meta.SelectGrantFunc = func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
 		return nil, errors.New("error mock SelectGrant")
 	}
-	meta.DropGrantFunc = func(tenant string, role *milvuspb.RoleEntity) error {
+	meta.DropGrantFunc = func(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
 		return errors.New("error mock DropGrant")
 	}
-	meta.ListPolicyFunc = func(tenant string) ([]string, error) {
+	meta.ListPolicyFunc = func(ctx context.Context, tenant string) ([]string, error) {
 		return nil, errors.New("error mock ListPolicy")
 	}
-	meta.ListUserRoleFunc = func(tenant string) ([]string, error) {
+	meta.ListUserRoleFunc = func(ctx context.Context, tenant string) ([]string, error) {
 		return nil, errors.New("error mock ListUserRole")
 	}
 	meta.DescribeAliasFunc = func(ctx context.Context, dbName, alias string, ts Timestamp) (string, error) {
@@ -552,19 +552,19 @@ func withInvalidMeta() Opt {
 	meta.DescribeDatabaseFunc = func(ctx context.Context, dbName string) (*model.Database, error) {
 		return nil, errors.New("error mock DescribeDatabase")
 	}
-	meta.CreatePrivilegeGroupFunc = func(groupName string) error {
+	meta.CreatePrivilegeGroupFunc = func(ctx context.Context, groupName string) error {
 		return errors.New("error mock CreatePrivilegeGroup")
 	}
-	meta.DropPrivilegeGroupFunc = func(groupName string) error {
+	meta.DropPrivilegeGroupFunc = func(ctx context.Context, groupName string) error {
 		return errors.New("error mock DropPrivilegeGroup")
 	}
-	meta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+	meta.ListPrivilegeGroupsFunc = func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
 		return nil, errors.New("error mock ListPrivilegeGroups")
 	}
-	meta.OperatePrivilegeGroupFunc = func(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
+	meta.OperatePrivilegeGroupFunc = func(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
 		return errors.New("error mock OperatePrivilegeGroup")
 	}
-	meta.GetPrivilegeGroupRolesFunc = func(groupName string) ([]*milvuspb.RoleEntity, error) {
+	meta.GetPrivilegeGroupRolesFunc = func(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error) {
 		return nil, errors.New("error mock GetPrivilegeGroupRoles")
 	}
 	return withMeta(meta)

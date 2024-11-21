@@ -77,17 +77,17 @@ func (_c *IMetaTable_AddCollection_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// AddCredential provides a mock function with given fields: credInfo
-func (_m *IMetaTable) AddCredential(credInfo *internalpb.CredentialInfo) error {
-	ret := _m.Called(credInfo)
+// AddCredential provides a mock function with given fields: ctx, credInfo
+func (_m *IMetaTable) AddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
+	ret := _m.Called(ctx, credInfo)
 
 	if len(ret) == 0 {
 		panic("no return value specified for AddCredential")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*internalpb.CredentialInfo) error); ok {
-		r0 = rf(credInfo)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.CredentialInfo) error); ok {
+		r0 = rf(ctx, credInfo)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -101,14 +101,15 @@ type IMetaTable_AddCredential_Call struct {
 }
 
 // AddCredential is a helper method to define mock.On call
+//   - ctx context.Context
 //   - credInfo *internalpb.CredentialInfo
-func (_e *IMetaTable_Expecter) AddCredential(credInfo interface{}) *IMetaTable_AddCredential_Call {
-	return &IMetaTable_AddCredential_Call{Call: _e.mock.On("AddCredential", credInfo)}
+func (_e *IMetaTable_Expecter) AddCredential(ctx interface{}, credInfo interface{}) *IMetaTable_AddCredential_Call {
+	return &IMetaTable_AddCredential_Call{Call: _e.mock.On("AddCredential", ctx, credInfo)}
 }
 
-func (_c *IMetaTable_AddCredential_Call) Run(run func(credInfo *internalpb.CredentialInfo)) *IMetaTable_AddCredential_Call {
+func (_c *IMetaTable_AddCredential_Call) Run(run func(ctx context.Context, credInfo *internalpb.CredentialInfo)) *IMetaTable_AddCredential_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*internalpb.CredentialInfo))
+		run(args[0].(context.Context), args[1].(*internalpb.CredentialInfo))
 	})
 	return _c
 }
@@ -118,7 +119,7 @@ func (_c *IMetaTable_AddCredential_Call) Return(_a0 error) *IMetaTable_AddCreden
 	return _c
 }
 
-func (_c *IMetaTable_AddCredential_Call) RunAndReturn(run func(*internalpb.CredentialInfo) error) *IMetaTable_AddCredential_Call {
+func (_c *IMetaTable_AddCredential_Call) RunAndReturn(run func(context.Context, *internalpb.CredentialInfo) error) *IMetaTable_AddCredential_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -269,17 +270,17 @@ func (_c *IMetaTable_AlterCollection_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// AlterCredential provides a mock function with given fields: credInfo
-func (_m *IMetaTable) AlterCredential(credInfo *internalpb.CredentialInfo) error {
-	ret := _m.Called(credInfo)
+// AlterCredential provides a mock function with given fields: ctx, credInfo
+func (_m *IMetaTable) AlterCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
+	ret := _m.Called(ctx, credInfo)
 
 	if len(ret) == 0 {
 		panic("no return value specified for AlterCredential")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*internalpb.CredentialInfo) error); ok {
-		r0 = rf(credInfo)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.CredentialInfo) error); ok {
+		r0 = rf(ctx, credInfo)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -293,14 +294,15 @@ type IMetaTable_AlterCredential_Call struct {
 }
 
 // AlterCredential is a helper method to define mock.On call
+//   - ctx context.Context
 //   - credInfo *internalpb.CredentialInfo
-func (_e *IMetaTable_Expecter) AlterCredential(credInfo interface{}) *IMetaTable_AlterCredential_Call {
-	return &IMetaTable_AlterCredential_Call{Call: _e.mock.On("AlterCredential", credInfo)}
+func (_e *IMetaTable_Expecter) AlterCredential(ctx interface{}, credInfo interface{}) *IMetaTable_AlterCredential_Call {
+	return &IMetaTable_AlterCredential_Call{Call: _e.mock.On("AlterCredential", ctx, credInfo)}
 }
 
-func (_c *IMetaTable_AlterCredential_Call) Run(run func(credInfo *internalpb.CredentialInfo)) *IMetaTable_AlterCredential_Call {
+func (_c *IMetaTable_AlterCredential_Call) Run(run func(ctx context.Context, credInfo *internalpb.CredentialInfo)) *IMetaTable_AlterCredential_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*internalpb.CredentialInfo))
+		run(args[0].(context.Context), args[1].(*internalpb.CredentialInfo))
 	})
 	return _c
 }
@@ -310,7 +312,7 @@ func (_c *IMetaTable_AlterCredential_Call) Return(_a0 error) *IMetaTable_AlterCr
 	return _c
 }
 
-func (_c *IMetaTable_AlterCredential_Call) RunAndReturn(run func(*internalpb.CredentialInfo) error) *IMetaTable_AlterCredential_Call {
+func (_c *IMetaTable_AlterCredential_Call) RunAndReturn(run func(context.Context, *internalpb.CredentialInfo) error) *IMetaTable_AlterCredential_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -620,17 +622,17 @@ func (_c *IMetaTable_CreateDatabase_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// CreatePrivilegeGroup provides a mock function with given fields: groupName
-func (_m *IMetaTable) CreatePrivilegeGroup(groupName string) error {
-	ret := _m.Called(groupName)
+// CreatePrivilegeGroup provides a mock function with given fields: ctx, groupName
+func (_m *IMetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string) error {
+	ret := _m.Called(ctx, groupName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreatePrivilegeGroup")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(groupName)
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, groupName)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -644,14 +646,15 @@ type IMetaTable_CreatePrivilegeGroup_Call struct {
 }
 
 // CreatePrivilegeGroup is a helper method to define mock.On call
+//   - ctx context.Context
 //   - groupName string
-func (_e *IMetaTable_Expecter) CreatePrivilegeGroup(groupName interface{}) *IMetaTable_CreatePrivilegeGroup_Call {
-	return &IMetaTable_CreatePrivilegeGroup_Call{Call: _e.mock.On("CreatePrivilegeGroup", groupName)}
+func (_e *IMetaTable_Expecter) CreatePrivilegeGroup(ctx interface{}, groupName interface{}) *IMetaTable_CreatePrivilegeGroup_Call {
+	return &IMetaTable_CreatePrivilegeGroup_Call{Call: _e.mock.On("CreatePrivilegeGroup", ctx, groupName)}
 }
 
-func (_c *IMetaTable_CreatePrivilegeGroup_Call) Run(run func(groupName string)) *IMetaTable_CreatePrivilegeGroup_Call {
+func (_c *IMetaTable_CreatePrivilegeGroup_Call) Run(run func(ctx context.Context, groupName string)) *IMetaTable_CreatePrivilegeGroup_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -661,22 +664,22 @@ func (_c *IMetaTable_CreatePrivilegeGroup_Call) Return(_a0 error) *IMetaTable_Cr
 	return _c
 }
 
-func (_c *IMetaTable_CreatePrivilegeGroup_Call) RunAndReturn(run func(string) error) *IMetaTable_CreatePrivilegeGroup_Call {
+func (_c *IMetaTable_CreatePrivilegeGroup_Call) RunAndReturn(run func(context.Context, string) error) *IMetaTable_CreatePrivilegeGroup_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CreateRole provides a mock function with given fields: tenant, entity
-func (_m *IMetaTable) CreateRole(tenant string, entity *milvuspb.RoleEntity) error {
-	ret := _m.Called(tenant, entity)
+// CreateRole provides a mock function with given fields: ctx, tenant, entity
+func (_m *IMetaTable) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+	ret := _m.Called(ctx, tenant, entity)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateRole")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *milvuspb.RoleEntity) error); ok {
-		r0 = rf(tenant, entity)
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.RoleEntity) error); ok {
+		r0 = rf(ctx, tenant, entity)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -690,15 +693,16 @@ type IMetaTable_CreateRole_Call struct {
 }
 
 // CreateRole is a helper method to define mock.On call
+//   - ctx context.Context
 //   - tenant string
 //   - entity *milvuspb.RoleEntity
-func (_e *IMetaTable_Expecter) CreateRole(tenant interface{}, entity interface{}) *IMetaTable_CreateRole_Call {
-	return &IMetaTable_CreateRole_Call{Call: _e.mock.On("CreateRole", tenant, entity)}
+func (_e *IMetaTable_Expecter) CreateRole(ctx interface{}, tenant interface{}, entity interface{}) *IMetaTable_CreateRole_Call {
+	return &IMetaTable_CreateRole_Call{Call: _e.mock.On("CreateRole", ctx, tenant, entity)}
 }
 
-func (_c *IMetaTable_CreateRole_Call) Run(run func(tenant string, entity *milvuspb.RoleEntity)) *IMetaTable_CreateRole_Call {
+func (_c *IMetaTable_CreateRole_Call) Run(run func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity)) *IMetaTable_CreateRole_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*milvuspb.RoleEntity))
+		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.RoleEntity))
 	})
 	return _c
 }
@@ -708,22 +712,22 @@ func (_c *IMetaTable_CreateRole_Call) Return(_a0 error) *IMetaTable_CreateRole_C
 	return _c
 }
 
-func (_c *IMetaTable_CreateRole_Call) RunAndReturn(run func(string, *milvuspb.RoleEntity) error) *IMetaTable_CreateRole_Call {
+func (_c *IMetaTable_CreateRole_Call) RunAndReturn(run func(context.Context, string, *milvuspb.RoleEntity) error) *IMetaTable_CreateRole_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// DeleteCredential provides a mock function with given fields: username
-func (_m *IMetaTable) DeleteCredential(username string) error {
-	ret := _m.Called(username)
+// DeleteCredential provides a mock function with given fields: ctx, username
+func (_m *IMetaTable) DeleteCredential(ctx context.Context, username string) error {
+	ret := _m.Called(ctx, username)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DeleteCredential")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(username)
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, username)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -737,14 +741,15 @@ type IMetaTable_DeleteCredential_Call struct {
 }
 
 // DeleteCredential is a helper method to define mock.On call
+//   - ctx context.Context
 //   - username string
-func (_e *IMetaTable_Expecter) DeleteCredential(username interface{}) *IMetaTable_DeleteCredential_Call {
-	return &IMetaTable_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential", username)}
+func (_e *IMetaTable_Expecter) DeleteCredential(ctx interface{}, username interface{}) *IMetaTable_DeleteCredential_Call {
+	return &IMetaTable_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential", ctx, username)}
 }
 
-func (_c *IMetaTable_DeleteCredential_Call) Run(run func(username string)) *IMetaTable_DeleteCredential_Call {
+func (_c *IMetaTable_DeleteCredential_Call) Run(run func(ctx context.Context, username string)) *IMetaTable_DeleteCredential_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -754,7 +759,7 @@ func (_c *IMetaTable_DeleteCredential_Call) Return(_a0 error) *IMetaTable_Delete
 	return _c
 }
 
-func (_c *IMetaTable_DeleteCredential_Call) RunAndReturn(run func(string) error) *IMetaTable_DeleteCredential_Call {
+func (_c *IMetaTable_DeleteCredential_Call) RunAndReturn(run func(context.Context, string) error) *IMetaTable_DeleteCredential_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -915,17 +920,17 @@ func (_c *IMetaTable_DropDatabase_Call) RunAndReturn(run func(context.Context, s
 	return _c
 }
 
-// DropGrant provides a mock function with given fields: tenant, role
-func (_m *IMetaTable) DropGrant(tenant string, role *milvuspb.RoleEntity) error {
-	ret := _m.Called(tenant, role)
+// DropGrant provides a mock function with given fields: ctx, tenant, role
+func (_m *IMetaTable) DropGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
+	ret := _m.Called(ctx, tenant, role)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DropGrant")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *milvuspb.RoleEntity) error); ok {
-		r0 = rf(tenant, role)
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.RoleEntity) error); ok {
+		r0 = rf(ctx, tenant, role)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -939,15 +944,16 @@ type IMetaTable_DropGrant_Call struct {
 }
 
 // DropGrant is a helper method to define mock.On call
+//   - ctx context.Context
 //   - tenant string
 //   - role *milvuspb.RoleEntity
-func (_e *IMetaTable_Expecter) DropGrant(tenant interface{}, role interface{}) *IMetaTable_DropGrant_Call {
-	return &IMetaTable_DropGrant_Call{Call: _e.mock.On("DropGrant", tenant, role)}
+func (_e *IMetaTable_Expecter) DropGrant(ctx interface{}, tenant interface{}, role interface{}) *IMetaTable_DropGrant_Call {
+	return &IMetaTable_DropGrant_Call{Call: _e.mock.On("DropGrant", ctx, tenant, role)}
 }
 
-func (_c *IMetaTable_DropGrant_Call) Run(run func(tenant string, role *milvuspb.RoleEntity)) *IMetaTable_DropGrant_Call {
+func (_c *IMetaTable_DropGrant_Call) Run(run func(ctx context.Context, tenant string, role *milvuspb.RoleEntity)) *IMetaTable_DropGrant_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*milvuspb.RoleEntity))
+		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.RoleEntity))
 	})
 	return _c
 }
@@ -957,22 +963,22 @@ func (_c *IMetaTable_DropGrant_Call) Return(_a0 error) *IMetaTable_DropGrant_Cal
 	return _c
 }
 
-func (_c *IMetaTable_DropGrant_Call) RunAndReturn(run func(string, *milvuspb.RoleEntity) error) *IMetaTable_DropGrant_Call {
+func (_c *IMetaTable_DropGrant_Call) RunAndReturn(run func(context.Context, string, *milvuspb.RoleEntity) error) *IMetaTable_DropGrant_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// DropPrivilegeGroup provides a mock function with given fields: groupName
-func (_m *IMetaTable) DropPrivilegeGroup(groupName string) error {
-	ret := _m.Called(groupName)
+// DropPrivilegeGroup provides a mock function with given fields: ctx, groupName
+func (_m *IMetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) error {
+	ret := _m.Called(ctx, groupName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DropPrivilegeGroup")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(groupName)
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, groupName)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -986,14 +992,15 @@ type IMetaTable_DropPrivilegeGroup_Call struct {
 }
 
 // DropPrivilegeGroup is a helper method to define mock.On call
+//   - ctx context.Context
 //   - groupName string
-func (_e *IMetaTable_Expecter) DropPrivilegeGroup(groupName interface{}) *IMetaTable_DropPrivilegeGroup_Call {
-	return &IMetaTable_DropPrivilegeGroup_Call{Call: _e.mock.On("DropPrivilegeGroup", groupName)}
+func (_e *IMetaTable_Expecter) DropPrivilegeGroup(ctx interface{}, groupName interface{}) *IMetaTable_DropPrivilegeGroup_Call {
+	return &IMetaTable_DropPrivilegeGroup_Call{Call: _e.mock.On("DropPrivilegeGroup", ctx, groupName)}
 }
 
-func (_c *IMetaTable_DropPrivilegeGroup_Call) Run(run func(groupName string)) *IMetaTable_DropPrivilegeGroup_Call {
+func (_c *IMetaTable_DropPrivilegeGroup_Call) Run(run func(ctx context.Context, groupName string)) *IMetaTable_DropPrivilegeGroup_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -1003,22 +1010,22 @@ func (_c *IMetaTable_DropPrivilegeGroup_Call) Return(_a0 error) *IMetaTable_Drop
 	return _c
 }
 
-func (_c *IMetaTable_DropPrivilegeGroup_Call) RunAndReturn(run func(string) error) *IMetaTable_DropPrivilegeGroup_Call {
+func (_c *IMetaTable_DropPrivilegeGroup_Call) RunAndReturn(run func(context.Context, string) error) *IMetaTable_DropPrivilegeGroup_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// DropRole provides a mock function with given fields: tenant, roleName
-func (_m *IMetaTable) DropRole(tenant string, roleName string) error {
-	ret := _m.Called(tenant, roleName)
+// DropRole provides a mock function with given fields: ctx, tenant, roleName
+func (_m *IMetaTable) DropRole(ctx context.Context, tenant string, roleName string) error {
+	ret := _m.Called(ctx, tenant, roleName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DropRole")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string) error); ok {
-		r0 = rf(tenant, roleName)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = rf(ctx, tenant, roleName)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -1032,15 +1039,16 @@ type IMetaTable_DropRole_Call struct {
 }
 
 // DropRole is a helper method to define mock.On call
+//   - ctx context.Context
 //   - tenant string
 //   - roleName string
-func (_e *IMetaTable_Expecter) DropRole(tenant interface{}, roleName interface{}) *IMetaTable_DropRole_Call {
-	return &IMetaTable_DropRole_Call{Call: _e.mock.On("DropRole", tenant, roleName)}
+func (_e *IMetaTable_Expecter) DropRole(ctx interface{}, tenant interface{}, roleName interface{}) *IMetaTable_DropRole_Call {
+	return &IMetaTable_DropRole_Call{Call: _e.mock.On("DropRole", ctx, tenant, roleName)}
 }
 
-func (_c *IMetaTable_DropRole_Call) Run(run func(tenant string, roleName string)) *IMetaTable_DropRole_Call {
+func (_c *IMetaTable_DropRole_Call) Run(run func(ctx context.Context, tenant string, roleName string)) *IMetaTable_DropRole_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string))
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
 	})
 	return _c
 }
@@ -1050,7 +1058,7 @@ func (_c *IMetaTable_DropRole_Call) Return(_a0 error) *IMetaTable_DropRole_Call 
 	return _c
 }
 
-func (_c *IMetaTable_DropRole_Call) RunAndReturn(run func(string, string) error) *IMetaTable_DropRole_Call {
+func (_c *IMetaTable_DropRole_Call) RunAndReturn(run func(context.Context, string, string) error) *IMetaTable_DropRole_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1237,17 +1245,17 @@ func (_c *IMetaTable_GetCollectionByName_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
-// GetCollectionVirtualChannels provides a mock function with given fields: colID
-func (_m *IMetaTable) GetCollectionVirtualChannels(colID int64) []string {
-	ret := _m.Called(colID)
+// GetCollectionVirtualChannels provides a mock function with given fields: ctx, colID
+func (_m *IMetaTable) GetCollectionVirtualChannels(ctx context.Context, colID int64) []string {
+	ret := _m.Called(ctx, colID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCollectionVirtualChannels")
 	}
 
 	var r0 []string
-	if rf, ok := ret.Get(0).(func(int64) []string); ok {
-		r0 = rf(colID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) []string); ok {
+		r0 = rf(ctx, colID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
@@ -1263,14 +1271,15 @@ type IMetaTable_GetCollectionVirtualChannels_Call struct {
 }
 
 // GetCollectionVirtualChannels is a helper method to define mock.On call
+//   - ctx context.Context
 //   - colID int64
-func (_e *IMetaTable_Expecter) GetCollectionVirtualChannels(colID interface{}) *IMetaTable_GetCollectionVirtualChannels_Call {
-	return &IMetaTable_GetCollectionVirtualChannels_Call{Call: _e.mock.On("GetCollectionVirtualChannels", colID)}
+func (_e *IMetaTable_Expecter) GetCollectionVirtualChannels(ctx interface{}, colID interface{}) *IMetaTable_GetCollectionVirtualChannels_Call {
+	return &IMetaTable_GetCollectionVirtualChannels_Call{Call: _e.mock.On("GetCollectionVirtualChannels", ctx, colID)}
 }
 
-func (_c *IMetaTable_GetCollectionVirtualChannels_Call) Run(run func(colID int64)) *IMetaTable_GetCollectionVirtualChannels_Call {
+func (_c *IMetaTable_GetCollectionVirtualChannels_Call) Run(run func(ctx context.Context, colID int64)) *IMetaTable_GetCollectionVirtualChannels_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -1280,14 +1289,14 @@ func (_c *IMetaTable_GetCollectionVirtualChannels_Call) Return(_a0 []string) *IM
 	return _c
 }
 
-func (_c *IMetaTable_GetCollectionVirtualChannels_Call) RunAndReturn(run func(int64) []string) *IMetaTable_GetCollectionVirtualChannels_Call {
+func (_c *IMetaTable_GetCollectionVirtualChannels_Call) RunAndReturn(run func(context.Context, int64) []string) *IMetaTable_GetCollectionVirtualChannels_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetCredential provides a mock function with given fields: username
-func (_m *IMetaTable) GetCredential(username string) (*internalpb.CredentialInfo, error) {
-	ret := _m.Called(username)
+// GetCredential provides a mock function with given fields: ctx, username
+func (_m *IMetaTable) GetCredential(ctx context.Context, username string) (*internalpb.CredentialInfo, error) {
+	ret := _m.Called(ctx, username)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCredential")
@@ -1295,19 +1304,19 @@ func (_m *IMetaTable) GetCredential(username string) (*internalpb.CredentialInfo
 
 	var r0 *internalpb.CredentialInfo
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (*internalpb.CredentialInfo, error)); ok {
-		return rf(username)
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*internalpb.CredentialInfo, error)); ok {
+		return rf(ctx, username)
 	}
-	if rf, ok := ret.Get(0).(func(string) *internalpb.CredentialInfo); ok {
-		r0 = rf(username)
+	if rf, ok := ret.Get(0).(func(context.Context, string) *internalpb.CredentialInfo); ok {
+		r0 = rf(ctx, username)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*internalpb.CredentialInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(username)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, username)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1321,14 +1330,15 @@ type IMetaTable_GetCredential_Call struct {
 }
 
 // GetCredential is a helper method to define mock.On call
+//   - ctx context.Context
 //   - username string
-func (_e *IMetaTable_Expecter) GetCredential(username interface{}) *IMetaTable_GetCredential_Call {
-	return &IMetaTable_GetCredential_Call{Call: _e.mock.On("GetCredential", username)}
+func (_e *IMetaTable_Expecter) GetCredential(ctx interface{}, username interface{}) *IMetaTable_GetCredential_Call {
+	return &IMetaTable_GetCredential_Call{Call: _e.mock.On("GetCredential", ctx, username)}
 }
 
-func (_c *IMetaTable_GetCredential_Call) Run(run func(username string)) *IMetaTable_GetCredential_Call {
+func (_c *IMetaTable_GetCredential_Call) Run(run func(ctx context.Context, username string)) *IMetaTable_GetCredential_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -1338,7 +1348,7 @@ func (_c *IMetaTable_GetCredential_Call) Return(_a0 *internalpb.CredentialInfo, 
 	return _c
 }
 
-func (_c *IMetaTable_GetCredential_Call) RunAndReturn(run func(string) (*internalpb.CredentialInfo, error)) *IMetaTable_GetCredential_Call {
+func (_c *IMetaTable_GetCredential_Call) RunAndReturn(run func(context.Context, string) (*internalpb.CredentialInfo, error)) *IMetaTable_GetCredential_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1463,17 +1473,17 @@ func (_c *IMetaTable_GetDatabaseByName_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
-// GetPChannelInfo provides a mock function with given fields: pchannel
-func (_m *IMetaTable) GetPChannelInfo(pchannel string) *rootcoordpb.GetPChannelInfoResponse {
-	ret := _m.Called(pchannel)
+// GetPChannelInfo provides a mock function with given fields: ctx, pchannel
+func (_m *IMetaTable) GetPChannelInfo(ctx context.Context, pchannel string) *rootcoordpb.GetPChannelInfoResponse {
+	ret := _m.Called(ctx, pchannel)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPChannelInfo")
 	}
 
 	var r0 *rootcoordpb.GetPChannelInfoResponse
-	if rf, ok := ret.Get(0).(func(string) *rootcoordpb.GetPChannelInfoResponse); ok {
-		r0 = rf(pchannel)
+	if rf, ok := ret.Get(0).(func(context.Context, string) *rootcoordpb.GetPChannelInfoResponse); ok {
+		r0 = rf(ctx, pchannel)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*rootcoordpb.GetPChannelInfoResponse)
@@ -1489,14 +1499,15 @@ type IMetaTable_GetPChannelInfo_Call struct {
 }
 
 // GetPChannelInfo is a helper method to define mock.On call
+//   - ctx context.Context
 //   - pchannel string
-func (_e *IMetaTable_Expecter) GetPChannelInfo(pchannel interface{}) *IMetaTable_GetPChannelInfo_Call {
-	return &IMetaTable_GetPChannelInfo_Call{Call: _e.mock.On("GetPChannelInfo", pchannel)}
+func (_e *IMetaTable_Expecter) GetPChannelInfo(ctx interface{}, pchannel interface{}) *IMetaTable_GetPChannelInfo_Call {
+	return &IMetaTable_GetPChannelInfo_Call{Call: _e.mock.On("GetPChannelInfo", ctx, pchannel)}
 }
 
-func (_c *IMetaTable_GetPChannelInfo_Call) Run(run func(pchannel string)) *IMetaTable_GetPChannelInfo_Call {
+func (_c *IMetaTable_GetPChannelInfo_Call) Run(run func(ctx context.Context, pchannel string)) *IMetaTable_GetPChannelInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -1506,14 +1517,14 @@ func (_c *IMetaTable_GetPChannelInfo_Call) Return(_a0 *rootcoordpb.GetPChannelIn
 	return _c
 }
 
-func (_c *IMetaTable_GetPChannelInfo_Call) RunAndReturn(run func(string) *rootcoordpb.GetPChannelInfoResponse) *IMetaTable_GetPChannelInfo_Call {
+func (_c *IMetaTable_GetPChannelInfo_Call) RunAndReturn(run func(context.Context, string) *rootcoordpb.GetPChannelInfoResponse) *IMetaTable_GetPChannelInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetPrivilegeGroupRoles provides a mock function with given fields: groupName
-func (_m *IMetaTable) GetPrivilegeGroupRoles(groupName string) ([]*milvuspb.RoleEntity, error) {
-	ret := _m.Called(groupName)
+// GetPrivilegeGroupRoles provides a mock function with given fields: ctx, groupName
+func (_m *IMetaTable) GetPrivilegeGroupRoles(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error) {
+	ret := _m.Called(ctx, groupName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPrivilegeGroupRoles")
@@ -1521,19 +1532,19 @@ func (_m *IMetaTable) GetPrivilegeGroupRoles(groupName string) ([]*milvuspb.Role
 
 	var r0 []*milvuspb.RoleEntity
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) ([]*milvuspb.RoleEntity, error)); ok {
-		return rf(groupName)
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*milvuspb.RoleEntity, error)); ok {
+		return rf(ctx, groupName)
 	}
-	if rf, ok := ret.Get(0).(func(string) []*milvuspb.RoleEntity); ok {
-		r0 = rf(groupName)
+	if rf, ok := ret.Get(0).(func(context.Context, string) []*milvuspb.RoleEntity); ok {
+		r0 = rf(ctx, groupName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*milvuspb.RoleEntity)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(groupName)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, groupName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1547,14 +1558,15 @@ type IMetaTable_GetPrivilegeGroupRoles_Call struct {
 }
 
 // GetPrivilegeGroupRoles is a helper method to define mock.On call
+//   - ctx context.Context
 //   - groupName string
-func (_e *IMetaTable_Expecter) GetPrivilegeGroupRoles(groupName interface{}) *IMetaTable_GetPrivilegeGroupRoles_Call {
-	return &IMetaTable_GetPrivilegeGroupRoles_Call{Call: _e.mock.On("GetPrivilegeGroupRoles", groupName)}
+func (_e *IMetaTable_Expecter) GetPrivilegeGroupRoles(ctx interface{}, groupName interface{}) *IMetaTable_GetPrivilegeGroupRoles_Call {
+	return &IMetaTable_GetPrivilegeGroupRoles_Call{Call: _e.mock.On("GetPrivilegeGroupRoles", ctx, groupName)}
 }
 
-func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) Run(run func(groupName string)) *IMetaTable_GetPrivilegeGroupRoles_Call {
+func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) Run(run func(ctx context.Context, groupName string)) *IMetaTable_GetPrivilegeGroupRoles_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -1564,22 +1576,22 @@ func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) Return(_a0 []*milvuspb.RoleEnt
 	return _c
 }
 
-func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) RunAndReturn(run func(string) ([]*milvuspb.RoleEntity, error)) *IMetaTable_GetPrivilegeGroupRoles_Call {
+func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) RunAndReturn(run func(context.Context, string) ([]*milvuspb.RoleEntity, error)) *IMetaTable_GetPrivilegeGroupRoles_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// IsAlias provides a mock function with given fields: db, name
-func (_m *IMetaTable) IsAlias(db string, name string) bool {
-	ret := _m.Called(db, name)
+// IsAlias provides a mock function with given fields: ctx, db, name
+func (_m *IMetaTable) IsAlias(ctx context.Context, db string, name string) bool {
+	ret := _m.Called(ctx, db, name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for IsAlias")
 	}
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(string, string) bool); ok {
-		r0 = rf(db, name)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) bool); ok {
+		r0 = rf(ctx, db, name)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
@@ -1593,15 +1605,16 @@ type IMetaTable_IsAlias_Call struct {
 }
 
 // IsAlias is a helper method to define mock.On call
+//   - ctx context.Context
 //   - db string
 //   - name string
-func (_e *IMetaTable_Expecter) IsAlias(db interface{}, name interface{}) *IMetaTable_IsAlias_Call {
-	return &IMetaTable_IsAlias_Call{Call: _e.mock.On("IsAlias", db, name)}
+func (_e *IMetaTable_Expecter) IsAlias(ctx interface{}, db interface{}, name interface{}) *IMetaTable_IsAlias_Call {
+	return &IMetaTable_IsAlias_Call{Call: _e.mock.On("IsAlias", ctx, db, name)}
 }
 
-func (_c *IMetaTable_IsAlias_Call) Run(run func(db string, name string)) *IMetaTable_IsAlias_Call {
+func (_c *IMetaTable_IsAlias_Call) Run(run func(ctx context.Context, db string, name string)) *IMetaTable_IsAlias_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string))
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
 	})
 	return _c
 }
@@ -1611,14 +1624,14 @@ func (_c *IMetaTable_IsAlias_Call) Return(_a0 bool) *IMetaTable_IsAlias_Call {
 	return _c
 }
 
-func (_c *IMetaTable_IsAlias_Call) RunAndReturn(run func(string, string) bool) *IMetaTable_IsAlias_Call {
+func (_c *IMetaTable_IsAlias_Call) RunAndReturn(run func(context.Context, string, string) bool) *IMetaTable_IsAlias_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// IsCustomPrivilegeGroup provides a mock function with given fields: groupName
-func (_m *IMetaTable) IsCustomPrivilegeGroup(groupName string) (bool, error) {
-	ret := _m.Called(groupName)
+// IsCustomPrivilegeGroup provides a mock function with given fields: ctx, groupName
+func (_m *IMetaTable) IsCustomPrivilegeGroup(ctx context.Context, groupName string) (bool, error) {
+	ret := _m.Called(ctx, groupName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for IsCustomPrivilegeGroup")
@@ -1626,17 +1639,17 @@ func (_m *IMetaTable) IsCustomPrivilegeGroup(groupName string) (bool, error) {
 
 	var r0 bool
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (bool, error)); ok {
-		return rf(groupName)
+	if rf, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return rf(ctx, groupName)
 	}
-	if rf, ok := ret.Get(0).(func(string) bool); ok {
-		r0 = rf(groupName)
+	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = rf(ctx, groupName)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(groupName)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, groupName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1650,14 +1663,15 @@ type IMetaTable_IsCustomPrivilegeGroup_Call struct {
 }
 
 // IsCustomPrivilegeGroup is a helper method to define mock.On call
+//   - ctx context.Context
 //   - groupName string
-func (_e *IMetaTable_Expecter) IsCustomPrivilegeGroup(groupName interface{}) *IMetaTable_IsCustomPrivilegeGroup_Call {
-	return &IMetaTable_IsCustomPrivilegeGroup_Call{Call: _e.mock.On("IsCustomPrivilegeGroup", groupName)}
+func (_e *IMetaTable_Expecter) IsCustomPrivilegeGroup(ctx interface{}, groupName interface{}) *IMetaTable_IsCustomPrivilegeGroup_Call {
+	return &IMetaTable_IsCustomPrivilegeGroup_Call{Call: _e.mock.On("IsCustomPrivilegeGroup", ctx, groupName)}
 }
 
-func (_c *IMetaTable_IsCustomPrivilegeGroup_Call) Run(run func(groupName string)) *IMetaTable_IsCustomPrivilegeGroup_Call {
+func (_c *IMetaTable_IsCustomPrivilegeGroup_Call) Run(run func(ctx context.Context, groupName string)) *IMetaTable_IsCustomPrivilegeGroup_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -1667,7 +1681,7 @@ func (_c *IMetaTable_IsCustomPrivilegeGroup_Call) Return(_a0 bool, _a1 error) *I
 	return _c
 }
 
-func (_c *IMetaTable_IsCustomPrivilegeGroup_Call) RunAndReturn(run func(string) (bool, error)) *IMetaTable_IsCustomPrivilegeGroup_Call {
+func (_c *IMetaTable_IsCustomPrivilegeGroup_Call) RunAndReturn(run func(context.Context, string) (bool, error)) *IMetaTable_IsCustomPrivilegeGroup_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1733,17 +1747,17 @@ func (_c *IMetaTable_ListAliases_Call) RunAndReturn(run func(context.Context, st
 	return _c
 }
 
-// ListAliasesByID provides a mock function with given fields: collID
-func (_m *IMetaTable) ListAliasesByID(collID int64) []string {
-	ret := _m.Called(collID)
+// ListAliasesByID provides a mock function with given fields: ctx, collID
+func (_m *IMetaTable) ListAliasesByID(ctx context.Context, collID int64) []string {
+	ret := _m.Called(ctx, collID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListAliasesByID")
 	}
 
 	var r0 []string
-	if rf, ok := ret.Get(0).(func(int64) []string); ok {
-		r0 = rf(collID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) []string); ok {
+		r0 = rf(ctx, collID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
@@ -1759,14 +1773,15 @@ type IMetaTable_ListAliasesByID_Call struct {
 }
 
 // ListAliasesByID is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collID int64
-func (_e *IMetaTable_Expecter) ListAliasesByID(collID interface{}) *IMetaTable_ListAliasesByID_Call {
-	return &IMetaTable_ListAliasesByID_Call{Call: _e.mock.On("ListAliasesByID", collID)}
+func (_e *IMetaTable_Expecter) ListAliasesByID(ctx interface{}, collID interface{}) *IMetaTable_ListAliasesByID_Call {
+	return &IMetaTable_ListAliasesByID_Call{Call: _e.mock.On("ListAliasesByID", ctx, collID)}
 }
 
-func (_c *IMetaTable_ListAliasesByID_Call) Run(run func(collID int64)) *IMetaTable_ListAliasesByID_Call {
+func (_c *IMetaTable_ListAliasesByID_Call) Run(run func(ctx context.Context, collID int64)) *IMetaTable_ListAliasesByID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -1776,7 +1791,7 @@ func (_c *IMetaTable_ListAliasesByID_Call) Return(_a0 []string) *IMetaTable_List
 	return _c
 }
 
-func (_c *IMetaTable_ListAliasesByID_Call) RunAndReturn(run func(int64) []string) *IMetaTable_ListAliasesByID_Call {
+func (_c *IMetaTable_ListAliasesByID_Call) RunAndReturn(run func(context.Context, int64) []string) *IMetaTable_ListAliasesByID_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1829,17 +1844,17 @@ func (_c *IMetaTable_ListAllAvailCollections_Call) RunAndReturn(run func(context
 	return _c
 }
 
-// ListCollectionPhysicalChannels provides a mock function with given fields:
-func (_m *IMetaTable) ListCollectionPhysicalChannels() map[int64][]string {
-	ret := _m.Called()
+// ListCollectionPhysicalChannels provides a mock function with given fields: ctx
+func (_m *IMetaTable) ListCollectionPhysicalChannels(ctx context.Context) map[int64][]string {
+	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListCollectionPhysicalChannels")
 	}
 
 	var r0 map[int64][]string
-	if rf, ok := ret.Get(0).(func() map[int64][]string); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(context.Context) map[int64][]string); ok {
+		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[int64][]string)
@@ -1855,13 +1870,14 @@ type IMetaTable_ListCollectionPhysicalChannels_Call struct {
 }
 
 // ListCollectionPhysicalChannels is a helper method to define mock.On call
-func (_e *IMetaTable_Expecter) ListCollectionPhysicalChannels() *IMetaTable_ListCollectionPhysicalChannels_Call {
-	return &IMetaTable_ListCollectionPhysicalChannels_Call{Call: _e.mock.On("ListCollectionPhysicalChannels")}
+//   - ctx context.Context
+func (_e *IMetaTable_Expecter) ListCollectionPhysicalChannels(ctx interface{}) *IMetaTable_ListCollectionPhysicalChannels_Call {
+	return &IMetaTable_ListCollectionPhysicalChannels_Call{Call: _e.mock.On("ListCollectionPhysicalChannels", ctx)}
 }
 
-func (_c *IMetaTable_ListCollectionPhysicalChannels_Call) Run(run func()) *IMetaTable_ListCollectionPhysicalChannels_Call {
+func (_c *IMetaTable_ListCollectionPhysicalChannels_Call) Run(run func(ctx context.Context)) *IMetaTable_ListCollectionPhysicalChannels_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		run(args[0].(context.Context))
 	})
 	return _c
 }
@@ -1871,7 +1887,7 @@ func (_c *IMetaTable_ListCollectionPhysicalChannels_Call) Return(_a0 map[int64][
 	return _c
 }
 
-func (_c *IMetaTable_ListCollectionPhysicalChannels_Call) RunAndReturn(run func() map[int64][]string) *IMetaTable_ListCollectionPhysicalChannels_Call {
+func (_c *IMetaTable_ListCollectionPhysicalChannels_Call) RunAndReturn(run func(context.Context) map[int64][]string) *IMetaTable_ListCollectionPhysicalChannels_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1937,9 +1953,9 @@ func (_c *IMetaTable_ListCollections_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// ListCredentialUsernames provides a mock function with given fields:
-func (_m *IMetaTable) ListCredentialUsernames() (*milvuspb.ListCredUsersResponse, error) {
-	ret := _m.Called()
+// ListCredentialUsernames provides a mock function with given fields: ctx
+func (_m *IMetaTable) ListCredentialUsernames(ctx context.Context) (*milvuspb.ListCredUsersResponse, error) {
+	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListCredentialUsernames")
@@ -1947,19 +1963,19 @@ func (_m *IMetaTable) ListCredentialUsernames() (*milvuspb.ListCredUsersResponse
 
 	var r0 *milvuspb.ListCredUsersResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func() (*milvuspb.ListCredUsersResponse, error)); ok {
-		return rf()
+	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.ListCredUsersResponse, error)); ok {
+		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func() *milvuspb.ListCredUsersResponse); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.ListCredUsersResponse); ok {
+		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ListCredUsersResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1973,13 +1989,14 @@ type IMetaTable_ListCredentialUsernames_Call struct {
 }
 
 // ListCredentialUsernames is a helper method to define mock.On call
-func (_e *IMetaTable_Expecter) ListCredentialUsernames() *IMetaTable_ListCredentialUsernames_Call {
-	return &IMetaTable_ListCredentialUsernames_Call{Call: _e.mock.On("ListCredentialUsernames")}
+//   - ctx context.Context
+func (_e *IMetaTable_Expecter) ListCredentialUsernames(ctx interface{}) *IMetaTable_ListCredentialUsernames_Call {
+	return &IMetaTable_ListCredentialUsernames_Call{Call: _e.mock.On("ListCredentialUsernames", ctx)}
 }
 
-func (_c *IMetaTable_ListCredentialUsernames_Call) Run(run func()) *IMetaTable_ListCredentialUsernames_Call {
+func (_c *IMetaTable_ListCredentialUsernames_Call) Run(run func(ctx context.Context)) *IMetaTable_ListCredentialUsernames_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		run(args[0].(context.Context))
 	})
 	return _c
 }
@@ -1989,7 +2006,7 @@ func (_c *IMetaTable_ListCredentialUsernames_Call) Return(_a0 *milvuspb.ListCred
 	return _c
 }
 
-func (_c *IMetaTable_ListCredentialUsernames_Call) RunAndReturn(run func() (*milvuspb.ListCredUsersResponse, error)) *IMetaTable_ListCredentialUsernames_Call {
+func (_c *IMetaTable_ListCredentialUsernames_Call) RunAndReturn(run func(context.Context) (*milvuspb.ListCredUsersResponse, error)) *IMetaTable_ListCredentialUsernames_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2053,9 +2070,9 @@ func (_c *IMetaTable_ListDatabases_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// ListPolicy provides a mock function with given fields: tenant
-func (_m *IMetaTable) ListPolicy(tenant string) ([]string, error) {
-	ret := _m.Called(tenant)
+// ListPolicy provides a mock function with given fields: ctx, tenant
+func (_m *IMetaTable) ListPolicy(ctx context.Context, tenant string) ([]string, error) {
+	ret := _m.Called(ctx, tenant)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListPolicy")
@@ -2063,19 +2080,19 @@ func (_m *IMetaTable) ListPolicy(tenant string) ([]string, error) {
 
 	var r0 []string
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) ([]string, error)); ok {
-		return rf(tenant)
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]string, error)); ok {
+		return rf(ctx, tenant)
 	}
-	if rf, ok := ret.Get(0).(func(string) []string); ok {
-		r0 = rf(tenant)
+	if rf, ok := ret.Get(0).(func(context.Context, string) []string); ok {
+		r0 = rf(ctx, tenant)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(tenant)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, tenant)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2089,14 +2106,15 @@ type IMetaTable_ListPolicy_Call struct {
 }
 
 // ListPolicy is a helper method to define mock.On call
+//   - ctx context.Context
 //   - tenant string
-func (_e *IMetaTable_Expecter) ListPolicy(tenant interface{}) *IMetaTable_ListPolicy_Call {
-	return &IMetaTable_ListPolicy_Call{Call: _e.mock.On("ListPolicy", tenant)}
+func (_e *IMetaTable_Expecter) ListPolicy(ctx interface{}, tenant interface{}) *IMetaTable_ListPolicy_Call {
+	return &IMetaTable_ListPolicy_Call{Call: _e.mock.On("ListPolicy", ctx, tenant)}
 }
 
-func (_c *IMetaTable_ListPolicy_Call) Run(run func(tenant string)) *IMetaTable_ListPolicy_Call {
+func (_c *IMetaTable_ListPolicy_Call) Run(run func(ctx context.Context, tenant string)) *IMetaTable_ListPolicy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -2106,14 +2124,14 @@ func (_c *IMetaTable_ListPolicy_Call) Return(_a0 []string, _a1 error) *IMetaTabl
 	return _c
 }
 
-func (_c *IMetaTable_ListPolicy_Call) RunAndReturn(run func(string) ([]string, error)) *IMetaTable_ListPolicy_Call {
+func (_c *IMetaTable_ListPolicy_Call) RunAndReturn(run func(context.Context, string) ([]string, error)) *IMetaTable_ListPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// ListPrivilegeGroups provides a mock function with given fields:
-func (_m *IMetaTable) ListPrivilegeGroups() ([]*milvuspb.PrivilegeGroupInfo, error) {
-	ret := _m.Called()
+// ListPrivilegeGroups provides a mock function with given fields: ctx
+func (_m *IMetaTable) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
+	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListPrivilegeGroups")
@@ -2121,19 +2139,19 @@ func (_m *IMetaTable) ListPrivilegeGroups() ([]*milvuspb.PrivilegeGroupInfo, err
 
 	var r0 []*milvuspb.PrivilegeGroupInfo
 	var r1 error
-	if rf, ok := ret.Get(0).(func() ([]*milvuspb.PrivilegeGroupInfo, error)); ok {
-		return rf()
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)); ok {
+		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func() []*milvuspb.PrivilegeGroupInfo); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(context.Context) []*milvuspb.PrivilegeGroupInfo); ok {
+		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*milvuspb.PrivilegeGroupInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2147,13 +2165,14 @@ type IMetaTable_ListPrivilegeGroups_Call struct {
 }
 
 // ListPrivilegeGroups is a helper method to define mock.On call
-func (_e *IMetaTable_Expecter) ListPrivilegeGroups() *IMetaTable_ListPrivilegeGroups_Call {
-	return &IMetaTable_ListPrivilegeGroups_Call{Call: _e.mock.On("ListPrivilegeGroups")}
+//   - ctx context.Context
+func (_e *IMetaTable_Expecter) ListPrivilegeGroups(ctx interface{}) *IMetaTable_ListPrivilegeGroups_Call {
+	return &IMetaTable_ListPrivilegeGroups_Call{Call: _e.mock.On("ListPrivilegeGroups", ctx)}
 }
 
-func (_c *IMetaTable_ListPrivilegeGroups_Call) Run(run func()) *IMetaTable_ListPrivilegeGroups_Call {
+func (_c *IMetaTable_ListPrivilegeGroups_Call) Run(run func(ctx context.Context)) *IMetaTable_ListPrivilegeGroups_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		run(args[0].(context.Context))
 	})
 	return _c
 }
@@ -2163,14 +2182,14 @@ func (_c *IMetaTable_ListPrivilegeGroups_Call) Return(_a0 []*milvuspb.PrivilegeG
 	return _c
 }
 
-func (_c *IMetaTable_ListPrivilegeGroups_Call) RunAndReturn(run func() ([]*milvuspb.PrivilegeGroupInfo, error)) *IMetaTable_ListPrivilegeGroups_Call {
+func (_c *IMetaTable_ListPrivilegeGroups_Call) RunAndReturn(run func(context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)) *IMetaTable_ListPrivilegeGroups_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// ListUserRole provides a mock function with given fields: tenant
-func (_m *IMetaTable) ListUserRole(tenant string) ([]string, error) {
-	ret := _m.Called(tenant)
+// ListUserRole provides a mock function with given fields: ctx, tenant
+func (_m *IMetaTable) ListUserRole(ctx context.Context, tenant string) ([]string, error) {
+	ret := _m.Called(ctx, tenant)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListUserRole")
@@ -2178,19 +2197,19 @@ func (_m *IMetaTable) ListUserRole(tenant string) ([]string, error) {
 
 	var r0 []string
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) ([]string, error)); ok {
-		return rf(tenant)
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]string, error)); ok {
+		return rf(ctx, tenant)
 	}
-	if rf, ok := ret.Get(0).(func(string) []string); ok {
-		r0 = rf(tenant)
+	if rf, ok := ret.Get(0).(func(context.Context, string) []string); ok {
+		r0 = rf(ctx, tenant)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(tenant)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, tenant)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2204,14 +2223,15 @@ type IMetaTable_ListUserRole_Call struct {
 }
 
 // ListUserRole is a helper method to define mock.On call
+//   - ctx context.Context
 //   - tenant string
-func (_e *IMetaTable_Expecter) ListUserRole(tenant interface{}) *IMetaTable_ListUserRole_Call {
-	return &IMetaTable_ListUserRole_Call{Call: _e.mock.On("ListUserRole", tenant)}
+func (_e *IMetaTable_Expecter) ListUserRole(ctx interface{}, tenant interface{}) *IMetaTable_ListUserRole_Call {
+	return &IMetaTable_ListUserRole_Call{Call: _e.mock.On("ListUserRole", ctx, tenant)}
 }
 
-func (_c *IMetaTable_ListUserRole_Call) Run(run func(tenant string)) *IMetaTable_ListUserRole_Call {
+func (_c *IMetaTable_ListUserRole_Call) Run(run func(ctx context.Context, tenant string)) *IMetaTable_ListUserRole_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -2221,22 +2241,22 @@ func (_c *IMetaTable_ListUserRole_Call) Return(_a0 []string, _a1 error) *IMetaTa
 	return _c
 }
 
-func (_c *IMetaTable_ListUserRole_Call) RunAndReturn(run func(string) ([]string, error)) *IMetaTable_ListUserRole_Call {
+func (_c *IMetaTable_ListUserRole_Call) RunAndReturn(run func(context.Context, string) ([]string, error)) *IMetaTable_ListUserRole_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// OperatePrivilege provides a mock function with given fields: tenant, entity, operateType
-func (_m *IMetaTable) OperatePrivilege(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
-	ret := _m.Called(tenant, entity, operateType)
+// OperatePrivilege provides a mock function with given fields: ctx, tenant, entity, operateType
+func (_m *IMetaTable) OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+	ret := _m.Called(ctx, tenant, entity, operateType)
 
 	if len(ret) == 0 {
 		panic("no return value specified for OperatePrivilege")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *milvuspb.GrantEntity, milvuspb.OperatePrivilegeType) error); ok {
-		r0 = rf(tenant, entity, operateType)
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.GrantEntity, milvuspb.OperatePrivilegeType) error); ok {
+		r0 = rf(ctx, tenant, entity, operateType)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -2250,16 +2270,17 @@ type IMetaTable_OperatePrivilege_Call struct {
 }
 
 // OperatePrivilege is a helper method to define mock.On call
+//   - ctx context.Context
 //   - tenant string
 //   - entity *milvuspb.GrantEntity
 //   - operateType milvuspb.OperatePrivilegeType
-func (_e *IMetaTable_Expecter) OperatePrivilege(tenant interface{}, entity interface{}, operateType interface{}) *IMetaTable_OperatePrivilege_Call {
-	return &IMetaTable_OperatePrivilege_Call{Call: _e.mock.On("OperatePrivilege", tenant, entity, operateType)}
+func (_e *IMetaTable_Expecter) OperatePrivilege(ctx interface{}, tenant interface{}, entity interface{}, operateType interface{}) *IMetaTable_OperatePrivilege_Call {
+	return &IMetaTable_OperatePrivilege_Call{Call: _e.mock.On("OperatePrivilege", ctx, tenant, entity, operateType)}
 }
 
-func (_c *IMetaTable_OperatePrivilege_Call) Run(run func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType)) *IMetaTable_OperatePrivilege_Call {
+func (_c *IMetaTable_OperatePrivilege_Call) Run(run func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType)) *IMetaTable_OperatePrivilege_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*milvuspb.GrantEntity), args[2].(milvuspb.OperatePrivilegeType))
+		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.GrantEntity), args[3].(milvuspb.OperatePrivilegeType))
 	})
 	return _c
 }
@@ -2269,22 +2290,22 @@ func (_c *IMetaTable_OperatePrivilege_Call) Return(_a0 error) *IMetaTable_Operat
 	return _c
 }
 
-func (_c *IMetaTable_OperatePrivilege_Call) RunAndReturn(run func(string, *milvuspb.GrantEntity, milvuspb.OperatePrivilegeType) error) *IMetaTable_OperatePrivilege_Call {
+func (_c *IMetaTable_OperatePrivilege_Call) RunAndReturn(run func(context.Context, string, *milvuspb.GrantEntity, milvuspb.OperatePrivilegeType) error) *IMetaTable_OperatePrivilege_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// OperatePrivilegeGroup provides a mock function with given fields: groupName, privileges, operateType
-func (_m *IMetaTable) OperatePrivilegeGroup(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
-	ret := _m.Called(groupName, privileges, operateType)
+// OperatePrivilegeGroup provides a mock function with given fields: ctx, groupName, privileges, operateType
+func (_m *IMetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
+	ret := _m.Called(ctx, groupName, privileges, operateType)
 
 	if len(ret) == 0 {
 		panic("no return value specified for OperatePrivilegeGroup")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, []*milvuspb.PrivilegeEntity, milvuspb.OperatePrivilegeGroupType) error); ok {
-		r0 = rf(groupName, privileges, operateType)
+	if rf, ok := ret.Get(0).(func(context.Context, string, []*milvuspb.PrivilegeEntity, milvuspb.OperatePrivilegeGroupType) error); ok {
+		r0 = rf(ctx, groupName, privileges, operateType)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -2298,16 +2319,17 @@ type IMetaTable_OperatePrivilegeGroup_Call struct {
 }
 
 // OperatePrivilegeGroup is a helper method to define mock.On call
+//   - ctx context.Context
 //   - groupName string
 //   - privileges []*milvuspb.PrivilegeEntity
 //   - operateType milvuspb.OperatePrivilegeGroupType
-func (_e *IMetaTable_Expecter) OperatePrivilegeGroup(groupName interface{}, privileges interface{}, operateType interface{}) *IMetaTable_OperatePrivilegeGroup_Call {
-	return &IMetaTable_OperatePrivilegeGroup_Call{Call: _e.mock.On("OperatePrivilegeGroup", groupName, privileges, operateType)}
+func (_e *IMetaTable_Expecter) OperatePrivilegeGroup(ctx interface{}, groupName interface{}, privileges interface{}, operateType interface{}) *IMetaTable_OperatePrivilegeGroup_Call {
+	return &IMetaTable_OperatePrivilegeGroup_Call{Call: _e.mock.On("OperatePrivilegeGroup", ctx, groupName, privileges, operateType)}
 }
 
-func (_c *IMetaTable_OperatePrivilegeGroup_Call) Run(run func(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType)) *IMetaTable_OperatePrivilegeGroup_Call {
+func (_c *IMetaTable_OperatePrivilegeGroup_Call) Run(run func(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType)) *IMetaTable_OperatePrivilegeGroup_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].([]*milvuspb.PrivilegeEntity), args[2].(milvuspb.OperatePrivilegeGroupType))
+		run(args[0].(context.Context), args[1].(string), args[2].([]*milvuspb.PrivilegeEntity), args[3].(milvuspb.OperatePrivilegeGroupType))
 	})
 	return _c
 }
@@ -2317,22 +2339,22 @@ func (_c *IMetaTable_OperatePrivilegeGroup_Call) Return(_a0 error) *IMetaTable_O
 	return _c
 }
 
-func (_c *IMetaTable_OperatePrivilegeGroup_Call) RunAndReturn(run func(string, []*milvuspb.PrivilegeEntity, milvuspb.OperatePrivilegeGroupType) error) *IMetaTable_OperatePrivilegeGroup_Call {
+func (_c *IMetaTable_OperatePrivilegeGroup_Call) RunAndReturn(run func(context.Context, string, []*milvuspb.PrivilegeEntity, milvuspb.OperatePrivilegeGroupType) error) *IMetaTable_OperatePrivilegeGroup_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// OperateUserRole provides a mock function with given fields: tenant, userEntity, roleEntity, operateType
-func (_m *IMetaTable) OperateUserRole(tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
-	ret := _m.Called(tenant, userEntity, roleEntity, operateType)
+// OperateUserRole provides a mock function with given fields: ctx, tenant, userEntity, roleEntity, operateType
+func (_m *IMetaTable) OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
+	ret := _m.Called(ctx, tenant, userEntity, roleEntity, operateType)
 
 	if len(ret) == 0 {
 		panic("no return value specified for OperateUserRole")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *milvuspb.UserEntity, *milvuspb.RoleEntity, milvuspb.OperateUserRoleType) error); ok {
-		r0 = rf(tenant, userEntity, roleEntity, operateType)
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.UserEntity, *milvuspb.RoleEntity, milvuspb.OperateUserRoleType) error); ok {
+		r0 = rf(ctx, tenant, userEntity, roleEntity, operateType)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -2346,17 +2368,18 @@ type IMetaTable_OperateUserRole_Call struct {
 }
 
 // OperateUserRole is a helper method to define mock.On call
+//   - ctx context.Context
 //   - tenant string
 //   - userEntity *milvuspb.UserEntity
 //   - roleEntity *milvuspb.RoleEntity
 //   - operateType milvuspb.OperateUserRoleType
-func (_e *IMetaTable_Expecter) OperateUserRole(tenant interface{}, userEntity interface{}, roleEntity interface{}, operateType interface{}) *IMetaTable_OperateUserRole_Call {
-	return &IMetaTable_OperateUserRole_Call{Call: _e.mock.On("OperateUserRole", tenant, userEntity, roleEntity, operateType)}
+func (_e *IMetaTable_Expecter) OperateUserRole(ctx interface{}, tenant interface{}, userEntity interface{}, roleEntity interface{}, operateType interface{}) *IMetaTable_OperateUserRole_Call {
+	return &IMetaTable_OperateUserRole_Call{Call: _e.mock.On("OperateUserRole", ctx, tenant, userEntity, roleEntity, operateType)}
 }
 
-func (_c *IMetaTable_OperateUserRole_Call) Run(run func(tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType)) *IMetaTable_OperateUserRole_Call {
+func (_c *IMetaTable_OperateUserRole_Call) Run(run func(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType)) *IMetaTable_OperateUserRole_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*milvuspb.UserEntity), args[2].(*milvuspb.RoleEntity), args[3].(milvuspb.OperateUserRoleType))
+		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.UserEntity), args[3].(*milvuspb.RoleEntity), args[4].(milvuspb.OperateUserRoleType))
 	})
 	return _c
 }
@@ -2366,7 +2389,7 @@ func (_c *IMetaTable_OperateUserRole_Call) Return(_a0 error) *IMetaTable_Operate
 	return _c
 }
 
-func (_c *IMetaTable_OperateUserRole_Call) RunAndReturn(run func(string, *milvuspb.UserEntity, *milvuspb.RoleEntity, milvuspb.OperateUserRoleType) error) *IMetaTable_OperateUserRole_Call {
+func (_c *IMetaTable_OperateUserRole_Call) RunAndReturn(run func(context.Context, string, *milvuspb.UserEntity, *milvuspb.RoleEntity, milvuspb.OperateUserRoleType) error) *IMetaTable_OperateUserRole_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2568,9 +2591,9 @@ func (_c *IMetaTable_RestoreRBAC_Call) RunAndReturn(run func(context.Context, st
 	return _c
 }
 
-// SelectGrant provides a mock function with given fields: tenant, entity
-func (_m *IMetaTable) SelectGrant(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
-	ret := _m.Called(tenant, entity)
+// SelectGrant provides a mock function with given fields: ctx, tenant, entity
+func (_m *IMetaTable) SelectGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+	ret := _m.Called(ctx, tenant, entity)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SelectGrant")
@@ -2578,19 +2601,19 @@ func (_m *IMetaTable) SelectGrant(tenant string, entity *milvuspb.GrantEntity) (
 
 	var r0 []*milvuspb.GrantEntity
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)); ok {
-		return rf(tenant, entity)
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)); ok {
+		return rf(ctx, tenant, entity)
 	}
-	if rf, ok := ret.Get(0).(func(string, *milvuspb.GrantEntity) []*milvuspb.GrantEntity); ok {
-		r0 = rf(tenant, entity)
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.GrantEntity) []*milvuspb.GrantEntity); ok {
+		r0 = rf(ctx, tenant, entity)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*milvuspb.GrantEntity)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, *milvuspb.GrantEntity) error); ok {
-		r1 = rf(tenant, entity)
+	if rf, ok := ret.Get(1).(func(context.Context, string, *milvuspb.GrantEntity) error); ok {
+		r1 = rf(ctx, tenant, entity)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2604,15 +2627,16 @@ type IMetaTable_SelectGrant_Call struct {
 }
 
 // SelectGrant is a helper method to define mock.On call
+//   - ctx context.Context
 //   - tenant string
 //   - entity *milvuspb.GrantEntity
-func (_e *IMetaTable_Expecter) SelectGrant(tenant interface{}, entity interface{}) *IMetaTable_SelectGrant_Call {
-	return &IMetaTable_SelectGrant_Call{Call: _e.mock.On("SelectGrant", tenant, entity)}
+func (_e *IMetaTable_Expecter) SelectGrant(ctx interface{}, tenant interface{}, entity interface{}) *IMetaTable_SelectGrant_Call {
+	return &IMetaTable_SelectGrant_Call{Call: _e.mock.On("SelectGrant", ctx, tenant, entity)}
 }
 
-func (_c *IMetaTable_SelectGrant_Call) Run(run func(tenant string, entity *milvuspb.GrantEntity)) *IMetaTable_SelectGrant_Call {
+func (_c *IMetaTable_SelectGrant_Call) Run(run func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity)) *IMetaTable_SelectGrant_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*milvuspb.GrantEntity))
+		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.GrantEntity))
 	})
 	return _c
 }
@@ -2622,14 +2646,14 @@ func (_c *IMetaTable_SelectGrant_Call) Return(_a0 []*milvuspb.GrantEntity, _a1 e
 	return _c
 }
 
-func (_c *IMetaTable_SelectGrant_Call) RunAndReturn(run func(string, *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)) *IMetaTable_SelectGrant_Call {
+func (_c *IMetaTable_SelectGrant_Call) RunAndReturn(run func(context.Context, string, *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)) *IMetaTable_SelectGrant_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// SelectRole provides a mock function with given fields: tenant, entity, includeUserInfo
-func (_m *IMetaTable) SelectRole(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
-	ret := _m.Called(tenant, entity, includeUserInfo)
+// SelectRole provides a mock function with given fields: ctx, tenant, entity, includeUserInfo
+func (_m *IMetaTable) SelectRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+	ret := _m.Called(ctx, tenant, entity, includeUserInfo)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SelectRole")
@@ -2637,19 +2661,19 @@ func (_m *IMetaTable) SelectRole(tenant string, entity *milvuspb.RoleEntity, inc
 
 	var r0 []*milvuspb.RoleResult
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, *milvuspb.RoleEntity, bool) ([]*milvuspb.RoleResult, error)); ok {
-		return rf(tenant, entity, includeUserInfo)
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.RoleEntity, bool) ([]*milvuspb.RoleResult, error)); ok {
+		return rf(ctx, tenant, entity, includeUserInfo)
 	}
-	if rf, ok := ret.Get(0).(func(string, *milvuspb.RoleEntity, bool) []*milvuspb.RoleResult); ok {
-		r0 = rf(tenant, entity, includeUserInfo)
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.RoleEntity, bool) []*milvuspb.RoleResult); ok {
+		r0 = rf(ctx, tenant, entity, includeUserInfo)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*milvuspb.RoleResult)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, *milvuspb.RoleEntity, bool) error); ok {
-		r1 = rf(tenant, entity, includeUserInfo)
+	if rf, ok := ret.Get(1).(func(context.Context, string, *milvuspb.RoleEntity, bool) error); ok {
+		r1 = rf(ctx, tenant, entity, includeUserInfo)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2663,16 +2687,17 @@ type IMetaTable_SelectRole_Call struct {
 }
 
 // SelectRole is a helper method to define mock.On call
+//   - ctx context.Context
 //   - tenant string
 //   - entity *milvuspb.RoleEntity
 //   - includeUserInfo bool
-func (_e *IMetaTable_Expecter) SelectRole(tenant interface{}, entity interface{}, includeUserInfo interface{}) *IMetaTable_SelectRole_Call {
-	return &IMetaTable_SelectRole_Call{Call: _e.mock.On("SelectRole", tenant, entity, includeUserInfo)}
+func (_e *IMetaTable_Expecter) SelectRole(ctx interface{}, tenant interface{}, entity interface{}, includeUserInfo interface{}) *IMetaTable_SelectRole_Call {
+	return &IMetaTable_SelectRole_Call{Call: _e.mock.On("SelectRole", ctx, tenant, entity, includeUserInfo)}
 }
 
-func (_c *IMetaTable_SelectRole_Call) Run(run func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool)) *IMetaTable_SelectRole_Call {
+func (_c *IMetaTable_SelectRole_Call) Run(run func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool)) *IMetaTable_SelectRole_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*milvuspb.RoleEntity), args[2].(bool))
+		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.RoleEntity), args[3].(bool))
 	})
 	return _c
 }
@@ -2682,14 +2707,14 @@ func (_c *IMetaTable_SelectRole_Call) Return(_a0 []*milvuspb.RoleResult, _a1 err
 	return _c
 }
 
-func (_c *IMetaTable_SelectRole_Call) RunAndReturn(run func(string, *milvuspb.RoleEntity, bool) ([]*milvuspb.RoleResult, error)) *IMetaTable_SelectRole_Call {
+func (_c *IMetaTable_SelectRole_Call) RunAndReturn(run func(context.Context, string, *milvuspb.RoleEntity, bool) ([]*milvuspb.RoleResult, error)) *IMetaTable_SelectRole_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// SelectUser provides a mock function with given fields: tenant, entity, includeRoleInfo
-func (_m *IMetaTable) SelectUser(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
-	ret := _m.Called(tenant, entity, includeRoleInfo)
+// SelectUser provides a mock function with given fields: ctx, tenant, entity, includeRoleInfo
+func (_m *IMetaTable) SelectUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
+	ret := _m.Called(ctx, tenant, entity, includeRoleInfo)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SelectUser")
@@ -2697,19 +2722,19 @@ func (_m *IMetaTable) SelectUser(tenant string, entity *milvuspb.UserEntity, inc
 
 	var r0 []*milvuspb.UserResult
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, *milvuspb.UserEntity, bool) ([]*milvuspb.UserResult, error)); ok {
-		return rf(tenant, entity, includeRoleInfo)
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.UserEntity, bool) ([]*milvuspb.UserResult, error)); ok {
+		return rf(ctx, tenant, entity, includeRoleInfo)
 	}
-	if rf, ok := ret.Get(0).(func(string, *milvuspb.UserEntity, bool) []*milvuspb.UserResult); ok {
-		r0 = rf(tenant, entity, includeRoleInfo)
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.UserEntity, bool) []*milvuspb.UserResult); ok {
+		r0 = rf(ctx, tenant, entity, includeRoleInfo)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*milvuspb.UserResult)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, *milvuspb.UserEntity, bool) error); ok {
-		r1 = rf(tenant, entity, includeRoleInfo)
+	if rf, ok := ret.Get(1).(func(context.Context, string, *milvuspb.UserEntity, bool) error); ok {
+		r1 = rf(ctx, tenant, entity, includeRoleInfo)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2723,16 +2748,17 @@ type IMetaTable_SelectUser_Call struct {
 }
 
 // SelectUser is a helper method to define mock.On call
+//   - ctx context.Context
 //   - tenant string
 //   - entity *milvuspb.UserEntity
 //   - includeRoleInfo bool
-func (_e *IMetaTable_Expecter) SelectUser(tenant interface{}, entity interface{}, includeRoleInfo interface{}) *IMetaTable_SelectUser_Call {
-	return &IMetaTable_SelectUser_Call{Call: _e.mock.On("SelectUser", tenant, entity, includeRoleInfo)}
+func (_e *IMetaTable_Expecter) SelectUser(ctx interface{}, tenant interface{}, entity interface{}, includeRoleInfo interface{}) *IMetaTable_SelectUser_Call {
+	return &IMetaTable_SelectUser_Call{Call: _e.mock.On("SelectUser", ctx, tenant, entity, includeRoleInfo)}
 }
 
-func (_c *IMetaTable_SelectUser_Call) Run(run func(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool)) *IMetaTable_SelectUser_Call {
+func (_c *IMetaTable_SelectUser_Call) Run(run func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool)) *IMetaTable_SelectUser_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*milvuspb.UserEntity), args[2].(bool))
+		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.UserEntity), args[3].(bool))
 	})
 	return _c
 }
@@ -2742,7 +2768,7 @@ func (_c *IMetaTable_SelectUser_Call) Return(_a0 []*milvuspb.UserResult, _a1 err
 	return _c
 }
 
-func (_c *IMetaTable_SelectUser_Call) RunAndReturn(run func(string, *milvuspb.UserEntity, bool) ([]*milvuspb.UserResult, error)) *IMetaTable_SelectUser_Call {
+func (_c *IMetaTable_SelectUser_Call) RunAndReturn(run func(context.Context, string, *milvuspb.UserEntity, bool) ([]*milvuspb.UserResult, error)) *IMetaTable_SelectUser_Call {
 	_c.Call.Return(run)
 	return _c
 }
