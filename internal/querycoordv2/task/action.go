@@ -123,7 +123,9 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 		}
 
 		// segment found in leader view
-		views := distMgr.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(action.segmentID, false))
+		views := distMgr.LeaderViewManager.GetByFilter(
+			meta.WithChannelName2LeaderView(action.Shard()),
+			meta.WithSegment2LeaderView(action.segmentID, false))
 		if len(views) == 0 {
 			return false
 		}
