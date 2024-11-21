@@ -692,6 +692,57 @@ func Test_SaveBinlogPaths(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
+func Test_GetDataViewVersions(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockDC)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().GetDataViewVersions(mock.Anything, mock.Anything).Return(&datapb.GetDataViewVersionsResponse{
+		Status: merr.Success(),
+	}, nil)
+	_, err = client.GetDataViewVersions(ctx, &datapb.GetDataViewVersionsRequest{})
+	assert.Nil(t, err)
+
+	// test return error status
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetDataViewVersions(mock.Anything, mock.Anything).Return(&datapb.GetDataViewVersionsResponse{
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
+
+	rsp, err := client.GetDataViewVersions(ctx, &datapb.GetDataViewVersionsRequest{})
+	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetDataViewVersions(mock.Anything, mock.Anything).Return(&datapb.GetDataViewVersionsResponse{
+		Status: merr.Success(),
+	}, mockErr)
+
+	_, err = client.GetDataViewVersions(ctx, &datapb.GetDataViewVersionsRequest{})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err = client.GetDataViewVersions(ctx, &datapb.GetDataViewVersionsRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
 func Test_GetRecoveryInfo(t *testing.T) {
 	paramtable.Init()
 
