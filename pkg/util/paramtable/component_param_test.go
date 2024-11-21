@@ -134,6 +134,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 0, len(Params.ReadOnlyPrivileges.GetAsStrings()))
 		assert.Equal(t, 0, len(Params.ReadWritePrivileges.GetAsStrings()))
 		assert.Equal(t, 0, len(Params.AdminPrivileges.GetAsStrings()))
+		assert.Equal(t, 0, len(Params.ManualStartComponents.GetAsStrings()))
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {

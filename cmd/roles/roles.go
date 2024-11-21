@@ -30,7 +30,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
@@ -398,22 +397,6 @@ func (mr *MilvusRoles) Run() {
 		defer streaming.Release()
 	}
 
-	enableComponents := []bool{
-		mr.EnableRootCoord,
-		mr.EnableProxy,
-		mr.EnableQueryCoord,
-		mr.EnableQueryNode,
-		mr.EnableDataCoord,
-		mr.EnableDataNode,
-		mr.EnableIndexCoord,
-		mr.EnableIndexNode,
-		mr.EnableStreamingNode,
-	}
-	enableComponents = lo.Filter(enableComponents, func(v bool, _ int) bool {
-		return v
-	})
-	healthz.SetComponentNum(len(enableComponents))
-
 	expr.Init()
 	expr.Register("param", paramtable.Get())
 	mr.setupLogger()
@@ -432,61 +415,108 @@ func (mr *MilvusRoles) Run() {
 		}
 	}
 
+	data := paramtable.Get().CommonCfg.ManualStartComponents.GetAsStrings()
+	manualStartComponents := typeutil.NewSet(data...)
+	log.Info("manual start components: ", zap.Any("components", data))
+
 	var wg sync.WaitGroup
 	local := mr.Local
 
 	componentMap := make(map[string]component)
 	var rootCoord, queryCoord, indexCoord, dataCoord component
 	var proxy, dataNode, indexNode, queryNode, streamingNode component
-	if mr.EnableRootCoord {
+	if mr.EnableRootCoord && !manualStartComponents.Contain(typeutil.RootCoordRole) {
 		rootCoord = mr.runRootCoord(ctx, local, &wg)
 		componentMap[typeutil.RootCoordRole] = rootCoord
 	}
 
-	if mr.EnableDataCoord {
+	if mr.EnableDataCoord && !manualStartComponents.Contain(typeutil.DataCoordRole) {
 		dataCoord = mr.runDataCoord(ctx, local, &wg)
 		componentMap[typeutil.DataCoordRole] = dataCoord
 	}
 
-	if mr.EnableIndexCoord {
+	if mr.EnableIndexCoord && !manualStartComponents.Contain(typeutil.IndexCoordRole) {
 		indexCoord = mr.runIndexCoord(ctx, local, &wg)
 		componentMap[typeutil.IndexCoordRole] = indexCoord
 	}
 
-	if mr.EnableQueryCoord {
+	if mr.EnableQueryCoord && !manualStartComponents.Contain(typeutil.QueryCoordRole) {
 		queryCoord = mr.runQueryCoord(ctx, local, &wg)
 		componentMap[typeutil.QueryCoordRole] = queryCoord
 	}
 
-	if mr.EnableQueryNode {
+	if mr.EnableQueryNode && !manualStartComponents.Contain(typeutil.QueryNodeRole) {
 		queryNode = mr.runQueryNode(ctx, local, &wg)
 		componentMap[typeutil.QueryNodeRole] = queryNode
 	}
 
-	if mr.EnableDataNode {
+	if mr.EnableDataNode && !manualStartComponents.Contain(typeutil.DataNodeRole) {
 		dataNode = mr.runDataNode(ctx, local, &wg)
 		componentMap[typeutil.DataNodeRole] = dataNode
 	}
-	if mr.EnableIndexNode {
+	if mr.EnableIndexNode && !manualStartComponents.Contain(typeutil.IndexNodeRole) {
 		indexNode = mr.runIndexNode(ctx, local, &wg)
 		componentMap[typeutil.IndexNodeRole] = indexNode
 	}
 
-	if mr.EnableProxy {
+	if mr.EnableProxy && !manualStartComponents.Contain(typeutil.ProxyRole) {
 		proxy = mr.runProxy(ctx, local, &wg)
 		componentMap[typeutil.ProxyRole] = proxy
 	}
 
-	if mr.EnableStreamingNode {
+	if mr.EnableStreamingNode && !manualStartComponents.Contain(typeutil.StreamingNodeRole) {
 		streamingNode = mr.runStreamingNode(ctx, local, &wg)
 		componentMap[typeutil.StreamingNodeRole] = streamingNode
 	}
 
 	wg.Wait()
 
+	http.RegisterStartComponent(func(role string) error {
+		if len(role) == 0 {
+			return fmt.Errorf("start component [%s] in [%s] is not supported", role, mr.ServerType)
+		}
+
+		if componentMap[role] != nil {
+			log.Warn(fmt.Sprintf("component[%s] already exist in [%s]", role, mr.ServerType))
+			return nil
+		}
+
+		switch role {
+		case typeutil.RootCoordRole:
+			rootCoord = mr.runRootCoord(ctx, local, &wg)
+			componentMap[typeutil.RootCoordRole] = rootCoord
+		case typeutil.DataCoordRole:
+			dataCoord = mr.runDataCoord(ctx, local, &wg)
+			componentMap[typeutil.DataCoordRole] = dataCoord
+		case typeutil.QueryCoordRole:
+			queryCoord = mr.runQueryCoord(ctx, local, &wg)
+			componentMap[typeutil.QueryCoordRole] = queryCoord
+		case typeutil.QueryNodeRole:
+			queryNode = mr.runQueryNode(ctx, local, &wg)
+			componentMap[typeutil.QueryNodeRole] = queryNode
+		case typeutil.DataNodeRole:
+			dataNode = mr.runDataNode(ctx, local, &wg)
+			componentMap[typeutil.DataNodeRole] = dataNode
+		case typeutil.IndexNodeRole:
+			indexNode = mr.runIndexNode(ctx, local, &wg)
+			componentMap[typeutil.IndexNodeRole] = indexNode
+		case typeutil.ProxyRole:
+			proxy = mr.runProxy(ctx, local, &wg)
+			componentMap[typeutil.ProxyRole] = proxy
+		default:
+			return fmt.Errorf("component [%s] in [%s] is not supported", role, mr.ServerType)
+		}
+
+		return nil
+	})
+
 	http.RegisterStopComponent(func(role string) error {
 		if len(role) == 0 || componentMap[role] == nil {
 			return fmt.Errorf("stop component [%s] in [%s] is not supported", role, mr.ServerType)
+		}
+
+		if componentMap[role] == nil {
+			return fmt.Errorf("component [%s] in [%s] is not started", role, mr.ServerType)
 		}
 
 		log.Info("unregister component before stop", zap.String("role", role))
@@ -495,8 +525,12 @@ func (mr *MilvusRoles) Run() {
 	})
 
 	http.RegisterCheckComponentReady(func(role string) error {
-		if len(role) == 0 || componentMap[role] == nil {
+		if len(role) == 0 {
 			return fmt.Errorf("check component state for [%s] in [%s] is not supported", role, mr.ServerType)
+		}
+
+		if componentMap[role] == nil {
+			return fmt.Errorf("component [%s] in [%s] is not started", role, mr.ServerType)
 		}
 
 		// for coord component, if it's in standby state, it will return StateCode_StandBy

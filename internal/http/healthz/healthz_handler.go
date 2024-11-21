@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -52,12 +53,10 @@ type HealthResponse struct {
 }
 
 type HealthHandler struct {
-	indicators   []Indicator
-	indicatorNum int
+	indicators map[string]Indicator
 
 	// unregister role when call stop by restful api
-	unregisterLock    sync.RWMutex
-	unregisteredRoles map[string]struct{}
+	lock sync.RWMutex
 }
 
 var _ http.Handler = (*HealthHandler)(nil)
@@ -65,21 +64,33 @@ var _ http.Handler = (*HealthHandler)(nil)
 var defaultHandler = HealthHandler{}
 
 func Register(indicator Indicator) {
-	defaultHandler.indicators = append(defaultHandler.indicators, indicator)
-}
+	defaultHandler.lock.Lock()
+	defer defaultHandler.lock.Unlock()
 
-func SetComponentNum(num int) {
-	defaultHandler.indicatorNum = num
+	if defaultHandler.indicators == nil {
+		defaultHandler.indicators = make(map[string]Indicator)
+	}
+	defaultHandler.indicators[indicator.GetName()] = indicator
+	log.Info("register indicator",
+		zap.String("name", indicator.GetName()),
+		zap.Int("num", len(defaultHandler.indicators)),
+	)
 }
 
 func UnRegister(role string) {
-	defaultHandler.unregisterLock.Lock()
-	defer defaultHandler.unregisterLock.Unlock()
+	defaultHandler.lock.Lock()
+	defer defaultHandler.lock.Unlock()
 
-	if defaultHandler.unregisteredRoles == nil {
-		defaultHandler.unregisteredRoles = make(map[string]struct{})
+	if defaultHandler.indicators == nil || defaultHandler.indicators[role] == nil {
+		log.Warn("indicator not found", zap.String("name", role))
+		return
 	}
-	defaultHandler.unregisteredRoles[role] = struct{}{}
+
+	delete(defaultHandler.indicators, role)
+
+	log.Info("unregister indicator",
+		zap.String("name", role),
+		zap.Int("num", len(defaultHandler.indicators)))
 }
 
 func Handler() *HealthHandler {
@@ -90,16 +101,14 @@ func (handler *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	resp := &HealthResponse{
 		State: "OK",
 	}
+
 	ctx := context.Background()
+	handler.lock.RLock()
+	indicators := lo.Values(handler.indicators)
+	handler.lock.RUnlock()
+
 	healthNum := 0
-	for _, in := range handler.indicators {
-		handler.unregisterLock.RLock()
-		_, unregistered := handler.unregisteredRoles[in.GetName()]
-		handler.unregisterLock.RUnlock()
-		if unregistered {
-			healthNum++
-			continue
-		}
+	for _, in := range indicators {
 		code := in.Health(ctx)
 		resp.Detail = append(resp.Detail, &IndicatorState{
 			Name: in.GetName(),
@@ -110,8 +119,8 @@ func (handler *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	if healthNum != handler.indicatorNum {
-		resp.State = fmt.Sprintf("Not all components are healthy, %d/%d", healthNum, handler.indicatorNum)
+	if healthNum != len(handler.indicators) {
+		resp.State = fmt.Sprintf("Not all components are healthy, %d/%d", healthNum, len(indicators))
 	}
 
 	if resp.State == "OK" {

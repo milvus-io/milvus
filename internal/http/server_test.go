@@ -103,7 +103,6 @@ func (suite *HTTPServerTestSuite) TestHealthzHandler() {
 	url := "http://localhost:" + DefaultListenPort + "/healthz"
 	client := http.Client{}
 
-	healthz.SetComponentNum(1)
 	healthz.Register(&MockIndicator{"m1", commonpb.StateCode_Healthy})
 
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
@@ -121,7 +120,6 @@ func (suite *HTTPServerTestSuite) TestHealthzHandler() {
 	body, _ = io.ReadAll(resp.Body)
 	suite.Equal("{\"state\":\"OK\",\"detail\":[{\"name\":\"m1\",\"code\":1}]}", string(body))
 
-	healthz.SetComponentNum(2)
 	healthz.Register(&MockIndicator{"m2", commonpb.StateCode_Abnormal})
 	req, _ = http.NewRequest(http.MethodGet, url, nil)
 	req.Header.Set("Content-Type", "application/json")

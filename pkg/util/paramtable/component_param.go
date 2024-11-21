@@ -283,6 +283,8 @@ type commonConfig struct {
 	ReadOnlyPrivileges                  ParamItem `refreshable:"false"`
 	ReadWritePrivileges                 ParamItem `refreshable:"false"`
 	AdminPrivileges                     ParamItem `refreshable:"false"`
+
+	ManualStartComponents ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -924,6 +926,13 @@ This helps Milvus-CDC synchronize incremental data`,
 		Doc:     `use to override the default value of admin privileges,  example: "PrivilegeCreateOwnership,PrivilegeDropOwnership"`,
 	}
 	p.AdminPrivileges.Init(base.mgr)
+
+	p.ManualStartComponents = ParamItem{
+		Key:     "common.manualStartComponent",
+		Doc:     `if component has been set to manualStartComponent, it will skip start progress, then can startup by management api,  example: "querynode,datanode,indexnode,proxy"`,
+		Version: "2.4.17",
+	}
+	p.ManualStartComponents.Init(base.mgr)
 }
 
 type gpuConfig struct {

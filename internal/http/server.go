@@ -106,6 +106,26 @@ func registerDefaults() {
 	RegisterWebUIHandler()
 }
 
+func RegisterStartComponent(triggerComponentStart func(role string) error) {
+	// register restful api to trigger stop
+	Register(&Handler{
+		Path: RouteTriggerStartPath,
+		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
+			role := req.URL.Query().Get("role")
+			log.Info("start to trigger component start", zap.String("role", role))
+			if err := triggerComponentStart(role); err != nil {
+				log.Warn("failed to trigger component start", zap.Error(err))
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(fmt.Sprintf(`{"msg": "failed to trigger component start, %s"}`, err.Error())))
+				return
+			}
+			log.Info("finish to trigger component start", zap.String("role", role))
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"msg": "OK"}`))
+		},
+	})
+}
+
 func RegisterStopComponent(triggerComponentStop func(role string) error) {
 	// register restful api to trigger stop
 	Register(&Handler{

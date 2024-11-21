@@ -41,6 +41,7 @@ const (
 
 // for every component, register it's own api to trigger stop and check ready
 const (
+	RouteTriggerStartPath    = "/management/start"
 	RouteTriggerStopPath     = "/management/stop"
 	RouteCheckComponentReady = "/management/check/ready"
 	RouteWebUI               = "/webui/"
