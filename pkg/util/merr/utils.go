@@ -772,8 +772,8 @@ func WrapErrIndexNotFound(indexName string, msg ...string) error {
 	return err
 }
 
-func WrapErrIndexNotFoundForSegment(segmentID int64, msg ...string) error {
-	err := wrapFields(ErrIndexNotFound, value("segmentID", segmentID))
+func WrapErrIndexNotFoundForSegments(segmentIDs []int64, msg ...string) error {
+	err := wrapFields(ErrIndexNotFound, value("segmentIDs", segmentIDs))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
