@@ -1012,7 +1012,9 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	}
 	// set segment to SegmentState_Flushed
 	var operators []UpdateOperator
-	operators = append(operators, SetSegmentIsInvisible(segmentID, true))
+	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+		operators = append(operators, SetSegmentIsInvisible(segmentID, true))
+	}
 	operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
 	err := s.meta.UpdateSegmentsInfo(operators...)
 	if err != nil {
