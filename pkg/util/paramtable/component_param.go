@@ -3457,7 +3457,7 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 	p.CompactionTaskQueueCapacity = ParamItem{
 		Key:          "dataCoord.compaction.taskQueueCapacity",
 		Version:      "2.5.0",
-		DefaultValue: "256",
+		DefaultValue: "100000",
 		Doc:          `compaction task queue size`,
 		Export:       true,
 	}
