@@ -748,7 +748,7 @@ msgChannel:
 log:
   # Milvus log level. Option: debug, info, warn, error, panic, and fatal. 
   # It is recommended to use debug level under test and development environments, and info level in production environment.
-  level: debug
+  level: info
   file:
     # Root path to the log files.
     # The default value is set empty, indicating to output log files to standard output (stdout) and standard error (stderr).
