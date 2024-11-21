@@ -30,9 +30,9 @@ func TestRegistry(t *testing.T) {
 	RegisterRootCoordServer(&rootcoordpb.UnimplementedRootCoordServer{})
 	RegisterDataCoordServer(&datapb.UnimplementedDataCoordServer{})
 	RegisterQueryCoordServer(&querypb.UnimplementedQueryCoordServer{})
-	assert.False(t, glocalClient.dataCoordClient.Ready())
-	assert.False(t, glocalClient.queryCoordClient.Ready())
-	assert.False(t, glocalClient.rootCoordClient.Ready())
+	assert.False(t, glocalClient.dataCoordClient.localDataCoordServer.Ready())
+	assert.False(t, glocalClient.queryCoordClient.localQueryCoordServer.Ready())
+	assert.False(t, glocalClient.rootCoordClient.localRootCoordServer.Ready())
 
 	enableLocal = &LocalClientRoleConfig{}
 
@@ -49,9 +49,9 @@ func TestRegistry(t *testing.T) {
 	RegisterRootCoordServer(&rootcoordpb.UnimplementedRootCoordServer{})
 	RegisterDataCoordServer(&datapb.UnimplementedDataCoordServer{})
 	RegisterQueryCoordServer(&querypb.UnimplementedQueryCoordServer{})
-	assert.True(t, glocalClient.dataCoordClient.Ready())
-	assert.True(t, glocalClient.queryCoordClient.Ready())
-	assert.True(t, glocalClient.rootCoordClient.Ready())
+	assert.True(t, glocalClient.dataCoordClient.localDataCoordServer.Ready())
+	assert.True(t, glocalClient.queryCoordClient.localQueryCoordServer.Ready())
+	assert.True(t, glocalClient.rootCoordClient.localRootCoordServer.Ready())
 
 	enableLocal = &LocalClientRoleConfig{}
 
@@ -68,7 +68,4 @@ func TestRegistry(t *testing.T) {
 	assert.NotNil(t, GetQueryCoordClient(context.Background()))
 	assert.NotNil(t, GetDataCoordClient(context.Background()))
 	assert.NotNil(t, GetRootCoordClient(context.Background()))
-	GetQueryCoordClient(context.Background()).Close()
-	GetDataCoordClient(context.Background()).Close()
-	GetRootCoordClient(context.Background()).Close()
 }
