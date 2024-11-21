@@ -467,7 +467,7 @@ queryNode:
       taskQueueExpire: 60 # Control how long (many seconds) that queue retains since queue is empty
       enableCrossUserGrouping: false # Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
-  levelZeroForwardPolicy: RemoteLoad # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
+  levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   dataSync:
     flowGraph:
@@ -748,7 +748,7 @@ msgChannel:
 log:
   # Milvus log level. Option: debug, info, warn, error, panic, and fatal. 
   # It is recommended to use debug level under test and development environments, and info level in production environment.
-  level: info
+  level: debug
   file:
     # Root path to the log files.
     # The default value is set empty, indicating to output log files to standard output (stdout) and standard error (stderr).
