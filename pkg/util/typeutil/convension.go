@@ -165,3 +165,33 @@ func SparseFloatBytesToMap(b []byte) map[uint32]float32 {
 	}
 	return values
 }
+
+// Float32ArrayToBytes serialize vector into byte slice, used in search placeholder
+// LittleEndian is used for convention
+func Float32ArrayToBytes(fv []float32) []byte {
+	data := make([]byte, 0, 4*len(fv)) // float32 occupies 4 bytes
+	buf := make([]byte, 4)
+	for _, f := range fv {
+		binary.LittleEndian.PutUint32(buf, math.Float32bits(f))
+		data = append(data, buf...)
+	}
+	return data
+}
+
+// Float32ArrayToFloat16Bytes converts float32 vector `fv` to float16 vector
+func Float32ArrayToFloat16Bytes(fv []float32) []byte {
+	data := make([]byte, 0, 2*len(fv)) // float16 occupies 2 bytes
+	for _, f := range fv {
+		data = append(data, Float32ToFloat16Bytes(f)...)
+	}
+	return data
+}
+
+// Float32ArrayToBFloat16Bytes converts float32 vector `fv` to bfloat16 vector
+func Float32ArrayToBFloat16Bytes(fv []float32) []byte {
+	data := make([]byte, 0, 2*len(fv)) // bfloat16 occupies 2 bytes
+	for _, f := range fv {
+		data = append(data, Float32ToBFloat16Bytes(f)...)
+	}
+	return data
+}
