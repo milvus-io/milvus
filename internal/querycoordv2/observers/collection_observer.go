@@ -325,7 +325,9 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 	}
 	subChannelCount := loadedCount
 	for _, segment := range segmentTargets {
-		views := ob.dist.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(segment.GetID(), false))
+		views := ob.dist.LeaderViewManager.GetByFilter(
+			meta.WithChannelName2LeaderView(segment.GetInsertChannel()),
+			meta.WithSegment2LeaderView(segment.GetID(), false))
 		nodes := lo.Map(views, func(view *meta.LeaderView, _ int) int64 { return view.ID })
 		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager, partition.GetCollectionID(), nodes)
 		loadedCount += len(group)
