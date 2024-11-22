@@ -45,3 +45,9 @@ func (c *ColumnSparseFloatVector) FieldData() *schemapb.FieldData {
 	vectors.Dim = int64(max.Dim())
 	return fd
 }
+
+func (c *ColumnSparseFloatVector) Slice(start, end int) Column {
+	return &ColumnSparseFloatVector{
+		vectorBase: c.vectorBase.slice(start, end),
+	}
+}

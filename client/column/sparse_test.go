@@ -91,4 +91,13 @@ func TestColumnSparseEmbedding(t *testing.T) {
 			assert.Equal(t, v, getV)
 		}
 	})
+
+	t.Run("test_column_slice", func(t *testing.T) {
+		l := rand.Intn(columnLen)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnSparseFloatVector)
+		if assert.True(t, ok) {
+			assert.Equal(t, column.Data()[:l], slicedColumn.Data())
+		}
+	})
 }
