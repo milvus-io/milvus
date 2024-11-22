@@ -1764,7 +1764,9 @@ func TestRootCoord_RBACError(t *testing.T) {
 			assert.NoError(t, err)
 			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 		}
-
+		mockMeta.IsCustomPrivilegeGroupFunc = func(ctx context.Context, groupName string) (bool, error) {
+			return false, nil
+		}
 		mockMeta.SelectUserFunc = func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
 			return nil, nil
 		}

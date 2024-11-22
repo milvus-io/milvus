@@ -222,7 +222,7 @@ func TestGetSegmentDistJSON(t *testing.T) {
 	manager.Update(1, segment1)
 	manager.Update(2, segment2)
 
-	segments := manager.GetSegmentDist()
+	segments := manager.GetSegmentDist(0)
 	assert.Equal(t, 2, len(segments))
 
 	checkResults := func(s *metricsinfo.Segment) {

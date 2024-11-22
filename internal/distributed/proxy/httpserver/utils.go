@@ -1531,7 +1531,7 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 		}
 		return data, nil
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("Unexpected default value type: %d", dataType))
+		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("Unexpected default value type: %s", dataType.String()))
 	}
 }
 

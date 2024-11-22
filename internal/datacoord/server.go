@@ -1145,41 +1145,50 @@ func (s *Server) registerMetricsRequest() {
 			return s.getSystemInfoMetrics(ctx, req)
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataDist,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DistKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.getDistJSON(ctx, req), nil
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ImportTasks,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ImportTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.importMeta.TaskStatsJSON(), nil
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.CompactionTasks,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.CompactionTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.meta.compactionTaskMeta.TaskStatsJSON(), nil
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.BuildIndexTasks,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.BuildIndexTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.meta.indexMeta.TaskStatsJSON(), nil
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTasks,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.getSyncTaskJSON(ctx, req)
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataSegments,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return s.getSegmentsJSON(ctx, req)
+			return s.getSegmentsJSON(ctx, req, jsonReq)
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataChannels,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.getChannelsJSON(ctx, req)
 		})
 
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.IndexKey,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			v := jsonReq.Get(metricsinfo.MetricRequestParamCollectionIDKey)
+			collectionID := int64(0)
+			if v.Exists() {
+				collectionID = v.Int()
+			}
+			return s.meta.indexMeta.GetIndexJSON(collectionID), nil
+		})
 	log.Info("register metrics actions finished")
 }
 

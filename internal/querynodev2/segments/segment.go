@@ -776,7 +776,7 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 	return nil
 }
 
-func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error {
+func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKeys, timestamps []typeutil.Timestamp) error {
 	/*
 		CStatus
 		Delete(CSegmentInterface c_segment,
@@ -786,7 +786,7 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 		           const unsigned long* timestamps);
 	*/
 
-	if len(primaryKeys) == 0 {
+	if primaryKeys.Len() == 0 {
 		return nil
 	}
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
@@ -795,34 +795,12 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 	defer s.ptrLock.RUnlock()
 
 	cOffset := C.int64_t(0) // depre
-	cSize := C.int64_t(len(primaryKeys))
+	cSize := C.int64_t(primaryKeys.Len())
 	cTimestampsPtr := (*C.uint64_t)(&(timestamps)[0])
 
-	ids := &schemapb.IDs{}
-	pkType := primaryKeys[0].Type()
-	switch pkType {
-	case schemapb.DataType_Int64:
-		int64Pks := make([]int64, len(primaryKeys))
-		for index, pk := range primaryKeys {
-			int64Pks[index] = pk.(*storage.Int64PrimaryKey).Value
-		}
-		ids.IdField = &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{
-				Data: int64Pks,
-			},
-		}
-	case schemapb.DataType_VarChar:
-		varCharPks := make([]string, len(primaryKeys))
-		for index, entity := range primaryKeys {
-			varCharPks[index] = entity.(*storage.VarCharPrimaryKey).Value
-		}
-		ids.IdField = &schemapb.IDs_StrId{
-			StrId: &schemapb.StringArray{
-				Data: varCharPks,
-			},
-		}
-	default:
-		return fmt.Errorf("invalid data type of primary keys")
+	ids, err := storage.ParsePrimaryKeysBatch2IDs(primaryKeys)
+	if err != nil {
+		return err
 	}
 
 	dataBlob, err := proto.Marshal(ids)
@@ -1410,7 +1388,7 @@ func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error
 	var status C.CStatus
 	log.Ctx(ctx).Info("create text index for segment", zap.Int64("segmentID", s.ID()), zap.Int64("fieldID", fieldID))
 
-	GetDynamicPool().Submit(func() (any, error) {
+	GetLoadPool().Submit(func() (any, error) {
 		status = C.CreateTextIndex(s.ptr, C.int64_t(fieldID))
 		return nil, nil
 	}).Await()

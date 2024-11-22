@@ -2655,7 +2655,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionBasicInfo{}, nil).Maybe()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 	cache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[string][]nodeInfo{}, nil).Maybe()
 	cache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
 	globalMetaCache = cache
@@ -2974,7 +2974,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		}
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Once()
@@ -2983,7 +2983,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.True(t, skip)
 
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Bounded,
 			}, nil).Once()
@@ -2991,7 +2991,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.True(t, skip)
 
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Strong,
 			}, nil).Once()
@@ -3001,7 +3001,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 
 	t.Run("request consistency level", func(t *testing.T) {
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Times(3)
@@ -3073,7 +3073,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		mockMetaCache.ExpectedCalls = nil
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, fmt.Errorf("mock error"))
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil)
@@ -3128,7 +3128,7 @@ func (s *MaterializedViewTestSuite) SetupTest() {
 	s.mockMetaCache = NewMockCache(s.T())
 	s.mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.colID, nil)
 	s.mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-		&collectionBasicInfo{
+		&collectionInfo{
 			collID:                s.colID,
 			partitionKeyIsolation: true,
 		}, nil)

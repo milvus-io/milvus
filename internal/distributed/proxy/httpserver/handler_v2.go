@@ -147,6 +147,8 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(RoleCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.dropRole))))
 	router.POST(RoleCategory+GrantPrivilegeAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.addPrivilegeToRole))))
 	router.POST(RoleCategory+RevokePrivilegeAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.removePrivilegeFromRole))))
+	router.POST(RoleCategory+GrantPrivilegeActionV2, timeoutMiddleware(wrapperPost(func() any { return &GrantV2Req{} }, wrapperTraceLog(h.grantV2))))
+	router.POST(RoleCategory+RevokePrivilegeActionV2, timeoutMiddleware(wrapperPost(func() any { return &GrantV2Req{} }, wrapperTraceLog(h.revokeV2))))
 
 	// privilege group
 	router.POST(PrivilegeGroupCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.createPrivilegeGroup))))
@@ -1808,6 +1810,33 @@ func (h *HandlersV2) operatePrivilegeToRole(ctx context.Context, c *gin.Context,
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
+}
+
+func (h *HandlersV2) operatePrivilegeToRoleV2(ctx context.Context, c *gin.Context, httpReq *GrantV2Req, operateType milvuspb.OperatePrivilegeType) (interface{}, error) {
+	req := &milvuspb.OperatePrivilegeV2Request{
+		Role: &milvuspb.RoleEntity{Name: httpReq.RoleName},
+		Grantor: &milvuspb.GrantorEntity{
+			Privilege: &milvuspb.PrivilegeEntity{Name: httpReq.Privilege},
+		},
+		Type:           operateType,
+		DbName:         httpReq.DbName,
+		CollectionName: httpReq.CollectionName,
+	}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/OperatePrivilege", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.OperatePrivilegeV2(reqCtx, req.(*milvuspb.OperatePrivilegeV2Request))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) grantV2(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	return h.operatePrivilegeToRoleV2(ctx, c, anyReq.(*GrantV2Req), milvuspb.OperatePrivilegeType_Grant)
+}
+
+func (h *HandlersV2) revokeV2(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	return h.operatePrivilegeToRoleV2(ctx, c, anyReq.(*GrantV2Req), milvuspb.OperatePrivilegeType_Revoke)
 }
 
 func (h *HandlersV2) addPrivilegeToRole(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {

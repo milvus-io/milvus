@@ -178,7 +178,8 @@ func TestListCollection(t *testing.T) {
 			QueryServiceAvailable: []bool{true, true},
 		}, nil)
 
-		handler := listCollection(mockRoortCoordClient, mockQueryCoordClient)
+		proxy := &Proxy{queryCoord: mockQueryCoordClient, rootCoord: mockRoortCoordClient}
+		handler := listCollection(proxy)
 		handler(c)
 
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -194,7 +195,8 @@ func TestListCollection(t *testing.T) {
 		mockRoortCoordClient := mocks.NewMockRootCoordClient(t)
 		mockRoortCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
 
-		handler := listCollection(mockRoortCoordClient, nil)
+		proxy := &Proxy{rootCoord: mockRoortCoordClient}
+		handler := listCollection(proxy)
 		handler(c)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		assert.Contains(t, w.Body.String(), "error")
@@ -212,7 +214,8 @@ func TestListCollection(t *testing.T) {
 		mockQueryCoordClient := mocks.NewMockQueryCoordClient(t)
 		mockQueryCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
 
-		handler := listCollection(mockRoortCoordClient, mockQueryCoordClient)
+		proxy := &Proxy{queryCoord: mockQueryCoordClient, rootCoord: mockRoortCoordClient}
+		handler := listCollection(proxy)
 		handler(c)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		assert.Contains(t, w.Body.String(), "error")
@@ -225,9 +228,8 @@ func TestDescribeCollection(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?db_name=default&collection_name=collection1", nil)
 
-		mockProxy := mocks.NewMockProxy(t)
 		mockRootCoord := mocks.NewMockRootCoordClient(t)
-		mockProxy.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 			Status:               &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			CollectionID:         1,
 			CollectionName:       "collection1",
@@ -255,7 +257,8 @@ func TestDescribeCollection(t *testing.T) {
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		}, nil)
 
-		handler := describeCollection(mockProxy, mockRootCoord)
+		proxy := &Proxy{rootCoord: mockRootCoord}
+		handler := describeCollection(proxy)
 		handler(c)
 
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -268,11 +271,11 @@ func TestDescribeCollection(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?db_name=default&collection_name=collection1", nil)
 
-		mockProxy := mocks.NewMockProxy(t)
 		mockRootCoord := mocks.NewMockRootCoordClient(t)
-		mockProxy.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
 
-		handler := describeCollection(mockProxy, mockRootCoord)
+		proxy := &Proxy{rootCoord: mockRootCoord}
+		handler := describeCollection(proxy)
 		handler(c)
 
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -284,10 +287,9 @@ func TestDescribeCollection(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?db_name=default", nil)
 
-		mockProxy := mocks.NewMockProxy(t)
 		mockRootCoord := mocks.NewMockRootCoordClient(t)
-
-		handler := describeCollection(mockProxy, mockRootCoord)
+		proxy := &Proxy{rootCoord: mockRootCoord}
+		handler := describeCollection(proxy)
 		handler(c)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
