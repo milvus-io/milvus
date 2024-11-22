@@ -1372,7 +1372,7 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 		return merr.Status(err), nil
 	}
 
-	pks := storage.ParseIDs2PrimaryKeys(req.GetPrimaryKeys())
+	pks := storage.ParseIDs2PrimaryKeysBatch(req.GetPrimaryKeys())
 	for _, segment := range segments {
 		err := segment.Delete(ctx, pks, req.GetTimestamps())
 		if err != nil {
@@ -1427,7 +1427,7 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 		log.Warn("Delete batch find missing ids", zap.Int64s("missing_ids", missingIDs.Collect()))
 	}
 
-	pks := storage.ParseIDs2PrimaryKeys(req.GetPrimaryKeys())
+	pks := storage.ParseIDs2PrimaryKeysBatch(req.GetPrimaryKeys())
 
 	// control the execution batch parallel with P number
 	// maybe it shall be lower in case of heavy CPU usage may impacting search/query

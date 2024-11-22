@@ -166,15 +166,15 @@ func (suite *SegmentSuite) TestResourceUsageEstimate() {
 func (suite *SegmentSuite) TestDelete() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	pks, err := storage.GenInt64PrimaryKeys(0, 1)
-	suite.NoError(err)
+	pks := storage.NewInt64PrimaryKeys(2)
+	pks.AppendRaw(0, 1)
 
 	// Test for sealed
 	rowNum := suite.sealed.RowNum()
-	err = suite.sealed.Delete(ctx, pks, []uint64{1000, 1000})
+	err := suite.sealed.Delete(ctx, pks, []uint64{1000, 1000})
 	suite.NoError(err)
 
-	suite.Equal(rowNum-int64(len(pks)), suite.sealed.RowNum())
+	suite.Equal(rowNum-int64(pks.Len()), suite.sealed.RowNum())
 	suite.Equal(rowNum, suite.sealed.InsertCount())
 
 	// Test for growing
@@ -182,7 +182,7 @@ func (suite *SegmentSuite) TestDelete() {
 	err = suite.growing.Delete(ctx, pks, []uint64{1000, 1000})
 	suite.NoError(err)
 
-	suite.Equal(rowNum-int64(len(pks)), suite.growing.RowNum())
+	suite.Equal(rowNum-int64(pks.Len()), suite.growing.RowNum())
 	suite.Equal(rowNum, suite.growing.InsertCount())
 }
 
