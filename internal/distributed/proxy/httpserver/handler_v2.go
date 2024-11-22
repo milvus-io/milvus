@@ -1813,21 +1813,17 @@ func (h *HandlersV2) operatePrivilegeToRole(ctx context.Context, c *gin.Context,
 }
 
 func (h *HandlersV2) operatePrivilegeToRoleV2(ctx context.Context, c *gin.Context, httpReq *GrantV2Req, operateType milvuspb.OperatePrivilegeType) (interface{}, error) {
-	req := &milvuspb.OperatePrivilegeRequest{
-		Entity: &milvuspb.GrantEntity{
-			Role:       &milvuspb.RoleEntity{Name: httpReq.RoleName},
-			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
-			ObjectName: httpReq.CollectionName,
-			DbName:     httpReq.DbName,
-			Grantor: &milvuspb.GrantorEntity{
-				Privilege: &milvuspb.PrivilegeEntity{Name: httpReq.Privilege},
-			},
+	req := &milvuspb.OperatePrivilegeV2Request{
+		Role: &milvuspb.RoleEntity{Name: httpReq.RoleName},
+		Grantor: &milvuspb.GrantorEntity{
+			Privilege: &milvuspb.PrivilegeEntity{Name: httpReq.Privilege},
 		},
-		Type:    operateType,
-		Version: "v2",
+		Type:           operateType,
+		DbName:         httpReq.DbName,
+		CollectionName: httpReq.CollectionName,
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/OperatePrivilege", func(reqCtx context.Context, req any) (interface{}, error) {
-		return h.proxy.OperatePrivilege(reqCtx, req.(*milvuspb.OperatePrivilegeRequest))
+		return h.proxy.OperatePrivilegeV2(reqCtx, req.(*milvuspb.OperatePrivilegeV2Request))
 	})
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
