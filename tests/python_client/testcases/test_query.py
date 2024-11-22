@@ -4012,7 +4012,7 @@ class TestQueryCount(TestcaseBase):
                            check_items={exp_res: [{count: res}]})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[13:15])
     def test_counts_expression_sparse_vectors(self, index):
         """
         target: test count with expr

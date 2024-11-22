@@ -15,6 +15,10 @@ class IndexName:
     HNSW = "HNSW"
     DISKANN = "DISKANN"
     SCANN = "SCANN"
+    HNSW_FLAT = "HNSW"
+    HNSW_SQ = "HNSW_SQ"
+    HNSW_PQ = "HNSW_PQ"
+    HNSW_PRQ = "HNSW_PRQ"
     # binary
     BIN_FLAT = "BIN_FLAT"
     BIN_IVF_FLAT = "BIN_IVF_FLAT"
@@ -358,6 +362,32 @@ class DefaultVectorIndexParams:
             field: IndexPrams(index_type=IndexName.SPARSE_INVERTED_INDEX, params={"drop_ratio_build": drop_ratio_build},
                               metric_type=metric_type)
         }
+
+    @staticmethod
+    def HNSW_FLAT(field: str, metric_type=MetricType.IP):
+        return {
+            field: IndexPrams(index_type=IndexName.HNSW_FLAT, params={}, metric_type=metric_type)
+        }
+
+    @staticmethod
+    def HNSW_SQ(field: str, sq_type: str = "SQ8", metric_type=MetricType.IP):
+        return {
+            field: IndexPrams(index_type=IndexName.HNSW_SQ, params={"sq_type": sq_type}, metric_type=metric_type)
+        }
+
+    @staticmethod
+    def HNSW_PQ(field: str, m: int = 32, nbits: int = 8, metric_type=MetricType.IP):
+        return {
+            field: IndexPrams(index_type=IndexName.HNSW_PQ, params={"m": m, "nbits": nbits}, metric_type=metric_type)
+        }
+
+    @staticmethod
+    def HNSW_PRQ(field: str, m: int = 32, nbits: int = 4 , nrq: int = 2, metric_type=MetricType.IP):
+        return {
+            field: IndexPrams(index_type=IndexName.HNSW_PRQ, params={"m": m, "nbits": nbits, "nrq": nrq},
+                              metric_type=metric_type)
+        }
+
 
 class DefaultScalarIndexParams:
 

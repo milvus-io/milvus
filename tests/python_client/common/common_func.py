@@ -2288,6 +2288,9 @@ def gen_search_param(index_type, metric_type="L2"):
         for search_list in [20, 300, 1500]:
             diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
             search_params.append(diskann_search_param)
+    elif index_type in [ct.HNSW_FLAT, ct.HNSW_SQ, ct.HNSW_PQ, ct.HNSW_PRQ]:
+        faiss_hnsw_search_param = {"metric_type": metric_type, "params": {}}
+        search_params.append(faiss_hnsw_search_param)
     else:
         log.error("Invalid index_type.")
         raise Exception("Invalid index_type.")
