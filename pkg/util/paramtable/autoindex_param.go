@@ -70,7 +70,7 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 
 	p.EnableResultLimitCheck = ParamItem{
 		Key:          "autoIndex.resultLimitCheck",
-		Version:      "2.5.0",
+		Version:      "2.4.18",
 		DefaultValue: "true",
 		PanicIfEmpty: true,
 	}
