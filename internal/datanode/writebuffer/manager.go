@@ -152,7 +152,7 @@ func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, 
 
 	_, loaded := m.buffers.GetOrInsert(channel, buf)
 	if loaded {
-		buf.Close(context.Background(), false)
+		buf.Close(false)
 		return merr.WrapErrChannelReduplicate(channel)
 	}
 	return nil
@@ -184,7 +184,7 @@ func (m *bufferManager) FlushChannel(ctx context.Context, channel string, flushT
 }
 
 // BufferData put data into channel write buffer.
-func (m *bufferManager) BufferData(channel string, insertData []*msgstream.InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
+func (m *bufferManager) BufferData(channel string, insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
 		log.Ctx(context.Background()).Warn("write buffer not found when buffer data",
