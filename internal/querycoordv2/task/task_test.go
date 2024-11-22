@@ -476,6 +476,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		ID:           targetNode,
 		CollectionID: suite.collection,
 		Segments:     map[int64]*querypb.SegmentDist{},
+		Channel:      channel.ChannelName,
 	}
 	for _, segment := range suite.loadSegments {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
@@ -575,6 +576,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 		ID:           targetNode,
 		CollectionID: suite.collection,
 		Segments:     map[int64]*querypb.SegmentDist{},
+		Channel:      channel.ChannelName,
 	}
 	for _, segment := range suite.loadSegments {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
@@ -1139,6 +1141,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		ID:           targetNode,
 		CollectionID: suite.collection,
 		Segments:     map[int64]*querypb.SegmentDist{},
+		Channel:      channel.ChannelName,
 	}
 	for _, segment := range suite.loadSegments[1:] {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
