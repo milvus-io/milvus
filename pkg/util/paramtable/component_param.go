@@ -1111,7 +1111,7 @@ type rootCoordConfig struct {
 	MaxPartitionNum             ParamItem `refreshable:"true"`
 	MinSegmentSizeToEnableIndex ParamItem `refreshable:"true"`
 	EnableActiveStandby         ParamItem `refreshable:"false"`
-	MaxDatabaseNum              ParamItem `refreshable:"false"`
+	MaxDatabaseNum              ParamItem `refreshable:"true"`
 	MaxGeneralCapacity          ParamItem `refreshable:"true"`
 	GracefulStopTimeout         ParamItem `refreshable:"true"`
 	UseLockScheduler            ParamItem `refreshable:"true"`
