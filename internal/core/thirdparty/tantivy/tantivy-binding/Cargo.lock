@@ -3,6 +3,21 @@
 version = 3
 
 [[package]]
+name = "addr2line"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfbe277e56a376000877090da837660b4427aad530e3028d44e0bffe4f89a1c1"
+dependencies = [
+ "gimli",
+]
+
+[[package]]
+name = "adler2"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627"
+
+[[package]]
 name = "ahash"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -85,6 +100,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
 
 [[package]]
+name = "async-channel"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89b47800b0be77592da0afd425cc03468052844aff33b84e33cc696f64e77b6a"
+dependencies = [
+ "concurrent-queue",
+ "event-listener-strategy",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -111,6 +138,21 @@ name = "autocfg"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
+
+[[package]]
+name = "backtrace"
+version = "0.3.74"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d82cb332cdfaed17ae235a638438ac4d4839913cc2af585c3c6746e8f8bee1a"
+dependencies = [
+ "addr2line",
+ "cfg-if",
+ "libc",
+ "miniz_oxide",
+ "object",
+ "rustc-demangle",
+ "windows-targets 0.52.6",
+]
 
 [[package]]
 name = "base64"
@@ -233,6 +275,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 
 [[package]]
+name = "concurrent-queue"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -334,6 +385,27 @@ checksum = "534c5cf6194dfab3db3242765c03bbe257cf92f22b38f6bc0c58d59108a820ba"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "event-listener"
+version = "5.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6032be9bd27023a771701cc49f9f053c751055f71efb2e0ae5c15809093675ba"
+dependencies = [
+ "concurrent-queue",
+ "parking",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "event-listener-strategy"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f214dc438f977e6d4e3500aaa277f5ad94ca83fbbd9b1a15713ce2344ccc5a1"
+dependencies = [
+ "event-listener",
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -472,6 +544,12 @@ dependencies = [
  "libc",
  "wasi",
 ]
+
+[[package]]
+name = "gimli"
+version = "0.31.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
 
 [[package]]
 name = "hashbrown"
@@ -675,6 +753,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
+name = "miniz_oxide"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2d80299ef12ff69b16a84bb182e3b9df68b5a91574d3d4fa6e41b65deec4df1"
+dependencies = [
+ "adler2",
+]
+
+[[package]]
 name = "murmurhash32"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -707,6 +794,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "object"
+version = "0.36.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aedf0a2d09c573ed1d8d85b30c119153926a2b36dce0ab28322c09a117a4683e"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -727,10 +823,16 @@ checksum = "e2355d85b9a3786f481747ced0e0ff2ba35213a1f9bd406ed906554d7af805a1"
 [[package]]
 name = "ownedbytes"
 version = "0.6.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
 dependencies = [
  "stable_deref_trait",
 ]
+
+[[package]]
+name = "parking"
+version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
 
 [[package]]
 name = "phf"
@@ -893,6 +995,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustc-demangle"
+version = "0.1.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "719b953e2095829ee67db738b3bfa9fa368c94900df327b3f07fe6e794d2fe1f"
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1028,10 +1136,11 @@ dependencies = [
 [[package]]
 name = "tantivy"
 version = "0.21.1"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
 dependencies = [
  "aho-corasick",
  "arc-swap",
+ "async-channel",
  "async-trait",
  "base64",
  "bitpacking",
@@ -1073,6 +1182,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "time",
+ "tokio",
  "uuid",
  "winapi",
  "zstd-sys",
@@ -1099,7 +1209,7 @@ dependencies = [
 [[package]]
 name = "tantivy-bitpacker"
 version = "0.5.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
 dependencies = [
  "bitpacking",
 ]
@@ -1107,7 +1217,7 @@ dependencies = [
 [[package]]
 name = "tantivy-columnar"
 version = "0.2.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
 dependencies = [
  "fastdivide",
  "fnv",
@@ -1122,7 +1232,7 @@ dependencies = [
 [[package]]
 name = "tantivy-common"
 version = "0.6.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -1145,7 +1255,7 @@ dependencies = [
 [[package]]
 name = "tantivy-query-grammar"
 version = "0.21.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
 dependencies = [
  "nom",
 ]
@@ -1153,7 +1263,7 @@ dependencies = [
 [[package]]
 name = "tantivy-sstable"
 version = "0.2.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
 dependencies = [
  "tantivy-common",
  "tantivy-fst",
@@ -1163,7 +1273,7 @@ dependencies = [
 [[package]]
 name = "tantivy-stacker"
 version = "0.2.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
 dependencies = [
  "murmurhash32",
  "tantivy-common",
@@ -1172,7 +1282,7 @@ dependencies = [
 [[package]]
 name = "tantivy-tokenizer-api"
 version = "0.2.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix2#7610424aad391f6cf39b3c1a775ada121f7f4ac9"
+source = "git+https://github.com/milvus-io/tantivy?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
 dependencies = [
  "serde",
 ]
@@ -1254,6 +1364,16 @@ checksum = "3f252a68540fde3a3877aeea552b832b40ab9a69e318efd078774a01ddee1ccf"
 dependencies = [
  "num-conv",
  "time-core",
+]
+
+[[package]]
+name = "tokio"
+version = "1.41.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22cfb5bee7a6a52939ca9224d6ac897bb669134078daa8735560897f69de4d33"
+dependencies = [
+ "backtrace",
+ "pin-project-lite",
 ]
 
 [[package]]
