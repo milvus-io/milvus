@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -590,12 +591,15 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (t *searchTask) reduceResults(ctx context.Context, toReduceResults []*internalpb.SearchResults, nq, topK int64, offset int64, queryInfo *planpb.QueryInfo, isAdvance bool) (*milvuspb.SearchResults, error) {
+func getMetricType(toReduceResults []*internalpb.SearchResults) string {
 	metricType := ""
 	if len(toReduceResults) >= 1 {
 		metricType = toReduceResults[0].GetMetricType()
 	}
+	return metricType
+}
 
+func (t *searchTask) reduceResults(ctx context.Context, toReduceResults []*internalpb.SearchResults, nq, topK int64, offset int64, metricType string, queryInfo *planpb.QueryInfo, isAdvance bool) (*milvuspb.SearchResults, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "reduceResults")
 	defer sp.End()
 
@@ -629,6 +633,24 @@ func (t *searchTask) reduceResults(ctx context.Context, toReduceResults []*inter
 		return nil, err
 	}
 	return result, nil
+}
+
+// find the last bound based on reduced results and metric type
+// only support nq == 1, for search iterator v2
+func getLastBound(result *milvuspb.SearchResults, incomingLastBound *float32, metricType string) float32 {
+	len := len(result.Results.Scores)
+	if len > 0 && result.GetResults().GetNumQueries() == 1 {
+		return result.Results.Scores[len-1]
+	}
+	// if no results found and incoming last bound is not nil, return it
+	if incomingLastBound != nil {
+		return *incomingLastBound
+	}
+	// if no results found and it is the first call, return the closest bound
+	if metric.PositivelyRelated(metricType) {
+		return math.MaxFloat32
+	}
+	return -math.MaxFloat32
 }
 
 func (t *searchTask) PostExecute(ctx context.Context) error {
@@ -670,6 +692,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
+	metricType := getMetricType(toReduceResults)
 	// reduce
 	if t.SearchRequest.GetIsAdvanced() {
 		multipleInternalResults := make([][]*internalpb.SearchResults, len(t.SearchRequest.GetSubReqs()))
@@ -696,16 +719,12 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		multipleMilvusResults := make([]*milvuspb.SearchResults, len(t.SearchRequest.GetSubReqs()))
 		for index, internalResults := range multipleInternalResults {
 			subReq := t.SearchRequest.GetSubReqs()[index]
-
-			metricType := ""
-			if len(internalResults) >= 1 {
-				metricType = internalResults[0].GetMetricType()
-			}
-			result, err := t.reduceResults(t.ctx, internalResults, subReq.GetNq(), subReq.GetTopk(), subReq.GetOffset(), t.queryInfos[index], true)
+			subMetricType := getMetricType(internalResults)
+			result, err := t.reduceResults(t.ctx, internalResults, subReq.GetNq(), subReq.GetTopk(), subReq.GetOffset(), subMetricType, t.queryInfos[index], true)
 			if err != nil {
 				return err
 			}
-			t.reScorers[index].setMetricType(metricType)
+			t.reScorers[index].setMetricType(subMetricType)
 			t.reScorers[index].reScore(result)
 			multipleMilvusResults[index] = result
 		}
@@ -721,7 +740,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 			return err
 		}
 	} else {
-		t.result, err = t.reduceResults(t.ctx, toReduceResults, t.SearchRequest.GetNq(), t.SearchRequest.GetTopk(), t.SearchRequest.GetOffset(), t.queryInfos[0], false)
+		t.result, err = t.reduceResults(t.ctx, toReduceResults, t.SearchRequest.GetNq(), t.SearchRequest.GetTopk(), t.SearchRequest.GetOffset(), metricType, t.queryInfos[0], false)
 		if err != nil {
 			return err
 		}
@@ -751,6 +770,14 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 	t.result.Results.OutputFields = t.userOutputFields
 	t.result.CollectionName = t.request.GetCollectionName()
+	if t.isIterator && len(t.queryInfos) == 1 && t.queryInfos[0] != nil {
+		if iterInfo := t.queryInfos[0].GetSearchIteratorV2Info(); iterInfo != nil {
+			t.result.Results.SearchIteratorV2Results = &schemapb.SearchIteratorV2Results{
+				Token:     iterInfo.GetToken(),
+				LastBound: getLastBound(t.result, iterInfo.LastBound, metricType),
+			}
+		}
+	}
 	if t.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
 		// first page for iteration, need to set up sessionTs for iterator
 		t.result.SessionTs = getMaxMvccTsFromChannels(t.queryChannelsTs, t.BeginTs())
