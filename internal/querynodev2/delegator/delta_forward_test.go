@@ -18,13 +18,13 @@ package delegator
 
 import (
 	"context"
+	"math/rand"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"math/rand/v2"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -411,7 +411,7 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingBF() {
 	deltaData := storage.NewDeltaData(int64(n))
 
 	for i := 0; i < n; i++ {
-		deltaData.Append(storage.NewInt64PrimaryKey(rand.Int64()), 0)
+		deltaData.Append(storage.NewInt64PrimaryKey(rand.Int63()), 0)
 	}
 	err = l0Segment.LoadDeltaData(context.Background(), deltaData)
 	s.Require().NoError(err)
@@ -458,7 +458,7 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingLoad() {
 	deltaData := storage.NewDeltaData(int64(n))
 
 	for i := 0; i < n; i++ {
-		deltaData.Append(storage.NewInt64PrimaryKey(rand.Int64()), 0)
+		deltaData.Append(storage.NewInt64PrimaryKey(rand.Int63()), 0)
 	}
 	err = l0Segment.LoadDeltaData(context.Background(), deltaData)
 	s.Require().NoError(err)
