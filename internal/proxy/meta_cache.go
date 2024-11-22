@@ -706,33 +706,14 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 	if err != nil {
 		return nil, err
 	}
-	resp := &milvuspb.DescribeCollectionResponse{
-		Status: coll.Status,
-		Schema: &schemapb.CollectionSchema{
-			Name:               coll.Schema.Name,
-			Description:        coll.Schema.Description,
-			AutoID:             coll.Schema.AutoID,
-			Fields:             make([]*schemapb.FieldSchema, 0),
-			Functions:          make([]*schemapb.FunctionSchema, 0),
-			EnableDynamicField: coll.Schema.EnableDynamicField,
-		},
-		CollectionID:         coll.CollectionID,
-		VirtualChannelNames:  coll.VirtualChannelNames,
-		PhysicalChannelNames: coll.PhysicalChannelNames,
-		CreatedTimestamp:     coll.CreatedTimestamp,
-		CreatedUtcTimestamp:  coll.CreatedUtcTimestamp,
-		ConsistencyLevel:     coll.ConsistencyLevel,
-		DbName:               coll.GetDbName(),
-		Properties:           coll.Properties,
-	}
+	userFields := make([]*schemapb.FieldSchema, 0)
 	for _, field := range coll.Schema.Fields {
 		if field.FieldID >= common.StartOfUserFieldID {
-			resp.Schema.Fields = append(resp.Schema.Fields, field)
+			userFields = append(userFields, field)
 		}
 	}
-
-	resp.Schema.Functions = append(resp.Schema.Functions, coll.Schema.Functions...)
-	return resp, nil
+	coll.Schema.Fields = userFields
+	return coll, nil
 }
 
 func (m *MetaCache) showPartitions(ctx context.Context, dbName string, collectionName string, collectionID UniqueID) (*milvuspb.ShowPartitionsResponse, error) {
