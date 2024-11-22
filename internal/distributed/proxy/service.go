@@ -990,6 +990,10 @@ func (s *Server) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePriv
 	return s.proxy.OperatePrivilege(ctx, req)
 }
 
+func (s *Server) OperatePrivilegeV2(ctx context.Context, req *milvuspb.OperatePrivilegeV2Request) (*commonpb.Status, error) {
+	return s.proxy.OperatePrivilegeV2(ctx, req)
+}
+
 func (s *Server) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
 	return s.proxy.SelectGrant(ctx, req)
 }
