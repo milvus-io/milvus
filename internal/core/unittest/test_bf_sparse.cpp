@@ -143,12 +143,13 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
             AssertMatch(ref, ans);
         }
 
-        auto result3 = BruteForceSearchIterators(query_dataset,
-                                                 raw_dataset,
-                                                 search_info,
-                                                 index_info,
-                                                 bitset_view,
-                                                 DataType::VECTOR_SPARSE_FLOAT);
+        auto result3 = PackBruteForceSearchIteratorsIntoSubResult(
+            query_dataset,
+            raw_dataset,
+            search_info,
+            index_info,
+            bitset_view,
+            DataType::VECTOR_SPARSE_FLOAT);
         auto iterators = result3.chunk_iterators();
         for (int i = 0; i < nq; i++) {
             auto it = iterators[i];
