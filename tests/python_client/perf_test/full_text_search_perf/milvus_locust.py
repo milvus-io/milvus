@@ -25,6 +25,8 @@ def setup_collection(environment):
 
     # 获取配置参数
     collection_name = environment.parsed_options.milvus_collection
+    reindex = environment.parsed_options.reindex == "true"
+    logger.info(f"Collection name: {collection_name}, reindex: {reindex} {type(reindex)}")
     connections.connect(uri=environment.host)
     analyzer_params = {
         "type": "standard"
@@ -50,26 +52,29 @@ def setup_collection(environment):
     # 创建索引
     indexes = [index.to_dict() for index in collection.indexes]
     indexed_fields = [index['field'] for index in indexes]
-    # if "sparse" not in indexed_fields:
-    collection.create_index(
-        "sparse",
-        {
-            "index_type": "SPARSE_INVERTED_INDEX",
-            "metric_type": "BM25",
-            "params": {
-                "bm25_k1": 1.5,
-                "bm25_b": 0.75,
+    if ("sparse" not in indexed_fields) or reindex:
+        logger.info("Creating sparse index")
+        collection.create_index(
+            "sparse",
+            {
+                "index_type": "SPARSE_INVERTED_INDEX",
+                "metric_type": "BM25",
+                "params": {
+                    "bm25_k1": 1.5,
+                    "bm25_b": 0.75,
+                }
             }
-        }
-    )
-    # if "dense_emb" not in indexed_fields:
-    collection.create_index(
-        "dense_emb",
-        {
-            "index_type": "HNSW",
-            "metric_type": "COSINE"
-        }
-    )
+        )
+    if ("dense_emb" not in indexed_fields) or reindex:
+        logger.info("Creating dense index")
+        collection.create_index(
+            "dense_emb",
+            {
+                "index_type": "HNSW",
+                "metric_type": "COSINE"
+            }
+        )
+    logger.info("Loading collection")
     collection.load()
     logger.info("Collection setup completed successfully")
 
@@ -370,3 +375,6 @@ def _(parser):
                                 help="Number of cluster units (default: %(default)s)")
     milvus_options.add_argument("--milvus-throughput-per-user", type=float, default=0,
                                 help="How many requests per second each user should issue (default: %(default)s)")
+    milvus_options.add_argument("--reindex", type=str, default="false",
+                                help=" reindex (default: %(default)s)")
+
