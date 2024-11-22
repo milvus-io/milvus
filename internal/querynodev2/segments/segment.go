@@ -1410,7 +1410,7 @@ func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error
 	var status C.CStatus
 	log.Ctx(ctx).Info("create text index for segment", zap.Int64("segmentID", s.ID()), zap.Int64("fieldID", fieldID))
 
-	GetDynamicPool().Submit(func() (any, error) {
+	GetLoadPool().Submit(func() (any, error) {
 		status = C.CreateTextIndex(s.ptr, C.int64_t(fieldID))
 		return nil, nil
 	}).Await()
