@@ -111,9 +111,9 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 
 	task.processPipelining()
 
-	seg11 := s.meta.GetSegment(101)
+	seg11 := s.meta.GetSegment(context.TODO(), 101)
 	s.Equal(datapb.SegmentLevel_L1, seg11.Level)
-	seg21 := s.meta.GetSegment(102)
+	seg21 := s.meta.GetSegment(context.TODO(), 102)
 	s.Equal(datapb.SegmentLevel_L2, seg21.Level)
 	s.Equal(int64(10000), seg21.PartitionStatsVersion)
 
@@ -165,21 +165,21 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 
 		task.processFailedOrTimeout()
 
-		seg12 := s.meta.GetSegment(101)
+		seg12 := s.meta.GetSegment(context.TODO(), 101)
 		s.Equal(datapb.SegmentLevel_L1, seg12.Level)
 		s.Equal(commonpb.SegmentState_Dropped, seg12.State)
 
-		seg22 := s.meta.GetSegment(102)
+		seg22 := s.meta.GetSegment(context.TODO(), 102)
 		s.Equal(datapb.SegmentLevel_L2, seg22.Level)
 		s.Equal(int64(10000), seg22.PartitionStatsVersion)
 		s.Equal(commonpb.SegmentState_Dropped, seg22.State)
 
-		seg32 := s.meta.GetSegment(103)
+		seg32 := s.meta.GetSegment(context.TODO(), 103)
 		s.Equal(datapb.SegmentLevel_L1, seg32.Level)
 		s.Equal(int64(0), seg32.PartitionStatsVersion)
 		s.Equal(commonpb.SegmentState_Flushed, seg32.State)
 
-		seg42 := s.meta.GetSegment(104)
+		seg42 := s.meta.GetSegment(context.TODO(), 104)
 		s.Equal(datapb.SegmentLevel_L1, seg42.Level)
 		s.Equal(int64(0), seg42.PartitionStatsVersion)
 		s.Equal(commonpb.SegmentState_Flushed, seg42.State)
@@ -254,29 +254,29 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 
 		task.processFailedOrTimeout()
 
-		seg12 := s.meta.GetSegment(101)
+		seg12 := s.meta.GetSegment(context.TODO(), 101)
 		s.Equal(datapb.SegmentLevel_L1, seg12.Level)
-		seg22 := s.meta.GetSegment(102)
+		seg22 := s.meta.GetSegment(context.TODO(), 102)
 		s.Equal(datapb.SegmentLevel_L2, seg22.Level)
 		s.Equal(int64(10000), seg22.PartitionStatsVersion)
 
-		seg32 := s.meta.GetSegment(103)
+		seg32 := s.meta.GetSegment(context.TODO(), 103)
 		s.Equal(datapb.SegmentLevel_L2, seg32.Level)
 		s.Equal(commonpb.SegmentState_Dropped, seg32.State)
 		s.True(seg32.IsInvisible)
 
-		seg42 := s.meta.GetSegment(104)
+		seg42 := s.meta.GetSegment(context.TODO(), 104)
 		s.Equal(datapb.SegmentLevel_L2, seg42.Level)
 		s.Equal(commonpb.SegmentState_Dropped, seg42.State)
 		s.True(seg42.IsInvisible)
 
-		seg52 := s.meta.GetSegment(105)
+		seg52 := s.meta.GetSegment(context.TODO(), 105)
 		s.Equal(datapb.SegmentLevel_L2, seg52.Level)
 		s.Equal(int64(10001), seg52.PartitionStatsVersion)
 		s.Equal(commonpb.SegmentState_Dropped, seg52.State)
 		s.True(seg52.IsInvisible)
 
-		seg62 := s.meta.GetSegment(106)
+		seg62 := s.meta.GetSegment(context.TODO(), 106)
 		s.Equal(datapb.SegmentLevel_L2, seg62.Level)
 		s.Equal(int64(10001), seg62.PartitionStatsVersion)
 		s.Equal(commonpb.SegmentState_Dropped, seg62.State)
@@ -636,7 +636,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 		}
 
 		task.updateAndSaveTaskMeta(setResultSegments([]int64{10, 11}))
-		err := s.meta.indexMeta.CreateIndex(index)
+		err := s.meta.indexMeta.CreateIndex(context.TODO(), index)
 		s.NoError(err)
 
 		s.False(task.Process())
@@ -650,7 +650,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 			CollectionID: 1,
 			IndexID:      3,
 		}
-		err := s.meta.indexMeta.CreateIndex(index)
+		err := s.meta.indexMeta.CreateIndex(context.TODO(), index)
 		s.NoError(err)
 
 		s.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{

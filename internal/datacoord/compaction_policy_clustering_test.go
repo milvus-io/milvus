@@ -210,13 +210,14 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAbnormal() {
 }
 
 func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNoClusteringKeySchema() {
+	ctx := context.Background()
 	coll := &collectionInfo{
 		ID:     100,
 		Schema: newTestSchema(),
 	}
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
 
-	s.meta.compactionTaskMeta.SaveCompactionTask(&datapb.CompactionTask{
+	s.meta.compactionTaskMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{
 		TriggerID:    1,
 		PlanID:       10,
 		CollectionID: 100,
@@ -230,13 +231,14 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNoClusteringKe
 }
 
 func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionCompacting() {
+	ctx := context.Background()
 	coll := &collectionInfo{
 		ID:     100,
 		Schema: newTestScalarClusteringKeySchema(),
 	}
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
 
-	s.meta.compactionTaskMeta.SaveCompactionTask(&datapb.CompactionTask{
+	s.meta.compactionTaskMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{
 		TriggerID:    1,
 		PlanID:       10,
 		CollectionID: 100,
@@ -250,6 +252,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionCompacting() {
 }
 
 func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting() {
+	ctx := context.Background()
 	s.Run("no collection is compacting", func() {
 		compacting, triggerID := s.clusteringCompactionPolicy.collectionIsClusteringCompacting(collID)
 		s.False(compacting)
@@ -280,7 +283,7 @@ func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting()
 				s.clusteringCompactionPolicy.meta = &meta{
 					compactionTaskMeta: compactionTaskMeta,
 				}
-				compactionTaskMeta.SaveCompactionTask(&datapb.CompactionTask{
+				compactionTaskMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{
 					TriggerID:    1,
 					PlanID:       10,
 					CollectionID: collID,

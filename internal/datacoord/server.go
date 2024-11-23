@@ -408,7 +408,7 @@ func (s *Server) initDataCoord() error {
 
 	s.initGarbageCollection(storageCli)
 
-	s.importMeta, err = NewImportMeta(s.meta.catalog)
+	s.importMeta, err = NewImportMeta(s.ctx, s.meta.catalog)
 	if err != nil {
 		return err
 	}
@@ -765,9 +765,9 @@ func (s *Server) startTaskScheduler() {
 	s.startIndexService(s.serverLoopCtx)
 }
 
-func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
+func (s *Server) updateSegmentStatistics(ctx context.Context, stats []*commonpb.SegmentStats) {
 	for _, stat := range stats {
-		segment := s.meta.GetSegment(stat.GetSegmentID())
+		segment := s.meta.GetSegment(ctx, stat.GetSegmentID())
 		if segment == nil {
 			log.Warn("skip updating row number for not exist segment",
 				zap.Int64("segmentID", stat.GetSegmentID()),
@@ -786,7 +786,7 @@ func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
 		if segment.currRows < stat.GetNumRows() {
 			log.Debug("Updating segment number of rows",
 				zap.Int64("segmentID", stat.GetSegmentID()),
-				zap.Int64("old value", s.meta.GetSegment(stat.GetSegmentID()).GetNumOfRows()),
+				zap.Int64("old value", s.meta.GetSegment(ctx, stat.GetSegmentID()).GetNumOfRows()),
 				zap.Int64("new value", stat.GetNumRows()),
 			)
 			s.meta.SetCurrentRows(stat.GetSegmentID(), stat.GetNumRows())
@@ -794,10 +794,10 @@ func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
 	}
 }
 
-func (s *Server) getFlushableSegmentsInfo(flushableIDs []int64) []*SegmentInfo {
+func (s *Server) getFlushableSegmentsInfo(ctx context.Context, flushableIDs []int64) []*SegmentInfo {
 	res := make([]*SegmentInfo, 0, len(flushableIDs))
 	for _, id := range flushableIDs {
-		sinfo := s.meta.GetHealthySegment(id)
+		sinfo := s.meta.GetHealthySegment(ctx, id)
 		if sinfo == nil {
 			log.Error("get segment from meta error", zap.Int64("id", id))
 			continue
@@ -1006,7 +1006,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 // 3. change segment state to `Flushed` in meta
 func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	log := log.Ctx(ctx)
-	segment := s.meta.GetHealthySegment(segmentID)
+	segment := s.meta.GetHealthySegment(ctx, segmentID)
 	if segment == nil {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
 	}
@@ -1014,7 +1014,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	var operators []UpdateOperator
 	operators = append(operators, SetSegmentIsInvisible(segmentID, true))
 	operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
-	err := s.meta.UpdateSegmentsInfo(operators...)
+	err := s.meta.UpdateSegmentsInfo(ctx, operators...)
 	if err != nil {
 		log.Warn("flush segment complete failed", zap.Error(err))
 		return err
@@ -1152,7 +1152,7 @@ func (s *Server) registerMetricsRequest() {
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ImportTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return s.importMeta.TaskStatsJSON(), nil
+			return s.importMeta.TaskStatsJSON(ctx), nil
 		})
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.CompactionTaskKey,

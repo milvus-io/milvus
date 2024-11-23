@@ -698,7 +698,7 @@ func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, 
 	return nil
 }
 
-func (kc *Catalog) SaveImportJob(job *datapb.ImportJob) error {
+func (kc *Catalog) SaveImportJob(ctx context.Context, job *datapb.ImportJob) error {
 	key := buildImportJobKey(job.GetJobID())
 	value, err := proto.Marshal(job)
 	if err != nil {
@@ -707,7 +707,7 @@ func (kc *Catalog) SaveImportJob(job *datapb.ImportJob) error {
 	return kc.MetaKv.Save(key, string(value))
 }
 
-func (kc *Catalog) ListImportJobs() ([]*datapb.ImportJob, error) {
+func (kc *Catalog) ListImportJobs(ctx context.Context) ([]*datapb.ImportJob, error) {
 	jobs := make([]*datapb.ImportJob, 0)
 	_, values, err := kc.MetaKv.LoadWithPrefix(ImportJobPrefix)
 	if err != nil {
@@ -724,12 +724,12 @@ func (kc *Catalog) ListImportJobs() ([]*datapb.ImportJob, error) {
 	return jobs, nil
 }
 
-func (kc *Catalog) DropImportJob(jobID int64) error {
+func (kc *Catalog) DropImportJob(ctx context.Context, jobID int64) error {
 	key := buildImportJobKey(jobID)
 	return kc.MetaKv.Remove(key)
 }
 
-func (kc *Catalog) SavePreImportTask(task *datapb.PreImportTask) error {
+func (kc *Catalog) SavePreImportTask(ctx context.Context, task *datapb.PreImportTask) error {
 	key := buildPreImportTaskKey(task.GetTaskID())
 	value, err := proto.Marshal(task)
 	if err != nil {
@@ -738,7 +738,7 @@ func (kc *Catalog) SavePreImportTask(task *datapb.PreImportTask) error {
 	return kc.MetaKv.Save(key, string(value))
 }
 
-func (kc *Catalog) ListPreImportTasks() ([]*datapb.PreImportTask, error) {
+func (kc *Catalog) ListPreImportTasks(ctx context.Context) ([]*datapb.PreImportTask, error) {
 	tasks := make([]*datapb.PreImportTask, 0)
 
 	_, values, err := kc.MetaKv.LoadWithPrefix(PreImportTaskPrefix)
@@ -757,12 +757,12 @@ func (kc *Catalog) ListPreImportTasks() ([]*datapb.PreImportTask, error) {
 	return tasks, nil
 }
 
-func (kc *Catalog) DropPreImportTask(taskID int64) error {
+func (kc *Catalog) DropPreImportTask(ctx context.Context, taskID int64) error {
 	key := buildPreImportTaskKey(taskID)
 	return kc.MetaKv.Remove(key)
 }
 
-func (kc *Catalog) SaveImportTask(task *datapb.ImportTaskV2) error {
+func (kc *Catalog) SaveImportTask(ctx context.Context, task *datapb.ImportTaskV2) error {
 	key := buildImportTaskKey(task.GetTaskID())
 	value, err := proto.Marshal(task)
 	if err != nil {
@@ -771,7 +771,7 @@ func (kc *Catalog) SaveImportTask(task *datapb.ImportTaskV2) error {
 	return kc.MetaKv.Save(key, string(value))
 }
 
-func (kc *Catalog) ListImportTasks() ([]*datapb.ImportTaskV2, error) {
+func (kc *Catalog) ListImportTasks(ctx context.Context) ([]*datapb.ImportTaskV2, error) {
 	tasks := make([]*datapb.ImportTaskV2, 0)
 
 	_, values, err := kc.MetaKv.LoadWithPrefix(ImportTaskPrefix)
@@ -789,7 +789,7 @@ func (kc *Catalog) ListImportTasks() ([]*datapb.ImportTaskV2, error) {
 	return tasks, nil
 }
 
-func (kc *Catalog) DropImportTask(taskID int64) error {
+func (kc *Catalog) DropImportTask(ctx context.Context, taskID int64) error {
 	key := buildImportTaskKey(taskID)
 	return kc.MetaKv.Remove(key)
 }

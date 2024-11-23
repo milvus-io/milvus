@@ -87,7 +87,7 @@ type Manager interface {
 	// GetFlushableSegments returns flushable segment ids
 	GetFlushableSegments(ctx context.Context, channel string, ts Timestamp) ([]UniqueID, error)
 	// ExpireAllocations notifies segment status to expire old allocations
-	ExpireAllocations(channel string, ts Timestamp) error
+	ExpireAllocations(ctx context.Context, channel string, ts Timestamp) error
 	// DropSegmentsOfChannel drops all segments in a channel
 	DropSegmentsOfChannel(ctx context.Context, channel string)
 }
@@ -261,7 +261,7 @@ func (s *SegmentManager) maybeResetLastExpireForSegments() error {
 			return errors.New("global max expire ts is unavailable for segment manager")
 		}
 		for _, sID := range s.segments {
-			if segment := s.meta.GetSegment(sID); segment != nil && segment.GetState() == commonpb.SegmentState_Growing {
+			if segment := s.meta.GetSegment(context.TODO(), sID); segment != nil && segment.GetState() == commonpb.SegmentState_Growing {
 				s.meta.SetLastExpire(sID, latestTs)
 			}
 		}
@@ -288,7 +288,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	invalidSegments := make(map[UniqueID]struct{})
 	segments := make([]*SegmentInfo, 0)
 	for _, segmentID := range s.segments {
-		segment := s.meta.GetHealthySegment(segmentID)
+		segment := s.meta.GetHealthySegment(context.TODO(), segmentID)
 		if segment == nil {
 			invalidSegments[segmentID] = struct{}{}
 			continue
@@ -435,7 +435,7 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 			break
 		}
 	}
-	segment := s.meta.GetHealthySegment(segmentID)
+	segment := s.meta.GetHealthySegment(context.TODO(), segmentID)
 	if segment == nil {
 		log.Warn("Failed to get segment", zap.Int64("id", segmentID))
 		return
@@ -468,7 +468,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 	ret = append(ret, sealedSegments...)
 
 	for _, id := range growingSegments {
-		if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
+		if err := s.meta.SetState(ctx, id, commonpb.SegmentState_Sealed); err != nil {
 			return nil, err
 		}
 		ret = append(ret, id)
@@ -483,15 +483,15 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// TODO:move tryToSealSegment and dropEmptySealedSegment outside
-	if err := s.tryToSealSegment(t, channel); err != nil {
+	if err := s.tryToSealSegment(ctx, t, channel); err != nil {
 		return nil, err
 	}
 
-	s.cleanupSealedSegment(t, channel)
+	s.cleanupSealedSegment(ctx, t, channel)
 
 	ret := make([]UniqueID, 0, len(s.segments))
 	for _, id := range s.segments {
-		info := s.meta.GetHealthySegment(id)
+		info := s.meta.GetHealthySegment(ctx, id)
 		if info == nil || info.InsertChannel != channel {
 			continue
 		}
@@ -504,11 +504,11 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 }
 
 // ExpireAllocations notify segment status to expire old allocations
-func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
+func (s *SegmentManager) ExpireAllocations(ctx context.Context, channel string, ts Timestamp) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, id := range s.segments {
-		segment := s.meta.GetHealthySegment(id)
+		segment := s.meta.GetHealthySegment(ctx, id)
 		if segment == nil || segment.InsertChannel != channel {
 			continue
 		}
@@ -526,10 +526,10 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 	return nil
 }
 
-func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
+func (s *SegmentManager) cleanupSealedSegment(ctx context.Context, ts Timestamp, channel string) {
 	valids := make([]int64, 0, len(s.segments))
 	for _, id := range s.segments {
-		segment := s.meta.GetHealthySegment(id)
+		segment := s.meta.GetHealthySegment(ctx, id)
 		if segment == nil || segment.InsertChannel != channel {
 			valids = append(valids, id)
 			continue
@@ -537,7 +537,7 @@ func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
 
 		if isEmptySealedSegment(segment, ts) {
 			log.Info("remove empty sealed segment", zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id))
-			s.meta.SetState(id, commonpb.SegmentState_Dropped)
+			s.meta.SetState(ctx, id, commonpb.SegmentState_Dropped)
 			continue
 		}
 
@@ -551,11 +551,11 @@ func isEmptySealedSegment(segment *SegmentInfo, ts Timestamp) bool {
 }
 
 // tryToSealSegment applies segment & channel seal policies
-func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
+func (s *SegmentManager) tryToSealSegment(ctx context.Context, ts Timestamp, channel string) error {
 	channelInfo := make(map[string][]*SegmentInfo)
 	sealedSegments := make(map[int64]struct{})
 	for _, id := range s.segments {
-		info := s.meta.GetHealthySegment(id)
+		info := s.meta.GetHealthySegment(ctx, id)
 		if info == nil || info.InsertChannel != channel {
 			continue
 		}
@@ -567,7 +567,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 		for _, policy := range s.segmentSealPolicies {
 			if shouldSeal, reason := policy.ShouldSeal(info, ts); shouldSeal {
 				log.Info("Seal Segment for policy matched", zap.Int64("segmentID", info.GetID()), zap.String("reason", reason))
-				if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
+				if err := s.meta.SetState(ctx, id, commonpb.SegmentState_Sealed); err != nil {
 					return err
 				}
 				sealedSegments[id] = struct{}{}
@@ -585,7 +585,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 				if info.State != commonpb.SegmentState_Growing {
 					continue
 				}
-				if err := s.meta.SetState(info.GetID(), commonpb.SegmentState_Sealed); err != nil {
+				if err := s.meta.SetState(ctx, info.GetID(), commonpb.SegmentState_Sealed); err != nil {
 					return err
 				}
 				log.Info("seal segment for channel seal policy matched",
@@ -604,7 +604,7 @@ func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel stri
 
 	validSegments := make([]int64, 0, len(s.segments))
 	for _, sid := range s.segments {
-		segment := s.meta.GetHealthySegment(sid)
+		segment := s.meta.GetHealthySegment(ctx, sid)
 		if segment == nil {
 			continue
 		}

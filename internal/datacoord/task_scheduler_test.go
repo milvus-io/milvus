@@ -1062,9 +1062,9 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler, nil)
 
 		// remove task in meta
-		err := scheduler.meta.analyzeMeta.DropAnalyzeTask(1)
+		err := scheduler.meta.analyzeMeta.DropAnalyzeTask(context.TODO(), 1)
 		s.NoError(err)
-		err = scheduler.meta.analyzeMeta.DropAnalyzeTask(2)
+		err = scheduler.meta.analyzeMeta.DropAnalyzeTask(context.TODO(), 2)
 		s.NoError(err)
 
 		mt.segments.DropSegment(1000)

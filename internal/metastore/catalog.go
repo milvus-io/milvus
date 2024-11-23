@@ -148,15 +148,15 @@ type DataCoordCatalog interface {
 	AlterSegmentIndexes(ctx context.Context, newSegIdxes []*model.SegmentIndex) error
 	DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error
 
-	SaveImportJob(job *datapb.ImportJob) error
-	ListImportJobs() ([]*datapb.ImportJob, error)
-	DropImportJob(jobID int64) error
-	SavePreImportTask(task *datapb.PreImportTask) error
-	ListPreImportTasks() ([]*datapb.PreImportTask, error)
-	DropPreImportTask(taskID int64) error
-	SaveImportTask(task *datapb.ImportTaskV2) error
-	ListImportTasks() ([]*datapb.ImportTaskV2, error)
-	DropImportTask(taskID int64) error
+	SaveImportJob(ctx context.Context, job *datapb.ImportJob) error
+	ListImportJobs(ctx context.Context) ([]*datapb.ImportJob, error)
+	DropImportJob(ctx context.Context, jobID int64) error
+	SavePreImportTask(ctx context.Context, task *datapb.PreImportTask) error
+	ListPreImportTasks(ctx context.Context) ([]*datapb.PreImportTask, error)
+	DropPreImportTask(ctx context.Context, taskID int64) error
+	SaveImportTask(ctx context.Context, task *datapb.ImportTaskV2) error
+	ListImportTasks(ctx context.Context) ([]*datapb.ImportTaskV2, error)
+	DropImportTask(ctx context.Context, taskID int64) error
 
 	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
 

@@ -324,7 +324,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 			return true
 		}
 
-		segment := gc.meta.GetSegment(segmentID)
+		segment := gc.meta.GetSegment(ctx, segmentID)
 		if checker(chunkInfo, segment) {
 			valid++
 			logger.Info("garbageCollector recycleUnusedBinlogFiles skip file since it is valid", zap.String("filePath", chunkInfo.FilePath), zap.Int64("segmentID", segmentID))
@@ -416,7 +416,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 	log.Info("start clear dropped segments...")
 	defer func() { log.Info("clear dropped segments done", zap.Duration("timeCost", time.Since(start))) }()
 
-	all := gc.meta.SelectSegments()
+	all := gc.meta.SelectSegments(ctx)
 	drops := make(map[int64]*SegmentInfo, 0)
 	compactTo := make(map[int64]*SegmentInfo)
 	channels := typeutil.NewSet[string]()
@@ -480,7 +480,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 			continue
 		}
 
-		if err := gc.meta.DropSegment(segment.GetID()); err != nil {
+		if err := gc.meta.DropSegment(ctx, segment.GetID()); err != nil {
 			log.Warn("GC segment meta failed to drop segment", zap.Error(err))
 			continue
 		}
@@ -622,7 +622,7 @@ func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context) {
 		}
 
 		log := log.With(zap.Int64("collectionID", index.CollectionID), zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID))
-		if err := gc.meta.indexMeta.RemoveIndex(index.CollectionID, index.IndexID); err != nil {
+		if err := gc.meta.indexMeta.RemoveIndex(ctx, index.CollectionID, index.IndexID); err != nil {
 			log.Warn("remove index on collection fail", zap.Error(err))
 			continue
 		}
@@ -646,7 +646,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context) {
 
 		// 1. segment belongs to is deleted.
 		// 2. index is deleted.
-		if gc.meta.GetSegment(segIdx.SegmentID) == nil || !gc.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+		if gc.meta.GetSegment(ctx, segIdx.SegmentID) == nil || !gc.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			indexFiles := gc.getAllIndexFilesOfIndex(segIdx)
 			log := log.With(zap.Int64("collectionID", segIdx.CollectionID),
 				zap.Int64("partitionID", segIdx.PartitionID),
@@ -664,7 +664,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context) {
 			}
 
 			// Remove meta from index meta.
-			if err := gc.meta.indexMeta.RemoveSegmentIndex(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexID, segIdx.BuildID); err != nil {
+			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexID, segIdx.BuildID); err != nil {
 				log.Warn("delete index meta from etcd failed, wait to retry", zap.Error(err))
 				continue
 			}
@@ -850,7 +850,7 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context) {
 	log.Info("start recycleUnusedTextIndexFiles...")
 	defer func() { log.Info("recycleUnusedTextIndexFiles done", zap.Duration("timeCost", time.Since(start))) }()
 
-	hasTextIndexSegments := gc.meta.SelectSegments(SegmentFilterFunc(func(info *SegmentInfo) bool {
+	hasTextIndexSegments := gc.meta.SelectSegments(ctx, SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return len(info.GetTextStatsLogs()) != 0
 	}))
 	fileNum := 0

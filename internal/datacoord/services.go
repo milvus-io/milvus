@@ -128,7 +128,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		sealedSegmentsIDDict[sealedSegmentID] = true
 	}
 
-	segments := s.meta.GetSegmentsOfCollection(req.GetCollectionID())
+	segments := s.meta.GetSegmentsOfCollection(ctx, req.GetCollectionID())
 	flushSegmentIDs := make([]UniqueID, 0, len(segments))
 	for _, segment := range segments {
 		if segment != nil &&
@@ -295,7 +295,7 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 		state := &datapb.SegmentStateInfo{
 			SegmentID: segmentID,
 		}
-		segmentInfo := s.meta.GetHealthySegment(segmentID)
+		segmentInfo := s.meta.GetHealthySegment(ctx, segmentID)
 		if segmentInfo == nil {
 			state.State = commonpb.SegmentState_NotExist
 		} else {
@@ -316,7 +316,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		}, nil
 	}
 
-	segment := s.meta.GetHealthySegment(req.GetSegmentID())
+	segment := s.meta.GetHealthySegment(ctx, req.GetSegmentID())
 	if segment == nil {
 		return &datapb.GetInsertBinlogPathsResponse{
 			Status: merr.Status(merr.WrapErrSegmentNotFound(req.GetSegmentID())),
@@ -394,7 +394,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 		nums = s.meta.GetNumRowsOfCollection(req.CollectionID)
 	}
 	for _, partID := range req.GetPartitionIDs() {
-		num := s.meta.GetNumRowsOfPartition(req.CollectionID, partID)
+		num := s.meta.GetNumRowsOfPartition(ctx, req.CollectionID, partID)
 		nums += num
 	}
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
@@ -427,7 +427,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	for _, id := range req.SegmentIDs {
 		var info *SegmentInfo
 		if req.IncludeUnHealthy {
-			info = s.meta.GetSegment(id)
+			info = s.meta.GetSegment(ctx, id)
 			// TODO: GetCompactionTo should be removed and add into GetSegment method and protected by lock.
 			// Too much modification need to be applied to SegmentInfo, a refactor is needed.
 			children, ok := s.meta.GetCompactionTo(id)
@@ -451,7 +451,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
 			infos = append(infos, clonedInfo.SegmentInfo)
 		} else {
-			info = s.meta.GetHealthySegment(id)
+			info = s.meta.GetHealthySegment(ctx, id)
 			if info == nil {
 				err := merr.WrapErrSegmentNotFound(id)
 				resp.Status = merr.Status(err)
@@ -518,7 +518,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
 		operators = append(operators, CreateL0Operator(req.GetCollectionID(), req.GetPartitionID(), req.GetSegmentID(), req.GetChannel()))
 	} else {
-		segment := s.meta.GetSegment(req.GetSegmentID())
+		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
 		// validate level one segment
 		if segment == nil {
 			err := merr.WrapErrSegmentNotFound(req.GetSegmentID())
@@ -558,7 +558,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	)
 
 	// Update segment info in memory and meta.
-	if err := s.meta.UpdateSegmentsInfo(operators...); err != nil {
+	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
 		log.Error("save binlog and checkpoints failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -632,7 +632,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		segments = append(segments, segment)
 	}
 
-	err := s.meta.UpdateDropChannelSegmentInfo(channel, segments)
+	err := s.meta.UpdateDropChannelSegmentInfo(ctx, channel, segments)
 	if err != nil {
 		log.Error("Update Drop Channel segment info failed", zap.String("channel", channel), zap.Error(err))
 		resp.Status = merr.Status(err)
@@ -665,7 +665,7 @@ func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStat
 			Status: merr.Status(err),
 		}, nil
 	}
-	err := s.meta.SetState(req.GetSegmentId(), req.GetNewState())
+	err := s.meta.SetState(ctx, req.GetSegmentId(), req.GetNewState())
 	if err != nil {
 		log.Error("failed to updated segment state in dataCoord meta",
 			zap.Int64("segmentID", req.SegmentId),
@@ -758,7 +758,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	segmentsNumOfRows := make(map[UniqueID]int64)
 	segment2TextStatsLogs := make(map[UniqueID]map[UniqueID]*datapb.TextIndexStats)
 	for id := range flushedIDs {
-		segment := s.meta.GetSegment(id)
+		segment := s.meta.GetSegment(ctx, id)
 		if segment == nil {
 			err := merr.WrapErrSegmentNotFound(id)
 			log.Warn("failed to get segment", zap.Int64("segmentID", id))
@@ -882,7 +882,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 
 	segmentInfos := make([]*datapb.SegmentInfo, 0)
 	for id := range flushedIDs {
-		segment := s.meta.GetSegment(id)
+		segment := s.meta.GetSegment(ctx, id)
 		if segment == nil {
 			err := merr.WrapErrSegmentNotFound(id)
 			log.Warn("failed to get segment", zap.Int64("segmentID", id))
@@ -993,13 +993,13 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	}
 	var segmentIDs []UniqueID
 	if partitionID < 0 {
-		segmentIDs = s.meta.GetSegmentsIDOfCollectionWithDropped(collectionID)
+		segmentIDs = s.meta.GetSegmentsIDOfCollectionWithDropped(ctx, collectionID)
 	} else {
-		segmentIDs = s.meta.GetSegmentsIDOfPartitionWithDropped(collectionID, partitionID)
+		segmentIDs = s.meta.GetSegmentsIDOfPartitionWithDropped(ctx, collectionID, partitionID)
 	}
 	ret := make([]UniqueID, 0, len(segmentIDs))
 	for _, id := range segmentIDs {
-		segment := s.meta.GetSegment(id)
+		segment := s.meta.GetSegment(ctx, id)
 		// if this segment == nil, we assume this segment has been gc
 		if segment == nil ||
 			(segment.GetState() != commonpb.SegmentState_Dropped &&
@@ -1038,9 +1038,9 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 	}
 	var segmentIDs []UniqueID
 	if partitionID < 0 {
-		segmentIDs = s.meta.GetSegmentsIDOfCollection(collectionID)
+		segmentIDs = s.meta.GetSegmentsIDOfCollection(ctx, collectionID)
 	} else {
-		segmentIDs = s.meta.GetSegmentsIDOfPartition(collectionID, partitionID)
+		segmentIDs = s.meta.GetSegmentsIDOfPartition(ctx, collectionID, partitionID)
 	}
 	ret := make([]UniqueID, 0, len(segmentIDs))
 
@@ -1049,7 +1049,7 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 		statesDict[state] = true
 	}
 	for _, id := range segmentIDs {
-		segment := s.meta.GetHealthySegment(id)
+		segment := s.meta.GetHealthySegment(ctx, id)
 		if segment != nil && statesDict[segment.GetState()] {
 			ret = append(ret, id)
 		}
@@ -1179,7 +1179,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 		return resp, nil
 	}
 
-	info := s.compactionHandler.getCompactionInfo(req.GetCompactionID())
+	info := s.compactionHandler.getCompactionInfo(ctx, req.GetCompactionID())
 
 	resp.State = info.state
 	resp.ExecutingPlanNo = int64(info.executingCnt)
@@ -1213,7 +1213,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 		return resp, nil
 	}
 
-	info := s.compactionHandler.getCompactionInfo(req.GetCompactionID())
+	info := s.compactionHandler.getCompactionInfo(ctx, req.GetCompactionID())
 	resp.State = info.state
 	resp.MergeInfos = lo.MapToSlice[int64, *milvuspb.CompactionMergeInfo](info.mergeInfos, func(_ int64, merge *milvuspb.CompactionMergeInfo) *milvuspb.CompactionMergeInfo {
 		return merge
@@ -1260,7 +1260,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		startPos := toMsgPosition(channelName, req.GetStartPositions())
 		if startPos != nil {
 			startPos.Timestamp = req.GetCreateTimestamp()
-			if err := s.meta.UpdateChannelCheckpoint(channelName, startPos); err != nil {
+			if err := s.meta.UpdateChannelCheckpoint(ctx, channelName, startPos); err != nil {
 				log.Warn("failed to init channel checkpoint, meta update error", zap.String("channel", channelName), zap.Error(err))
 			}
 		} else {
@@ -1287,7 +1287,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 	if len(req.GetSegmentIDs()) > 0 {
 		var unflushed []UniqueID
 		for _, sid := range req.GetSegmentIDs() {
-			segment := s.meta.GetHealthySegment(sid)
+			segment := s.meta.GetHealthySegment(ctx, sid)
 			// segment is nil if it was compacted, or it's an empty segment and is set to dropped
 			if segment == nil || isFlushState(segment.GetState()) {
 				continue
@@ -1390,7 +1390,7 @@ func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.Update
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	s.updateSegmentStatistics(req.GetStats())
+	s.updateSegmentStatistics(ctx, req.GetStats())
 	return merr.Success(), nil
 }
 
@@ -1409,7 +1409,7 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 			log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
 			return merr.Status(merr.WrapErrChannelNotFound(channel, fmt.Sprintf("from node %d", nodeID))), nil
 		}
-		err := s.meta.UpdateChannelCheckpoint(req.GetVChannel(), req.GetPosition())
+		err := s.meta.UpdateChannelCheckpoint(ctx, req.GetVChannel(), req.GetPosition())
 		if err != nil {
 			log.Warn("failed to UpdateChannelCheckpoint", zap.String("vChannel", req.GetVChannel()), zap.Error(err))
 			return merr.Status(err), nil
@@ -1426,7 +1426,7 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		return matched
 	})
 
-	err := s.meta.UpdateChannelCheckpoints(checkpoints)
+	err := s.meta.UpdateChannelCheckpoints(ctx, checkpoints)
 	if err != nil {
 		log.Warn("failed to update channel checkpoint", zap.Error(err))
 		return merr.Status(err), nil
@@ -1490,9 +1490,9 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), pChannelName).
 		Set(float64(sub))
 
-	s.updateSegmentStatistics(segmentStats)
+	s.updateSegmentStatistics(ctx, segmentStats)
 
-	if err := s.segmentManager.ExpireAllocations(channel, ts); err != nil {
+	if err := s.segmentManager.ExpireAllocations(ctx, channel, ts); err != nil {
 		log.Warn("failed to expire allocations", zap.Error(err))
 		return err
 	}
@@ -1502,7 +1502,7 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 		log.Warn("failed to get flushable segments", zap.Error(err))
 		return err
 	}
-	flushableSegments := s.getFlushableSegmentsInfo(flushableIDs)
+	flushableSegments := s.getFlushableSegmentsInfo(ctx, flushableIDs)
 	if len(flushableSegments) == 0 {
 		return nil
 	}
@@ -1531,7 +1531,7 @@ func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmen
 	log.Info("marking segments dropped", zap.Int64s("segments", req.GetSegmentIds()))
 	var err error
 	for _, segID := range req.GetSegmentIds() {
-		if err = s.meta.SetState(segID, commonpb.SegmentState_Dropped); err != nil {
+		if err = s.meta.SetState(ctx, segID, commonpb.SegmentState_Dropped); err != nil {
 			// Fail-open.
 			log.Error("failed to set segment state as dropped", zap.Int64("segmentID", segID))
 			break
@@ -1699,7 +1699,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 	// Check if the number of jobs exceeds the limit.
 	maxNum := paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt()
-	executingNum := s.importMeta.CountJobBy(WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
+	executingNum := s.importMeta.CountJobBy(ctx, WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
 	if executingNum >= maxNum {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(
 			fmt.Sprintf("The number of jobs has reached the limit, please try again later. " +
@@ -1737,7 +1737,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
-	err = s.importMeta.AddJob(job)
+	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("add import job failed, err=%w", err)))
 		return resp, nil
@@ -1764,7 +1764,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse job id failed, err=%w", err)))
 		return resp, nil
 	}
-	job := s.importMeta.GetJob(jobID)
+	job := s.importMeta.GetJob(ctx, jobID)
 	if job == nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
 		return resp, nil
@@ -1800,9 +1800,9 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 
 	var jobs []ImportJob
 	if req.GetCollectionID() != 0 {
-		jobs = s.importMeta.GetJobBy(WithCollectionID(req.GetCollectionID()))
+		jobs = s.importMeta.GetJobBy(ctx, WithCollectionID(req.GetCollectionID()))
 	} else {
-		jobs = s.importMeta.GetJobBy()
+		jobs = s.importMeta.GetJobBy(ctx)
 	}
 
 	for _, job := range jobs {

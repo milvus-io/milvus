@@ -1411,25 +1411,25 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 
 		conclusion: only G is GCed.
 	*/
-	segA := gc.meta.GetSegment(segID)
+	segA := gc.meta.GetSegment(context.TODO(), segID)
 	assert.NotNil(t, segA)
-	segB := gc.meta.GetSegment(segID + 1)
+	segB := gc.meta.GetSegment(context.TODO(), segID+1)
 	assert.NotNil(t, segB)
-	segC := gc.meta.GetSegment(segID + 2)
+	segC := gc.meta.GetSegment(context.TODO(), segID+2)
 	assert.NotNil(t, segC)
-	segD := gc.meta.GetSegment(segID + 3)
+	segD := gc.meta.GetSegment(context.TODO(), segID+3)
 	assert.NotNil(t, segD)
-	segE := gc.meta.GetSegment(segID + 4)
+	segE := gc.meta.GetSegment(context.TODO(), segID+4)
 	assert.NotNil(t, segE)
-	segF := gc.meta.GetSegment(segID + 5)
+	segF := gc.meta.GetSegment(context.TODO(), segID+5)
 	assert.NotNil(t, segF)
-	segG := gc.meta.GetSegment(segID + 6)
+	segG := gc.meta.GetSegment(context.TODO(), segID+6)
 	assert.NotNil(t, segG)
-	segH := gc.meta.GetSegment(segID + 7)
+	segH := gc.meta.GetSegment(context.TODO(), segID+7)
 	assert.NotNil(t, segH)
-	segG = gc.meta.GetSegment(segID + 8)
+	segG = gc.meta.GetSegment(context.TODO(), segID+8)
 	assert.Nil(t, segG)
-	err := gc.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
+	err := gc.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 		SegmentID:    segID + 4,
 		CollectionID: collID,
 		PartitionID:  partID,
@@ -1459,9 +1459,9 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		D: dropped, not indexed, should be GCed since E is indexed
 	*/
 
-	segC = gc.meta.GetSegment(segID + 2)
+	segC = gc.meta.GetSegment(context.TODO(), segID+2)
 	assert.Nil(t, segC)
-	segD = gc.meta.GetSegment(segID + 3)
+	segD = gc.meta.GetSegment(context.TODO(), segID+3)
 	assert.Nil(t, segD)
 
 	gc.recycleDroppedSegments(context.TODO())
@@ -1469,9 +1469,9 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		A: compacted became false due to C is GCed already, A should be GCed since dropTolernace is meet
 		B: compacted became false due to C is GCed already, B should be GCed since dropTolerance is meet
 	*/
-	segA = gc.meta.GetSegment(segID)
+	segA = gc.meta.GetSegment(context.TODO(), segID)
 	assert.Nil(t, segA)
-	segB = gc.meta.GetSegment(segID + 1)
+	segB = gc.meta.GetSegment(context.TODO(), segID+1)
 	assert.Nil(t, segB)
 }
 

@@ -124,10 +124,10 @@ func (psm *partitionStatsMeta) SavePartitionStatsInfo(info *datapb.PartitionStat
 	return nil
 }
 
-func (psm *partitionStatsMeta) DropPartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
+func (psm *partitionStatsMeta) DropPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {
 	psm.Lock()
 	defer psm.Unlock()
-	if err := psm.catalog.DropPartitionStatsInfo(psm.ctx, info); err != nil {
+	if err := psm.catalog.DropPartitionStatsInfo(ctx, info); err != nil {
 		log.Error("meta update: drop PartitionStatsInfo info fail",
 			zap.Int64("collectionID", info.GetCollectionID()),
 			zap.Int64("partitionID", info.GetPartitionID()),

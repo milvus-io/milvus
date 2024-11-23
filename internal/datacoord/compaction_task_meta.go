@@ -146,10 +146,10 @@ func (csm *compactionTaskMeta) GetCompactionTasksByTriggerID(triggerID int64) []
 	return res
 }
 
-func (csm *compactionTaskMeta) SaveCompactionTask(task *datapb.CompactionTask) error {
+func (csm *compactionTaskMeta) SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
 	csm.Lock()
 	defer csm.Unlock()
-	if err := csm.catalog.SaveCompactionTask(csm.ctx, task); err != nil {
+	if err := csm.catalog.SaveCompactionTask(ctx, task); err != nil {
 		log.Error("meta update: update compaction task fail", zap.Error(err))
 		return err
 	}
@@ -166,10 +166,10 @@ func (csm *compactionTaskMeta) saveCompactionTaskMemory(task *datapb.CompactionT
 	csm.taskStats.Add(task.PlanID, newCompactionTaskStats(task))
 }
 
-func (csm *compactionTaskMeta) DropCompactionTask(task *datapb.CompactionTask) error {
+func (csm *compactionTaskMeta) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
 	csm.Lock()
 	defer csm.Unlock()
-	if err := csm.catalog.DropCompactionTask(csm.ctx, task); err != nil {
+	if err := csm.catalog.DropCompactionTask(ctx, task); err != nil {
 		log.Error("meta update: drop compaction task fail", zap.Int64("triggerID", task.TriggerID), zap.Int64("planID", task.PlanID), zap.Int64("collectionID", task.CollectionID), zap.Error(err))
 		return err
 	}

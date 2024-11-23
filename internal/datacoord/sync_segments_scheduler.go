@@ -125,7 +125,7 @@ func (sss *SyncSegmentsScheduler) SyncSegments(ctx context.Context, collectionID
 	// sync all healthy segments, but only check flushed segments on datanode. Because L0 growing segments may not in datacoord's meta.
 	// upon receiving the SyncSegments request, the datanode's segment state may have already transitioned from Growing/Flushing
 	// to Flushed, so the view must include this segment.
-	segments := sss.meta.SelectSegments(WithChannel(channelName), SegmentFilterFunc(func(info *SegmentInfo) bool {
+	segments := sss.meta.SelectSegments(ctx, WithChannel(channelName), SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return info.GetPartitionID() == partitionID && info.GetLevel() != datapb.SegmentLevel_L0 && isSegmentHealthy(info)
 	}))
 	req := &datapb.SyncSegmentsRequest{

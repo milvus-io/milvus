@@ -155,7 +155,7 @@ func (t *mixCompactionTask) processExecuting() bool {
 }
 
 func (t *mixCompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
-	return t.meta.SaveCompactionTask(task)
+	return t.meta.SaveCompactionTask(context.TODO(), task)
 }
 
 func (t *mixCompactionTask) SaveTaskMeta() error {
@@ -165,7 +165,7 @@ func (t *mixCompactionTask) SaveTaskMeta() error {
 func (t *mixCompactionTask) saveSegmentMeta() error {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
 	// Also prepare metric updates.
-	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(t.taskProto.Load().(*datapb.CompactionTask), t.result)
+	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(context.TODO(), t.taskProto.Load().(*datapb.CompactionTask), t.result)
 	if err != nil {
 		return err
 	}
@@ -237,7 +237,7 @@ func (t *mixCompactionTask) processCompleted() bool {
 }
 
 func (t *mixCompactionTask) resetSegmentCompacting() {
-	t.meta.SetSegmentsCompacting(t.taskProto.Load().(*datapb.CompactionTask).GetInputSegments(), false)
+	t.meta.SetSegmentsCompacting(context.TODO(), t.taskProto.Load().(*datapb.CompactionTask).GetInputSegments(), false)
 }
 
 func (t *mixCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask {
@@ -316,7 +316,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 
 	segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
 	for _, segID := range taskProto.GetInputSegments() {
-		segInfo := t.meta.GetHealthySegment(segID)
+		segInfo := t.meta.GetHealthySegment(context.TODO(), segID)
 		if segInfo == nil {
 			return nil, merr.WrapErrSegmentNotFound(segID)
 		}
