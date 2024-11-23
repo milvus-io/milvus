@@ -2596,6 +2596,9 @@ func (c *Core) isValidPrivilegeV2(ctx context.Context, privilegeName, dbName, co
 		}
 	}
 	if privilegeLevel == "" {
+		if util.IsAdjustBuiltinPrivilegeGroup(privilegeName) {
+			return nil
+		}
 		customPrivGroup, err := c.meta.IsCustomPrivilegeGroup(ctx, privilegeName)
 		if err != nil {
 			return err
@@ -2648,6 +2651,8 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 			ctxLog.Error("", zap.Error(err))
 			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
 		}
+		// adjust privilege group level for ReadOnly, ReadWrite, Admin
+		in.Entity.Grantor.Privilege.Name = util.AdjustPrivilegeGroupLevel(in.Entity.Grantor.Privilege.Name, in.Entity.DbName, in.Entity.ObjectName)
 	default:
 		if err := c.isValidPrivilege(ctx, in.Entity.Grantor.Privilege.Name, in.Entity.Object.Name); err != nil {
 			ctxLog.Error("", zap.Error(err))
@@ -3314,7 +3319,7 @@ func (c *Core) OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePr
 	if err != nil {
 		errMsg := "fail to execute task when operate privilege group"
 		ctxLog.Warn(errMsg, zap.Error(err))
-		status := merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperatePrivilegeGroupFailure)
+		status := merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeGroupFailure)
 		return status, nil
 	}
 

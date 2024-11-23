@@ -307,6 +307,12 @@ var (
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterAdmin.String()):        ClusterAdminPrivilegeGroup,
 	}
 
+	AdjustBuiltinPrivilegeGroups = []string{
+		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String()),
+		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String()),
+		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupAdmin.String()),
+	}
+
 	CollectionReadOnlyPrivilegeGroup = []string{
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeQuery.String()),
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSearch.String()),
@@ -476,4 +482,48 @@ func GetObjectType(privName string) string {
 		}
 	}
 	return ""
+}
+
+func IsAdjustBuiltinPrivilegeGroup(privName string) bool {
+	return lo.Contains(AdjustBuiltinPrivilegeGroups, privName)
+}
+
+func AdjustPrivilegeGroupLevel(privName string, dbName string, collectionName string) string {
+	if !IsAdjustBuiltinPrivilegeGroup(privName) {
+		return privName
+	}
+	// cluster level
+	if IsAnyWord(dbName) && IsAnyWord(collectionName) {
+		switch privName {
+		case MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String()):
+			return MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterReadOnly.String())
+		case MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String()):
+			return MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterReadWrite.String())
+		case MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupAdmin.String()):
+			return MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterAdmin.String())
+		}
+	}
+	// database level
+	if !IsAnyWord(dbName) && IsAnyWord(collectionName) {
+		switch privName {
+		case MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String()):
+			return MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupDatabaseReadOnly.String())
+		case MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String()):
+			return MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupDatabaseReadWrite.String())
+		case MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupAdmin.String()):
+			return MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupDatabaseAdmin.String())
+		}
+	}
+	// collection level
+	if !IsAnyWord(collectionName) {
+		switch privName {
+		case MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String()):
+			return MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadOnly.String())
+		case MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String()):
+			return MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadWrite.String())
+		case MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupAdmin.String()):
+			return MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionAdmin.String())
+		}
+	}
+	return privName
 }
