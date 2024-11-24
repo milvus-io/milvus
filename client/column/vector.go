@@ -40,6 +40,13 @@ func (b *vectorBase[T]) FieldData() *schemapb.FieldData {
 	return fd
 }
 
+func (b *vectorBase[T]) slice(start, end int) *vectorBase[T] {
+	return &vectorBase[T]{
+		genericColumnBase: b.genericColumnBase.slice(start, end),
+		dim:               b.dim,
+	}
+}
+
 func newVectorBase[T entity.Vector](fieldName string, dim int, vectors []T, fieldType entity.FieldType) *vectorBase[T] {
 	return &vectorBase[T]{
 		genericColumnBase: &genericColumnBase[T]{
@@ -78,6 +85,12 @@ func (c *ColumnFloatVector) AppendValue(i interface{}) error {
 	return nil
 }
 
+func (c *ColumnFloatVector) Slice(start, end int) Column {
+	return &ColumnFloatVector{
+		vectorBase: c.vectorBase.slice(start, end),
+	}
+}
+
 /* binary vector */
 
 type ColumnBinaryVector struct {
@@ -103,6 +116,12 @@ func (c *ColumnBinaryVector) AppendValue(i interface{}) error {
 		return errors.Newf("unexpected append value type %T, field type %v", vector, c.fieldType)
 	}
 	return nil
+}
+
+func (c *ColumnBinaryVector) Slice(start, end int) Column {
+	return &ColumnBinaryVector{
+		vectorBase: c.vectorBase.slice(start, end),
+	}
 }
 
 /* fp16 vector */
@@ -132,6 +151,12 @@ func (c *ColumnFloat16Vector) AppendValue(i interface{}) error {
 	return nil
 }
 
+func (c *ColumnFloat16Vector) Slice(start, end int) Column {
+	return &ColumnFloat16Vector{
+		vectorBase: c.vectorBase.slice(start, end),
+	}
+}
+
 type ColumnBFloat16Vector struct {
 	*vectorBase[entity.BFloat16Vector]
 }
@@ -155,4 +180,10 @@ func (c *ColumnBFloat16Vector) AppendValue(i interface{}) error {
 		return errors.Newf("unexpected append value type %T, field type %v", vector, c.fieldType)
 	}
 	return nil
+}
+
+func (c *ColumnBFloat16Vector) Slice(start, end int) Column {
+	return &ColumnBFloat16Vector{
+		vectorBase: c.vectorBase.slice(start, end),
+	}
 }
