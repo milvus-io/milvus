@@ -19,9 +19,7 @@ package httpserver
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
-	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -367,27 +365,37 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 					}
 					reallyData[fieldName] = sparseVec
 				case schemapb.DataType_Float16Vector:
-					if dataString == "" {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray, validDataMap
-					}
-					vectorStr := gjson.Get(data.Raw, fieldName).Raw
-					var vectorArray []byte
-					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
-					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
-					}
-					reallyData[fieldName] = vectorArray
+					fallthrough
 				case schemapb.DataType_BFloat16Vector:
 					if dataString == "" {
 						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray, validDataMap
 					}
-					vectorStr := gjson.Get(data.Raw, fieldName).Raw
-					var vectorArray []byte
-					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
-					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
+					vectorJSON := gjson.Get(data.Raw, fieldName)
+					// Clients may send float32 vector because they are inconvenient of processing float16 or bfloat16.
+					// Float32 vector is an array in JSON format, like `[1.0, 2.0, 3.0]`, `[1, 2, 3]`, etc,
+					// while float16 or bfloat16 vector is a string in JSON format, like `"4z1jPgAAgL8="`, `"gD+AP4A/gD8="`, etc.
+					if vectorJSON.IsArray() {
+						// `data` is a float32 vector
+						// same as `case schemapb.DataType_FloatVector`
+						var vectorArray []float32
+						err := json.Unmarshal([]byte(dataString), &vectorArray)
+						if err != nil {
+							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
+						}
+						reallyData[fieldName] = vectorArray
+					} else if vectorJSON.Type == gjson.String {
+						// `data` is a float16 or bfloat16 vector
+						// same as `case schemapb.DataType_BinaryVector`
+						vectorStr := gjson.Get(data.Raw, fieldName).Raw
+						var vectorArray []byte
+						err := json.Unmarshal([]byte(vectorStr), &vectorArray)
+						if err != nil {
+							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
+						}
+						reallyData[fieldName] = vectorArray
+					} else {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, "invalid vector field: "+fieldName), reallyDataArray, validDataMap
 					}
-					reallyData[fieldName] = vectorArray
 				case schemapb.DataType_Bool:
 					result, err := cast.ToBoolE(dataString)
 					if err != nil {
@@ -633,7 +641,6 @@ func convertFloatVectorToArray(vector [][]float32, dim int64) ([]float32, error)
 }
 
 func convertBinaryVectorToArray(vector [][]byte, dim int64, dataType schemapb.DataType) ([]byte, error) {
-	binaryArray := make([]byte, 0)
 	var bytesLen int64
 	switch dataType {
 	case schemapb.DataType_BinaryVector:
@@ -643,6 +650,7 @@ func convertBinaryVectorToArray(vector [][]byte, dim int64, dataType schemapb.Da
 	case schemapb.DataType_BFloat16Vector:
 		bytesLen = dim * 2
 	}
+	binaryArray := make([]byte, 0, len(vector)*int(bytesLen))
 	for _, arr := range vector {
 		if int64(len(arr)) != bytesLen {
 			return nil, fmt.Errorf("[]byte size %d doesn't equal to vector dimension %d of %s",
@@ -836,9 +844,25 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			case schemapb.DataType_BinaryVector:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), candi.v.Interface().([]byte))
 			case schemapb.DataType_Float16Vector:
-				nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), candi.v.Interface().([]byte))
+				switch candi.v.Interface().(type) {
+				case []byte:
+					nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), candi.v.Interface().([]byte))
+				case []float32:
+					vec := typeutil.Float32ArrayToFloat16Bytes(candi.v.Interface().([]float32))
+					nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), vec)
+				default:
+					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid type(%v) of field(%v) ", field.DataType, field.Name))
+				}
 			case schemapb.DataType_BFloat16Vector:
-				nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), candi.v.Interface().([]byte))
+				switch candi.v.Interface().(type) {
+				case []byte:
+					nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), candi.v.Interface().([]byte))
+				case []float32:
+					vec := typeutil.Float32ArrayToBFloat16Bytes(candi.v.Interface().([]float32))
+					nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), vec)
+				default:
+					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid type(%v) of field(%v) ", field.DataType, field.Name))
+				}
 			case schemapb.DataType_SparseFloatVector:
 				content := candi.v.Interface().([]byte)
 				rowSparseDim := typeutil.SparseFloatRowDim(content)
@@ -1074,30 +1098,19 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 	return columns, nil
 }
 
-// --------------------- search param --------------------- //
-func serialize(fv []float32) []byte {
-	data := make([]byte, 0, 4*len(fv)) // float32 occupies 4 bytes
-	buf := make([]byte, 4)
-	for _, f := range fv {
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(f))
-		data = append(data, buf...)
-	}
-	return data
-}
-
-func serializeFloatVectors(vectors []gjson.Result, dataType schemapb.DataType, dimension, bytesLen int64) ([][]byte, error) {
+func serializeFloatVectors(vectorStr string, dataType schemapb.DataType, dimension, bytesLen int64, fpArrayToBytesFunc func([]float32) []byte) ([][]byte, error) {
 	values := make([][]byte, 0)
-	for _, vector := range vectors {
-		var vectorArray []float32
-		err := json.Unmarshal([]byte(vector.String()), &vectorArray)
-		if err != nil {
-			return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vector.String(), err.Error())
-		}
+	var fp32Values [][]float32
+	err := json.Unmarshal([]byte(vectorStr), &fp32Values)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vectorStr, err.Error())
+	}
+	for _, vectorArray := range fp32Values {
 		if int64(len(vectorArray)) != dimension {
-			return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vector.String(),
+			return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vectorStr,
 				fmt.Sprintf("dimension: %d, but length of []float: %d", dimension, len(vectorArray)))
 		}
-		vectorBytes := serialize(vectorArray)
+		vectorBytes := fpArrayToBytesFunc(vectorArray)
 		values = append(values, vectorBytes)
 	}
 	return values, nil
@@ -1105,7 +1118,7 @@ func serializeFloatVectors(vectors []gjson.Result, dataType schemapb.DataType, d
 
 func serializeByteVectors(vectorStr string, dataType schemapb.DataType, dimension, bytesLen int64) ([][]byte, error) {
 	values := make([][]byte, 0)
-	err := json.Unmarshal([]byte(vectorStr), &values) // todo check len == dimension * 1/2/2
+	err := json.Unmarshal([]byte(vectorStr), &values)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vectorStr, err.Error())
 	}
@@ -1116,6 +1129,24 @@ func serializeByteVectors(vectorStr string, dataType schemapb.DataType, dimensio
 		}
 	}
 	return values, nil
+}
+
+// serializeFloatOrByteVectors serializes float32/float16/bfloat16 vectors.
+// `[[1, 2, 3], [4.0, 5.0, 6.0]] is float32 vector,
+// `["4z1jPgAAgL8=", "gD+AP4A/gD8="]` is float16/bfloat16 vector.
+func serializeFloatOrByteVectors(jsonResult gjson.Result, dataType schemapb.DataType, dimension int64, fpArrayToBytesFunc func([]float32) []byte) ([][]byte, error) {
+	firstElement := jsonResult.Get("0")
+
+	// Clients may send float32 vector because they are inconvenient of processing float16 or bfloat16.
+	// Float32 vector is an array in JSON format, like `[1.0, 2.0, 3.0]`, `[1, 2, 3]`, etc,
+	// while float16 or bfloat16 vector is a string in JSON format, like `"4z1jPgAAgL8="`, `"gD+AP4A/gD8="`, etc.
+	if firstElement.IsArray() {
+		return serializeFloatVectors(jsonResult.Raw, dataType, dimension, dimension*2, fpArrayToBytesFunc)
+	} else if firstElement.Type == gjson.String || !firstElement.Exists() {
+		// consider corner case: `[]`
+		return serializeByteVectors(jsonResult.Raw, dataType, dimension, dimension*2)
+	}
+	return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], jsonResult.Raw, "invalid type")
 }
 
 func serializeSparseFloatVectors(vectors []gjson.Result, dataType schemapb.DataType) ([][]byte, error) {
@@ -1138,16 +1169,16 @@ func convertQueries2Placeholder(body string, dataType schemapb.DataType, dimensi
 	switch dataType {
 	case schemapb.DataType_FloatVector:
 		valueType = commonpb.PlaceholderType_FloatVector
-		values, err = serializeFloatVectors(gjson.Get(body, HTTPRequestData).Array(), dataType, dimension, dimension*4)
+		values, err = serializeFloatVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension*4, typeutil.Float32ArrayToBytes)
 	case schemapb.DataType_BinaryVector:
 		valueType = commonpb.PlaceholderType_BinaryVector
 		values, err = serializeByteVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension/8)
 	case schemapb.DataType_Float16Vector:
 		valueType = commonpb.PlaceholderType_Float16Vector
-		values, err = serializeByteVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension*2)
+		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, typeutil.Float32ArrayToFloat16Bytes)
 	case schemapb.DataType_BFloat16Vector:
 		valueType = commonpb.PlaceholderType_BFloat16Vector
-		values, err = serializeByteVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension*2)
+		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, typeutil.Float32ArrayToBFloat16Bytes)
 	case schemapb.DataType_SparseFloatVector:
 		valueType = commonpb.PlaceholderType_SparseFloatVector
 		values, err = serializeSparseFloatVectors(gjson.Get(body, HTTPRequestData).Array(), dataType)
@@ -1180,7 +1211,7 @@ func vectors2PlaceholderGroupBytes(vectors [][]float32) []byte {
 
 		ph.Type = placeHolderType
 		for _, vector := range vectors {
-			ph.Values = append(ph.Values, serialize(vector))
+			ph.Values = append(ph.Values, typeutil.Float32ArrayToBytes(vector))
 		}
 	}
 	phg := &commonpb.PlaceholderGroup{

@@ -1,7 +1,6 @@
 {
   "collection_name": "book",
   "consistency_level": 1,
-  "db_name": "string",
   "schema": {
     "autoID": false,
     "description": "Test book search",
@@ -18,6 +17,32 @@
         "description": "embedded vector of book introduction",
         "autoID": false,
         "data_type": 101,
+        "is_primary_key": false,
+        "type_params": [
+          {
+            "key": "dim",
+            "value": "2"
+          }
+        ]
+      },
+      {
+        "name": "author_intro",
+        "description": "embedded vector of author introduction",
+        "autoID": false,
+        "data_type": 102,
+        "is_primary_key": false,
+        "type_params": [
+          {
+            "key": "dim",
+            "value": "2"
+          }
+        ]
+      },
+      {
+        "name": "comment",
+        "description": "embedded vector of comment",
+        "autoID": false,
+        "data_type": 103,
         "is_primary_key": false,
         "type_params": [
           {

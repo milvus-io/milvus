@@ -161,8 +161,10 @@ class TestInsertVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("pass_fp32_to_fp16_or_bf16", [True, False])
     def test_insert_entities_with_all_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                      is_partition_key, enable_dynamic_schema,
+                                                      pass_fp32_to_fp16_or_bf16):
         """
         Insert a vector with a simple payload
         """
@@ -210,9 +212,17 @@ class TestInsertVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
-                        "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
+                        "binary_vector": gen_vector(datatype="BinaryVector", dim=dim),
                     }
                 else:
                     tmp = {
@@ -221,8 +231,16 @@ class TestInsertVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                         "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
                     }
                 if enable_dynamic_schema:
@@ -253,8 +271,10 @@ class TestInsertVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("pass_fp32_to_fp16_or_bf16", [True, False])
     def test_insert_entities_with_all_vector_datatype_0(self, nb, dim, insert_round, auto_id,
-                                                        is_partition_key, enable_dynamic_schema):
+                                                        is_partition_key, enable_dynamic_schema,
+                                                        pass_fp32_to_fp16_or_bf16):
         """
         Insert a vector with a simple payload
         """
@@ -307,8 +327,16 @@ class TestInsertVector(TestBase):
                         "book_describe": f"book_{i}",
                         "book_vector": gen_vector(datatype="FloatVector", dim=dim),
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                     }
                 else:
                     tmp = {
@@ -318,8 +346,16 @@ class TestInsertVector(TestBase):
                         "book_describe": f"book_{i}",
                         "book_vector": gen_vector(datatype="FloatVector", dim=dim),
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                     }
                 if enable_dynamic_schema:
                     tmp.update({f"dynamic_field_{i}": i})
@@ -349,8 +385,10 @@ class TestInsertVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("pass_fp32_to_fp16_or_bf16", [True, False])
     def test_insert_entities_with_all_vector_datatype_1(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                      is_partition_key, enable_dynamic_schema,
+                                                        pass_fp32_to_fp16_or_bf16):
         """
         Insert a vector with a simple payload
         """
@@ -399,8 +437,16 @@ class TestInsertVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                     }
                 else:
                     tmp = {
@@ -409,8 +455,16 @@ class TestInsertVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                     }
                 if enable_dynamic_schema:
                     tmp.update({f"dynamic_field_{i}": i})
@@ -632,7 +686,6 @@ class TestInsertVector(TestBase):
         rsp = self.vector_client.vector_query({"collectionName": name, "filter": "user_id > 0", "limit": 50})
         assert rsp['code'] == 0
         assert len(rsp['data']) == 50
-
 
 
 @pytest.mark.L0
@@ -937,8 +990,10 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [16])
+    @pytest.mark.parametrize("pass_fp32_to_fp16_or_bf16", [True, False])
     def test_search_vector_with_all_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                      is_partition_key, enable_dynamic_schema,
+                                                      pass_fp32_to_fp16_or_bf16):
         """
         Insert a vector with a simple payload
         """
@@ -986,8 +1041,16 @@ class TestSearchVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                         "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
                     }
                 else:
@@ -997,8 +1060,16 @@ class TestSearchVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                         "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
                     }
                 if enable_dynamic_schema:
@@ -1985,7 +2056,6 @@ class TestSearchVector(TestBase):
                 assert token in d[field]
 
 
-
 @pytest.mark.L0
 class TestSearchVectorNegative(TestBase):
 
@@ -2210,7 +2280,6 @@ class TestAdvancedSearchVector(TestBase):
         assert len(rsp['data']) == 10
 
 
-
 @pytest.mark.L0
 class TestHybridSearchVector(TestBase):
 
@@ -2316,8 +2385,6 @@ class TestHybridSearchVector(TestBase):
         rsp = self.vector_client.vector_hybrid_search(payload)
         assert rsp['code'] == 0
         assert len(rsp['data']) == 10
-
-
 
 
 @pytest.mark.L0
@@ -2463,8 +2530,10 @@ class TestQueryVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("pass_fp32_to_fp16_or_bf16", [True, False])
     def test_query_entities_with_all_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                      is_partition_key, enable_dynamic_schema,
+                                                      pass_fp32_to_fp16_or_bf16):
         """
         Insert a vector with a simple payload
         """
@@ -2512,8 +2581,16 @@ class TestQueryVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                         "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
                     }
                 else:
@@ -2523,8 +2600,16 @@ class TestQueryVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                         "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
                     }
                 if enable_dynamic_schema:
@@ -2819,8 +2904,6 @@ class TestQueryVector(TestBase):
             assert rsp['code'] == 0, rsp
             for d in rsp['data']:
                 assert token in d[field]
-
-
 
 
 @pytest.mark.L0
