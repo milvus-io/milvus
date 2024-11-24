@@ -25,7 +25,6 @@
 #include <mutex>
 #include <shared_mutex>
 
-#include "Types.h"
 #include "arrow/api.h"
 #include "arrow/array/array_binary.h"
 #include "common/FieldMeta.h"

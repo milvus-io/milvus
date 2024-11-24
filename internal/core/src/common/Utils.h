@@ -302,4 +302,50 @@ class Defer {
 
 #define DeferLambda(fn) Defer Defer_##__COUNTER__(fn);
 
+template <typename T>
+FOLLY_ALWAYS_INLINE
+int comparePrimitiveAsc(const T& left, const T& right) {
+    if constexpr (std::is_floating_point<T>::value) {
+        bool leftNan = std::isnan(left);
+        bool rightNan = std::isnan(right);
+        if (leftNan) {
+            return rightNan ? 0 : 1;
+        }
+        if (rightNan) {
+            return -1;
+        }
+    }
+    return left < right ? -1 : left == right ? 0 : 1;
+}
+
+inline std::string lowerString(const std::string& str) {
+    std::string ret;
+    ret.reserve(str.size());
+    std::transform(str.begin(), str.end(), ret.begin(), [](unsigned char c) {
+        return std::tolower(c);
+    });
+    return ret;
+}
+
+template <typename T>
+T checkPlus(const T& a, const T& b, const char* typeName = "integer"){
+    T result;
+    bool overflow = __builtin_add_overflow(a, b, &result);
+    if (UNLIKELY(overflow)) {
+        PanicInfo(DataTypeInvalid, "{} overflow: {} + {}", typeName, a, b);
+    }
+    return result;
+}
+
+template <typename T>
+T checkedMultiply(const T& a, const T& b, const char* typeName = "integer") {
+    T result;
+    bool overflow = __builtin_mul_overflow(a, b, &result);
+    if (UNLIKELY(overflow)) {
+        PanicInfo(DataTypeInvalid, "{} overflow: {} * {}", typeName, a, b);
+    }
+    return result;
+}
+
 }  // namespace milvus
+

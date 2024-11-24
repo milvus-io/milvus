@@ -26,10 +26,13 @@
 #include "exec/operator/MvccNode.h"
 #include "exec/operator/Operator.h"
 #include "exec/operator/VectorSearchNode.h"
-#include "exec/operator/GroupByNode.h"
+#include "exec/operator/SearchGroupByNode.h"
+#include "exec/operator/AggregationNode.h"
+#include "exec/operator/ProjectNode.h"
 #include "exec/Task.h"
 
 #include "common/EasyAssert.h"
+
 
 namespace milvus {
 namespace exec {
@@ -72,11 +75,16 @@ DriverFactory::CreateDriver(std::unique_ptr<DriverContext> ctx,
                            plannode)) {
             operators.push_back(std::make_unique<PhyVectorSearchNode>(
                 id, ctx.get(), vectorsearchnode));
-        } else if (auto groupbynode =
-                       std::dynamic_pointer_cast<const plan::GroupByNode>(
+        } else if (auto vectorGroupByNode =
+                       std::dynamic_pointer_cast<const plan::SearchGroupByNode>(
                            plannode)) {
             operators.push_back(
-                std::make_unique<PhyGroupByNode>(id, ctx.get(), groupbynode));
+                std::make_unique<PhySearchGroupByNode>(id, ctx.get(), vectorGroupByNode));
+        } else if (auto queryGroupByNode = std::dynamic_pointer_cast<const plan::AggregationNode>(plannode)) {
+            operators.push_back(
+                    std::make_unique<PhyAggregationNode>(id, ctx.get(), queryGroupByNode));
+        } else if (auto projectNode = std::dynamic_pointer_cast<const plan::ProjectNode>(plannode)) {
+            operators.push_back(std::make_unique<PhyProjectNode>(id, ctx.get(), projectNode));
         }
         // TODO: add more operators
     }

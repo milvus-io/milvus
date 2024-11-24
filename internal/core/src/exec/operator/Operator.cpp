@@ -17,5 +17,9 @@
 #include "Operator.h"
 
 namespace milvus {
-namespace exec {}
+namespace exec {
+void Operator::initialize() {
+// TODO check memory and set up memory pool in the future
+}
+}
 }  // namespace milvus

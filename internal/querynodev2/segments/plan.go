@@ -175,7 +175,7 @@ type RetrievePlan struct {
 	ignoreNonPk   bool
 }
 
-func NewRetrievePlan(ctx context.Context, col *Collection, expr []byte, timestamp Timestamp, msgID UniqueID) (*RetrievePlan, error) {
+func NewRetrievePlan(ctx context.Context, col *Collection, planBytes []byte, timestamp Timestamp, msgID UniqueID) (*RetrievePlan, error) {
 	col.mu.RLock()
 	defer col.mu.RUnlock()
 
@@ -184,7 +184,7 @@ func NewRetrievePlan(ctx context.Context, col *Collection, expr []byte, timestam
 	}
 
 	var cPlan C.CRetrievePlan
-	status := C.CreateRetrievePlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
+	status := C.CreateRetrievePlanByExpr(col.collectionPtr, unsafe.Pointer(&planBytes[0]), (C.int64_t)(len(planBytes)), &cPlan)
 
 	err := HandleCStatus(ctx, &status, "Create retrieve plan by expr failed")
 	if err != nil {

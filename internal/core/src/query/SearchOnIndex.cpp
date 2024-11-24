@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SearchOnIndex.h"
-#include "exec/operator/groupby/SearchGroupByOperator.h"
+#include "exec/operator/search-groupby/SearchGroupByOperator.h"
 
 namespace milvus::query {
 void
