@@ -2919,12 +2919,10 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 }
 
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
-	receiveSize := proto.Size(request)
-	metrics.ProxyReceiveBytes.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.SearchLabel,
-		request.GetCollectionName(),
-	).Add(float64(receiveSize))
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(metrics.SearchLabel).
+		SetCollectionName(request.GetCollectionName())
 
 	metrics.ProxyReceivedNQ.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -3151,19 +3149,10 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 }
 
 func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
-	receiveSize := proto.Size(request)
-	metrics.ProxyReceiveBytes.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.HybridSearchLabel,
-		request.GetCollectionName(),
-	).Add(float64(receiveSize))
-
-	subLabel := GetCollectionRateSubLabel(request)
-	allNQ := int64(0)
-	for _, searchRequest := range request.Requests {
-		allNQ += searchRequest.GetNq()
-	}
-	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(allNQ), subLabel)
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(metrics.HybridSearchLabel).
+		SetCollectionName(request.GetCollectionName())
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
