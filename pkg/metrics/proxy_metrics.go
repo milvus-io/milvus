@@ -390,12 +390,23 @@ var (
 			Help:      "max insert rate",
 		}, []string{"node_id", "scope"})
 
+	// ProxyRetrySearchCount records the retry search count when result count does not meet limit and topk reduce is on
 	ProxyRetrySearchCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
 			Name:      "retry_search_cnt",
 			Help:      "counter of retry search",
+		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
+
+	// ProxyRetrySearchResultInsufficientCount records the retry search without reducing topk that still not meet result limit
+	// there are more likely some non-index-related reasons like we do not have enough entities for very big k, duplicate pks, etc
+	ProxyRetrySearchResultInsufficientCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "retry_search_result_insufficient_cnt",
+			Help:      "counter of retry search which does not have enough results",
 		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
 )
 

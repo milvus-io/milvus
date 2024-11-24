@@ -2885,18 +2885,26 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	}
 
 	optimizedSearch := true
-	resultSizeNotMeetLimit := false
+	resultSizeInsufficient := false
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeNotMeetLimit, err = node.search(ctx, request, optimizedSearch)
-		if merr.Ok(rsp.GetStatus()) && resultSizeNotMeetLimit && optimizedSearch && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
+		rsp, resultSizeInsufficient, err = node.search(ctx, request, optimizedSearch)
+		if merr.Ok(rsp.GetStatus()) && resultSizeInsufficient && optimizedSearch && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeNotMeetLimit, err = node.search(ctx, request, optimizedSearch)
+			rsp, resultSizeInsufficient, err = node.search(ctx, request, optimizedSearch)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
 				request.GetCollectionName(),
 			).Inc()
+			// result size still insufficient
+			if resultSizeInsufficient {
+				metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
+					strconv.FormatInt(paramtable.GetNodeID(), 10),
+					metrics.SearchLabel,
+					request.GetCollectionName(),
+				).Inc()
+			}
 		}
 		if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
 			return true, merr.Error(rsp.GetStatus())
@@ -3099,7 +3107,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
 	}
-	return qt.result, qt.resultSizeNotMeetLimit, nil
+	return qt.result, qt.resultSizeInsufficient, nil
 }
 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
@@ -3108,18 +3116,26 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		Status: merr.Success(),
 	}
 	optimizedSearch := true
-	resultSizeNotMeetLimit := false
+	resultSizeInsufficient := false
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeNotMeetLimit, err = node.hybridSearch(ctx, request, optimizedSearch)
-		if merr.Ok(rsp.GetStatus()) && resultSizeNotMeetLimit && optimizedSearch && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
+		rsp, resultSizeInsufficient, err = node.hybridSearch(ctx, request, optimizedSearch)
+		if merr.Ok(rsp.GetStatus()) && resultSizeInsufficient && optimizedSearch && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeNotMeetLimit, err = node.hybridSearch(ctx, request, optimizedSearch)
+			rsp, resultSizeInsufficient, err = node.hybridSearch(ctx, request, optimizedSearch)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.HybridSearchLabel,
 				request.GetCollectionName(),
 			).Inc()
+			// result size still insufficient
+			if resultSizeInsufficient {
+				metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
+					strconv.FormatInt(paramtable.GetNodeID(), 10),
+					metrics.SearchLabel,
+					request.GetCollectionName(),
+				).Inc()
+			}
 		}
 		if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
 			return true, merr.Error(rsp.GetStatus())
@@ -3306,7 +3322,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
 	}
-	return qt.result, qt.resultSizeNotMeetLimit, nil
+	return qt.result, qt.resultSizeInsufficient, nil
 }
 
 func (node *Proxy) getVectorPlaceholderGroupForSearchByPks(ctx context.Context, request *milvuspb.SearchRequest) ([]byte, error) {
