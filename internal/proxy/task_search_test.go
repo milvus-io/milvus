@@ -98,7 +98,8 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		err := qt.PostExecute(context.TODO())
 		assert.NoError(t, err)
 		assert.Equal(t, qt.result.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-		assert.Equal(t, qt.resultSizeInsufficient, false)
+		assert.Equal(t, qt.resultSizeInsufficient, true)
+		assert.Equal(t, qt.isTopkReduce, false)
 	})
 }
 

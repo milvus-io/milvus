@@ -62,6 +62,7 @@ type searchTask struct {
 	enableMaterializedView bool
 	mustUsePartitionKey    bool
 	resultSizeInsufficient bool
+	isTopkReduce           bool
 
 	userOutputFields  []string
 	userDynamicFields []string
@@ -693,7 +694,6 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	// reduce done, get final result
 	limit := t.SearchRequest.GetTopk() - t.SearchRequest.GetOffset()
 	resultSizeInsufficient := false
-	// only when topk reduced optimization is on, we will check results size for possible further re-search
 	if isTopkReduce {
 		for _, topk := range t.result.Results.Topks {
 			if topk < limit {
@@ -703,6 +703,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		}
 	}
 	t.resultSizeInsufficient = resultSizeInsufficient
+	t.isTopkReduce = isTopkReduce
 	t.result.CollectionName = t.collectionName
 	t.fillInFieldInfo()
 
