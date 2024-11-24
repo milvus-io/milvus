@@ -467,6 +467,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(MaxInsertRate)
 	registry.MustRegister(ProxyRetrySearchCount)
+	registry.MustRegister(ProxyRetrySearchResultInsufficientCount)
 }
 
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {
@@ -572,7 +573,22 @@ func CleanupProxyCollectionMetrics(nodeID int64, collection string) {
 	})
 	ProxyRetrySearchCount.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: QueryLabel,
+		queryTypeLabelName: SearchLabel,
+		collectionName:     collection,
+	})
+	ProxyRetrySearchCount.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: HybridSearchLabel,
+		collectionName:     collection,
+	})
+	ProxyRetrySearchResultInsufficientCount.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: SearchLabel,
+		collectionName:     collection,
+	})
+	ProxyRetrySearchResultInsufficientCount.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: HybridSearchLabel,
 		collectionName:     collection,
 	})
 }
