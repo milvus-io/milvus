@@ -3132,7 +3132,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			if resultSizeInsufficient {
 				metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
 					strconv.FormatInt(paramtable.GetNodeID(), 10),
-					metrics.SearchLabel,
+					metrics.HybridSearchLabel,
 					request.GetCollectionName(),
 				).Inc()
 			}
