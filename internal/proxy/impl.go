@@ -6617,34 +6617,37 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	router.GET(http.SlowQueryPath, getSlowQuery(node))
 
 	// QueryCoord requests that are forwarded from proxy
-	router.GET(http.QCTargetPath, getQueryComponentMetrics(node, metricsinfo.QueryTarget))
-	router.GET(http.QCDistPath, getQueryComponentMetrics(node, metricsinfo.QueryDist))
-	router.GET(http.QCReplicaPath, getQueryComponentMetrics(node, metricsinfo.QueryReplicas))
-	router.GET(http.QCResourceGroupPath, getQueryComponentMetrics(node, metricsinfo.QueryResourceGroups))
-	router.GET(http.QCAllTasksPath, getQueryComponentMetrics(node, metricsinfo.QueryCoordAllTasks))
+	router.GET(http.QCTargetPath, getQueryComponentMetrics(node, metricsinfo.TargetKey))
+	router.GET(http.QCDistPath, getQueryComponentMetrics(node, metricsinfo.DistKey))
+	router.GET(http.QCReplicaPath, getQueryComponentMetrics(node, metricsinfo.ReplicaKey))
+	router.GET(http.QCResourceGroupPath, getQueryComponentMetrics(node, metricsinfo.ResourceGroupKey))
+	router.GET(http.QCAllTasksPath, getQueryComponentMetrics(node, metricsinfo.AllTaskKey))
+	router.GET(http.QCSegmentsPath, getQueryComponentMetrics(node, metricsinfo.SegmentKey))
 
 	// QueryNode requests that are forwarded from querycoord
-	router.GET(http.QNSegmentsPath, getQueryComponentMetrics(node, metricsinfo.QuerySegments))
-	router.GET(http.QNChannelsPath, getQueryComponentMetrics(node, metricsinfo.QueryChannels))
+	router.GET(http.QNSegmentsPath, getQueryComponentMetrics(node, metricsinfo.SegmentKey))
+	router.GET(http.QNChannelsPath, getQueryComponentMetrics(node, metricsinfo.ChannelKey))
 
 	// DataCoord requests that are forwarded from proxy
-	router.GET(http.DCDistPath, getDataComponentMetrics(node, metricsinfo.DataDist))
-	router.GET(http.DCCompactionTasksPath, getDataComponentMetrics(node, metricsinfo.CompactionTasks))
-	router.GET(http.DCImportTasksPath, getDataComponentMetrics(node, metricsinfo.ImportTasks))
-	router.GET(http.DCBuildIndexTasksPath, getDataComponentMetrics(node, metricsinfo.BuildIndexTasks))
+	router.GET(http.DCDistPath, getDataComponentMetrics(node, metricsinfo.DistKey))
+	router.GET(http.DCCompactionTasksPath, getDataComponentMetrics(node, metricsinfo.CompactionTaskKey))
+	router.GET(http.DCImportTasksPath, getDataComponentMetrics(node, metricsinfo.ImportTaskKey))
+	router.GET(http.DCBuildIndexTasksPath, getDataComponentMetrics(node, metricsinfo.BuildIndexTaskKey))
+	router.GET(http.IndexListPath, getDataComponentMetrics(node, metricsinfo.IndexKey))
+	router.GET(http.DCSegmentsPath, getDataComponentMetrics(node, metricsinfo.SegmentKey))
 
 	// Datanode requests that are forwarded from datacoord
-	router.GET(http.DNSyncTasksPath, getDataComponentMetrics(node, metricsinfo.SyncTasks))
-	router.GET(http.DNSegmentsPath, getDataComponentMetrics(node, metricsinfo.DataSegments))
-	router.GET(http.DNChannelsPath, getDataComponentMetrics(node, metricsinfo.DataChannels))
+	router.GET(http.DNSyncTasksPath, getDataComponentMetrics(node, metricsinfo.SyncTaskKey))
+	router.GET(http.DNSegmentsPath, getDataComponentMetrics(node, metricsinfo.SegmentKey))
+	router.GET(http.DNChannelsPath, getDataComponentMetrics(node, metricsinfo.ChannelKey))
 
 	// Database requests
 	router.GET(http.DatabaseListPath, listDatabase(node))
 	router.GET(http.DatabaseDescPath, describeDatabase(node))
 
 	// Collection requests
-	router.GET(http.CollectionListPath, listCollection(node.rootCoord, node.queryCoord))
-	router.GET(http.CollectionDescPath, describeCollection(node, node.rootCoord))
+	router.GET(http.CollectionListPath, listCollection(node))
+	router.GET(http.CollectionDescPath, describeCollection(node))
 }
 
 func (node *Proxy) CreatePrivilegeGroup(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {

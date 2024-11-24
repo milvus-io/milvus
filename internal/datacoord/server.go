@@ -38,12 +38,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
-	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -237,7 +237,7 @@ func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64)
 }
 
 func defaultRootCoordCreatorFunc(ctx context.Context) (types.RootCoordClient, error) {
-	return rootcoordclient.NewClient(ctx)
+	return coordclient.GetRootCoordClient(ctx), nil
 }
 
 // QuitSignal returns signal when server quits
@@ -1145,41 +1145,50 @@ func (s *Server) registerMetricsRequest() {
 			return s.getSystemInfoMetrics(ctx, req)
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataDist,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DistKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.getDistJSON(ctx, req), nil
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ImportTasks,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ImportTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.importMeta.TaskStatsJSON(), nil
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.CompactionTasks,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.CompactionTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.meta.compactionTaskMeta.TaskStatsJSON(), nil
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.BuildIndexTasks,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.BuildIndexTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.meta.indexMeta.TaskStatsJSON(), nil
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTasks,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.getSyncTaskJSON(ctx, req)
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataSegments,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return s.getSegmentsJSON(ctx, req)
+			return s.getSegmentsJSON(ctx, req, jsonReq)
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataChannels,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.getChannelsJSON(ctx, req)
 		})
 
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.IndexKey,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			v := jsonReq.Get(metricsinfo.MetricRequestParamCollectionIDKey)
+			collectionID := int64(0)
+			if v.Exists() {
+				collectionID = v.Int()
+			}
+			return s.meta.indexMeta.GetIndexJSON(collectionID), nil
+		})
 	log.Info("register metrics actions finished")
 }
 

@@ -1168,7 +1168,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		}
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Once()
@@ -1177,7 +1177,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.True(t, skip)
 
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Bounded,
 			}, nil).Once()
@@ -1185,7 +1185,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.True(t, skip)
 
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Strong,
 			}, nil).Once()
@@ -1195,7 +1195,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 
 	t.Run("request consistency level", func(t *testing.T) {
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Times(3)
@@ -1267,7 +1267,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		mockMetaCache.ExpectedCalls = nil
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, fmt.Errorf("mock error"))
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil)

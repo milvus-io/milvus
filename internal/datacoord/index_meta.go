@@ -42,9 +42,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -1067,4 +1069,73 @@ func (m *indexMeta) TaskStatsJSON() string {
 		return ""
 	}
 	return string(ret)
+}
+
+func (m *indexMeta) GetIndexJSON(collectionID int64) string {
+	m.RLock()
+	defer m.RUnlock()
+
+	var indexMetrics []*metricsinfo.Index
+	for collID, indexes := range m.indexes {
+		for _, index := range indexes {
+			if collectionID == 0 || collID == collectionID {
+				im := &metricsinfo.Index{
+					CollectionID:    collID,
+					IndexID:         index.IndexID,
+					FieldID:         index.FieldID,
+					Name:            index.IndexName,
+					IsDeleted:       index.IsDeleted,
+					CreateTime:      tsoutil.PhysicalTimeFormat(index.CreateTime),
+					IndexParams:     funcutil.KeyValuePair2Map(index.IndexParams),
+					IsAutoIndex:     index.IsAutoIndex,
+					UserIndexParams: funcutil.KeyValuePair2Map(index.UserIndexParams),
+				}
+				indexMetrics = append(indexMetrics, im)
+			}
+		}
+	}
+
+	ret, err := json.Marshal(indexMetrics)
+	if err != nil {
+		return ""
+	}
+	return string(ret)
+}
+
+func (m *indexMeta) GetSegmentIndexedFields(collectionID UniqueID, segmentID UniqueID) (bool, []*metricsinfo.IndexedField) {
+	m.RLock()
+	defer m.RUnlock()
+	fieldIndexes, ok := m.indexes[collectionID]
+	if !ok {
+		// the segment should be unindexed status if the collection has no indexes
+		return false, []*metricsinfo.IndexedField{}
+	}
+
+	// the segment should be unindexed status if the segment indexes is not found
+	segIndexInfos, ok := m.segmentIndexes[segmentID]
+	if !ok || len(segIndexInfos) == 0 {
+		return false, []*metricsinfo.IndexedField{}
+	}
+
+	isIndexed := true
+	var segmentIndexes []*metricsinfo.IndexedField
+	for _, index := range fieldIndexes {
+		if si, ok := segIndexInfos[index.IndexID]; !index.IsDeleted {
+			buildID := int64(-1)
+			if !ok {
+				// the segment should be unindexed status if the segment index is not found within field indexes
+				isIndexed = false
+			} else {
+				buildID = si.BuildID
+			}
+
+			segmentIndexes = append(segmentIndexes, &metricsinfo.IndexedField{
+				IndexFieldID: index.IndexID,
+				IndexID:      index.IndexID,
+				BuildID:      buildID,
+				IndexSize:    int64(si.IndexSize),
+			})
+		}
+	}
+	return isIndexed, segmentIndexes
 }

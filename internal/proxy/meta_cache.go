@@ -58,7 +58,7 @@ type Cache interface {
 	// GetCollectionName get collection's name and database by id
 	GetCollectionName(ctx context.Context, database string, collectionID int64) (string, error)
 	// GetCollectionInfo get collection's information by name or collection id, such as schema, and etc.
-	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionBasicInfo, error)
+	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionInfo, error)
 	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error)
 	// GetPartitions get all partitions' id of specific collection.
@@ -91,13 +91,6 @@ type Cache interface {
 	GetDatabaseInfo(ctx context.Context, database string) (*databaseInfo, error)
 	// AllocID is only using on requests that need to skip timestamp allocation, don't overuse it.
 	AllocID(ctx context.Context) (int64, error)
-}
-type collectionBasicInfo struct {
-	collID                typeutil.UniqueID
-	createdTimestamp      uint64
-	createdUtcTimestamp   uint64
-	consistencyLevel      commonpb.ConsistencyLevel
-	partitionKeyIsolation bool
 }
 
 type collectionInfo struct {
@@ -270,20 +263,6 @@ type partitionInfo struct {
 	partitionID         typeutil.UniqueID
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
-}
-
-// getBasicInfo get a basic info by deep copy.
-func (info *collectionInfo) getBasicInfo() *collectionBasicInfo {
-	// Do a deep copy for all fields.
-	basicInfo := &collectionBasicInfo{
-		collID:                info.collID,
-		createdTimestamp:      info.createdTimestamp,
-		createdUtcTimestamp:   info.createdUtcTimestamp,
-		consistencyLevel:      info.consistencyLevel,
-		partitionKeyIsolation: info.partitionKeyIsolation,
-	}
-
-	return basicInfo
 }
 
 func (info *collectionInfo) isCollectionCached() bool {
@@ -556,7 +535,7 @@ func (m *MetaCache) GetCollectionName(ctx context.Context, database string, coll
 	return collInfo.schema.Name, nil
 }
 
-func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionBasicInfo, error) {
+func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionInfo, error) {
 	collInfo, ok := m.getCollection(database, collectionName, 0)
 
 	method := "GetCollectionInfo"
@@ -571,11 +550,11 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, coll
 			return nil, err
 		}
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return collInfo.getBasicInfo(), nil
+		return collInfo, nil
 	}
 
 	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
-	return collInfo.getBasicInfo(), nil
+	return collInfo, nil
 }
 
 // GetCollectionInfo returns the collection information related to provided collection name

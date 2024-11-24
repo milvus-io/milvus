@@ -141,14 +141,17 @@ class TestRestfulSdkCompatibility(TestBase):
             FieldSchema(name="json", dtype=DataType.JSON),
             FieldSchema(name="int_array", dtype=DataType.ARRAY, element_type=DataType.INT64, max_capacity=1024),
             FieldSchema(name="varchar_array", dtype=DataType.ARRAY, element_type=DataType.VARCHAR, max_capacity=1024, max_length=65535),
-            FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=128)
+            FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=128),
+            FieldSchema(name="float16_vector", dtype=DataType.FLOAT16_VECTOR, dim=128),
+            FieldSchema(name="bfloat16_vector", dtype=DataType.BFLOAT16_VECTOR, dim=128),
         ]
         default_schema = CollectionSchema(fields=default_fields, description="test collection",
                                           enable_dynamic_field=True)
         collection = Collection(name=name, schema=default_schema)
         # create index by sdk
         index_param = {"metric_type": "L2", "index_type": "IVF_FLAT", "params": {"nlist": 128}}
-        collection.create_index(field_name="float_vector", index_params=index_param)
+        for field_name in ("float_vector", "float16_vector", "bfloat16_vector"):
+            collection.create_index(field_name=field_name, index_params=index_param)
         collection.load()
         # insert data by restful
         data = [
@@ -159,6 +162,9 @@ class TestRestfulSdkCompatibility(TestBase):
              "int_array": [i for i in range(10)],
              "varchar_array": [str(i) for i in range(10)],
              "float_vector": [random.random() for _ in range(dim)],
+             # float16 / bfloat16 field supports float32 arguments
+             "float16_vector": [random.random() for _ in range(dim)],
+             "bfloat16_vector": [random.random() for _ in range(dim)],
              "age": i}
             for i in range(nb)
         ]

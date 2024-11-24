@@ -21,9 +21,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/tidwall/gjson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
@@ -105,4 +108,75 @@ func TestGetSegmentsFromQueryNode(t *testing.T) {
 	err = json.Unmarshal([]byte(result), &actualSegments)
 	assert.NoError(t, err)
 	assert.Equal(t, expectedSegments, actualSegments)
+}
+
+func TestServer_getSegmentsJSON(t *testing.T) {
+	mockCluster := session.NewMockCluster(t)
+	nodeManager := session.NewNodeManager()
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
+	server := &Server{cluster: mockCluster, nodeMgr: nodeManager}
+	expectedSegments := []*metricsinfo.Segment{
+		{
+			SegmentID:            1,
+			PartitionID:          1,
+			Channel:              "channel1",
+			ResourceGroup:        "default",
+			MemSize:              int64(1024),
+			LoadedInsertRowCount: 100,
+		},
+		{
+			SegmentID:            2,
+			PartitionID:          1,
+			Channel:              "channel2",
+			ResourceGroup:        "default",
+			MemSize:              int64(1024),
+			LoadedInsertRowCount: 200,
+		},
+	}
+	resp := &milvuspb.GetMetricsResponse{
+		Response: func() string {
+			data, _ := json.Marshal(expectedSegments)
+			return string(data)
+		}(),
+	}
+	req := &milvuspb.GetMetricsRequest{}
+	mockCluster.EXPECT().GetMetrics(mock.Anything, mock.Anything, req).Return(resp, nil)
+
+	server.dist = meta.NewDistributionManager()
+	server.dist.SegmentDistManager.Update(1, meta.SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  1,
+		PartitionID:   1,
+		InsertChannel: "dmc0",
+	}))
+
+	ctx := context.TODO()
+
+	t.Run("valid request in dc", func(t *testing.T) {
+		jsonReq := gjson.Parse(`{"in": "qc", "collection_id": 1}`)
+		result, err := server.getSegmentsJSON(ctx, req, jsonReq)
+		assert.NoError(t, err)
+		assert.NotEmpty(t, result)
+	})
+
+	t.Run("invalid request", func(t *testing.T) {
+		jsonReq := gjson.Parse(`{"in": "invalid"}`)
+		result, err := server.getSegmentsJSON(ctx, req, jsonReq)
+		assert.Error(t, err)
+		assert.Empty(t, result)
+	})
+
+	t.Run("valid request in qn", func(t *testing.T) {
+		jsonReq := gjson.Parse(`{"in": "qn"}`)
+		result, err := server.getSegmentsJSON(ctx, req, jsonReq)
+		assert.NoError(t, err)
+		assert.NotEmpty(t, result)
+	})
+
+	t.Run("valid request in qc", func(t *testing.T) {
+		jsonReq := gjson.Parse(`{"in": "qc", "collection_id": 1}`)
+		result, err := server.getSegmentsJSON(ctx, req, jsonReq)
+		assert.NoError(t, err)
+		assert.NotEmpty(t, result)
+	})
 }

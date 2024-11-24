@@ -162,6 +162,96 @@ func (s *VectorSuite) TestBasic() {
 	})
 }
 
+func (s *VectorSuite) TestSlice() {
+	s.Run("float_vector", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		n := 100
+		dim := rand.Intn(10) + 2
+		data := make([][]float32, 0, n)
+		for i := 0; i < n; i++ {
+			row := lo.RepeatBy(dim, func(i int) float32 {
+				return rand.Float32()
+			})
+			data = append(data, row)
+		}
+		column := NewColumnFloatVector(name, dim, data)
+
+		l := rand.Intn(n)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnFloatVector)
+		if s.True(ok) {
+			s.Equal(dim, slicedColumn.Dim())
+			s.Equal(lo.Map(data[:l], func(row []float32, _ int) entity.FloatVector { return entity.FloatVector(row) }), slicedColumn.Data())
+		}
+	})
+
+	s.Run("binary_vector", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		n := 100
+		dim := (rand.Intn(10) + 1) * 8
+		data := make([][]byte, 0, n)
+		for i := 0; i < n; i++ {
+			row := lo.RepeatBy(dim/8, func(i int) byte {
+				return byte(rand.Intn(math.MaxUint8))
+			})
+			data = append(data, row)
+		}
+		column := NewColumnBinaryVector(name, dim, data)
+
+		l := rand.Intn(n)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnBinaryVector)
+		if s.True(ok) {
+			s.Equal(dim, slicedColumn.Dim())
+			s.Equal(lo.Map(data[:l], func(row []byte, _ int) entity.BinaryVector { return entity.BinaryVector(row) }), slicedColumn.Data())
+		}
+	})
+
+	s.Run("fp16_vector", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		n := 3
+		dim := rand.Intn(10) + 1
+		data := make([][]byte, 0, n)
+		for i := 0; i < n; i++ {
+			row := lo.RepeatBy(dim*2, func(i int) byte {
+				return byte(rand.Intn(math.MaxUint8))
+			})
+			data = append(data, row)
+		}
+		column := NewColumnFloat16Vector(name, dim, data)
+
+		l := rand.Intn(n)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnFloat16Vector)
+		if s.True(ok) {
+			s.Equal(dim, slicedColumn.Dim())
+			s.Equal(lo.Map(data[:l], func(row []byte, _ int) entity.Float16Vector { return entity.Float16Vector(row) }), slicedColumn.Data())
+		}
+	})
+
+	s.Run("bf16_vector", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		n := 3
+		dim := rand.Intn(10) + 1
+		data := make([][]byte, 0, n)
+		for i := 0; i < n; i++ {
+			row := lo.RepeatBy(dim*2, func(i int) byte {
+				return byte(rand.Intn(math.MaxUint8))
+			})
+			data = append(data, row)
+		}
+		column := NewColumnBFloat16Vector(name, dim, data)
+
+		l := rand.Intn(n)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnBFloat16Vector)
+		if s.True(ok) {
+			s.Equal(dim, slicedColumn.Dim())
+			s.Equal(lo.Map(data[:l], func(row []byte, _ int) entity.BFloat16Vector { return entity.BFloat16Vector(row) }), slicedColumn.Data())
+		}
+	})
+}
+
 func TestVectors(t *testing.T) {
 	suite.Run(t, new(VectorSuite))
 }

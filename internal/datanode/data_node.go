@@ -285,17 +285,17 @@ func (node *DataNode) registerMetricsRequest() {
 			return node.getSystemInfoMetrics(ctx, req)
 		})
 
-	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTasks,
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return node.syncMgr.TaskStatsJSON(), nil
 		})
 
-	node.metricsRequest.RegisterMetricsRequest(metricsinfo.DataSegments,
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return node.flowgraphManager.GetSegmentsJSON(), nil
 		})
 
-	node.metricsRequest.RegisterMetricsRequest(metricsinfo.DataChannels,
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return node.flowgraphManager.GetChannelsJSON(), nil
 		})
