@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -57,7 +58,7 @@ func EnableLocalClientRole(cfg *LocalClientRoleConfig) {
 
 // RegisterQueryCoordServer register query coord server
 func RegisterQueryCoordServer(server querypb.QueryCoordServer) {
-	if !enableLocal.EnableQueryCoord {
+	if !enableLocal.EnableQueryCoord || !paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
 		return
 	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&querypb.QueryCoord_ServiceDesc, server, querypb.NewQueryCoordClient)
@@ -67,7 +68,7 @@ func RegisterQueryCoordServer(server querypb.QueryCoordServer) {
 
 // RegsterDataCoordServer register data coord server
 func RegisterDataCoordServer(server datapb.DataCoordServer) {
-	if !enableLocal.EnableDataCoord {
+	if !enableLocal.EnableDataCoord || !paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
 		return
 	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&datapb.DataCoord_ServiceDesc, server, datapb.NewDataCoordClient)
@@ -77,7 +78,7 @@ func RegisterDataCoordServer(server datapb.DataCoordServer) {
 
 // RegisterRootCoordServer register root coord server
 func RegisterRootCoordServer(server rootcoordpb.RootCoordServer) {
-	if !enableLocal.EnableRootCoord {
+	if !enableLocal.EnableRootCoord || !paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
 		return
 	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&rootcoordpb.RootCoord_ServiceDesc, server, rootcoordpb.NewRootCoordClient)
