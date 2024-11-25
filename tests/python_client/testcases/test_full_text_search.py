@@ -2655,7 +2655,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             param={},
             limit=limit + offset,
             offset=0,
-            output_fields=["id", "text", "text_sparse_emb"])
+            output_fields=["id", "text"])
         full_res_id_list = []
         for i in range(nq):
             res = full_res_list[i]
@@ -2671,7 +2671,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             param={},
             limit=limit,
             offset=offset,
-            output_fields=["id", "text", "text_sparse_emb"])
+            output_fields=["id", "text"])
 
         # verify correctness
         for i in range(nq):
