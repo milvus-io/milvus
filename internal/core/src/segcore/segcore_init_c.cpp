@@ -108,11 +108,11 @@ GetMinimalIndexVersion() {
 
 extern "C" void
 SetThreadName(const char* name) {
-    #ifdef __linux__
+#ifdef __linux__
     pthread_setname_np(pthread_self(), name);
-    #elif __APPLE__
+#elif __APPLE__
     pthread_setname_np(name);
-    #endif
+#endif
 }
 
 }  // namespace milvus::segcore
