@@ -1764,7 +1764,9 @@ func TestRootCoord_RBACError(t *testing.T) {
 			assert.NoError(t, err)
 			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 		}
-
+		mockMeta.IsCustomPrivilegeGroupFunc = func(groupName string) (bool, error) {
+			return false, nil
+		}
 		mockMeta.SelectUserFunc = func(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
 			return nil, nil
 		}
@@ -2008,6 +2010,29 @@ func TestCore_InitRBAC(t *testing.T) {
 
 		err := c.initRbac()
 		assert.NoError(t, err)
+	})
+
+	t.Run("init default privilege groups", func(t *testing.T) {
+		clusterReadWrite := `SelectOwnership,SelectUser,DescribeResourceGroup`
+		meta := mockrootcoord.NewIMetaTable(t)
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+
+		Params.Save(Params.RbacConfig.Enabled.Key, "true")
+		Params.Save(Params.RbacConfig.ClusterReadWritePrivileges.Key, clusterReadWrite)
+
+		defer func() {
+			Params.Reset(Params.RbacConfig.Enabled.Key)
+			Params.Reset(Params.RbacConfig.ClusterReadWritePrivileges.Key)
+		}()
+
+		builtinGroups := c.initBuiltinPrivilegeGroups()
+		fmt.Println(builtinGroups)
+		assert.Equal(t, len(util.BuiltinPrivilegeGroups), len(builtinGroups))
+		for _, group := range builtinGroups {
+			if group.GroupName == "ClusterReadWrite" {
+				assert.Equal(t, len(group.Privileges), 3)
+			}
+		}
 	})
 }
 
