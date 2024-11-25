@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -707,6 +708,52 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 	s.Equal(1, info.completedCnt)
 	s.Equal(1, info.executingCnt)
 	s.Equal(1, info.failedCnt)
+}
+
+func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
+	s.SetupTest()
+	paramtable.Get().Save("dataCoord.compaction.taskQueueCapacity", "1")
+	defer paramtable.Get().Reset("dataCoord.compaction.taskQueueCapacity")
+
+	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc, nil, nil)
+
+	t1 := &mixCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			TriggerID: 1,
+			PlanID:    1,
+			Type:      datapb.CompactionType_MixCompaction,
+			Channel:   "ch-01",
+			State:     datapb.CompactionTaskState_executing,
+		},
+		meta:     s.mockMeta,
+		sessions: s.mockSessMgr,
+	}
+	t1.plan = &datapb.CompactionPlan{
+		PlanID:  1,
+		Type:    datapb.CompactionType_MixCompaction,
+		Channel: "ch-01",
+	}
+
+	s.NoError(s.handler.submitTask(t1))
+
+	t2 := &mixCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			TriggerID: 1,
+			PlanID:    2,
+			Type:      datapb.CompactionType_MixCompaction,
+			Channel:   "ch-01",
+			State:     datapb.CompactionTaskState_completed,
+		},
+		meta:     s.mockMeta,
+		sessions: s.mockSessMgr,
+	}
+	t2.plan = &datapb.CompactionPlan{
+		PlanID:  2,
+		Type:    datapb.CompactionType_MixCompaction,
+		Channel: "ch-01",
+	}
+
+	s.Error(s.handler.submitTask(t2))
 }
 
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
