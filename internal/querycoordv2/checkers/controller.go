@@ -67,7 +67,7 @@ func NewCheckerController(
 	checkers := map[utils.CheckerType]Checker{
 		utils.ChannelChecker: NewChannelChecker(meta, dist, targetMgr, nodeMgr, getBalancerFunc),
 		utils.SegmentChecker: NewSegmentChecker(meta, dist, targetMgr, nodeMgr, getBalancerFunc),
-		utils.BalanceChecker: NewBalanceChecker(meta, targetMgr, nodeMgr, scheduler, getBalancerFunc),
+		utils.BalanceChecker: NewBalanceChecker(meta, dist, targetMgr, nodeMgr, scheduler, getBalancerFunc),
 		utils.IndexChecker:   NewIndexChecker(meta, dist, broker, nodeMgr, targetMgr),
 		// todo temporary work around must fix
 		// utils.LeaderChecker:  NewLeaderChecker(meta, dist, targetMgr, nodeMgr, true),
