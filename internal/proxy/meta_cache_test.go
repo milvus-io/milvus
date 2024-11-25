@@ -796,7 +796,6 @@ func TestGlobalMetaCache_ShuffleShardLeaders(t *testing.T) {
 		},
 	}
 	sl := &shardLeaders{
-		deprecated:   uatomic.NewBool(false),
 		idx:          uatomic.NewInt64(5),
 		shardLeaders: shards,
 	}
