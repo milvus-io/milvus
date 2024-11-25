@@ -17,6 +17,7 @@
 package checkers
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -85,10 +86,11 @@ func (suite *CheckerControllerSuite) SetupTest() {
 }
 
 func (suite *CheckerControllerSuite) TestBasic() {
+	ctx := context.Background()
 	// set meta
-	suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
-	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
-	suite.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	suite.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	suite.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	suite.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -99,8 +101,8 @@ func (suite *CheckerControllerSuite) TestBasic() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	suite.meta.ResourceManager.HandleNodeUp(1)
-	suite.meta.ResourceManager.HandleNodeUp(2)
+	suite.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	suite.meta.ResourceManager.HandleNodeUp(ctx, 2)
 
 	// set target
 	channels := []*datapb.VchannelInfo{
@@ -119,7 +121,7 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	suite.targetManager.UpdateCollectionNextTarget(int64(1))
+	suite.targetManager.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// set dist
 	suite.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
@@ -134,11 +136,11 @@ func (suite *CheckerControllerSuite) TestBasic() {
 
 	assignSegCounter := atomic.NewInt32(0)
 	assingChanCounter := atomic.NewInt32(0)
-	suite.balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(i1 int64, s []*meta.Segment, i2 []int64, i4 bool) []balance.SegmentAssignPlan {
+	suite.balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i1 int64, s []*meta.Segment, i2 []int64, i4 bool) []balance.SegmentAssignPlan {
 		assignSegCounter.Inc()
 		return nil
 	})
-	suite.balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(dc []*meta.DmChannel, i []int64, _ bool) []balance.ChannelAssignPlan {
+	suite.balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dc []*meta.DmChannel, i []int64, _ bool) []balance.ChannelAssignPlan {
 		assingChanCounter.Inc()
 		return nil
 	})

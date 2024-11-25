@@ -73,19 +73,19 @@ func (b *BalanceChecker) Description() string {
 	return "BalanceChecker checks the cluster distribution and generates balance tasks"
 }
 
-func (b *BalanceChecker) readyToCheck(collectionID int64) bool {
-	metaExist := (b.meta.GetCollection(collectionID) != nil)
-	targetExist := b.targetMgr.IsNextTargetExist(collectionID) || b.targetMgr.IsCurrentTargetExist(collectionID, common.AllPartitionsID)
+func (b *BalanceChecker) readyToCheck(ctx context.Context, collectionID int64) bool {
+	metaExist := (b.meta.GetCollection(ctx, collectionID) != nil)
+	targetExist := b.targetMgr.IsNextTargetExist(ctx, collectionID) || b.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
 
 	return metaExist && targetExist
 }
 
-func (b *BalanceChecker) replicasToBalance() []int64 {
-	ids := b.meta.GetAll()
+func (b *BalanceChecker) replicasToBalance(ctx context.Context) []int64 {
+	ids := b.meta.GetAll(ctx)
 
 	// all replicas belonging to loading collection will be skipped
 	loadedCollections := lo.Filter(ids, func(cid int64, _ int) bool {
-		collection := b.meta.GetCollection(cid)
+		collection := b.meta.GetCollection(ctx, cid)
 		return collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded
 	})
 	sort.Slice(loadedCollections, func(i, j int) bool {
@@ -97,10 +97,10 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 		stoppingReplicas := make([]int64, 0)
 		for _, cid := range loadedCollections {
 			// if target and meta isn't ready, skip balance this collection
-			if !b.readyToCheck(cid) {
+			if !b.readyToCheck(ctx, cid) {
 				continue
 			}
-			replicas := b.meta.ReplicaManager.GetByCollection(cid)
+			replicas := b.meta.ReplicaManager.GetByCollection(ctx, cid)
 			for _, replica := range replicas {
 				if replica.RONodesCount() > 0 {
 					stoppingReplicas = append(stoppingReplicas, replica.GetID())
@@ -130,7 +130,7 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 		}
 		hasUnbalancedCollection = true
 		b.normalBalanceCollectionsCurrentRound.Insert(cid)
-		for _, replica := range b.meta.ReplicaManager.GetByCollection(cid) {
+		for _, replica := range b.meta.ReplicaManager.GetByCollection(ctx, cid) {
 			normalReplicasToBalance = append(normalReplicasToBalance, replica.GetID())
 		}
 		break
@@ -144,14 +144,14 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 	return normalReplicasToBalance
 }
 
-func (b *BalanceChecker) balanceReplicas(replicaIDs []int64) ([]balance.SegmentAssignPlan, []balance.ChannelAssignPlan) {
+func (b *BalanceChecker) balanceReplicas(ctx context.Context, replicaIDs []int64) ([]balance.SegmentAssignPlan, []balance.ChannelAssignPlan) {
 	segmentPlans, channelPlans := make([]balance.SegmentAssignPlan, 0), make([]balance.ChannelAssignPlan, 0)
 	for _, rid := range replicaIDs {
-		replica := b.meta.ReplicaManager.Get(rid)
+		replica := b.meta.ReplicaManager.Get(ctx, rid)
 		if replica == nil {
 			continue
 		}
-		sPlans, cPlans := b.getBalancerFunc().BalanceReplica(replica)
+		sPlans, cPlans := b.getBalancerFunc().BalanceReplica(ctx, replica)
 		segmentPlans = append(segmentPlans, sPlans...)
 		channelPlans = append(channelPlans, cPlans...)
 		if len(segmentPlans) != 0 || len(channelPlans) != 0 {
@@ -164,12 +164,12 @@ func (b *BalanceChecker) balanceReplicas(replicaIDs []int64) ([]balance.SegmentA
 func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	ret := make([]task.Task, 0)
 
-	replicasToBalance := b.replicasToBalance()
-	segmentPlans, channelPlans := b.balanceReplicas(replicasToBalance)
+	replicasToBalance := b.replicasToBalance(ctx)
+	segmentPlans, channelPlans := b.balanceReplicas(ctx, replicasToBalance)
 	// iterate all collection to find a collection to balance
 	for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.normalBalanceCollectionsCurrentRound.Len() > 0 {
-		replicasToBalance := b.replicasToBalance()
-		segmentPlans, channelPlans = b.balanceReplicas(replicasToBalance)
+		replicasToBalance := b.replicasToBalance(ctx)
+		segmentPlans, channelPlans = b.balanceReplicas(ctx, replicasToBalance)
 	}
 
 	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), segmentPlans)

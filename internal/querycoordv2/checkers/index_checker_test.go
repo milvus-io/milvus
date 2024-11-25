@@ -78,7 +78,7 @@ func (suite *IndexCheckerSuite) SetupTest() {
 	suite.targetMgr = meta.NewMockTargetManager(suite.T())
 	suite.checker = NewIndexChecker(suite.meta, distManager, suite.broker, suite.nodeMgr, suite.targetMgr)
 
-	suite.targetMgr.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(cid, sid int64, i3 int32) *datapb.SegmentInfo {
+	suite.targetMgr.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cid, sid int64, i3 int32) *datapb.SegmentInfo {
 		return &datapb.SegmentInfo{
 			ID:    sid,
 			Level: datapb.SegmentLevel_L1,
@@ -92,12 +92,13 @@ func (suite *IndexCheckerSuite) TearDownTest() {
 
 func (suite *IndexCheckerSuite) TestLoadIndex() {
 	checker := suite.checker
+	ctx := context.Background()
 
 	// meta
 	coll := utils.CreateTestCollection(1, 1)
 	coll.FieldIndexID = map[int64]int64{101: 1000}
-	checker.meta.CollectionManager.PutCollection(coll)
-	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, coll)
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -108,8 +109,8 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(1)
-	checker.meta.ResourceManager.HandleNodeUp(2)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
 
 	// dist
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
@@ -147,8 +148,8 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 	// test skip load index for read only node
 	suite.nodeMgr.Stopping(1)
 	suite.nodeMgr.Stopping(2)
-	suite.meta.ResourceManager.HandleNodeStopping(1)
-	suite.meta.ResourceManager.HandleNodeStopping(2)
+	suite.meta.ResourceManager.HandleNodeStopping(ctx, 1)
+	suite.meta.ResourceManager.HandleNodeStopping(ctx, 2)
 	utils.RecoverAllCollection(suite.meta)
 	tasks = checker.Check(context.Background())
 	suite.Require().Len(tasks, 0)
@@ -156,12 +157,13 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 
 func (suite *IndexCheckerSuite) TestIndexInfoNotMatch() {
 	checker := suite.checker
+	ctx := context.Background()
 
 	// meta
 	coll := utils.CreateTestCollection(1, 1)
 	coll.FieldIndexID = map[int64]int64{101: 1000}
-	checker.meta.CollectionManager.PutCollection(coll)
-	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, coll)
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -172,8 +174,8 @@ func (suite *IndexCheckerSuite) TestIndexInfoNotMatch() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(1)
-	checker.meta.ResourceManager.HandleNodeUp(2)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
 
 	// dist
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
@@ -216,12 +218,13 @@ func (suite *IndexCheckerSuite) TestIndexInfoNotMatch() {
 
 func (suite *IndexCheckerSuite) TestGetIndexInfoFailed() {
 	checker := suite.checker
+	ctx := context.Background()
 
 	// meta
 	coll := utils.CreateTestCollection(1, 1)
 	coll.FieldIndexID = map[int64]int64{101: 1000}
-	checker.meta.CollectionManager.PutCollection(coll)
-	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, coll)
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -232,8 +235,8 @@ func (suite *IndexCheckerSuite) TestGetIndexInfoFailed() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(1)
-	checker.meta.ResourceManager.HandleNodeUp(2)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
 
 	// dist
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
@@ -255,12 +258,13 @@ func (suite *IndexCheckerSuite) TestGetIndexInfoFailed() {
 
 func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 	checker := suite.checker
+	ctx := context.Background()
 
 	// meta
 	coll := utils.CreateTestCollection(1, 1)
 	coll.FieldIndexID = map[int64]int64{101: 1000}
-	checker.meta.CollectionManager.PutCollection(coll)
-	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, coll)
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -271,8 +275,8 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(1)
-	checker.meta.ResourceManager.HandleNodeUp(2)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
 
 	// dist
 	segment := utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel")

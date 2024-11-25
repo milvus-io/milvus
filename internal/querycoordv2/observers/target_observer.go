@@ -169,14 +169,14 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 			return
 
 		case <-ob.initChan:
-			for _, collectionID := range ob.meta.GetAll() {
+			for _, collectionID := range ob.meta.GetAll(ctx) {
 				ob.init(ctx, collectionID)
 			}
 			log.Info("target observer init done")
 
 		case <-ticker.C:
 			ob.clean()
-			loaded := lo.FilterMap(ob.meta.GetAllCollections(), func(collection *meta.Collection, _ int) (int64, bool) {
+			loaded := lo.FilterMap(ob.meta.GetAllCollections(ctx), func(collection *meta.Collection, _ int) (int64, bool) {
 				if collection.GetStatus() == querypb.LoadStatus_Loaded {
 					return collection.GetCollectionID(), true
 				}
@@ -192,7 +192,7 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 			switch req.opType {
 			case UpdateCollection:
 				ob.keylocks.Lock(req.CollectionID)
-				err := ob.updateNextTarget(req.CollectionID)
+				err := ob.updateNextTarget(ctx, req.CollectionID)
 				ob.keylocks.Unlock(req.CollectionID)
 				if err != nil {
 					log.Warn("failed to manually update next target",
@@ -214,10 +214,10 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				delete(ob.readyNotifiers, req.CollectionID)
 				ob.mut.Unlock()
 
-				ob.targetMgr.RemoveCollection(req.CollectionID)
+				ob.targetMgr.RemoveCollection(ctx, req.CollectionID)
 				req.Notifier <- nil
 			case ReleasePartition:
-				ob.targetMgr.RemovePartition(req.CollectionID, req.PartitionIDs...)
+				ob.targetMgr.RemovePartition(ctx, req.CollectionID, req.PartitionIDs...)
 				req.Notifier <- nil
 			}
 			log.Info("manually trigger update target done",
@@ -230,7 +230,7 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 // Check whether provided collection is has current target.
 // If not, submit an async task into dispatcher.
 func (ob *TargetObserver) Check(ctx context.Context, collectionID int64, partitionID int64) bool {
-	result := ob.targetMgr.IsCurrentTargetExist(collectionID, partitionID)
+	result := ob.targetMgr.IsCurrentTargetExist(ctx, collectionID, partitionID)
 	if !result {
 		ob.loadingDispatcher.AddTask(collectionID)
 	}
@@ -246,24 +246,24 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 	defer ob.keylocks.Unlock(collectionID)
 
 	if ob.shouldUpdateCurrentTarget(ctx, collectionID) {
-		ob.updateCurrentTarget(collectionID)
+		ob.updateCurrentTarget(ctx, collectionID)
 	}
 
-	if ob.shouldUpdateNextTarget(collectionID) {
+	if ob.shouldUpdateNextTarget(ctx, collectionID) {
 		// update next target in collection level
-		ob.updateNextTarget(collectionID)
+		ob.updateNextTarget(ctx, collectionID)
 	}
 }
 
 func (ob *TargetObserver) init(ctx context.Context, collectionID int64) {
 	// pull next target first if not exist
-	if !ob.targetMgr.IsNextTargetExist(collectionID) {
-		ob.updateNextTarget(collectionID)
+	if !ob.targetMgr.IsNextTargetExist(ctx, collectionID) {
+		ob.updateNextTarget(ctx, collectionID)
 	}
 
 	// try to update current target if all segment/channel are ready
 	if ob.shouldUpdateCurrentTarget(ctx, collectionID) {
-		ob.updateCurrentTarget(collectionID)
+		ob.updateCurrentTarget(ctx, collectionID)
 	}
 	// refresh collection loading status upon restart
 	ob.check(ctx, collectionID)
@@ -310,7 +310,7 @@ func (ob *TargetObserver) ReleasePartition(collectionID int64, partitionID ...in
 }
 
 func (ob *TargetObserver) clean() {
-	collectionSet := typeutil.NewUniqueSet(ob.meta.GetAll()...)
+	collectionSet := typeutil.NewUniqueSet(ob.meta.GetAll(context.TODO())...)
 	// for collection which has been removed from target, try to clear nextTargetLastUpdate
 	ob.nextTargetLastUpdate.Range(func(collectionID int64, _ time.Time) bool {
 		if !collectionSet.Contain(collectionID) {
@@ -331,8 +331,8 @@ func (ob *TargetObserver) clean() {
 	}
 }
 
-func (ob *TargetObserver) shouldUpdateNextTarget(collectionID int64) bool {
-	return !ob.targetMgr.IsNextTargetExist(collectionID) || ob.isNextTargetExpired(collectionID)
+func (ob *TargetObserver) shouldUpdateNextTarget(ctx context.Context, collectionID int64) bool {
+	return !ob.targetMgr.IsNextTargetExist(ctx, collectionID) || ob.isNextTargetExpired(collectionID)
 }
 
 func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
@@ -343,12 +343,12 @@ func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
 	return time.Since(lastUpdated) > params.Params.QueryCoordCfg.NextTargetSurviveTime.GetAsDuration(time.Second)
 }
 
-func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
+func (ob *TargetObserver) updateNextTarget(ctx context.Context, collectionID int64) error {
 	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.TargetObserver", 1, 60).
 		With(zap.Int64("collectionID", collectionID))
 
 	log.RatedInfo(10, "observer trigger update next target")
-	err := ob.targetMgr.UpdateCollectionNextTarget(collectionID)
+	err := ob.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	if err != nil {
 		log.Warn("failed to update next target for collection",
 			zap.Error(err))
@@ -363,7 +363,7 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
-	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(collectionID)
+	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(ctx, collectionID)
 	log := log.Ctx(ctx).WithRateGroup(
 		fmt.Sprintf("qcv2.TargetObserver-%d", collectionID),
 		10,
@@ -374,7 +374,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 	)
 
 	// check channel first
-	channelNames := ob.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
+	channelNames := ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTarget)
 	if len(channelNames) == 0 {
 		// next target is empty, no need to update
 		log.RatedInfo(10, "next target is empty, no need to update")
@@ -402,13 +402,13 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 	var partitions []int64
 	var indexInfo []*indexpb.IndexInfo
 	var err error
-	newVersion := ob.targetMgr.GetCollectionTargetVersion(collectionID, meta.NextTarget)
+	newVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
 	for _, leader := range collectionReadyLeaders {
 		updateVersionAction := ob.checkNeedUpdateTargetVersion(ctx, leader, newVersion)
 		if updateVersionAction == nil {
 			continue
 		}
-		replica := ob.meta.ReplicaManager.GetByCollectionAndNode(collectionID, leader.ID)
+		replica := ob.meta.ReplicaManager.GetByCollectionAndNode(ctx, collectionID, leader.ID)
 		if replica == nil {
 			log.Warn("replica not found", zap.Int64("nodeID", leader.ID), zap.Int64("collectionID", collectionID))
 			continue
@@ -422,7 +422,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 				return false
 			}
 
-			partitions, err = utils.GetPartitions(ob.meta.CollectionManager, collectionID)
+			partitions, err = utils.GetPartitions(ctx, ob.meta.CollectionManager, collectionID)
 			if err != nil {
 				log.Warn("failed to get partitions", zap.Error(err))
 				return false
@@ -467,7 +467,7 @@ func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leade
 		Actions:      diffs,
 		Schema:       collectionInfo.GetSchema(),
 		LoadMeta: &querypb.LoadMetaInfo{
-			LoadType:      ob.meta.GetLoadType(leaderView.CollectionID),
+			LoadType:      ob.meta.GetLoadType(ctx, leaderView.CollectionID),
 			CollectionID:  leaderView.CollectionID,
 			PartitionIDs:  partitions,
 			DbName:        collectionInfo.GetDbName(),
@@ -506,10 +506,10 @@ func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, lead
 		zap.Int64("newVersion", targetVersion),
 	)
 
-	sealedSegments := ob.targetMgr.GetSealedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
-	growingSegments := ob.targetMgr.GetGrowingSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
-	droppedSegments := ob.targetMgr.GetDroppedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
-	channel := ob.targetMgr.GetDmChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTargetFirst)
+	sealedSegments := ob.targetMgr.GetSealedSegmentsByChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
+	growingSegments := ob.targetMgr.GetGrowingSegmentsByChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
+	droppedSegments := ob.targetMgr.GetDroppedSegmentsByChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
+	channel := ob.targetMgr.GetDmChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTargetFirst)
 
 	action := &querypb.SyncAction{
 		Type:            querypb.SyncType_UpdateVersion,
@@ -526,10 +526,10 @@ func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, lead
 	return action
 }
 
-func (ob *TargetObserver) updateCurrentTarget(collectionID int64) {
-	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.TargetObserver", 1, 60)
+func (ob *TargetObserver) updateCurrentTarget(ctx context.Context, collectionID int64) {
+	log := log.Ctx(ctx).WithRateGroup("qcv2.TargetObserver", 1, 60)
 	log.RatedInfo(10, "observer trigger update current target", zap.Int64("collectionID", collectionID))
-	if ob.targetMgr.UpdateCollectionCurrentTarget(collectionID) {
+	if ob.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID) {
 		ob.mut.Lock()
 		defer ob.mut.Unlock()
 		notifiers := ob.readyNotifiers[collectionID]

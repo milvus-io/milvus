@@ -208,7 +208,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	)
 
 	// get segment's replica first, then get shard leader by replica
-	replica := ex.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
+	replica := ex.meta.ReplicaManager.GetByCollectionAndNode(ctx, task.CollectionID(), action.Node())
 	if replica == nil {
 		msg := "node doesn't belong to any replica"
 		err := merr.WrapErrNodeNotAvailable(action.Node())
@@ -259,7 +259,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	dstNode := action.Node()
 
 	req := packReleaseSegmentRequest(task, action)
-	channel := ex.targetMgr.GetDmChannel(task.CollectionID(), task.Shard(), meta.CurrentTarget)
+	channel := ex.targetMgr.GetDmChannel(ctx, task.CollectionID(), task.Shard(), meta.CurrentTarget)
 	if channel != nil {
 		// if channel exists in current target, set cp to ReleaseSegmentRequest, need to use it as growing segment's exclude ts
 		req.Checkpoint = channel.GetSeekPosition()
@@ -272,9 +272,9 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	} else {
 		req.Shard = task.shard
 
-		if ex.meta.CollectionManager.Exist(task.CollectionID()) {
+		if ex.meta.CollectionManager.Exist(ctx, task.CollectionID()) {
 			// get segment's replica first, then get shard leader by replica
-			replica := ex.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
+			replica := ex.meta.ReplicaManager.GetByCollectionAndNode(ctx, task.CollectionID(), action.Node())
 			if replica == nil {
 				msg := "node doesn't belong to any replica, try to send release to worker"
 				err := merr.WrapErrNodeNotAvailable(action.Node())
@@ -344,8 +344,8 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		log.Warn("failed to get collection info")
 		return err
 	}
-	loadFields := ex.meta.GetLoadFields(task.CollectionID())
-	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, task.CollectionID())
+	loadFields := ex.meta.GetLoadFields(ctx, task.CollectionID())
+	partitions, err := utils.GetPartitions(ctx, ex.meta.CollectionManager, task.CollectionID())
 	if err != nil {
 		log.Warn("failed to get partitions of collection")
 		return err
@@ -356,7 +356,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		return err
 	}
 	loadMeta := packLoadMeta(
-		ex.meta.GetLoadType(task.CollectionID()),
+		ex.meta.GetLoadType(ctx, task.CollectionID()),
 		task.CollectionID(),
 		collectionInfo.GetDbName(),
 		task.ResourceGroup(),
@@ -364,7 +364,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		partitions...,
 	)
 
-	dmChannel := ex.targetMgr.GetDmChannel(task.CollectionID(), action.ChannelName(), meta.NextTarget)
+	dmChannel := ex.targetMgr.GetDmChannel(ctx, task.CollectionID(), action.ChannelName(), meta.NextTarget)
 	if dmChannel == nil {
 		msg := "channel does not exist in next target, skip it"
 		log.Warn(msg, zap.String("channelName", action.ChannelName()))
@@ -652,15 +652,15 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		log.Warn("failed to get collection info", zap.Error(err))
 		return nil, nil, nil, err
 	}
-	loadFields := ex.meta.GetLoadFields(task.CollectionID())
-	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, collectionID)
+	loadFields := ex.meta.GetLoadFields(ctx, task.CollectionID())
+	partitions, err := utils.GetPartitions(ctx, ex.meta.CollectionManager, collectionID)
 	if err != nil {
 		log.Warn("failed to get partitions of collection", zap.Error(err))
 		return nil, nil, nil, err
 	}
 
 	loadMeta := packLoadMeta(
-		ex.meta.GetLoadType(task.CollectionID()),
+		ex.meta.GetLoadType(ctx, task.CollectionID()),
 		task.CollectionID(),
 		collectionInfo.GetDbName(),
 		task.ResourceGroup(),
@@ -669,7 +669,7 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 	)
 
 	// get channel first, in case of target updated after segment info fetched
-	channel := ex.targetMgr.GetDmChannel(collectionID, shard, meta.NextTargetFirst)
+	channel := ex.targetMgr.GetDmChannel(ctx, collectionID, shard, meta.NextTargetFirst)
 	if channel == nil {
 		return nil, nil, nil, merr.WrapErrChannelNotAvailable(shard)
 	}

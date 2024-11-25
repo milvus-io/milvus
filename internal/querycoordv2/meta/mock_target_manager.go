@@ -3,6 +3,8 @@
 package meta
 
 import (
+	context "context"
+
 	metastore "github.com/milvus-io/milvus/internal/metastore"
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 
@@ -24,17 +26,17 @@ func (_m *MockTargetManager) EXPECT() *MockTargetManager_Expecter {
 	return &MockTargetManager_Expecter{mock: &_m.Mock}
 }
 
-// CanSegmentBeMoved provides a mock function with given fields: collectionID, segmentID
-func (_m *MockTargetManager) CanSegmentBeMoved(collectionID int64, segmentID int64) bool {
-	ret := _m.Called(collectionID, segmentID)
+// CanSegmentBeMoved provides a mock function with given fields: ctx, collectionID, segmentID
+func (_m *MockTargetManager) CanSegmentBeMoved(ctx context.Context, collectionID int64, segmentID int64) bool {
+	ret := _m.Called(ctx, collectionID, segmentID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CanSegmentBeMoved")
 	}
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(int64, int64) bool); ok {
-		r0 = rf(collectionID, segmentID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) bool); ok {
+		r0 = rf(ctx, collectionID, segmentID)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
@@ -48,15 +50,16 @@ type MockTargetManager_CanSegmentBeMoved_Call struct {
 }
 
 // CanSegmentBeMoved is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - segmentID int64
-func (_e *MockTargetManager_Expecter) CanSegmentBeMoved(collectionID interface{}, segmentID interface{}) *MockTargetManager_CanSegmentBeMoved_Call {
-	return &MockTargetManager_CanSegmentBeMoved_Call{Call: _e.mock.On("CanSegmentBeMoved", collectionID, segmentID)}
+func (_e *MockTargetManager_Expecter) CanSegmentBeMoved(ctx interface{}, collectionID interface{}, segmentID interface{}) *MockTargetManager_CanSegmentBeMoved_Call {
+	return &MockTargetManager_CanSegmentBeMoved_Call{Call: _e.mock.On("CanSegmentBeMoved", ctx, collectionID, segmentID)}
 }
 
-func (_c *MockTargetManager_CanSegmentBeMoved_Call) Run(run func(collectionID int64, segmentID int64)) *MockTargetManager_CanSegmentBeMoved_Call {
+func (_c *MockTargetManager_CanSegmentBeMoved_Call) Run(run func(ctx context.Context, collectionID int64, segmentID int64)) *MockTargetManager_CanSegmentBeMoved_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int64))
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64))
 	})
 	return _c
 }
@@ -66,22 +69,22 @@ func (_c *MockTargetManager_CanSegmentBeMoved_Call) Return(_a0 bool) *MockTarget
 	return _c
 }
 
-func (_c *MockTargetManager_CanSegmentBeMoved_Call) RunAndReturn(run func(int64, int64) bool) *MockTargetManager_CanSegmentBeMoved_Call {
+func (_c *MockTargetManager_CanSegmentBeMoved_Call) RunAndReturn(run func(context.Context, int64, int64) bool) *MockTargetManager_CanSegmentBeMoved_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetCollectionTargetVersion provides a mock function with given fields: collectionID, scope
-func (_m *MockTargetManager) GetCollectionTargetVersion(collectionID int64, scope int32) int64 {
-	ret := _m.Called(collectionID, scope)
+// GetCollectionTargetVersion provides a mock function with given fields: ctx, collectionID, scope
+func (_m *MockTargetManager) GetCollectionTargetVersion(ctx context.Context, collectionID int64, scope int32) int64 {
+	ret := _m.Called(ctx, collectionID, scope)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCollectionTargetVersion")
 	}
 
 	var r0 int64
-	if rf, ok := ret.Get(0).(func(int64, int32) int64); ok {
-		r0 = rf(collectionID, scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int32) int64); ok {
+		r0 = rf(ctx, collectionID, scope)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
@@ -95,15 +98,16 @@ type MockTargetManager_GetCollectionTargetVersion_Call struct {
 }
 
 // GetCollectionTargetVersion is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - scope int32
-func (_e *MockTargetManager_Expecter) GetCollectionTargetVersion(collectionID interface{}, scope interface{}) *MockTargetManager_GetCollectionTargetVersion_Call {
-	return &MockTargetManager_GetCollectionTargetVersion_Call{Call: _e.mock.On("GetCollectionTargetVersion", collectionID, scope)}
+func (_e *MockTargetManager_Expecter) GetCollectionTargetVersion(ctx interface{}, collectionID interface{}, scope interface{}) *MockTargetManager_GetCollectionTargetVersion_Call {
+	return &MockTargetManager_GetCollectionTargetVersion_Call{Call: _e.mock.On("GetCollectionTargetVersion", ctx, collectionID, scope)}
 }
 
-func (_c *MockTargetManager_GetCollectionTargetVersion_Call) Run(run func(collectionID int64, scope int32)) *MockTargetManager_GetCollectionTargetVersion_Call {
+func (_c *MockTargetManager_GetCollectionTargetVersion_Call) Run(run func(ctx context.Context, collectionID int64, scope int32)) *MockTargetManager_GetCollectionTargetVersion_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int32))
+		run(args[0].(context.Context), args[1].(int64), args[2].(int32))
 	})
 	return _c
 }
@@ -113,22 +117,22 @@ func (_c *MockTargetManager_GetCollectionTargetVersion_Call) Return(_a0 int64) *
 	return _c
 }
 
-func (_c *MockTargetManager_GetCollectionTargetVersion_Call) RunAndReturn(run func(int64, int32) int64) *MockTargetManager_GetCollectionTargetVersion_Call {
+func (_c *MockTargetManager_GetCollectionTargetVersion_Call) RunAndReturn(run func(context.Context, int64, int32) int64) *MockTargetManager_GetCollectionTargetVersion_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetDmChannel provides a mock function with given fields: collectionID, channel, scope
-func (_m *MockTargetManager) GetDmChannel(collectionID int64, channel string, scope int32) *DmChannel {
-	ret := _m.Called(collectionID, channel, scope)
+// GetDmChannel provides a mock function with given fields: ctx, collectionID, channel, scope
+func (_m *MockTargetManager) GetDmChannel(ctx context.Context, collectionID int64, channel string, scope int32) *DmChannel {
+	ret := _m.Called(ctx, collectionID, channel, scope)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetDmChannel")
 	}
 
 	var r0 *DmChannel
-	if rf, ok := ret.Get(0).(func(int64, string, int32) *DmChannel); ok {
-		r0 = rf(collectionID, channel, scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string, int32) *DmChannel); ok {
+		r0 = rf(ctx, collectionID, channel, scope)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*DmChannel)
@@ -144,16 +148,17 @@ type MockTargetManager_GetDmChannel_Call struct {
 }
 
 // GetDmChannel is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - channel string
 //   - scope int32
-func (_e *MockTargetManager_Expecter) GetDmChannel(collectionID interface{}, channel interface{}, scope interface{}) *MockTargetManager_GetDmChannel_Call {
-	return &MockTargetManager_GetDmChannel_Call{Call: _e.mock.On("GetDmChannel", collectionID, channel, scope)}
+func (_e *MockTargetManager_Expecter) GetDmChannel(ctx interface{}, collectionID interface{}, channel interface{}, scope interface{}) *MockTargetManager_GetDmChannel_Call {
+	return &MockTargetManager_GetDmChannel_Call{Call: _e.mock.On("GetDmChannel", ctx, collectionID, channel, scope)}
 }
 
-func (_c *MockTargetManager_GetDmChannel_Call) Run(run func(collectionID int64, channel string, scope int32)) *MockTargetManager_GetDmChannel_Call {
+func (_c *MockTargetManager_GetDmChannel_Call) Run(run func(ctx context.Context, collectionID int64, channel string, scope int32)) *MockTargetManager_GetDmChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(string), args[2].(int32))
+		run(args[0].(context.Context), args[1].(int64), args[2].(string), args[3].(int32))
 	})
 	return _c
 }
@@ -163,22 +168,22 @@ func (_c *MockTargetManager_GetDmChannel_Call) Return(_a0 *DmChannel) *MockTarge
 	return _c
 }
 
-func (_c *MockTargetManager_GetDmChannel_Call) RunAndReturn(run func(int64, string, int32) *DmChannel) *MockTargetManager_GetDmChannel_Call {
+func (_c *MockTargetManager_GetDmChannel_Call) RunAndReturn(run func(context.Context, int64, string, int32) *DmChannel) *MockTargetManager_GetDmChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetDmChannelsByCollection provides a mock function with given fields: collectionID, scope
-func (_m *MockTargetManager) GetDmChannelsByCollection(collectionID int64, scope int32) map[string]*DmChannel {
-	ret := _m.Called(collectionID, scope)
+// GetDmChannelsByCollection provides a mock function with given fields: ctx, collectionID, scope
+func (_m *MockTargetManager) GetDmChannelsByCollection(ctx context.Context, collectionID int64, scope int32) map[string]*DmChannel {
+	ret := _m.Called(ctx, collectionID, scope)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetDmChannelsByCollection")
 	}
 
 	var r0 map[string]*DmChannel
-	if rf, ok := ret.Get(0).(func(int64, int32) map[string]*DmChannel); ok {
-		r0 = rf(collectionID, scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int32) map[string]*DmChannel); ok {
+		r0 = rf(ctx, collectionID, scope)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]*DmChannel)
@@ -194,15 +199,16 @@ type MockTargetManager_GetDmChannelsByCollection_Call struct {
 }
 
 // GetDmChannelsByCollection is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - scope int32
-func (_e *MockTargetManager_Expecter) GetDmChannelsByCollection(collectionID interface{}, scope interface{}) *MockTargetManager_GetDmChannelsByCollection_Call {
-	return &MockTargetManager_GetDmChannelsByCollection_Call{Call: _e.mock.On("GetDmChannelsByCollection", collectionID, scope)}
+func (_e *MockTargetManager_Expecter) GetDmChannelsByCollection(ctx interface{}, collectionID interface{}, scope interface{}) *MockTargetManager_GetDmChannelsByCollection_Call {
+	return &MockTargetManager_GetDmChannelsByCollection_Call{Call: _e.mock.On("GetDmChannelsByCollection", ctx, collectionID, scope)}
 }
 
-func (_c *MockTargetManager_GetDmChannelsByCollection_Call) Run(run func(collectionID int64, scope int32)) *MockTargetManager_GetDmChannelsByCollection_Call {
+func (_c *MockTargetManager_GetDmChannelsByCollection_Call) Run(run func(ctx context.Context, collectionID int64, scope int32)) *MockTargetManager_GetDmChannelsByCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int32))
+		run(args[0].(context.Context), args[1].(int64), args[2].(int32))
 	})
 	return _c
 }
@@ -212,22 +218,22 @@ func (_c *MockTargetManager_GetDmChannelsByCollection_Call) Return(_a0 map[strin
 	return _c
 }
 
-func (_c *MockTargetManager_GetDmChannelsByCollection_Call) RunAndReturn(run func(int64, int32) map[string]*DmChannel) *MockTargetManager_GetDmChannelsByCollection_Call {
+func (_c *MockTargetManager_GetDmChannelsByCollection_Call) RunAndReturn(run func(context.Context, int64, int32) map[string]*DmChannel) *MockTargetManager_GetDmChannelsByCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetDroppedSegmentsByChannel provides a mock function with given fields: collectionID, channelName, scope
-func (_m *MockTargetManager) GetDroppedSegmentsByChannel(collectionID int64, channelName string, scope int32) []int64 {
-	ret := _m.Called(collectionID, channelName, scope)
+// GetDroppedSegmentsByChannel provides a mock function with given fields: ctx, collectionID, channelName, scope
+func (_m *MockTargetManager) GetDroppedSegmentsByChannel(ctx context.Context, collectionID int64, channelName string, scope int32) []int64 {
+	ret := _m.Called(ctx, collectionID, channelName, scope)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetDroppedSegmentsByChannel")
 	}
 
 	var r0 []int64
-	if rf, ok := ret.Get(0).(func(int64, string, int32) []int64); ok {
-		r0 = rf(collectionID, channelName, scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string, int32) []int64); ok {
+		r0 = rf(ctx, collectionID, channelName, scope)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]int64)
@@ -243,16 +249,17 @@ type MockTargetManager_GetDroppedSegmentsByChannel_Call struct {
 }
 
 // GetDroppedSegmentsByChannel is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - channelName string
 //   - scope int32
-func (_e *MockTargetManager_Expecter) GetDroppedSegmentsByChannel(collectionID interface{}, channelName interface{}, scope interface{}) *MockTargetManager_GetDroppedSegmentsByChannel_Call {
-	return &MockTargetManager_GetDroppedSegmentsByChannel_Call{Call: _e.mock.On("GetDroppedSegmentsByChannel", collectionID, channelName, scope)}
+func (_e *MockTargetManager_Expecter) GetDroppedSegmentsByChannel(ctx interface{}, collectionID interface{}, channelName interface{}, scope interface{}) *MockTargetManager_GetDroppedSegmentsByChannel_Call {
+	return &MockTargetManager_GetDroppedSegmentsByChannel_Call{Call: _e.mock.On("GetDroppedSegmentsByChannel", ctx, collectionID, channelName, scope)}
 }
 
-func (_c *MockTargetManager_GetDroppedSegmentsByChannel_Call) Run(run func(collectionID int64, channelName string, scope int32)) *MockTargetManager_GetDroppedSegmentsByChannel_Call {
+func (_c *MockTargetManager_GetDroppedSegmentsByChannel_Call) Run(run func(ctx context.Context, collectionID int64, channelName string, scope int32)) *MockTargetManager_GetDroppedSegmentsByChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(string), args[2].(int32))
+		run(args[0].(context.Context), args[1].(int64), args[2].(string), args[3].(int32))
 	})
 	return _c
 }
@@ -262,22 +269,22 @@ func (_c *MockTargetManager_GetDroppedSegmentsByChannel_Call) Return(_a0 []int64
 	return _c
 }
 
-func (_c *MockTargetManager_GetDroppedSegmentsByChannel_Call) RunAndReturn(run func(int64, string, int32) []int64) *MockTargetManager_GetDroppedSegmentsByChannel_Call {
+func (_c *MockTargetManager_GetDroppedSegmentsByChannel_Call) RunAndReturn(run func(context.Context, int64, string, int32) []int64) *MockTargetManager_GetDroppedSegmentsByChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetGrowingSegmentsByChannel provides a mock function with given fields: collectionID, channelName, scope
-func (_m *MockTargetManager) GetGrowingSegmentsByChannel(collectionID int64, channelName string, scope int32) typeutil.Set[int64] {
-	ret := _m.Called(collectionID, channelName, scope)
+// GetGrowingSegmentsByChannel provides a mock function with given fields: ctx, collectionID, channelName, scope
+func (_m *MockTargetManager) GetGrowingSegmentsByChannel(ctx context.Context, collectionID int64, channelName string, scope int32) typeutil.Set[int64] {
+	ret := _m.Called(ctx, collectionID, channelName, scope)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetGrowingSegmentsByChannel")
 	}
 
 	var r0 typeutil.Set[int64]
-	if rf, ok := ret.Get(0).(func(int64, string, int32) typeutil.Set[int64]); ok {
-		r0 = rf(collectionID, channelName, scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string, int32) typeutil.Set[int64]); ok {
+		r0 = rf(ctx, collectionID, channelName, scope)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(typeutil.Set[int64])
@@ -293,16 +300,17 @@ type MockTargetManager_GetGrowingSegmentsByChannel_Call struct {
 }
 
 // GetGrowingSegmentsByChannel is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - channelName string
 //   - scope int32
-func (_e *MockTargetManager_Expecter) GetGrowingSegmentsByChannel(collectionID interface{}, channelName interface{}, scope interface{}) *MockTargetManager_GetGrowingSegmentsByChannel_Call {
-	return &MockTargetManager_GetGrowingSegmentsByChannel_Call{Call: _e.mock.On("GetGrowingSegmentsByChannel", collectionID, channelName, scope)}
+func (_e *MockTargetManager_Expecter) GetGrowingSegmentsByChannel(ctx interface{}, collectionID interface{}, channelName interface{}, scope interface{}) *MockTargetManager_GetGrowingSegmentsByChannel_Call {
+	return &MockTargetManager_GetGrowingSegmentsByChannel_Call{Call: _e.mock.On("GetGrowingSegmentsByChannel", ctx, collectionID, channelName, scope)}
 }
 
-func (_c *MockTargetManager_GetGrowingSegmentsByChannel_Call) Run(run func(collectionID int64, channelName string, scope int32)) *MockTargetManager_GetGrowingSegmentsByChannel_Call {
+func (_c *MockTargetManager_GetGrowingSegmentsByChannel_Call) Run(run func(ctx context.Context, collectionID int64, channelName string, scope int32)) *MockTargetManager_GetGrowingSegmentsByChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(string), args[2].(int32))
+		run(args[0].(context.Context), args[1].(int64), args[2].(string), args[3].(int32))
 	})
 	return _c
 }
@@ -312,22 +320,22 @@ func (_c *MockTargetManager_GetGrowingSegmentsByChannel_Call) Return(_a0 typeuti
 	return _c
 }
 
-func (_c *MockTargetManager_GetGrowingSegmentsByChannel_Call) RunAndReturn(run func(int64, string, int32) typeutil.Set[int64]) *MockTargetManager_GetGrowingSegmentsByChannel_Call {
+func (_c *MockTargetManager_GetGrowingSegmentsByChannel_Call) RunAndReturn(run func(context.Context, int64, string, int32) typeutil.Set[int64]) *MockTargetManager_GetGrowingSegmentsByChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetGrowingSegmentsByCollection provides a mock function with given fields: collectionID, scope
-func (_m *MockTargetManager) GetGrowingSegmentsByCollection(collectionID int64, scope int32) typeutil.Set[int64] {
-	ret := _m.Called(collectionID, scope)
+// GetGrowingSegmentsByCollection provides a mock function with given fields: ctx, collectionID, scope
+func (_m *MockTargetManager) GetGrowingSegmentsByCollection(ctx context.Context, collectionID int64, scope int32) typeutil.Set[int64] {
+	ret := _m.Called(ctx, collectionID, scope)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetGrowingSegmentsByCollection")
 	}
 
 	var r0 typeutil.Set[int64]
-	if rf, ok := ret.Get(0).(func(int64, int32) typeutil.Set[int64]); ok {
-		r0 = rf(collectionID, scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int32) typeutil.Set[int64]); ok {
+		r0 = rf(ctx, collectionID, scope)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(typeutil.Set[int64])
@@ -343,15 +351,16 @@ type MockTargetManager_GetGrowingSegmentsByCollection_Call struct {
 }
 
 // GetGrowingSegmentsByCollection is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - scope int32
-func (_e *MockTargetManager_Expecter) GetGrowingSegmentsByCollection(collectionID interface{}, scope interface{}) *MockTargetManager_GetGrowingSegmentsByCollection_Call {
-	return &MockTargetManager_GetGrowingSegmentsByCollection_Call{Call: _e.mock.On("GetGrowingSegmentsByCollection", collectionID, scope)}
+func (_e *MockTargetManager_Expecter) GetGrowingSegmentsByCollection(ctx interface{}, collectionID interface{}, scope interface{}) *MockTargetManager_GetGrowingSegmentsByCollection_Call {
+	return &MockTargetManager_GetGrowingSegmentsByCollection_Call{Call: _e.mock.On("GetGrowingSegmentsByCollection", ctx, collectionID, scope)}
 }
 
-func (_c *MockTargetManager_GetGrowingSegmentsByCollection_Call) Run(run func(collectionID int64, scope int32)) *MockTargetManager_GetGrowingSegmentsByCollection_Call {
+func (_c *MockTargetManager_GetGrowingSegmentsByCollection_Call) Run(run func(ctx context.Context, collectionID int64, scope int32)) *MockTargetManager_GetGrowingSegmentsByCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int32))
+		run(args[0].(context.Context), args[1].(int64), args[2].(int32))
 	})
 	return _c
 }
@@ -361,22 +370,22 @@ func (_c *MockTargetManager_GetGrowingSegmentsByCollection_Call) Return(_a0 type
 	return _c
 }
 
-func (_c *MockTargetManager_GetGrowingSegmentsByCollection_Call) RunAndReturn(run func(int64, int32) typeutil.Set[int64]) *MockTargetManager_GetGrowingSegmentsByCollection_Call {
+func (_c *MockTargetManager_GetGrowingSegmentsByCollection_Call) RunAndReturn(run func(context.Context, int64, int32) typeutil.Set[int64]) *MockTargetManager_GetGrowingSegmentsByCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetSealedSegment provides a mock function with given fields: collectionID, id, scope
-func (_m *MockTargetManager) GetSealedSegment(collectionID int64, id int64, scope int32) *datapb.SegmentInfo {
-	ret := _m.Called(collectionID, id, scope)
+// GetSealedSegment provides a mock function with given fields: ctx, collectionID, id, scope
+func (_m *MockTargetManager) GetSealedSegment(ctx context.Context, collectionID int64, id int64, scope int32) *datapb.SegmentInfo {
+	ret := _m.Called(ctx, collectionID, id, scope)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetSealedSegment")
 	}
 
 	var r0 *datapb.SegmentInfo
-	if rf, ok := ret.Get(0).(func(int64, int64, int32) *datapb.SegmentInfo); ok {
-		r0 = rf(collectionID, id, scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int32) *datapb.SegmentInfo); ok {
+		r0 = rf(ctx, collectionID, id, scope)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*datapb.SegmentInfo)
@@ -392,16 +401,17 @@ type MockTargetManager_GetSealedSegment_Call struct {
 }
 
 // GetSealedSegment is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - id int64
 //   - scope int32
-func (_e *MockTargetManager_Expecter) GetSealedSegment(collectionID interface{}, id interface{}, scope interface{}) *MockTargetManager_GetSealedSegment_Call {
-	return &MockTargetManager_GetSealedSegment_Call{Call: _e.mock.On("GetSealedSegment", collectionID, id, scope)}
+func (_e *MockTargetManager_Expecter) GetSealedSegment(ctx interface{}, collectionID interface{}, id interface{}, scope interface{}) *MockTargetManager_GetSealedSegment_Call {
+	return &MockTargetManager_GetSealedSegment_Call{Call: _e.mock.On("GetSealedSegment", ctx, collectionID, id, scope)}
 }
 
-func (_c *MockTargetManager_GetSealedSegment_Call) Run(run func(collectionID int64, id int64, scope int32)) *MockTargetManager_GetSealedSegment_Call {
+func (_c *MockTargetManager_GetSealedSegment_Call) Run(run func(ctx context.Context, collectionID int64, id int64, scope int32)) *MockTargetManager_GetSealedSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int64), args[2].(int32))
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(int32))
 	})
 	return _c
 }
@@ -411,22 +421,22 @@ func (_c *MockTargetManager_GetSealedSegment_Call) Return(_a0 *datapb.SegmentInf
 	return _c
 }
 
-func (_c *MockTargetManager_GetSealedSegment_Call) RunAndReturn(run func(int64, int64, int32) *datapb.SegmentInfo) *MockTargetManager_GetSealedSegment_Call {
+func (_c *MockTargetManager_GetSealedSegment_Call) RunAndReturn(run func(context.Context, int64, int64, int32) *datapb.SegmentInfo) *MockTargetManager_GetSealedSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetSealedSegmentsByChannel provides a mock function with given fields: collectionID, channelName, scope
-func (_m *MockTargetManager) GetSealedSegmentsByChannel(collectionID int64, channelName string, scope int32) map[int64]*datapb.SegmentInfo {
-	ret := _m.Called(collectionID, channelName, scope)
+// GetSealedSegmentsByChannel provides a mock function with given fields: ctx, collectionID, channelName, scope
+func (_m *MockTargetManager) GetSealedSegmentsByChannel(ctx context.Context, collectionID int64, channelName string, scope int32) map[int64]*datapb.SegmentInfo {
+	ret := _m.Called(ctx, collectionID, channelName, scope)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetSealedSegmentsByChannel")
 	}
 
 	var r0 map[int64]*datapb.SegmentInfo
-	if rf, ok := ret.Get(0).(func(int64, string, int32) map[int64]*datapb.SegmentInfo); ok {
-		r0 = rf(collectionID, channelName, scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string, int32) map[int64]*datapb.SegmentInfo); ok {
+		r0 = rf(ctx, collectionID, channelName, scope)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[int64]*datapb.SegmentInfo)
@@ -442,16 +452,17 @@ type MockTargetManager_GetSealedSegmentsByChannel_Call struct {
 }
 
 // GetSealedSegmentsByChannel is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - channelName string
 //   - scope int32
-func (_e *MockTargetManager_Expecter) GetSealedSegmentsByChannel(collectionID interface{}, channelName interface{}, scope interface{}) *MockTargetManager_GetSealedSegmentsByChannel_Call {
-	return &MockTargetManager_GetSealedSegmentsByChannel_Call{Call: _e.mock.On("GetSealedSegmentsByChannel", collectionID, channelName, scope)}
+func (_e *MockTargetManager_Expecter) GetSealedSegmentsByChannel(ctx interface{}, collectionID interface{}, channelName interface{}, scope interface{}) *MockTargetManager_GetSealedSegmentsByChannel_Call {
+	return &MockTargetManager_GetSealedSegmentsByChannel_Call{Call: _e.mock.On("GetSealedSegmentsByChannel", ctx, collectionID, channelName, scope)}
 }
 
-func (_c *MockTargetManager_GetSealedSegmentsByChannel_Call) Run(run func(collectionID int64, channelName string, scope int32)) *MockTargetManager_GetSealedSegmentsByChannel_Call {
+func (_c *MockTargetManager_GetSealedSegmentsByChannel_Call) Run(run func(ctx context.Context, collectionID int64, channelName string, scope int32)) *MockTargetManager_GetSealedSegmentsByChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(string), args[2].(int32))
+		run(args[0].(context.Context), args[1].(int64), args[2].(string), args[3].(int32))
 	})
 	return _c
 }
@@ -461,22 +472,22 @@ func (_c *MockTargetManager_GetSealedSegmentsByChannel_Call) Return(_a0 map[int6
 	return _c
 }
 
-func (_c *MockTargetManager_GetSealedSegmentsByChannel_Call) RunAndReturn(run func(int64, string, int32) map[int64]*datapb.SegmentInfo) *MockTargetManager_GetSealedSegmentsByChannel_Call {
+func (_c *MockTargetManager_GetSealedSegmentsByChannel_Call) RunAndReturn(run func(context.Context, int64, string, int32) map[int64]*datapb.SegmentInfo) *MockTargetManager_GetSealedSegmentsByChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetSealedSegmentsByCollection provides a mock function with given fields: collectionID, scope
-func (_m *MockTargetManager) GetSealedSegmentsByCollection(collectionID int64, scope int32) map[int64]*datapb.SegmentInfo {
-	ret := _m.Called(collectionID, scope)
+// GetSealedSegmentsByCollection provides a mock function with given fields: ctx, collectionID, scope
+func (_m *MockTargetManager) GetSealedSegmentsByCollection(ctx context.Context, collectionID int64, scope int32) map[int64]*datapb.SegmentInfo {
+	ret := _m.Called(ctx, collectionID, scope)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetSealedSegmentsByCollection")
 	}
 
 	var r0 map[int64]*datapb.SegmentInfo
-	if rf, ok := ret.Get(0).(func(int64, int32) map[int64]*datapb.SegmentInfo); ok {
-		r0 = rf(collectionID, scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int32) map[int64]*datapb.SegmentInfo); ok {
+		r0 = rf(ctx, collectionID, scope)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[int64]*datapb.SegmentInfo)
@@ -492,15 +503,16 @@ type MockTargetManager_GetSealedSegmentsByCollection_Call struct {
 }
 
 // GetSealedSegmentsByCollection is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - scope int32
-func (_e *MockTargetManager_Expecter) GetSealedSegmentsByCollection(collectionID interface{}, scope interface{}) *MockTargetManager_GetSealedSegmentsByCollection_Call {
-	return &MockTargetManager_GetSealedSegmentsByCollection_Call{Call: _e.mock.On("GetSealedSegmentsByCollection", collectionID, scope)}
+func (_e *MockTargetManager_Expecter) GetSealedSegmentsByCollection(ctx interface{}, collectionID interface{}, scope interface{}) *MockTargetManager_GetSealedSegmentsByCollection_Call {
+	return &MockTargetManager_GetSealedSegmentsByCollection_Call{Call: _e.mock.On("GetSealedSegmentsByCollection", ctx, collectionID, scope)}
 }
 
-func (_c *MockTargetManager_GetSealedSegmentsByCollection_Call) Run(run func(collectionID int64, scope int32)) *MockTargetManager_GetSealedSegmentsByCollection_Call {
+func (_c *MockTargetManager_GetSealedSegmentsByCollection_Call) Run(run func(ctx context.Context, collectionID int64, scope int32)) *MockTargetManager_GetSealedSegmentsByCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int32))
+		run(args[0].(context.Context), args[1].(int64), args[2].(int32))
 	})
 	return _c
 }
@@ -510,22 +522,22 @@ func (_c *MockTargetManager_GetSealedSegmentsByCollection_Call) Return(_a0 map[i
 	return _c
 }
 
-func (_c *MockTargetManager_GetSealedSegmentsByCollection_Call) RunAndReturn(run func(int64, int32) map[int64]*datapb.SegmentInfo) *MockTargetManager_GetSealedSegmentsByCollection_Call {
+func (_c *MockTargetManager_GetSealedSegmentsByCollection_Call) RunAndReturn(run func(context.Context, int64, int32) map[int64]*datapb.SegmentInfo) *MockTargetManager_GetSealedSegmentsByCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetSealedSegmentsByPartition provides a mock function with given fields: collectionID, partitionID, scope
-func (_m *MockTargetManager) GetSealedSegmentsByPartition(collectionID int64, partitionID int64, scope int32) map[int64]*datapb.SegmentInfo {
-	ret := _m.Called(collectionID, partitionID, scope)
+// GetSealedSegmentsByPartition provides a mock function with given fields: ctx, collectionID, partitionID, scope
+func (_m *MockTargetManager) GetSealedSegmentsByPartition(ctx context.Context, collectionID int64, partitionID int64, scope int32) map[int64]*datapb.SegmentInfo {
+	ret := _m.Called(ctx, collectionID, partitionID, scope)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetSealedSegmentsByPartition")
 	}
 
 	var r0 map[int64]*datapb.SegmentInfo
-	if rf, ok := ret.Get(0).(func(int64, int64, int32) map[int64]*datapb.SegmentInfo); ok {
-		r0 = rf(collectionID, partitionID, scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int32) map[int64]*datapb.SegmentInfo); ok {
+		r0 = rf(ctx, collectionID, partitionID, scope)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[int64]*datapb.SegmentInfo)
@@ -541,16 +553,17 @@ type MockTargetManager_GetSealedSegmentsByPartition_Call struct {
 }
 
 // GetSealedSegmentsByPartition is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - partitionID int64
 //   - scope int32
-func (_e *MockTargetManager_Expecter) GetSealedSegmentsByPartition(collectionID interface{}, partitionID interface{}, scope interface{}) *MockTargetManager_GetSealedSegmentsByPartition_Call {
-	return &MockTargetManager_GetSealedSegmentsByPartition_Call{Call: _e.mock.On("GetSealedSegmentsByPartition", collectionID, partitionID, scope)}
+func (_e *MockTargetManager_Expecter) GetSealedSegmentsByPartition(ctx interface{}, collectionID interface{}, partitionID interface{}, scope interface{}) *MockTargetManager_GetSealedSegmentsByPartition_Call {
+	return &MockTargetManager_GetSealedSegmentsByPartition_Call{Call: _e.mock.On("GetSealedSegmentsByPartition", ctx, collectionID, partitionID, scope)}
 }
 
-func (_c *MockTargetManager_GetSealedSegmentsByPartition_Call) Run(run func(collectionID int64, partitionID int64, scope int32)) *MockTargetManager_GetSealedSegmentsByPartition_Call {
+func (_c *MockTargetManager_GetSealedSegmentsByPartition_Call) Run(run func(ctx context.Context, collectionID int64, partitionID int64, scope int32)) *MockTargetManager_GetSealedSegmentsByPartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int64), args[2].(int32))
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(int32))
 	})
 	return _c
 }
@@ -560,22 +573,22 @@ func (_c *MockTargetManager_GetSealedSegmentsByPartition_Call) Return(_a0 map[in
 	return _c
 }
 
-func (_c *MockTargetManager_GetSealedSegmentsByPartition_Call) RunAndReturn(run func(int64, int64, int32) map[int64]*datapb.SegmentInfo) *MockTargetManager_GetSealedSegmentsByPartition_Call {
+func (_c *MockTargetManager_GetSealedSegmentsByPartition_Call) RunAndReturn(run func(context.Context, int64, int64, int32) map[int64]*datapb.SegmentInfo) *MockTargetManager_GetSealedSegmentsByPartition_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetTargetJSON provides a mock function with given fields: scope
-func (_m *MockTargetManager) GetTargetJSON(scope int32) string {
-	ret := _m.Called(scope)
+// GetTargetJSON provides a mock function with given fields: ctx, scope
+func (_m *MockTargetManager) GetTargetJSON(ctx context.Context, scope int32) string {
+	ret := _m.Called(ctx, scope)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetTargetJSON")
 	}
 
 	var r0 string
-	if rf, ok := ret.Get(0).(func(int32) string); ok {
-		r0 = rf(scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int32) string); ok {
+		r0 = rf(ctx, scope)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
@@ -589,14 +602,15 @@ type MockTargetManager_GetTargetJSON_Call struct {
 }
 
 // GetTargetJSON is a helper method to define mock.On call
+//   - ctx context.Context
 //   - scope int32
-func (_e *MockTargetManager_Expecter) GetTargetJSON(scope interface{}) *MockTargetManager_GetTargetJSON_Call {
-	return &MockTargetManager_GetTargetJSON_Call{Call: _e.mock.On("GetTargetJSON", scope)}
+func (_e *MockTargetManager_Expecter) GetTargetJSON(ctx interface{}, scope interface{}) *MockTargetManager_GetTargetJSON_Call {
+	return &MockTargetManager_GetTargetJSON_Call{Call: _e.mock.On("GetTargetJSON", ctx, scope)}
 }
 
-func (_c *MockTargetManager_GetTargetJSON_Call) Run(run func(scope int32)) *MockTargetManager_GetTargetJSON_Call {
+func (_c *MockTargetManager_GetTargetJSON_Call) Run(run func(ctx context.Context, scope int32)) *MockTargetManager_GetTargetJSON_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int32))
+		run(args[0].(context.Context), args[1].(int32))
 	})
 	return _c
 }
@@ -606,22 +620,22 @@ func (_c *MockTargetManager_GetTargetJSON_Call) Return(_a0 string) *MockTargetMa
 	return _c
 }
 
-func (_c *MockTargetManager_GetTargetJSON_Call) RunAndReturn(run func(int32) string) *MockTargetManager_GetTargetJSON_Call {
+func (_c *MockTargetManager_GetTargetJSON_Call) RunAndReturn(run func(context.Context, int32) string) *MockTargetManager_GetTargetJSON_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// IsCurrentTargetExist provides a mock function with given fields: collectionID, partitionID
-func (_m *MockTargetManager) IsCurrentTargetExist(collectionID int64, partitionID int64) bool {
-	ret := _m.Called(collectionID, partitionID)
+// IsCurrentTargetExist provides a mock function with given fields: ctx, collectionID, partitionID
+func (_m *MockTargetManager) IsCurrentTargetExist(ctx context.Context, collectionID int64, partitionID int64) bool {
+	ret := _m.Called(ctx, collectionID, partitionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for IsCurrentTargetExist")
 	}
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(int64, int64) bool); ok {
-		r0 = rf(collectionID, partitionID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) bool); ok {
+		r0 = rf(ctx, collectionID, partitionID)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
@@ -635,15 +649,16 @@ type MockTargetManager_IsCurrentTargetExist_Call struct {
 }
 
 // IsCurrentTargetExist is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - partitionID int64
-func (_e *MockTargetManager_Expecter) IsCurrentTargetExist(collectionID interface{}, partitionID interface{}) *MockTargetManager_IsCurrentTargetExist_Call {
-	return &MockTargetManager_IsCurrentTargetExist_Call{Call: _e.mock.On("IsCurrentTargetExist", collectionID, partitionID)}
+func (_e *MockTargetManager_Expecter) IsCurrentTargetExist(ctx interface{}, collectionID interface{}, partitionID interface{}) *MockTargetManager_IsCurrentTargetExist_Call {
+	return &MockTargetManager_IsCurrentTargetExist_Call{Call: _e.mock.On("IsCurrentTargetExist", ctx, collectionID, partitionID)}
 }
 
-func (_c *MockTargetManager_IsCurrentTargetExist_Call) Run(run func(collectionID int64, partitionID int64)) *MockTargetManager_IsCurrentTargetExist_Call {
+func (_c *MockTargetManager_IsCurrentTargetExist_Call) Run(run func(ctx context.Context, collectionID int64, partitionID int64)) *MockTargetManager_IsCurrentTargetExist_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int64))
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64))
 	})
 	return _c
 }
@@ -653,22 +668,22 @@ func (_c *MockTargetManager_IsCurrentTargetExist_Call) Return(_a0 bool) *MockTar
 	return _c
 }
 
-func (_c *MockTargetManager_IsCurrentTargetExist_Call) RunAndReturn(run func(int64, int64) bool) *MockTargetManager_IsCurrentTargetExist_Call {
+func (_c *MockTargetManager_IsCurrentTargetExist_Call) RunAndReturn(run func(context.Context, int64, int64) bool) *MockTargetManager_IsCurrentTargetExist_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// IsNextTargetExist provides a mock function with given fields: collectionID
-func (_m *MockTargetManager) IsNextTargetExist(collectionID int64) bool {
-	ret := _m.Called(collectionID)
+// IsNextTargetExist provides a mock function with given fields: ctx, collectionID
+func (_m *MockTargetManager) IsNextTargetExist(ctx context.Context, collectionID int64) bool {
+	ret := _m.Called(ctx, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for IsNextTargetExist")
 	}
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(int64) bool); ok {
-		r0 = rf(collectionID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) bool); ok {
+		r0 = rf(ctx, collectionID)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
@@ -682,14 +697,15 @@ type MockTargetManager_IsNextTargetExist_Call struct {
 }
 
 // IsNextTargetExist is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
-func (_e *MockTargetManager_Expecter) IsNextTargetExist(collectionID interface{}) *MockTargetManager_IsNextTargetExist_Call {
-	return &MockTargetManager_IsNextTargetExist_Call{Call: _e.mock.On("IsNextTargetExist", collectionID)}
+func (_e *MockTargetManager_Expecter) IsNextTargetExist(ctx interface{}, collectionID interface{}) *MockTargetManager_IsNextTargetExist_Call {
+	return &MockTargetManager_IsNextTargetExist_Call{Call: _e.mock.On("IsNextTargetExist", ctx, collectionID)}
 }
 
-func (_c *MockTargetManager_IsNextTargetExist_Call) Run(run func(collectionID int64)) *MockTargetManager_IsNextTargetExist_Call {
+func (_c *MockTargetManager_IsNextTargetExist_Call) Run(run func(ctx context.Context, collectionID int64)) *MockTargetManager_IsNextTargetExist_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -699,22 +715,22 @@ func (_c *MockTargetManager_IsNextTargetExist_Call) Return(_a0 bool) *MockTarget
 	return _c
 }
 
-func (_c *MockTargetManager_IsNextTargetExist_Call) RunAndReturn(run func(int64) bool) *MockTargetManager_IsNextTargetExist_Call {
+func (_c *MockTargetManager_IsNextTargetExist_Call) RunAndReturn(run func(context.Context, int64) bool) *MockTargetManager_IsNextTargetExist_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// Recover provides a mock function with given fields: catalog
-func (_m *MockTargetManager) Recover(catalog metastore.QueryCoordCatalog) error {
-	ret := _m.Called(catalog)
+// Recover provides a mock function with given fields: ctx, catalog
+func (_m *MockTargetManager) Recover(ctx context.Context, catalog metastore.QueryCoordCatalog) error {
+	ret := _m.Called(ctx, catalog)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Recover")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(metastore.QueryCoordCatalog) error); ok {
-		r0 = rf(catalog)
+	if rf, ok := ret.Get(0).(func(context.Context, metastore.QueryCoordCatalog) error); ok {
+		r0 = rf(ctx, catalog)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -728,14 +744,15 @@ type MockTargetManager_Recover_Call struct {
 }
 
 // Recover is a helper method to define mock.On call
+//   - ctx context.Context
 //   - catalog metastore.QueryCoordCatalog
-func (_e *MockTargetManager_Expecter) Recover(catalog interface{}) *MockTargetManager_Recover_Call {
-	return &MockTargetManager_Recover_Call{Call: _e.mock.On("Recover", catalog)}
+func (_e *MockTargetManager_Expecter) Recover(ctx interface{}, catalog interface{}) *MockTargetManager_Recover_Call {
+	return &MockTargetManager_Recover_Call{Call: _e.mock.On("Recover", ctx, catalog)}
 }
 
-func (_c *MockTargetManager_Recover_Call) Run(run func(catalog metastore.QueryCoordCatalog)) *MockTargetManager_Recover_Call {
+func (_c *MockTargetManager_Recover_Call) Run(run func(ctx context.Context, catalog metastore.QueryCoordCatalog)) *MockTargetManager_Recover_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(metastore.QueryCoordCatalog))
+		run(args[0].(context.Context), args[1].(metastore.QueryCoordCatalog))
 	})
 	return _c
 }
@@ -745,14 +762,14 @@ func (_c *MockTargetManager_Recover_Call) Return(_a0 error) *MockTargetManager_R
 	return _c
 }
 
-func (_c *MockTargetManager_Recover_Call) RunAndReturn(run func(metastore.QueryCoordCatalog) error) *MockTargetManager_Recover_Call {
+func (_c *MockTargetManager_Recover_Call) RunAndReturn(run func(context.Context, metastore.QueryCoordCatalog) error) *MockTargetManager_Recover_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// RemoveCollection provides a mock function with given fields: collectionID
-func (_m *MockTargetManager) RemoveCollection(collectionID int64) {
-	_m.Called(collectionID)
+// RemoveCollection provides a mock function with given fields: ctx, collectionID
+func (_m *MockTargetManager) RemoveCollection(ctx context.Context, collectionID int64) {
+	_m.Called(ctx, collectionID)
 }
 
 // MockTargetManager_RemoveCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveCollection'
@@ -761,14 +778,15 @@ type MockTargetManager_RemoveCollection_Call struct {
 }
 
 // RemoveCollection is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
-func (_e *MockTargetManager_Expecter) RemoveCollection(collectionID interface{}) *MockTargetManager_RemoveCollection_Call {
-	return &MockTargetManager_RemoveCollection_Call{Call: _e.mock.On("RemoveCollection", collectionID)}
+func (_e *MockTargetManager_Expecter) RemoveCollection(ctx interface{}, collectionID interface{}) *MockTargetManager_RemoveCollection_Call {
+	return &MockTargetManager_RemoveCollection_Call{Call: _e.mock.On("RemoveCollection", ctx, collectionID)}
 }
 
-func (_c *MockTargetManager_RemoveCollection_Call) Run(run func(collectionID int64)) *MockTargetManager_RemoveCollection_Call {
+func (_c *MockTargetManager_RemoveCollection_Call) Run(run func(ctx context.Context, collectionID int64)) *MockTargetManager_RemoveCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -778,19 +796,19 @@ func (_c *MockTargetManager_RemoveCollection_Call) Return() *MockTargetManager_R
 	return _c
 }
 
-func (_c *MockTargetManager_RemoveCollection_Call) RunAndReturn(run func(int64)) *MockTargetManager_RemoveCollection_Call {
+func (_c *MockTargetManager_RemoveCollection_Call) RunAndReturn(run func(context.Context, int64)) *MockTargetManager_RemoveCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// RemovePartition provides a mock function with given fields: collectionID, partitionIDs
-func (_m *MockTargetManager) RemovePartition(collectionID int64, partitionIDs ...int64) {
+// RemovePartition provides a mock function with given fields: ctx, collectionID, partitionIDs
+func (_m *MockTargetManager) RemovePartition(ctx context.Context, collectionID int64, partitionIDs ...int64) {
 	_va := make([]interface{}, len(partitionIDs))
 	for _i := range partitionIDs {
 		_va[_i] = partitionIDs[_i]
 	}
 	var _ca []interface{}
-	_ca = append(_ca, collectionID)
+	_ca = append(_ca, ctx, collectionID)
 	_ca = append(_ca, _va...)
 	_m.Called(_ca...)
 }
@@ -801,22 +819,23 @@ type MockTargetManager_RemovePartition_Call struct {
 }
 
 // RemovePartition is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - partitionIDs ...int64
-func (_e *MockTargetManager_Expecter) RemovePartition(collectionID interface{}, partitionIDs ...interface{}) *MockTargetManager_RemovePartition_Call {
+func (_e *MockTargetManager_Expecter) RemovePartition(ctx interface{}, collectionID interface{}, partitionIDs ...interface{}) *MockTargetManager_RemovePartition_Call {
 	return &MockTargetManager_RemovePartition_Call{Call: _e.mock.On("RemovePartition",
-		append([]interface{}{collectionID}, partitionIDs...)...)}
+		append([]interface{}{ctx, collectionID}, partitionIDs...)...)}
 }
 
-func (_c *MockTargetManager_RemovePartition_Call) Run(run func(collectionID int64, partitionIDs ...int64)) *MockTargetManager_RemovePartition_Call {
+func (_c *MockTargetManager_RemovePartition_Call) Run(run func(ctx context.Context, collectionID int64, partitionIDs ...int64)) *MockTargetManager_RemovePartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]int64, len(args)-1)
-		for i, a := range args[1:] {
+		variadicArgs := make([]int64, len(args)-2)
+		for i, a := range args[2:] {
 			if a != nil {
 				variadicArgs[i] = a.(int64)
 			}
 		}
-		run(args[0].(int64), variadicArgs...)
+		run(args[0].(context.Context), args[1].(int64), variadicArgs...)
 	})
 	return _c
 }
@@ -826,14 +845,14 @@ func (_c *MockTargetManager_RemovePartition_Call) Return() *MockTargetManager_Re
 	return _c
 }
 
-func (_c *MockTargetManager_RemovePartition_Call) RunAndReturn(run func(int64, ...int64)) *MockTargetManager_RemovePartition_Call {
+func (_c *MockTargetManager_RemovePartition_Call) RunAndReturn(run func(context.Context, int64, ...int64)) *MockTargetManager_RemovePartition_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// SaveCurrentTarget provides a mock function with given fields: catalog
-func (_m *MockTargetManager) SaveCurrentTarget(catalog metastore.QueryCoordCatalog) {
-	_m.Called(catalog)
+// SaveCurrentTarget provides a mock function with given fields: ctx, catalog
+func (_m *MockTargetManager) SaveCurrentTarget(ctx context.Context, catalog metastore.QueryCoordCatalog) {
+	_m.Called(ctx, catalog)
 }
 
 // MockTargetManager_SaveCurrentTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveCurrentTarget'
@@ -842,14 +861,15 @@ type MockTargetManager_SaveCurrentTarget_Call struct {
 }
 
 // SaveCurrentTarget is a helper method to define mock.On call
+//   - ctx context.Context
 //   - catalog metastore.QueryCoordCatalog
-func (_e *MockTargetManager_Expecter) SaveCurrentTarget(catalog interface{}) *MockTargetManager_SaveCurrentTarget_Call {
-	return &MockTargetManager_SaveCurrentTarget_Call{Call: _e.mock.On("SaveCurrentTarget", catalog)}
+func (_e *MockTargetManager_Expecter) SaveCurrentTarget(ctx interface{}, catalog interface{}) *MockTargetManager_SaveCurrentTarget_Call {
+	return &MockTargetManager_SaveCurrentTarget_Call{Call: _e.mock.On("SaveCurrentTarget", ctx, catalog)}
 }
 
-func (_c *MockTargetManager_SaveCurrentTarget_Call) Run(run func(catalog metastore.QueryCoordCatalog)) *MockTargetManager_SaveCurrentTarget_Call {
+func (_c *MockTargetManager_SaveCurrentTarget_Call) Run(run func(ctx context.Context, catalog metastore.QueryCoordCatalog)) *MockTargetManager_SaveCurrentTarget_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(metastore.QueryCoordCatalog))
+		run(args[0].(context.Context), args[1].(metastore.QueryCoordCatalog))
 	})
 	return _c
 }
@@ -859,22 +879,22 @@ func (_c *MockTargetManager_SaveCurrentTarget_Call) Return() *MockTargetManager_
 	return _c
 }
 
-func (_c *MockTargetManager_SaveCurrentTarget_Call) RunAndReturn(run func(metastore.QueryCoordCatalog)) *MockTargetManager_SaveCurrentTarget_Call {
+func (_c *MockTargetManager_SaveCurrentTarget_Call) RunAndReturn(run func(context.Context, metastore.QueryCoordCatalog)) *MockTargetManager_SaveCurrentTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// UpdateCollectionCurrentTarget provides a mock function with given fields: collectionID
-func (_m *MockTargetManager) UpdateCollectionCurrentTarget(collectionID int64) bool {
-	ret := _m.Called(collectionID)
+// UpdateCollectionCurrentTarget provides a mock function with given fields: ctx, collectionID
+func (_m *MockTargetManager) UpdateCollectionCurrentTarget(ctx context.Context, collectionID int64) bool {
+	ret := _m.Called(ctx, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateCollectionCurrentTarget")
 	}
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(int64) bool); ok {
-		r0 = rf(collectionID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) bool); ok {
+		r0 = rf(ctx, collectionID)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
@@ -888,14 +908,15 @@ type MockTargetManager_UpdateCollectionCurrentTarget_Call struct {
 }
 
 // UpdateCollectionCurrentTarget is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
-func (_e *MockTargetManager_Expecter) UpdateCollectionCurrentTarget(collectionID interface{}) *MockTargetManager_UpdateCollectionCurrentTarget_Call {
-	return &MockTargetManager_UpdateCollectionCurrentTarget_Call{Call: _e.mock.On("UpdateCollectionCurrentTarget", collectionID)}
+func (_e *MockTargetManager_Expecter) UpdateCollectionCurrentTarget(ctx interface{}, collectionID interface{}) *MockTargetManager_UpdateCollectionCurrentTarget_Call {
+	return &MockTargetManager_UpdateCollectionCurrentTarget_Call{Call: _e.mock.On("UpdateCollectionCurrentTarget", ctx, collectionID)}
 }
 
-func (_c *MockTargetManager_UpdateCollectionCurrentTarget_Call) Run(run func(collectionID int64)) *MockTargetManager_UpdateCollectionCurrentTarget_Call {
+func (_c *MockTargetManager_UpdateCollectionCurrentTarget_Call) Run(run func(ctx context.Context, collectionID int64)) *MockTargetManager_UpdateCollectionCurrentTarget_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -905,22 +926,22 @@ func (_c *MockTargetManager_UpdateCollectionCurrentTarget_Call) Return(_a0 bool)
 	return _c
 }
 
-func (_c *MockTargetManager_UpdateCollectionCurrentTarget_Call) RunAndReturn(run func(int64) bool) *MockTargetManager_UpdateCollectionCurrentTarget_Call {
+func (_c *MockTargetManager_UpdateCollectionCurrentTarget_Call) RunAndReturn(run func(context.Context, int64) bool) *MockTargetManager_UpdateCollectionCurrentTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// UpdateCollectionNextTarget provides a mock function with given fields: collectionID
-func (_m *MockTargetManager) UpdateCollectionNextTarget(collectionID int64) error {
-	ret := _m.Called(collectionID)
+// UpdateCollectionNextTarget provides a mock function with given fields: ctx, collectionID
+func (_m *MockTargetManager) UpdateCollectionNextTarget(ctx context.Context, collectionID int64) error {
+	ret := _m.Called(ctx, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateCollectionNextTarget")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64) error); ok {
-		r0 = rf(collectionID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, collectionID)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -934,14 +955,15 @@ type MockTargetManager_UpdateCollectionNextTarget_Call struct {
 }
 
 // UpdateCollectionNextTarget is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
-func (_e *MockTargetManager_Expecter) UpdateCollectionNextTarget(collectionID interface{}) *MockTargetManager_UpdateCollectionNextTarget_Call {
-	return &MockTargetManager_UpdateCollectionNextTarget_Call{Call: _e.mock.On("UpdateCollectionNextTarget", collectionID)}
+func (_e *MockTargetManager_Expecter) UpdateCollectionNextTarget(ctx interface{}, collectionID interface{}) *MockTargetManager_UpdateCollectionNextTarget_Call {
+	return &MockTargetManager_UpdateCollectionNextTarget_Call{Call: _e.mock.On("UpdateCollectionNextTarget", ctx, collectionID)}
 }
 
-func (_c *MockTargetManager_UpdateCollectionNextTarget_Call) Run(run func(collectionID int64)) *MockTargetManager_UpdateCollectionNextTarget_Call {
+func (_c *MockTargetManager_UpdateCollectionNextTarget_Call) Run(run func(ctx context.Context, collectionID int64)) *MockTargetManager_UpdateCollectionNextTarget_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -951,7 +973,7 @@ func (_c *MockTargetManager_UpdateCollectionNextTarget_Call) Return(_a0 error) *
 	return _c
 }
 
-func (_c *MockTargetManager_UpdateCollectionNextTarget_Call) RunAndReturn(run func(int64) error) *MockTargetManager_UpdateCollectionNextTarget_Call {
+func (_c *MockTargetManager_UpdateCollectionNextTarget_Call) RunAndReturn(run func(context.Context, int64) error) *MockTargetManager_UpdateCollectionNextTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }
