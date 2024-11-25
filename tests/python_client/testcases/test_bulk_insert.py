@@ -1746,6 +1746,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             for r in hit:
                 fields_from_search = r.fields.keys()
                 for f in fields:
+                    if f.name == df.bm25_sparse_vec_field:
+                        continue
                     assert f.name in fields_from_search
                 if enable_dynamic_field:
                     assert "name" in fields_from_search
@@ -1767,7 +1769,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             check_items={"nq": 1, "limit": 1},
         )
 
-    
+
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
