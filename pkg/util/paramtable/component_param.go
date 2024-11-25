@@ -650,8 +650,8 @@ like the old password verification when updating the credential`,
 	p.DefaultRootPassword = ParamItem{
 		Key:          "common.security.defaultRootPassword",
 		Version:      "2.4.7",
-		Doc:          "default password for root user",
-		DefaultValue: "Milvus",
+		Doc:          "default password for root user. The maximum length is 72 characters, and double quotes are required.",
+		DefaultValue: "\"Milvus\"",
 		Export:       true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
@@ -1344,8 +1344,15 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.MaxPasswordLength = ParamItem{
 		Key:          "proxy.maxPasswordLength",
-		DefaultValue: "256",
+		DefaultValue: "72", // bcrypt max length
 		Version:      "2.0.0",
+		Formatter: func(v string) string {
+			n := getAsInt(v)
+			if n <= 0 || n > 72 {
+				return "72"
+			}
+			return v
+		},
 		PanicIfEmpty: true,
 	}
 	p.MaxPasswordLength.Init(base.mgr)
