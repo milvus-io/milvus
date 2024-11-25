@@ -38,7 +38,7 @@ func (t *createDatabaseTask) Prepare(ctx context.Context) error {
 	}
 
 	cfgMaxDatabaseNum := Params.RootCoordCfg.MaxDatabaseNum.GetAsInt()
-	if len(dbs) > cfgMaxDatabaseNum {
+	if len(dbs) >= cfgMaxDatabaseNum {
 		return merr.WrapErrDatabaseNumLimitExceeded(cfgMaxDatabaseNum)
 	}
 
