@@ -39,7 +39,7 @@ import (
 type channelsMgr interface {
 	getChannels(collectionID UniqueID) ([]pChan, error)
 	getVChannels(collectionID UniqueID) ([]vChan, error)
-	getOrCreateDmlStream(collectionID UniqueID) (msgstream.MsgStream, error)
+	getOrCreateDmlStream(ctx context.Context, collectionID UniqueID) (msgstream.MsgStream, error)
 	removeDMLStream(collectionID UniqueID)
 	removeAllDMLStream()
 }
@@ -172,7 +172,7 @@ func (mgr *singleTypeChannelsMgr) streamExistPrivate(collectionID UniqueID) bool
 	return ok && streamInfos.stream != nil
 }
 
-func createStream(factory msgstream.Factory, pchans []pChan, repack repackFuncType) (msgstream.MsgStream, error) {
+func createStream(ctx context.Context, factory msgstream.Factory, pchans []pChan, repack repackFuncType) (msgstream.MsgStream, error) {
 	var stream msgstream.MsgStream
 	var err error
 
@@ -181,7 +181,7 @@ func createStream(factory msgstream.Factory, pchans []pChan, repack repackFuncTy
 		return nil, err
 	}
 
-	stream.AsProducer(pchans)
+	stream.AsProducer(ctx, pchans)
 	if repack != nil {
 		stream.SetRepackFunc(repack)
 	}
@@ -202,7 +202,7 @@ func decPChanMetrics(pchans []pChan) {
 
 // createMsgStream create message stream for specified collection. Idempotent.
 // If stream already exists, directly return it and no error will be returned.
-func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) (msgstream.MsgStream, error) {
+func (mgr *singleTypeChannelsMgr) createMsgStream(ctx context.Context, collectionID UniqueID) (msgstream.MsgStream, error) {
 	mgr.mu.RLock()
 	infos, ok := mgr.infos[collectionID]
 	if ok && infos.stream != nil {
@@ -219,7 +219,7 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) (msgstr
 		return nil, err
 	}
 
-	stream, err := createStream(mgr.msgStreamFactory, channelInfos.pchans, mgr.repackFunc)
+	stream, err := createStream(ctx, mgr.msgStreamFactory, channelInfos.pchans, mgr.repackFunc)
 	if err != nil {
 		// What if stream created by other goroutines?
 		log.Error("failed to create message stream", zap.Error(err), zap.Int64("collection", collectionID))
@@ -253,12 +253,12 @@ func (mgr *singleTypeChannelsMgr) lockGetStream(collectionID UniqueID) (msgstrea
 
 // getOrCreateStream get message stream of specified collection.
 // If stream doesn't exist, call createMsgStream to create for it.
-func (mgr *singleTypeChannelsMgr) getOrCreateStream(collectionID UniqueID) (msgstream.MsgStream, error) {
+func (mgr *singleTypeChannelsMgr) getOrCreateStream(ctx context.Context, collectionID UniqueID) (msgstream.MsgStream, error) {
 	if stream, err := mgr.lockGetStream(collectionID); err == nil {
 		return stream, nil
 	}
 
-	return mgr.createMsgStream(collectionID)
+	return mgr.createMsgStream(ctx, collectionID)
 }
 
 // removeStream remove the corresponding stream of the specified collection. Idempotent.
@@ -315,8 +315,8 @@ func (mgr *channelsMgrImpl) getVChannels(collectionID UniqueID) ([]vChan, error)
 	return mgr.dmlChannelsMgr.getVChannels(collectionID)
 }
 
-func (mgr *channelsMgrImpl) getOrCreateDmlStream(collectionID UniqueID) (msgstream.MsgStream, error) {
-	return mgr.dmlChannelsMgr.getOrCreateStream(collectionID)
+func (mgr *channelsMgrImpl) getOrCreateDmlStream(ctx context.Context, collectionID UniqueID) (msgstream.MsgStream, error) {
+	return mgr.dmlChannelsMgr.getOrCreateStream(ctx, collectionID)
 }
 
 func (mgr *channelsMgrImpl) removeDMLStream(collectionID UniqueID) {

@@ -33,7 +33,7 @@ func TestNatsMQProducer(t *testing.T) {
 	pOpts := common.ProducerOptions{Topic: topic}
 
 	// Check Topic()
-	p, err := c.CreateProducer(pOpts)
+	p, err := c.CreateProducer(context.TODO(), pOpts)
 	assert.NoError(t, err)
 	assert.Equal(t, p.(*nmqProducer).Topic(), topic)
 

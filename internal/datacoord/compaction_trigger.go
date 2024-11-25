@@ -423,7 +423,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	segment := t.meta.GetHealthySegment(t.meta.ctx, signal.segmentID)
+	segment := t.meta.GetHealthySegment(context.TODO(), signal.segmentID)
 	if segment == nil {
 		log.Warn("segment in compaction signal not found in meta", zap.Int64("segmentID", signal.segmentID))
 		return

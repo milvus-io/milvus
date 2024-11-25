@@ -86,7 +86,7 @@ func TestNmqClient_CreateProducer(t *testing.T) {
 
 	topic := "TestNmqClient_CreateProducer"
 	proOpts := common.ProducerOptions{Topic: topic}
-	producer, err := client.CreateProducer(proOpts)
+	producer, err := client.CreateProducer(context.TODO(), proOpts)
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 	defer producer.Close()
@@ -102,7 +102,7 @@ func TestNmqClient_CreateProducer(t *testing.T) {
 	assert.NoError(t, err)
 
 	invalidOpts := common.ProducerOptions{Topic: ""}
-	producer, e := client.CreateProducer(invalidOpts)
+	producer, e := client.CreateProducer(context.TODO(), invalidOpts)
 	assert.Nil(t, producer)
 	assert.Error(t, e)
 }
@@ -114,7 +114,7 @@ func TestNmqClient_GetLatestMsg(t *testing.T) {
 
 	topic := fmt.Sprintf("t2GetLatestMsg-%d", rand.Int())
 	proOpts := common.ProducerOptions{Topic: topic}
-	producer, err := client.CreateProducer(proOpts)
+	producer, err := client.CreateProducer(context.TODO(), proOpts)
 	assert.NoError(t, err)
 	defer producer.Close()
 
@@ -135,7 +135,7 @@ func TestNmqClient_GetLatestMsg(t *testing.T) {
 		BufSize:                     1024,
 	}
 
-	consumer, err := client.Subscribe(consumerOpts)
+	consumer, err := client.Subscribe(context.TODO(), consumerOpts)
 	assert.NoError(t, err)
 
 	expectLastMsg, err := consumer.GetLatestMsgID()
@@ -166,13 +166,13 @@ func TestNmqClient_IllegalSubscribe(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	sub, err := client.Subscribe(mqwrapper.ConsumerOptions{
+	sub, err := client.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic: "",
 	})
 	assert.Nil(t, sub)
 	assert.Error(t, err)
 
-	sub, err = client.Subscribe(mqwrapper.ConsumerOptions{
+	sub, err = client.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:            "123",
 		SubscriptionName: "",
 	})
@@ -188,7 +188,7 @@ func TestNmqClient_Subscribe(t *testing.T) {
 
 	topic := "TestNmqClient_Subscribe"
 	proOpts := common.ProducerOptions{Topic: topic}
-	producer, err := client.CreateProducer(proOpts)
+	producer, err := client.CreateProducer(context.TODO(), proOpts)
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 	defer producer.Close()
@@ -201,12 +201,12 @@ func TestNmqClient_Subscribe(t *testing.T) {
 		BufSize:                     1024,
 	}
 
-	consumer, err := client.Subscribe(consumerOpts)
+	consumer, err := client.Subscribe(context.TODO(), consumerOpts)
 	assert.Error(t, err)
 	assert.Nil(t, consumer)
 
 	consumerOpts.Topic = topic
-	consumer, err = client.Subscribe(consumerOpts)
+	consumer, err = client.Subscribe(context.TODO(), consumerOpts)
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()

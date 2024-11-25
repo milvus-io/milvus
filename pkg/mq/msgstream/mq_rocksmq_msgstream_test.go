@@ -52,7 +52,7 @@ func TestMqMsgStream_AsProducer(t *testing.T) {
 	assert.NoError(t, err)
 
 	// empty channel name
-	m.AsProducer([]string{""})
+	m.AsProducer(context.TODO(), []string{""})
 }
 
 // TODO(wxyu): add a mock implement of mqwrapper.Client, then inject errors to improve coverage
@@ -121,7 +121,7 @@ func TestMqMsgStream_GetProduceChannels(t *testing.T) {
 	assert.Equal(t, 0, len(chs))
 
 	// not empty after AsProducer
-	m.AsProducer([]string{"a"})
+	m.AsProducer(context.TODO(), []string{"a"})
 	chs = m.GetProduceChannels()
 	assert.Equal(t, 1, len(chs))
 }
@@ -160,7 +160,7 @@ func TestMqMsgStream_Produce(t *testing.T) {
 	msgPack := &MsgPack{
 		Msgs: []TsMsg{insertMsg},
 	}
-	err = m.Produce(msgPack)
+	err = m.Produce(context.TODO(), msgPack)
 	assert.Error(t, err)
 }
 
@@ -173,7 +173,7 @@ func TestMqMsgStream_Broadcast(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Broadcast nil pointer
-	_, err = m.Broadcast(nil)
+	_, err = m.Broadcast(context.TODO(), nil)
 	assert.Error(t, err)
 }
 
@@ -241,7 +241,7 @@ func initRmqStream(ctx context.Context,
 
 	rmqClient, _ := rmq.NewClientWithDefaultOptions(ctx)
 	inputStream, _ := NewMqMsgStream(ctx, 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
-	inputStream.AsProducer(producerChannels)
+	inputStream.AsProducer(ctx, producerChannels)
 	for _, opt := range opts {
 		inputStream.SetRepackFunc(opt)
 	}
@@ -265,7 +265,7 @@ func initRmqTtStream(ctx context.Context,
 
 	rmqClient, _ := rmq.NewClientWithDefaultOptions(ctx)
 	inputStream, _ := NewMqMsgStream(ctx, 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
-	inputStream.AsProducer(producerChannels)
+	inputStream.AsProducer(ctx, producerChannels)
 	for _, opt := range opts {
 		inputStream.SetRepackFunc(opt)
 	}
@@ -290,7 +290,7 @@ func TestStream_RmqMsgStream_Insert(t *testing.T) {
 
 	ctx := context.Background()
 	inputStream, outputStream := initRmqStream(ctx, producerChannels, consumerChannels, consumerGroupName)
-	err := inputStream.Produce(&msgPack)
+	err := inputStream.Produce(ctx, &msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	receiveMsg(ctx, outputStream, len(msgPack.Msgs))
@@ -316,13 +316,13 @@ func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
 	ctx := context.Background()
 	inputStream, outputStream := initRmqTtStream(ctx, producerChannels, consumerChannels, consumerSubName)
 
-	_, err := inputStream.Broadcast(&msgPack0)
+	_, err := inputStream.Broadcast(ctx, &msgPack0)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
-	err = inputStream.Produce(&msgPack1)
+	err = inputStream.Produce(ctx, &msgPack1)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
-	_, err = inputStream.Broadcast(&msgPack2)
+	_, err = inputStream.Broadcast(ctx, &msgPack2)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
 	receiveMsg(ctx, outputStream, len(msgPack1.Msgs))
@@ -355,13 +355,13 @@ func TestStream_RmqTtMsgStream_DuplicatedIDs(t *testing.T) {
 	ctx := context.Background()
 	inputStream, outputStream := initRmqTtStream(ctx, producerChannels, consumerChannels, consumerSubName)
 
-	_, err := inputStream.Broadcast(&msgPack0)
+	_, err := inputStream.Broadcast(ctx, &msgPack0)
 	assert.NoError(t, err)
-	err = inputStream.Produce(&msgPack1)
+	err = inputStream.Produce(ctx, &msgPack1)
 	assert.NoError(t, err)
-	err = inputStream.Produce(&msgPack2)
+	err = inputStream.Produce(ctx, &msgPack2)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack3)
+	_, err = inputStream.Broadcast(ctx, &msgPack3)
 	assert.NoError(t, err)
 
 	receivedMsg := consumer(ctx, outputStream)
@@ -425,21 +425,21 @@ func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
 	ctx := context.Background()
 	inputStream, outputStream := initRmqTtStream(ctx, producerChannels, consumerChannels, consumerSubName)
 
-	_, err := inputStream.Broadcast(&msgPack0)
+	_, err := inputStream.Broadcast(ctx, &msgPack0)
 	assert.NoError(t, err)
-	err = inputStream.Produce(&msgPack1)
+	err = inputStream.Produce(ctx, &msgPack1)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack2)
+	_, err = inputStream.Broadcast(ctx, &msgPack2)
 	assert.NoError(t, err)
-	err = inputStream.Produce(&msgPack3)
+	err = inputStream.Produce(ctx, &msgPack3)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack4)
+	_, err = inputStream.Broadcast(ctx, &msgPack4)
 	assert.NoError(t, err)
-	err = inputStream.Produce(&msgPack5)
+	err = inputStream.Produce(ctx, &msgPack5)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack6)
+	_, err = inputStream.Broadcast(ctx, &msgPack6)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack7)
+	_, err = inputStream.Broadcast(ctx, &msgPack7)
 	assert.NoError(t, err)
 
 	receivedMsg := consumer(ctx, outputStream)
@@ -512,7 +512,7 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 
-	err := inputStream.Produce(msgPack)
+	err := inputStream.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 	var seekPosition *msgpb.MsgPosition
 	for i := 0; i < 10; i++ {
@@ -546,7 +546,7 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
-	err = inputStream.Produce(msgPack)
+	err = inputStream.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 
 	result := consumer(ctx, outputStream2)
@@ -560,27 +560,28 @@ func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
 	producerChannels := []string{"insert1"}
 	consumerChannels := []string{"insert1"}
 	consumerSubName := "subInsert"
+	ctx := context.Background()
 
 	factory := ProtoUDFactory{}
 
 	rmqClient, _ := rmq.NewClientWithDefaultOptions(context.Background())
 
 	otherInputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
-	otherInputStream.AsProducer([]string{"root_timetick"})
-	otherInputStream.Produce(getTimeTickMsgPack(999))
+	otherInputStream.AsProducer(context.TODO(), []string{"root_timetick"})
+	otherInputStream.Produce(ctx, getTimeTickMsgPack(999))
 
 	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
-	inputStream.AsProducer(producerChannels)
+	inputStream.AsProducer(context.TODO(), producerChannels)
 
 	for i := 0; i < 100; i++ {
-		inputStream.Produce(getTimeTickMsgPack(int64(i)))
+		inputStream.Produce(ctx, getTimeTickMsgPack(int64(i)))
 	}
 
 	rmqClient2, _ := rmq.NewClientWithDefaultOptions(context.Background())
 	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(context.Background(), consumerChannels, consumerSubName, mqcommon.SubscriptionPositionLatest)
 
-	inputStream.Produce(getTimeTickMsgPack(1000))
+	inputStream.Produce(ctx, getTimeTickMsgPack(1000))
 	pack := <-outputStream.Chan()
 	assert.NotNil(t, pack)
 	assert.Equal(t, 1, len(pack.Msgs))

@@ -278,7 +278,7 @@ func (node *Proxy) Init() error {
 		return err
 	}
 	node.replicateMsgStream.EnableProduce(true)
-	node.replicateMsgStream.AsProducer([]string{replicateMsgChannel})
+	node.replicateMsgStream.AsProducer(node.ctx, []string{replicateMsgChannel})
 
 	node.sched, err = newTaskScheduler(node.ctx, node.tsoAllocator, node.factory)
 	if err != nil {

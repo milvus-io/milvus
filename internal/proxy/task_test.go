@@ -1755,7 +1755,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
 	defer chMgr.removeAllDMLStream()
 
-	_, err = chMgr.getOrCreateDmlStream(collectionID)
+	_, err = chMgr.getOrCreateDmlStream(ctx, collectionID)
 	assert.NoError(t, err)
 	pchans, err := chMgr.getChannels(collectionID)
 	assert.NoError(t, err)
@@ -2004,7 +2004,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
 	defer chMgr.removeAllDMLStream()
 
-	_, err = chMgr.getOrCreateDmlStream(collectionID)
+	_, err = chMgr.getOrCreateDmlStream(ctx, collectionID)
 	assert.NoError(t, err)
 	pchans, err := chMgr.getChannels(collectionID)
 	assert.NoError(t, err)
@@ -3460,7 +3460,7 @@ func TestPartitionKey(t *testing.T) {
 	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
 	defer chMgr.removeAllDMLStream()
 
-	_, err = chMgr.getOrCreateDmlStream(collectionID)
+	_, err = chMgr.getOrCreateDmlStream(ctx, collectionID)
 	assert.NoError(t, err)
 	pchans, err := chMgr.getChannels(collectionID)
 	assert.NoError(t, err)
