@@ -86,6 +86,7 @@ func (suite *BalanceCheckerTestSuite) TearDownTest() {
 }
 
 func (suite *BalanceCheckerTestSuite) TestAutoBalanceConf() {
+	ctx := context.Background()
 	// set up nodes info
 	nodeID1, nodeID2 := 1, 2
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
@@ -98,8 +99,8 @@ func (suite *BalanceCheckerTestSuite) TestAutoBalanceConf() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	suite.checker.meta.ResourceManager.HandleNodeUp(int64(nodeID1))
-	suite.checker.meta.ResourceManager.HandleNodeUp(int64(nodeID2))
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID1))
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID2))
 
 	// set collections meta
 	segments := []*datapb.SegmentInfo{
@@ -123,46 +124,47 @@ func (suite *BalanceCheckerTestSuite) TestAutoBalanceConf() {
 	collection1.Status = querypb.LoadStatus_Loaded
 	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{int64(nodeID1), int64(nodeID2)})
 	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
-	suite.checker.meta.CollectionManager.PutCollection(collection1, partition1)
-	suite.checker.meta.ReplicaManager.Put(replica1)
-	suite.targetMgr.UpdateCollectionNextTarget(int64(cid1))
-	suite.targetMgr.UpdateCollectionCurrentTarget(int64(cid1))
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1, partition1)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
+	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid1))
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid1))
 
 	cid2, replicaID2, partitionID2 := 2, 2, 2
 	collection2 := utils.CreateTestCollection(int64(cid2), int32(replicaID2))
 	collection2.Status = querypb.LoadStatus_Loaded
 	replica2 := utils.CreateTestReplica(int64(replicaID2), int64(cid2), []int64{int64(nodeID1), int64(nodeID2)})
 	partition2 := utils.CreateTestPartition(int64(cid2), int64(partitionID2))
-	suite.checker.meta.CollectionManager.PutCollection(collection2, partition2)
-	suite.checker.meta.ReplicaManager.Put(replica2)
-	suite.targetMgr.UpdateCollectionNextTarget(int64(cid2))
-	suite.targetMgr.UpdateCollectionCurrentTarget(int64(cid2))
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2, partition2)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
+	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid2))
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid2))
 
 	// test disable auto balance
 	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
 	suite.scheduler.EXPECT().GetSegmentTaskNum().Maybe().Return(func() int {
 		return 0
 	})
-	replicasToBalance := suite.checker.replicasToBalance()
+	replicasToBalance := suite.checker.replicasToBalance(ctx)
 	suite.Empty(replicasToBalance)
-	segPlans, _ := suite.checker.balanceReplicas(replicasToBalance)
+	segPlans, _ := suite.checker.balanceReplicas(ctx, replicasToBalance)
 	suite.Empty(segPlans)
 
 	// test enable auto balance
 	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
 	idsToBalance := []int64{int64(replicaID1)}
-	replicasToBalance = suite.checker.replicasToBalance()
+	replicasToBalance = suite.checker.replicasToBalance(ctx)
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
 	// next round
 	idsToBalance = []int64{int64(replicaID2)}
-	replicasToBalance = suite.checker.replicasToBalance()
+	replicasToBalance = suite.checker.replicasToBalance(ctx)
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
 	// final round
-	replicasToBalance = suite.checker.replicasToBalance()
+	replicasToBalance = suite.checker.replicasToBalance(ctx)
 	suite.Empty(replicasToBalance)
 }
 
 func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
+	ctx := context.Background()
 	// set up nodes info
 	nodeID1, nodeID2 := 1, 2
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
@@ -175,8 +177,8 @@ func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	suite.checker.meta.ResourceManager.HandleNodeUp(int64(nodeID1))
-	suite.checker.meta.ResourceManager.HandleNodeUp(int64(nodeID2))
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID1))
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID2))
 
 	segments := []*datapb.SegmentInfo{
 		{
@@ -199,31 +201,32 @@ func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
 	collection1.Status = querypb.LoadStatus_Loaded
 	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{int64(nodeID1), int64(nodeID2)})
 	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
-	suite.checker.meta.CollectionManager.PutCollection(collection1, partition1)
-	suite.checker.meta.ReplicaManager.Put(replica1)
-	suite.targetMgr.UpdateCollectionNextTarget(int64(cid1))
-	suite.targetMgr.UpdateCollectionCurrentTarget(int64(cid1))
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1, partition1)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
+	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid1))
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid1))
 
 	cid2, replicaID2, partitionID2 := 2, 2, 2
 	collection2 := utils.CreateTestCollection(int64(cid2), int32(replicaID2))
 	collection2.Status = querypb.LoadStatus_Loaded
 	replica2 := utils.CreateTestReplica(int64(replicaID2), int64(cid2), []int64{int64(nodeID1), int64(nodeID2)})
 	partition2 := utils.CreateTestPartition(int64(cid2), int64(partitionID2))
-	suite.checker.meta.CollectionManager.PutCollection(collection2, partition2)
-	suite.checker.meta.ReplicaManager.Put(replica2)
-	suite.targetMgr.UpdateCollectionNextTarget(int64(cid2))
-	suite.targetMgr.UpdateCollectionCurrentTarget(int64(cid2))
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2, partition2)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
+	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid2))
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid2))
 
 	// test scheduler busy
 	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
 	suite.scheduler.EXPECT().GetSegmentTaskNum().Maybe().Return(func() int {
 		return 1
 	})
-	replicasToBalance := suite.checker.replicasToBalance()
+	replicasToBalance := suite.checker.replicasToBalance(ctx)
 	suite.Len(replicasToBalance, 1)
 }
 
 func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
+	ctx := context.Background()
 	// set up nodes info, stopping node1
 	nodeID1, nodeID2 := 1, 2
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
@@ -237,8 +240,8 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 		Hostname: "localhost",
 	}))
 	suite.nodeMgr.Stopping(int64(nodeID1))
-	suite.checker.meta.ResourceManager.HandleNodeUp(int64(nodeID1))
-	suite.checker.meta.ResourceManager.HandleNodeUp(int64(nodeID2))
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID1))
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID2))
 
 	segments := []*datapb.SegmentInfo{
 		{
@@ -261,32 +264,32 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 	collection1.Status = querypb.LoadStatus_Loaded
 	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{int64(nodeID1), int64(nodeID2)})
 	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
-	suite.checker.meta.CollectionManager.PutCollection(collection1, partition1)
-	suite.checker.meta.ReplicaManager.Put(replica1)
-	suite.targetMgr.UpdateCollectionNextTarget(int64(cid1))
-	suite.targetMgr.UpdateCollectionCurrentTarget(int64(cid1))
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1, partition1)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
+	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid1))
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid1))
 
 	cid2, replicaID2, partitionID2 := 2, 2, 2
 	collection2 := utils.CreateTestCollection(int64(cid2), int32(replicaID2))
 	collection2.Status = querypb.LoadStatus_Loaded
 	replica2 := utils.CreateTestReplica(int64(replicaID2), int64(cid2), []int64{int64(nodeID1), int64(nodeID2)})
 	partition2 := utils.CreateTestPartition(int64(cid2), int64(partitionID2))
-	suite.checker.meta.CollectionManager.PutCollection(collection2, partition2)
-	suite.checker.meta.ReplicaManager.Put(replica2)
-	suite.targetMgr.UpdateCollectionNextTarget(int64(cid2))
-	suite.targetMgr.UpdateCollectionCurrentTarget(int64(cid2))
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2, partition2)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
+	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid2))
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid2))
 
 	mr1 := replica1.CopyForWrite()
 	mr1.AddRONode(1)
-	suite.checker.meta.ReplicaManager.Put(mr1.IntoReplica())
+	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
 
 	mr2 := replica2.CopyForWrite()
 	mr2.AddRONode(1)
-	suite.checker.meta.ReplicaManager.Put(mr2.IntoReplica())
+	suite.checker.meta.ReplicaManager.Put(ctx, mr2.IntoReplica())
 
 	// test stopping balance
 	idsToBalance := []int64{int64(replicaID1), int64(replicaID2)}
-	replicasToBalance := suite.checker.replicasToBalance()
+	replicasToBalance := suite.checker.replicasToBalance(ctx)
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
 
 	// checker check
@@ -298,12 +301,13 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 		To:      2,
 	}
 	segPlans = append(segPlans, mockPlan)
-	suite.balancer.EXPECT().BalanceReplica(mock.Anything).Return(segPlans, chanPlans)
+	suite.balancer.EXPECT().BalanceReplica(mock.Anything, mock.Anything).Return(segPlans, chanPlans)
 	tasks := suite.checker.Check(context.TODO())
 	suite.Len(tasks, 2)
 }
 
 func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
+	ctx := context.Background()
 	// set up nodes info, stopping node1
 	nodeID1, nodeID2 := int64(1), int64(2)
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
@@ -317,8 +321,8 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 		Hostname: "localhost",
 	}))
 	suite.nodeMgr.Stopping(nodeID1)
-	suite.checker.meta.ResourceManager.HandleNodeUp(nodeID1)
-	suite.checker.meta.ResourceManager.HandleNodeUp(nodeID2)
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID1)
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID2)
 
 	segments := []*datapb.SegmentInfo{
 		{
@@ -341,30 +345,30 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 	collection1.Status = querypb.LoadStatus_Loaded
 	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{nodeID1, nodeID2})
 	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
-	suite.checker.meta.CollectionManager.PutCollection(collection1, partition1)
-	suite.checker.meta.ReplicaManager.Put(replica1)
-	suite.targetMgr.UpdateCollectionNextTarget(int64(cid1))
-	suite.targetMgr.UpdateCollectionCurrentTarget(int64(cid1))
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1, partition1)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
+	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid1))
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid1))
 
 	cid2, replicaID2, partitionID2 := 2, 2, 2
 	collection2 := utils.CreateTestCollection(int64(cid2), int32(replicaID2))
 	collection2.Status = querypb.LoadStatus_Loaded
 	replica2 := utils.CreateTestReplica(int64(replicaID2), int64(cid2), []int64{nodeID1, nodeID2})
 	partition2 := utils.CreateTestPartition(int64(cid2), int64(partitionID2))
-	suite.checker.meta.CollectionManager.PutCollection(collection2, partition2)
-	suite.checker.meta.ReplicaManager.Put(replica2)
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2, partition2)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
 
 	mr1 := replica1.CopyForWrite()
 	mr1.AddRONode(1)
-	suite.checker.meta.ReplicaManager.Put(mr1.IntoReplica())
+	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
 
 	mr2 := replica2.CopyForWrite()
 	mr2.AddRONode(1)
-	suite.checker.meta.ReplicaManager.Put(mr2.IntoReplica())
+	suite.checker.meta.ReplicaManager.Put(ctx, mr2.IntoReplica())
 
 	// test stopping balance
 	idsToBalance := []int64{int64(replicaID1)}
-	replicasToBalance := suite.checker.replicasToBalance()
+	replicasToBalance := suite.checker.replicasToBalance(ctx)
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
 }
 

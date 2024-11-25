@@ -670,6 +670,40 @@ class TestCreateCollection(TestBase):
         assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
 
+    def test_create_collections_with_nullable_default(self):
+        """
+        target: test create collection
+        method: create a collection with default none
+        expected: create collection success
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}, "defaultValue": 100},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"},
+                     "nullable": True, "defaultValue": "123"},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            }
+        }
+        logging.info(f"create collection {name} with payload: {payload}")
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = client.collection_list()
+
+        all_collections = rsp['data']
+        assert name in all_collections
+        # describe collection
+        rsp = client.collection_describe(name)
+        assert rsp['code'] == 0
+        assert rsp['data']['fields'][2]['defaultValue'] == {'Data': {'StringData': '123'}}
+        assert rsp['data']['fields'][2]['nullable'] is True
+
 
 @pytest.mark.L1
 class TestCreateCollectionNegative(TestBase):
@@ -735,6 +769,125 @@ class TestCreateCollectionNegative(TestBase):
         rsp = client.collection_create(payload)
         assert rsp['code'] == 1100
         assert "Invalid collection name" in rsp['message'] or "invalid parameter" in rsp['message']
+
+    def test_create_collections_with_partition_key_nullable(self):
+        """
+        partition key field not support nullable
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}, "isPartitionKey": True,
+                     "nullable": True},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            }
+        }
+        logging.info(f"create collection {name} with payload: {payload}")
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 1100
+        assert "partition key field not support nullable" in rsp['message']
+
+    def test_create_collections_with_vector_nullable(self):
+        """
+        vector field not support nullable
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"},
+                     "nullable": True}
+                ]
+            }
+        }
+        logging.info(f"create collection {name} with payload: {payload}")
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 1100
+        assert "vector type not support null" in rsp['message']
+
+    def test_create_collections_with_primary_default(self):
+        """
+        primary key field not support defaultValue
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {},
+                     "defaultValue": 123},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            }
+        }
+        logging.info(f"create collection {name} with payload: {payload}")
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 1100
+        assert "primary field not support default_value" in rsp['message']
+
+    def test_create_collections_with_json_field_default(self):
+        """
+        json field not support default value
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "json", "dataType": "JSON", "elementTypeParams": {}, "defaultValue": {"key": 1}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            }
+        }
+        logging.info(f"create collection {name} with payload: {payload}")
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 1100
+        assert "convert defaultValue fail" in rsp['message']
+
+    def test_create_collections_with_array_field_default(self):
+        """
+        array field not support default value
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "int_array", "dataType": "Array", "elementDataType": "Int64", "defaultValue": [1, 2],
+                     "elementTypeParams": {"max_capacity": "1024"}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            }
+        }
+        logging.info(f"create collection {name} with payload: {payload}")
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 1100
+        assert "convert defaultValue fail" in rsp['message']
 
 
 @pytest.mark.L0

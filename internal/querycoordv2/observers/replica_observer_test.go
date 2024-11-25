@@ -16,6 +16,7 @@
 package observers
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -47,6 +48,7 @@ type ReplicaObserverSuite struct {
 
 	collectionID int64
 	partitionID  int64
+	ctx          context.Context
 }
 
 func (suite *ReplicaObserverSuite) SetupSuite() {
@@ -67,6 +69,7 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 		config.EtcdTLSMinVersion.GetValue())
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
+	suite.ctx = context.Background()
 
 	// meta
 	store := querycoord.NewCatalog(suite.kv)
@@ -82,11 +85,12 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 }
 
 func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
-	suite.meta.ResourceManager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
+	ctx := suite.ctx
+	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
 	})
-	suite.meta.ResourceManager.AddResourceGroup("rg2", &rgpb.ResourceGroupConfig{
+	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg2", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
 	})
@@ -110,14 +114,14 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 		Address:  "localhost:8080",
 		Hostname: "localhost",
 	}))
-	suite.meta.ResourceManager.HandleNodeUp(1)
-	suite.meta.ResourceManager.HandleNodeUp(2)
-	suite.meta.ResourceManager.HandleNodeUp(3)
-	suite.meta.ResourceManager.HandleNodeUp(4)
+	suite.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	suite.meta.ResourceManager.HandleNodeUp(ctx, 2)
+	suite.meta.ResourceManager.HandleNodeUp(ctx, 3)
+	suite.meta.ResourceManager.HandleNodeUp(ctx, 4)
 
-	err := suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(suite.collectionID, 2))
+	err := suite.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 2))
 	suite.NoError(err)
-	replicas, err := suite.meta.Spawn(suite.collectionID, map[string]int{
+	replicas, err := suite.meta.Spawn(ctx, suite.collectionID, map[string]int{
 		"rg1": 1,
 		"rg2": 1,
 	}, nil)
@@ -127,7 +131,7 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	suite.Eventually(func() bool {
 		availableNodes := typeutil.NewUniqueSet()
 		for _, r := range replicas {
-			replica := suite.meta.ReplicaManager.Get(r.GetID())
+			replica := suite.meta.ReplicaManager.Get(ctx, r.GetID())
 			suite.NotNil(replica)
 			if replica.RWNodesCount() != 2 {
 				return false
@@ -151,13 +155,13 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	}
 
 	// Do a replica transfer.
-	suite.meta.ReplicaManager.TransferReplica(suite.collectionID, "rg1", "rg2", 1)
+	suite.meta.ReplicaManager.TransferReplica(ctx, suite.collectionID, "rg1", "rg2", 1)
 
 	// All replica should in the rg2 but not rg1
 	// And some nodes will become ro nodes before all segment and channel on it is cleaned.
 	suite.Eventually(func() bool {
 		for _, r := range replicas {
-			replica := suite.meta.ReplicaManager.Get(r.GetID())
+			replica := suite.meta.ReplicaManager.Get(ctx, r.GetID())
 			suite.NotNil(replica)
 			suite.Equal("rg2", replica.GetResourceGroup())
 			// all replica should have ro nodes.
@@ -178,7 +182,7 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 
 	suite.Eventually(func() bool {
 		for _, r := range replicas {
-			replica := suite.meta.ReplicaManager.Get(r.GetID())
+			replica := suite.meta.ReplicaManager.Get(ctx, r.GetID())
 			suite.NotNil(replica)
 			suite.Equal("rg2", replica.GetResourceGroup())
 			if replica.RONodesCount() > 0 {

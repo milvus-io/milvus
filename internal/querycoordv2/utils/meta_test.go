@@ -17,6 +17,7 @@
 package utils
 
 import (
+	"context"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -51,18 +52,19 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 	require.NoError(t, err)
 	kv := etcdKV.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 
+	ctx := context.Background()
 	store := querycoord.NewCatalog(kv)
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
-	m.ResourceManager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
+	m.ResourceManager.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
 	})
-	m.ResourceManager.AddResourceGroup("rg2", &rgpb.ResourceGroupConfig{
+	m.ResourceManager.AddResourceGroup(ctx, "rg2", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
 	})
-	m.ResourceManager.AddResourceGroup("rg3", &rgpb.ResourceGroupConfig{
+	m.ResourceManager.AddResourceGroup(ctx, "rg3", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
 	})
@@ -74,13 +76,13 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 			Hostname: "localhost",
 		}))
 		if i%3 == 0 {
-			m.ResourceManager.HandleNodeUp(int64(i))
+			m.ResourceManager.HandleNodeUp(ctx, int64(i))
 		}
 		if i%3 == 1 {
-			m.ResourceManager.HandleNodeUp(int64(i))
+			m.ResourceManager.HandleNodeUp(ctx, int64(i))
 		}
 		if i%3 == 2 {
-			m.ResourceManager.HandleNodeUp(int64(i))
+			m.ResourceManager.HandleNodeUp(ctx, int64(i))
 		}
 	}
 
@@ -120,7 +122,7 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := SpawnReplicasWithRG(tt.args.m, tt.args.collection, tt.args.resourceGroups, tt.args.replicaNumber, nil)
+			got, err := SpawnReplicasWithRG(ctx, tt.args.m, tt.args.collection, tt.args.resourceGroups, tt.args.replicaNumber, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SpawnReplicasWithRG() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -135,21 +137,22 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 
 func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 	paramtable.Init()
+	ctx := context.Background()
 
 	store := mocks.NewQueryCoordCatalog(t)
-	store.EXPECT().SaveCollection(mock.Anything).Return(nil)
-	store.EXPECT().SaveReplica(mock.Anything).Return(nil).Times(4)
-	store.EXPECT().SaveResourceGroup(mock.Anything).Return(nil)
+	store.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil)
+	store.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Times(4)
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
-	m.ResourceManager.AddResourceGroup("rg", &rgpb.ResourceGroupConfig{
+	m.ResourceManager.AddResourceGroup(ctx, "rg", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
 	})
-	m.CollectionManager.PutCollection(CreateTestCollection(1, 2))
-	m.CollectionManager.PutCollection(CreateTestCollection(2, 2))
-	m.ReplicaManager.Put(meta.NewReplica(
+	m.CollectionManager.PutCollection(ctx, CreateTestCollection(1, 2))
+	m.CollectionManager.PutCollection(ctx, CreateTestCollection(2, 2))
+	m.ReplicaManager.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            1,
 			CollectionID:  1,
@@ -159,7 +162,7 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 		typeutil.NewUniqueSet(),
 	))
 
-	m.ReplicaManager.Put(meta.NewReplica(
+	m.ReplicaManager.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            2,
 			CollectionID:  1,
@@ -169,7 +172,7 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 		typeutil.NewUniqueSet(),
 	))
 
-	m.ReplicaManager.Put(meta.NewReplica(
+	m.ReplicaManager.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            3,
 			CollectionID:  2,
@@ -179,7 +182,7 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 		typeutil.NewUniqueSet(),
 	))
 
-	m.ReplicaManager.Put(meta.NewReplica(
+	m.ReplicaManager.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            4,
 			CollectionID:  2,
@@ -190,33 +193,34 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 	))
 
 	storeErr := errors.New("store error")
-	store.EXPECT().SaveReplica(mock.Anything).Return(storeErr)
+	store.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(storeErr)
 	RecoverAllCollection(m)
 
-	assert.Len(t, m.ReplicaManager.Get(1).GetNodes(), 0)
-	assert.Len(t, m.ReplicaManager.Get(2).GetNodes(), 0)
-	assert.Len(t, m.ReplicaManager.Get(3).GetNodes(), 0)
-	assert.Len(t, m.ReplicaManager.Get(4).GetNodes(), 0)
+	assert.Len(t, m.ReplicaManager.Get(ctx, 1).GetNodes(), 0)
+	assert.Len(t, m.ReplicaManager.Get(ctx, 2).GetNodes(), 0)
+	assert.Len(t, m.ReplicaManager.Get(ctx, 3).GetNodes(), 0)
+	assert.Len(t, m.ReplicaManager.Get(ctx, 4).GetNodes(), 0)
 }
 
 func TestAddNodesToCollectionsInRG(t *testing.T) {
 	paramtable.Init()
+	ctx := context.Background()
 
 	store := mocks.NewQueryCoordCatalog(t)
-	store.EXPECT().SaveCollection(mock.Anything).Return(nil)
-	store.EXPECT().SaveReplica(mock.Anything).Return(nil)
-	store.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
-	store.EXPECT().SaveResourceGroup(mock.Anything).Return(nil)
+	store.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil)
+	store.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	store.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
-	m.ResourceManager.AddResourceGroup("rg", &rgpb.ResourceGroupConfig{
+	m.ResourceManager.AddResourceGroup(ctx, "rg", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 4},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 4},
 	})
-	m.CollectionManager.PutCollection(CreateTestCollection(1, 2))
-	m.CollectionManager.PutCollection(CreateTestCollection(2, 2))
-	m.ReplicaManager.Put(meta.NewReplica(
+	m.CollectionManager.PutCollection(ctx, CreateTestCollection(1, 2))
+	m.CollectionManager.PutCollection(ctx, CreateTestCollection(2, 2))
+	m.ReplicaManager.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            1,
 			CollectionID:  1,
@@ -226,7 +230,7 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 		typeutil.NewUniqueSet(),
 	))
 
-	m.ReplicaManager.Put(meta.NewReplica(
+	m.ReplicaManager.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            2,
 			CollectionID:  1,
@@ -236,7 +240,7 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 		typeutil.NewUniqueSet(),
 	))
 
-	m.ReplicaManager.Put(meta.NewReplica(
+	m.ReplicaManager.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            3,
 			CollectionID:  2,
@@ -246,7 +250,7 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 		typeutil.NewUniqueSet(),
 	))
 
-	m.ReplicaManager.Put(meta.NewReplica(
+	m.ReplicaManager.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            4,
 			CollectionID:  2,
@@ -262,12 +266,12 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 			Address:  "127.0.0.1",
 			Hostname: "localhost",
 		}))
-		m.ResourceManager.HandleNodeUp(nodeID)
+		m.ResourceManager.HandleNodeUp(ctx, nodeID)
 	}
 	RecoverAllCollection(m)
 
-	assert.Len(t, m.ReplicaManager.Get(1).GetNodes(), 2)
-	assert.Len(t, m.ReplicaManager.Get(2).GetNodes(), 2)
-	assert.Len(t, m.ReplicaManager.Get(3).GetNodes(), 2)
-	assert.Len(t, m.ReplicaManager.Get(4).GetNodes(), 2)
+	assert.Len(t, m.ReplicaManager.Get(ctx, 1).GetNodes(), 2)
+	assert.Len(t, m.ReplicaManager.Get(ctx, 2).GetNodes(), 2)
+	assert.Len(t, m.ReplicaManager.Get(ctx, 3).GetNodes(), 2)
+	assert.Len(t, m.ReplicaManager.Get(ctx, 4).GetNodes(), 2)
 }

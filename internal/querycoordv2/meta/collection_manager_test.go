@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"context"
 	"sort"
 	"testing"
 	"time"
@@ -59,6 +60,8 @@ type CollectionManagerSuite struct {
 
 	// Test object
 	mgr *CollectionManager
+
+	ctx context.Context
 }
 
 func (suite *CollectionManagerSuite) SetupSuite() {
@@ -85,6 +88,7 @@ func (suite *CollectionManagerSuite) SetupSuite() {
 		102: {100, 100, 100},
 		103: {},
 	}
+	suite.ctx = context.Background()
 }
 
 func (suite *CollectionManagerSuite) SetupTest() {
@@ -113,12 +117,13 @@ func (suite *CollectionManagerSuite) TearDownTest() {
 
 func (suite *CollectionManagerSuite) TestGetProperty() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	for i, collection := range suite.collections {
-		loadType := mgr.GetLoadType(collection)
-		replicaNumber := mgr.GetReplicaNumber(collection)
-		percentage := mgr.CalculateLoadPercentage(collection)
-		exist := mgr.Exist(collection)
+		loadType := mgr.GetLoadType(ctx, collection)
+		replicaNumber := mgr.GetReplicaNumber(ctx, collection)
+		percentage := mgr.CalculateLoadPercentage(ctx, collection)
+		exist := mgr.Exist(ctx, collection)
 		suite.Equal(suite.loadTypes[i], loadType)
 		suite.Equal(suite.replicaNumber[i], replicaNumber)
 		suite.Equal(suite.colLoadPercent[i], percentage)
@@ -126,10 +131,10 @@ func (suite *CollectionManagerSuite) TestGetProperty() {
 	}
 
 	invalidCollection := -1
-	loadType := mgr.GetLoadType(int64(invalidCollection))
-	replicaNumber := mgr.GetReplicaNumber(int64(invalidCollection))
-	percentage := mgr.CalculateLoadPercentage(int64(invalidCollection))
-	exist := mgr.Exist(int64(invalidCollection))
+	loadType := mgr.GetLoadType(ctx, int64(invalidCollection))
+	replicaNumber := mgr.GetReplicaNumber(ctx, int64(invalidCollection))
+	percentage := mgr.CalculateLoadPercentage(ctx, int64(invalidCollection))
+	exist := mgr.Exist(ctx, int64(invalidCollection))
 	suite.Equal(querypb.LoadType_UnKnownType, loadType)
 	suite.EqualValues(-1, replicaNumber)
 	suite.EqualValues(-1, percentage)
@@ -138,6 +143,7 @@ func (suite *CollectionManagerSuite) TestGetProperty() {
 
 func (suite *CollectionManagerSuite) TestPut() {
 	suite.releaseAll()
+	ctx := suite.ctx
 	// test put collection with partitions
 	for i, collection := range suite.collections {
 		status := querypb.LoadStatus_Loaded
@@ -167,7 +173,7 @@ func (suite *CollectionManagerSuite) TestPut() {
 				CreatedAt:      time.Now(),
 			}
 		})
-		err := suite.mgr.PutCollection(col, partitions...)
+		err := suite.mgr.PutCollection(ctx, col, partitions...)
 		suite.NoError(err)
 	}
 	suite.checkLoadResult()
@@ -179,43 +185,44 @@ func (suite *CollectionManagerSuite) TestGet() {
 
 func (suite *CollectionManagerSuite) TestUpdate() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
-	collections := mgr.GetAllCollections()
-	partitions := mgr.GetAllPartitions()
+	collections := mgr.GetAllCollections(ctx)
+	partitions := mgr.GetAllPartitions(ctx)
 	for _, collection := range collections {
 		collection := collection.Clone()
 		collection.LoadPercentage = 100
-		err := mgr.PutCollectionWithoutSave(collection)
+		err := mgr.PutCollectionWithoutSave(ctx, collection)
 		suite.NoError(err)
 
-		modified := mgr.GetCollection(collection.GetCollectionID())
+		modified := mgr.GetCollection(ctx, collection.GetCollectionID())
 		suite.Equal(collection, modified)
 		suite.EqualValues(100, modified.LoadPercentage)
 
 		collection.Status = querypb.LoadStatus_Loaded
-		err = mgr.PutCollection(collection)
+		err = mgr.PutCollection(ctx, collection)
 		suite.NoError(err)
 	}
 	for _, partition := range partitions {
 		partition := partition.Clone()
 		partition.LoadPercentage = 100
-		err := mgr.PutPartitionWithoutSave(partition)
+		err := mgr.PutPartitionWithoutSave(ctx, partition)
 		suite.NoError(err)
 
-		modified := mgr.GetPartition(partition.GetPartitionID())
+		modified := mgr.GetPartition(ctx, partition.GetPartitionID())
 		suite.Equal(partition, modified)
 		suite.EqualValues(100, modified.LoadPercentage)
 
 		partition.Status = querypb.LoadStatus_Loaded
-		err = mgr.PutPartition(partition)
+		err = mgr.PutPartition(ctx, partition)
 		suite.NoError(err)
 	}
 
 	suite.clearMemory()
-	err := mgr.Recover(suite.broker)
+	err := mgr.Recover(ctx, suite.broker)
 	suite.NoError(err)
-	collections = mgr.GetAllCollections()
-	partitions = mgr.GetAllPartitions()
+	collections = mgr.GetAllCollections(ctx)
+	partitions = mgr.GetAllPartitions(ctx)
 	for _, collection := range collections {
 		suite.Equal(querypb.LoadStatus_Loaded, collection.GetStatus())
 	}
@@ -226,7 +233,8 @@ func (suite *CollectionManagerSuite) TestUpdate() {
 
 func (suite *CollectionManagerSuite) TestGetFieldIndex() {
 	mgr := suite.mgr
-	mgr.PutCollection(&Collection{
+	ctx := suite.ctx
+	mgr.PutCollection(ctx, &Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  1,
 			ReplicaNumber: 1,
@@ -237,7 +245,7 @@ func (suite *CollectionManagerSuite) TestGetFieldIndex() {
 		LoadPercentage: 0,
 		CreatedAt:      time.Now(),
 	})
-	indexID := mgr.GetFieldIndex(1)
+	indexID := mgr.GetFieldIndex(ctx, 1)
 	suite.Len(indexID, 2)
 	suite.Contains(indexID, int64(1))
 	suite.Contains(indexID, int64(2))
@@ -245,14 +253,15 @@ func (suite *CollectionManagerSuite) TestGetFieldIndex() {
 
 func (suite *CollectionManagerSuite) TestRemove() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	// Remove collections/partitions
 	for i, collectionID := range suite.collections {
 		if suite.loadTypes[i] == querypb.LoadType_LoadCollection {
-			err := mgr.RemoveCollection(collectionID)
+			err := mgr.RemoveCollection(ctx, collectionID)
 			suite.NoError(err)
 		} else {
-			err := mgr.RemovePartition(collectionID, suite.partitions[collectionID]...)
+			err := mgr.RemovePartition(ctx, collectionID, suite.partitions[collectionID]...)
 			suite.NoError(err)
 		}
 	}
@@ -260,23 +269,23 @@ func (suite *CollectionManagerSuite) TestRemove() {
 	// Try to get the removed items
 	for i, collectionID := range suite.collections {
 		if suite.loadTypes[i] == querypb.LoadType_LoadCollection {
-			collection := mgr.GetCollection(collectionID)
+			collection := mgr.GetCollection(ctx, collectionID)
 			suite.Nil(collection)
 		} else {
-			partitions := mgr.GetPartitionsByCollection(collectionID)
+			partitions := mgr.GetPartitionsByCollection(ctx, collectionID)
 			suite.Empty(partitions)
 		}
 	}
 
 	// Make sure the removes applied to meta store
-	err := mgr.Recover(suite.broker)
+	err := mgr.Recover(ctx, suite.broker)
 	suite.NoError(err)
 	for i, collectionID := range suite.collections {
 		if suite.loadTypes[i] == querypb.LoadType_LoadCollection {
-			collection := mgr.GetCollection(collectionID)
+			collection := mgr.GetCollection(ctx, collectionID)
 			suite.Nil(collection)
 		} else {
-			partitions := mgr.GetPartitionsByCollection(collectionID)
+			partitions := mgr.GetPartitionsByCollection(ctx, collectionID)
 			suite.Empty(partitions)
 		}
 	}
@@ -285,9 +294,9 @@ func (suite *CollectionManagerSuite) TestRemove() {
 	suite.loadAll()
 	for i, collectionID := range suite.collections {
 		if suite.loadTypes[i] == querypb.LoadType_LoadPartition {
-			err := mgr.RemoveCollection(collectionID)
+			err := mgr.RemoveCollection(ctx, collectionID)
 			suite.NoError(err)
-			partitions := mgr.GetPartitionsByCollection(collectionID)
+			partitions := mgr.GetPartitionsByCollection(ctx, collectionID)
 			suite.Empty(partitions)
 		}
 	}
@@ -296,27 +305,28 @@ func (suite *CollectionManagerSuite) TestRemove() {
 	suite.releaseAll()
 	suite.loadAll()
 	for _, collectionID := range suite.collections {
-		err := mgr.RemoveCollection(collectionID)
+		err := mgr.RemoveCollection(ctx, collectionID)
 		suite.NoError(err)
-		err = mgr.Recover(suite.broker)
+		err = mgr.Recover(ctx, suite.broker)
 		suite.NoError(err)
-		collection := mgr.GetCollection(collectionID)
+		collection := mgr.GetCollection(ctx, collectionID)
 		suite.Nil(collection)
-		partitions := mgr.GetPartitionsByCollection(collectionID)
+		partitions := mgr.GetPartitionsByCollection(ctx, collectionID)
 		suite.Empty(partitions)
 	}
 }
 
 func (suite *CollectionManagerSuite) TestRecover_normal() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	suite.clearMemory()
-	err := mgr.Recover(suite.broker)
+	err := mgr.Recover(ctx, suite.broker)
 	suite.NoError(err)
 	for _, collection := range suite.collections {
-		suite.True(mgr.Exist(collection))
+		suite.True(mgr.Exist(ctx, collection))
 		for _, partitionID := range suite.partitions[collection] {
-			partition := mgr.GetPartition(partitionID)
+			partition := mgr.GetPartition(ctx, partitionID)
 			suite.NotNil(partition)
 		}
 	}
@@ -325,6 +335,7 @@ func (suite *CollectionManagerSuite) TestRecover_normal() {
 func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 	mgr := suite.mgr
 	suite.releaseAll()
+	ctx := suite.ctx
 	// test put collection with partitions
 	for i, collection := range suite.collections {
 		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
@@ -350,20 +361,20 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 				CreatedAt:      time.Now(),
 			}
 		})
-		err := suite.mgr.PutCollection(col, partitions...)
+		err := suite.mgr.PutCollection(ctx, col, partitions...)
 		suite.NoError(err)
 	}
 
 	// recover for first time, expected recover success
 	suite.clearMemory()
-	err := mgr.Recover(suite.broker)
+	err := mgr.Recover(ctx, suite.broker)
 	suite.NoError(err)
 	for _, collectionID := range suite.collections {
-		collection := mgr.GetCollection(collectionID)
+		collection := mgr.GetCollection(ctx, collectionID)
 		suite.NotNil(collection)
 		suite.Equal(int32(1), collection.GetRecoverTimes())
 		for _, partitionID := range suite.partitions[collectionID] {
-			partition := mgr.GetPartition(partitionID)
+			partition := mgr.GetPartition(ctx, partitionID)
 			suite.NotNil(partition)
 			suite.Equal(int32(1), partition.GetRecoverTimes())
 		}
@@ -372,18 +383,18 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 	// update load percent, then recover for second time
 	for _, collectionID := range suite.collections {
 		for _, partitionID := range suite.partitions[collectionID] {
-			mgr.UpdateLoadPercent(partitionID, 10)
+			mgr.UpdateLoadPercent(ctx, partitionID, 10)
 		}
 	}
 	suite.clearMemory()
-	err = mgr.Recover(suite.broker)
+	err = mgr.Recover(ctx, suite.broker)
 	suite.NoError(err)
 	for _, collectionID := range suite.collections {
-		collection := mgr.GetCollection(collectionID)
+		collection := mgr.GetCollection(ctx, collectionID)
 		suite.NotNil(collection)
 		suite.Equal(int32(2), collection.GetRecoverTimes())
 		for _, partitionID := range suite.partitions[collectionID] {
-			partition := mgr.GetPartition(partitionID)
+			partition := mgr.GetPartition(ctx, partitionID)
 			suite.NotNil(partition)
 			suite.Equal(int32(2), partition.GetRecoverTimes())
 		}
@@ -393,14 +404,14 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 	for i := 0; i < int(paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32()); i++ {
 		log.Info("stupid", zap.Int("count", i))
 		suite.clearMemory()
-		err = mgr.Recover(suite.broker)
+		err = mgr.Recover(ctx, suite.broker)
 		suite.NoError(err)
 	}
 	for _, collectionID := range suite.collections {
-		collection := mgr.GetCollection(collectionID)
+		collection := mgr.GetCollection(ctx, collectionID)
 		suite.Nil(collection)
 		for _, partitionID := range suite.partitions[collectionID] {
-			partition := mgr.GetPartition(partitionID)
+			partition := mgr.GetPartition(ctx, partitionID)
 			suite.Nil(partition)
 		}
 	}
@@ -408,7 +419,8 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 
 func (suite *CollectionManagerSuite) TestUpdateLoadPercentage() {
 	mgr := suite.mgr
-	mgr.PutCollection(&Collection{
+	ctx := suite.ctx
+	mgr.PutCollection(ctx, &Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  1,
 			ReplicaNumber: 1,
@@ -421,7 +433,7 @@ func (suite *CollectionManagerSuite) TestUpdateLoadPercentage() {
 
 	partitions := []int64{1, 2}
 	for _, partition := range partitions {
-		mgr.PutPartition(&Partition{
+		mgr.PutPartition(ctx, &Partition{
 			PartitionLoadInfo: &querypb.PartitionLoadInfo{
 				CollectionID: 1,
 				PartitionID:  partition,
@@ -432,42 +444,43 @@ func (suite *CollectionManagerSuite) TestUpdateLoadPercentage() {
 		})
 	}
 	// test update partition load percentage
-	mgr.UpdateLoadPercent(1, 30)
-	partition := mgr.GetPartition(1)
+	mgr.UpdateLoadPercent(ctx, 1, 30)
+	partition := mgr.GetPartition(ctx, 1)
 	suite.Equal(int32(30), partition.LoadPercentage)
-	suite.Equal(int32(30), mgr.GetPartitionLoadPercentage(partition.PartitionID))
+	suite.Equal(int32(30), mgr.GetPartitionLoadPercentage(ctx, partition.PartitionID))
 	suite.Equal(querypb.LoadStatus_Loading, partition.Status)
-	collection := mgr.GetCollection(1)
+	collection := mgr.GetCollection(ctx, 1)
 	suite.Equal(int32(15), collection.LoadPercentage)
 	suite.Equal(querypb.LoadStatus_Loading, collection.Status)
 	// test update partition load percentage to 100
-	mgr.UpdateLoadPercent(1, 100)
-	partition = mgr.GetPartition(1)
+	mgr.UpdateLoadPercent(ctx, 1, 100)
+	partition = mgr.GetPartition(ctx, 1)
 	suite.Equal(int32(100), partition.LoadPercentage)
 	suite.Equal(querypb.LoadStatus_Loaded, partition.Status)
-	collection = mgr.GetCollection(1)
+	collection = mgr.GetCollection(ctx, 1)
 	suite.Equal(int32(50), collection.LoadPercentage)
 	suite.Equal(querypb.LoadStatus_Loading, collection.Status)
 	// test update collection load percentage
-	mgr.UpdateLoadPercent(2, 100)
-	partition = mgr.GetPartition(1)
+	mgr.UpdateLoadPercent(ctx, 2, 100)
+	partition = mgr.GetPartition(ctx, 1)
 	suite.Equal(int32(100), partition.LoadPercentage)
 	suite.Equal(querypb.LoadStatus_Loaded, partition.Status)
-	collection = mgr.GetCollection(1)
+	collection = mgr.GetCollection(ctx, 1)
 	suite.Equal(int32(100), collection.LoadPercentage)
 	suite.Equal(querypb.LoadStatus_Loaded, collection.Status)
-	suite.Equal(querypb.LoadStatus_Loaded, mgr.CalculateLoadStatus(collection.CollectionID))
+	suite.Equal(querypb.LoadStatus_Loaded, mgr.CalculateLoadStatus(ctx, collection.CollectionID))
 }
 
 func (suite *CollectionManagerSuite) TestUpgradeRecover() {
 	suite.releaseAll()
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	// put old version of collections and partitions
 	for i, collection := range suite.collections {
 		status := querypb.LoadStatus_Loaded
 		if suite.loadTypes[i] == querypb.LoadType_LoadCollection {
-			mgr.PutCollection(&Collection{
+			mgr.PutCollection(ctx, &Collection{
 				CollectionLoadInfo: &querypb.CollectionLoadInfo{
 					CollectionID:  collection,
 					ReplicaNumber: suite.replicaNumber[i],
@@ -479,7 +492,7 @@ func (suite *CollectionManagerSuite) TestUpgradeRecover() {
 			})
 		} else {
 			for _, partition := range suite.partitions[collection] {
-				mgr.PutPartition(&Partition{
+				mgr.PutPartition(ctx, &Partition{
 					PartitionLoadInfo: &querypb.PartitionLoadInfo{
 						CollectionID:  collection,
 						PartitionID:   partition,
@@ -513,12 +526,12 @@ func (suite *CollectionManagerSuite) TestUpgradeRecover() {
 
 	// do recovery
 	suite.clearMemory()
-	err := mgr.Recover(suite.broker)
+	err := mgr.Recover(ctx, suite.broker)
 	suite.NoError(err)
 	suite.checkLoadResult()
 
 	for i, collection := range suite.collections {
-		newColl := mgr.GetCollection(collection)
+		newColl := mgr.GetCollection(ctx, collection)
 		suite.Equal(suite.loadTypes[i], newColl.GetLoadType())
 	}
 }
@@ -526,10 +539,11 @@ func (suite *CollectionManagerSuite) TestUpgradeRecover() {
 func (suite *CollectionManagerSuite) TestUpgradeLoadFields() {
 	suite.releaseAll()
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	// put old version of collections and partitions
 	for i, collection := range suite.collections {
-		mgr.PutCollection(&Collection{
+		mgr.PutCollection(ctx, &Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
 				CollectionID:  collection,
 				ReplicaNumber: suite.replicaNumber[i],
@@ -541,7 +555,7 @@ func (suite *CollectionManagerSuite) TestUpgradeLoadFields() {
 			CreatedAt:      time.Now(),
 		})
 		for j, partition := range suite.partitions[collection] {
-			mgr.PutPartition(&Partition{
+			mgr.PutPartition(ctx, &Partition{
 				PartitionLoadInfo: &querypb.PartitionLoadInfo{
 					CollectionID: collection,
 					PartitionID:  partition,
@@ -570,12 +584,12 @@ func (suite *CollectionManagerSuite) TestUpgradeLoadFields() {
 
 	// do recovery
 	suite.clearMemory()
-	err := mgr.Recover(suite.broker)
+	err := mgr.Recover(ctx, suite.broker)
 	suite.NoError(err)
 	suite.checkLoadResult()
 
 	for _, collection := range suite.collections {
-		newColl := mgr.GetCollection(collection)
+		newColl := mgr.GetCollection(ctx, collection)
 		suite.ElementsMatch([]int64{100, 101}, newColl.GetLoadFields())
 	}
 }
@@ -584,8 +598,9 @@ func (suite *CollectionManagerSuite) TestUpgradeLoadFieldsFail() {
 	suite.Run("normal_error", func() {
 		suite.releaseAll()
 		mgr := suite.mgr
+		ctx := suite.ctx
 
-		mgr.PutCollection(&Collection{
+		mgr.PutCollection(ctx, &Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
 				CollectionID:  100,
 				ReplicaNumber: 1,
@@ -596,7 +611,7 @@ func (suite *CollectionManagerSuite) TestUpgradeLoadFieldsFail() {
 			LoadPercentage: 100,
 			CreatedAt:      time.Now(),
 		})
-		mgr.PutPartition(&Partition{
+		mgr.PutPartition(ctx, &Partition{
 			PartitionLoadInfo: &querypb.PartitionLoadInfo{
 				CollectionID: 100,
 				PartitionID:  1000,
@@ -609,15 +624,16 @@ func (suite *CollectionManagerSuite) TestUpgradeLoadFieldsFail() {
 		suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 		// do recovery
 		suite.clearMemory()
-		err := mgr.Recover(suite.broker)
+		err := mgr.Recover(ctx, suite.broker)
 		suite.Error(err)
 	})
 
 	suite.Run("normal_error", func() {
 		suite.releaseAll()
 		mgr := suite.mgr
+		ctx := suite.ctx
 
-		mgr.PutCollection(&Collection{
+		mgr.PutCollection(ctx, &Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
 				CollectionID:  100,
 				ReplicaNumber: 1,
@@ -628,7 +644,7 @@ func (suite *CollectionManagerSuite) TestUpgradeLoadFieldsFail() {
 			LoadPercentage: 100,
 			CreatedAt:      time.Now(),
 		})
-		mgr.PutPartition(&Partition{
+		mgr.PutPartition(ctx, &Partition{
 			PartitionLoadInfo: &querypb.PartitionLoadInfo{
 				CollectionID: 100,
 				PartitionID:  1000,
@@ -643,13 +659,14 @@ func (suite *CollectionManagerSuite) TestUpgradeLoadFieldsFail() {
 		}, nil).Once()
 		// do recovery
 		suite.clearMemory()
-		err := mgr.Recover(suite.broker)
+		err := mgr.Recover(ctx, suite.broker)
 		suite.NoError(err)
 	})
 }
 
 func (suite *CollectionManagerSuite) loadAll() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
 	for i, collection := range suite.collections {
 		status := querypb.LoadStatus_Loaded
@@ -657,7 +674,7 @@ func (suite *CollectionManagerSuite) loadAll() {
 			status = querypb.LoadStatus_Loading
 		}
 
-		mgr.PutCollection(&Collection{
+		mgr.PutCollection(ctx, &Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
 				CollectionID:  collection,
 				ReplicaNumber: suite.replicaNumber[i],
@@ -670,7 +687,7 @@ func (suite *CollectionManagerSuite) loadAll() {
 		})
 
 		for j, partition := range suite.partitions[collection] {
-			mgr.PutPartition(&Partition{
+			mgr.PutPartition(ctx, &Partition{
 				PartitionLoadInfo: &querypb.PartitionLoadInfo{
 					CollectionID: collection,
 					PartitionID:  partition,
@@ -685,18 +702,19 @@ func (suite *CollectionManagerSuite) loadAll() {
 
 func (suite *CollectionManagerSuite) checkLoadResult() {
 	mgr := suite.mgr
+	ctx := suite.ctx
 
-	allCollections := mgr.GetAllCollections()
-	allPartitions := mgr.GetAllPartitions()
+	allCollections := mgr.GetAllCollections(ctx)
+	allPartitions := mgr.GetAllPartitions(ctx)
 	for _, collectionID := range suite.collections {
-		collection := mgr.GetCollection(collectionID)
+		collection := mgr.GetCollection(ctx, collectionID)
 		suite.Equal(collectionID, collection.GetCollectionID())
 		suite.Contains(allCollections, collection)
 
-		partitions := mgr.GetPartitionsByCollection(collectionID)
+		partitions := mgr.GetPartitionsByCollection(ctx, collectionID)
 		suite.Len(partitions, len(suite.partitions[collectionID]))
 		for _, partitionID := range suite.partitions[collectionID] {
-			partition := mgr.GetPartition(partitionID)
+			partition := mgr.GetPartition(ctx, partitionID)
 			suite.Equal(collectionID, partition.GetCollectionID())
 			suite.Equal(partitionID, partition.GetPartitionID())
 			suite.Contains(partitions, partition)
@@ -704,14 +722,14 @@ func (suite *CollectionManagerSuite) checkLoadResult() {
 		}
 	}
 
-	all := mgr.GetAll()
+	all := mgr.GetAll(ctx)
 	sort.Slice(all, func(i, j int) bool { return all[i] < all[j] })
 	suite.Equal(suite.collections, all)
 }
 
 func (suite *CollectionManagerSuite) releaseAll() {
 	for _, collection := range suite.collections {
-		err := suite.mgr.RemoveCollection(collection)
+		err := suite.mgr.RemoveCollection(context.TODO(), collection)
 		suite.NoError(err)
 	}
 }

@@ -100,7 +100,7 @@ func (suite *ChannelCheckerTestSuite) setNodeAvailable(nodes ...int64) {
 
 func (suite *ChannelCheckerTestSuite) createMockBalancer() balance.Balance {
 	balancer := balance.NewMockBalancer(suite.T())
-	balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything, mock.Anything).Maybe().Return(func(channels []*meta.DmChannel, nodes []int64, _ bool) []balance.ChannelAssignPlan {
+	balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe().Return(func(ctx context.Context, channels []*meta.DmChannel, nodes []int64, _ bool) []balance.ChannelAssignPlan {
 		plans := make([]balance.ChannelAssignPlan, 0, len(channels))
 		for i, c := range channels {
 			plan := balance.ChannelAssignPlan{
@@ -117,16 +117,17 @@ func (suite *ChannelCheckerTestSuite) createMockBalancer() balance.Balance {
 }
 
 func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
+	ctx := context.Background()
 	checker := suite.checker
-	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
-	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
-	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1}))
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	suite.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
 
 	channels := []*datapb.VchannelInfo{
 		{
@@ -137,7 +138,7 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, nil, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -151,10 +152,11 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
 }
 
 func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
+	ctx := context.Background()
 	checker := suite.checker
-	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
-	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
-	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1}))
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1}))
 
 	channels := []*datapb.VchannelInfo{
 		{
@@ -164,8 +166,8 @@ func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, nil, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
-	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
 
 	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel1"))
 	checker.dist.LeaderViewManager.Update(1, &meta.LeaderView{ID: 1, Channel: "test-insert-channel1"})
@@ -184,11 +186,12 @@ func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
 }
 
 func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
+	ctx := context.Background()
 	checker := suite.checker
-	err := checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
-	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
+	err := checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	suite.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
 	suite.NoError(err)
-	err = checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	err = checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	suite.NoError(err)
 
 	segments := []*datapb.SegmentInfo{
@@ -206,7 +209,7 @@ func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 2, "test-insert-channel"))
 
@@ -228,11 +231,12 @@ func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 }
 
 func (suite *ChannelCheckerTestSuite) TestReleaseDirtyChannels() {
+	ctx := context.Background()
 	checker := suite.checker
-	err := checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
-	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
+	err := checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	suite.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
 	suite.NoError(err)
-	err = checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1}))
+	err = checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1}))
 	suite.NoError(err)
 
 	segments := []*datapb.SegmentInfo{
@@ -261,7 +265,7 @@ func (suite *ChannelCheckerTestSuite) TestReleaseDirtyChannels() {
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 2, "test-insert-channel"))
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 2, "test-insert-channel"))
 	checker.dist.LeaderViewManager.Update(1, &meta.LeaderView{ID: 1, Channel: "test-insert-channel"})

@@ -182,23 +182,23 @@ type DataCoordCatalog interface {
 }
 
 type QueryCoordCatalog interface {
-	SaveCollection(collection *querypb.CollectionLoadInfo, partitions ...*querypb.PartitionLoadInfo) error
-	SavePartition(info ...*querypb.PartitionLoadInfo) error
-	SaveReplica(replicas ...*querypb.Replica) error
-	GetCollections() ([]*querypb.CollectionLoadInfo, error)
-	GetPartitions() (map[int64][]*querypb.PartitionLoadInfo, error)
-	GetReplicas() ([]*querypb.Replica, error)
-	ReleaseCollection(collection int64) error
-	ReleasePartition(collection int64, partitions ...int64) error
-	ReleaseReplicas(collectionID int64) error
-	ReleaseReplica(collection int64, replicas ...int64) error
-	SaveResourceGroup(rgs ...*querypb.ResourceGroup) error
-	RemoveResourceGroup(rgName string) error
-	GetResourceGroups() ([]*querypb.ResourceGroup, error)
+	SaveCollection(ctx context.Context, collection *querypb.CollectionLoadInfo, partitions ...*querypb.PartitionLoadInfo) error
+	SavePartition(ctx context.Context, info ...*querypb.PartitionLoadInfo) error
+	SaveReplica(ctx context.Context, replicas ...*querypb.Replica) error
+	GetCollections(ctx context.Context) ([]*querypb.CollectionLoadInfo, error)
+	GetPartitions(ctx context.Context) (map[int64][]*querypb.PartitionLoadInfo, error)
+	GetReplicas(ctx context.Context) ([]*querypb.Replica, error)
+	ReleaseCollection(ctx context.Context, collection int64) error
+	ReleasePartition(ctx context.Context, collection int64, partitions ...int64) error
+	ReleaseReplicas(ctx context.Context, collectionID int64) error
+	ReleaseReplica(ctx context.Context, collection int64, replicas ...int64) error
+	SaveResourceGroup(ctx context.Context, rgs ...*querypb.ResourceGroup) error
+	RemoveResourceGroup(ctx context.Context, rgName string) error
+	GetResourceGroups(ctx context.Context) ([]*querypb.ResourceGroup, error)
 
-	SaveCollectionTargets(target ...*querypb.CollectionTarget) error
-	RemoveCollectionTarget(collectionID int64) error
-	GetCollectionTargets() (map[int64]*querypb.CollectionTarget, error)
+	SaveCollectionTargets(ctx context.Context, target ...*querypb.CollectionTarget) error
+	RemoveCollectionTarget(ctx context.Context, collectionID int64) error
+	GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error)
 }
 
 // StreamingCoordCataLog is the interface for streamingcoord catalog

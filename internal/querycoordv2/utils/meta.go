@@ -17,6 +17,7 @@
 package utils
 
 import (
+	"context"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -29,10 +30,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-func GetPartitions(collectionMgr *meta.CollectionManager, collectionID int64) ([]int64, error) {
-	collection := collectionMgr.GetCollection(collectionID)
+func GetPartitions(ctx context.Context, collectionMgr *meta.CollectionManager, collectionID int64) ([]int64, error) {
+	collection := collectionMgr.GetCollection(ctx, collectionID)
 	if collection != nil {
-		partitions := collectionMgr.GetPartitionsByCollection(collectionID)
+		partitions := collectionMgr.GetPartitionsByCollection(ctx, collectionID)
 		if partitions != nil {
 			return lo.Map(partitions, func(partition *meta.Partition, i int) int64 {
 				return partition.PartitionID
@@ -45,9 +46,9 @@ func GetPartitions(collectionMgr *meta.CollectionManager, collectionID int64) ([
 
 // GroupNodesByReplica groups nodes by replica,
 // returns ReplicaID -> NodeIDs
-func GroupNodesByReplica(replicaMgr *meta.ReplicaManager, collectionID int64, nodes []int64) map[int64][]int64 {
+func GroupNodesByReplica(ctx context.Context, replicaMgr *meta.ReplicaManager, collectionID int64, nodes []int64) map[int64][]int64 {
 	ret := make(map[int64][]int64)
-	replicas := replicaMgr.GetByCollection(collectionID)
+	replicas := replicaMgr.GetByCollection(ctx, collectionID)
 	for _, replica := range replicas {
 		for _, node := range nodes {
 			if replica.Contains(node) {
@@ -71,9 +72,9 @@ func GroupPartitionsByCollection(partitions []*meta.Partition) map[int64][]*meta
 
 // GroupSegmentsByReplica groups segments by replica,
 // returns ReplicaID -> Segments
-func GroupSegmentsByReplica(replicaMgr *meta.ReplicaManager, collectionID int64, segments []*meta.Segment) map[int64][]*meta.Segment {
+func GroupSegmentsByReplica(ctx context.Context, replicaMgr *meta.ReplicaManager, collectionID int64, segments []*meta.Segment) map[int64][]*meta.Segment {
 	ret := make(map[int64][]*meta.Segment)
-	replicas := replicaMgr.GetByCollection(collectionID)
+	replicas := replicaMgr.GetByCollection(ctx, collectionID)
 	for _, replica := range replicas {
 		for _, segment := range segments {
 			if replica.Contains(segment.Node) {
@@ -85,32 +86,32 @@ func GroupSegmentsByReplica(replicaMgr *meta.ReplicaManager, collectionID int64,
 }
 
 // RecoverReplicaOfCollection recovers all replica of collection with latest resource group.
-func RecoverReplicaOfCollection(m *meta.Meta, collectionID typeutil.UniqueID) {
+func RecoverReplicaOfCollection(ctx context.Context, m *meta.Meta, collectionID typeutil.UniqueID) {
 	logger := log.With(zap.Int64("collectionID", collectionID))
-	rgNames := m.ReplicaManager.GetResourceGroupByCollection(collectionID)
+	rgNames := m.ReplicaManager.GetResourceGroupByCollection(ctx, collectionID)
 	if rgNames.Len() == 0 {
 		logger.Error("no resource group found for collection", zap.Int64("collectionID", collectionID))
 		return
 	}
-	rgs, err := m.ResourceManager.GetNodesOfMultiRG(rgNames.Collect())
+	rgs, err := m.ResourceManager.GetNodesOfMultiRG(ctx, rgNames.Collect())
 	if err != nil {
 		logger.Error("unreachable code as expected, fail to get resource group for replica", zap.Error(err))
 		return
 	}
 
-	if err := m.ReplicaManager.RecoverNodesInCollection(collectionID, rgs); err != nil {
+	if err := m.ReplicaManager.RecoverNodesInCollection(ctx, collectionID, rgs); err != nil {
 		logger.Warn("fail to set available nodes in replica", zap.Error(err))
 	}
 }
 
 // RecoverAllCollectionrecovers all replica of all collection in resource group.
 func RecoverAllCollection(m *meta.Meta) {
-	for _, collection := range m.CollectionManager.GetAll() {
-		RecoverReplicaOfCollection(m, collection)
+	for _, collection := range m.CollectionManager.GetAll(context.TODO()) {
+		RecoverReplicaOfCollection(context.TODO(), m, collection)
 	}
 }
 
-func AssignReplica(m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool) (map[string]int, error) {
+func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool) (map[string]int, error) {
 	if len(resourceGroups) != 0 && len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
 		return nil, errors.Errorf(
 			"replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
@@ -135,10 +136,10 @@ func AssignReplica(m *meta.Meta, resourceGroups []string, replicaNumber int32, c
 	// 2. rg1 is removed.
 	// 3. replica1 spawn finished, but cannot find related resource group.
 	for rgName, num := range replicaNumInRG {
-		if !m.ContainResourceGroup(rgName) {
+		if !m.ContainResourceGroup(ctx, rgName) {
 			return nil, merr.WrapErrResourceGroupNotFound(rgName)
 		}
-		nodes, err := m.ResourceManager.GetNodes(rgName)
+		nodes, err := m.ResourceManager.GetNodes(ctx, rgName)
 		if err != nil {
 			return nil, err
 		}
@@ -155,35 +156,36 @@ func AssignReplica(m *meta.Meta, resourceGroups []string, replicaNumber int32, c
 }
 
 // SpawnReplicasWithRG spawns replicas in rgs one by one for given collection.
-func SpawnReplicasWithRG(m *meta.Meta, collection int64, resourceGroups []string, replicaNumber int32, channels []string) ([]*meta.Replica, error) {
-	replicaNumInRG, err := AssignReplica(m, resourceGroups, replicaNumber, true)
+func SpawnReplicasWithRG(ctx context.Context, m *meta.Meta, collection int64, resourceGroups []string, replicaNumber int32, channels []string) ([]*meta.Replica, error) {
+	replicaNumInRG, err := AssignReplica(ctx, m, resourceGroups, replicaNumber, true)
 	if err != nil {
 		return nil, err
 	}
 
 	// Spawn it in replica manager.
-	replicas, err := m.ReplicaManager.Spawn(collection, replicaNumInRG, channels)
+	replicas, err := m.ReplicaManager.Spawn(ctx, collection, replicaNumInRG, channels)
 	if err != nil {
 		return nil, err
 	}
 	// Active recover it.
-	RecoverReplicaOfCollection(m, collection)
+	RecoverReplicaOfCollection(ctx, m, collection)
 	return replicas, nil
 }
 
 func ReassignReplicaToRG(
+	ctx context.Context,
 	m *meta.Meta,
 	collectionID int64,
 	newReplicaNumber int32,
 	newResourceGroups []string,
 ) (map[string]int, map[string][]*meta.Replica, []int64, error) {
 	// assign all replicas to newResourceGroups, got each rg's replica number
-	newAssignment, err := AssignReplica(m, newResourceGroups, newReplicaNumber, false)
+	newAssignment, err := AssignReplica(ctx, m, newResourceGroups, newReplicaNumber, false)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	replicas := m.ReplicaManager.GetByCollection(collectionID)
+	replicas := m.ReplicaManager.GetByCollection(context.TODO(), collectionID)
 	replicasInRG := lo.GroupBy(replicas, func(replica *meta.Replica) string {
 		return replica.GetResourceGroup()
 	})

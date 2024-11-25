@@ -49,7 +49,7 @@ import (
 // may come from different replica group. We only need these shards to form a replica that serves query
 // requests.
 func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
-	for _, replica := range s.meta.ReplicaManager.GetByCollection(collectionID) {
+	for _, replica := range s.meta.ReplicaManager.GetByCollection(s.ctx, collectionID) {
 		isAvailable := true
 		for _, node := range replica.GetRONodes() {
 			if s.nodeMgr.Get(node) == nil {
@@ -64,9 +64,9 @@ func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
 	return false
 }
 
-func (s *Server) getCollectionSegmentInfo(collection int64) []*querypb.SegmentInfo {
+func (s *Server) getCollectionSegmentInfo(ctx context.Context, collection int64) []*querypb.SegmentInfo {
 	segments := s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collection))
-	currentTargetSegmentsMap := s.targetMgr.GetSealedSegmentsByCollection(collection, meta.CurrentTarget)
+	currentTargetSegmentsMap := s.targetMgr.GetSealedSegmentsByCollection(ctx, collection, meta.CurrentTarget)
 	infos := make(map[int64]*querypb.SegmentInfo)
 	for _, segment := range segments {
 		if _, existCurrentTarget := currentTargetSegmentsMap[segment.GetID()]; !existCurrentTarget {
@@ -104,7 +104,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 	copyMode bool,
 ) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.Int64("srcNode", srcNode))
-	plans := s.getBalancerFunc().AssignSegment(collectionID, segments, dstNodes, true)
+	plans := s.getBalancerFunc().AssignSegment(ctx, collectionID, segments, dstNodes, true)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica
@@ -183,7 +183,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 ) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 
-	plans := s.getBalancerFunc().AssignChannel(channels, dstNodes, true)
+	plans := s.getBalancerFunc().AssignChannel(ctx, channels, dstNodes, true)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica
@@ -458,16 +458,16 @@ func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetric
 	return ret
 }
 
-func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) *milvuspb.ReplicaInfo {
+func (s *Server) fillReplicaInfo(ctx context.Context, replica *meta.Replica, withShardNodes bool) *milvuspb.ReplicaInfo {
 	info := &milvuspb.ReplicaInfo{
 		ReplicaID:         replica.GetID(),
 		CollectionID:      replica.GetCollectionID(),
 		NodeIds:           replica.GetNodes(),
 		ResourceGroupName: replica.GetResourceGroup(),
-		NumOutboundNode:   s.meta.GetOutgoingNodeNumByReplica(replica),
+		NumOutboundNode:   s.meta.GetOutgoingNodeNumByReplica(ctx, replica),
 	}
 
-	channels := s.targetMgr.GetDmChannelsByCollection(replica.GetCollectionID(), meta.CurrentTarget)
+	channels := s.targetMgr.GetDmChannelsByCollection(ctx, replica.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {
 		log.Warn("failed to get channels, collection may be not loaded or in recovering", zap.Int64("collectionID", replica.GetCollectionID()))
 		return info

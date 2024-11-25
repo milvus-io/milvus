@@ -65,13 +65,13 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 	)
 
 	// check if collection not load or loadType is loadPartition
-	collection := job.meta.GetCollection(job.req.GetCollectionID())
+	collection := job.meta.GetCollection(job.ctx, job.req.GetCollectionID())
 	if collection == nil || collection.GetLoadType() == querypb.LoadType_LoadPartition {
 		return nil
 	}
 
 	// check if partition already existed
-	if partition := job.meta.GetPartition(job.req.GetPartitionID()); partition != nil {
+	if partition := job.meta.GetPartition(job.ctx, job.req.GetPartitionID()); partition != nil {
 		return nil
 	}
 
@@ -89,7 +89,7 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		LoadPercentage: 100,
 		CreatedAt:      time.Now(),
 	}
-	err = job.meta.CollectionManager.PutPartition(partition)
+	err = job.meta.CollectionManager.PutPartition(job.ctx, partition)
 	if err != nil {
 		msg := "failed to store partitions"
 		log.Warn(msg, zap.Error(err))
