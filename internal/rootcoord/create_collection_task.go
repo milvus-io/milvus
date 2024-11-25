@@ -107,7 +107,7 @@ func (t *createCollectionTask) validate() error {
 	if t.Req.GetNumPartitions() > 0 {
 		newPartNum = t.Req.GetNumPartitions()
 	}
-	return checkGeneralCapacity(t.ctx, 1, newPartNum, t.Req.GetShardsNum(), t.core, t.ts)
+	return checkGeneralCapacity(t.ctx, 1, newPartNum, t.Req.GetShardsNum(), t.core)
 }
 
 // checkMaxCollectionsPerDB DB properties take precedence over quota configurations for max collections.

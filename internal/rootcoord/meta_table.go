@@ -74,6 +74,7 @@ type IMetaTable interface {
 	ListAliases(ctx context.Context, dbName string, collectionName string, ts Timestamp) ([]string, error)
 	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error
 	RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error
+	GetGeneralCount(ctx context.Context) int
 
 	// TODO: it'll be a big cost if we handle the time travel logic, since we should always list all aliases in catalog.
 	IsAlias(ctx context.Context, db, name string) bool
@@ -114,6 +115,8 @@ type MetaTable struct {
 
 	dbName2Meta map[string]*model.Database              // database name ->  db meta
 	collID2Meta map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
+
+	generalCnt int // sum of product of partition number and shard number
 
 	// collections *collectionDb
 	names   *nameDb
@@ -189,6 +192,7 @@ func (mt *MetaTable) reload() error {
 		}
 		for _, collection := range collections {
 			mt.collID2Meta[collection.CollectionID] = collection
+			mt.generalCnt += len(collection.Partitions) * int(collection.ShardsNum)
 			if collection.Available() {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)
 				collectionNum++
@@ -417,6 +421,8 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	mt.collID2Meta[coll.CollectionID] = coll.Clone()
 	mt.names.insert(db.Name, coll.Name, coll.CollectionID)
 
+	mt.generalCnt += len(coll.Partitions) * int(coll.ShardsNum)
+
 	log.Ctx(ctx).Info("add collection to meta table",
 		zap.Int64("dbID", coll.DBID),
 		zap.String("collection", coll.Name),
@@ -520,6 +526,8 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	// We cannot delete the name directly, since newly collection with same name may be created.
 	mt.removeAllNamesIfMatchedInternal(collectionID, allNames)
 	mt.removeCollectionByIDInternal(collectionID)
+
+	mt.generalCnt -= len(coll.Partitions) * int(coll.ShardsNum)
 
 	log.Ctx(ctx).Info("remove collection",
 		zap.Int64("dbID", coll.DBID),
@@ -895,6 +903,8 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 	}
 	mt.collID2Meta[partition.CollectionID].Partitions = append(mt.collID2Meta[partition.CollectionID].Partitions, partition.Clone())
 
+	mt.generalCnt += int(coll.ShardsNum) // 1 partition * shardNum
+
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
 
 	log.Ctx(ctx).Info("add partition to meta table",
@@ -961,6 +971,7 @@ func (mt *MetaTable) RemovePartition(ctx context.Context, dbID int64, collection
 	}
 	if loc != -1 {
 		coll.Partitions = append(coll.Partitions[:loc], coll.Partitions[loc+1:]...)
+		mt.generalCnt -= int(coll.ShardsNum) // 1 partition * shardNum
 	}
 	log.Info("remove partition", zap.Int64("collection", collectionID), zap.Int64("partition", partitionID), zap.Uint64("ts", ts))
 	return nil
@@ -1227,6 +1238,14 @@ func (mt *MetaTable) ListAliasesByID(ctx context.Context, collID UniqueID) []str
 	defer mt.ddLock.RUnlock()
 
 	return mt.listAliasesByID(collID)
+}
+
+// GetGeneralCount gets the general count(sum of product of partition number and shard number).
+func (mt *MetaTable) GetGeneralCount(ctx context.Context) int {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	return mt.generalCnt
 }
 
 // AddCredential add credential
