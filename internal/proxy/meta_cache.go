@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -350,6 +351,7 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 	if err != nil {
 		return err
 	}
+	expr.Register("cache", globalMetaCache)
 
 	// The privilege info is a little more. And to get this info, the query operation of involving multiple table queries is required.
 	resp, err := rootCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
