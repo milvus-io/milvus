@@ -694,12 +694,10 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	// reduce done, get final result
 	limit := t.SearchRequest.GetTopk() - t.SearchRequest.GetOffset()
 	resultSizeInsufficient := false
-	if isTopkReduce {
-		for _, topk := range t.result.Results.Topks {
-			if topk < limit {
-				resultSizeInsufficient = true
-				break
-			}
+	for _, topk := range t.result.Results.Topks {
+		if topk < limit {
+			resultSizeInsufficient = true
+			break
 		}
 	}
 	t.resultSizeInsufficient = resultSizeInsufficient

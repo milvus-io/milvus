@@ -68,7 +68,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			common.SegmentNumKey:   estSegmentNum,
 			common.WithFilterKey:   withFilter,
 			common.DataTypeKey:     int32(plan.GetVectorAnns().GetVectorType()),
-			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool() && req.GetReq().GetIsTopkReduce(),
+			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool() && req.GetReq().GetIsTopkReduce() && queryInfo.GetGroupByFieldId() < 0,
 			common.CollectionKey:   req.GetReq().GetCollectionID(),
 		}
 		if withFilter && channelNum > 1 {
