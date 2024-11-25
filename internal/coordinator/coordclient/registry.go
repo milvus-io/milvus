@@ -50,6 +50,9 @@ type LocalClientRoleConfig struct {
 
 // EnableLocalClientRole init localable roles
 func EnableLocalClientRole(cfg *LocalClientRoleConfig) {
+	if !paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
+		return
+	}
 	if cfg.ServerType != typeutil.StandaloneRole && cfg.ServerType != typeutil.MixtureRole {
 		return
 	}
@@ -58,7 +61,7 @@ func EnableLocalClientRole(cfg *LocalClientRoleConfig) {
 
 // RegisterQueryCoordServer register query coord server
 func RegisterQueryCoordServer(server querypb.QueryCoordServer) {
-	if !enableLocal.EnableQueryCoord || !paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
+	if !enableLocal.EnableQueryCoord {
 		return
 	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&querypb.QueryCoord_ServiceDesc, server, querypb.NewQueryCoordClient)
@@ -68,7 +71,7 @@ func RegisterQueryCoordServer(server querypb.QueryCoordServer) {
 
 // RegsterDataCoordServer register data coord server
 func RegisterDataCoordServer(server datapb.DataCoordServer) {
-	if !enableLocal.EnableDataCoord || !paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
+	if !enableLocal.EnableDataCoord {
 		return
 	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&datapb.DataCoord_ServiceDesc, server, datapb.NewDataCoordClient)
@@ -78,7 +81,7 @@ func RegisterDataCoordServer(server datapb.DataCoordServer) {
 
 // RegisterRootCoordServer register root coord server
 func RegisterRootCoordServer(server rootcoordpb.RootCoordServer) {
-	if !enableLocal.EnableRootCoord || !paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
+	if !enableLocal.EnableRootCoord {
 		return
 	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&rootcoordpb.RootCoord_ServiceDesc, server, rootcoordpb.NewRootCoordClient)

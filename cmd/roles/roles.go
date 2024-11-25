@@ -36,6 +36,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/cmd/components"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -380,6 +381,12 @@ func (mr *MilvusRoles) Run() {
 		paramtable.Init()
 		paramtable.SetRole(mr.ServerType)
 	}
+	coordclient.EnableLocalClientRole(&coordclient.LocalClientRoleConfig{
+		ServerType:       mr.ServerType,
+		EnableQueryCoord: mr.EnableQueryCoord,
+		EnableDataCoord:  mr.EnableDataCoord,
+		EnableRootCoord:  mr.EnableRootCoord,
+	})
 
 	enableComponents := []bool{
 		mr.EnableRootCoord,
