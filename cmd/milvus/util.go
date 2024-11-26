@@ -20,7 +20,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/cmd/roles"
-	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -180,12 +179,7 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n%s", serverType, getHelp())
 		os.Exit(-1)
 	}
-	coordclient.EnableLocalClientRole(&coordclient.LocalClientRoleConfig{
-		ServerType:       serverType,
-		EnableQueryCoord: role.EnableQueryCoord,
-		EnableDataCoord:  role.EnableDataCoord,
-		EnableRootCoord:  role.EnableRootCoord,
-	})
+
 	return role
 }
 
