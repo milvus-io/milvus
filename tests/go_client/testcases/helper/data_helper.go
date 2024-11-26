@@ -179,13 +179,13 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) 
 		}
 		return column.NewColumnDoubleArray(fieldName, doubleValues)
 	case entity.FieldTypeVarChar:
-		varcharValues := make([][][]byte, 0, nb)
+		varcharValues := make([][]string, 0, nb)
 		for i := start; i < start+nb; i++ {
-			varcharArray := make([][]byte, 0, capacity)
+			varcharArray := make([]string, 0, capacity)
 			for j := 0; j < capacity; j++ {
 				var buf bytes.Buffer
 				buf.WriteString(strconv.Itoa(i + j))
-				varcharArray = append(varcharArray, buf.Bytes())
+				varcharArray = append(varcharArray, buf.String())
 			}
 			varcharValues = append(varcharValues, varcharArray)
 		}

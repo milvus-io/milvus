@@ -42,7 +42,7 @@ type RowCountBasedBalancer struct {
 
 // AssignSegment, when row count based balancer assign segments, it will assign segment to node with least global row count.
 // try to make every query node has same row count.
-func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
+func (b *RowCountBasedBalancer) AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
 	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
 	if !manualBalance {
 		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
@@ -87,7 +87,7 @@ func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*me
 
 // AssignSegment, when row count based balancer assign segments, it will assign channel to node with least global channel count.
 // try to make every query node has channel count
-func (b *RowCountBasedBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
+func (b *RowCountBasedBalancer) AssignChannel(ctx context.Context, channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
 	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
 	if !manualBalance {
 		versionRangeFilter := semver.MustParseRange(">2.3.x")
@@ -167,7 +167,7 @@ func (b *RowCountBasedBalancer) convertToNodeItemsByChannel(nodeIDs []int64) []*
 	return ret
 }
 
-func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) (segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan) {
+func (b *RowCountBasedBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan) {
 	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.RowCountBasedBalancer", 1, 60).With(
 		zap.Int64("collectionID", replica.GetCollectionID()),
 		zap.Int64("replicaID", replica.GetCollectionID()),
@@ -206,33 +206,33 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) (segmentPl
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
 		if b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, rwNodes, roNodes)...)
+			channelPlans = append(channelPlans, b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)...)
 		}
 
 		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, rwNodes, roNodes)...)
+			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)...)
 		}
 	} else {
 		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genChannelPlan(br, replica, rwNodes)...)
+			channelPlans = append(channelPlans, b.genChannelPlan(ctx, br, replica, rwNodes)...)
 		}
 
 		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = append(segmentPlans, b.genSegmentPlan(replica, rwNodes)...)
+			segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, replica, rwNodes)...)
 		}
 	}
 
 	return segmentPlans, channelPlans
 }
 
-func (b *RowCountBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, rwNodes []int64, roNodes []int64) []SegmentAssignPlan {
+func (b *RowCountBasedBalancer) genStoppingSegmentPlan(ctx context.Context, replica *meta.Replica, rwNodes []int64, roNodes []int64) []SegmentAssignPlan {
 	segmentPlans := make([]SegmentAssignPlan, 0)
 	for _, nodeID := range roNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(nodeID))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
+			return b.targetMgr.CanSegmentBeMoved(ctx, segment.GetCollectionID(), segment.GetID())
 		})
-		plans := b.AssignSegment(replica.GetCollectionID(), segments, rwNodes, false)
+		plans := b.AssignSegment(ctx, replica.GetCollectionID(), segments, rwNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -242,7 +242,7 @@ func (b *RowCountBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, rw
 	return segmentPlans
 }
 
-func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, rwNodes []int64) []SegmentAssignPlan {
+func (b *RowCountBasedBalancer) genSegmentPlan(ctx context.Context, replica *meta.Replica, rwNodes []int64) []SegmentAssignPlan {
 	segmentsToMove := make([]*meta.Segment, 0)
 
 	nodeRowCount := make(map[int64]int, 0)
@@ -251,7 +251,7 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, rwNodes []
 	for _, node := range rwNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
+			return b.targetMgr.CanSegmentBeMoved(ctx, segment.GetCollectionID(), segment.GetID())
 		})
 		rowCount := 0
 		for _, s := range segments {
@@ -298,7 +298,7 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, rwNodes []
 		return nil
 	}
 
-	segmentPlans := b.AssignSegment(replica.GetCollectionID(), segmentsToMove, nodesWithLessRow, false)
+	segmentPlans := b.AssignSegment(ctx, replica.GetCollectionID(), segmentsToMove, nodesWithLessRow, false)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
 		segmentPlans[i].Replica = replica
@@ -307,11 +307,11 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, rwNodes []
 	return segmentPlans
 }
 
-func (b *RowCountBasedBalancer) genStoppingChannelPlan(replica *meta.Replica, rwNodes []int64, roNodes []int64) []ChannelAssignPlan {
+func (b *RowCountBasedBalancer) genStoppingChannelPlan(ctx context.Context, replica *meta.Replica, rwNodes []int64, roNodes []int64) []ChannelAssignPlan {
 	channelPlans := make([]ChannelAssignPlan, 0)
 	for _, nodeID := range roNodes {
 		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(nodeID))
-		plans := b.AssignChannel(dmChannels, rwNodes, false)
+		plans := b.AssignChannel(ctx, dmChannels, rwNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -321,7 +321,7 @@ func (b *RowCountBasedBalancer) genStoppingChannelPlan(replica *meta.Replica, rw
 	return channelPlans
 }
 
-func (b *RowCountBasedBalancer) genChannelPlan(br *balanceReport, replica *meta.Replica, rwNodes []int64) []ChannelAssignPlan {
+func (b *RowCountBasedBalancer) genChannelPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, rwNodes []int64) []ChannelAssignPlan {
 	channelPlans := make([]ChannelAssignPlan, 0)
 	if len(rwNodes) > 1 {
 		// start to balance channels on all available nodes
@@ -349,7 +349,7 @@ func (b *RowCountBasedBalancer) genChannelPlan(br *balanceReport, replica *meta.
 			return nil
 		}
 
-		channelPlans := b.AssignChannel(channelsToMove, nodeWithLessChannel, false)
+		channelPlans := b.AssignChannel(ctx, channelsToMove, nodeWithLessChannel, false)
 		for i := range channelPlans {
 			channelPlans[i].From = channelPlans[i].Channel.Node
 			channelPlans[i].Replica = replica

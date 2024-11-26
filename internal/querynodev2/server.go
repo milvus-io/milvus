@@ -284,12 +284,12 @@ func (node *QueryNode) registerMetricsRequest() {
 			return getSystemInfoMetrics(ctx, req, node)
 		})
 
-	node.metricsRequest.RegisterMetricsRequest(metricsinfo.QuerySegments,
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return getSegmentJSON(node), nil
 		})
 
-	node.metricsRequest.RegisterMetricsRequest(metricsinfo.QueryChannels,
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return getChannelJSON(node), nil
 		})

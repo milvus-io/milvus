@@ -2709,6 +2709,8 @@ func TestProxy(t *testing.T) {
 
 	testProxyRole(ctx, t, proxy)
 	testProxyPrivilege(ctx, t, proxy)
+	testProxyOperatePrivilegeV2(ctx, t, proxy)
+	assert.False(t, false, true)
 	testProxyRefreshPolicyInfoCache(ctx, t, proxy)
 
 	// proxy unhealthy
@@ -4371,6 +4373,106 @@ func testProxyPrivilege(ctx context.Context, t *testing.T, proxy *Proxy) {
 
 		roleReq.Type = milvuspb.OperatePrivilegeType_Revoke
 		resp, _ = proxy.OperatePrivilege(ctx, roleReq)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Wait()
+}
+
+func testProxyOperatePrivilegeV2(ctx context.Context, t *testing.T, proxy *Proxy) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	t.Run("Operate Privilege V2, Select Grant", func(t *testing.T) {
+		defer wg.Done()
+
+		// GrantPrivilege
+		req := &milvuspb.OperatePrivilegeV2Request{}
+		resp, _ := proxy.OperatePrivilegeV2(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Role = &milvuspb.RoleEntity{}
+		resp, _ = proxy.OperatePrivilegeV2(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Grantor = &milvuspb.GrantorEntity{}
+		resp, _ = proxy.OperatePrivilegeV2(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Grantor.Privilege = &milvuspb.PrivilegeEntity{}
+		resp, _ = proxy.OperatePrivilegeV2(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Grantor.Privilege.Name = util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String())
+
+		resp, _ = proxy.OperatePrivilegeV2(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.DbName = ""
+		resp, _ = proxy.OperatePrivilegeV2(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.CollectionName = ""
+		resp, _ = proxy.OperatePrivilegeV2(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		roleReq := &milvuspb.OperatePrivilegeV2Request{
+			Role:           &milvuspb.RoleEntity{Name: "public"},
+			Grantor:        &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeLoad.String())}},
+			DbName:         "default",
+			CollectionName: "col1",
+			Type:           milvuspb.OperatePrivilegeType_Grant,
+		}
+		resp, _ = proxy.OperatePrivilegeV2(ctx, roleReq)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		roleReq = &milvuspb.OperatePrivilegeV2Request{
+			Role:           &milvuspb.RoleEntity{Name: "public"},
+			Grantor:        &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterReadOnly.String())}},
+			DbName:         util.AnyWord,
+			CollectionName: util.AnyWord,
+			Type:           milvuspb.OperatePrivilegeType_Grant,
+		}
+		resp, _ = proxy.OperatePrivilegeV2(ctx, roleReq)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		roleReq = &milvuspb.OperatePrivilegeV2Request{
+			Role:           &milvuspb.RoleEntity{Name: "public"},
+			Grantor:        &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterReadOnly.String())}},
+			DbName:         "db1",
+			CollectionName: util.AnyWord,
+			Type:           milvuspb.OperatePrivilegeType_Grant,
+		}
+		resp, _ = proxy.OperatePrivilegeV2(ctx, roleReq)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		roleReq = &milvuspb.OperatePrivilegeV2Request{
+			Role:           &milvuspb.RoleEntity{Name: "public"},
+			Grantor:        &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadOnly.String())}},
+			DbName:         "db1",
+			CollectionName: util.AnyWord,
+			Type:           milvuspb.OperatePrivilegeType_Grant,
+		}
+		resp, _ = proxy.OperatePrivilegeV2(ctx, roleReq)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		roleReq = &milvuspb.OperatePrivilegeV2Request{
+			Role:           &milvuspb.RoleEntity{Name: "public"},
+			Grantor:        &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterReadOnly.String())}},
+			DbName:         "db1",
+			CollectionName: "col1",
+			Type:           milvuspb.OperatePrivilegeType_Grant,
+		}
+		resp, _ = proxy.OperatePrivilegeV2(ctx, roleReq)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		roleReq = &milvuspb.OperatePrivilegeV2Request{
+			Role:           &milvuspb.RoleEntity{Name: "public"},
+			Grantor:        &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupDatabaseReadOnly.String())}},
+			DbName:         "db1",
+			CollectionName: util.AnyWord,
+			Type:           milvuspb.OperatePrivilegeType_Grant,
+		}
+		resp, _ = proxy.OperatePrivilegeV2(ctx, roleReq)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 

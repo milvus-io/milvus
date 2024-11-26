@@ -147,7 +147,7 @@ func (s *L0Segment) Insert(ctx context.Context, rowIDs []int64, timestamps []typ
 	return merr.WrapErrIoFailedReason("insert not supported for L0 segment")
 }
 
-func (s *L0Segment) Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error {
+func (s *L0Segment) Delete(ctx context.Context, primaryKeys storage.PrimaryKeys, timestamps []typeutil.Timestamp) error {
 	return merr.WrapErrIoFailedReason("delete not supported for L0 segment")
 }
 

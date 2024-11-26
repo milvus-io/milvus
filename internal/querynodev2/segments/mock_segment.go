@@ -221,7 +221,7 @@ func (_c *MockSegment_DatabaseName_Call) RunAndReturn(run func() string) *MockSe
 }
 
 // Delete provides a mock function with given fields: ctx, primaryKeys, timestamps
-func (_m *MockSegment) Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []uint64) error {
+func (_m *MockSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKeys, timestamps []uint64) error {
 	ret := _m.Called(ctx, primaryKeys, timestamps)
 
 	if len(ret) == 0 {
@@ -229,7 +229,7 @@ func (_m *MockSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, []storage.PrimaryKey, []uint64) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, storage.PrimaryKeys, []uint64) error); ok {
 		r0 = rf(ctx, primaryKeys, timestamps)
 	} else {
 		r0 = ret.Error(0)
@@ -245,15 +245,15 @@ type MockSegment_Delete_Call struct {
 
 // Delete is a helper method to define mock.On call
 //   - ctx context.Context
-//   - primaryKeys []storage.PrimaryKey
+//   - primaryKeys storage.PrimaryKeys
 //   - timestamps []uint64
 func (_e *MockSegment_Expecter) Delete(ctx interface{}, primaryKeys interface{}, timestamps interface{}) *MockSegment_Delete_Call {
 	return &MockSegment_Delete_Call{Call: _e.mock.On("Delete", ctx, primaryKeys, timestamps)}
 }
 
-func (_c *MockSegment_Delete_Call) Run(run func(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []uint64)) *MockSegment_Delete_Call {
+func (_c *MockSegment_Delete_Call) Run(run func(ctx context.Context, primaryKeys storage.PrimaryKeys, timestamps []uint64)) *MockSegment_Delete_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].([]storage.PrimaryKey), args[2].([]uint64))
+		run(args[0].(context.Context), args[1].(storage.PrimaryKeys), args[2].([]uint64))
 	})
 	return _c
 }
@@ -263,7 +263,7 @@ func (_c *MockSegment_Delete_Call) Return(_a0 error) *MockSegment_Delete_Call {
 	return _c
 }
 
-func (_c *MockSegment_Delete_Call) RunAndReturn(run func(context.Context, []storage.PrimaryKey, []uint64) error) *MockSegment_Delete_Call {
+func (_c *MockSegment_Delete_Call) RunAndReturn(run func(context.Context, storage.PrimaryKeys, []uint64) error) *MockSegment_Delete_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -75,9 +75,9 @@ func (c *SegmentChecker) Description() string {
 	return "SegmentChecker checks the lack of segments, or some segments are redundant"
 }
 
-func (c *SegmentChecker) readyToCheck(collectionID int64) bool {
-	metaExist := (c.meta.GetCollection(collectionID) != nil)
-	targetExist := c.targetMgr.IsNextTargetExist(collectionID) || c.targetMgr.IsCurrentTargetExist(collectionID, common.AllPartitionsID)
+func (c *SegmentChecker) readyToCheck(ctx context.Context, collectionID int64) bool {
+	metaExist := (c.meta.GetCollection(ctx, collectionID) != nil)
+	targetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID) || c.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
 
 	return metaExist && targetExist
 }
@@ -86,11 +86,11 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	if !c.IsActive() {
 		return nil
 	}
-	collectionIDs := c.meta.CollectionManager.GetAll()
+	collectionIDs := c.meta.CollectionManager.GetAll(ctx)
 	results := make([]task.Task, 0)
 	for _, cid := range collectionIDs {
-		if c.readyToCheck(cid) {
-			replicas := c.meta.ReplicaManager.GetByCollection(cid)
+		if c.readyToCheck(ctx, cid) {
+			replicas := c.meta.ReplicaManager.GetByCollection(ctx, cid)
 			for _, r := range replicas {
 				results = append(results, c.checkReplica(ctx, r)...)
 			}
@@ -111,7 +111,7 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 		segmentsOnQN := c.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(nodeID))
 		collectionSegments := lo.GroupBy(segmentsOnQN, func(segment *meta.Segment) int64 { return segment.GetCollectionID() })
 		for collectionID, segments := range collectionSegments {
-			replica := c.meta.ReplicaManager.GetByCollectionAndNode(collectionID, nodeID)
+			replica := c.meta.ReplicaManager.GetByCollectionAndNode(ctx, collectionID, nodeID)
 			if replica == nil {
 				reduceTasks := c.createSegmentReduceTasks(ctx, segments, meta.NilReplica, querypb.DataScope_Historical)
 				task.SetReason("dirty segment exists", reduceTasks...)
@@ -128,21 +128,21 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	ret := make([]task.Task, 0)
 
 	// compare with targets to find the lack and redundancy of segments
-	lacks, redundancies := c.getSealedSegmentDiff(replica.GetCollectionID(), replica.GetID())
+	lacks, redundancies := c.getSealedSegmentDiff(ctx, replica.GetCollectionID(), replica.GetID())
 	// loadCtx := trace.ContextWithSpan(context.Background(), c.meta.GetCollection(replica.CollectionID).LoadSpan)
 	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, replica)
 	task.SetReason("lacks of segment", tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
 
-	redundancies = c.filterSegmentInUse(replica, redundancies)
+	redundancies = c.filterSegmentInUse(ctx, replica, redundancies)
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Historical)
 	task.SetReason("segment not exists in target", tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
 
 	// compare inner dists to find repeated loaded segments
-	redundancies = c.findRepeatedSealedSegments(replica.GetID())
+	redundancies = c.findRepeatedSealedSegments(ctx, replica.GetID())
 	redundancies = c.filterExistedOnLeader(replica, redundancies)
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Historical)
 	task.SetReason("redundancies of segment", tasks...)
@@ -151,7 +151,7 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	ret = append(ret, tasks...)
 
 	// compare with target to find the lack and redundancy of segments
-	_, redundancies = c.getGrowingSegmentDiff(replica.GetCollectionID(), replica.GetID())
+	_, redundancies = c.getGrowingSegmentDiff(ctx, replica.GetCollectionID(), replica.GetID())
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Streaming)
 	task.SetReason("streaming segment not exists in target", tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
@@ -161,10 +161,10 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 }
 
 // GetGrowingSegmentDiff get streaming segment diff between leader view and target
-func (c *SegmentChecker) getGrowingSegmentDiff(collectionID int64,
+func (c *SegmentChecker) getGrowingSegmentDiff(ctx context.Context, collectionID int64,
 	replicaID int64,
 ) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
-	replica := c.meta.Get(replicaID)
+	replica := c.meta.Get(ctx, replicaID)
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
 		return
@@ -181,7 +181,7 @@ func (c *SegmentChecker) getGrowingSegmentDiff(collectionID int64,
 			log.Info("leaderView is not ready, skip", zap.String("channelName", channelName), zap.Int64("node", node))
 			continue
 		}
-		targetVersion := c.targetMgr.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)
+		targetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
 		if view.TargetVersion != targetVersion {
 			// before shard delegator update it's readable version, skip release segment
 			log.RatedInfo(20, "before shard delegator update it's readable version, skip release segment",
@@ -193,10 +193,10 @@ func (c *SegmentChecker) getGrowingSegmentDiff(collectionID int64,
 			continue
 		}
 
-		nextTargetExist := c.targetMgr.IsNextTargetExist(collectionID)
-		nextTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(collectionID, meta.NextTarget)
-		currentTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(collectionID, meta.CurrentTarget)
-		currentTargetChannelMap := c.targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
+		nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
+		nextTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(ctx, collectionID, meta.NextTarget)
+		currentTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
+		currentTargetChannelMap := c.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
 
 		// get segment which exist on leader view, but not on current target and next target
 		for _, segment := range view.GrowingSegments {
@@ -227,10 +227,11 @@ func (c *SegmentChecker) getGrowingSegmentDiff(collectionID int64,
 
 // GetSealedSegmentDiff get historical segment diff between target and dist
 func (c *SegmentChecker) getSealedSegmentDiff(
+	ctx context.Context,
 	collectionID int64,
 	replicaID int64,
 ) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
-	replica := c.meta.Get(replicaID)
+	replica := c.meta.Get(ctx, replicaID)
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
 		return
@@ -278,9 +279,9 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		return !existInDist
 	}
 
-	nextTargetExist := c.targetMgr.IsNextTargetExist(collectionID)
-	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(collectionID, meta.NextTarget)
-	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(collectionID, meta.CurrentTarget)
+	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
+	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTarget)
+	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
 
 	// Segment which exist on next target, but not on dist
 	for _, segment := range nextTargetMap {
@@ -325,9 +326,9 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	return
 }
 
-func (c *SegmentChecker) findRepeatedSealedSegments(replicaID int64) []*meta.Segment {
+func (c *SegmentChecker) findRepeatedSealedSegments(ctx context.Context, replicaID int64) []*meta.Segment {
 	segments := make([]*meta.Segment, 0)
-	replica := c.meta.Get(replicaID)
+	replica := c.meta.Get(ctx, replicaID)
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
 		return segments
@@ -336,7 +337,7 @@ func (c *SegmentChecker) findRepeatedSealedSegments(replicaID int64) []*meta.Seg
 	versions := make(map[int64]*meta.Segment)
 	for _, s := range dist {
 		// l0 segment should be release with channel together
-		segment := c.targetMgr.GetSealedSegment(s.GetCollectionID(), s.GetID(), meta.CurrentTargetFirst)
+		segment := c.targetMgr.GetSealedSegment(ctx, s.GetCollectionID(), s.GetID(), meta.CurrentTargetFirst)
 		existInTarget := segment != nil
 		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
 		if isL0Segment {
@@ -378,7 +379,7 @@ func (c *SegmentChecker) filterExistedOnLeader(replica *meta.Replica, segments [
 	return filtered
 }
 
-func (c *SegmentChecker) filterSegmentInUse(replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
+func (c *SegmentChecker) filterSegmentInUse(ctx context.Context, replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
 	filtered := make([]*meta.Segment, 0, len(segments))
 	for _, s := range segments {
 		leaderID, ok := c.dist.ChannelDistManager.GetShardLeader(replica, s.GetInsertChannel())
@@ -387,8 +388,8 @@ func (c *SegmentChecker) filterSegmentInUse(replica *meta.Replica, segments []*m
 		}
 
 		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
-		currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(s.CollectionID, meta.CurrentTarget)
-		partition := c.meta.CollectionManager.GetPartition(s.PartitionID)
+		currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, s.CollectionID, meta.CurrentTarget)
+		partition := c.meta.CollectionManager.GetPartition(ctx, s.PartitionID)
 
 		// if delegator has valid target version, and before it update to latest readable version, skip release it's sealed segment
 		// Notice: if syncTargetVersion stuck, segment on delegator won't be released
@@ -435,7 +436,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 				SegmentInfo: s,
 			}
 		})
-		shardPlans := c.getBalancerFunc().AssignSegment(replica.GetCollectionID(), segmentInfos, rwNodes, false)
+		shardPlans := c.getBalancerFunc().AssignSegment(ctx, replica.GetCollectionID(), segmentInfos, rwNodes, false)
 		for i := range shardPlans {
 			shardPlans[i].Replica = replica
 		}
@@ -474,7 +475,7 @@ func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments 
 }
 
 func (c *SegmentChecker) getTraceCtx(ctx context.Context, collectionID int64) context.Context {
-	coll := c.meta.GetCollection(collectionID)
+	coll := c.meta.GetCollection(ctx, collectionID)
 	if coll == nil || coll.LoadSpan == nil {
 		return ctx
 	}

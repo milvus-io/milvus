@@ -17,6 +17,7 @@
 package balance
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -50,7 +51,7 @@ func NewScoreBasedBalancer(scheduler task.Scheduler,
 }
 
 // AssignSegment got a segment list, and try to assign each segment to node's with lowest score
-func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
+func (b *ScoreBasedBalancer) AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
 	br := NewBalanceReport()
 	return b.assignSegment(br, collectionID, segments, nodes, manualBalance)
 }
@@ -263,7 +264,7 @@ func (b *ScoreBasedBalancer) calculateSegmentScore(s *meta.Segment) float64 {
 	return float64(s.GetNumOfRows()) * (1 + params.Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat())
 }
 
-func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) (segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan) {
+func (b *ScoreBasedBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan) {
 	log := log.With(
 		zap.Int64("collection", replica.GetCollectionID()),
 		zap.Int64("replica id", replica.GetID()),
@@ -308,32 +309,32 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) (segmentPlans
 		br.AddRecord(StrRecordf("executing stopping balance: %v", roNodes))
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
 		if b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, rwNodes, roNodes)...)
+			channelPlans = append(channelPlans, b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)...)
 		}
 		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, rwNodes, roNodes)...)
+			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)...)
 		}
 	} else {
 		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genChannelPlan(br, replica, rwNodes)...)
+			channelPlans = append(channelPlans, b.genChannelPlan(ctx, br, replica, rwNodes)...)
 		}
 
 		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = append(segmentPlans, b.genSegmentPlan(br, replica, rwNodes)...)
+			segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, rwNodes)...)
 		}
 	}
 
 	return segmentPlans, channelPlans
 }
 
-func (b *ScoreBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []SegmentAssignPlan {
+func (b *ScoreBasedBalancer) genStoppingSegmentPlan(ctx context.Context, replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []SegmentAssignPlan {
 	segmentPlans := make([]SegmentAssignPlan, 0)
 	for _, nodeID := range offlineNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(nodeID))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
+			return b.targetMgr.CanSegmentBeMoved(ctx, segment.GetCollectionID(), segment.GetID())
 		})
-		plans := b.AssignSegment(replica.GetCollectionID(), segments, onlineNodes, false)
+		plans := b.AssignSegment(ctx, replica.GetCollectionID(), segments, onlineNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -343,7 +344,7 @@ func (b *ScoreBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, onlin
 	return segmentPlans
 }
 
-func (b *ScoreBasedBalancer) genSegmentPlan(br *balanceReport, replica *meta.Replica, onlineNodes []int64) []SegmentAssignPlan {
+func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, onlineNodes []int64) []SegmentAssignPlan {
 	segmentDist := make(map[int64][]*meta.Segment)
 	nodeItemsMap := b.convertToNodeItems(br, replica.GetCollectionID(), onlineNodes)
 	if len(nodeItemsMap) == 0 {
@@ -359,7 +360,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(br *balanceReport, replica *meta.Rep
 	for _, node := range onlineNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
+			return b.targetMgr.CanSegmentBeMoved(ctx, segment.GetCollectionID(), segment.GetID())
 		})
 		segmentDist[node] = segments
 	}

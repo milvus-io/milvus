@@ -56,6 +56,9 @@ GetCurrentIndexVersion();
 int32_t
 GetMinimalIndexVersion();
 
+void
+SetThreadName(const char*);
+
 #ifdef __cplusplus
 }
 #endif

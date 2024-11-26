@@ -86,25 +86,25 @@ func (sd *shardDelegator) forwardStreamingDeletion(ctx context.Context, deleteDa
 }
 
 func (sd *shardDelegator) addL0ForGrowing(ctx context.Context, segment segments.Segment) error {
-	switch policy := paramtable.Get().QueryNodeCfg.StreamingDeltaForwardPolicy.GetValue(); policy {
-	case ForwardPolicyDefault, StreamingForwardPolicyBF:
+	switch sd.l0ForwardPolicy {
+	case ForwardPolicyDefault, L0ForwardPolicyBF:
 		return sd.addL0GrowingBF(ctx, segment)
-	case StreamingForwardPolicyDirect:
+	case L0ForwardPolicyRemoteLoad:
 		// forward streaming deletion without bf filtering
 		return sd.addL0ForGrowingLoad(ctx, segment)
 	default:
-		log.Fatal("unsupported streaming forward policy", zap.String("policy", policy))
+		log.Fatal("unsupported l0 forward policy", zap.String("policy", sd.l0ForwardPolicy))
 	}
 	return nil
 }
 
 func (sd *shardDelegator) addL0GrowingBF(ctx context.Context, segment segments.Segment) error {
 	deletedPks, deletedTss := sd.GetLevel0Deletions(segment.Partition(), pkoracle.NewCandidateKey(segment.ID(), segment.Partition(), segments.SegmentTypeGrowing))
-	if len(deletedPks) == 0 {
+	if deletedPks == nil || deletedPks.Len() == 0 {
 		return nil
 	}
 
-	log.Info("forwarding L0 delete records...", zap.Int64("segmentID", segment.ID()), zap.Int("deletionCount", len(deletedPks)))
+	log.Info("forwarding L0 delete records...", zap.Int64("segmentID", segment.ID()), zap.Int("deletionCount", deletedPks.Len()))
 	return segment.Delete(ctx, deletedPks, deletedTss)
 }
 
@@ -131,19 +131,21 @@ func (sd *shardDelegator) forwardL0ByBF(ctx context.Context,
 	}
 
 	deletedPks, deletedTss := sd.GetLevel0Deletions(candidate.Partition(), candidate)
-	deleteData := &storage.DeleteData{}
-	deleteData.AppendBatch(deletedPks, deletedTss)
-	if deleteData.RowCount > 0 {
+	if deletedPks != nil && deletedPks.Len() > 0 {
 		log.Info("forward L0 delete to worker...",
-			zap.Int64("deleteRowNum", deleteData.RowCount),
+			zap.Int("deleteRowNum", deletedPks.Len()),
 		)
-		err := worker.Delete(ctx, &querypb.DeleteRequest{
+		pks, err := storage.ParsePrimaryKeysBatch2IDs(deletedPks)
+		if err != nil {
+			return err
+		}
+		err = worker.Delete(ctx, &querypb.DeleteRequest{
 			Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(targetNodeID)),
 			CollectionId: info.GetCollectionID(),
 			PartitionId:  info.GetPartitionID(),
 			SegmentId:    info.GetSegmentID(),
-			PrimaryKeys:  storage.ParsePrimaryKeys2IDs(deleteData.Pks),
-			Timestamps:   deleteData.Tss,
+			PrimaryKeys:  pks,
+			Timestamps:   deletedTss,
 			Scope:        deleteScope,
 		})
 		if err != nil {

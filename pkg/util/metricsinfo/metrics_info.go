@@ -126,7 +126,7 @@ type Segment struct {
 	// load related
 	IsInvisible          bool            `json:"is_invisible,omitempty"`
 	LoadedTimestamp      string          `json:"loaded_timestamp,omitempty,string"`
-	Index                []*SegmentIndex `json:"index,omitempty"`
+	IndexedFields        []*IndexedField `json:"index_fields,omitempty"`
 	ResourceGroup        string          `json:"resource_group,omitempty"`
 	LoadedInsertRowCount int64           `json:"loaded_insert_row_count,omitempty,string"` // inert row count for growing segment that excludes the deleted row count in QueryNode
 	MemSize              int64           `json:"mem_size,omitempty,string"`                // memory size of segment in QueryNode
@@ -135,9 +135,11 @@ type Segment struct {
 	FlushedRows    int64 `json:"flushed_rows,omitempty,string"`
 	SyncBufferRows int64 `json:"sync_buffer_rows,omitempty,string"`
 	SyncingRows    int64 `json:"syncing_rows,omitempty,string"`
+
+	IsIndexed bool `json:"is_indexed,omitempty"` // indicate whether the segment is indexed
 }
 
-type SegmentIndex struct {
+type IndexedField struct {
 	IndexFieldID int64 `json:"field_id,omitempty,string"`
 	IndexID      int64 `json:"index_id,omitempty,string"`
 	BuildID      int64 `json:"build_id,omitempty,string"`
@@ -462,4 +464,18 @@ type Databases struct {
 	Names             []string `json:"db_names,omitempty"`
 	IDs               []string `json:"db_ids,omitempty"`
 	CreatedTimestamps []string `json:"created_timestamps,omitempty"`
+}
+
+type Index struct {
+	CollectionID         int64             `json:"collection_id,omitempty,string"`
+	FieldID              int64             `json:"field_id,omitempty,string"`
+	IndexID              int64             `json:"index_id,omitempty,string"`
+	Name                 string            `json:"name,omitempty"`
+	IsDeleted            bool              `json:"is_deleted"`
+	CreateTime           string            `json:"create_time,omitempty"`
+	IndexParams          map[string]string `json:"index_params,omitempty"`
+	IsAutoIndex          bool              `json:"is_auto_index,omitempty"`
+	UserIndexParams      map[string]string `json:"user_index_params"`
+	State                string            `json:"state,omitempty"`
+	IndexStateFailReason string            `json:"index_state_fail_reason,omitempty"`
 }

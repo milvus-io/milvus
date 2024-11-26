@@ -78,11 +78,15 @@ func (s *RBACBackupTestSuite) TestBackup() {
 			Type: operateType,
 			Entity: &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: role},
-				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
-				ObjectName: objectName,
+				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
+				ObjectName: collectionName,
 				DbName:     dbName,
-				Grantor:    &milvuspb.GrantorEntity{User: &milvuspb.UserEntity{Name: util.UserRoot}, Privilege: &milvuspb.PrivilegeEntity{Name: privilege}},
+				Grantor: &milvuspb.GrantorEntity{
+					User:      &milvuspb.UserEntity{Name: util.UserRoot},
+					Privilege: &milvuspb.PrivilegeEntity{Name: privilege},
+				},
 			},
+			Version: "v2",
 		})
 		s.NoError(err)
 		s.True(merr.Ok(resp))

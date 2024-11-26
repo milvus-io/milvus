@@ -16,6 +16,7 @@
 package balance
 
 import (
+	"context"
 	"testing"
 
 	"github.com/samber/lo"
@@ -85,6 +86,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TearDownTest() {
 }
 
 func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegment() {
+	ctx := context.Background()
 	cases := []struct {
 		name               string
 		comment            string
@@ -240,7 +242,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegment() {
 				suite.balancer.nodeManager.Add(nodeInfo)
 			}
 			for i := range c.collectionIDs {
-				plans := balancer.AssignSegment(c.collectionIDs[i], c.assignments[i], c.nodes, false)
+				plans := balancer.AssignSegment(ctx, c.collectionIDs[i], c.assignments[i], c.nodes, false)
 				if c.unstableAssignment {
 					suite.Equal(len(plans), len(c.expectPlans[i]))
 				} else {
@@ -252,6 +254,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegment() {
 }
 
 func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegmentWithGrowing() {
+	ctx := context.Background()
 	suite.SetupSuite()
 	defer suite.TearDownTest()
 	balancer := suite.balancer
@@ -293,13 +296,14 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegmentWithGrowing() 
 		CollectionID: 1,
 	}
 	suite.balancer.dist.LeaderViewManager.Update(1, leaderView)
-	plans := balancer.AssignSegment(1, toAssign, lo.Keys(distributions), false)
+	plans := balancer.AssignSegment(ctx, 1, toAssign, lo.Keys(distributions), false)
 	for _, p := range plans {
 		suite.Equal(int64(2), p.To)
 	}
 }
 
 func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceOneRound() {
+	ctx := context.Background()
 	cases := []struct {
 		name                 string
 		nodes                []int64
@@ -376,11 +380,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceOneRound() {
 			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
-			balancer.meta.CollectionManager.PutCollection(collection)
-			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(c.collectionID, c.collectionID))
-			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
-			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
+			balancer.meta.CollectionManager.PutCollection(ctx, collection)
+			balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(c.collectionID, c.collectionID))
+			balancer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
+			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
+			balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.distributions {
@@ -400,7 +404,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceOneRound() {
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
-				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
+				suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, c.nodes[i])
 			}
 
 			// 4. balance and verify result
@@ -412,6 +416,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceOneRound() {
 }
 
 func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceMultiRound() {
+	ctx := context.Background()
 	balanceCase := struct {
 		name            string
 		nodes           []int64
@@ -495,12 +500,12 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceMultiRound() {
 		collection.LoadPercentage = 100
 		collection.Status = querypb.LoadStatus_Loaded
 		collection.LoadType = querypb.LoadType_LoadCollection
-		balancer.meta.CollectionManager.PutCollection(collection)
-		balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(balanceCase.collectionIDs[i], balanceCase.collectionIDs[i]))
-		balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(balanceCase.replicaIDs[i], balanceCase.collectionIDs[i],
+		balancer.meta.CollectionManager.PutCollection(ctx, collection)
+		balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(balanceCase.collectionIDs[i], balanceCase.collectionIDs[i]))
+		balancer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(balanceCase.replicaIDs[i], balanceCase.collectionIDs[i],
 			append(balanceCase.nodes, balanceCase.notExistedNodes...)))
-		balancer.targetMgr.UpdateCollectionNextTarget(balanceCase.collectionIDs[i])
-		balancer.targetMgr.UpdateCollectionCurrentTarget(balanceCase.collectionIDs[i])
+		balancer.targetMgr.UpdateCollectionNextTarget(ctx, balanceCase.collectionIDs[i])
+		balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, balanceCase.collectionIDs[i])
 	}
 
 	// 2. set up target for distribution for multi collections
@@ -517,7 +522,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceMultiRound() {
 		})
 		nodeInfo.SetState(balanceCase.states[i])
 		suite.balancer.nodeManager.Add(nodeInfo)
-		suite.balancer.meta.ResourceManager.HandleNodeUp(balanceCase.nodes[i])
+		suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, balanceCase.nodes[i])
 	}
 
 	// 4. first round balance
@@ -535,6 +540,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceMultiRound() {
 }
 
 func (suite *ChannelLevelScoreBalancerTestSuite) TestStoppedBalance() {
+	ctx := context.Background()
 	cases := []struct {
 		name                 string
 		nodes                []int64
@@ -654,11 +660,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestStoppedBalance() {
 			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
-			balancer.meta.CollectionManager.PutCollection(collection)
-			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(c.collectionID, c.collectionID))
-			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
-			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
+			balancer.meta.CollectionManager.PutCollection(ctx, collection)
+			balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(c.collectionID, c.collectionID))
+			balancer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
+			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
+			balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.distributions {
@@ -678,11 +684,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestStoppedBalance() {
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
-				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
+				suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, c.nodes[i])
 			}
 
 			for i := range c.outBoundNodes {
-				suite.balancer.meta.ResourceManager.HandleNodeDown(c.outBoundNodes[i])
+				suite.balancer.meta.ResourceManager.HandleNodeDown(ctx, c.outBoundNodes[i])
 			}
 			utils.RecoverAllCollection(balancer.meta)
 
@@ -695,6 +701,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestStoppedBalance() {
 }
 
 func (suite *ChannelLevelScoreBalancerTestSuite) TestMultiReplicaBalance() {
+	ctx := context.Background()
 	cases := []struct {
 		name               string
 		collectionID       int64
@@ -771,13 +778,13 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestMultiReplicaBalance() {
 			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
-			balancer.meta.CollectionManager.PutCollection(collection)
-			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(c.collectionID, c.collectionID))
+			balancer.meta.CollectionManager.PutCollection(ctx, collection)
+			balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(c.collectionID, c.collectionID))
 			for replicaID, nodes := range c.replicaWithNodes {
-				balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(replicaID, c.collectionID, nodes))
+				balancer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(replicaID, c.collectionID, nodes))
 			}
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
-			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
+			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
+			balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.segmentDist {
@@ -798,7 +805,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestMultiReplicaBalance() {
 					nodeInfo.UpdateStats(session.WithChannelCnt(len(c.channelDist[nodes[i]])))
 					nodeInfo.SetState(c.states[i])
 					suite.balancer.nodeManager.Add(nodeInfo)
-					suite.balancer.meta.ResourceManager.HandleNodeUp(nodes[i])
+					suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, nodes[i])
 				}
 			}
 
@@ -824,10 +831,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestMultiReplicaBalance() {
 func (suite *ChannelLevelScoreBalancerTestSuite) getCollectionBalancePlans(balancer *ChannelLevelScoreBalancer,
 	collectionID int64,
 ) ([]SegmentAssignPlan, []ChannelAssignPlan) {
-	replicas := balancer.meta.ReplicaManager.GetByCollection(collectionID)
+	ctx := context.Background()
+	replicas := balancer.meta.ReplicaManager.GetByCollection(ctx, collectionID)
 	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
 	for _, replica := range replicas {
-		sPlans, cPlans := balancer.BalanceReplica(replica)
+		sPlans, cPlans := balancer.BalanceReplica(ctx, replica)
 		segmentPlans = append(segmentPlans, sPlans...)
 		channelPlans = append(channelPlans, cPlans...)
 	}
@@ -835,6 +843,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) getCollectionBalancePlans(balan
 }
 
 func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_ChannelOutBound() {
+	ctx := context.Background()
 	Params.Save(Params.QueryCoordCfg.Balancer.Key, meta.ChannelLevelScoreBalancerName)
 	defer Params.Reset(Params.QueryCoordCfg.Balancer.Key)
 	Params.Save(Params.QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "2")
@@ -865,11 +874,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Cha
 	collection := utils.CreateTestCollection(collectionID, int32(1))
 	collection.LoadPercentage = 100
 	collection.Status = querypb.LoadStatus_Loaded
-	balancer.meta.CollectionManager.PutCollection(collection)
-	balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(collectionID, partitionID))
-	balancer.meta.ReplicaManager.Spawn(1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
-	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
-	balancer.targetMgr.UpdateCollectionCurrentTarget(collectionID)
+	balancer.meta.CollectionManager.PutCollection(ctx, collection)
+	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
+	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
 	// 3. set up nodes info and resourceManager for balancer
 	nodeCount := 4
@@ -883,11 +892,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Cha
 		// nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 		nodeInfo.SetState(session.NodeStateNormal)
 		suite.balancer.nodeManager.Add(nodeInfo)
-		suite.balancer.meta.ResourceManager.HandleNodeUp(nodeInfo.ID())
+		suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, nodeInfo.ID())
 	}
 	utils.RecoverAllCollection(balancer.meta)
 
-	replica := balancer.meta.ReplicaManager.GetByCollection(collectionID)[0]
+	replica := balancer.meta.ReplicaManager.GetByCollection(ctx, collectionID)[0]
 	ch1Nodes := replica.GetChannelRWNodes("channel1")
 	ch2Nodes := replica.GetChannelRWNodes("channel2")
 	suite.Len(ch1Nodes, 2)
@@ -903,12 +912,13 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Cha
 		},
 	}...)
 
-	sPlans, cPlans := balancer.BalanceReplica(replica)
+	sPlans, cPlans := balancer.BalanceReplica(ctx, replica)
 	suite.Len(sPlans, 0)
 	suite.Len(cPlans, 1)
 }
 
 func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_SegmentOutbound() {
+	ctx := context.Background()
 	Params.Save(Params.QueryCoordCfg.Balancer.Key, meta.ChannelLevelScoreBalancerName)
 	defer Params.Reset(Params.QueryCoordCfg.Balancer.Key)
 	Params.Save(Params.QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "2")
@@ -939,11 +949,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 	collection := utils.CreateTestCollection(collectionID, int32(1))
 	collection.LoadPercentage = 100
 	collection.Status = querypb.LoadStatus_Loaded
-	balancer.meta.CollectionManager.PutCollection(collection)
-	balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(collectionID, partitionID))
-	balancer.meta.ReplicaManager.Spawn(1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
-	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
-	balancer.targetMgr.UpdateCollectionCurrentTarget(collectionID)
+	balancer.meta.CollectionManager.PutCollection(ctx, collection)
+	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
+	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
 	// 3. set up nodes info and resourceManager for balancer
 	nodeCount := 4
@@ -957,11 +967,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 		// nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 		nodeInfo.SetState(session.NodeStateNormal)
 		suite.balancer.nodeManager.Add(nodeInfo)
-		suite.balancer.meta.ResourceManager.HandleNodeUp(nodeInfo.ID())
+		suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, nodeInfo.ID())
 	}
 	utils.RecoverAllCollection(balancer.meta)
 
-	replica := balancer.meta.ReplicaManager.GetByCollection(collectionID)[0]
+	replica := balancer.meta.ReplicaManager.GetByCollection(ctx, collectionID)[0]
 	ch1Nodes := replica.GetChannelRWNodes("channel1")
 	ch2Nodes := replica.GetChannelRWNodes("channel2")
 	suite.Len(ch1Nodes, 2)
@@ -1000,12 +1010,13 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 		},
 	}...)
 
-	sPlans, cPlans := balancer.BalanceReplica(replica)
+	sPlans, cPlans := balancer.BalanceReplica(ctx, replica)
 	suite.Len(sPlans, 1)
 	suite.Len(cPlans, 0)
 }
 
 func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_NodeStopping() {
+	ctx := context.Background()
 	Params.Save(Params.QueryCoordCfg.Balancer.Key, meta.ChannelLevelScoreBalancerName)
 	defer Params.Reset(Params.QueryCoordCfg.Balancer.Key)
 	Params.Save(Params.QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "2")
@@ -1036,11 +1047,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Nod
 	collection := utils.CreateTestCollection(collectionID, int32(1))
 	collection.LoadPercentage = 100
 	collection.Status = querypb.LoadStatus_Loaded
-	balancer.meta.CollectionManager.PutCollection(collection)
-	balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(collectionID, partitionID))
-	balancer.meta.ReplicaManager.Spawn(1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
-	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
-	balancer.targetMgr.UpdateCollectionCurrentTarget(collectionID)
+	balancer.meta.CollectionManager.PutCollection(ctx, collection)
+	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
+	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
 	// 3. set up nodes info and resourceManager for balancer
 	nodeCount := 4
@@ -1054,11 +1065,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Nod
 		// nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 		nodeInfo.SetState(session.NodeStateNormal)
 		suite.balancer.nodeManager.Add(nodeInfo)
-		suite.balancer.meta.ResourceManager.HandleNodeUp(nodeInfo.ID())
+		suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, nodeInfo.ID())
 	}
 	utils.RecoverAllCollection(balancer.meta)
 
-	replica := balancer.meta.ReplicaManager.GetByCollection(collectionID)[0]
+	replica := balancer.meta.ReplicaManager.GetByCollection(ctx, collectionID)[0]
 	ch1Nodes := replica.GetChannelRWNodes("channel1")
 	ch2Nodes := replica.GetChannelRWNodes("channel2")
 	suite.Len(ch1Nodes, 2)
@@ -1112,24 +1123,25 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Nod
 
 	balancer.nodeManager.Stopping(ch1Nodes[0])
 	balancer.nodeManager.Stopping(ch2Nodes[0])
-	suite.balancer.meta.ResourceManager.HandleNodeStopping(ch1Nodes[0])
-	suite.balancer.meta.ResourceManager.HandleNodeStopping(ch2Nodes[0])
+	suite.balancer.meta.ResourceManager.HandleNodeStopping(ctx, ch1Nodes[0])
+	suite.balancer.meta.ResourceManager.HandleNodeStopping(ctx, ch2Nodes[0])
 	utils.RecoverAllCollection(balancer.meta)
 
-	replica = balancer.meta.ReplicaManager.Get(replica.GetID())
-	sPlans, cPlans := balancer.BalanceReplica(replica)
+	replica = balancer.meta.ReplicaManager.Get(ctx, replica.GetID())
+	sPlans, cPlans := balancer.BalanceReplica(ctx, replica)
 	suite.Len(sPlans, 0)
 	suite.Len(cPlans, 2)
 
 	balancer.dist.ChannelDistManager.Update(ch1Nodes[0])
 	balancer.dist.ChannelDistManager.Update(ch2Nodes[0])
 
-	sPlans, cPlans = balancer.BalanceReplica(replica)
+	sPlans, cPlans = balancer.BalanceReplica(ctx, replica)
 	suite.Len(sPlans, 2)
 	suite.Len(cPlans, 0)
 }
 
 func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_SegmentUnbalance() {
+	ctx := context.Background()
 	Params.Save(Params.QueryCoordCfg.Balancer.Key, meta.ChannelLevelScoreBalancerName)
 	defer Params.Reset(Params.QueryCoordCfg.Balancer.Key)
 	Params.Save(Params.QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "2")
@@ -1160,11 +1172,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 	collection := utils.CreateTestCollection(collectionID, int32(1))
 	collection.LoadPercentage = 100
 	collection.Status = querypb.LoadStatus_Loaded
-	balancer.meta.CollectionManager.PutCollection(collection)
-	balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(collectionID, partitionID))
-	balancer.meta.ReplicaManager.Spawn(1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
-	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
-	balancer.targetMgr.UpdateCollectionCurrentTarget(collectionID)
+	balancer.meta.CollectionManager.PutCollection(ctx, collection)
+	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
+	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
 	// 3. set up nodes info and resourceManager for balancer
 	nodeCount := 4
@@ -1178,11 +1190,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 		// nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 		nodeInfo.SetState(session.NodeStateNormal)
 		suite.balancer.nodeManager.Add(nodeInfo)
-		suite.balancer.meta.ResourceManager.HandleNodeUp(nodeInfo.ID())
+		suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, nodeInfo.ID())
 	}
 	utils.RecoverAllCollection(balancer.meta)
 
-	replica := balancer.meta.ReplicaManager.GetByCollection(collectionID)[0]
+	replica := balancer.meta.ReplicaManager.GetByCollection(ctx, collectionID)[0]
 	ch1Nodes := replica.GetChannelRWNodes("channel1")
 	ch2Nodes := replica.GetChannelRWNodes("channel2")
 	suite.Len(ch1Nodes, 2)
@@ -1254,7 +1266,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 		},
 	}...)
 
-	sPlans, cPlans := balancer.BalanceReplica(replica)
+	sPlans, cPlans := balancer.BalanceReplica(ctx, replica)
 	suite.Len(sPlans, 2)
 	suite.Len(cPlans, 0)
 }

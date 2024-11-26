@@ -79,7 +79,7 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 	if !c.IsActive() {
 		return nil
 	}
-	collectionIDs := c.meta.CollectionManager.GetAll()
+	collectionIDs := c.meta.CollectionManager.GetAll(ctx)
 	var tasks []task.Task
 
 	for _, collectionID := range collectionIDs {
@@ -89,12 +89,12 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 			continue
 		}
 
-		collection := c.meta.CollectionManager.GetCollection(collectionID)
+		collection := c.meta.CollectionManager.GetCollection(ctx, collectionID)
 		if collection == nil {
 			log.Warn("collection released during check index", zap.Int64("collection", collectionID))
 			continue
 		}
-		replicas := c.meta.ReplicaManager.GetByCollection(collectionID)
+		replicas := c.meta.ReplicaManager.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
 			tasks = append(tasks, c.checkReplica(ctx, collection, replica, indexInfos)...)
 		}
@@ -121,7 +121,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 		}
 
 		// skip update index for l0 segment
-		segmentInTarget := c.targetMgr.GetSealedSegment(collection.GetCollectionID(), segment.GetID(), meta.CurrentTargetFirst)
+		segmentInTarget := c.targetMgr.GetSealedSegment(ctx, collection.GetCollectionID(), segment.GetID(), meta.CurrentTargetFirst)
 		if segmentInTarget == nil || segmentInTarget.GetLevel() == datapb.SegmentLevel_L0 {
 			continue
 		}

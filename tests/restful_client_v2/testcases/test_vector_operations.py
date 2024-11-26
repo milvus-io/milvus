@@ -161,8 +161,10 @@ class TestInsertVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("pass_fp32_to_fp16_or_bf16", [True, False])
     def test_insert_entities_with_all_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                      is_partition_key, enable_dynamic_schema,
+                                                      pass_fp32_to_fp16_or_bf16):
         """
         Insert a vector with a simple payload
         """
@@ -210,9 +212,17 @@ class TestInsertVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
-                        "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
+                        "binary_vector": gen_vector(datatype="BinaryVector", dim=dim),
                     }
                 else:
                     tmp = {
@@ -221,8 +231,16 @@ class TestInsertVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                         "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
                     }
                 if enable_dynamic_schema:
@@ -253,8 +271,10 @@ class TestInsertVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("pass_fp32_to_fp16_or_bf16", [True, False])
     def test_insert_entities_with_all_vector_datatype_0(self, nb, dim, insert_round, auto_id,
-                                                        is_partition_key, enable_dynamic_schema):
+                                                        is_partition_key, enable_dynamic_schema,
+                                                        pass_fp32_to_fp16_or_bf16):
         """
         Insert a vector with a simple payload
         """
@@ -307,8 +327,16 @@ class TestInsertVector(TestBase):
                         "book_describe": f"book_{i}",
                         "book_vector": gen_vector(datatype="FloatVector", dim=dim),
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                     }
                 else:
                     tmp = {
@@ -318,8 +346,16 @@ class TestInsertVector(TestBase):
                         "book_describe": f"book_{i}",
                         "book_vector": gen_vector(datatype="FloatVector", dim=dim),
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                     }
                 if enable_dynamic_schema:
                     tmp.update({f"dynamic_field_{i}": i})
@@ -349,8 +385,10 @@ class TestInsertVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("pass_fp32_to_fp16_or_bf16", [True, False])
     def test_insert_entities_with_all_vector_datatype_1(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                      is_partition_key, enable_dynamic_schema,
+                                                        pass_fp32_to_fp16_or_bf16):
         """
         Insert a vector with a simple payload
         """
@@ -399,8 +437,16 @@ class TestInsertVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                     }
                 else:
                     tmp = {
@@ -409,8 +455,16 @@ class TestInsertVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                     }
                 if enable_dynamic_schema:
                     tmp.update({f"dynamic_field_{i}": i})
@@ -633,7 +687,86 @@ class TestInsertVector(TestBase):
         assert rsp['code'] == 0
         assert len(rsp['data']) == 50
 
-
+    @pytest.mark.parametrize("insert_round", [1])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("is_partition_key", [True, False])
+    @pytest.mark.parametrize("enable_dynamic_schema", [True, False])
+    @pytest.mark.parametrize("nb", [3000])
+    @pytest.mark.parametrize("dim", [128])
+    def test_insert_entities_with_default_none(self, nb, dim, insert_round, auto_id, is_partition_key,
+                                               enable_dynamic_schema):
+        """
+        Insert a vector with defaultValue and none
+        """
+        # create a collection
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": auto_id,
+                "enableDynamicField": enable_dynamic_schema,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": is_partition_key,
+                     "elementTypeParams": {}, "defaultValue": 10},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}, "nullable": True},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"},
+                     "defaultValue": "default", "nullable": True},
+                    {"fieldName": "json", "dataType": "JSON", "elementTypeParams": {}, "nullable": True},
+                    {"fieldName": "varchar_array", "dataType": "Array", "elementDataType": "VarChar",
+                     "elementTypeParams": {"max_capacity": "1024", "max_length": "256"}, "nullable": True},
+                    {"fieldName": "text_emb", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "text_emb", "indexName": "text_emb", "metricType": "L2"},
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 0
+        # insert data
+        for k in range(insert_round):
+            data = []
+            for i in range(nb):
+                if auto_id:
+                    tmp = {
+                        "user_id": None,
+                        "word_count": None,
+                        "book_describe": None,
+                        "json": None,
+                        "varchar_array": None,
+                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[0].tolist(),
+                    }
+                else:
+                    tmp = {
+                        "book_id": i,
+                        "user_id": None,
+                        "word_count": None,
+                        "book_describe": None,
+                        "json": None,
+                        "varchar_array": None,
+                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[0].tolist(),
+                    }
+                if enable_dynamic_schema:
+                    tmp.update({f"dynamic_field_{i}": i})
+                data.append(tmp)
+            payload = {
+                "collectionName": name,
+                "data": data,
+            }
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 0
+            assert rsp['data']['insertCount'] == nb
+        # query data to make sure the data is inserted
+        rsp = self.vector_client.vector_query({"collectionName": name, "filter": "user_id > 0", "limit": 5})
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == 5
+        assert rsp['data'][0]['book_describe'] == 'default'
+        assert rsp['data'][0]['word_count'] is None
+        assert rsp['data'][0]['json'] is None
 
 @pytest.mark.L0
 class TestInsertVectorNegative(TestBase):
@@ -723,6 +856,44 @@ class TestInsertVectorNegative(TestBase):
         }
         body_size = sys.getsizeof(json.dumps(payload))
         logger.info(f"body size: {body_size / 1024 / 1024} MB")
+        rsp = self.vector_client.vector_insert(payload)
+        assert rsp['code'] == 1804
+        assert "fail to deal the insert data" in rsp['message']
+
+    def test_insert_entities_with_none_no_nullable_field(self):
+        """
+        Insert a vector with none no nullable field
+        """
+        # create a collection
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": True,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "text_emb", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{128}"}},
+                ]
+            }
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 0
+        # insert data
+        data = []
+        for i in range(10):
+            tmp = {
+                "word_count": i if i % 2 else None,
+                "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(128)])])[0].tolist(),
+            }
+            data.append(tmp)
+        payload = {
+            "collectionName": name,
+            "data": data,
+        }
         rsp = self.vector_client.vector_insert(payload)
         assert rsp['code'] == 1804
         assert "fail to deal the insert data" in rsp['message']
@@ -895,6 +1066,85 @@ class TestUpsertVector(TestBase):
         res = utility.get_query_segment_info(name)
         logger.info(f"res: {res}")
 
+    @pytest.mark.parametrize("insert_round", [2])
+    @pytest.mark.parametrize("nb", [3000])
+    @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("id_type", ["Int64", "VarChar"])
+    def test_upsert_vector_with_default_none(self, nb, dim, insert_round, id_type):
+        # create a collection
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": f"{id_type}", "isPrimary": True, "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": True, "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}, "defaultValue": 123},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"},
+                     "nullable": True},
+                    {"fieldName": "text_emb", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            },
+            "indexParams": [{"fieldName": "text_emb", "indexName": "text_emb_index", "metricType": "L2"}]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 0
+        # insert data
+        for i in range(insert_round):
+            data = []
+            for j in range(nb):
+                tmp = {
+                    "book_id": i * nb + j if id_type == "Int64" else f"{i * nb + j}",
+                    "user_id": i * nb + j,
+                    "word_count": i * nb + j,
+                    "book_describe": f"book_{i * nb + j}",
+                    "text_emb": preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
+                }
+                data.append(tmp)
+            payload = {
+                "collectionName": name,
+                "data": data,
+            }
+            body_size = sys.getsizeof(json.dumps(payload))
+            logger.info(f"body size: {body_size / 1024 / 1024} MB")
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 0
+            assert rsp['data']['insertCount'] == nb
+            c = Collection(name)
+            c.flush()
+
+        # upsert data
+        for i in range(insert_round):
+            data = []
+            for j in range(nb):
+                tmp = {
+                    "book_id": i * nb + j if id_type == "Int64" else f"{i * nb + j}",
+                    "user_id": i * nb + j + 1,
+                    "word_count": None,
+                    "book_describe": None,
+                    "text_emb": preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
+                }
+                data.append(tmp)
+            payload = {
+                "collectionName": name,
+                "data": data,
+            }
+            body_size = sys.getsizeof(json.dumps(payload))
+            logger.info(f"body size: {body_size / 1024 / 1024} MB")
+            rsp = self.vector_client.vector_upsert(payload)
+        # query data to make sure the data is updated
+        if id_type == "Int64":
+            rsp = self.vector_client.vector_query({"collectionName": name, "filter": "book_id > 0"})
+        if id_type == "VarChar":
+            rsp = self.vector_client.vector_query({"collectionName": name, "filter": "book_id > '0'"})
+        for data in rsp['data']:
+            assert data['user_id'] == int(data['book_id']) + 1
+            assert data['word_count'] == 123
+            assert data['book_describe'] is None
+
 
 @pytest.mark.L0
 class TestUpsertVectorNegative(TestBase):
@@ -928,6 +1178,45 @@ class TestUpsertVectorNegative(TestBase):
         assert rsp['code'] == 100
         assert "can't find collection" in rsp['message']
 
+    def test_upsert_entities_with_none_no_nullable_field(self):
+        """
+        Insert a vector with none no nullable field
+        """
+        # create a collection
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": True,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "text_emb", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{128}"}},
+                ]
+            }
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 0
+        # insert data
+        data = []
+        for i in range(10):
+            tmp = {
+                "word_count": i if i % 2 else None,
+                "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(128)])])[0].tolist(),
+            }
+            data.append(tmp)
+        payload = {
+            "collectionName": name,
+            "data": data,
+        }
+        rsp = self.vector_client.vector_upsert(payload)
+        assert rsp['code'] == 1804
+        assert "fail to deal the insert data" in rsp['message']
+
+
 @pytest.mark.L0
 class TestSearchVector(TestBase):
 
@@ -937,8 +1226,10 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [16])
+    @pytest.mark.parametrize("pass_fp32_to_fp16_or_bf16", [True, False])
     def test_search_vector_with_all_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                      is_partition_key, enable_dynamic_schema,
+                                                      pass_fp32_to_fp16_or_bf16):
         """
         Insert a vector with a simple payload
         """
@@ -986,8 +1277,16 @@ class TestSearchVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                         "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
                     }
                 else:
@@ -997,8 +1296,16 @@ class TestSearchVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                         "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
                     }
                 if enable_dynamic_schema:
@@ -1984,7 +2291,88 @@ class TestSearchVector(TestBase):
             for d in rsp['data']:
                 assert token in d[field]
 
-
+    @pytest.mark.parametrize("insert_round", [1])
+    @pytest.mark.parametrize("auto_id", [True])
+    @pytest.mark.parametrize("is_partition_key", [True])
+    @pytest.mark.parametrize("enable_dynamic_schema", [True])
+    @pytest.mark.parametrize("nb", [3000])
+    @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("nq", [1, 2])
+    @pytest.mark.parametrize("metric_type", ['COSINE', "L2", "IP"])
+    def test_search_vector_with_default_none(self, nb, dim, insert_round, auto_id, is_partition_key,
+                                             enable_dynamic_schema, nq, metric_type):
+        """
+        Insert a vector with default and none
+        """
+        # create a collection
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": auto_id,
+                "enableDynamicField": enable_dynamic_schema,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": is_partition_key,
+                     "elementTypeParams": {}, "defaultValue": 8888},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}, "nullable": True},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"},
+                     "nullable": True, "defaultValue": "8888"},
+                    {"fieldName": "float_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "float_vector", "indexName": "float_vector", "metricType": metric_type},
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 0
+        # insert data
+        for i in range(insert_round):
+            data = []
+            for i in range(nb):
+                if auto_id:
+                    tmp = {
+                        "user_id": i % 100 if i % 2 else None,
+                        "word_count": None,
+                        "book_describe": None,
+                        "float_vector": gen_vector(datatype="FloatVector", dim=dim),
+                    }
+                else:
+                    tmp = {
+                        "book_id": i,
+                        "user_id": i % 100 if i % 2 else None,
+                        "word_count": None,
+                        "book_describe": None,
+                        "float_vector": gen_vector(datatype="FloatVector", dim=dim),
+                    }
+                if enable_dynamic_schema:
+                    tmp.update({f"dynamic_field_{i}": i})
+                data.append(tmp)
+            payload = {
+                "collectionName": name,
+                "data": data,
+            }
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 0
+            assert rsp['data']['insertCount'] == nb
+        # search data
+        payload = {
+            "collectionName": name,
+            "data": [gen_vector(datatype="FloatVector", dim=dim) for _ in range(nq)],
+            "filter": "book_id >= 0",
+            # "groupingField": "user_id",
+            "outputFields": ["*"],
+            "limit": 100,
+        }
+        rsp = self.vector_client.vector_search(payload)
+        assert rsp['code'] == 0
+        assert rsp['data'][0]['book_describe'] == "8888"
+        assert rsp['data'][0]['word_count'] is None
+        assert len(rsp['data']) == 100 * nq
 
 @pytest.mark.L0
 class TestSearchVectorNegative(TestBase):
@@ -2210,7 +2598,6 @@ class TestAdvancedSearchVector(TestBase):
         assert len(rsp['data']) == 10
 
 
-
 @pytest.mark.L0
 class TestHybridSearchVector(TestBase):
 
@@ -2316,8 +2703,6 @@ class TestHybridSearchVector(TestBase):
         rsp = self.vector_client.vector_hybrid_search(payload)
         assert rsp['code'] == 0
         assert len(rsp['data']) == 10
-
-
 
 
 @pytest.mark.L0
@@ -2463,8 +2848,10 @@ class TestQueryVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("pass_fp32_to_fp16_or_bf16", [True, False])
     def test_query_entities_with_all_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                      is_partition_key, enable_dynamic_schema,
+                                                      pass_fp32_to_fp16_or_bf16):
         """
         Insert a vector with a simple payload
         """
@@ -2512,8 +2899,16 @@ class TestQueryVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                         "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
                     }
                 else:
@@ -2523,8 +2918,16 @@ class TestQueryVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
-                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
-                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                        "float16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="Float16Vector", dim=dim)
+                        ),
+                        "bfloat16_vector": (
+                            gen_vector(datatype="FloatVector", dim=dim)
+                            if pass_fp32_to_fp16_or_bf16
+                            else gen_vector(datatype="BFloat16Vector", dim=dim)
+                        ),
                         "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
                     }
                 if enable_dynamic_schema:
@@ -2820,7 +3223,104 @@ class TestQueryVector(TestBase):
             for d in rsp['data']:
                 assert token in d[field]
 
-
+    @pytest.mark.parametrize("insert_round", [1])
+    @pytest.mark.parametrize("auto_id", [True])
+    @pytest.mark.parametrize("is_partition_key", [True])
+    @pytest.mark.parametrize("enable_dynamic_schema", [True])
+    @pytest.mark.parametrize("nb", [3000])
+    @pytest.mark.parametrize("dim", [128])
+    def test_query_entities_with_default_none(self, nb, dim, insert_round, auto_id, is_partition_key,
+                                              enable_dynamic_schema):
+        """
+        Insert a vector with default and none
+        """
+        # create a collection
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": auto_id,
+                "enableDynamicField": enable_dynamic_schema,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": is_partition_key,
+                     "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}, "defaultValue": 8888},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "25536"},
+                     "nullable": True},
+                    {"fieldName": "bool", "dataType": "Bool", "elementTypeParams": {}, "nullable": True},
+                    {"fieldName": "json", "dataType": "JSON", "elementTypeParams": {}, "nullable": True},
+                    {"fieldName": "int_array", "dataType": "Array", "elementDataType": "Int64",
+                     "elementTypeParams": {"max_capacity": "1024"}, "nullable": True},
+                    {"fieldName": "varchar_array", "dataType": "Array", "elementDataType": "VarChar",
+                     "elementTypeParams": {"max_capacity": "1024", "max_length": "256"}, "nullable": True},
+                    {"fieldName": "bool_array", "dataType": "Array", "elementDataType": "Bool",
+                     "elementTypeParams": {"max_capacity": "1024"}, "nullable": True},
+                    {"fieldName": "text_emb", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "text_emb", "indexName": "text_emb", "metricType": "L2"},
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 0
+        # insert data
+        for i in range(insert_round):
+            data = []
+            for i in range(nb):
+                if auto_id:
+                    tmp = {
+                        "user_id": i,
+                        "word_count": None,
+                        "book_describe": None,
+                        "bool": random.choice([True, False]),
+                        "json": None,
+                        "int_array": None,
+                        "varchar_array": None,
+                        "bool_array": None,
+                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[0].tolist(),
+                    }
+                else:
+                    tmp = {
+                        "book_id": i,
+                        "user_id": i,
+                        "word_count": None,
+                        "book_describe": None,
+                        "bool": random.choice([True, False]),
+                        "json": None,
+                        "int_array": None,
+                        "varchar_array": None,
+                        "bool_array": None,
+                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[0].tolist(),
+                    }
+                if enable_dynamic_schema:
+                    tmp.update({f"dynamic_field_{i}": i})
+                data.append(tmp)
+            payload = {
+                "collectionName": name,
+                "data": data,
+            }
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 0
+            assert rsp['data']['insertCount'] == nb
+        # query data to make sure the data is inserted
+        payload = {
+            "collectionName": name,
+            "filter": "user_id > 0",
+            "limit": 50,
+            "outputFields": ["*"]
+        }
+        rsp = self.vector_client.vector_query(payload)
+        assert rsp['code'] == 0
+        assert rsp['data'][0]['book_describe'] is None
+        assert rsp['data'][0]['word_count'] == 8888
+        assert rsp['data'][0]['json'] is None
+        assert rsp['data'][0]['varchar_array'] is None
+        assert len(rsp['data']) == 50
 
 
 @pytest.mark.L0

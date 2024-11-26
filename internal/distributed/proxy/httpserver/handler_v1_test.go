@@ -1220,6 +1220,184 @@ func TestUpsert(t *testing.T) {
 	})
 }
 
+func TestFp16Bf16VectorsV1(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
+	mp := mocks.NewMockProxy(t)
+	collSchema := generateCollectionSchemaWithVectorFields()
+	testEngine := initHTTPServer(mp, true)
+	queryTestCases := []requestBodyTestCase{}
+	for _, path := range []string{VectorInsertPath, VectorUpsertPath} {
+		queryTestCases = append(queryTestCases,
+			requestBodyTestCase{
+				path: path,
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": [3.0],
+							"bfloat16Vector": [4.4, 442],
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						}
+					]
+				}`),
+				errCode: 1804,
+				errMsg:  "fail to deal the insert data, error: []byte size 2 doesn't equal to vector dimension 2 of Float16Vector",
+			}, requestBodyTestCase{
+				path: path,
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": [3, 3.0],
+							"bfloat16Vector": [4.4, 442],
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						}
+					]
+				}`),
+				errCode: 200,
+			}, requestBodyTestCase{
+				path: path,
+				// [3, 3] shouble be converted to [float(3), float(3)]
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": [3, 3],
+							"bfloat16Vector": [4.4, 442],
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						}
+					]
+				}`),
+				errCode: 200,
+			}, requestBodyTestCase{
+				path: path,
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": "AQIDBA==",
+							"bfloat16Vector": "AQIDBA==",
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						}
+					]
+				}`),
+				errCode: 200,
+			}, requestBodyTestCase{
+				path: path,
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": [3, 3.0, 3],
+							"bfloat16Vector": [4.4, 44],
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						}
+					]
+				}`),
+				errMsg:  "fail to deal the insert data, error: []byte size 6 doesn't equal to vector dimension 2 of Float16Vector",
+				errCode: 1804,
+			}, requestBodyTestCase{
+				path: path,
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": [3, 3.0],
+							"bfloat16Vector": [4.4, 442, 44],
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						}
+					]
+				}`),
+				errMsg:  "fail to deal the insert data, error: []byte size 6 doesn't equal to vector dimension 2 of BFloat16Vector",
+				errCode: 1804,
+			}, requestBodyTestCase{
+				path: path,
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": "AQIDBA==",
+							"bfloat16Vector": [4.4, 442],
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						},
+						{
+							"book_id": 1,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": [3.1, 3.1],
+							"bfloat16Vector": "AQIDBA==",
+							"sparseFloatVector": {"3": 1.1, "2": 0.44}
+						}
+					]
+				}`),
+				errCode: 200,
+			})
+	}
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         collSchema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(len(queryTestCases))
+	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Times(4)
+	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Times(4)
+	for i, testcase := range queryTestCases {
+		t.Run(testcase.path, func(t *testing.T) {
+			bodyReader := bytes.NewReader(testcase.requestBody)
+			req := httptest.NewRequest(http.MethodPost, versional(testcase.path), bodyReader)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code, "case %d: ", i, string(testcase.requestBody))
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err, "case %d: ", i)
+			assert.Equal(t, testcase.errCode, returnBody.Code, "case %d: ", i, string(testcase.requestBody))
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message, "case %d: ", i, string(testcase.requestBody))
+			}
+			fmt.Println(w.Body.String())
+		})
+	}
+}
+
 func genIDs(dataType schemapb.DataType) *schemapb.IDs {
 	return generateIDs(dataType, 3)
 }

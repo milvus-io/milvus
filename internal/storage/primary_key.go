@@ -350,6 +350,25 @@ func ParseIDs2PrimaryKeys(ids *schemapb.IDs) []PrimaryKey {
 	return ret
 }
 
+func ParseIDs2PrimaryKeysBatch(ids *schemapb.IDs) PrimaryKeys {
+	var result PrimaryKeys
+	switch ids.IdField.(type) {
+	case *schemapb.IDs_IntId:
+		int64Pks := ids.GetIntId().GetData()
+		pks := NewInt64PrimaryKeys(int64(len(int64Pks)))
+		pks.AppendRaw(int64Pks...)
+		result = pks
+	case *schemapb.IDs_StrId:
+		stringPks := ids.GetStrId().GetData()
+		pks := NewVarcharPrimaryKeys(int64(len(stringPks)))
+		pks.AppendRaw(stringPks...)
+		result = pks
+	default:
+		panic(fmt.Sprintf("unexpected schema id field type %T", ids.IdField))
+	}
+	return result
+}
+
 func ParsePrimaryKeysBatch2IDs(pks PrimaryKeys) (*schemapb.IDs, error) {
 	ret := &schemapb.IDs{}
 	if pks.Len() == 0 {
