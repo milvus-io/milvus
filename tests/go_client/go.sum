@@ -318,10 +318,10 @@ github.com/matttproud/golang_protobuf_extensions v1.0.4/go.mod h1:BSXmuO+STAnVfr
 github.com/mediocregopher/radix/v3 v3.4.2/go.mod h1:8FL3F6UQRXHXIBSPUs5h0RybMF8i4n7wVopoX3x7Bv8=
 github.com/microcosm-cc/bluemonday v1.0.2/go.mod h1:iVP4YcDBq+n/5fb23BhYFvIMq/leAFZyRl6bYmGDlGc=
 github.com/miekg/dns v1.0.14/go.mod h1:W1PPwlIAgtquWBMBEV9nkV9Cazfe8ScdGz/Lj7v3Nrg=
-github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20241111025219-806678b2806e h1:vablXYYktqJjTuSDUkNNNRigkGuJVHLXr34xoiE7GR0=
-github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20241111025219-806678b2806e/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
-github.com/milvus-io/milvus/client/v2 v2.0.0-20241111031027-fca946dee181 h1:YHpgSTEnfm71INTQ4BnbFmx56DSvWJEv7j2XitL/Ueo=
-github.com/milvus-io/milvus/client/v2 v2.0.0-20241111031027-fca946dee181/go.mod h1:Y5KeQdPOEV7fICgAW7HDnprnwBWhapr7K11yRD/THdg=
+github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20241120015424-93892e628c69 h1:Qt0Bv2Fum3EX3OlkuQYHJINBzeU4oEuHy2lXSfB/gZw=
+github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20241120015424-93892e628c69/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
+github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d h1:B9O725cOdoVt3Yosnv7ux/LGfFAZtGR+ap19OhYWgUM=
+github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d/go.mod h1:8n6FsmUmL0BUlAna1e7LIIijQSIyo76RCSGFbnDcPp8=
 github.com/milvus-io/milvus/pkg v0.0.2-0.20241111021426-5e90f348fcbb h1:lMyIrG03agASB88AAwnk+NOU9V33lcBdtub/ZEv6IQU=
 github.com/milvus-io/milvus/pkg v0.0.2-0.20241111021426-5e90f348fcbb/go.mod h1:w5nu1Z318AvgWQrGUYXaqLeVLu4JvCS/oYhxqctOZvU=
 github.com/mitchellh/cli v1.0.0/go.mod h1:hNIlj7HEI86fIcpObd7a0FcrxTWetlwJDGcceTlRvqc=
