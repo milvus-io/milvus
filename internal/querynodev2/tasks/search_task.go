@@ -156,14 +156,14 @@ func (t *SearchTask) Execute() error {
 		searchedSegments []segments.Segment
 	)
 	if req.GetScope() == querypb.DataScope_Historical {
-		results, err = segments.SearchHistorical(
+		results, searchedSegments, err = segments.SearchHistorical(
 			t.ctx,
 			t.segmentManager,
 			searchReq,
 			req.GetSegmentIDs(),
 		)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
-		results, _, err = segments.SearchStreaming(
+		results, searchedSegments, err = segments.SearchStreaming(
 			t.ctx,
 			t.segmentManager,
 			searchReq,

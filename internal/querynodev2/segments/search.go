@@ -200,19 +200,19 @@ func searchSegmentsStreamly(ctx context.Context,
 }
 
 // search will search on the historical segments the target segments in historical.
-func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRequest, segIDs []int64) ([]*SearchResult, error) {
+func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRequest, segIDs []int64) ([]*SearchResult, []Segment, error) {
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, nil, ctx.Err()
 	}
 
 	segments, err := manager.Segment.GetAndPin(segIDs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer manager.Segment.Unpin(segments)
 
 	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeSealed, searchReq)
-	return searchResults, err
+	return searchResults, segments, err
 }
 
 // searchStreaming will search all the target segments in streaming

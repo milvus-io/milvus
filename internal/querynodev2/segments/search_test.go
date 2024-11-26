@@ -144,7 +144,7 @@ func (suite *SearchSuite) TestSearchSealed() {
 	searchReq, err := genSearchPlanAndRequests(suite.collection, []int64{suite.sealed.ID()}, IndexFaissIDMap, nq)
 	suite.NoError(err)
 
-	_, err = SearchHistorical(ctx, suite.manager, searchReq, []int64{suite.sealed.ID()})
+	_, _, err = SearchHistorical(ctx, suite.manager, searchReq, []int64{suite.sealed.ID()})
 	suite.NoError(err)
 }
 
