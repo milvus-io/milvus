@@ -2,11 +2,14 @@ use std::ffi::c_char;
 use std::ffi::c_void;
 use std::ffi::CStr;
 
+use crate::array::RustResult;
+use crate::cstr_to_str;
+use crate::error::Result;
 use crate::index_writer::IndexWriterWrapper;
+use crate::log::init_log;
+use crate::string_c::c_str_to_str;
 use crate::tokenizer::create_tokenizer;
 use crate::util::create_binding;
-use crate::string_c::c_str_to_str;
-use crate::log::init_log;
 
 #[no_mangle]
 pub extern "C" fn tantivy_create_text_writer(
@@ -17,13 +20,13 @@ pub extern "C" fn tantivy_create_text_writer(
     num_threads: usize,
     overall_memory_budget_in_bytes: usize,
     in_ram: bool,
-) -> *mut c_void {
+) -> RustResult {
     init_log();
-    let field_name_str = unsafe { CStr::from_ptr(field_name).to_str().unwrap() };
-    let path_str = unsafe { CStr::from_ptr(path).to_str().unwrap() };
-    let tokenizer_name_str = unsafe { CStr::from_ptr(tokenizer_name).to_str().unwrap() };
-    let params = unsafe{c_str_to_str(analyzer_params).to_string()};
-    let analyzer = create_tokenizer(&params);
+    let field_name_str = cstr_to_str!(field_name);
+    let path_str = cstr_to_str!(path);
+    let tokenizer_name_str = cstr_to_str!(tokenizer_name);
+    let params = cstr_to_str!(analyzer_params);
+    let analyzer = create_tokenizer(params);
     match analyzer {
         Ok(text_analyzer) => {
             let wrapper = IndexWriterWrapper::create_text_writer(
@@ -35,11 +38,12 @@ pub extern "C" fn tantivy_create_text_writer(
                 overall_memory_budget_in_bytes,
                 in_ram,
             );
-            create_binding(wrapper)
+            RustResult::from_ptr(create_binding(wrapper))
         }
-        Err(err) => {
-            log::warn!("create tokenizer failed with error: {} param: {}", err.to_string(), params);
-            std::ptr::null_mut()
-        },
+        Err(err) => RustResult::from_error(format!(
+            "create tokenizer failed with error: {} param: {}",
+            err.to_string(),
+            params,
+        )),
     }
 }
