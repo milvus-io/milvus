@@ -303,6 +303,9 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 			growing.Remove(segmentID)
 			return true
 		}
+		if segment.GetPartitionID() != partitionID {
+			return true
+		}
 		segmentInfos = append(segmentInfos, segment)
 		return true
 	})
@@ -635,6 +638,7 @@ func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel stri
 	s.channelLock.Lock(channel)
 	defer s.channelLock.Unlock(channel)
 
+	s.channel2Sealed.Remove(channel)
 	growing, ok := s.channel2Growing.Get(channel)
 	if !ok {
 		return
@@ -653,5 +657,4 @@ func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel stri
 		return true
 	})
 	s.channel2Growing.Remove(channel)
-	s.channel2Sealed.Remove(channel)
 }
