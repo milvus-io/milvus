@@ -417,6 +417,15 @@ var (
 			Help:      "the number of non-zeros in each sparse search task",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, collectionName})
+
+	// ProxyRecallSearchCount records the counter that users issue recall evaluation requests, which are cpu-intensive
+	ProxyRecallSearchCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "recall_serch_cnt",
+			Help:      "counter of recall search",
+		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -479,6 +488,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyRetrySearchResultInsufficientCount)
 
 	registry.MustRegister(ProxySearchSparseNumNonZeros)
+	registry.MustRegister(ProxyRecallSearchCount)
 }
 
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {
@@ -600,6 +610,11 @@ func CleanupProxyCollectionMetrics(nodeID int64, collection string) {
 	ProxyRetrySearchResultInsufficientCount.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
 		queryTypeLabelName: HybridSearchLabel,
+		collectionName:     collection,
+	})
+	ProxyRecallSearchCount.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: SearchLabel,
 		collectionName:     collection,
 	})
 }
