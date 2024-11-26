@@ -225,6 +225,12 @@ PhyJsonContainsFilterExpr::ExecJsonContains() {
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
+
+    FieldId field_id = expr_->column_.field_id_;
+    if (CanUseJsonKeyIndex(field_id)) {
+        return ExecJsonContainsByKeyIndex<ExprValueType>();
+    }
+
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
@@ -284,8 +290,67 @@ PhyJsonContainsFilterExpr::ExecJsonContains() {
     return res_vec;
 }
 
+template <typename ExprValueType>
+VectorPtr
+PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
+    using GetType =
+        std::conditional_t<std::is_same_v<ExprValueType, std::string>,
+                           std::string_view,
+                           ExprValueType>;
+    Assert(segment_->type() == SegmentType::Sealed && num_data_chunk_ == 1);
+    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
+                               ? active_count_ - current_data_chunk_pos_
+                               : batch_size_;
+    std::unordered_set<ExprValueType> elements;
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    for (auto const& element : expr_->vals_) {
+        elements.insert(GetValueFromProto<ExprValueType>(element));
+    }
+    if (elements.empty()) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size, false),
+            TargetBitmap(real_batch_size, true));
+    }
+    if (cached_index_chunk_id_ != 0) {
+        const auto* sealed_seg =
+            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        auto field_id = expr_->column_.field_id_;
+        auto* index = sealed_seg->GetJsonKeyIndex(field_id);
+        Assert(index != nullptr);
+        auto filter_func = [sealed_seg, &elements, &field_id](uint32_t row_id,
+                                                              uint16_t offset,
+                                                              uint16_t size) {
+            auto json_pair = sealed_seg->GetJsonData(field_id, row_id);
+            if (!json_pair.second) {
+                return false;
+            }
+            auto json =
+                milvus::Json(json_pair.first.data(), json_pair.first.size());
+            auto val = json.at<GetType>(offset, size);
+            if (val.error()) {
+                return false;
+            }
+            return elements.count(ExprValueType(val.value())) > 0;
+        };
+        cached_index_chunk_res_ =
+            index->FilterByPath(pointer, real_batch_size, filter_func).clone();
+        cached_index_chunk_id_ = 0;
+    }
+    TargetBitmap result;
+    result.append(
+        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
+    current_data_chunk_pos_ += real_batch_size;
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          TargetBitmap(real_batch_size, true));
+}
+
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsArray() {
+    FieldId field_id = expr_->column_.field_id_;
+    if (CanUseJsonKeyIndex(field_id)) {
+        return ExecJsonContainsArrayByKeyIndex();
+    }
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
@@ -353,6 +418,63 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray() {
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+VectorPtr
+PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
+    Assert(segment_->type() == SegmentType::Sealed && num_data_chunk_ == 1);
+    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
+                               ? active_count_ - current_data_chunk_pos_
+                               : batch_size_;
+    std::vector<proto::plan::Array> elements;
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    for (auto const& element : expr_->vals_) {
+        elements.emplace_back(GetValueFromProto<proto::plan::Array>(element));
+    }
+    if (elements.empty()) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size, false),
+            TargetBitmap(real_batch_size, true));
+    }
+    if (cached_index_chunk_id_ != 0) {
+        const auto* sealed_seg =
+            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        auto field_id = expr_->column_.field_id_;
+        auto* index = sealed_seg->GetJsonKeyIndex(field_id);
+        Assert(index != nullptr);
+        auto filter_func = [sealed_seg, &elements, &field_id](uint32_t row_id,
+                                                              uint16_t offset,
+                                                              uint16_t size) {
+            auto json_pair = sealed_seg->GetJsonData(field_id, row_id);
+            if (!json_pair.second) {
+                return false;
+            }
+            auto json =
+                milvus::Json(json_pair.first.data(), json_pair.first.size());
+            auto array = json.array_at(offset, size);
+            if (array.error()) {
+                return false;
+            }
+            for (auto&& it : array) {
+                for (auto const& element : elements) {
+                    if (CompareTwoJsonArray(it.get_array(), element)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+        cached_index_chunk_res_ =
+            index->FilterByPath(pointer, real_batch_size, filter_func).clone();
+        cached_index_chunk_id_ = 0;
+    }
+    TargetBitmap result;
+    result.append(
+        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
+    current_data_chunk_pos_ += real_batch_size;
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          TargetBitmap(real_batch_size, true));
 }
 
 template <typename ExprValueType>
@@ -423,6 +545,11 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll() {
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
+
+    FieldId field_id = expr_->column_.field_id_;
+    if (CanUseJsonKeyIndex(field_id)) {
+        return ExecJsonContainsAllByKeyIndex<ExprValueType>();
+    }
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
@@ -486,8 +613,74 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll() {
     return res_vec;
 }
 
+template <typename ExprValueType>
+VectorPtr
+PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
+    using GetType =
+        std::conditional_t<std::is_same_v<ExprValueType, std::string>,
+                           std::string_view,
+                           ExprValueType>;
+    Assert(segment_->type() == SegmentType::Sealed && num_data_chunk_ == 1);
+    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
+                               ? active_count_ - current_data_chunk_pos_
+                               : batch_size_;
+    std::unordered_set<GetType> elements;
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    for (auto const& element : expr_->vals_) {
+        elements.insert(GetValueFromProto<GetType>(element));
+    }
+    if (elements.empty()) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size, false),
+            TargetBitmap(real_batch_size, true));
+    }
+    if (cached_index_chunk_id_ != 0) {
+        const auto* sealed_seg =
+            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        auto field_id = expr_->column_.field_id_;
+        auto* index = sealed_seg->GetJsonKeyIndex(field_id);
+        Assert(index != nullptr);
+        auto filter_func = [sealed_seg, &elements, &field_id](uint32_t row_id,
+                                                              uint16_t offset,
+                                                              uint16_t size) {
+            auto json_pair = sealed_seg->GetJsonData(field_id, row_id);
+            if (!json_pair.second) {
+                return false;
+            }
+            auto json =
+                milvus::Json(json_pair.first.data(), json_pair.first.size());
+            auto array = json.array_at(offset, size);
+            if (array.error()) {
+                return false;
+            }
+            std::unordered_set<GetType> tmp_elements(elements);
+            for (auto&& it : array) {
+                tmp_elements.erase(it);
+                if (tmp_elements.empty()) {
+                    return true;
+                }
+            }
+            return tmp_elements.empty();
+        };
+        cached_index_chunk_res_ =
+            index->FilterByPath(pointer, real_batch_size, filter_func).clone();
+        cached_index_chunk_id_ = 0;
+    }
+    TargetBitmap result;
+    result.append(
+        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
+    current_data_chunk_pos_ += real_batch_size;
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          TargetBitmap(real_batch_size, true));
+}
+
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType() {
+    FieldId field_id = expr_->column_.field_id_;
+    if (CanUseJsonKeyIndex(field_id)) {
+        return ExecJsonContainsAllWithDiffTypeByKeyIndex();
+    }
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
@@ -622,7 +815,128 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType() {
 }
 
 VectorPtr
+PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
+    Assert(segment_->type() == SegmentType::Sealed && num_data_chunk_ == 1);
+    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
+                               ? active_count_ - current_data_chunk_pos_
+                               : batch_size_;
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    auto elements = expr_->vals_;
+    std::unordered_set<int> elements_index;
+    int i = 0;
+    for (auto& element : elements) {
+        elements_index.insert(i);
+        i++;
+    }
+    if (elements.empty()) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size, false),
+            TargetBitmap(real_batch_size, true));
+    }
+    if (cached_index_chunk_id_ != 0) {
+        const auto* sealed_seg =
+            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        auto field_id = expr_->column_.field_id_;
+        auto* index = sealed_seg->GetJsonKeyIndex(field_id);
+        Assert(index != nullptr);
+        auto filter_func =
+            [sealed_seg, &elements, &elements_index, &field_id](
+                uint32_t row_id, uint16_t offset, uint16_t size) {
+                return false;
+                auto json_pair = sealed_seg->GetJsonData(field_id, row_id);
+                if (!json_pair.second) {
+                    return false;
+                }
+                auto json = milvus::Json(json_pair.first.data(),
+                                         json_pair.first.size());
+                std::unordered_set<int> tmp_elements_index(elements_index);
+                int i = -1;
+                for (auto& element : elements) {
+                    i++;
+                    switch (element.val_case()) {
+                        case proto::plan::GenericValue::kBoolVal: {
+                            auto val = json.at<bool>(offset, size);
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.bool_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kInt64Val: {
+                            auto val = json.at<bool>(offset, size);
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.int64_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kFloatVal: {
+                            auto val = json.at<double>(offset, size);
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.float_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kStringVal: {
+                            auto val = json.at<std::string_view>(offset, size);
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.string_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kArrayVal: {
+                            auto val = json.array_at(offset, size);
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (CompareTwoJsonArray(val, element.array_val())) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
+                        }
+                        default:
+                            PanicInfo(DataTypeInvalid,
+                                      fmt::format("unsupported data type {}",
+                                                  element.val_case()));
+                    }
+                    if (tmp_elements_index.empty()) {
+                        return true;
+                    }
+                }
+                if (tmp_elements_index.empty()) {
+                    return true;
+                }
+                return tmp_elements_index.empty();
+            };
+        cached_index_chunk_res_ =
+            index->FilterByPath(pointer, real_batch_size, filter_func).clone();
+        cached_index_chunk_id_ = 0;
+    }
+    TargetBitmap result;
+    result.append(
+        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
+    current_data_chunk_pos_ += real_batch_size;
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          TargetBitmap(real_batch_size, true));
+}
+
+VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllArray() {
+    FieldId field_id = expr_->column_.field_id_;
+    if (CanUseJsonKeyIndex(field_id)) {
+        return ExecJsonContainsAllArrayByKeyIndex();
+    }
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
@@ -698,7 +1012,67 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray() {
 }
 
 VectorPtr
+PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
+    Assert(segment_->type() == SegmentType::Sealed && num_data_chunk_ == 1);
+    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
+                               ? active_count_ - current_data_chunk_pos_
+                               : batch_size_;
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    std::vector<proto::plan::Array> elements;
+    for (auto const& element : expr_->vals_) {
+        elements.emplace_back(GetValueFromProto<proto::plan::Array>(element));
+    }
+    if (elements.empty()) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size, false),
+            TargetBitmap(real_batch_size, true));
+    }
+    if (cached_index_chunk_id_ != 0) {
+        const auto* sealed_seg =
+            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        auto field_id = expr_->column_.field_id_;
+        auto* index = sealed_seg->GetJsonKeyIndex(field_id);
+        Assert(index != nullptr);
+        auto filter_func = [sealed_seg, &elements, &field_id](uint32_t row_id,
+                                                              uint16_t offset,
+                                                              uint16_t size) {
+            auto json_pair = sealed_seg->GetJsonData(field_id, row_id);
+            if (!json_pair.second) {
+                return false;
+            }
+            auto json =
+                milvus::Json(json_pair.first.data(), json_pair.first.size());
+            auto val = json.array_at(offset, size);
+            if (val.error()) {
+                return false;
+            }
+            std::unordered_set<int> exist_elements_index;
+            for (int index = 0; index < elements.size(); ++index) {
+                if (CompareTwoJsonArray(val.value(), elements[index])) {
+                    exist_elements_index.insert(index);
+                }
+            }
+            return exist_elements_index.size() == elements.size();
+        };
+        cached_index_chunk_res_ =
+            index->FilterByPath(pointer, real_batch_size, filter_func).clone();
+        cached_index_chunk_id_ = 0;
+    }
+    TargetBitmap result;
+    result.append(
+        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
+    current_data_chunk_pos_ += real_batch_size;
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          TargetBitmap(real_batch_size, true));
+}
+
+VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType() {
+    FieldId field_id = expr_->column_.field_id_;
+    if (CanUseJsonKeyIndex(field_id)) {
+        return ExecJsonContainsWithDiffTypeByKeyIndex();
+    }
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
@@ -817,6 +1191,108 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType() {
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+VectorPtr
+PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
+    Assert(segment_->type() == SegmentType::Sealed && num_data_chunk_ == 1);
+    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
+                               ? active_count_ - current_data_chunk_pos_
+                               : batch_size_;
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    auto elements = expr_->vals_;
+    if (elements.empty()) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size, false),
+            TargetBitmap(real_batch_size, true));
+    }
+    if (cached_index_chunk_id_ != 0) {
+        const auto* sealed_seg =
+            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        auto field_id = expr_->column_.field_id_;
+        auto* index = sealed_seg->GetJsonKeyIndex(field_id);
+        Assert(index != nullptr);
+        auto filter_func = [sealed_seg, &elements, &field_id](uint32_t row_id,
+                                                              uint16_t offset,
+                                                              uint16_t size) {
+            auto json_pair = sealed_seg->GetJsonData(field_id, row_id);
+            if (!json_pair.second) {
+                return false;
+            }
+            auto json =
+                milvus::Json(json_pair.first.data(), json_pair.first.size());
+            for (auto const& element : elements) {
+                switch (element.val_case()) {
+                    case proto::plan::GenericValue::kBoolVal: {
+                        auto val = json.at<bool>(offset, size);
+                        if (val.error()) {
+                            return false;
+                        }
+                        if (val.value() == element.bool_val()) {
+                            return true;
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kInt64Val: {
+                        auto val = json.at<int64_t>(offset, size);
+                        if (val.error()) {
+                            return false;
+                        }
+                        if (val.value() == element.int64_val()) {
+                            return true;
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kFloatVal: {
+                        auto val = json.at<double>(offset, size);
+                        if (val.error()) {
+                            return false;
+                        }
+                        if (val.value() == element.float_val()) {
+                            return true;
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kStringVal: {
+                        auto val = json.at<std::string_view>(offset, size);
+                        if (val.error()) {
+                            return false;
+                        }
+                        if (val.value() == element.string_val()) {
+                            return true;
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kArrayVal: {
+                        auto val = json.array_at(offset, size);
+                        if (val.error()) {
+                            return false;
+                        }
+                        if (CompareTwoJsonArray(val.value(),
+                                                element.array_val())) {
+                            return true;
+                        }
+                        break;
+                    }
+                    default:
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format("unsupported data type {}",
+                                              element.val_case()));
+                }
+            }
+            return false;
+        };
+        cached_index_chunk_res_ =
+            index->FilterByPath(pointer, real_batch_size, filter_func).clone();
+        cached_index_chunk_id_ = 0;
+    }
+    TargetBitmap result;
+    result.append(
+        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
+    current_data_chunk_pos_ += real_batch_size;
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          TargetBitmap(real_batch_size, true));
 }
 
 VectorPtr

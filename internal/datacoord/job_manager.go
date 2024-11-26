@@ -188,7 +188,7 @@ func (jm *statsJobManager) triggerJsonKeyIndexStatsTask() {
 				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 			}
 		}
-		segments := jm.mt.SelectSegments(WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
+		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
 			return needDoJsonKeyIndex(seg, needTriggerFieldIDs)
 		}))
 		for _, segment := range segments {
