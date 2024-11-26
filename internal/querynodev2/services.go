@@ -733,6 +733,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	if req.GetReq().GetIsTopkReduce() {
 		resp.IsTopkReduce = true
 	}
+	resp.IsRecallEvaluation = req.GetReq().GetIsRecallEvaluation()
 	return resp, nil
 }
 
