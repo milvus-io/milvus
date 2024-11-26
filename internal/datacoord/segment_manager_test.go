@@ -862,13 +862,12 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 				if segmentInfo != nil {
 					channel = segmentInfo.GetInsertChannel()
 				}
-				if segmentInfo.GetState() == commonpb.SegmentState_Sealed {
-					sealed, _ := s.channel2Sealed.GetOrInsert(channel, typeutil.NewUniqueSet())
-					sealed.Insert(segmentID)
-				}
-				if segmentInfo.GetState() == commonpb.SegmentState_Sealed {
+				if segmentInfo == nil || segmentInfo.GetState() == commonpb.SegmentState_Growing {
 					growing, _ := s.channel2Growing.GetOrInsert(channel, typeutil.NewUniqueSet())
 					growing.Insert(segmentID)
+				} else if segmentInfo.GetState() == commonpb.SegmentState_Sealed {
+					sealed, _ := s.channel2Sealed.GetOrInsert(channel, typeutil.NewUniqueSet())
+					sealed.Insert(segmentID)
 				}
 			}
 			s.DropSegmentsOfChannel(context.TODO(), tt.args.channel)
