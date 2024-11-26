@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "pthread.h"
 #include "config/ConfigKnowhere.h"
 #include "fmt/core.h"
 #include "log/Log.h"
@@ -103,6 +104,15 @@ GetCurrentIndexVersion() {
 extern "C" int32_t
 GetMinimalIndexVersion() {
     return milvus::config::GetMinimalIndexVersion();
+}
+
+extern "C" void
+SetThreadName(const char* name) {
+#ifdef __linux__
+    pthread_setname_np(pthread_self(), name);
+#elif __APPLE__
+    pthread_setname_np(name);
+#endif
 }
 
 }  // namespace milvus::segcore
