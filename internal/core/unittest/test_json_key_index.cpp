@@ -198,7 +198,7 @@ class JsonKeyIndexTest : public testing::Test {
             }
             return term_set.find((std::string(val.first))) != term_set.end();
         };
-        index_->FilterByPath("/keys0", filter_func);
+        index_->FilterByPath("/keys0", 10000, filter_func);
     }
 
  public:
