@@ -39,8 +39,9 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
 
     const TargetBitmap
     FilterByPath(const std::string& path,
+                 int32_t row,
                  std::function<bool(uint32_t, uint16_t, uint16_t)> filter) {
-        TargetBitmap bitset(Count());
+        TargetBitmap bitset(row);
         auto array = wrapper_->term_query<std::string>(path);
         LOG_DEBUG("json key filter size:{}", array.array_.len);
 
