@@ -186,7 +186,7 @@ func (chainTask *CollectionPrepare) Load(ctx context.Context, t *testing.T, mc *
 	if lp.CollectionName == "" {
 		log.Fatal("[Load] Empty collection name is not expected")
 	}
-	loadTask, err := mc.LoadCollection(ctx, clientv2.NewLoadCollectionOption(lp.CollectionName).WithReplica(lp.Replica))
+	loadTask, err := mc.LoadCollection(ctx, clientv2.NewLoadCollectionOption(lp.CollectionName).WithReplica(lp.Replica).WithLoadFields(lp.LoadFields...).WithSkipLoadDynamicField(lp.SkipLoadDynamicField))
 	common.CheckErr(t, err, true)
 	err = loadTask.Await(ctx)
 	common.CheckErr(t, err, true)
