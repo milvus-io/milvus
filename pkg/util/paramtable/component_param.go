@@ -1136,6 +1136,7 @@ type rootCoordConfig struct {
 	MaxGeneralCapacity          ParamItem `refreshable:"true"`
 	GracefulStopTimeout         ParamItem `refreshable:"true"`
 	UseLockScheduler            ParamItem `refreshable:"true"`
+	DefaultDBProperties         ParamItem `refreshable:"false"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -1219,6 +1220,15 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 		Export:       false,
 	}
 	p.UseLockScheduler.Init(base.mgr)
+
+	p.DefaultDBProperties = ParamItem{
+		Key:          "rootCoord.defaultDBProperties",
+		Version:      "2.4.16",
+		DefaultValue: "{}",
+		Doc:          "default db properties, should be a json string",
+		Export:       false,
+	}
+	p.DefaultDBProperties.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
