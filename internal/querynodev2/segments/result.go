@@ -56,12 +56,16 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 
 	channelsMvcc := make(map[string]uint64)
 	isTopkReduce := false
+	isRecallEvaluation := false
 	for _, r := range results {
 		for ch, ts := range r.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
 		}
 		if r.GetIsTopkReduce() {
 			isTopkReduce = true
+		}
+		if r.GetIsRecallEvaluation() {
+			isRecallEvaluation = true
 		}
 		// shouldn't let new SearchResults.MetricType to be empty, though the req.MetricType is empty
 		if metricType == "" {
@@ -116,6 +120,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	searchResults.ChannelsMvcc = channelsMvcc
 	searchResults.IsTopkReduce = isTopkReduce
+	searchResults.IsRecallEvaluation = isRecallEvaluation
 	return searchResults, nil
 }
 

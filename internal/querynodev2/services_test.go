@@ -1161,7 +1161,7 @@ func (suite *ServiceSuite) TestGetSegmentInfo_Failed() {
 }
 
 // Test Search
-func (suite *ServiceSuite) genCSearchRequest(nq int64, dataType schemapb.DataType, fieldID int64, metricType string, isTopkReduce bool) (*internalpb.SearchRequest, error) {
+func (suite *ServiceSuite) genCSearchRequest(nq int64, dataType schemapb.DataType, fieldID int64, metricType string, isTopkReduce bool, isRecallEvaluation bool) (*internalpb.SearchRequest, error) {
 	placeHolder, err := genPlaceHolderGroup(nq)
 	if err != nil {
 		return nil, err
@@ -1186,6 +1186,7 @@ func (suite *ServiceSuite) genCSearchRequest(nq int64, dataType schemapb.DataTyp
 		Nq:                 nq,
 		MvccTimestamp:      typeutil.MaxTimestamp,
 		IsTopkReduce:       isTopkReduce,
+		IsRecallEvaluation: isRecallEvaluation,
 	}, nil
 }
 
@@ -1195,7 +1196,7 @@ func (suite *ServiceSuite) TestSearch_Normal() {
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
 
-	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false)
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false, false)
 	req := &querypb.SearchRequest{
 		Req: creq,
 
@@ -1219,7 +1220,7 @@ func (suite *ServiceSuite) TestSearch_Concurrent() {
 	futures := make([]*conc.Future[*internalpb.SearchResults], 0, concurrency)
 	for i := 0; i < concurrency; i++ {
 		future := conc.Go(func() (*internalpb.SearchResults, error) {
-			creq, err := suite.genCSearchRequest(30, schemapb.DataType_FloatVector, 107, defaultMetricType, false)
+			creq, err := suite.genCSearchRequest(30, schemapb.DataType_FloatVector, 107, defaultMetricType, false, false)
 			req := &querypb.SearchRequest{
 				Req: creq,
 
@@ -1245,7 +1246,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 
 	// data
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
-	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, "invalidMetricType", false)
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, "invalidMetricType", false, false)
 	req := &querypb.SearchRequest{
 		Req: creq,
 
@@ -1365,7 +1366,7 @@ func (suite *ServiceSuite) TestSearchSegments_Normal() {
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
 
-	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false)
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false, false)
 	req := &querypb.SearchRequest{
 		Req: creq,
 
@@ -1377,13 +1378,15 @@ func (suite *ServiceSuite) TestSearchSegments_Normal() {
 	rsp, err := suite.node.SearchSegments(ctx, req)
 	suite.NoError(err)
 	suite.Equal(rsp.GetIsTopkReduce(), false)
+	suite.Equal(rsp.GetIsRecallEvaluation(), false)
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 
-	req.Req, err = suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, true)
+	req.Req, err = suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, true, true)
 	suite.NoError(err)
 	rsp, err = suite.node.SearchSegments(ctx, req)
 	suite.NoError(err)
 	suite.Equal(rsp.GetIsTopkReduce(), true)
+	suite.Equal(rsp.GetIsRecallEvaluation(), true)
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 }
 
@@ -1393,7 +1396,7 @@ func (suite *ServiceSuite) TestStreamingSearch() {
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.UseStreamComputing.Key, "true")
-	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false)
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false, true)
 	req := &querypb.SearchRequest{
 		Req:             creq,
 		FromShardLeader: true,
@@ -1407,6 +1410,7 @@ func (suite *ServiceSuite) TestStreamingSearch() {
 	rsp, err := suite.node.SearchSegments(ctx, req)
 	suite.NoError(err)
 	suite.Equal(false, rsp.GetIsTopkReduce())
+	suite.Equal(true, rsp.GetIsRecallEvaluation())
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 }
 
@@ -1415,7 +1419,7 @@ func (suite *ServiceSuite) TestStreamingSearchGrowing() {
 	// pre
 	suite.TestWatchDmChannelsInt64()
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.UseStreamComputing.Key, "true")
-	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false)
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false, false)
 	req := &querypb.SearchRequest{
 		Req:             creq,
 		FromShardLeader: true,
