@@ -497,16 +497,18 @@ func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) (segmentPlan
 			zap.Any("available nodes", rwNodes),
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, rwNodes, roNodes)...)
-		if len(channelPlans) == 0 {
+		if b.permitBalanceChannel(replica.GetCollectionID()) {
+			channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, rwNodes, roNodes)...)
+		}
+		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
 			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, rwNodes, roNodes)...)
 		}
 	} else {
-		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) {
 			channelPlans = append(channelPlans, b.genChannelPlan(br, replica, rwNodes)...)
 		}
 
-		if len(channelPlans) == 0 {
+		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
 			segmentPlans = b.genSegmentPlan(replica, rwNodes)
 		}
 	}
