@@ -111,8 +111,7 @@ func (t *QueryTask) Execute() error {
 		return err
 	}
 	defer retrievePlan.Delete()
-	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
-	defer t.segmentManager.Segment.Unpin(pinnedSegments)
+	results, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
 	if err != nil {
 		return err
 	}

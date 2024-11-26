@@ -47,7 +47,6 @@ func (suite *PlanSuite) SetupTest() {
 	suite.collection = NewCollection(suite.collectionID, schema, GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
-	suite.collection.AddPartition(suite.partitionID)
 }
 
 func (suite *PlanSuite) TearDownTest() {

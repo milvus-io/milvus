@@ -23,6 +23,54 @@ func (_m *MockCollectionManager) EXPECT() *MockCollectionManager_Expecter {
 	return &MockCollectionManager_Expecter{mock: &_m.Mock}
 }
 
+// AddPartition provides a mock function with given fields: collectionID, partitions
+func (_m *MockCollectionManager) AddPartition(collectionID int64, partitions ...int64) {
+	_va := make([]interface{}, len(partitions))
+	for _i := range partitions {
+		_va[_i] = partitions[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, collectionID)
+	_ca = append(_ca, _va...)
+	_m.Called(_ca...)
+}
+
+// MockCollectionManager_AddPartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddPartition'
+type MockCollectionManager_AddPartition_Call struct {
+	*mock.Call
+}
+
+// AddPartition is a helper method to define mock.On call
+//   - collectionID int64
+//   - partitions ...int64
+func (_e *MockCollectionManager_Expecter) AddPartition(collectionID interface{}, partitions ...interface{}) *MockCollectionManager_AddPartition_Call {
+	return &MockCollectionManager_AddPartition_Call{Call: _e.mock.On("AddPartition",
+		append([]interface{}{collectionID}, partitions...)...)}
+}
+
+func (_c *MockCollectionManager_AddPartition_Call) Run(run func(collectionID int64, partitions ...int64)) *MockCollectionManager_AddPartition_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]int64, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(int64)
+			}
+		}
+		run(args[0].(int64), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_AddPartition_Call) Return() *MockCollectionManager_AddPartition_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCollectionManager_AddPartition_Call) RunAndReturn(run func(int64, ...int64)) *MockCollectionManager_AddPartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Get provides a mock function with given fields: collectionID
 func (_m *MockCollectionManager) Get(collectionID int64) *Collection {
 	ret := _m.Called(collectionID)
@@ -67,6 +115,54 @@ func (_c *MockCollectionManager_Get_Call) Return(_a0 *Collection) *MockCollectio
 }
 
 func (_c *MockCollectionManager_Get_Call) RunAndReturn(run func(int64) *Collection) *MockCollectionManager_Get_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetPartitions provides a mock function with given fields: collectionID
+func (_m *MockCollectionManager) GetPartitions(collectionID int64) []int64 {
+	ret := _m.Called(collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPartitions")
+	}
+
+	var r0 []int64
+	if rf, ok := ret.Get(0).(func(int64) []int64); ok {
+		r0 = rf(collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]int64)
+		}
+	}
+
+	return r0
+}
+
+// MockCollectionManager_GetPartitions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPartitions'
+type MockCollectionManager_GetPartitions_Call struct {
+	*mock.Call
+}
+
+// GetPartitions is a helper method to define mock.On call
+//   - collectionID int64
+func (_e *MockCollectionManager_Expecter) GetPartitions(collectionID interface{}) *MockCollectionManager_GetPartitions_Call {
+	return &MockCollectionManager_GetPartitions_Call{Call: _e.mock.On("GetPartitions", collectionID)}
+}
+
+func (_c *MockCollectionManager_GetPartitions_Call) Run(run func(collectionID int64)) *MockCollectionManager_GetPartitions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_GetPartitions_Call) Return(_a0 []int64) *MockCollectionManager_GetPartitions_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCollectionManager_GetPartitions_Call) RunAndReturn(run func(int64) []int64) *MockCollectionManager_GetPartitions_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -244,6 +340,54 @@ func (_c *MockCollectionManager_Ref_Call) Return(_a0 bool) *MockCollectionManage
 }
 
 func (_c *MockCollectionManager_Ref_Call) RunAndReturn(run func(int64, uint32) bool) *MockCollectionManager_Ref_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemovePartition provides a mock function with given fields: collectionID, partition
+func (_m *MockCollectionManager) RemovePartition(collectionID int64, partition ...int64) {
+	_va := make([]interface{}, len(partition))
+	for _i := range partition {
+		_va[_i] = partition[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, collectionID)
+	_ca = append(_ca, _va...)
+	_m.Called(_ca...)
+}
+
+// MockCollectionManager_RemovePartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemovePartition'
+type MockCollectionManager_RemovePartition_Call struct {
+	*mock.Call
+}
+
+// RemovePartition is a helper method to define mock.On call
+//   - collectionID int64
+//   - partition ...int64
+func (_e *MockCollectionManager_Expecter) RemovePartition(collectionID interface{}, partition ...interface{}) *MockCollectionManager_RemovePartition_Call {
+	return &MockCollectionManager_RemovePartition_Call{Call: _e.mock.On("RemovePartition",
+		append([]interface{}{collectionID}, partition...)...)}
+}
+
+func (_c *MockCollectionManager_RemovePartition_Call) Run(run func(collectionID int64, partition ...int64)) *MockCollectionManager_RemovePartition_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]int64, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(int64)
+			}
+		}
+		run(args[0].(int64), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_RemovePartition_Call) Return() *MockCollectionManager_RemovePartition_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCollectionManager_RemovePartition_Call) RunAndReturn(run func(int64, ...int64)) *MockCollectionManager_RemovePartition_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -64,7 +64,6 @@ func (suite *InsertNodeSuite) TestBasic() {
 	collection := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
-	collection.AddPartition(suite.partitionID)
 
 	// init mock
 	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
@@ -100,8 +99,6 @@ func (suite *InsertNodeSuite) TestDataTypeNotSupported() {
 	collection := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
-	collection.AddPartition(suite.partitionID)
-
 	// init mock
 	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
 	mockCollectionManager.EXPECT().Get(suite.collectionID).Return(collection)

@@ -391,10 +391,7 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 	}
 	defer node.lifetime.Done()
 
-	collection := node.manager.Collection.Get(req.GetCollectionID())
-	if collection != nil {
-		collection.AddPartition(req.GetPartitionIDs()...)
-	}
+	node.manager.Collection.AddPartition(req.GetCollectionID(), req.GetPartitionIDs()...)
 
 	log.Info("load partitions done")
 	return merr.Success(), nil
@@ -531,13 +528,7 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, req *querypb.Relea
 	}
 	defer node.lifetime.Done()
 
-	collection := node.manager.Collection.Get(req.GetCollectionID())
-	if collection != nil {
-		for _, partition := range req.GetPartitionIDs() {
-			collection.RemovePartition(partition)
-		}
-	}
-
+	node.manager.Collection.RemovePartition(req.GetCollectionID(), req.GetPartitionIDs()...)
 	log.Info("release partitions done")
 	return merr.Success(), nil
 }

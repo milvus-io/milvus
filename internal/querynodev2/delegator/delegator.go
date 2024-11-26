@@ -116,10 +116,11 @@ type shardDelegator struct {
 	distribution *distribution
 	idfOracle    IDFOracle
 
-	segmentManager segments.SegmentManager
-	tsafeManager   tsafe.Manager
-	pkOracle       pkoracle.PkOracle
-	level0Mut      sync.RWMutex
+	segmentManager    segments.SegmentManager
+	collectionManager segments.CollectionManager
+	tsafeManager      tsafe.Manager
+	pkOracle          pkoracle.PkOracle
+	level0Mut         sync.RWMutex
 	// stream delete buffer
 	deleteMut    sync.RWMutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
@@ -268,8 +269,8 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 	return nodeReq
 }
 
-func (sd *shardDelegator) getTargetPartitions(reqPartitions []int64) (searchPartitions []int64, err error) {
-	existPartitions := sd.collection.GetPartitions()
+func (sd *shardDelegator) getTargetPartitions(reqCollection int64, reqPartitions []int64) (searchPartitions []int64, err error) {
+	existPartitions := sd.collectionManager.GetPartitions(reqCollection)
 
 	// search all loaded partitions if req partition ids not provided
 	if len(reqPartitions) == 0 {
@@ -380,22 +381,18 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
+	targetPartitions, err := sd.getTargetPartitions(req.GetReq().GetCollectionID(), req.GetReq().GetPartitionIDs())
+	if err != nil {
+		return nil, err
+	}
+	// set target partition ids to sub task request
+	req.Req.PartitionIDs = targetPartitions
 	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to search, current distribution is not serviceable")
 		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
 	}
 	defer sd.distribution.Unpin(version)
-	targetPartitions, err := sd.getTargetPartitions(req.GetReq().GetPartitionIDs())
-	if err != nil {
-		return nil, err
-	}
-	// set target partition ids to sub task request
-	req.Req.PartitionIDs = targetPartitions
-	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
-		return funcutil.SliceContain(targetPartitions, segment.PartitionID)
-	})
-
 	if req.GetReq().GetIsAdvanced() {
 		futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetSubReqs()))
 		for index, subReq := range req.GetReq().GetSubReqs() {
@@ -497,6 +494,13 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
+	targetPartitions, err := sd.getTargetPartitions(req.GetReq().GetCollectionID(), req.GetReq().GetPartitionIDs())
+	if err != nil {
+		return err
+	}
+	// set target partition ids to sub task request
+	req.Req.PartitionIDs = targetPartitions
+
 	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable")
@@ -504,16 +508,6 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	}
 	defer sd.distribution.Unpin(version)
 
-	targetPartitions, err := sd.getTargetPartitions(req.GetReq().GetPartitionIDs())
-	if err != nil {
-		return err
-	}
-	// set target partition ids to sub task request
-	req.Req.PartitionIDs = targetPartitions
-
-	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
-		return funcutil.SliceContain(targetPartitions, segment.PartitionID)
-	})
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
 	}
@@ -570,6 +564,13 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
+	targetPartitions, err := sd.getTargetPartitions(req.GetReq().GetCollectionID(), req.GetReq().GetPartitionIDs())
+	if err != nil {
+		return nil, err
+	}
+	// set target partition ids to sub task request
+	req.Req.PartitionIDs = targetPartitions
+
 	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable")
@@ -577,19 +578,8 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 	defer sd.distribution.Unpin(version)
 
-	targetPartitions, err := sd.getTargetPartitions(req.GetReq().GetPartitionIDs())
-	if err != nil {
-		return nil, err
-	}
-	// set target partition ids to sub task request
-	req.Req.PartitionIDs = targetPartitions
-
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
-	} else {
-		growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
-			return funcutil.SliceContain(targetPartitions, segment.PartitionID)
-		})
 	}
 
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
@@ -961,15 +951,16 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	log.Info("shard delegator setup l0 forward policy", zap.String("policy", policy))
 
 	sd := &shardDelegator{
-		collectionID:   collectionID,
-		replicaID:      replicaID,
-		vchannelName:   channel,
-		version:        version,
-		collection:     collection,
-		segmentManager: manager.Segment,
-		workerManager:  workerManager,
-		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
-		distribution:   NewDistribution(),
+		collectionID:      collectionID,
+		replicaID:         replicaID,
+		vchannelName:      channel,
+		version:           version,
+		collection:        collection,
+		segmentManager:    manager.Segment,
+		collectionManager: manager.Collection,
+		workerManager:     workerManager,
+		lifetime:          lifetime.NewLifetime(lifetime.Initializing),
+		distribution:      NewDistribution(),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
 		pkOracle:         pkoracle.NewPkOracle(),

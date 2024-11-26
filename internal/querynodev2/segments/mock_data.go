@@ -946,7 +946,6 @@ func genSearchRequest(nq int64, indexType string, collection *Collection) (*inte
 	return &internalpb.SearchRequest{
 		Base:               genCommonMsgBase(commonpb.MsgType_Search, 0),
 		CollectionID:       collection.ID(),
-		PartitionIDs:       collection.GetPartitions(),
 		PlaceholderGroup:   placeHolder,
 		SerializedExprPlan: serializedPlan,
 		DslType:            commonpb.DslType_BoolExprV1,

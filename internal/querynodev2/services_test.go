@@ -1004,10 +1004,7 @@ func (suite *ServiceSuite) TestReleasePartitions_Normal() {
 	status, err := suite.node.ReleasePartitions(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
-	collection := suite.node.manager.Collection.Get(suite.collectionID)
-	for _, partition := range suite.partitionIDs {
-		suite.False(collection.ExistPartition(partition))
-	}
+	suite.NotContains(suite.node.manager.Collection.GetPartitions(suite.collectionID), suite.partitionIDs)
 }
 
 func (suite *ServiceSuite) TestReleasePartitions_Failed() {

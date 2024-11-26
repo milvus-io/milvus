@@ -55,17 +55,67 @@ type CollectionManager interface {
 	// returns true if the collection ref count goes 0, or the collection not exists,
 	// return false otherwise
 	Unref(collectionID int64, count uint32) bool
+
+	// addPartitionID would add a loaded partition id to partition id list of collection
+	AddPartition(collectionID int64, partitions ...int64)
+	// removePartitionID removes the partition id from partition id list of collection
+	RemovePartition(collectionID int64, partition ...int64)
+	// getPartitionIDs return loaded partitionIDs of collection
+	GetPartitions(collectionID int64) []int64
 }
 
 type collectionManager struct {
-	mut         sync.RWMutex
-	collections map[int64]*Collection
+	mut              sync.RWMutex
+	collections      map[int64]*Collection
+	loadedPartitions map[int64][]int64
 }
 
 func NewCollectionManager() *collectionManager {
 	return &collectionManager{
-		collections: make(map[int64]*Collection),
+		collections:      make(map[int64]*Collection),
+		loadedPartitions: make(map[int64][]int64),
 	}
+}
+
+// getPartitionIDs return partitionIDs of collection
+func (m *collectionManager) GetPartitions(collectionID int64) []int64 {
+	m.mut.RLock()
+	defer m.mut.RUnlock()
+	return m.loadedPartitions[collectionID]
+}
+
+// addPartitionID would add a partition id to partition id list of collection
+func (m *collectionManager) AddPartition(collectionID int64, partitions ...int64) {
+	m.mut.Lock()
+	defer m.mut.Unlock()
+	_, ok := m.loadedPartitions[collectionID]
+	if !ok {
+		m.loadedPartitions[collectionID] = make([]int64, 0)
+	}
+
+	m.loadedPartitions[collectionID] = append(m.loadedPartitions[collectionID], partitions...)
+}
+
+// removePartitionID removes the partition id from partition id list of collection
+func (m *collectionManager) RemovePartition(collectionID int64, partition ...int64) {
+	m.mut.Lock()
+	defer m.mut.Unlock()
+
+	loadedPartitions, ok := m.loadedPartitions[collectionID]
+	if !ok {
+		log.Warn("collection not found", zap.Int64("collectionID", collectionID))
+		return
+	}
+
+	deleteSet := typeutil.NewUniqueSet(partition...)
+	ret := make([]int64, 0)
+	for _, partitionID := range loadedPartitions {
+		if !deleteSet.Contain(partitionID) {
+			ret = append(ret, partitionID)
+		}
+	}
+	m.loadedPartitions[collectionID] = ret
+	log.Info("remove partitions", zap.Int64("collection", collectionID), zap.Int64s("partitions", partition))
 }
 
 func (m *collectionManager) List() []int64 {
@@ -103,10 +153,15 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		return
 	}
 
-	log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Any("schema", schema))
+	log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Int64s("partitions", loadMeta.GetPartitionIDs()), zap.Any("schema", schema))
 	collection := NewCollection(collectionID, schema, meta, loadMeta)
 	collection.Ref(1)
 	m.collections[collectionID] = collection
+
+	if m.loadedPartitions[collectionID] == nil {
+		m.loadedPartitions[collectionID] = make([]int64, 0)
+	}
+	m.loadedPartitions[collectionID] = append(m.loadedPartitions[collectionID], loadMeta.GetPartitionIDs()...)
 }
 
 func (m *collectionManager) Ref(collectionID int64, count uint32) bool {
@@ -147,7 +202,6 @@ type Collection struct {
 	mu            sync.RWMutex // protects colllectionPtr
 	collectionPtr C.CCollection
 	id            int64
-	partitions    *typeutil.ConcurrentSet[int64]
 	loadType      querypb.LoadType
 	dbName        string
 	resourceGroup string
@@ -186,29 +240,6 @@ func (c *Collection) Schema() *schemapb.CollectionSchema {
 // IsGpuIndex returns a boolean value indicating whether the collection is using a GPU index.
 func (c *Collection) IsGpuIndex() bool {
 	return c.isGpuIndex
-}
-
-// getPartitionIDs return partitionIDs of collection
-func (c *Collection) GetPartitions() []int64 {
-	return c.partitions.Collect()
-}
-
-func (c *Collection) ExistPartition(partitionIDs ...int64) bool {
-	return c.partitions.Contain(partitionIDs...)
-}
-
-// addPartitionID would add a partition id to partition id list of collection
-func (c *Collection) AddPartition(partitions ...int64) {
-	for i := range partitions {
-		c.partitions.Insert(partitions[i])
-	}
-	log.Info("add partitions", zap.Int64("collection", c.ID()), zap.Int64s("partitions", partitions))
-}
-
-// removePartitionID removes the partition id from partition id list of collection
-func (c *Collection) RemovePartition(partitionID int64) {
-	c.partitions.Remove(partitionID)
-	log.Info("remove partition", zap.Int64("collection", c.ID()), zap.Int64("partition", partitionID))
 }
 
 // getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition
@@ -284,16 +315,12 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	coll := &Collection{
 		collectionPtr: collection,
 		id:            collectionID,
-		partitions:    typeutil.NewConcurrentSet[int64](),
 		loadType:      loadMetaInfo.GetLoadType(),
 		dbName:        loadMetaInfo.GetDbName(),
 		resourceGroup: loadMetaInfo.GetResourceGroup(),
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
 		loadFields:    loadFieldIDs,
-	}
-	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
-		coll.partitions.Insert(partitionID)
 	}
 	coll.schema.Store(schema)
 
@@ -302,10 +329,9 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 
 func NewCollectionWithoutSchema(collectionID int64, loadType querypb.LoadType) *Collection {
 	return &Collection{
-		id:         collectionID,
-		partitions: typeutil.NewConcurrentSet[int64](),
-		loadType:   loadType,
-		refCount:   atomic.NewUint32(0),
+		id:       collectionID,
+		loadType: loadType,
+		refCount: atomic.NewUint32(0),
 	}
 }
 
@@ -313,9 +339,8 @@ func NewCollectionWithoutSchema(collectionID int64, loadType querypb.LoadType) *
 // ONLY FOR TEST
 func NewCollectionWithoutSegcoreForTest(collectionID int64, schema *schemapb.CollectionSchema) *Collection {
 	coll := &Collection{
-		id:         collectionID,
-		partitions: typeutil.NewConcurrentSet[int64](),
-		refCount:   atomic.NewUint32(0),
+		id:       collectionID,
+		refCount: atomic.NewUint32(0),
 	}
 	coll.schema.Store(schema)
 	return coll

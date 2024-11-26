@@ -200,48 +200,50 @@ func searchSegmentsStreamly(ctx context.Context,
 }
 
 // search will search on the historical segments the target segments in historical.
-// if segIDs is not specified, it will search on all the historical segments speficied by partIDs.
-// if segIDs is specified, it will only search on the segments specified by the segIDs.
-// if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []Segment, error) {
+func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRequest, segIDs []int64) ([]*SearchResult, error) {
 	if ctx.Err() != nil {
-		return nil, nil, ctx.Err()
+		return nil, ctx.Err()
 	}
 
-	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
+	segments, err := manager.Segment.GetAndPin(segIDs)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
+	defer manager.Segment.Unpin(segments)
+
 	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeSealed, searchReq)
-	return searchResults, segments, err
+	return searchResults, err
 }
 
 // searchStreaming will search all the target segments in streaming
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []Segment, error) {
+func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchRequest, segIDs []int64) ([]*SearchResult, []Segment, error) {
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
 	}
 
-	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
+	segments, err := manager.Segment.GetAndPin(segIDs)
 	if err != nil {
 		return nil, nil, err
 	}
+	defer manager.Segment.Unpin(segments)
+
 	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeGrowing, searchReq)
 	return searchResults, segments, err
 }
 
-func SearchHistoricalStreamly(ctx context.Context, manager *Manager, searchReq *SearchRequest,
-	collID int64, partIDs []int64, segIDs []int64, streamReduce func(result *SearchResult) error,
+func SearchHistoricalStreamly(ctx context.Context, manager *Manager, searchReq *SearchRequest, segIDs []int64, streamReduce func(result *SearchResult) error,
 ) ([]Segment, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 
-	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
+	segments, err := manager.Segment.GetAndPin(segIDs)
 	if err != nil {
 		return segments, err
 	}
+	defer manager.Segment.Unpin(segments)
+
 	err = searchSegmentsStreamly(ctx, manager, segments, searchReq, streamReduce)
 	if err != nil {
 		return segments, err

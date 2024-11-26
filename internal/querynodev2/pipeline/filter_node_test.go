@@ -73,9 +73,6 @@ func (suite *FilterNodeSuite) TestWithLoadCollection() {
 
 	// mock
 	collection := segments.NewCollectionWithoutSchema(suite.collectionID, querypb.LoadType_LoadCollection)
-	for _, partitionID := range suite.partitionIDs {
-		collection.AddPartition(partitionID)
-	}
 
 	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
 	mockCollectionManager.EXPECT().Get(suite.collectionID).Return(collection)
@@ -112,11 +109,9 @@ func (suite *FilterNodeSuite) TestWithLoadPartation() {
 
 	// mock
 	collection := segments.NewCollectionWithoutSchema(suite.collectionID, querypb.LoadType_LoadPartition)
-	collection.AddPartition(suite.partitionIDs[0])
 
 	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
 	mockCollectionManager.EXPECT().Get(suite.collectionID).Return(collection)
-
 	mockSegmentManager := segments.NewMockSegmentManager(suite.T())
 
 	suite.manager = &segments.Manager{

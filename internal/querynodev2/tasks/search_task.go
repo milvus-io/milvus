@@ -156,25 +156,21 @@ func (t *SearchTask) Execute() error {
 		searchedSegments []segments.Segment
 	)
 	if req.GetScope() == querypb.DataScope_Historical {
-		results, searchedSegments, err = segments.SearchHistorical(
+		results, err = segments.SearchHistorical(
 			t.ctx,
 			t.segmentManager,
 			searchReq,
-			req.GetReq().GetCollectionID(),
-			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
 		)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
-		results, searchedSegments, err = segments.SearchStreaming(
+		results, _, err = segments.SearchStreaming(
 			t.ctx,
 			t.segmentManager,
 			searchReq,
-			req.GetReq().GetCollectionID(),
-			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
 		)
 	}
-	defer t.segmentManager.Segment.Unpin(searchedSegments)
+
 	if err != nil {
 		return err
 	}
@@ -451,12 +447,9 @@ func (t *StreamingSearchTask) Execute() error {
 			t.ctx,
 			t.segmentManager,
 			searchReq,
-			req.GetReq().GetCollectionID(),
-			nil,
 			req.GetSegmentIDs(),
 			streamReduceFunc)
 		defer segments.DeleteStreamReduceHelper(t.streamReducer)
-		defer t.segmentManager.Segment.Unpin(pinnedSegments)
 		if err != nil {
 			log.Error("Failed to search sealed segments streamly", zap.Error(err))
 			return err
@@ -475,12 +468,9 @@ func (t *StreamingSearchTask) Execute() error {
 			t.ctx,
 			t.segmentManager,
 			searchReq,
-			req.GetReq().GetCollectionID(),
-			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
 		)
 		defer segments.DeleteSearchResults(results)
-		defer t.segmentManager.Segment.Unpin(pinnedSegments)
 		if err != nil {
 			return err
 		}
