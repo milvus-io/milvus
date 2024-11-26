@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -110,9 +111,9 @@ func (m *dataViewManager) Close() {
 	})
 }
 
-func (m *dataViewManager) update(view *DataView) {
+func (m *dataViewManager) update(view *DataView, reason string) {
 	m.currentViews.Insert(view.CollectionID, view)
-	log.Info("update new data view", zap.Int64("collectionID", view.CollectionID), zap.Int64("version", view.Version))
+	log.Info("update new data view", zap.Int64("collectionID", view.CollectionID), zap.Int64("version", view.Version), zap.String("reason", reason))
 }
 
 func (m *dataViewManager) TryUpdateDataView(collectionID int64) {
@@ -127,7 +128,7 @@ func (m *dataViewManager) TryUpdateDataView(collectionID int64) {
 	currentView, ok := m.currentViews.Get(collectionID)
 	if !ok {
 		// update due to data view is empty
-		m.update(newView)
+		m.update(newView, "init data view")
 		return
 	}
 	// no-op if the incoming version is less than the current version.
@@ -141,7 +142,7 @@ func (m *dataViewManager) TryUpdateDataView(collectionID int64) {
 		current, ok := currentView.Channels[channel]
 		if !ok {
 			// update due to channel info is empty
-			m.update(newView)
+			m.update(newView, "init channel info")
 			return
 		}
 		if !funcutil.SliceSetEqual(new.GetLevelZeroSegmentIds(), current.GetLevelZeroSegmentIds()) ||
@@ -150,24 +151,26 @@ func (m *dataViewManager) TryUpdateDataView(collectionID int64) {
 			!funcutil.SliceSetEqual(new.GetIndexedSegmentIds(), current.GetIndexedSegmentIds()) ||
 			!funcutil.SliceSetEqual(new.GetDroppedSegmentIds(), current.GetDroppedSegmentIds()) {
 			// update due to segments list changed
-			m.update(newView)
+			m.update(newView, "channel segments list changed")
 			return
 		}
 		if !typeutil.MapEqual(new.GetPartitionStatsVersions(), current.GetPartitionStatsVersions()) {
 			// update due to partition stats changed
-			m.update(newView)
+			m.update(newView, "partition stats changed")
 			return
 		}
 		// TODO: It might be too frequent.
-		if new.GetSeekPosition().GetTimestamp() > current.GetSeekPosition().GetTimestamp() {
+		newTime := tsoutil.PhysicalTime(new.GetSeekPosition().GetTimestamp())
+		curTime := tsoutil.PhysicalTime(current.GetSeekPosition().GetTimestamp())
+		if newTime.Sub(curTime) > time.Second*600 {
 			// update due to channel cp advanced
-			m.update(newView)
+			m.update(newView, "channel cp advanced")
 			return
 		}
 	}
 
 	if !typeutil.MapEqual(newView.Segments, currentView.Segments) {
 		// update due to segments list changed
-		m.update(newView)
+		m.update(newView, "segment list changed")
 	}
 }
