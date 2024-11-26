@@ -113,21 +113,21 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	}
 	timeOfSeal, _ := tsoutil.ParseTS(ts)
 
-	sealedSegmentIDs := make([]int64, 0)
+	sealedSegmentsIDDict := make(map[UniqueID]bool)
+
 	if !streamingutil.IsStreamingServiceEnabled() {
-		var err error
 		for _, channel := range coll.VChannelNames {
-			if sealedSegmentIDs, err = s.segmentManager.SealAllSegments(ctx, channel, req.GetSegmentIDs()); err != nil {
+			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, req.GetSegmentIDs())
+			if err != nil {
 				return &datapb.FlushResponse{
 					Status: merr.Status(errors.Wrapf(err, "failed to flush collection %d",
 						req.GetCollectionID())),
 				}, nil
 			}
+			for _, sealedSegmentID := range sealedSegmentIDs {
+				sealedSegmentsIDDict[sealedSegmentID] = true
+			}
 		}
-	}
-	sealedSegmentsIDDict := make(map[UniqueID]bool)
-	for _, sealedSegmentID := range sealedSegmentIDs {
-		sealedSegmentsIDDict[sealedSegmentID] = true
 	}
 
 	segments := s.meta.GetSegmentsOfCollection(req.GetCollectionID())
@@ -174,7 +174,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 
 	log.Info("flush response with segments",
 		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64s("sealSegments", sealedSegmentIDs),
+		zap.Int64s("sealSegments", lo.Keys(sealedSegmentsIDDict)),
 		zap.Int("flushedSegmentsCount", len(flushSegmentIDs)),
 		zap.Time("timeOfSeal", timeOfSeal),
 		zap.Uint64("flushTs", ts),
@@ -184,7 +184,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		Status:          merr.Success(),
 		DbID:            req.GetDbID(),
 		CollectionID:    req.GetCollectionID(),
-		SegmentIDs:      sealedSegmentIDs,
+		SegmentIDs:      lo.Keys(sealedSegmentsIDDict),
 		TimeOfSeal:      timeOfSeal.Unix(),
 		FlushSegmentIDs: flushSegmentIDs,
 		FlushTs:         ts,
