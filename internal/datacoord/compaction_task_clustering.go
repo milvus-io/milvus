@@ -223,6 +223,7 @@ func (t *clusteringCompactionTask) processExecuting() error {
 	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.String("type", t.GetType().String()))
 	result, err := t.sessions.GetCompactionPlanResult(t.GetNodeID(), t.GetPlanID())
 	if err != nil || result == nil {
+		log.Info("processExecuting clustering compaction", zap.Bool("result nil", result == nil), zap.Error(err))
 		if errors.Is(err, merr.ErrNodeNotFound) {
 			log.Warn("GetCompactionPlanResult fail", zap.Error(err))
 			// setNodeID(NullNodeID) to trigger reassign node ID
@@ -230,7 +231,8 @@ func (t *clusteringCompactionTask) processExecuting() error {
 		}
 		return err
 	}
-	log.Info("compaction result", zap.Any("result", result.String()))
+	log.Debug("compaction result", zap.String("result state", result.GetState().String()),
+		zap.Int("result segments num", len(result.GetSegments())), zap.Int("result string length", len(result.String())))
 	switch result.GetState() {
 	case datapb.CompactionTaskState_completed:
 		t.result = result
@@ -504,6 +506,7 @@ func (t *clusteringCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskO
 		return merr.WrapErrClusteringCompactionMetaError("updateAndSaveTaskMeta", err) // retryable
 	}
 	t.CompactionTask = task
+	log.Info("updateAndSaveTaskMeta success", zap.String("task state", t.CompactionTask.State.String()))
 	return nil
 }
 
