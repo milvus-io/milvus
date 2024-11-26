@@ -9,10 +9,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestRegistry(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.LocalRPCEnabled.Key, "true")
+
 	assert.False(t, enableLocal.EnableQueryCoord)
 	assert.False(t, enableLocal.EnableDataCoord)
 	assert.False(t, enableLocal.EnableRootCoord)
