@@ -301,7 +301,7 @@ func TestInsertColumnsMismatchFields(t *testing.T) {
 
 	// len(column) < len(fields)
 	_, errInsert := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, intColumn))
-	common.CheckErr(t, errInsert, false, "not passed")
+	common.CheckErr(t, errInsert, false, "has no corresponding fieldData pass in: invalid parameter")
 
 	// len(column) > len(fields)
 	_, errInsert2 := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, intColumn, vecColumn, vecColumn))

@@ -344,7 +344,7 @@ func TestUpsertNotExistCollectionPartition(t *testing.T) {
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
 	_, errUpsert = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithPartition("aaa"))
-	common.CheckErr(t, errUpsert, false, "field int64 not passed")
+	common.CheckErr(t, errUpsert, false, "num_rows should be greater than 0")
 
 	// upsert not exist partition
 	opt := *hp.TNewDataOption()
@@ -366,7 +366,7 @@ func TestUpsertInvalidColumnData(t *testing.T) {
 	opt := *hp.TNewDataOption()
 	pkColumn, vecColumn := hp.GenColumnData(upsertNb, entity.FieldTypeInt64, opt), hp.GenColumnData(upsertNb, entity.FieldTypeFloatVector, opt)
 	_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(pkColumn))
-	common.CheckErr(t, err, false, fmt.Sprintf("field %s not passed", common.DefaultFloatVecFieldName))
+	common.CheckErr(t, err, false, fmt.Sprintf("fieldSchema(%s) has no corresponding fieldData pass in", common.DefaultFloatVecFieldName))
 
 	// 2. upsert extra a column
 	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(pkColumn, vecColumn, vecColumn))

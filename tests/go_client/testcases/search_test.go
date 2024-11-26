@@ -161,7 +161,7 @@ func TestSearchPartitions(t *testing.T) {
 	queryRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("int64 in [%d, %d]", _defId0, _parId0)).WithOutputFields("*"))
 	require.ElementsMatch(t, []int64{_defId0, _parId0}, queryRes.GetColumn(common.DefaultInt64FieldName).(*column.ColumnInt64).Data())
 	for _, vec := range queryRes.GetColumn(common.DefaultFloatVecFieldName).(*column.ColumnFloatVector).Data() {
-		vectors = append(vectors, entity.FloatVector(vec))
+		vectors = append(vectors, vec)
 	}
 
 	for _, partitions := range [][]string{{}, {common.DefaultPartition, parName}} {
@@ -174,8 +174,8 @@ func TestSearchPartitions(t *testing.T) {
 		common.CheckSearchResult(t, searchResult, len(vectors), 5)
 		require.Contains(t, searchResult[0].IDs.(*column.ColumnInt64).Data(), _defId0)
 		require.Contains(t, searchResult[1].IDs.(*column.ColumnInt64).Data(), _parId0)
-		require.EqualValues(t, entity.FloatVector(searchResult[0].GetColumn(common.DefaultFloatVecFieldName).(*column.ColumnFloatVector).Data()[0]), vectors[0])
-		require.EqualValues(t, entity.FloatVector(searchResult[1].GetColumn(common.DefaultFloatVecFieldName).(*column.ColumnFloatVector).Data()[0]), vectors[1])
+		require.EqualValues(t, searchResult[0].GetColumn(common.DefaultFloatVecFieldName).(*column.ColumnFloatVector).Data()[0], vectors[0])
+		require.EqualValues(t, searchResult[1].GetColumn(common.DefaultFloatVecFieldName).(*column.ColumnFloatVector).Data()[0], vectors[1])
 	}
 }
 
