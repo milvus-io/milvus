@@ -559,7 +559,7 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
             return term_set.find(ValueType(val.value())) != term_set.end();
         };
         cached_index_chunk_res_ =
-            index->FilterByPath(pointer, filter_func).clone();
+            index->FilterByPath(pointer, real_batch_size, filter_func).clone();
         cached_index_chunk_id_ = 0;
     }
 
