@@ -499,10 +499,16 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			return err
 		}
 	} else if st.req.GetSubJobType() == indexpb.StatsSubJob_JsonKeyIndexJob {
-		err = st.createJsonKeyIndex(ctx, st.req.GetStorageConfig(), st.req.GetCollectionID(),
-			st.req.GetPartitionID(), st.req.GetTargetSegmentID(), st.req.GetTaskVersion(), st.req.GetTaskID(), insertLogs)
+		err = st.createJsonKeyIndex(ctx,
+			st.req.GetStorageConfig(),
+			st.req.GetCollectionID(),
+			st.req.GetPartitionID(),
+			st.req.GetTargetSegmentID(),
+			st.req.GetTaskVersion(),
+			st.req.GetTaskID(),
+			insertLogs)
 		if err != nil {
-			log.Warn("stats wrong, failed to create text index", zap.Error(err))
+			log.Warn("stats wrong, failed to create json index", zap.Error(err))
 			return err
 		}
 	}
