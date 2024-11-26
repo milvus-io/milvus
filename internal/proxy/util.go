@@ -1792,10 +1792,19 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 			for _, rowData := range field.GetScalars().GetJsonData().GetData() {
 				jsonData := make(map[string]interface{})
 				if err := json.Unmarshal(rowData, &jsonData); err != nil {
-					return err
+					log.Warn("insert invalid dynamic data, milvus only support json map",
+						zap.ByteString("data", rowData),
+						zap.Error(err),
+					)
+					return merr.WrapErrIoFailedReason(err.Error())
 				}
 				if _, ok := jsonData[common.MetaFieldName]; ok {
 					return fmt.Errorf("cannot set json key to: %s", common.MetaFieldName)
+				}
+				for _, f := range schema.GetFields() {
+					if _, ok := jsonData[f.GetName()]; ok {
+						return fmt.Errorf("dynamic field name cannot include the static field name: %s", f.GetName())
+					}
 				}
 			}
 		}

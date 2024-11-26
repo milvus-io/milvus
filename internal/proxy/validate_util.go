@@ -8,7 +8,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -655,20 +654,6 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 				msg := fmt.Sprintf("the length (%d) of json field (%s) exceeds max length (%d)", len(s),
 					field.GetFieldName(), paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64())
 				return merr.WrapErrParameterInvalid("valid length json string", "length exceeds max length", msg)
-			}
-		}
-	}
-
-	if fieldSchema.GetIsDynamic() {
-		var jsonMap map[string]interface{}
-		for _, data := range jsonArray {
-			err := json.Unmarshal(data, &jsonMap)
-			if err != nil {
-				log.Warn("insert invalid JSON data, milvus only support json map without nesting",
-					zap.ByteString("data", data),
-					zap.Error(err),
-				)
-				return merr.WrapErrIoFailedReason(err.Error())
 			}
 		}
 	}
