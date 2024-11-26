@@ -6,8 +6,10 @@ import (
 )
 
 type LoadParams struct {
-	CollectionName string
-	Replica        int
+	CollectionName       string
+	Replica              int
+	LoadFields           []string
+	SkipLoadDynamicField bool
 }
 
 func NewLoadParams(collectionName string) *LoadParams {
@@ -18,6 +20,16 @@ func NewLoadParams(collectionName string) *LoadParams {
 
 func (opt *LoadParams) TWithReplica(replica int) *LoadParams {
 	opt.Replica = replica
+	return opt
+}
+
+func (opt *LoadParams) TWithLoadFields(loadFields ...string) *LoadParams {
+	opt.LoadFields = loadFields
+	return opt
+}
+
+func (opt *LoadParams) TWithSkipLoadDynamicField(skipFlag bool) *LoadParams {
+	opt.SkipLoadDynamicField = skipFlag
 	return opt
 }
 
