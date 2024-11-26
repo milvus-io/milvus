@@ -273,6 +273,13 @@ type PrivilegeGroupReq struct {
 	Privileges         []string `json:"privileges"`
 }
 
+type GrantV2Req struct {
+	RoleName       string `json:"roleName" binding:"required"`
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName"`
+	Privilege      string `json:"privilege" binding:"required"`
+}
+
 type GrantReq struct {
 	RoleName   string `json:"roleName" binding:"required"`
 	ObjectType string `json:"objectType" binding:"required"`

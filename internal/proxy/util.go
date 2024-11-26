@@ -155,6 +155,32 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 	return nil
 }
 
+func ValidatePrivilegeGroupName(groupName string) error {
+	if groupName == "" {
+		return merr.WrapErrDatabaseNameInvalid(groupName, "privilege group name couldn't be empty")
+	}
+
+	if len(groupName) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
+		return merr.WrapErrDatabaseNameInvalid(groupName,
+			fmt.Sprintf("the length of a privilege group name must be less than %d characters", Params.ProxyCfg.MaxNameLength.GetAsInt()))
+	}
+
+	firstChar := groupName[0]
+	if firstChar != '_' && !isAlpha(firstChar) {
+		return merr.WrapErrDatabaseNameInvalid(groupName,
+			"the first character of a privilege group name must be an underscore or letter")
+	}
+
+	for i := 1; i < len(groupName); i++ {
+		c := groupName[i]
+		if c != '_' && !isAlpha(c) && !isNumber(c) {
+			return merr.WrapErrDatabaseNameInvalid(groupName,
+				"privilege group name can only contain numbers, letters and underscores")
+		}
+	}
+	return nil
+}
+
 func ValidateResourceGroupName(entity string) error {
 	if entity == "" {
 		return errors.New("resource group name couldn't be empty")

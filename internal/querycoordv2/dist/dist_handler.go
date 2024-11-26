@@ -180,7 +180,11 @@ func (dh *distHandler) updateChannelsDistribution(resp *querypb.GetDataDistribut
 				Version: ch.GetVersion(),
 			}
 		} else {
-			channel = channelInfo.Clone()
+			channel = &meta.DmChannel{
+				VchannelInfo: channelInfo.VchannelInfo,
+				Node:         resp.GetNodeID(),
+				Version:      ch.GetVersion(),
+			}
 		}
 		updates = append(updates, channel)
 	}
