@@ -159,10 +159,9 @@ func (m *dataViewManager) TryUpdateDataView(collectionID int64) {
 			m.update(newView, "partition stats changed")
 			return
 		}
-		// TODO: It might be too frequent.
 		newTime := tsoutil.PhysicalTime(new.GetSeekPosition().GetTimestamp())
 		curTime := tsoutil.PhysicalTime(current.GetSeekPosition().GetTimestamp())
-		if newTime.Sub(curTime) > time.Second*600 {
+		if newTime.Sub(curTime) > paramtable.Get().DataCoordCfg.CPIntervalToUpdateDataView.GetAsDuration(time.Second) {
 			// update due to channel cp advanced
 			m.update(newView, "channel cp advanced")
 			return
