@@ -408,27 +408,29 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingBF() {
 	s.Require().NoError(err)
 
 	n := 10
-	deltaData := storage.NewDeltaData(int64(n))
-
+	pks := make([]storage.PrimaryKey, 0, n)
+	tss := make([]uint64, 0, n)
 	for i := 0; i < n; i++ {
-		deltaData.Append(storage.NewInt64PrimaryKey(rand.Int63()), 0)
+		pks = append(pks, storage.NewInt64PrimaryKey(rand.Int63()))
+		tss = append(tss, 0)
 	}
-	err = l0Segment.LoadDeltaData(context.Background(), deltaData)
+	deleteData := storage.NewDeleteData(pks, tss)
+	err = l0Segment.LoadDeltaData(context.Background(), deleteData)
 	s.Require().NoError(err)
 	s.manager.Segment.Put(context.Background(), segments.SegmentTypeSealed, l0Segment)
 
 	seg.EXPECT().ID().Return(10000)
 	seg.EXPECT().Partition().Return(100)
-	seg.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pk storage.PrimaryKeys, u []uint64) error {
-		s.Equal(deltaData.DeletePks(), pk)
-		s.Equal(deltaData.DeleteTimestamps(), u)
+	seg.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pk []storage.PrimaryKey, u []uint64) error {
+		s.Equal(pks, pk)
+		s.Equal(tss, u)
 		return nil
 	}).Once()
 
 	err = sd.addL0ForGrowing(context.Background(), seg)
 	s.NoError(err)
 
-	seg.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pk storage.PrimaryKeys, u []uint64) error {
+	seg.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pk []storage.PrimaryKey, u []uint64) error {
 		return errors.New("mocked")
 	}).Once()
 	err = sd.addL0ForGrowing(context.Background(), seg)
@@ -455,12 +457,15 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingLoad() {
 	s.Require().NoError(err)
 
 	n := 10
-	deltaData := storage.NewDeltaData(int64(n))
-
+	pks := make([]storage.PrimaryKey, 0, n)
+	tss := make([]uint64, 0, n)
 	for i := 0; i < n; i++ {
-		deltaData.Append(storage.NewInt64PrimaryKey(rand.Int63()), 0)
+		pks = append(pks, storage.NewInt64PrimaryKey(rand.Int63()))
+		tss = append(tss, 0)
 	}
-	err = l0Segment.LoadDeltaData(context.Background(), deltaData)
+	deleteData := storage.NewDeleteData(pks, tss)
+
+	err = l0Segment.LoadDeltaData(context.Background(), deleteData)
 	s.Require().NoError(err)
 	s.manager.Segment.Put(context.Background(), segments.SegmentTypeSealed, l0Segment)
 
