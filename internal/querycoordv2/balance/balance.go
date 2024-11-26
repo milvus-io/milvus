@@ -141,6 +141,14 @@ func (b *RoundRobinBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 	return nil, nil
 }
 
+func (b *RoundRobinBalancer) permitBalanceChannel(collectionID int64) bool {
+	return b.scheduler.GetSegmentTaskNum(task.WithCollectionID2TaskFilter(collectionID), task.WithTaskTypeFilter(task.TaskTypeMove)) == 0
+}
+
+func (b *RoundRobinBalancer) permitBalanceSegment(collectionID int64) bool {
+	return b.scheduler.GetChannelTaskNum(task.WithCollectionID2TaskFilter(collectionID), task.WithTaskTypeFilter(task.TaskTypeMove)) == 0
+}
+
 func (b *RoundRobinBalancer) getNodes(nodes []int64) []*session.NodeInfo {
 	ret := make([]*session.NodeInfo, 0, len(nodes))
 	for _, n := range nodes {

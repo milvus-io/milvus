@@ -347,7 +347,7 @@ queryCoord:
   balanceCostThreshold: 0.001 # the threshold of balance cost, if the difference of cluster's cost after executing the balance plan is less than this value, the plan will not be executed
   checkSegmentInterval: 1000
   checkChannelInterval: 1000
-  checkBalanceInterval: 10000
+  checkBalanceInterval: 3000
   checkIndexInterval: 10000
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
@@ -457,7 +457,7 @@ queryNode:
       taskQueueExpire: 60 # Control how long (many seconds) that queue retains since queue is empty
       enableCrossUserGrouping: false # Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
-  levelZeroForwardPolicy: RemoteLoad # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
+  levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   dataSync:
     flowGraph:
@@ -797,6 +797,30 @@ common:
     # like the old password verification when updating the credential
     superUsers: 
     defaultRootPassword: Milvus # default password for root user
+    rbac:
+      overrideBuiltInPrivilgeGroups:
+        enabled: false # Whether to override build-in privilege groups
+      cluster:
+        readonly:
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups # Cluster level readonly privileges
+        readwrite:
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups # Cluster level readwrite privileges
+        admin:
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups,BackupRBAC,RestoreRBAC,CreateDatabase,DropDatabase,CreateOwnership,DropOwnership,ManageOwnership,CreateResourceGroup,DropResourceGroup,UpdateUser # Cluster level admin privileges
+      database:
+        readonly:
+          privileges: ShowCollections,DescribeDatabase # Database level readonly privileges
+        readwrite:
+          privileges: ShowCollections,DescribeDatabase,AlterDatabase # Database level readwrite privileges
+        admin:
+          privileges: ShowCollections,DescribeDatabase,AlterDatabase,CreateCollection,DropCollection # Database level admin privileges
+      collection:
+        readonly:
+          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases # Collection level readonly privileges
+        readwrite:
+          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,RenameCollection,CreateIndex,DropIndex,CreatePartition,DropPartition # Collection level readwrite privileges
+        admin:
+          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,RenameCollection,CreateIndex,DropIndex,CreatePartition,DropPartition,CreateAlias,DropAlias # Collection level admin privileges
     tlsMode: 0
   session:
     ttl: 30 # ttl value when session granting a lease to register service

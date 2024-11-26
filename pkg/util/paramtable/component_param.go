@@ -74,6 +74,7 @@ type ComponentParam struct {
 	HTTPCfg       httpConfig
 	LogCfg        logConfig
 	RoleCfg       roleConfig
+	RbacConfig    rbacConfig
 
 	RootCoordGrpcServerCfg  GrpcServerConfig
 	ProxyGrpcServerCfg      GrpcServerConfig
@@ -124,6 +125,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
+	p.RbacConfig.init(bt)
 	p.GpuConfig.init(bt)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
@@ -2970,7 +2972,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Key:          "queryNode.levelZeroForwardPolicy",
 		Version:      "2.4.12",
 		Doc:          "delegator level zero deletion forward policy, possible option[\"FilterByBF\", \"RemoteLoad\"]",
-		DefaultValue: "RemoteLoad",
+		DefaultValue: "FilterByBF",
 		Export:       true,
 	}
 	p.LevelZeroForwardPolicy.Init(base.mgr)

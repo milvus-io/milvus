@@ -563,3 +563,45 @@ func TestPrivilegeGroup(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestBuiltinPrivilegeGroup(t *testing.T) {
+	t.Run("ClusterAdmin", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		initPrivilegeGroups()
+
+		var err error
+		ctx := GetContext(context.Background(), "fooo:123456")
+		client := &MockRootCoordClientInterface{}
+		queryCoord := &mocks.MockQueryCoordClient{}
+		mgr := newShardClientMgr()
+
+		policies := []string{}
+		for _, priv := range util.BuiltinPrivilegeGroups["ClusterReadOnly"] {
+			objectType := util.GetObjectType(priv)
+			policies = append(policies, funcutil.PolicyForPrivilege("role1", objectType, "*", util.PrivilegeNameForMetastore(priv), "default"))
+		}
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return &internalpb.ListPolicyResponse{
+				Status:      merr.Success(),
+				PolicyInfos: policies,
+				UserRoles: []string{
+					funcutil.EncodeUserRoleCache("fooo", "role1"),
+				},
+			}, nil
+		}
+		InitMetaCache(ctx, client, queryCoord, mgr)
+		defer CleanPrivilegeCache()
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SelectUserRequest{})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DescribeResourceGroupRequest{})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.ListResourceGroupsRequest{})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{})
+		assert.Error(t, err)
+	})
+}

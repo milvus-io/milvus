@@ -43,6 +43,8 @@ const (
 	RevokeRoleAction                = "revoke_role"
 	GrantPrivilegeAction            = "grant_privilege"
 	RevokePrivilegeAction           = "revoke_privilege"
+	GrantPrivilegeActionV2          = "grant_privilege_v2"
+	RevokePrivilegeActionV2         = "revoke_privilege_v2"
 	AlterAction                     = "alter"
 	GetProgressAction               = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
 	AddPrivilegesToGroupAction      = "add_privileges_to_group"
