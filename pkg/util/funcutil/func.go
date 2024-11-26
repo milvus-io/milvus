@@ -168,6 +168,15 @@ func GetVecFieldIDs(schema *schemapb.CollectionSchema) []int64 {
 	return vecFieldIDs
 }
 
+func String2KeyValuePair(v string) ([]*commonpb.KeyValuePair, error) {
+	m := make(map[string]string)
+	err := json.Unmarshal([]byte(v), &m)
+	if err != nil {
+		return nil, err
+	}
+	return Map2KeyValuePair(m), nil
+}
+
 func Map2KeyValuePair(datas map[string]string) []*commonpb.KeyValuePair {
 	results := make([]*commonpb.KeyValuePair, len(datas))
 	offset := 0

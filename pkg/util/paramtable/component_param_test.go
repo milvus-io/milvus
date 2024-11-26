@@ -149,6 +149,10 @@ func TestComponentParam(t *testing.T) {
 		params.Save("rootCoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
+		assert.Equal(t, "{}", Params.DefaultDBProperties.GetValue())
+		params.Save("rootCoord.defaultDBProperties", "{\"key\":\"value\"}")
+		assert.Equal(t, "{\"key\":\"value\"}", Params.DefaultDBProperties.GetValue())
+
 		SetCreateTime(time.Now())
 		SetUpdateTime(time.Now())
 	})
