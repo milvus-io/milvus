@@ -269,7 +269,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 	for _, segID := range taskProto.GetInputSegments() {
-		segInfo := t.meta.GetHealthySegment(segID)
+		segInfo := t.meta.GetHealthySegment(context.TODO(), segID)
 		if segInfo == nil {
 			return nil, merr.WrapErrSegmentNotFound(segID)
 		}
@@ -286,7 +286,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 
 	// Select sealed L1 segments for LevelZero compaction that meets the condition:
 	// dmlPos < triggerInfo.pos
-	sealedSegments := t.meta.SelectSegments(WithCollection(taskProto.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
+	sealedSegments := t.meta.SelectSegments(context.TODO(), WithCollection(taskProto.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
 			info.GetInsertChannel() == plan.GetChannel() &&
 			isFlushState(info.GetState()) &&
@@ -321,7 +321,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 }
 
 func (t *l0CompactionTask) resetSegmentCompacting() {
-	t.meta.SetSegmentsCompacting(t.GetTaskProto().GetInputSegments(), false)
+	t.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
 }
 
 func (t *l0CompactionTask) hasAssignedWorker() bool {
@@ -347,7 +347,7 @@ func (t *l0CompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) erro
 }
 
 func (t *l0CompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
-	return t.meta.SaveCompactionTask(task)
+	return t.meta.SaveCompactionTask(context.TODO(), task)
 }
 
 func (t *l0CompactionTask) saveSegmentMeta() error {
@@ -365,7 +365,7 @@ func (t *l0CompactionTask) saveSegmentMeta() error {
 		zap.Int64("planID", t.GetTaskProto().GetPlanID()),
 	)
 
-	return t.meta.UpdateSegmentsInfo(operators...)
+	return t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
 }
 
 func (t *l0CompactionTask) GetSlotUsage() int64 {

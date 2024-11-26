@@ -78,7 +78,7 @@ func (policy *clusteringCompactionPolicy) checkAllL2SegmentsContains(ctx context
 			segment.GetLevel() == datapb.SegmentLevel_L2 &&
 			segment.isCompacting
 	}
-	segments := policy.meta.SelectSegments(SegmentFilterFunc(getCompactingL2Segment))
+	segments := policy.meta.SelectSegments(ctx, SegmentFilterFunc(getCompactingL2Segment))
 	if len(segments) > 0 {
 		log.Ctx(ctx).Info("there are some segments are compacting",
 			zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID),

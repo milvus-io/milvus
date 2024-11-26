@@ -39,7 +39,7 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 			},
 		},
 	})
-	err := svr.meta.indexMeta.CreateIndex(&model.Index{
+	err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 		CollectionID: 1,
 		FieldID:      2,
 		IndexID:      1,
@@ -91,7 +91,7 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 		require.NoError(t, err)
 
 		if arg.indexed {
-			err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
+			err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 				SegmentID: arg.segID,
 				BuildID:   arg.segID,
 				IndexID:   1,
@@ -150,7 +150,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		},
 	})
 
-	err := svr.meta.indexMeta.CreateIndex(&model.Index{
+	err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 		TenantID:     "",
 		CollectionID: 0,
 		FieldID:      2,
@@ -174,7 +174,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	}
 	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(s1))
 	assert.NoError(t, err)
-	err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
+	err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 		SegmentID: 1,
 		BuildID:   1,
 		IndexID:   1,
@@ -321,7 +321,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(&model.Index{
+		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			TenantID:     "",
 			CollectionID: 0,
 			FieldID:      2,
@@ -391,7 +391,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(&model.Index{
+		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			TenantID:     "",
 			CollectionID: 0,
 			FieldID:      2,
@@ -477,7 +477,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(&model.Index{
+		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			TenantID:     "",
 			CollectionID: 0,
 			FieldID:      2,
@@ -515,7 +515,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(d))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
+		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: 2,
 			BuildID:   1,
 			IndexID:   1,
@@ -543,7 +543,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(e))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
+		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: 3,
 			BuildID:   2,
 			IndexID:   1,
@@ -586,7 +586,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(&model.Index{
+		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			TenantID:     "",
 			CollectionID: 0,
 			FieldID:      2,

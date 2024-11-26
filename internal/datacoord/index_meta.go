@@ -374,13 +374,13 @@ func (m *indexMeta) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID)
 	return false, 0
 }
 
-func (m *indexMeta) CreateIndex(index *model.Index) error {
+func (m *indexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
 	log.Info("meta update: CreateIndex", zap.Int64("collectionID", index.CollectionID),
 		zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName))
 	m.Lock()
 	defer m.Unlock()
 
-	if err := m.catalog.CreateIndex(m.ctx, index); err != nil {
+	if err := m.catalog.CreateIndex(ctx, index); err != nil {
 		log.Error("meta update: CreateIndex save meta fail", zap.Int64("collectionID", index.CollectionID),
 			zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID),
 			zap.String("indexName", index.IndexName), zap.Error(err))
@@ -410,7 +410,7 @@ func (m *indexMeta) AlterIndex(ctx context.Context, indexes ...*model.Index) err
 }
 
 // AddSegmentIndex adds the index meta corresponding the indexBuildID to meta table.
-func (m *indexMeta) AddSegmentIndex(segIndex *model.SegmentIndex) error {
+func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.SegmentIndex) error {
 	m.Lock()
 	defer m.Unlock()
 
@@ -420,7 +420,7 @@ func (m *indexMeta) AddSegmentIndex(segIndex *model.SegmentIndex) error {
 		zap.Int64("buildID", buildID))
 
 	segIndex.IndexState = commonpb.IndexState_Unissued
-	if err := m.catalog.CreateSegmentIndex(m.ctx, segIndex); err != nil {
+	if err := m.catalog.CreateSegmentIndex(ctx, segIndex); err != nil {
 		log.Warn("meta update: adding segment index failed",
 			zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 			zap.Int64("buildID", segIndex.BuildID), zap.Error(err))
@@ -561,7 +561,7 @@ func (m *indexMeta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) 
 }
 
 // MarkIndexAsDeleted will mark the corresponding index as deleted, and recycleUnusedIndexFiles will recycle these tasks.
-func (m *indexMeta) MarkIndexAsDeleted(collID UniqueID, indexIDs []UniqueID) error {
+func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, indexIDs []UniqueID) error {
 	log.Info("IndexCoord metaTable MarkIndexAsDeleted", zap.Int64("collectionID", collID),
 		zap.Int64s("indexIDs", indexIDs))
 
@@ -585,7 +585,7 @@ func (m *indexMeta) MarkIndexAsDeleted(collID UniqueID, indexIDs []UniqueID) err
 	if len(indexes) == 0 {
 		return nil
 	}
-	err := m.catalog.AlterIndexes(m.ctx, indexes)
+	err := m.catalog.AlterIndexes(ctx, indexes)
 	if err != nil {
 		log.Error("failed to alter index meta in meta store", zap.Int("indexes num", len(indexes)), zap.Error(err))
 		return err
@@ -890,11 +890,11 @@ func (m *indexMeta) SetStoredIndexFileSizeMetric(collections map[UniqueID]*colle
 	return total
 }
 
-func (m *indexMeta) RemoveSegmentIndex(collID, partID, segID, indexID, buildID UniqueID) error {
+func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, collID, partID, segID, indexID, buildID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 
-	err := m.catalog.DropSegmentIndex(m.ctx, collID, partID, segID, buildID)
+	err := m.catalog.DropSegmentIndex(ctx, collID, partID, segID, buildID)
 	if err != nil {
 		return err
 	}
@@ -927,11 +927,11 @@ func (m *indexMeta) GetDeletedIndexes() []*model.Index {
 	return deletedIndexes
 }
 
-func (m *indexMeta) RemoveIndex(collID, indexID UniqueID) error {
+func (m *indexMeta) RemoveIndex(ctx context.Context, collID, indexID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 	log.Info("IndexCoord meta table remove index", zap.Int64("collectionID", collID), zap.Int64("indexID", indexID))
-	err := m.catalog.DropIndex(m.ctx, collID, indexID)
+	err := m.catalog.DropIndex(ctx, collID, indexID)
 	if err != nil {
 		log.Info("IndexCoord meta table remove index fail", zap.Int64("collectionID", collID),
 			zap.Int64("indexID", indexID), zap.Error(err))

@@ -3,6 +3,8 @@
 package datacoord
 
 import (
+	context "context"
+
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -66,17 +68,17 @@ func (_c *MockCompactionPlanContext_enqueueCompaction_Call) RunAndReturn(run fun
 	return _c
 }
 
-// getCompactionInfo provides a mock function with given fields: signalID
-func (_m *MockCompactionPlanContext) getCompactionInfo(signalID int64) *compactionInfo {
-	ret := _m.Called(signalID)
+// getCompactionInfo provides a mock function with given fields: ctx, signalID
+func (_m *MockCompactionPlanContext) getCompactionInfo(ctx context.Context, signalID int64) *compactionInfo {
+	ret := _m.Called(ctx, signalID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for getCompactionInfo")
 	}
 
 	var r0 *compactionInfo
-	if rf, ok := ret.Get(0).(func(int64) *compactionInfo); ok {
-		r0 = rf(signalID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *compactionInfo); ok {
+		r0 = rf(ctx, signalID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*compactionInfo)
@@ -92,14 +94,15 @@ type MockCompactionPlanContext_getCompactionInfo_Call struct {
 }
 
 // getCompactionInfo is a helper method to define mock.On call
+//   - ctx context.Context
 //   - signalID int64
-func (_e *MockCompactionPlanContext_Expecter) getCompactionInfo(signalID interface{}) *MockCompactionPlanContext_getCompactionInfo_Call {
-	return &MockCompactionPlanContext_getCompactionInfo_Call{Call: _e.mock.On("getCompactionInfo", signalID)}
+func (_e *MockCompactionPlanContext_Expecter) getCompactionInfo(ctx interface{}, signalID interface{}) *MockCompactionPlanContext_getCompactionInfo_Call {
+	return &MockCompactionPlanContext_getCompactionInfo_Call{Call: _e.mock.On("getCompactionInfo", ctx, signalID)}
 }
 
-func (_c *MockCompactionPlanContext_getCompactionInfo_Call) Run(run func(signalID int64)) *MockCompactionPlanContext_getCompactionInfo_Call {
+func (_c *MockCompactionPlanContext_getCompactionInfo_Call) Run(run func(ctx context.Context, signalID int64)) *MockCompactionPlanContext_getCompactionInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -109,7 +112,7 @@ func (_c *MockCompactionPlanContext_getCompactionInfo_Call) Return(_a0 *compacti
 	return _c
 }
 
-func (_c *MockCompactionPlanContext_getCompactionInfo_Call) RunAndReturn(run func(int64) *compactionInfo) *MockCompactionPlanContext_getCompactionInfo_Call {
+func (_c *MockCompactionPlanContext_getCompactionInfo_Call) RunAndReturn(run func(context.Context, int64) *compactionInfo) *MockCompactionPlanContext_getCompactionInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

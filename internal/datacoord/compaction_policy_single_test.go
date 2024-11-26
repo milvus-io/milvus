@@ -111,6 +111,7 @@ func (s *SingleCompactionPolicySuite) TestIsDeleteRowsTooManySegment() {
 }
 
 func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
+	ctx := context.Background()
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key)
 
@@ -134,7 +135,7 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 		compactionTaskMeta: compactionTaskMeta,
 		segments:           segmentsInfo,
 	}
-	compactionTaskMeta.SaveCompactionTask(&datapb.CompactionTask{
+	compactionTaskMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{
 		TriggerID:    1,
 		PlanID:       10,
 		CollectionID: collID,

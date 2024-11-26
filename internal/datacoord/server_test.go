@@ -431,7 +431,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		assert.Equal(t, 0, len(resp.GetChannelCheckpoint()))
 
 		// with nil insert channel of segment
-		err = svr.meta.UpdateChannelCheckpoint(mockVChannel, pos)
+		err = svr.meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, pos)
 		assert.NoError(t, err)
 		resp, err = svr.GetSegmentInfo(svr.ctx, req)
 		assert.NoError(t, err)
@@ -856,7 +856,7 @@ func (s *spySegmentManager) GetFlushableSegments(ctx context.Context, channel st
 }
 
 // ExpireAllocations notifies segment status to expire old allocations
-func (s *spySegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
+func (s *spySegmentManager) ExpireAllocations(ctx context.Context, channel string, ts Timestamp) error {
 	return nil
 }
 
@@ -1117,7 +1117,7 @@ func TestGetChannelSeekPosition(t *testing.T) {
 				assert.NoError(t, err)
 			}
 			if test.channelCP != nil {
-				err := svr.meta.UpdateChannelCheckpoint(test.channelCP.ChannelName, test.channelCP)
+				err := svr.meta.UpdateChannelCheckpoint(context.TODO(), test.channelCP.ChannelName, test.channelCP)
 				assert.NoError(t, err)
 			}
 
@@ -1197,14 +1197,14 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   10,
 			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		})
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(&model.Index{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			TenantID:     "",
 			CollectionID: 0,
 			FieldID:      2,
@@ -1253,7 +1253,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
+		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg1.ID,
 			BuildID:   seg1.ID,
 		})
@@ -1263,7 +1263,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
+		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg2.ID,
 			BuildID:   seg2.ID,
 		})
@@ -1307,7 +1307,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
 			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
@@ -1427,7 +1427,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(&model.Index{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			TenantID:     "",
 			CollectionID: 0,
 			FieldID:      2,
@@ -1435,7 +1435,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			IndexName:    "",
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
+		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: segment.ID,
 			BuildID:   segment.ID,
 		})
@@ -1481,7 +1481,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
 			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
@@ -1527,7 +1527,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
 			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
@@ -1568,7 +1568,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
 			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
@@ -1592,7 +1592,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.CreateIndex(&model.Index{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			TenantID:        "",
 			CollectionID:    0,
 			FieldID:         2,
@@ -1654,7 +1654,7 @@ func TestGetCompactionState(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
 		mockHandler := NewMockCompactionPlanContext(t)
-		mockHandler.EXPECT().getCompactionInfo(mock.Anything).Return(&compactionInfo{
+		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{
 			state: commonpb.CompactionState_Completed,
 		})
 		svr.compactionHandler = mockHandler
@@ -1667,7 +1667,7 @@ func TestGetCompactionState(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		mockMeta := NewMockCompactionMeta(t)
-		mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything).Return(
+		mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything, mock.Anything).Return(
 			[]*datapb.CompactionTask{
 				{State: datapb.CompactionTaskState_executing},
 				{State: datapb.CompactionTaskState_executing},
@@ -1771,7 +1771,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
 		mockHandler := NewMockCompactionPlanContext(t)
-		mockHandler.EXPECT().getCompactionInfo(mock.Anything).Return(&compactionInfo{
+		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{
 			state:        commonpb.CompactionState_Executing,
 			executingCnt: 1,
 		})
@@ -2271,7 +2271,7 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		assert.Equal(t, svr.meta.GetHealthySegment(100).currRows, int64(1))
+		assert.Equal(t, svr.meta.GetHealthySegment(context.TODO(), 100).currRows, int64(1))
 		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 		closeTestServer(t, svr)
 	})
@@ -2298,7 +2298,7 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		assert.Equal(t, svr.meta.GetHealthySegment(100).currRows, int64(0))
+		assert.Equal(t, svr.meta.GetHealthySegment(context.TODO(), 100).currRows, int64(0))
 		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 		closeTestServer(t, svr)
 	})
