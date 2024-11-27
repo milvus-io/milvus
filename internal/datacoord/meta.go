@@ -396,6 +396,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
 	// collection id => l0 delta entry count
 	collectionL0RowCounts := make(map[UniqueID]int64)
+	collectionL0Size := make(map[UniqueID]int64)
 
 	segments := m.segments.GetSegments()
 	var total int64
@@ -428,6 +429,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 			if segment.GetLevel() == datapb.SegmentLevel_L0 {
 				collectionL0RowCounts[segment.GetCollectionID()] += segment.getDeltaCount()
+				collectionL0Size[segment.GetCollectionID()] += segmentSize
 			}
 		}
 	}
@@ -449,11 +451,19 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID)).Set(float64(entriesNum))
 		}
 	}
+	metrics.DataCoordL0DeleteSize.Reset()
+	for collectionID, size := range collectionL0Size {
+		coll, ok := m.collections[collectionID]
+		if ok {
+			metrics.DataCoordL0DeleteSize.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID)).Set(float64(size))
+		}
+	}
 
 	info.TotalBinlogSize = total
 	info.CollectionBinlogSize = collectionBinlogSize
 	info.PartitionsBinlogSize = partitionBinlogSize
 	info.CollectionL0RowCount = collectionL0RowCounts
+	info.CollectionL0Size = collectionL0Size
 
 	return info
 }

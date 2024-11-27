@@ -154,6 +154,9 @@ type quotaConfig struct {
 	L0SegmentRowCountProtectionEnabled    ParamItem `refreshable:"true"`
 	L0SegmentRowCountLowWaterLevel        ParamItem `refreshable:"true"`
 	L0SegmentRowCountHighWaterLevel       ParamItem `refreshable:"true"`
+	L0SegmentSizeProtectionEnabled        ParamItem `refreshable:"true"`
+	L0SegmentSizeLowWaterLevel            ParamItem `refreshable:"true"`
+	L0SegmentSizeHighWaterLevel           ParamItem `refreshable:"true"`
 	DeleteBufferRowCountProtectionEnabled ParamItem `refreshable:"true"`
 	DeleteBufferRowCountLowWaterLevel     ParamItem `refreshable:"true"`
 	DeleteBufferRowCountHighWaterLevel    ParamItem `refreshable:"true"`
@@ -1911,6 +1914,33 @@ but the rate will not be lower than minRateRatio * dmlRate.`,
 		Export:       true,
 	}
 	p.L0SegmentRowCountHighWaterLevel.Init(base.mgr)
+
+	p.L0SegmentSizeProtectionEnabled = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.l0SegmentsSizeProtection.enabled",
+		Version:      "2.4.18",
+		DefaultValue: "false",
+		Doc:          "switch to enable l0 segment size quota",
+		Export:       true,
+	}
+	p.L0SegmentSizeProtectionEnabled.Init(base.mgr)
+
+	p.L0SegmentSizeLowWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.l0SegmentsSizeProtection.lowWaterLevel",
+		Version:      "2.4.18",
+		DefaultValue: "209715200",
+		Doc:          "l0 segment size quota, unit bytes, low water level",
+		Export:       true,
+	}
+	p.L0SegmentSizeLowWaterLevel.Init(base.mgr)
+
+	p.L0SegmentSizeHighWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.l0SegmentsSizeProtection.highWaterLevel",
+		Version:      "2.4.18",
+		DefaultValue: "524288000",
+		Doc:          "l0 segment size quota, unit bytes, high water level",
+		Export:       true,
+	}
+	p.L0SegmentSizeHighWaterLevel.Init(base.mgr)
 
 	p.DeleteBufferRowCountProtectionEnabled = ParamItem{
 		Key:          "quotaAndLimits.limitWriting.deleteBufferRowCountProtection.enabled",

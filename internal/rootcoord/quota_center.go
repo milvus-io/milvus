@@ -790,8 +790,10 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	updateCollectionFactor(memFactors)
 	growingSegFactors := q.getGrowingSegmentsSizeFactor()
 	updateCollectionFactor(growingSegFactors)
-	l0Factors := q.getL0SegmentsSizeFactor()
-	updateCollectionFactor(l0Factors)
+	l0CountFactors := q.getL0SegmentsDeleteCountFactor()
+	updateCollectionFactor(l0CountFactors)
+	l0SizeFactors := q.getL0SegmentsSizeFactor()
+	updateCollectionFactor(l0SizeFactors)
 	deleteBufferRowCountFactors := q.getDeleteBufferRowCountFactor()
 	updateCollectionFactor(deleteBufferRowCountFactors)
 	deleteBufferSizeFactors := q.getDeleteBufferSizeFactor()
@@ -1054,8 +1056,8 @@ func (q *QuotaCenter) getGrowingSegmentsSizeFactor() map[int64]float64 {
 	return collectionFactor
 }
 
-// getL0SegmentsSizeFactor checks wether any collection
-func (q *QuotaCenter) getL0SegmentsSizeFactor() map[int64]float64 {
+// getL0SegmentsDeleteCountFactor checks wether any collection
+func (q *QuotaCenter) getL0SegmentsDeleteCountFactor() map[int64]float64 {
 	if !Params.QuotaConfig.L0SegmentRowCountProtectionEnabled.GetAsBool() {
 		return nil
 	}
@@ -1075,6 +1077,32 @@ func (q *QuotaCenter) getL0SegmentsSizeFactor() map[int64]float64 {
 			zap.Int64("L0 delete count", l0DeleteCount),
 			zap.Int64("lowWatermark", L0DeleteCountLowWaterLevel),
 			zap.Int64("highWatermark", L0DeleteCountHighWaterLevel),
+			zap.Float64("factor", factor))
+	}
+	return collectionFactor
+}
+
+// getL0SegmentsSizeFactor checks wether any collection
+func (q *QuotaCenter) getL0SegmentsSizeFactor() map[int64]float64 {
+	if !Params.QuotaConfig.L0SegmentSizeProtectionEnabled.GetAsBool() {
+		return nil
+	}
+
+	L0DeleteSizeLowWaterLevel := Params.QuotaConfig.L0SegmentSizeLowWaterLevel.GetAsInt64()
+	L0DeleteSizeHighWaterLevel := Params.QuotaConfig.L0SegmentSizeHighWaterLevel.GetAsInt64()
+
+	collectionFactor := make(map[int64]float64)
+	for collectionID, l0DeleteSize := range q.dataCoordMetrics.CollectionL0Size {
+		if l0DeleteSize < L0DeleteSizeLowWaterLevel {
+			continue
+		}
+		factor := float64(L0DeleteSizeHighWaterLevel-l0DeleteSize) / float64(L0DeleteSizeHighWaterLevel-L0DeleteSizeLowWaterLevel)
+		collectionFactor[collectionID] = factor
+		log.RatedWarn(10, "QuotaCenter: DataCoord L0 segments deleted size exceeds watermark, limit writing rate",
+			zap.Int64("collection", collectionID),
+			zap.Int64("L0 delete size", l0DeleteSize),
+			zap.Int64("lowWatermark", L0DeleteSizeLowWaterLevel),
+			zap.Int64("highWatermark", L0DeleteSizeHighWaterLevel),
 			zap.Float64("factor", factor))
 	}
 	return collectionFactor
