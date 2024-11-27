@@ -215,6 +215,7 @@ var (
 	ErrGetCompactionPlanResultFail                = newMilvusError("fail to get compaction plan", 2313, true)
 	ErrCompactionResult                           = newMilvusError("illegal compaction results", 2314, false)
 	ErrDuplicatedCompactionTask                   = newMilvusError("duplicated compaction task", 2315, false)
+	ErrCleanPartitionStatsFail                    = newMilvusError("fail to clean partition Stats", 2316, true)
 
 	ErrDataNodeSlotExhausted = newMilvusError("datanode slot exhausted", 2401, false)
 
