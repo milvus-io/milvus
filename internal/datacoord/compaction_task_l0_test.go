@@ -335,7 +335,6 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
-
 		s.mockSessMgr.EXPECT().GetCompactionPlanResult(t.GetTaskProto().NodeID, mock.Anything).
 			Return(&datapb.CompactionPlanResult{
 				PlanID: t.GetTaskProto().GetPlanID(),
@@ -422,7 +421,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 
 		got := t.Process()
 		s.True(got)
-		s.Equal(datapb.CompactionTaskState_cleaned, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_failed, t.GetTaskProto().GetState())
 	})
 	s.Run("test executing with result failed save compaction meta failed", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
@@ -517,7 +516,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 
 		got := t.Process()
 		s.True(got)
-		s.Equal(datapb.CompactionTaskState_cleaned, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_failed, t.GetTaskProto().GetState())
 	})
 
 	s.Run("test process failed failed", func() {
@@ -532,7 +531,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 
 		got := t.Process()
 		s.True(got)
-		s.Equal(datapb.CompactionTaskState_cleaned, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_failed, t.GetTaskProto().GetState())
 	})
 
 	s.Run("test unknown task", func() {
