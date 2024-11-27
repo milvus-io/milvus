@@ -151,6 +151,8 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.cluster = session.NewMockCluster(suite.T())
+	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 	suite.targetObserver = observers.NewTargetObserver(
 		suite.meta,
 		suite.targetMgr,
@@ -168,8 +170,6 @@ func (suite *ServiceSuite) SetupTest() {
 		}))
 		suite.meta.ResourceManager.HandleNodeUp(context.TODO(), node)
 	}
-	suite.cluster = session.NewMockCluster(suite.T())
-	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 	suite.jobScheduler = job.NewScheduler()
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
 	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
@@ -345,8 +345,9 @@ func (suite *ServiceSuite) TestLoadCollection() {
 
 	// Test load all collections
 	for _, collection := range suite.collections {
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(nil, nil)
 		suite.expectGetRecoverInfo(collection)
-		suite.expectLoadPartitions()
 
 		req := &querypb.LoadCollectionRequest{
 			CollectionID: collection,
@@ -914,7 +915,8 @@ func (suite *ServiceSuite) TestLoadPartition() {
 
 	// Test load all partitions
 	for _, collection := range suite.collections {
-		suite.expectLoadPartitions()
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(nil, nil)
 		suite.expectGetRecoverInfo(collection)
 
 		req := &querypb.LoadPartitionsRequest{
@@ -1009,9 +1011,6 @@ func (suite *ServiceSuite) TestReleaseCollection() {
 	ctx := context.Background()
 	server := suite.server
 
-	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Success(), nil)
-
 	// Test release all collections
 	for _, collection := range suite.collections {
 		req := &querypb.ReleaseCollectionRequest{
@@ -1049,8 +1048,6 @@ func (suite *ServiceSuite) TestReleasePartition() {
 	server := suite.server
 
 	// Test release all partitions
-	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Success(), nil)
 	for _, collection := range suite.collections {
 		req := &querypb.ReleasePartitionsRequest{
 			CollectionID: collection,
@@ -1826,7 +1823,7 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 func (suite *ServiceSuite) loadAll() {
 	ctx := context.Background()
 	for _, collection := range suite.collections {
-		suite.expectLoadPartitions()
+		suite.expectLoadMetaRPCs()
 		suite.expectGetRecoverInfo(collection)
 		if suite.loadTypes[collection] == querypb.LoadType_LoadCollection {
 			req := &querypb.LoadCollectionRequest{
@@ -1839,7 +1836,6 @@ func (suite *ServiceSuite) loadAll() {
 				suite.dist,
 				suite.meta,
 				suite.broker,
-				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
 				suite.collectionObserver,
@@ -1864,7 +1860,6 @@ func (suite *ServiceSuite) loadAll() {
 				suite.dist,
 				suite.meta,
 				suite.broker,
-				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
 				suite.collectionObserver,
@@ -1963,13 +1958,11 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 		Return(vChannels, segmentBinlogs, nil).Maybe()
 }
 
-func (suite *ServiceSuite) expectLoadPartitions() {
+func (suite *ServiceSuite) expectLoadMetaRPCs() {
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-		Return(nil, nil)
+		Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).
-		Return(nil, nil)
-	suite.cluster.EXPECT().LoadPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Success(), nil)
+		Return(nil, nil).Maybe()
 }
 
 func (suite *ServiceSuite) getAllSegments(collection int64) []int64 {

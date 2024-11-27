@@ -304,7 +304,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 
 	targetNum := len(segmentTargets) + len(channelTargets)
 	if targetNum == 0 {
-		log.Info("segments and channels in target are both empty, waiting for new target content")
+		// log.Info("segments and channels in target are both empty, waiting for new target content")
 		return
 	}
 
