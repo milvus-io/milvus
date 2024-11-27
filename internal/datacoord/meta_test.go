@@ -79,6 +79,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListVShardInfos(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListVShardTasks(mock.Anything).Return(nil, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -95,6 +97,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListVShardInfos(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListVShardTasks(mock.Anything).Return(nil, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -108,6 +112,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListVShardInfos(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListVShardTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{
 			{
 				ID:           1,

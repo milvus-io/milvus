@@ -58,7 +58,7 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockCm = NewMockChannelManager(s.T())
 	s.mockSessMgr = session.NewMockDataNodeManager(s.T())
 	s.cluster = NewMockCluster(s.T())
-	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil, nil)
+	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc, nil, nil, nil)
 }
 
 func (s *CompactionPlanHandlerSuite) TestScheduleEmpty() {
@@ -630,7 +630,8 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.SetupTest()
 	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()
-	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil, nil)
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc, nil, nil, nil)
 
 	task := &datapb.CompactionTask{
 		TriggerID: 1,

@@ -60,6 +60,8 @@ func (s *ImportCheckerSuite) SetupTest() {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListVShardInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListVShardTasks(mock.Anything).Return(nil, nil)
 
 	cluster := NewMockCluster(s.T())
 	s.alloc = allocator.NewMockAllocator(s.T())

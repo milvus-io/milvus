@@ -90,6 +90,7 @@ type compactionPlanHandler struct {
 	cluster          Cluster
 	analyzeScheduler *taskScheduler
 	handler          Handler
+	vshardManager    VshardManager
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -179,8 +180,8 @@ func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64)
 	return cnt
 }
 
-func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager, meta CompactionMeta,
-	allocator allocator.Allocator, analyzeScheduler *taskScheduler, handler Handler,
+func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager, cm ChannelManager, meta CompactionMeta,
+	allocator allocator.Allocator, analyzeScheduler *taskScheduler, handler Handler, vshardManager VshardManager,
 ) *compactionPlanHandler {
 	// Higher capacity will have better ordering in priority, but consumes more memory.
 	// TODO[GOOSE]: Higher capacity makes tasks waiting longer, which need to be get rid of.
@@ -195,6 +196,7 @@ func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager,
 		executingTasks:   make(map[int64]CompactionTask),
 		analyzeScheduler: analyzeScheduler,
 		handler:          handler,
+		vshardManager:    vshardManager,
 	}
 }
 
@@ -231,6 +233,9 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 		case datapb.CompactionType_ClusteringCompaction:
 			clusterChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			clusterLabelExcludes.Insert(t.GetLabel())
+		case datapb.CompactionType_VShardCompaction:
+			mixChannelExcludes.Insert(t.GetTaskProto().GetChannel())
+			mixLabelExcludes.Insert(t.GetLabel())
 		}
 	}
 	c.executingGuard.RUnlock()
@@ -270,6 +275,13 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 		case datapb.CompactionType_MixCompaction:
 			if l0ChannelExcludes.Contain(t.GetTaskProto().GetChannel()) {
 				excluded = append(excluded, t)
+				continue
+			}
+			mixChannelExcludes.Insert(t.GetTaskProto().GetChannel())
+			mixLabelExcludes.Insert(t.GetLabel())
+			selected = append(selected, t)
+		case datapb.CompactionType_VShardCompaction:
+			if l0ChannelExcludes.Contain(t.GetTaskProto().GetChannel()) {
 				continue
 			}
 			mixChannelExcludes.Insert(t.GetTaskProto().GetChannel())
@@ -611,6 +623,8 @@ func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (Com
 		task = newL0CompactionTask(t, c.allocator, c.meta, c.sessions)
 	case datapb.CompactionType_ClusteringCompaction:
 		task = newClusteringCompactionTask(t, c.allocator, c.meta, c.sessions, c.handler, c.analyzeScheduler)
+	case datapb.CompactionType_VShardCompaction:
+		task = newVshardCompactionTask(t, c.allocator, c.meta, c.sessions, c.vshardManager)
 	default:
 		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 	}
