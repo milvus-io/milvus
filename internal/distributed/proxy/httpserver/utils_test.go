@@ -1592,3 +1592,143 @@ func TestConvertConsistencyLevel(t *testing.T) {
 	_, _, err = convertConsistencyLevel("test")
 	assert.NotNil(t, err)
 }
+
+func TestGenerateExpressionTemplate(t *testing.T) {
+	var mixedList []interface{}
+	var mixedAns [][]byte
+
+	mixedList = append(mixedList, float64(1))
+	mixedList = append(mixedList, "10")
+	mixedList = append(mixedList, true)
+
+	val, _ := json.Marshal(1)
+	mixedAns = append(mixedAns, val)
+	val, _ = json.Marshal("10")
+	mixedAns = append(mixedAns, val)
+	val, _ = json.Marshal(true)
+	mixedAns = append(mixedAns, val)
+	// all passed number is float64 type, so all the number type has convert to float64
+	expressionTemplates := []map[string]interface{}{
+		{"str": "10"},
+		{"min": float64(1), "max": float64(10)},
+		{"bool": true},
+		{"float64": 1.1},
+		{"int64": float64(1)},
+		{"list_of_str": []interface{}{"1", "10", "100"}},
+		{"list_of_bool": []interface{}{true, false, true}},
+		{"list_of_float": []interface{}{1.1, 10.1, 100.1}},
+		{"list_of_int": []interface{}{float64(1), float64(10), float64(100)}},
+		{"list_of_json": mixedList},
+	}
+	ans := []map[string]*schemapb.TemplateValue{
+		{
+			"str": &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_StringVal{
+					StringVal: "10",
+				},
+			},
+		},
+		{
+			"min": &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_Int64Val{
+					Int64Val: 1,
+				},
+			},
+			"max": &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_Int64Val{
+					Int64Val: 10,
+				},
+			},
+		},
+		{
+			"bool": &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_BoolVal{
+					BoolVal: true,
+				},
+			},
+		},
+		{
+			"float64": &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_FloatVal{
+					FloatVal: 1.1,
+				},
+			},
+		},
+		{
+			"int64": &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_Int64Val{
+					Int64Val: 1,
+				},
+			},
+		},
+		{
+			"list_of_str": &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_ArrayVal{
+					ArrayVal: &schemapb.TemplateArrayValue{
+						Data: &schemapb.TemplateArrayValue_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{"1", "10", "100"},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			"list_of_bool": &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_ArrayVal{
+					ArrayVal: &schemapb.TemplateArrayValue{
+						Data: &schemapb.TemplateArrayValue_BoolData{
+							BoolData: &schemapb.BoolArray{
+								Data: []bool{true, false, true},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			"list_of_float": &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_ArrayVal{
+					ArrayVal: &schemapb.TemplateArrayValue{
+						Data: &schemapb.TemplateArrayValue_DoubleData{
+							DoubleData: &schemapb.DoubleArray{
+								Data: []float64{1.1, 10.1, 100.1},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			"list_of_int": &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_ArrayVal{
+					ArrayVal: &schemapb.TemplateArrayValue{
+						Data: &schemapb.TemplateArrayValue_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{1, 10, 100},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			"list_of_json": &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_ArrayVal{
+					ArrayVal: &schemapb.TemplateArrayValue{
+						Data: &schemapb.TemplateArrayValue_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: mixedAns,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	for i, template := range expressionTemplates {
+		actual := generateExpressionTemplate(template)
+		assert.Equal(t, actual, ans[i])
+	}
+}
