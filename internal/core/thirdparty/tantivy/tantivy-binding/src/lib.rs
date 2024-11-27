@@ -21,6 +21,8 @@ mod util;
 mod error;
 mod util_c;
 mod vec_collector;
+mod stop_words;
+mod jieba_tokenizer;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right

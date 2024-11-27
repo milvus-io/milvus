@@ -18,13 +18,13 @@ package querynodev2
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -189,9 +189,9 @@ func getSegmentJSON(node *QueryNode) string {
 	allSegments := node.manager.Segment.GetBy()
 	var ms []*metricsinfo.Segment
 	for _, s := range allSegments {
-		indexes := make([]*metricsinfo.SegmentIndex, 0, len(s.Indexes()))
+		indexes := make([]*metricsinfo.IndexedField, 0, len(s.Indexes()))
 		for _, index := range s.Indexes() {
-			indexes = append(indexes, &metricsinfo.SegmentIndex{
+			indexes = append(indexes, &metricsinfo.IndexedField{
 				IndexFieldID: index.IndexInfo.FieldID,
 				IndexID:      index.IndexInfo.IndexID,
 				IndexSize:    index.IndexInfo.IndexSize,
@@ -205,7 +205,7 @@ func getSegmentJSON(node *QueryNode) string {
 			CollectionID:         s.Collection(),
 			PartitionID:          s.Partition(),
 			MemSize:              s.MemSize(),
-			Index:                indexes,
+			IndexedFields:        indexes,
 			State:                s.Type().String(),
 			ResourceGroup:        s.ResourceGroup(),
 			LoadedInsertRowCount: s.InsertCount(),

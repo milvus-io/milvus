@@ -21,9 +21,12 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -250,7 +253,6 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 
 	// test execute success
 	s.lbBalancer.ExpectedCalls = nil
-	s.mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
@@ -289,7 +291,6 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 
 	// test get client failed, and retry failed, expected success
 	s.mgr.ExpectedCalls = nil
-	s.mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, errors.New("fake error")).Times(1)
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
@@ -310,7 +311,6 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.Error(err)
 
 	s.mgr.ExpectedCalls = nil
-	s.mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, errors.New("fake error")).Times(1)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
@@ -331,7 +331,6 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 
 	// test exec failed, then retry success
 	s.mgr.ExpectedCalls = nil
-	s.mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
@@ -359,7 +358,6 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	// test exec timeout
 	s.mgr.ExpectedCalls = nil
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
-	s.mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	s.qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, context.Canceled).Times(1)
@@ -384,7 +382,6 @@ func (s *LBPolicySuite) TestExecute() {
 	ctx := context.Background()
 	mockErr := errors.New("mock error")
 	// test  all channel success
-	s.mgr.EXPECT().ReleaseClientRef(mock.Anything)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
@@ -454,6 +451,42 @@ func (s *LBPolicySuite) TestNewLBPolicy() {
 	policy = NewLBPolicyImpl(s.mgr)
 	s.Equal(reflect.TypeOf(policy.getBalancer()).String(), "*proxy.LookAsideBalancer")
 	policy.Close()
+}
+
+func (s *LBPolicySuite) TestGetShardLeaders() {
+	ctx := context.Background()
+
+	// ErrCollectionNotFullyLoaded is retriable, expected to retry until ctx done or success
+	counter := atomic.NewInt64(0)
+	globalMetaCache.DeprecateShardCache(dbName, s.collectionName)
+	s.qc.ExpectedCalls = nil
+	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+			counter.Inc()
+			return nil, merr.ErrCollectionNotFullyLoaded
+		}).Times(5)
+	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+			log.Info("return rpc success")
+			return nil, nil
+		}).Times(5)
+	_, err := s.lbPolicy.GetShardLeaders(ctx, dbName, s.collectionName, s.collectionID, true)
+	s.NoError(err)
+	s.Equal(int64(5), counter.Load())
+
+	// ErrServiceUnavailable is not retriable, expected to fail fast
+	counter.Store(0)
+	globalMetaCache.DeprecateShardCache(dbName, s.collectionName)
+	s.qc.ExpectedCalls = nil
+	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+			counter.Inc()
+			return nil, merr.ErrCollectionNotLoaded
+		})
+	_, err = s.lbPolicy.GetShardLeaders(ctx, dbName, s.collectionName, s.collectionID, true)
+	log.Info("check err", zap.Error(err))
+	s.Error(err)
+	s.Equal(int64(1), counter.Load())
 }
 
 func TestLBPolicySuite(t *testing.T) {

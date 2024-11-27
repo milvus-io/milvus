@@ -31,7 +31,7 @@ class TestCompactionParams(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 1, ct.err_msg: "should create connect first"}
+        error = {ct.err_code: 999, ct.err_msg: "should create connection first"}
         collection_w.compact(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -599,13 +599,15 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.wait_for_compaction_completed()
         c_plans = collection_w.get_compaction_plans(check_task=CheckTasks.check_merge_compact)[0]
 
+        old_segmentIDs = [c_plans.plans[0].target]
+        old_segmentIDs.extend(c_plans.plans[0].sources)
         # waiting for handoff completed and search
         cost = 180
         start = time()
         while True:
             sleep(1)
             segment_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-            if len(segment_info) != 0 and segment_info[0].segmentID == c_plans.plans[0].target:
+            if len(segment_info) != 0 and segment_info[0].segmentID not in old_segmentIDs and segment_info[0].is_sorted:
                 log.debug(segment_info)
                 break
             if time() - start > cost:

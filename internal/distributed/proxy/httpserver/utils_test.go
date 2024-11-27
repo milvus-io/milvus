@@ -1,7 +1,22 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package httpserver
 
 import (
-	"encoding/json"
 	"math"
 	"strconv"
 	"strings"
@@ -15,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -93,25 +109,37 @@ func generateVectorFieldSchema(dataType schemapb.DataType) *schemapb.FieldSchema
 	}
 }
 
-func generateCollectionSchema(primaryDataType schemapb.DataType, autoID bool) *schemapb.CollectionSchema {
+func generateCollectionSchema(primaryDataType schemapb.DataType, autoID bool, isDynamic bool) *schemapb.CollectionSchema {
 	primaryField := generatePrimaryField(primaryDataType, autoID)
 	vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
 	vectorField.Name = FieldBookIntro
+	fields := []*schemapb.FieldSchema{
+		primaryField, {
+			FieldID:      common.StartOfUserFieldID + 1,
+			Name:         FieldWordCount,
+			IsPrimaryKey: false,
+			Description:  "",
+			DataType:     5,
+			AutoID:       false,
+		}, vectorField,
+	}
+	if isDynamic {
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID:      common.StartOfUserFieldID + 2,
+			Name:         "$meta",
+			IsPrimaryKey: false,
+			Description:  "",
+			DataType:     23,
+			AutoID:       false,
+			IsDynamic:    true,
+		})
+	}
 	return &schemapb.CollectionSchema{
-		Name:        DefaultCollectionName,
-		Description: "",
-		AutoID:      false,
-		Fields: []*schemapb.FieldSchema{
-			primaryField, {
-				FieldID:      common.StartOfUserFieldID + 1,
-				Name:         FieldWordCount,
-				IsPrimaryKey: false,
-				Description:  "",
-				DataType:     5,
-				AutoID:       false,
-			}, vectorField,
-		},
-		EnableDynamicField: true,
+		Name:               DefaultCollectionName,
+		Description:        "",
+		AutoID:             autoID,
+		Fields:             fields,
+		EnableDynamicField: isDynamic,
 	}
 }
 
@@ -382,7 +410,7 @@ func generateQueryResult64(withDistance bool) []map[string]interface{} {
 }
 
 func TestPrintCollectionDetails(t *testing.T) {
-	coll := generateCollectionSchema(schemapb.DataType_Int64, false)
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	indexes := generateIndexes()
 	assert.Equal(t, []gin.H{
 		{
@@ -391,6 +419,7 @@ func TestPrintCollectionDetails(t *testing.T) {
 			HTTPReturnFieldPartitionKey:  false,
 			HTTPReturnFieldClusteringKey: false,
 			HTTPReturnFieldPrimaryKey:    true,
+			HTTPReturnFieldNullable:      false,
 			HTTPReturnFieldAutoID:        false,
 			HTTPReturnDescription:        "",
 		},
@@ -399,6 +428,7 @@ func TestPrintCollectionDetails(t *testing.T) {
 			HTTPReturnFieldType:          "Int64",
 			HTTPReturnFieldPartitionKey:  false,
 			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldNullable:      false,
 			HTTPReturnFieldPrimaryKey:    false,
 			HTTPReturnFieldAutoID:        false,
 			HTTPReturnDescription:        "",
@@ -409,6 +439,7 @@ func TestPrintCollectionDetails(t *testing.T) {
 			HTTPReturnFieldPartitionKey:  false,
 			HTTPReturnFieldClusteringKey: false,
 			HTTPReturnFieldPrimaryKey:    false,
+			HTTPReturnFieldNullable:      false,
 			HTTPReturnFieldAutoID:        false,
 			HTTPReturnDescription:        "",
 		},
@@ -420,6 +451,7 @@ func TestPrintCollectionDetails(t *testing.T) {
 			HTTPReturnFieldPartitionKey:  false,
 			HTTPReturnFieldClusteringKey: false,
 			HTTPReturnFieldPrimaryKey:    true,
+			HTTPReturnFieldNullable:      false,
 			HTTPReturnFieldAutoID:        false,
 			HTTPReturnDescription:        "",
 			HTTPReturnFieldID:            int64(100),
@@ -430,6 +462,7 @@ func TestPrintCollectionDetails(t *testing.T) {
 			HTTPReturnFieldPartitionKey:  false,
 			HTTPReturnFieldClusteringKey: false,
 			HTTPReturnFieldPrimaryKey:    false,
+			HTTPReturnFieldNullable:      false,
 			HTTPReturnFieldAutoID:        false,
 			HTTPReturnDescription:        "",
 			HTTPReturnFieldID:            int64(101),
@@ -439,6 +472,7 @@ func TestPrintCollectionDetails(t *testing.T) {
 			HTTPReturnFieldType:          "FloatVector",
 			HTTPReturnFieldPartitionKey:  false,
 			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldNullable:      false,
 			HTTPReturnFieldPrimaryKey:    false,
 			HTTPReturnFieldAutoID:        false,
 			HTTPReturnDescription:        "",
@@ -472,6 +506,7 @@ func TestPrintCollectionDetails(t *testing.T) {
 			HTTPReturnFieldPartitionKey:  false,
 			HTTPReturnFieldClusteringKey: false,
 			HTTPReturnFieldPrimaryKey:    false,
+			HTTPReturnFieldNullable:      false,
 			HTTPReturnFieldAutoID:        false,
 			HTTPReturnDescription:        "",
 		},
@@ -480,6 +515,7 @@ func TestPrintCollectionDetails(t *testing.T) {
 			HTTPReturnFieldType:          "Array",
 			HTTPReturnFieldPartitionKey:  false,
 			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldNullable:      false,
 			HTTPReturnFieldPrimaryKey:    false,
 			HTTPReturnFieldAutoID:        false,
 			HTTPReturnDescription:        "",
@@ -493,6 +529,7 @@ func TestPrintCollectionDetails(t *testing.T) {
 			HTTPReturnFieldPrimaryKey:    false,
 			HTTPReturnFieldClusteringKey: false,
 			HTTPReturnFieldAutoID:        false,
+			HTTPReturnFieldNullable:      false,
 			HTTPReturnDescription:        "",
 			HTTPReturnFieldID:            int64(0),
 			Params: []*commonpb.KeyValuePair{
@@ -504,6 +541,7 @@ func TestPrintCollectionDetails(t *testing.T) {
 			HTTPReturnFieldType:          "Array",
 			HTTPReturnFieldPartitionKey:  false,
 			HTTPReturnFieldClusteringKey: false,
+			HTTPReturnFieldNullable:      false,
 			HTTPReturnFieldPrimaryKey:    false,
 			HTTPReturnFieldAutoID:        false,
 			HTTPReturnDescription:        "",
@@ -514,7 +552,7 @@ func TestPrintCollectionDetails(t *testing.T) {
 }
 
 func TestPrimaryField(t *testing.T) {
-	coll := generateCollectionSchema(schemapb.DataType_Int64, false)
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	primaryField := generatePrimaryField(schemapb.DataType_Int64, false)
 	field, ok := getPrimaryField(coll)
 	assert.Equal(t, true, ok)
@@ -538,84 +576,253 @@ func TestPrimaryField(t *testing.T) {
 	rangeStr, err = convertRange(primaryField, idStr)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, `"1","2","3"`, rangeStr)
-	coll2 := generateCollectionSchema(schemapb.DataType_VarChar, false)
+	coll2 := generateCollectionSchema(schemapb.DataType_VarChar, false, true)
 	filter, err = checkGetPrimaryKey(coll2, idStr)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, `book_id in ["1","2","3"]`, filter)
 }
 
-func TestInsertWithDynamicFields(t *testing.T) {
-	body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}"
-	req := InsertReq{}
-	coll := generateCollectionSchema(schemapb.DataType_Int64, false)
-	var err error
-	err, req.Data, _ = checkAndSetData(body, coll)
-	assert.Equal(t, nil, err)
-	assert.Equal(t, int64(0), req.Data[0]["id"])
-	assert.Equal(t, int64(1), req.Data[0]["book_id"])
-	assert.Equal(t, int64(2), req.Data[0]["word_count"])
-	fieldsData, err := anyToColumns(req.Data, nil, coll)
-	assert.Equal(t, nil, err)
-	assert.Equal(t, true, fieldsData[len(fieldsData)-1].IsDynamic)
-	assert.Equal(t, schemapb.DataType_JSON, fieldsData[len(fieldsData)-1].Type)
-	assert.Equal(t, "{\"classified\":false,\"id\":0}", string(fieldsData[len(fieldsData)-1].GetScalars().GetJsonData().GetData()[0]))
+func TestAnyToColumns(t *testing.T) {
+	t.Run("insert with dynamic field", func(t *testing.T) {
+		body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}"
+		req := InsertReq{}
+		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
+		var err error
+		err, req.Data, _ = checkAndSetData(body, coll)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, int64(0), req.Data[0]["id"])
+		assert.Equal(t, int64(1), req.Data[0]["book_id"])
+		assert.Equal(t, int64(2), req.Data[0]["word_count"])
+		fieldsData, err := anyToColumns(req.Data, nil, coll, true)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, true, fieldsData[len(fieldsData)-1].IsDynamic)
+		assert.Equal(t, schemapb.DataType_JSON, fieldsData[len(fieldsData)-1].Type)
+		assert.Equal(t, "{\"classified\":false,\"id\":0}", string(fieldsData[len(fieldsData)-1].GetScalars().GetJsonData().GetData()[0]))
+	})
+
+	t.Run("upsert with dynamic field", func(t *testing.T) {
+		body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}"
+		req := InsertReq{}
+		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
+		var err error
+		err, req.Data, _ = checkAndSetData(body, coll)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, int64(0), req.Data[0]["id"])
+		assert.Equal(t, int64(1), req.Data[0]["book_id"])
+		assert.Equal(t, int64(2), req.Data[0]["word_count"])
+		fieldsData, err := anyToColumns(req.Data, nil, coll, false)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, true, fieldsData[len(fieldsData)-1].IsDynamic)
+		assert.Equal(t, schemapb.DataType_JSON, fieldsData[len(fieldsData)-1].Type)
+		assert.Equal(t, "{\"classified\":false,\"id\":0}", string(fieldsData[len(fieldsData)-1].GetScalars().GetJsonData().GetData()[0]))
+	})
+
+	t.Run("insert with dynamic field, but pass pk when autoid==true", func(t *testing.T) {
+		body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}"
+		req := InsertReq{}
+		coll := generateCollectionSchema(schemapb.DataType_Int64, true, true)
+		var err error
+		err, req.Data, _ = checkAndSetData(body, coll)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, int64(0), req.Data[0]["id"])
+		assert.Equal(t, int64(1), req.Data[0]["book_id"])
+		assert.Equal(t, int64(2), req.Data[0]["word_count"])
+		_, err = anyToColumns(req.Data, nil, coll, true)
+		assert.Error(t, err)
+		assert.Equal(t, true, strings.HasPrefix(err.Error(), "no need to pass pk field"))
+	})
+
+	t.Run("pass more field", func(t *testing.T) {
+		body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}"
+		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
+		var err error
+		err, _, _ = checkAndSetData(body, coll)
+		assert.Error(t, err)
+		assert.Equal(t, true, strings.HasPrefix(err.Error(), "has pass more fiel"))
+	})
+
+	t.Run("insert with autoid==false", func(t *testing.T) {
+		body := "{\"data\": {\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2}}"
+		req := InsertReq{}
+		coll := generateCollectionSchema(schemapb.DataType_Int64, false, false)
+		var err error
+		err, req.Data, _ = checkAndSetData(body, coll)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, int64(1), req.Data[0]["book_id"])
+		assert.Equal(t, []float32{0.1, 0.2}, req.Data[0]["book_intro"])
+		assert.Equal(t, int64(2), req.Data[0]["word_count"])
+		fieldsData, err := anyToColumns(req.Data, nil, coll, true)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, 3, len(fieldsData))
+		assert.Equal(t, false, fieldsData[len(fieldsData)-1].IsDynamic)
+	})
+
+	t.Run("insert with autoid==false but has no pk", func(t *testing.T) {
+		body := "{\"data\": { \"book_intro\": [0.1, 0.2], \"word_count\": 2}}"
+		coll := generateCollectionSchema(schemapb.DataType_Int64, false, false)
+		var err error
+		err, _, _ = checkAndSetData(body, coll)
+		assert.Error(t, err)
+		assert.Equal(t, true, strings.HasPrefix(err.Error(), "strconv.ParseInt: parsing \"\": invalid syntax"))
+	})
+
+	t.Run("insert with autoid==true", func(t *testing.T) {
+		body := "{\"data\": { \"book_intro\": [0.1, 0.2], \"word_count\": 2}}"
+		req := InsertReq{}
+		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
+		var err error
+		err, req.Data, _ = checkAndSetData(body, coll)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, []float32{0.1, 0.2}, req.Data[0]["book_intro"])
+		assert.Equal(t, int64(2), req.Data[0]["word_count"])
+		fieldsData, err := anyToColumns(req.Data, nil, coll, true)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, 2, len(fieldsData))
+		assert.Equal(t, false, fieldsData[len(fieldsData)-1].IsDynamic)
+	})
+
+	t.Run("upsert with autoid==true", func(t *testing.T) {
+		body := "{\"data\": {\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2}}"
+		req := InsertReq{}
+		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
+		var err error
+		err, req.Data, _ = checkAndSetData(body, coll)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, int64(1), req.Data[0]["book_id"])
+		assert.Equal(t, []float32{0.1, 0.2}, req.Data[0]["book_intro"])
+		assert.Equal(t, int64(2), req.Data[0]["word_count"])
+		fieldsData, err := anyToColumns(req.Data, nil, coll, false)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, 3, len(fieldsData))
+		assert.Equal(t, false, fieldsData[len(fieldsData)-1].IsDynamic)
+	})
+
+	t.Run("upsert with autoid==false", func(t *testing.T) {
+		body := "{\"data\": {\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2}}"
+		req := InsertReq{}
+		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
+		var err error
+		err, req.Data, _ = checkAndSetData(body, coll)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, int64(1), req.Data[0]["book_id"])
+		assert.Equal(t, []float32{0.1, 0.2}, req.Data[0]["book_intro"])
+		assert.Equal(t, int64(2), req.Data[0]["word_count"])
+		fieldsData, err := anyToColumns(req.Data, nil, coll, false)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, 3, len(fieldsData))
+		assert.Equal(t, false, fieldsData[len(fieldsData)-1].IsDynamic)
+	})
 }
 
-func TestInsertWithoutVector(t *testing.T) {
-	body := "{\"data\": {}}"
-	var err error
-	primaryField := generatePrimaryField(schemapb.DataType_Int64, false)
-	primaryField.AutoID = true
-	floatVectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
-	floatVectorField.Name = "floatVector"
-	binaryVectorField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)
-	binaryVectorField.Name = "binaryVector"
-	float16VectorField := generateVectorFieldSchema(schemapb.DataType_Float16Vector)
-	float16VectorField.Name = "float16Vector"
-	bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
-	bfloat16VectorField.Name = "bfloat16Vector"
-	err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
-		Name: DefaultCollectionName,
-		Fields: []*schemapb.FieldSchema{
-			primaryField, floatVectorField,
-		},
-		EnableDynamicField: true,
+func TestCheckAndSetData(t *testing.T) {
+	t.Run("invalid field name with dynamic field", func(t *testing.T) {
+		body := "{\"data\": {\"id\": 0,\"$meta\": 2,\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}"
+		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
+		var err error
+		err, _, _ = checkAndSetData(body, coll)
+		assert.Error(t, err)
+		assert.Equal(t, true, strings.HasPrefix(err.Error(), "use the invalid field name"))
 	})
-	assert.Error(t, err)
-	assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-	err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
-		Name: DefaultCollectionName,
-		Fields: []*schemapb.FieldSchema{
-			primaryField, binaryVectorField,
-		},
-		EnableDynamicField: true,
+	t.Run("without vector", func(t *testing.T) {
+		body := "{\"data\": {}}"
+		var err error
+		primaryField := generatePrimaryField(schemapb.DataType_Int64, true)
+		floatVectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
+		floatVectorField.Name = "floatVector"
+		binaryVectorField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)
+		binaryVectorField.Name = "binaryVector"
+		float16VectorField := generateVectorFieldSchema(schemapb.DataType_Float16Vector)
+		float16VectorField.Name = "float16Vector"
+		bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
+		bfloat16VectorField.Name = "bfloat16Vector"
+		err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				primaryField, floatVectorField,
+			},
+			EnableDynamicField: true,
+		})
+		assert.Error(t, err)
+		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
+		err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				primaryField, binaryVectorField,
+			},
+			EnableDynamicField: true,
+		})
+		assert.Error(t, err)
+		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
+		err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				primaryField, float16VectorField,
+			},
+			EnableDynamicField: true,
+		})
+		assert.Error(t, err)
+		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
+		err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				primaryField, bfloat16VectorField,
+			},
+			EnableDynamicField: true,
+		})
+		assert.Error(t, err)
+		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
 	})
-	assert.Error(t, err)
-	assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-	err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
-		Name: DefaultCollectionName,
-		Fields: []*schemapb.FieldSchema{
-			primaryField, float16VectorField,
-		},
-		EnableDynamicField: true,
+
+	t.Run("with pk when autoID == True when upsert", func(t *testing.T) {
+		arrayFieldName := "array-int64"
+		body := "{\"data\": {\"book_id\": 9999999999999999, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}"
+		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
+		coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+			Name:        arrayFieldName,
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64,
+		})
+		err, data, validData := checkAndSetData(body, coll)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, 1, len(data))
+		assert.Equal(t, 0, len(validData))
 	})
-	assert.Error(t, err)
-	assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-	err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
-		Name: DefaultCollectionName,
-		Fields: []*schemapb.FieldSchema{
-			primaryField, bfloat16VectorField,
-		},
-		EnableDynamicField: true,
+
+	t.Run("without pk when autoID == True when insert", func(t *testing.T) {
+		arrayFieldName := "array-int64"
+		body := "{\"data\": {\"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}"
+		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
+		coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+			Name:        arrayFieldName,
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64,
+		})
+		err, data, validData := checkAndSetData(body, coll)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, 1, len(data))
+		assert.Equal(t, 0, len(validData))
 	})
-	assert.Error(t, err)
-	assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
+
+	t.Run("with pk when autoID == false", func(t *testing.T) {
+		arrayFieldName := "array-int64"
+		body := "{\"data\": {\"book_id\": 9999999999999999, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}"
+		coll := generateCollectionSchema(schemapb.DataType_Int64, false, false)
+		coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+			Name:        arrayFieldName,
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64,
+		})
+		err, data, validData := checkAndSetData(body, coll)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, 1, len(data))
+		assert.Equal(t, 0, len(validData))
+	})
 }
 
 func TestInsertWithInt64(t *testing.T) {
 	arrayFieldName := "array-int64"
 	body := "{\"data\": {\"book_id\": 9999999999999999, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}"
-	coll := generateCollectionSchema(schemapb.DataType_Int64, false)
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 		Name:        arrayFieldName,
 		DataType:    schemapb.DataType_Array,
@@ -632,7 +839,7 @@ func TestInsertWithInt64(t *testing.T) {
 
 func TestInsertWithNullableField(t *testing.T) {
 	arrayFieldName := "array-int64"
-	coll := generateCollectionSchema(schemapb.DataType_Int64, false)
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 		Name:        arrayFieldName,
 		DataType:    schemapb.DataType_Array,
@@ -657,14 +864,14 @@ func TestInsertWithNullableField(t *testing.T) {
 	assert.Equal(t, 4, len(data[0]))
 	assert.Equal(t, 5, len(data[1]))
 
-	fieldData, err := anyToColumns(data, validData, coll)
+	fieldData, err := anyToColumns(data, validData, coll, true)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, len(coll.Fields)+1, len(fieldData))
+	assert.Equal(t, len(coll.Fields), len(fieldData))
 }
 
 func TestInsertWithDefaultValueField(t *testing.T) {
 	arrayFieldName := "array-int64"
-	coll := generateCollectionSchema(schemapb.DataType_Int64, false)
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 		Name:        arrayFieldName,
 		DataType:    schemapb.DataType_Array,
@@ -693,18 +900,21 @@ func TestInsertWithDefaultValueField(t *testing.T) {
 	assert.Equal(t, 4, len(data[0]))
 	assert.Equal(t, 5, len(data[1]))
 
-	fieldData, err := anyToColumns(data, validData, coll)
+	fieldData, err := anyToColumns(data, validData, coll, true)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, len(coll.Fields)+1, len(fieldData))
+	assert.Equal(t, len(coll.Fields), len(fieldData))
 }
 
 func TestSerialize(t *testing.T) {
 	parameters := []float32{0.11111, 0.22222}
-	assert.Equal(t, "\xa4\x8d\xe3=\xa4\x8dc>", string(serialize(parameters)))
 	assert.Equal(t, "\n\x10\n\x02$0\x10e\x1a\b\xa4\x8d\xe3=\xa4\x8dc>", string(vectors2PlaceholderGroupBytes([][]float32{parameters}))) // todo
+
+	// test serialize fp32 to {fp32, fp16, bf16}
 	requestBody := "{\"data\": [[0.11111, 0.22222]]}"
 	vectors := gjson.Get(requestBody, HTTPRequestData)
-	values, err := serializeFloatVectors(vectors.Array(), schemapb.DataType_FloatVector, 2, -1)
+
+	// fp32 -> fp32
+	values, err := serializeFloatVectors(vectors.Raw, schemapb.DataType_FloatVector, 2, -1, typeutil.Float32ArrayToBytes)
 	assert.Nil(t, err)
 	placeholderValue := &commonpb.PlaceholderValue{
 		Tag:    "$0",
@@ -718,6 +928,32 @@ func TestSerialize(t *testing.T) {
 	})
 	assert.Nil(t, err)
 	assert.Equal(t, "\n\x10\n\x02$0\x10e\x1a\b\xa4\x8d\xe3=\xa4\x8dc>", string(bytes)) // todo
+
+	// fp32 -> fp16/bf16
+	for _, testcase := range []struct {
+		dataType      schemapb.DataType
+		serializeFunc func([]float32) []byte
+		byteStr       string
+	}{
+		{schemapb.DataType_Float16Vector, typeutil.Float32ArrayToFloat16Bytes, "\n\f\n\x02$0\x10e\x1a\x04\x1c/\x1c3"},
+		{schemapb.DataType_BFloat16Vector, typeutil.Float32ArrayToBFloat16Bytes, "\n\f\n\x02$0\x10e\x1a\x04\xe3=c>"},
+	} {
+		values, err = serializeFloatOrByteVectors(vectors, testcase.dataType, 2, testcase.serializeFunc)
+		assert.Nil(t, err)
+		placeholderValue := &commonpb.PlaceholderValue{
+			Tag:    "$0",
+			Type:   commonpb.PlaceholderType_FloatVector,
+			Values: values,
+		}
+		bytes, err := proto.Marshal(&commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{
+				placeholderValue,
+			},
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, testcase.byteStr, string(bytes))
+	}
+
 	for _, dataType := range []schemapb.DataType{schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
 		request := map[string]interface{}{
 			HTTPRequestData: []interface{}{
@@ -737,6 +973,209 @@ func TestSerialize(t *testing.T) {
 			},
 		})
 		assert.Nil(t, err)
+	}
+}
+
+func TestConvertQueries2Placeholder(t *testing.T) {
+	fp16Req := map[string]interface{}{
+		HTTPRequestData: []interface{}{
+			typeutil.Float32ArrayToFloat16Bytes([]float32{0.11111, 0.22222, 0, -1}),
+			typeutil.Float32ArrayToFloat16Bytes([]float32{1, 1, 1, 1}),
+		},
+	}
+	fp16ReqBody, _ := json.Marshal(fp16Req)
+	const Float16VecJSON = `{"data":["HC8cMwAAALw=","ADwAPAA8ADw="]}`
+	assert.Equal(t, Float16VecJSON, string(fp16ReqBody))
+
+	bf16Req := map[string]interface{}{
+		HTTPRequestData: []interface{}{
+			typeutil.Float32ArrayToBFloat16Bytes([]float32{0.11111, 0.22222, 0, -1}),
+			typeutil.Float32ArrayToBFloat16Bytes([]float32{1, 1, 1, 1}),
+		},
+	}
+	bf16ReqBody, _ := json.Marshal(bf16Req)
+	const BFloat16VecJSON = `{"data":["4z1jPgAAgL8=","gD+AP4A/gD8="]}`
+	assert.Equal(t, BFloat16VecJSON, string(bf16ReqBody))
+
+	type testCase struct {
+		requestBody     string
+		dataType        schemapb.DataType
+		dim             int64
+		placehoderValue func() [][]byte
+	}
+	testCases := make([]testCase, 0)
+
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_FloatVector} {
+		// corner case: empty data
+		testCases = append(testCases, []testCase{
+			{
+				"{\"data\": []}",
+				dataType,
+				0,
+				func() [][]byte {
+					return [][]byte{}
+				},
+			}, {
+				"{\"data\": []}",
+				dataType,
+				100,
+				func() [][]byte {
+					return [][]byte{}
+				},
+			}, {
+				"{\"data\": [[], []]}",
+				dataType,
+				0,
+				func() [][]byte {
+					return [][]byte{{}, {}}
+				},
+			},
+		}...)
+	}
+
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
+		// corner case: empty float16/bfloat16 vector
+		testCases = append(testCases, []testCase{
+			{
+				`"{"data": ["", ""]}"`,
+				dataType,
+				0,
+				func() [][]byte {
+					return [][]byte{nil, nil}
+				},
+			}, {
+				`"{"data": [""]}"`,
+				dataType,
+				0,
+				func() [][]byte {
+					return [][]byte{nil}
+				},
+			},
+		}...)
+	}
+
+	testCases = append(testCases, []testCase{
+		{
+			"{\"data\": [[0.11111, 0.22222]]}",
+			schemapb.DataType_FloatVector,
+			2,
+			func() [][]byte {
+				bv := typeutil.Float32ArrayToBytes([]float32{0.11111, 0.22222})
+				return [][]byte{bv}
+			},
+		}, {
+			"{\"data\": [[0.11111, 0.22222, 0, -1]]}",
+			schemapb.DataType_Float16Vector,
+			4,
+			func() [][]byte {
+				bv := typeutil.Float32ArrayToFloat16Bytes([]float32{0.11111, 0.22222, 0, -1})
+				return [][]byte{bv}
+			},
+		}, {
+			"{\"data\": [[0.11111, 0.22222, 0, -1], [1, 1, 1, 1]]}",
+			schemapb.DataType_Float16Vector,
+			4,
+			func() [][]byte {
+				bv1 := typeutil.Float32ArrayToFloat16Bytes([]float32{0.11111, 0.22222, 0, -1})
+				bv2 := typeutil.Float32ArrayToFloat16Bytes([]float32{1, 1, 1, 1})
+				return [][]byte{bv1, bv2}
+			},
+		}, {
+			"{\"data\": [[0.11111, 0.22222, 0, -1], [1, 1, 1, 1]]}",
+			schemapb.DataType_BFloat16Vector,
+			4,
+			func() [][]byte {
+				bv1 := typeutil.Float32ArrayToBFloat16Bytes([]float32{0.11111, 0.22222, 0, -1})
+				bv2 := typeutil.Float32ArrayToBFloat16Bytes([]float32{1, 1, 1, 1})
+				return [][]byte{bv1, bv2}
+			},
+		}, {
+			Float16VecJSON,
+			schemapb.DataType_Float16Vector,
+			4,
+			func() [][]byte {
+				bv1 := typeutil.Float32ArrayToFloat16Bytes([]float32{0.11111, 0.22222, 0, -1})
+				bv2 := typeutil.Float32ArrayToFloat16Bytes([]float32{1, 1, 1, 1})
+				return [][]byte{bv1, bv2}
+			},
+		}, {
+			BFloat16VecJSON,
+			schemapb.DataType_BFloat16Vector,
+			4,
+			func() [][]byte {
+				bv1 := typeutil.Float32ArrayToBFloat16Bytes([]float32{0.11111, 0.22222, 0, -1})
+				bv2 := typeutil.Float32ArrayToBFloat16Bytes([]float32{1, 1, 1, 1})
+				return [][]byte{bv1, bv2}
+			},
+		},
+	}...)
+
+	for _, testcase := range testCases {
+		phv, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim)
+		assert.Nil(t, err)
+		assert.Equal(t, testcase.placehoderValue(), phv.GetValues())
+	}
+
+	for _, testcase := range []testCase{
+		// mismatched Datatype
+		{
+			"{\"data\": [[0.11111, 0.22222, 0, -1], [1, 1, 1, 1]]}",
+			schemapb.DataType_Float16Vector,
+			4,
+			func() [][]byte {
+				bv1 := typeutil.Float32ArrayToBFloat16Bytes([]float32{0.11111, 0.22222, 0, -1})
+				bv2 := typeutil.Float32ArrayToBFloat16Bytes([]float32{1, 1, 1, 1})
+				return [][]byte{bv1, bv2}
+			},
+		}, {
+			"{\"data\": [[0.11111, 0.22222, 0, -1], [1, 1, 1, 1]]}",
+			schemapb.DataType_BFloat16Vector,
+			4,
+			func() [][]byte {
+				bv1 := typeutil.Float32ArrayToFloat16Bytes([]float32{0.11111, 0.22222, 0, -1})
+				bv2 := typeutil.Float32ArrayToFloat16Bytes([]float32{1, 1, 1, 1})
+				return [][]byte{bv1, bv2}
+			},
+		},
+	} {
+		phv, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim)
+		assert.Nil(t, err)
+		assert.NotEqual(t, testcase.placehoderValue(), phv.GetValues())
+	}
+
+	for _, testcase := range []testCase{
+		// mismatched dimension
+		{
+			"{\"data\": [[0.11111, 0.22222, 0, -1], [1, 1, 1, 1]]}",
+			schemapb.DataType_Float16Vector,
+			2,
+			func() [][]byte {
+				bv1 := typeutil.Float32ArrayToBFloat16Bytes([]float32{0.11111, 0.22222, 0, -1})
+				bv2 := typeutil.Float32ArrayToBFloat16Bytes([]float32{1, 1, 1, 1})
+				return [][]byte{bv1, bv2}
+			},
+		}, {
+			"{\"data\": [[0.11111, 0.22222, 0, -1], [1, 1, 1, 1]]}",
+			schemapb.DataType_BFloat16Vector,
+			8,
+			func() [][]byte {
+				bv1 := typeutil.Float32ArrayToFloat16Bytes([]float32{0.11111, 0.22222, 0, -1})
+				bv2 := typeutil.Float32ArrayToFloat16Bytes([]float32{1, 1, 1, 1})
+				return [][]byte{bv1, bv2}
+			},
+		}, {
+			"{\"data\": [[0.11111, 0.22222, 0, -1], [1, 1, 1]]}",
+			schemapb.DataType_BFloat16Vector,
+			4,
+			func() [][]byte {
+				bv1 := typeutil.Float32ArrayToFloat16Bytes([]float32{0.11111, 0.22222, 0, -1})
+				bv2 := typeutil.Float32ArrayToFloat16Bytes([]float32{1, 1, 1, 1})
+				return [][]byte{bv1, bv2}
+			},
+		},
+	} {
+		_, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim)
+		assert.NotNil(t, err)
 	}
 }
 
@@ -782,15 +1221,10 @@ func compareRow(m1 map[string]interface{}, m2 map[string]interface{}) bool {
 				}
 			}
 		} else if key == "field-json" {
-			arr1 := value.([]byte)
+			arr1 := value.(string)
 			arr2 := m2[key].([]byte)
-			if len(arr1) != len(arr2) {
+			if arr1 != string(arr2) {
 				return false
-			}
-			for j, element := range arr1 {
-				if element != arr2[j] {
-					return false
-				}
 			}
 		} else if strings.HasPrefix(key, "array-") {
 			continue
@@ -1587,24 +2021,24 @@ func newRowsWithArray(results []map[string]interface{}) []map[string]interface{}
 
 func TestArray(t *testing.T) {
 	body, _ := generateRequestBody(schemapb.DataType_Int64)
-	collectionSchema := generateCollectionSchema(schemapb.DataType_Int64, false)
+	collectionSchema := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	err, rows, validRows := checkAndSetData(string(body), collectionSchema)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 0, len(validRows))
 	assert.Equal(t, true, compareRows(rows, generateRawRows(schemapb.DataType_Int64), compareRow))
-	data, err := anyToColumns(rows, validRows, collectionSchema)
+	data, err := anyToColumns(rows, validRows, collectionSchema, true)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, len(collectionSchema.Fields)+1, len(data))
+	assert.Equal(t, len(collectionSchema.Fields), len(data))
 
 	body, _ = generateRequestBodyWithArray(schemapb.DataType_Int64)
-	collectionSchema = newCollectionSchemaWithArray(generateCollectionSchema(schemapb.DataType_Int64, false))
+	collectionSchema = newCollectionSchemaWithArray(generateCollectionSchema(schemapb.DataType_Int64, false, true))
 	err, rows, validRows = checkAndSetData(string(body), collectionSchema)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 0, len(validRows))
 	assert.Equal(t, true, compareRows(rows, newRowsWithArray(generateRawRows(schemapb.DataType_Int64)), compareRow))
-	data, err = anyToColumns(rows, validRows, collectionSchema)
+	data, err = anyToColumns(rows, validRows, collectionSchema, true)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, len(collectionSchema.Fields)+1, len(data))
+	assert.Equal(t, len(collectionSchema.Fields), len(data))
 }
 
 func TestVector(t *testing.T) {
@@ -1613,31 +2047,50 @@ func TestVector(t *testing.T) {
 	float16Vector := "vector-float16"
 	bfloat16Vector := "vector-bfloat16"
 	sparseFloatVector := "vector-sparse-float"
-	row1 := map[string]interface{}{
-		FieldBookID:       int64(1),
-		floatVector:       []float32{0.1, 0.11},
-		binaryVector:      []byte{1},
-		float16Vector:     []byte{1, 1, 11, 11},
-		bfloat16Vector:    []byte{1, 1, 11, 11},
-		sparseFloatVector: map[uint32]float32{0: 0.1, 1: 0.11},
+	testcaseRows := []map[string]interface{}{
+		{
+			FieldBookID:       int64(1),
+			floatVector:       []float32{0.1, 0.11},
+			binaryVector:      []byte{1},
+			float16Vector:     []byte{1, 1, 11, 11},
+			bfloat16Vector:    []byte{1, 1, 11, 11},
+			sparseFloatVector: map[uint32]float32{0: 0.1, 1: 0.11},
+		},
+		{
+			FieldBookID:       int64(2),
+			floatVector:       []float32{0.2, 0.22},
+			binaryVector:      []byte{2},
+			float16Vector:     []byte{2, 2, 22, 22},
+			bfloat16Vector:    []byte{2, 2, 22, 22},
+			sparseFloatVector: map[uint32]float32{1000: 0.3, 200: 0.44},
+		},
+		{
+			FieldBookID:       int64(3),
+			floatVector:       []float32{0.3, 0.33},
+			binaryVector:      []byte{3},
+			float16Vector:     []byte{3, 3, 33, 33},
+			bfloat16Vector:    []byte{3, 3, 33, 33},
+			sparseFloatVector: map[uint32]float32{987621: 32190.31, 32189: 0.0001},
+		},
+		{
+			FieldBookID:       int64(4),
+			floatVector:       []float32{0.4, 0.44},
+			binaryVector:      []byte{4},
+			float16Vector:     []float32{0.4, 0.44},
+			bfloat16Vector:    []float32{0.4, 0.44},
+			sparseFloatVector: map[uint32]float32{25: 0.1, 1: 0.11},
+		},
+		{
+			FieldBookID:       int64(5),
+			floatVector:       []float32{-0.4, -0.44},
+			binaryVector:      []byte{5},
+			float16Vector:     []int64{99999999, -99999999},
+			bfloat16Vector:    []int64{99999999, -99999999},
+			sparseFloatVector: map[uint32]float32{1121: 0.1, 3: 0.11},
+		},
 	}
-	row2 := map[string]interface{}{
-		FieldBookID:       int64(2),
-		floatVector:       []float32{0.2, 0.22},
-		binaryVector:      []byte{2},
-		float16Vector:     []byte{2, 2, 22, 22},
-		bfloat16Vector:    []byte{2, 2, 22, 22},
-		sparseFloatVector: map[uint32]float32{1000: 0.3, 200: 0.44},
-	}
-	row3 := map[string]interface{}{
-		FieldBookID:       int64(3),
-		floatVector:       []float32{0.3, 0.33},
-		binaryVector:      []byte{3},
-		float16Vector:     []byte{3, 3, 33, 33},
-		bfloat16Vector:    []byte{3, 3, 33, 33},
-		sparseFloatVector: map[uint32]float32{987621: 32190.31, 32189: 0.0001},
-	}
-	body, _ := wrapRequestBody([]map[string]interface{}{row1, row2, row3})
+	body, err := wrapRequestBody(testcaseRows)
+	assert.Nil(t, err)
 	primaryField := generatePrimaryField(schemapb.DataType_Int64, false)
 	floatVectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
 	floatVectorField.Name = floatVector
@@ -1660,21 +2113,36 @@ func TestVector(t *testing.T) {
 	}
 	err, rows, validRows := checkAndSetData(string(body), collectionSchema)
 	assert.Equal(t, nil, err)
-	for _, row := range rows {
+	for i, row := range rows {
+		assert.Equal(t, 2, len(row[floatVector].([]float32)))
 		assert.Equal(t, 1, len(row[binaryVector].([]byte)))
-		assert.Equal(t, 4, len(row[float16Vector].([]byte)))
-		assert.Equal(t, 4, len(row[bfloat16Vector].([]byte)))
+		if fv, ok := testcaseRows[i][float16Vector].([]float32); ok {
+			assert.Equal(t, fv, row[float16Vector].([]float32))
+		} else if iv, ok := testcaseRows[i][float16Vector].([]int64); ok {
+			assert.Equal(t, len(iv), len(row[float16Vector].([]float32)))
+		} else {
+			assert.Equal(t, 4, len(row[float16Vector].([]byte)))
+			assert.Equal(t, testcaseRows[i][float16Vector].([]byte), row[float16Vector].([]byte))
+		}
+		if fv, ok := testcaseRows[i][bfloat16Vector].([]float32); ok {
+			assert.Equal(t, fv, row[float16Vector].([]float32))
+		} else if iv, ok := testcaseRows[i][bfloat16Vector].([]int64); ok {
+			assert.Equal(t, len(iv), len(row[bfloat16Vector].([]float32)))
+		} else {
+			assert.Equal(t, 4, len(row[bfloat16Vector].([]byte)))
+			assert.Equal(t, testcaseRows[i][bfloat16Vector].([]byte), row[bfloat16Vector].([]byte))
+		}
 		// all test sparse rows have 2 elements, each should be of 8 bytes
 		assert.Equal(t, 16, len(row[sparseFloatVector].([]byte)))
 	}
 	assert.Equal(t, 0, len(validRows))
-	data, err := anyToColumns(rows, validRows, collectionSchema)
+	data, err := anyToColumns(rows, validRows, collectionSchema, true)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, len(collectionSchema.Fields)+1, len(data))
 
 	assertError := func(field string, value interface{}) {
 		row := make(map[string]interface{})
-		for k, v := range row1 {
+		for k, v := range testcaseRows[0] {
 			row[k] = v
 		}
 		row[field] = value
@@ -1683,8 +2151,6 @@ func TestVector(t *testing.T) {
 		assert.Error(t, err)
 	}
 
-	assertError(bfloat16Vector, []int64{99999999, -99999999})
-	assertError(float16Vector, []int64{99999999, -99999999})
 	assertError(binaryVector, []int64{99999999, -99999999})
 	assertError(floatVector, []float64{math.MaxFloat64, 0})
 	assertError(sparseFloatVector, map[uint32]float32{0: -0.1, 1: 0.11, 2: 0.12})

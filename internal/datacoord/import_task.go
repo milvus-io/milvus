@@ -17,10 +17,9 @@
 package datacoord
 
 import (
-	"encoding/json"
-
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -185,7 +184,7 @@ func (p *preImportTask) MarshalJSON() ([]byte, error) {
 		NodeID:       p.GetNodeID(),
 		State:        p.GetState().String(),
 		Reason:       p.GetReason(),
-		TaskType:     "PreImportTask",
+		TaskType:     p.GetType().String(),
 		CreatedTime:  p.GetCreatedTime(),
 		CompleteTime: p.GetCompleteTime(),
 	}
@@ -231,7 +230,7 @@ func (t *importTask) MarshalJSON() ([]byte, error) {
 		NodeID:       t.GetNodeID(),
 		State:        t.GetState().String(),
 		Reason:       t.GetReason(),
-		TaskType:     "ImportTask",
+		TaskType:     t.GetType().String(),
 		CreatedTime:  t.GetCreatedTime(),
 		CompleteTime: t.GetCompleteTime(),
 	}

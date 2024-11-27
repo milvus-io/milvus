@@ -342,7 +342,7 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 	}
 
 	opts := tracer.GetInterceptorOpts()
-	s.grpcInternalServer = grpc.NewServer(
+	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
@@ -366,7 +366,12 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 				}
 				return s.serverID.Load()
 			}),
-		)))
+		)),
+		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
+	}
+
+	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("Proxy"))
+	s.grpcInternalServer = grpc.NewServer(grpcOpts...)
 	proxypb.RegisterProxyServer(s.grpcInternalServer, s)
 	grpc_health_v1.RegisterHealthServer(s.grpcInternalServer, s)
 	errChan <- nil
@@ -456,13 +461,6 @@ func (s *Server) init() error {
 		}
 	}
 
-	if HTTPParams.Enabled.GetAsBool() {
-		registerHTTPHandlerOnce.Do(func() {
-			log.Info("register Proxy http server")
-			s.registerHTTPServer()
-		})
-	}
-
 	if s.rootCoordClient == nil {
 		var err error
 		log.Debug("create RootCoord client for Proxy")
@@ -528,6 +526,13 @@ func (s *Server) init() error {
 	log.Debug("set QueryCoord client for Proxy")
 	s.proxy.SetQueryCoordClient(s.queryCoordClient)
 	log.Debug("set QueryCoord client for Proxy done")
+
+	if HTTPParams.Enabled.GetAsBool() {
+		registerHTTPHandlerOnce.Do(func() {
+			log.Info("register Proxy http server")
+			s.registerHTTPServer()
+		})
+	}
 
 	log.Debug(fmt.Sprintf("update Proxy's state to %s", commonpb.StateCode_Initializing.String()))
 	s.proxy.UpdateStateCode(commonpb.StateCode_Initializing)
@@ -983,6 +988,10 @@ func (s *Server) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest
 
 func (s *Server) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
 	return s.proxy.OperatePrivilege(ctx, req)
+}
+
+func (s *Server) OperatePrivilegeV2(ctx context.Context, req *milvuspb.OperatePrivilegeV2Request) (*commonpb.Status, error) {
+	return s.proxy.OperatePrivilegeV2(ctx, req)
 }
 
 func (s *Server) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {

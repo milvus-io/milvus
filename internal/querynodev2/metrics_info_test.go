@@ -18,12 +18,12 @@ package querynodev2
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -65,7 +66,7 @@ func TestGetPipelineJSON(t *testing.T) {
 		{
 			Name:           ch,
 			WatchState:     "Healthy",
-			LatestTimeTick: typeutil.TimestampToString(0),
+			LatestTimeTick: tsoutil.PhysicalTimeFormat(0),
 			NodeID:         paramtable.GetNodeID(),
 			CollectionID:   1,
 		},
@@ -119,12 +120,12 @@ func TestGetSegmentJSON(t *testing.T) {
 	assert.Equal(t, int64(1001), segments[0].CollectionID)
 	assert.Equal(t, int64(2001), segments[0].PartitionID)
 	assert.Equal(t, int64(1024), segments[0].MemSize)
-	assert.Equal(t, 1, len(segments[0].Index))
-	assert.Equal(t, int64(1), segments[0].Index[0].IndexFieldID)
-	assert.Equal(t, int64(101), segments[0].Index[0].IndexID)
-	assert.Equal(t, int64(512), segments[0].Index[0].IndexSize)
-	assert.Equal(t, int64(10001), segments[0].Index[0].BuildID)
-	assert.True(t, segments[0].Index[0].IsLoaded)
+	assert.Equal(t, 1, len(segments[0].IndexedFields))
+	assert.Equal(t, int64(1), segments[0].IndexedFields[0].IndexFieldID)
+	assert.Equal(t, int64(101), segments[0].IndexedFields[0].IndexID)
+	assert.Equal(t, int64(512), segments[0].IndexedFields[0].IndexSize)
+	assert.Equal(t, int64(10001), segments[0].IndexedFields[0].BuildID)
+	assert.True(t, segments[0].IndexedFields[0].IsLoaded)
 	assert.Equal(t, "Growing", segments[0].State)
 	assert.Equal(t, "default", segments[0].ResourceGroup)
 	assert.Equal(t, int64(100), segments[0].LoadedInsertRowCount)

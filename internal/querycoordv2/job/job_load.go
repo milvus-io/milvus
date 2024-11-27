@@ -98,14 +98,14 @@ func (job *LoadCollectionJob) PreExecute() error {
 		req.ResourceGroups = []string{meta.DefaultResourceGroupName}
 	}
 
-	collection := job.meta.GetCollection(req.GetCollectionID())
+	collection := job.meta.GetCollection(job.ctx, req.GetCollectionID())
 	if collection == nil {
 		return nil
 	}
 
 	if collection.GetReplicaNumber() != req.GetReplicaNumber() {
 		msg := fmt.Sprintf("collection with different replica number %d existed, release this collection first before changing its replica number",
-			job.meta.GetReplicaNumber(req.GetCollectionID()),
+			job.meta.GetReplicaNumber(job.ctx, req.GetCollectionID()),
 		)
 		log.Warn(msg)
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded collection")
@@ -125,7 +125,7 @@ func (job *LoadCollectionJob) PreExecute() error {
 		)
 		return merr.WrapErrParameterInvalid(collection.GetLoadFields(), req.GetLoadFields(), "can't change the load field list for loaded collection")
 	}
-	collectionUsedRG := job.meta.ReplicaManager.GetResourceGroupByCollection(collection.GetCollectionID()).Collect()
+	collectionUsedRG := job.meta.ReplicaManager.GetResourceGroupByCollection(job.ctx, collection.GetCollectionID()).Collect()
 	left, right := lo.Difference(collectionUsedRG, req.GetResourceGroups())
 	if len(left) > 0 || len(right) > 0 {
 		msg := fmt.Sprintf("collection with different resource groups %v existed, release this collection first before changing its resource groups",
@@ -149,7 +149,7 @@ func (job *LoadCollectionJob) Execute() error {
 		log.Warn(msg, zap.Error(err))
 		return errors.Wrap(err, msg)
 	}
-	loadedPartitionIDs := lo.Map(job.meta.CollectionManager.GetPartitionsByCollection(req.GetCollectionID()),
+	loadedPartitionIDs := lo.Map(job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionID()),
 		func(partition *meta.Partition, _ int) int64 {
 			return partition.GetPartitionID()
 		})
@@ -163,10 +163,10 @@ func (job *LoadCollectionJob) Execute() error {
 	job.undo.LackPartitions = lackPartitionIDs
 	log.Info("find partitions to load", zap.Int64s("partitions", lackPartitionIDs))
 
-	colExisted := job.meta.CollectionManager.Exist(req.GetCollectionID())
+	colExisted := job.meta.CollectionManager.Exist(job.ctx, req.GetCollectionID())
 	if !colExisted {
 		// Clear stale replicas, https://github.com/milvus-io/milvus/issues/20444
-		err = job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
+		err = job.meta.ReplicaManager.RemoveCollection(job.ctx, req.GetCollectionID())
 		if err != nil {
 			msg := "failed to clear stale replicas"
 			log.Warn(msg, zap.Error(err))
@@ -175,7 +175,7 @@ func (job *LoadCollectionJob) Execute() error {
 	}
 
 	// 2. create replica if not exist
-	replicas := job.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
+	replicas := job.meta.ReplicaManager.GetByCollection(job.ctx, req.GetCollectionID())
 	if len(replicas) == 0 {
 		collectionInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionID())
 		if err != nil {
@@ -184,7 +184,7 @@ func (job *LoadCollectionJob) Execute() error {
 
 		// API of LoadCollection is wired, we should use map[resourceGroupNames]replicaNumber as input, to keep consistency with `TransferReplica` API.
 		// Then we can implement dynamic replica changed in different resource group independently.
-		_, err = utils.SpawnReplicasWithRG(job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), collectionInfo.GetVirtualChannelNames())
+		_, err = utils.SpawnReplicasWithRG(job.ctx, job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), collectionInfo.GetVirtualChannelNames())
 		if err != nil {
 			msg := "failed to spawn replica for collection"
 			log.Warn(msg, zap.Error(err))
@@ -227,7 +227,7 @@ func (job *LoadCollectionJob) Execute() error {
 		LoadSpan:  sp,
 	}
 	job.undo.IsNewCollection = true
-	err = job.meta.CollectionManager.PutCollection(collection, partitions...)
+	err = job.meta.CollectionManager.PutCollection(job.ctx, collection, partitions...)
 	if err != nil {
 		msg := "failed to store collection and partitions"
 		log.Warn(msg, zap.Error(err))
@@ -312,7 +312,7 @@ func (job *LoadPartitionJob) PreExecute() error {
 		req.ResourceGroups = []string{meta.DefaultResourceGroupName}
 	}
 
-	collection := job.meta.GetCollection(req.GetCollectionID())
+	collection := job.meta.GetCollection(job.ctx, req.GetCollectionID())
 	if collection == nil {
 		return nil
 	}
@@ -337,7 +337,7 @@ func (job *LoadPartitionJob) PreExecute() error {
 		)
 		return merr.WrapErrParameterInvalid(collection.GetLoadFields(), req.GetLoadFields(), "can't change the load field list for loaded collection")
 	}
-	collectionUsedRG := job.meta.ReplicaManager.GetResourceGroupByCollection(collection.GetCollectionID()).Collect()
+	collectionUsedRG := job.meta.ReplicaManager.GetResourceGroupByCollection(job.ctx, collection.GetCollectionID()).Collect()
 	left, right := lo.Difference(collectionUsedRG, req.GetResourceGroups())
 	if len(left) > 0 || len(right) > 0 {
 		msg := fmt.Sprintf("collection with different resource groups %v existed, release this collection first before changing its resource groups",
@@ -358,7 +358,7 @@ func (job *LoadPartitionJob) Execute() error {
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
 
 	// 1. Fetch target partitions
-	loadedPartitionIDs := lo.Map(job.meta.CollectionManager.GetPartitionsByCollection(req.GetCollectionID()),
+	loadedPartitionIDs := lo.Map(job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionID()),
 		func(partition *meta.Partition, _ int) int64 {
 			return partition.GetPartitionID()
 		})
@@ -373,9 +373,9 @@ func (job *LoadPartitionJob) Execute() error {
 	log.Info("find partitions to load", zap.Int64s("partitions", lackPartitionIDs))
 
 	var err error
-	if !job.meta.CollectionManager.Exist(req.GetCollectionID()) {
+	if !job.meta.CollectionManager.Exist(job.ctx, req.GetCollectionID()) {
 		// Clear stale replicas, https://github.com/milvus-io/milvus/issues/20444
-		err = job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
+		err = job.meta.ReplicaManager.RemoveCollection(job.ctx, req.GetCollectionID())
 		if err != nil {
 			msg := "failed to clear stale replicas"
 			log.Warn(msg, zap.Error(err))
@@ -384,13 +384,13 @@ func (job *LoadPartitionJob) Execute() error {
 	}
 
 	// 2. create replica if not exist
-	replicas := job.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
+	replicas := job.meta.ReplicaManager.GetByCollection(context.TODO(), req.GetCollectionID())
 	if len(replicas) == 0 {
 		collectionInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionID())
 		if err != nil {
 			return err
 		}
-		_, err = utils.SpawnReplicasWithRG(job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), collectionInfo.GetVirtualChannelNames())
+		_, err = utils.SpawnReplicasWithRG(job.ctx, job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), collectionInfo.GetVirtualChannelNames())
 		if err != nil {
 			msg := "failed to spawn replica for collection"
 			log.Warn(msg, zap.Error(err))
@@ -419,7 +419,7 @@ func (job *LoadPartitionJob) Execute() error {
 		}
 	})
 	ctx, sp := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "LoadPartition", trace.WithNewRoot())
-	if !job.meta.CollectionManager.Exist(req.GetCollectionID()) {
+	if !job.meta.CollectionManager.Exist(job.ctx, req.GetCollectionID()) {
 		job.undo.IsNewCollection = true
 
 		collection := &meta.Collection{
@@ -434,14 +434,14 @@ func (job *LoadPartitionJob) Execute() error {
 			CreatedAt: time.Now(),
 			LoadSpan:  sp,
 		}
-		err = job.meta.CollectionManager.PutCollection(collection, partitions...)
+		err = job.meta.CollectionManager.PutCollection(job.ctx, collection, partitions...)
 		if err != nil {
 			msg := "failed to store collection and partitions"
 			log.Warn(msg, zap.Error(err))
 			return errors.Wrap(err, msg)
 		}
 	} else { // collection exists, put partitions only
-		err = job.meta.CollectionManager.PutPartition(partitions...)
+		err = job.meta.CollectionManager.PutPartition(job.ctx, partitions...)
 		if err != nil {
 			msg := "failed to store partitions"
 			log.Warn(msg, zap.Error(err))

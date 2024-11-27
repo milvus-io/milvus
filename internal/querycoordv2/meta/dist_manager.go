@@ -17,10 +17,9 @@
 package meta
 
 import (
-	"encoding/json"
-
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
@@ -44,13 +43,9 @@ func NewDistributionManager() *DistributionManager {
 // If there are no segments, channels, or leader views, it returns an empty string.
 // In case of an error during JSON marshaling, it returns the error.
 func (dm *DistributionManager) GetDistributionJSON() string {
-	segments := dm.GetSegmentDist()
+	segments := dm.GetSegmentDist(0)
 	channels := dm.GetChannelDist()
 	leaderView := dm.GetLeaderView()
-
-	if len(segments) == 0 && len(channels) == 0 && len(leaderView) == 0 {
-		return ""
-	}
 
 	dist := &metricsinfo.QueryCoordDist{
 		Segments:    segments,

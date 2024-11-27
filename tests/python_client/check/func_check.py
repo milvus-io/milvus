@@ -121,9 +121,13 @@ class ResponseChecker:
         assert len(error_dict) > 0
         if isinstance(res, Error):
             error_code = error_dict[ct.err_code]
-            assert res.code == error_code or error_dict[ct.err_msg] in res.message, (
+            # assert res.code == error_code or error_dict[ct.err_msg] in res.message, (
+            #     f"Response of API {self.func_name} "
+            #     f"expect get error code {error_dict[ct.err_code]} or error message {error_dict[ct.err_code]}, "
+            #     f"but got {res.code} {res.message}")
+            assert error_dict[ct.err_msg] in res.message, (
                 f"Response of API {self.func_name} "
-                f"expect get error code {error_dict[ct.err_code]} or error message {error_dict[ct.err_code]}, "
+                f"expect get error message {error_dict[ct.err_code]}, "
                 f"but got {res.code} {res.message}")
 
         else:

@@ -84,12 +84,12 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	})
 
 	// properties needs to be refreshed in the cache
-	aliases := a.core.meta.ListAliasesByID(oldColl.CollectionID)
+	aliases := a.core.meta.ListAliasesByID(ctx, oldColl.CollectionID)
 	redoTask.AddSyncStep(&expireCacheStep{
 		baseStep:        baseStep{core: a.core},
 		dbName:          a.Req.GetDbName(),
 		collectionNames: append(aliases, a.Req.GetCollectionName()),
-		collectionID:    oldColl.CollectionID,
+		collectionID:    InvalidCollectionID,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
 	})
 
@@ -126,10 +126,10 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 }
 
 func (a *alterCollectionTask) GetLockerKey() LockerKey {
-	collectionName := a.core.getRealCollectionName(a.ctx, a.Req.GetDbName(), a.Req.GetCollectionName())
+	collection := a.core.getCollectionIDStr(a.ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.Req.GetCollectionID())
 	return NewLockerKeyChain(
 		NewClusterLockerKey(false),
 		NewDatabaseLockerKey(a.Req.GetDbName(), false),
-		NewCollectionLockerKey(collectionName, true),
+		NewCollectionLockerKey(collection, true),
 	)
 }

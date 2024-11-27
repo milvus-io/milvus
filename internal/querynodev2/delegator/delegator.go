@@ -213,12 +213,49 @@ func (sd *shardDelegator) GetPartitionStatsVersions(ctx context.Context) map[int
 	return partStatMap
 }
 
+func (sd *shardDelegator) shallowCopySearchRequest(req *internalpb.SearchRequest, targetID int64) *internalpb.SearchRequest {
+	// Create a new SearchRequest with the same fields
+	nodeReq := &internalpb.SearchRequest{
+		Base:               &commonpb.MsgBase{TargetID: targetID},
+		ReqID:              req.ReqID,
+		DbID:               req.DbID,
+		CollectionID:       req.CollectionID,
+		PartitionIDs:       req.PartitionIDs, // Shallow copy: Same underlying slice
+		Dsl:                req.Dsl,
+		PlaceholderGroup:   req.PlaceholderGroup, // Shallow copy: Same underlying byte slice
+		DslType:            req.DslType,
+		SerializedExprPlan: req.SerializedExprPlan, // Shallow copy: Same underlying byte slice
+		OutputFieldsId:     req.OutputFieldsId,     // Shallow copy: Same underlying slice
+		MvccTimestamp:      req.MvccTimestamp,
+		GuaranteeTimestamp: req.GuaranteeTimestamp,
+		TimeoutTimestamp:   req.TimeoutTimestamp,
+		Nq:                 req.Nq,
+		Topk:               req.Topk,
+		MetricType:         req.MetricType,
+		IgnoreGrowing:      req.IgnoreGrowing,
+		Username:           req.Username,
+		SubReqs:            req.SubReqs, // Shallow copy: Same underlying slice of pointers
+		IsAdvanced:         req.IsAdvanced,
+		Offset:             req.Offset,
+		ConsistencyLevel:   req.ConsistencyLevel,
+		GroupByFieldId:     req.GroupByFieldId,
+		GroupSize:          req.GroupSize,
+		FieldId:            req.FieldId,
+		IsTopkReduce:       req.IsTopkReduce,
+	}
+
+	return nodeReq
+}
+
 func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.SearchRequest {
-	nodeReq := proto.Clone(req).(*querypb.SearchRequest)
-	nodeReq.Scope = scope
-	nodeReq.Req.Base.TargetID = targetID
-	nodeReq.SegmentIDs = segmentIDs
-	nodeReq.DmlChannels = []string{sd.vchannelName}
+	nodeReq := &querypb.SearchRequest{
+		DmlChannels:     []string{sd.vchannelName},
+		SegmentIDs:      segmentIDs,
+		Scope:           scope,
+		Req:             sd.shallowCopySearchRequest(req.GetReq(), targetID),
+		FromShardLeader: req.FromShardLeader,
+		TotalChannelNum: req.TotalChannelNum,
+	}
 	return nodeReq
 }
 

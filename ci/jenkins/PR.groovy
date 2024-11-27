@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.67.0') _
+@Library('jenkins-shared-library@v0.71.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 def milvus_helm_chart_version = '4.2.8'
@@ -10,7 +10,7 @@ pipeline {
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         preserveStashes(buildCount: 5)
         disableConcurrentBuilds(abortPrevious: true)
-        timeout(time: 6, unit: 'HOURS')
+        timeout(time: 3, unit: 'HOURS')
         throttleJobProperty(
             categories: ['cpu-e2e'],
             throttleEnabled: true,

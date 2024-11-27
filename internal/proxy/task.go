@@ -1723,7 +1723,6 @@ func (t *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 }
 
 func (t *releaseCollectionTask) PostExecute(ctx context.Context) error {
-	globalMetaCache.DeprecateShardCache(t.GetDbName(), t.CollectionName)
 	return nil
 }
 
@@ -1993,7 +1992,6 @@ func (t *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 }
 
 func (t *releasePartitionsTask) PostExecute(ctx context.Context) error {
-	globalMetaCache.DeprecateShardCache(t.GetDbName(), t.CollectionName)
 	return nil
 }
 

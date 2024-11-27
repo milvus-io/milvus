@@ -286,6 +286,8 @@ proxy:
   ginLogging: true
   ginLogSkipPaths: / # skip url path for gin log
   maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
+  ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
+  dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   accessLog:
     enable: false # Whether to enable the access log feature.
@@ -353,7 +355,7 @@ queryCoord:
   balanceCostThreshold: 0.001 # the threshold of balance cost, if the difference of cluster's cost after executing the balance plan is less than this value, the plan will not be executed
   checkSegmentInterval: 1000
   checkChannelInterval: 1000
-  checkBalanceInterval: 10000
+  checkBalanceInterval: 3000
   checkIndexInterval: 10000
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
@@ -515,6 +517,7 @@ dataCoord:
     balanceInterval: 360 # The interval with which the channel manager check dml channel balance status
     checkInterval: 1 # The interval in seconds with which the channel manager advances channel states
     notifyChannelOperationTimeout: 5 # Timeout notifing channel operations (in seconds).
+    maxConcurrentChannelTaskNumPerDN: 32 # The maximum concurrency for each DataNode executing channel tasks (watch, release).
   segment:
     maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
@@ -559,7 +562,7 @@ dataCoord:
     # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
     taskPrioritizer: default
-    taskQueueCapacity: 256 # compaction task queue size
+    taskQueueCapacity: 100000 # compaction task queue size
     rpcTimeout: 10
     maxParallelTaskNum: 10
     dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
@@ -675,6 +678,7 @@ dataNode:
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
+    useMergeSort: false # Whether to enable mergeSort mode when performing mixCompaction.
   gracefulStopTimeout: 1800 # seconds. force stop node without graceful stop
   slot:
     slotCap: 16 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode
@@ -780,6 +784,12 @@ tls:
   serverKeyPath: configs/cert/server.key
   caPemPath: configs/cert/ca.pem
 
+# Configure the node-tls enable.
+internaltls:
+  serverPemPath: configs/cert/server.pem
+  serverKeyPath: configs/cert/server.key
+  caPemPath: configs/cert/ca.pem
+
 common:
   defaultPartitionName: _default # Name of the default partition when a collection is created
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
@@ -810,7 +820,32 @@ common:
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
-    defaultRootPassword: Milvus # default password for root user
+    defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
+    rbac:
+      overrideBuiltInPrivilgeGroups:
+        enabled: false # Whether to override build-in privilege groups
+      cluster:
+        readonly:
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups # Cluster level readonly privileges
+        readwrite:
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups # Cluster level readwrite privileges
+        admin:
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups,BackupRBAC,RestoreRBAC,CreateDatabase,DropDatabase,CreateOwnership,DropOwnership,ManageOwnership,CreateResourceGroup,DropResourceGroup,UpdateUser # Cluster level admin privileges
+      database:
+        readonly:
+          privileges: ShowCollections,DescribeDatabase # Database level readonly privileges
+        readwrite:
+          privileges: ShowCollections,DescribeDatabase,AlterDatabase # Database level readwrite privileges
+        admin:
+          privileges: ShowCollections,DescribeDatabase,AlterDatabase,CreateCollection,DropCollection # Database level admin privileges
+      collection:
+        readonly:
+          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases # Collection level readonly privileges
+        readwrite:
+          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,RenameCollection,CreateIndex,DropIndex,CreatePartition,DropPartition # Collection level readwrite privileges
+        admin:
+          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,RenameCollection,CreateIndex,DropIndex,CreatePartition,DropPartition,CreateAlias,DropAlias # Collection level admin privileges
+    internaltlsEnabled: false
     tlsMode: 0
   session:
     ttl: 30 # ttl value when session granting a lease to register service
@@ -836,6 +871,7 @@ common:
   usePartitionKeyAsClusteringKey: false # if true, do clustering compaction and segment prune on partition key field
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction
+  localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
@@ -1081,11 +1117,11 @@ streaming:
 # Any configuration related to the knowhere vector search engine
 knowhere:
   enable: true # When enable this configuration, the index parameters defined following will be automatically populated as index parameters, without requiring user input.
-  DISKANN: # Index parameters for diskann
-    build: # Diskann build params
+  DISKANN:
+    build:
       max_degree: 56 # Maximum degree of the Vamana graph
-      search_list_size: 100 # Size of the candidate list during building graph
       pq_code_budget_gb_ratio: 0.125 # Size limit on the PQ code (compared with raw data)
       search_cache_budget_gb_ratio: 0.1 # Ratio of cached node numbers to raw data
-    search: # Diskann search params
-      beam_width_ratio: 4.0 # Ratio between the maximum number of IO requests per search iteration and CPU number
+      search_list_size: 100 # Size of the candidate list during building graph
+    search:
+      beam_width_ratio: 4 # Ratio between the maximum number of IO requests per search iteration and CPU number

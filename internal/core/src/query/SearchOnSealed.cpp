@@ -81,6 +81,7 @@ void
 SearchOnSealed(const Schema& schema,
                std::shared_ptr<ChunkedColumnBase> column,
                const SearchInfo& search_info,
+               const std::map<std::string, std::string>& index_info,
                const void* query_data,
                int64_t num_queries,
                int64_t row_count,
@@ -94,12 +95,12 @@ SearchOnSealed(const Schema& schema,
                    ? 0
                    : field.get_dim();
 
-    query::dataset::SearchDataset dataset{search_info.metric_type_,
-                                          num_queries,
-                                          search_info.topk_,
-                                          search_info.round_decimal_,
-                                          dim,
-                                          query_data};
+    query::dataset::SearchDataset query_dataset{search_info.metric_type_,
+                                                num_queries,
+                                                search_info.topk_,
+                                                search_info.round_decimal_,
+                                                dim,
+                                                query_data};
 
     auto data_type = field.get_data_type();
     CheckBruteForceSearchParam(field, search_info);
@@ -115,49 +116,27 @@ SearchOnSealed(const Schema& schema,
         auto vec_data = column->Data(i);
         auto chunk_size = column->chunk_row_nums(i);
         const uint8_t* bitset_ptr = nullptr;
-        bool aligned = false;
-        if ((offset & 0x7) == 0) {
-            bitset_ptr = bitview.data() + (offset >> 3);
-            aligned = true;
-        } else {
-            char* bitset_data = new char[(chunk_size + 7) / 8];
-            std::fill(bitset_data, bitset_data + sizeof(bitset_data), 0);
-            bitset::detail::ElementWiseBitsetPolicy<char>::op_copy(
-                reinterpret_cast<const char*>(bitview.data()),
-                offset,
-                bitset_data,
-                0,
-                chunk_size);
-            bitset_ptr = reinterpret_cast<const uint8_t*>(bitset_data);
-        }
-        BitsetView bitset_view(bitset_ptr, chunk_size);
-
+        auto data_id = offset;
+        auto raw_dataset =
+            query::dataset::RawDataset{offset, dim, chunk_size, vec_data};
         if (search_info.group_by_field_id_.has_value()) {
-            auto sub_qr = BruteForceSearchIterators(dataset,
-                                                    vec_data,
-                                                    chunk_size,
+            auto sub_qr = BruteForceSearchIterators(query_dataset,
+                                                    raw_dataset,
                                                     search_info,
-                                                    bitset_view,
+                                                    index_info,
+                                                    bitview,
                                                     data_type);
             final_qr.merge(sub_qr);
         } else {
-            auto sub_qr = BruteForceSearch(dataset,
-                                           vec_data,
-                                           chunk_size,
+            auto sub_qr = BruteForceSearch(query_dataset,
+                                           raw_dataset,
                                            search_info,
-                                           bitset_view,
+                                           index_info,
+                                           bitview,
                                            data_type);
-            for (auto& o : sub_qr.mutable_seg_offsets()) {
-                if (o != -1) {
-                    o += offset;
-                }
-            }
             final_qr.merge(sub_qr);
         }
 
-        if (!aligned) {
-            delete[] bitset_ptr;
-        }
         offset += chunk_size;
     }
     if (search_info.group_by_field_id_.has_value()) {
@@ -169,14 +148,15 @@ SearchOnSealed(const Schema& schema,
         result.distances_ = std::move(final_qr.mutable_distances());
         result.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());
     }
-    result.unity_topK_ = dataset.topk;
-    result.total_nq_ = dataset.num_queries;
+    result.unity_topK_ = query_dataset.topk;
+    result.total_nq_ = query_dataset.num_queries;
 }
 
 void
 SearchOnSealed(const Schema& schema,
                const void* vec_data,
                const SearchInfo& search_info,
+               const std::map<std::string, std::string>& index_info,
                const void* query_data,
                int64_t num_queries,
                int64_t row_count,
@@ -190,28 +170,37 @@ SearchOnSealed(const Schema& schema,
                    ? 0
                    : field.get_dim();
 
-    query::dataset::SearchDataset dataset{search_info.metric_type_,
-                                          num_queries,
-                                          search_info.topk_,
-                                          search_info.round_decimal_,
-                                          dim,
-                                          query_data};
+    query::dataset::SearchDataset query_dataset{search_info.metric_type_,
+                                                num_queries,
+                                                search_info.topk_,
+                                                search_info.round_decimal_,
+                                                dim,
+                                                query_data};
 
     auto data_type = field.get_data_type();
     CheckBruteForceSearchParam(field, search_info);
+    auto raw_dataset = query::dataset::RawDataset{0, dim, row_count, vec_data};
     if (search_info.group_by_field_id_.has_value()) {
-        auto sub_qr = BruteForceSearchIterators(
-            dataset, vec_data, row_count, search_info, bitset, data_type);
+        auto sub_qr = BruteForceSearchIterators(query_dataset,
+                                                raw_dataset,
+                                                search_info,
+                                                index_info,
+                                                bitset,
+                                                data_type);
         result.AssembleChunkVectorIterators(
             num_queries, 1, {0}, sub_qr.chunk_iterators());
     } else {
-        auto sub_qr = BruteForceSearch(
-            dataset, vec_data, row_count, search_info, bitset, data_type);
+        auto sub_qr = BruteForceSearch(query_dataset,
+                                       raw_dataset,
+                                       search_info,
+                                       index_info,
+                                       bitset,
+                                       data_type);
         result.distances_ = std::move(sub_qr.mutable_distances());
         result.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
     }
-    result.unity_topK_ = dataset.topk;
-    result.total_nq_ = dataset.num_queries;
+    result.unity_topK_ = query_dataset.topk;
+    result.total_nq_ = query_dataset.num_queries;
 }
 
 }  // namespace milvus::query

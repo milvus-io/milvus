@@ -24,16 +24,21 @@ import (
 
 var (
 	json = sonic.ConfigStd
-	// Marshal is exported by gin/json package.
+	// Marshal is exported from bytedance/sonic package.
 	Marshal = json.Marshal
-	// Unmarshal is exported by gin/json package.
+	// Unmarshal is exported from bytedance/sonic package.
 	Unmarshal = json.Unmarshal
-	// MarshalIndent is exported by gin/json package.
+	// MarshalIndent is exported from bytedance/sonic package.
 	MarshalIndent = json.MarshalIndent
-	// NewDecoder is exported by gin/json package.
+	// NewDecoder is exported from bytedance/sonic package.
 	NewDecoder = json.NewDecoder
-	// NewEncoder is exported by gin/json package.
+	// NewEncoder is exported from bytedance/sonic package.
 	NewEncoder = json.NewEncoder
 )
 
-type Number = gojson.Number
+type (
+	Delim      = gojson.Delim
+	Decoder    = gojson.Decoder
+	Number     = gojson.Number
+	RawMessage = gojson.RawMessage
+)

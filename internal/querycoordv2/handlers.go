@@ -18,17 +18,19 @@ package querycoordv2
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -47,7 +49,7 @@ import (
 // may come from different replica group. We only need these shards to form a replica that serves query
 // requests.
 func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
-	for _, replica := range s.meta.ReplicaManager.GetByCollection(collectionID) {
+	for _, replica := range s.meta.ReplicaManager.GetByCollection(s.ctx, collectionID) {
 		isAvailable := true
 		for _, node := range replica.GetRONodes() {
 			if s.nodeMgr.Get(node) == nil {
@@ -62,9 +64,9 @@ func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
 	return false
 }
 
-func (s *Server) getCollectionSegmentInfo(collection int64) []*querypb.SegmentInfo {
+func (s *Server) getCollectionSegmentInfo(ctx context.Context, collection int64) []*querypb.SegmentInfo {
 	segments := s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collection))
-	currentTargetSegmentsMap := s.targetMgr.GetSealedSegmentsByCollection(collection, meta.CurrentTarget)
+	currentTargetSegmentsMap := s.targetMgr.GetSealedSegmentsByCollection(ctx, collection, meta.CurrentTarget)
 	infos := make(map[int64]*querypb.SegmentInfo)
 	for _, segment := range segments {
 		if _, existCurrentTarget := currentTargetSegmentsMap[segment.GetID()]; !existCurrentTarget {
@@ -102,7 +104,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 	copyMode bool,
 ) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.Int64("srcNode", srcNode))
-	plans := s.getBalancerFunc().AssignSegment(collectionID, segments, dstNodes, true)
+	plans := s.getBalancerFunc().AssignSegment(ctx, collectionID, segments, dstNodes, true)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica
@@ -181,7 +183,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 ) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 
-	plans := s.getBalancerFunc().AssignChannel(channels, dstNodes, true)
+	plans := s.getBalancerFunc().AssignChannel(ctx, channels, dstNodes, true)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica
@@ -289,6 +291,36 @@ func (s *Server) getChannelsFromQueryNode(ctx context.Context, req *milvuspb.Get
 func (s *Server) getSegmentsFromQueryNode(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
 	segments, err := getMetrics[*metricsinfo.Segment](ctx, s, req)
 	return metricsinfo.MarshalGetMetricsValues(segments, err)
+}
+
+func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+	v := jsonReq.Get(metricsinfo.MetricRequestParamINKey)
+	if !v.Exists() {
+		// default to get all segments from dataanode
+		return s.getSegmentsFromQueryNode(ctx, req)
+	}
+
+	in := v.String()
+	if in == "qn" {
+		// TODO: support filter by collection id
+		return s.getSegmentsFromQueryNode(ctx, req)
+	}
+
+	if in == "qc" {
+		v = jsonReq.Get(metricsinfo.MetricRequestParamCollectionIDKey)
+		collectionID := int64(0)
+		if v.Exists() {
+			collectionID = v.Int()
+		}
+		filteredSegments := s.dist.SegmentDistManager.GetSegmentDist(collectionID)
+		bs, err := json.Marshal(filteredSegments)
+		if err != nil {
+			log.Warn("marshal segment value failed", zap.Int64("collectionID", collectionID), zap.String("err", err.Error()))
+			return "", nil
+		}
+		return string(bs), nil
+	}
+	return "", fmt.Errorf("invalid param value in=[%s], it should be qc or qn", in)
 }
 
 // TODO(dragondriver): add more detail metrics
@@ -426,16 +458,16 @@ func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetric
 	return ret
 }
 
-func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) *milvuspb.ReplicaInfo {
+func (s *Server) fillReplicaInfo(ctx context.Context, replica *meta.Replica, withShardNodes bool) *milvuspb.ReplicaInfo {
 	info := &milvuspb.ReplicaInfo{
 		ReplicaID:         replica.GetID(),
 		CollectionID:      replica.GetCollectionID(),
 		NodeIds:           replica.GetNodes(),
 		ResourceGroupName: replica.GetResourceGroup(),
-		NumOutboundNode:   s.meta.GetOutgoingNodeNumByReplica(replica),
+		NumOutboundNode:   s.meta.GetOutgoingNodeNumByReplica(ctx, replica),
 	}
 
-	channels := s.targetMgr.GetDmChannelsByCollection(replica.GetCollectionID(), meta.CurrentTarget)
+	channels := s.targetMgr.GetDmChannelsByCollection(ctx, replica.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {
 		log.Warn("failed to get channels, collection may be not loaded or in recovering", zap.Int64("collectionID", replica.GetCollectionID()))
 		return info

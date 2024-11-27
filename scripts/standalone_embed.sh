@@ -47,7 +47,7 @@ EOF
         --health-start-period=90s \
         --health-timeout=20s \
         --health-retries=3 \
-        milvusdb/milvus:v2.4.15 \
+        milvusdb/milvus:v2.5.0-beta \
         milvus run standalone  1> /dev/null
 }
 

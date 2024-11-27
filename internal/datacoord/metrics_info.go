@@ -18,16 +18,18 @@ package datacoord
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -37,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
 )
@@ -91,7 +94,7 @@ func (s *Server) getChannelsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 	channel2Checkpoints := s.meta.GetChannelCheckpoints()
 	for _, channel := range channels {
 		if cp, ok := channel2Checkpoints[channel.Name]; ok {
-			channel.CheckpointTS = typeutil.TimestampToString(cp.GetTimestamp())
+			channel.CheckpointTS = tsoutil.PhysicalTimeFormat(cp.GetTimestamp())
 		} else {
 			log.Warn("channel not found in meta cache", zap.String("channel", channel.Name))
 		}
@@ -131,21 +134,54 @@ func mergeChannels(dnChannels []*metricsinfo.Channel, dcChannels map[int64]map[s
 	return mergedChannels
 }
 
+func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+	v := jsonReq.Get(metricsinfo.MetricRequestParamINKey)
+	if !v.Exists() {
+		// default to get all segments from dataanode
+		return s.getDataNodeSegmentsJSON(ctx, req)
+	}
+
+	in := v.String()
+	if in == "dn" {
+		// TODO: support filter by collection id
+		return s.getDataNodeSegmentsJSON(ctx, req)
+	}
+
+	if in == "dc" {
+		v = jsonReq.Get(metricsinfo.MetricRequestParamCollectionIDKey)
+		collectionID := int64(0)
+		if v.Exists() {
+			collectionID = v.Int()
+		}
+
+		segments := s.meta.getSegmentsMetrics(collectionID)
+		for _, seg := range segments {
+			isIndexed, indexedFields := s.meta.indexMeta.GetSegmentIndexedFields(seg.CollectionID, seg.SegmentID)
+			seg.IndexedFields = indexedFields
+			seg.IsIndexed = isIndexed
+		}
+
+		bs, err := json.Marshal(segments)
+		if err != nil {
+			log.Warn("marshal segment value failed", zap.Int64("collectionID", collectionID), zap.String("err", err.Error()))
+			return "", nil
+		}
+		return string(bs), nil
+	}
+	return "", fmt.Errorf("invalid param value in=[%s], it should be dc or dn", in)
+}
+
 func (s *Server) getDistJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) string {
-	segments := s.meta.getSegmentsMetrics()
+	segments := s.meta.getSegmentsMetrics(-1)
 	var channels []*metricsinfo.DmChannel
 	for nodeID, ch := range s.channelManager.GetChannelWatchInfos() {
 		for _, chInfo := range ch {
 			dmChannel := metrics.NewDMChannelFrom(chInfo.GetVchan())
 			dmChannel.NodeID = nodeID
 			dmChannel.WatchState = chInfo.State.String()
-			dmChannel.StartWatchTS = chInfo.GetStartTs()
+			dmChannel.StartWatchTS = typeutil.TimestampToString(uint64(chInfo.GetStartTs()))
 			channels = append(channels, dmChannel)
 		}
-	}
-
-	if len(segments) == 0 && len(channels) == 0 {
-		return ""
 	}
 
 	dist := &metricsinfo.DataCoordDist{
@@ -161,7 +197,7 @@ func (s *Server) getDistJSON(ctx context.Context, req *milvuspb.GetMetricsReques
 	return string(bs)
 }
 
-func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
+func (s *Server) getDataNodeSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
 	ret, err := getMetrics[*metricsinfo.Segment](s, ctx, req)
 	return metricsinfo.MarshalGetMetricsValues(ret, err)
 }

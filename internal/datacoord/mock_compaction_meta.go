@@ -3,6 +3,8 @@
 package datacoord
 
 import (
+	context "context"
+
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -20,9 +22,9 @@ func (_m *MockCompactionMeta) EXPECT() *MockCompactionMeta_Expecter {
 	return &MockCompactionMeta_Expecter{mock: &_m.Mock}
 }
 
-// CheckAndSetSegmentsCompacting provides a mock function with given fields: segmentIDs
-func (_m *MockCompactionMeta) CheckAndSetSegmentsCompacting(segmentIDs []int64) (bool, bool) {
-	ret := _m.Called(segmentIDs)
+// CheckAndSetSegmentsCompacting provides a mock function with given fields: ctx, segmentIDs
+func (_m *MockCompactionMeta) CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []int64) (bool, bool) {
+	ret := _m.Called(ctx, segmentIDs)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CheckAndSetSegmentsCompacting")
@@ -30,17 +32,17 @@ func (_m *MockCompactionMeta) CheckAndSetSegmentsCompacting(segmentIDs []int64) 
 
 	var r0 bool
 	var r1 bool
-	if rf, ok := ret.Get(0).(func([]int64) (bool, bool)); ok {
-		return rf(segmentIDs)
+	if rf, ok := ret.Get(0).(func(context.Context, []int64) (bool, bool)); ok {
+		return rf(ctx, segmentIDs)
 	}
-	if rf, ok := ret.Get(0).(func([]int64) bool); ok {
-		r0 = rf(segmentIDs)
+	if rf, ok := ret.Get(0).(func(context.Context, []int64) bool); ok {
+		r0 = rf(ctx, segmentIDs)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func([]int64) bool); ok {
-		r1 = rf(segmentIDs)
+	if rf, ok := ret.Get(1).(func(context.Context, []int64) bool); ok {
+		r1 = rf(ctx, segmentIDs)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
@@ -54,14 +56,15 @@ type MockCompactionMeta_CheckAndSetSegmentsCompacting_Call struct {
 }
 
 // CheckAndSetSegmentsCompacting is a helper method to define mock.On call
+//   - ctx context.Context
 //   - segmentIDs []int64
-func (_e *MockCompactionMeta_Expecter) CheckAndSetSegmentsCompacting(segmentIDs interface{}) *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call {
-	return &MockCompactionMeta_CheckAndSetSegmentsCompacting_Call{Call: _e.mock.On("CheckAndSetSegmentsCompacting", segmentIDs)}
+func (_e *MockCompactionMeta_Expecter) CheckAndSetSegmentsCompacting(ctx interface{}, segmentIDs interface{}) *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call {
+	return &MockCompactionMeta_CheckAndSetSegmentsCompacting_Call{Call: _e.mock.On("CheckAndSetSegmentsCompacting", ctx, segmentIDs)}
 }
 
-func (_c *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call) Run(run func(segmentIDs []int64)) *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call {
+func (_c *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call) Run(run func(ctx context.Context, segmentIDs []int64)) *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]int64))
+		run(args[0].(context.Context), args[1].([]int64))
 	})
 	return _c
 }
@@ -71,22 +74,22 @@ func (_c *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call) Return(_a0 bool
 	return _c
 }
 
-func (_c *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call) RunAndReturn(run func([]int64) (bool, bool)) *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call {
+func (_c *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call) RunAndReturn(run func(context.Context, []int64) (bool, bool)) *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CleanPartitionStatsInfo provides a mock function with given fields: info
-func (_m *MockCompactionMeta) CleanPartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
-	ret := _m.Called(info)
+// CleanPartitionStatsInfo provides a mock function with given fields: ctx, info
+func (_m *MockCompactionMeta) CleanPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {
+	ret := _m.Called(ctx, info)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CleanPartitionStatsInfo")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*datapb.PartitionStatsInfo) error); ok {
-		r0 = rf(info)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.PartitionStatsInfo) error); ok {
+		r0 = rf(ctx, info)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -100,14 +103,15 @@ type MockCompactionMeta_CleanPartitionStatsInfo_Call struct {
 }
 
 // CleanPartitionStatsInfo is a helper method to define mock.On call
+//   - ctx context.Context
 //   - info *datapb.PartitionStatsInfo
-func (_e *MockCompactionMeta_Expecter) CleanPartitionStatsInfo(info interface{}) *MockCompactionMeta_CleanPartitionStatsInfo_Call {
-	return &MockCompactionMeta_CleanPartitionStatsInfo_Call{Call: _e.mock.On("CleanPartitionStatsInfo", info)}
+func (_e *MockCompactionMeta_Expecter) CleanPartitionStatsInfo(ctx interface{}, info interface{}) *MockCompactionMeta_CleanPartitionStatsInfo_Call {
+	return &MockCompactionMeta_CleanPartitionStatsInfo_Call{Call: _e.mock.On("CleanPartitionStatsInfo", ctx, info)}
 }
 
-func (_c *MockCompactionMeta_CleanPartitionStatsInfo_Call) Run(run func(info *datapb.PartitionStatsInfo)) *MockCompactionMeta_CleanPartitionStatsInfo_Call {
+func (_c *MockCompactionMeta_CleanPartitionStatsInfo_Call) Run(run func(ctx context.Context, info *datapb.PartitionStatsInfo)) *MockCompactionMeta_CleanPartitionStatsInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*datapb.PartitionStatsInfo))
+		run(args[0].(context.Context), args[1].(*datapb.PartitionStatsInfo))
 	})
 	return _c
 }
@@ -117,14 +121,14 @@ func (_c *MockCompactionMeta_CleanPartitionStatsInfo_Call) Return(_a0 error) *Mo
 	return _c
 }
 
-func (_c *MockCompactionMeta_CleanPartitionStatsInfo_Call) RunAndReturn(run func(*datapb.PartitionStatsInfo) error) *MockCompactionMeta_CleanPartitionStatsInfo_Call {
+func (_c *MockCompactionMeta_CleanPartitionStatsInfo_Call) RunAndReturn(run func(context.Context, *datapb.PartitionStatsInfo) error) *MockCompactionMeta_CleanPartitionStatsInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CompleteCompactionMutation provides a mock function with given fields: t, result
-func (_m *MockCompactionMeta) CompleteCompactionMutation(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
-	ret := _m.Called(t, result)
+// CompleteCompactionMutation provides a mock function with given fields: ctx, t, result
+func (_m *MockCompactionMeta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
+	ret := _m.Called(ctx, t, result)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CompleteCompactionMutation")
@@ -133,27 +137,27 @@ func (_m *MockCompactionMeta) CompleteCompactionMutation(t *datapb.CompactionTas
 	var r0 []*SegmentInfo
 	var r1 *segMetricMutation
 	var r2 error
-	if rf, ok := ret.Get(0).(func(*datapb.CompactionTask, *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)); ok {
-		return rf(t, result)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)); ok {
+		return rf(ctx, t, result)
 	}
-	if rf, ok := ret.Get(0).(func(*datapb.CompactionTask, *datapb.CompactionPlanResult) []*SegmentInfo); ok {
-		r0 = rf(t, result)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) []*SegmentInfo); ok {
+		r0 = rf(ctx, t, result)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*SegmentInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*datapb.CompactionTask, *datapb.CompactionPlanResult) *segMetricMutation); ok {
-		r1 = rf(t, result)
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) *segMetricMutation); ok {
+		r1 = rf(ctx, t, result)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).(*segMetricMutation)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func(*datapb.CompactionTask, *datapb.CompactionPlanResult) error); ok {
-		r2 = rf(t, result)
+	if rf, ok := ret.Get(2).(func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) error); ok {
+		r2 = rf(ctx, t, result)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -167,15 +171,16 @@ type MockCompactionMeta_CompleteCompactionMutation_Call struct {
 }
 
 // CompleteCompactionMutation is a helper method to define mock.On call
+//   - ctx context.Context
 //   - t *datapb.CompactionTask
 //   - result *datapb.CompactionPlanResult
-func (_e *MockCompactionMeta_Expecter) CompleteCompactionMutation(t interface{}, result interface{}) *MockCompactionMeta_CompleteCompactionMutation_Call {
-	return &MockCompactionMeta_CompleteCompactionMutation_Call{Call: _e.mock.On("CompleteCompactionMutation", t, result)}
+func (_e *MockCompactionMeta_Expecter) CompleteCompactionMutation(ctx interface{}, t interface{}, result interface{}) *MockCompactionMeta_CompleteCompactionMutation_Call {
+	return &MockCompactionMeta_CompleteCompactionMutation_Call{Call: _e.mock.On("CompleteCompactionMutation", ctx, t, result)}
 }
 
-func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) Run(run func(t *datapb.CompactionTask, result *datapb.CompactionPlanResult)) *MockCompactionMeta_CompleteCompactionMutation_Call {
+func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) Run(run func(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult)) *MockCompactionMeta_CompleteCompactionMutation_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*datapb.CompactionTask), args[1].(*datapb.CompactionPlanResult))
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTask), args[2].(*datapb.CompactionPlanResult))
 	})
 	return _c
 }
@@ -185,22 +190,22 @@ func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) Return(_a0 []*Segm
 	return _c
 }
 
-func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) RunAndReturn(run func(*datapb.CompactionTask, *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)) *MockCompactionMeta_CompleteCompactionMutation_Call {
+func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)) *MockCompactionMeta_CompleteCompactionMutation_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// DropCompactionTask provides a mock function with given fields: task
-func (_m *MockCompactionMeta) DropCompactionTask(task *datapb.CompactionTask) error {
-	ret := _m.Called(task)
+// DropCompactionTask provides a mock function with given fields: ctx, task
+func (_m *MockCompactionMeta) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
+	ret := _m.Called(ctx, task)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DropCompactionTask")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*datapb.CompactionTask) error); ok {
-		r0 = rf(task)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTask) error); ok {
+		r0 = rf(ctx, task)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -214,14 +219,15 @@ type MockCompactionMeta_DropCompactionTask_Call struct {
 }
 
 // DropCompactionTask is a helper method to define mock.On call
+//   - ctx context.Context
 //   - task *datapb.CompactionTask
-func (_e *MockCompactionMeta_Expecter) DropCompactionTask(task interface{}) *MockCompactionMeta_DropCompactionTask_Call {
-	return &MockCompactionMeta_DropCompactionTask_Call{Call: _e.mock.On("DropCompactionTask", task)}
+func (_e *MockCompactionMeta_Expecter) DropCompactionTask(ctx interface{}, task interface{}) *MockCompactionMeta_DropCompactionTask_Call {
+	return &MockCompactionMeta_DropCompactionTask_Call{Call: _e.mock.On("DropCompactionTask", ctx, task)}
 }
 
-func (_c *MockCompactionMeta_DropCompactionTask_Call) Run(run func(task *datapb.CompactionTask)) *MockCompactionMeta_DropCompactionTask_Call {
+func (_c *MockCompactionMeta_DropCompactionTask_Call) Run(run func(ctx context.Context, task *datapb.CompactionTask)) *MockCompactionMeta_DropCompactionTask_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*datapb.CompactionTask))
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTask))
 	})
 	return _c
 }
@@ -231,7 +237,7 @@ func (_c *MockCompactionMeta_DropCompactionTask_Call) Return(_a0 error) *MockCom
 	return _c
 }
 
-func (_c *MockCompactionMeta_DropCompactionTask_Call) RunAndReturn(run func(*datapb.CompactionTask) error) *MockCompactionMeta_DropCompactionTask_Call {
+func (_c *MockCompactionMeta_DropCompactionTask_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTask) error) *MockCompactionMeta_DropCompactionTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -330,17 +336,17 @@ func (_c *MockCompactionMeta_GetCompactionTaskMeta_Call) RunAndReturn(run func()
 	return _c
 }
 
-// GetCompactionTasks provides a mock function with given fields:
-func (_m *MockCompactionMeta) GetCompactionTasks() map[int64][]*datapb.CompactionTask {
-	ret := _m.Called()
+// GetCompactionTasks provides a mock function with given fields: ctx
+func (_m *MockCompactionMeta) GetCompactionTasks(ctx context.Context) map[int64][]*datapb.CompactionTask {
+	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCompactionTasks")
 	}
 
 	var r0 map[int64][]*datapb.CompactionTask
-	if rf, ok := ret.Get(0).(func() map[int64][]*datapb.CompactionTask); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(context.Context) map[int64][]*datapb.CompactionTask); ok {
+		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[int64][]*datapb.CompactionTask)
@@ -356,13 +362,14 @@ type MockCompactionMeta_GetCompactionTasks_Call struct {
 }
 
 // GetCompactionTasks is a helper method to define mock.On call
-func (_e *MockCompactionMeta_Expecter) GetCompactionTasks() *MockCompactionMeta_GetCompactionTasks_Call {
-	return &MockCompactionMeta_GetCompactionTasks_Call{Call: _e.mock.On("GetCompactionTasks")}
+//   - ctx context.Context
+func (_e *MockCompactionMeta_Expecter) GetCompactionTasks(ctx interface{}) *MockCompactionMeta_GetCompactionTasks_Call {
+	return &MockCompactionMeta_GetCompactionTasks_Call{Call: _e.mock.On("GetCompactionTasks", ctx)}
 }
 
-func (_c *MockCompactionMeta_GetCompactionTasks_Call) Run(run func()) *MockCompactionMeta_GetCompactionTasks_Call {
+func (_c *MockCompactionMeta_GetCompactionTasks_Call) Run(run func(ctx context.Context)) *MockCompactionMeta_GetCompactionTasks_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		run(args[0].(context.Context))
 	})
 	return _c
 }
@@ -372,22 +379,22 @@ func (_c *MockCompactionMeta_GetCompactionTasks_Call) Return(_a0 map[int64][]*da
 	return _c
 }
 
-func (_c *MockCompactionMeta_GetCompactionTasks_Call) RunAndReturn(run func() map[int64][]*datapb.CompactionTask) *MockCompactionMeta_GetCompactionTasks_Call {
+func (_c *MockCompactionMeta_GetCompactionTasks_Call) RunAndReturn(run func(context.Context) map[int64][]*datapb.CompactionTask) *MockCompactionMeta_GetCompactionTasks_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetCompactionTasksByTriggerID provides a mock function with given fields: triggerID
-func (_m *MockCompactionMeta) GetCompactionTasksByTriggerID(triggerID int64) []*datapb.CompactionTask {
-	ret := _m.Called(triggerID)
+// GetCompactionTasksByTriggerID provides a mock function with given fields: ctx, triggerID
+func (_m *MockCompactionMeta) GetCompactionTasksByTriggerID(ctx context.Context, triggerID int64) []*datapb.CompactionTask {
+	ret := _m.Called(ctx, triggerID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCompactionTasksByTriggerID")
 	}
 
 	var r0 []*datapb.CompactionTask
-	if rf, ok := ret.Get(0).(func(int64) []*datapb.CompactionTask); ok {
-		r0 = rf(triggerID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) []*datapb.CompactionTask); ok {
+		r0 = rf(ctx, triggerID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*datapb.CompactionTask)
@@ -403,14 +410,15 @@ type MockCompactionMeta_GetCompactionTasksByTriggerID_Call struct {
 }
 
 // GetCompactionTasksByTriggerID is a helper method to define mock.On call
+//   - ctx context.Context
 //   - triggerID int64
-func (_e *MockCompactionMeta_Expecter) GetCompactionTasksByTriggerID(triggerID interface{}) *MockCompactionMeta_GetCompactionTasksByTriggerID_Call {
-	return &MockCompactionMeta_GetCompactionTasksByTriggerID_Call{Call: _e.mock.On("GetCompactionTasksByTriggerID", triggerID)}
+func (_e *MockCompactionMeta_Expecter) GetCompactionTasksByTriggerID(ctx interface{}, triggerID interface{}) *MockCompactionMeta_GetCompactionTasksByTriggerID_Call {
+	return &MockCompactionMeta_GetCompactionTasksByTriggerID_Call{Call: _e.mock.On("GetCompactionTasksByTriggerID", ctx, triggerID)}
 }
 
-func (_c *MockCompactionMeta_GetCompactionTasksByTriggerID_Call) Run(run func(triggerID int64)) *MockCompactionMeta_GetCompactionTasksByTriggerID_Call {
+func (_c *MockCompactionMeta_GetCompactionTasksByTriggerID_Call) Run(run func(ctx context.Context, triggerID int64)) *MockCompactionMeta_GetCompactionTasksByTriggerID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -420,22 +428,22 @@ func (_c *MockCompactionMeta_GetCompactionTasksByTriggerID_Call) Return(_a0 []*d
 	return _c
 }
 
-func (_c *MockCompactionMeta_GetCompactionTasksByTriggerID_Call) RunAndReturn(run func(int64) []*datapb.CompactionTask) *MockCompactionMeta_GetCompactionTasksByTriggerID_Call {
+func (_c *MockCompactionMeta_GetCompactionTasksByTriggerID_Call) RunAndReturn(run func(context.Context, int64) []*datapb.CompactionTask) *MockCompactionMeta_GetCompactionTasksByTriggerID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetHealthySegment provides a mock function with given fields: segID
-func (_m *MockCompactionMeta) GetHealthySegment(segID int64) *SegmentInfo {
-	ret := _m.Called(segID)
+// GetHealthySegment provides a mock function with given fields: ctx, segID
+func (_m *MockCompactionMeta) GetHealthySegment(ctx context.Context, segID int64) *SegmentInfo {
+	ret := _m.Called(ctx, segID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetHealthySegment")
 	}
 
 	var r0 *SegmentInfo
-	if rf, ok := ret.Get(0).(func(int64) *SegmentInfo); ok {
-		r0 = rf(segID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *SegmentInfo); ok {
+		r0 = rf(ctx, segID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*SegmentInfo)
@@ -451,14 +459,15 @@ type MockCompactionMeta_GetHealthySegment_Call struct {
 }
 
 // GetHealthySegment is a helper method to define mock.On call
+//   - ctx context.Context
 //   - segID int64
-func (_e *MockCompactionMeta_Expecter) GetHealthySegment(segID interface{}) *MockCompactionMeta_GetHealthySegment_Call {
-	return &MockCompactionMeta_GetHealthySegment_Call{Call: _e.mock.On("GetHealthySegment", segID)}
+func (_e *MockCompactionMeta_Expecter) GetHealthySegment(ctx interface{}, segID interface{}) *MockCompactionMeta_GetHealthySegment_Call {
+	return &MockCompactionMeta_GetHealthySegment_Call{Call: _e.mock.On("GetHealthySegment", ctx, segID)}
 }
 
-func (_c *MockCompactionMeta_GetHealthySegment_Call) Run(run func(segID int64)) *MockCompactionMeta_GetHealthySegment_Call {
+func (_c *MockCompactionMeta_GetHealthySegment_Call) Run(run func(ctx context.Context, segID int64)) *MockCompactionMeta_GetHealthySegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -468,7 +477,7 @@ func (_c *MockCompactionMeta_GetHealthySegment_Call) Return(_a0 *SegmentInfo) *M
 	return _c
 }
 
-func (_c *MockCompactionMeta_GetHealthySegment_Call) RunAndReturn(run func(int64) *SegmentInfo) *MockCompactionMeta_GetHealthySegment_Call {
+func (_c *MockCompactionMeta_GetHealthySegment_Call) RunAndReturn(run func(context.Context, int64) *SegmentInfo) *MockCompactionMeta_GetHealthySegment_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -567,17 +576,17 @@ func (_c *MockCompactionMeta_GetPartitionStatsMeta_Call) RunAndReturn(run func()
 	return _c
 }
 
-// GetSegment provides a mock function with given fields: segID
-func (_m *MockCompactionMeta) GetSegment(segID int64) *SegmentInfo {
-	ret := _m.Called(segID)
+// GetSegment provides a mock function with given fields: ctx, segID
+func (_m *MockCompactionMeta) GetSegment(ctx context.Context, segID int64) *SegmentInfo {
+	ret := _m.Called(ctx, segID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetSegment")
 	}
 
 	var r0 *SegmentInfo
-	if rf, ok := ret.Get(0).(func(int64) *SegmentInfo); ok {
-		r0 = rf(segID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *SegmentInfo); ok {
+		r0 = rf(ctx, segID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*SegmentInfo)
@@ -593,14 +602,15 @@ type MockCompactionMeta_GetSegment_Call struct {
 }
 
 // GetSegment is a helper method to define mock.On call
+//   - ctx context.Context
 //   - segID int64
-func (_e *MockCompactionMeta_Expecter) GetSegment(segID interface{}) *MockCompactionMeta_GetSegment_Call {
-	return &MockCompactionMeta_GetSegment_Call{Call: _e.mock.On("GetSegment", segID)}
+func (_e *MockCompactionMeta_Expecter) GetSegment(ctx interface{}, segID interface{}) *MockCompactionMeta_GetSegment_Call {
+	return &MockCompactionMeta_GetSegment_Call{Call: _e.mock.On("GetSegment", ctx, segID)}
 }
 
-func (_c *MockCompactionMeta_GetSegment_Call) Run(run func(segID int64)) *MockCompactionMeta_GetSegment_Call {
+func (_c *MockCompactionMeta_GetSegment_Call) Run(run func(ctx context.Context, segID int64)) *MockCompactionMeta_GetSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -610,22 +620,22 @@ func (_c *MockCompactionMeta_GetSegment_Call) Return(_a0 *SegmentInfo) *MockComp
 	return _c
 }
 
-func (_c *MockCompactionMeta_GetSegment_Call) RunAndReturn(run func(int64) *SegmentInfo) *MockCompactionMeta_GetSegment_Call {
+func (_c *MockCompactionMeta_GetSegment_Call) RunAndReturn(run func(context.Context, int64) *SegmentInfo) *MockCompactionMeta_GetSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// SaveCompactionTask provides a mock function with given fields: task
-func (_m *MockCompactionMeta) SaveCompactionTask(task *datapb.CompactionTask) error {
-	ret := _m.Called(task)
+// SaveCompactionTask provides a mock function with given fields: ctx, task
+func (_m *MockCompactionMeta) SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
+	ret := _m.Called(ctx, task)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SaveCompactionTask")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*datapb.CompactionTask) error); ok {
-		r0 = rf(task)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTask) error); ok {
+		r0 = rf(ctx, task)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -639,14 +649,15 @@ type MockCompactionMeta_SaveCompactionTask_Call struct {
 }
 
 // SaveCompactionTask is a helper method to define mock.On call
+//   - ctx context.Context
 //   - task *datapb.CompactionTask
-func (_e *MockCompactionMeta_Expecter) SaveCompactionTask(task interface{}) *MockCompactionMeta_SaveCompactionTask_Call {
-	return &MockCompactionMeta_SaveCompactionTask_Call{Call: _e.mock.On("SaveCompactionTask", task)}
+func (_e *MockCompactionMeta_Expecter) SaveCompactionTask(ctx interface{}, task interface{}) *MockCompactionMeta_SaveCompactionTask_Call {
+	return &MockCompactionMeta_SaveCompactionTask_Call{Call: _e.mock.On("SaveCompactionTask", ctx, task)}
 }
 
-func (_c *MockCompactionMeta_SaveCompactionTask_Call) Run(run func(task *datapb.CompactionTask)) *MockCompactionMeta_SaveCompactionTask_Call {
+func (_c *MockCompactionMeta_SaveCompactionTask_Call) Run(run func(ctx context.Context, task *datapb.CompactionTask)) *MockCompactionMeta_SaveCompactionTask_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*datapb.CompactionTask))
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTask))
 	})
 	return _c
 }
@@ -656,18 +667,19 @@ func (_c *MockCompactionMeta_SaveCompactionTask_Call) Return(_a0 error) *MockCom
 	return _c
 }
 
-func (_c *MockCompactionMeta_SaveCompactionTask_Call) RunAndReturn(run func(*datapb.CompactionTask) error) *MockCompactionMeta_SaveCompactionTask_Call {
+func (_c *MockCompactionMeta_SaveCompactionTask_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTask) error) *MockCompactionMeta_SaveCompactionTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// SelectSegments provides a mock function with given fields: filters
-func (_m *MockCompactionMeta) SelectSegments(filters ...SegmentFilter) []*SegmentInfo {
+// SelectSegments provides a mock function with given fields: ctx, filters
+func (_m *MockCompactionMeta) SelectSegments(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
 	_va := make([]interface{}, len(filters))
 	for _i := range filters {
 		_va[_i] = filters[_i]
 	}
 	var _ca []interface{}
+	_ca = append(_ca, ctx)
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
@@ -676,8 +688,8 @@ func (_m *MockCompactionMeta) SelectSegments(filters ...SegmentFilter) []*Segmen
 	}
 
 	var r0 []*SegmentInfo
-	if rf, ok := ret.Get(0).(func(...SegmentFilter) []*SegmentInfo); ok {
-		r0 = rf(filters...)
+	if rf, ok := ret.Get(0).(func(context.Context, ...SegmentFilter) []*SegmentInfo); ok {
+		r0 = rf(ctx, filters...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*SegmentInfo)
@@ -693,21 +705,22 @@ type MockCompactionMeta_SelectSegments_Call struct {
 }
 
 // SelectSegments is a helper method to define mock.On call
+//   - ctx context.Context
 //   - filters ...SegmentFilter
-func (_e *MockCompactionMeta_Expecter) SelectSegments(filters ...interface{}) *MockCompactionMeta_SelectSegments_Call {
+func (_e *MockCompactionMeta_Expecter) SelectSegments(ctx interface{}, filters ...interface{}) *MockCompactionMeta_SelectSegments_Call {
 	return &MockCompactionMeta_SelectSegments_Call{Call: _e.mock.On("SelectSegments",
-		append([]interface{}{}, filters...)...)}
+		append([]interface{}{ctx}, filters...)...)}
 }
 
-func (_c *MockCompactionMeta_SelectSegments_Call) Run(run func(filters ...SegmentFilter)) *MockCompactionMeta_SelectSegments_Call {
+func (_c *MockCompactionMeta_SelectSegments_Call) Run(run func(ctx context.Context, filters ...SegmentFilter)) *MockCompactionMeta_SelectSegments_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]SegmentFilter, len(args)-0)
-		for i, a := range args[0:] {
+		variadicArgs := make([]SegmentFilter, len(args)-1)
+		for i, a := range args[1:] {
 			if a != nil {
 				variadicArgs[i] = a.(SegmentFilter)
 			}
 		}
-		run(variadicArgs...)
+		run(args[0].(context.Context), variadicArgs...)
 	})
 	return _c
 }
@@ -717,14 +730,14 @@ func (_c *MockCompactionMeta_SelectSegments_Call) Return(_a0 []*SegmentInfo) *Mo
 	return _c
 }
 
-func (_c *MockCompactionMeta_SelectSegments_Call) RunAndReturn(run func(...SegmentFilter) []*SegmentInfo) *MockCompactionMeta_SelectSegments_Call {
+func (_c *MockCompactionMeta_SelectSegments_Call) RunAndReturn(run func(context.Context, ...SegmentFilter) []*SegmentInfo) *MockCompactionMeta_SelectSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// SetSegmentsCompacting provides a mock function with given fields: segmentID, compacting
-func (_m *MockCompactionMeta) SetSegmentsCompacting(segmentID []int64, compacting bool) {
-	_m.Called(segmentID, compacting)
+// SetSegmentsCompacting provides a mock function with given fields: ctx, segmentID, compacting
+func (_m *MockCompactionMeta) SetSegmentsCompacting(ctx context.Context, segmentID []int64, compacting bool) {
+	_m.Called(ctx, segmentID, compacting)
 }
 
 // MockCompactionMeta_SetSegmentsCompacting_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetSegmentsCompacting'
@@ -733,15 +746,16 @@ type MockCompactionMeta_SetSegmentsCompacting_Call struct {
 }
 
 // SetSegmentsCompacting is a helper method to define mock.On call
+//   - ctx context.Context
 //   - segmentID []int64
 //   - compacting bool
-func (_e *MockCompactionMeta_Expecter) SetSegmentsCompacting(segmentID interface{}, compacting interface{}) *MockCompactionMeta_SetSegmentsCompacting_Call {
-	return &MockCompactionMeta_SetSegmentsCompacting_Call{Call: _e.mock.On("SetSegmentsCompacting", segmentID, compacting)}
+func (_e *MockCompactionMeta_Expecter) SetSegmentsCompacting(ctx interface{}, segmentID interface{}, compacting interface{}) *MockCompactionMeta_SetSegmentsCompacting_Call {
+	return &MockCompactionMeta_SetSegmentsCompacting_Call{Call: _e.mock.On("SetSegmentsCompacting", ctx, segmentID, compacting)}
 }
 
-func (_c *MockCompactionMeta_SetSegmentsCompacting_Call) Run(run func(segmentID []int64, compacting bool)) *MockCompactionMeta_SetSegmentsCompacting_Call {
+func (_c *MockCompactionMeta_SetSegmentsCompacting_Call) Run(run func(ctx context.Context, segmentID []int64, compacting bool)) *MockCompactionMeta_SetSegmentsCompacting_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]int64), args[1].(bool))
+		run(args[0].(context.Context), args[1].([]int64), args[2].(bool))
 	})
 	return _c
 }
@@ -751,18 +765,19 @@ func (_c *MockCompactionMeta_SetSegmentsCompacting_Call) Return() *MockCompactio
 	return _c
 }
 
-func (_c *MockCompactionMeta_SetSegmentsCompacting_Call) RunAndReturn(run func([]int64, bool)) *MockCompactionMeta_SetSegmentsCompacting_Call {
+func (_c *MockCompactionMeta_SetSegmentsCompacting_Call) RunAndReturn(run func(context.Context, []int64, bool)) *MockCompactionMeta_SetSegmentsCompacting_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// UpdateSegmentsInfo provides a mock function with given fields: operators
-func (_m *MockCompactionMeta) UpdateSegmentsInfo(operators ...UpdateOperator) error {
+// UpdateSegmentsInfo provides a mock function with given fields: ctx, operators
+func (_m *MockCompactionMeta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
 	_va := make([]interface{}, len(operators))
 	for _i := range operators {
 		_va[_i] = operators[_i]
 	}
 	var _ca []interface{}
+	_ca = append(_ca, ctx)
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
@@ -771,8 +786,8 @@ func (_m *MockCompactionMeta) UpdateSegmentsInfo(operators ...UpdateOperator) er
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(...UpdateOperator) error); ok {
-		r0 = rf(operators...)
+	if rf, ok := ret.Get(0).(func(context.Context, ...UpdateOperator) error); ok {
+		r0 = rf(ctx, operators...)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -786,21 +801,22 @@ type MockCompactionMeta_UpdateSegmentsInfo_Call struct {
 }
 
 // UpdateSegmentsInfo is a helper method to define mock.On call
+//   - ctx context.Context
 //   - operators ...UpdateOperator
-func (_e *MockCompactionMeta_Expecter) UpdateSegmentsInfo(operators ...interface{}) *MockCompactionMeta_UpdateSegmentsInfo_Call {
+func (_e *MockCompactionMeta_Expecter) UpdateSegmentsInfo(ctx interface{}, operators ...interface{}) *MockCompactionMeta_UpdateSegmentsInfo_Call {
 	return &MockCompactionMeta_UpdateSegmentsInfo_Call{Call: _e.mock.On("UpdateSegmentsInfo",
-		append([]interface{}{}, operators...)...)}
+		append([]interface{}{ctx}, operators...)...)}
 }
 
-func (_c *MockCompactionMeta_UpdateSegmentsInfo_Call) Run(run func(operators ...UpdateOperator)) *MockCompactionMeta_UpdateSegmentsInfo_Call {
+func (_c *MockCompactionMeta_UpdateSegmentsInfo_Call) Run(run func(ctx context.Context, operators ...UpdateOperator)) *MockCompactionMeta_UpdateSegmentsInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]UpdateOperator, len(args)-0)
-		for i, a := range args[0:] {
+		variadicArgs := make([]UpdateOperator, len(args)-1)
+		for i, a := range args[1:] {
 			if a != nil {
 				variadicArgs[i] = a.(UpdateOperator)
 			}
 		}
-		run(variadicArgs...)
+		run(args[0].(context.Context), variadicArgs...)
 	})
 	return _c
 }
@@ -810,7 +826,7 @@ func (_c *MockCompactionMeta_UpdateSegmentsInfo_Call) Return(_a0 error) *MockCom
 	return _c
 }
 
-func (_c *MockCompactionMeta_UpdateSegmentsInfo_Call) RunAndReturn(run func(...UpdateOperator) error) *MockCompactionMeta_UpdateSegmentsInfo_Call {
+func (_c *MockCompactionMeta_UpdateSegmentsInfo_Call) RunAndReturn(run func(context.Context, ...UpdateOperator) error) *MockCompactionMeta_UpdateSegmentsInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

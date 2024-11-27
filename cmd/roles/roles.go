@@ -36,6 +36,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/cmd/components"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
@@ -347,6 +348,11 @@ func (mr *MilvusRoles) Run() {
 
 	mr.printLDPreLoad()
 
+	// start milvus thread watcher to update actual thread number metrics
+	thw := internalmetrics.NewThreadWatcher()
+	thw.Start()
+	defer thw.Stop()
+
 	// only standalone enable localMsg
 	if mr.Local {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode); err != nil {
@@ -392,6 +398,13 @@ func (mr *MilvusRoles) Run() {
 		streaming.Init()
 		defer streaming.Release()
 	}
+
+	coordclient.EnableLocalClientRole(&coordclient.LocalClientRoleConfig{
+		ServerType:       mr.ServerType,
+		EnableQueryCoord: mr.EnableQueryCoord,
+		EnableDataCoord:  mr.EnableDataCoord,
+		EnableRootCoord:  mr.EnableRootCoord,
+	})
 
 	enableComponents := []bool{
 		mr.EnableRootCoord,

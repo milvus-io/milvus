@@ -18,7 +18,6 @@ package parquet
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/apache/arrow/go/v12/arrow"
@@ -28,6 +27,7 @@ import (
 	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"

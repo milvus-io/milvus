@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
@@ -151,6 +151,32 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 		c := entity[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
 			return merr.WrapErrParameterInvalidMsg("%s collection %s can only contain numbers, letters and underscores", invalidMsg, entityType)
+		}
+	}
+	return nil
+}
+
+func ValidatePrivilegeGroupName(groupName string) error {
+	if groupName == "" {
+		return merr.WrapErrDatabaseNameInvalid(groupName, "privilege group name couldn't be empty")
+	}
+
+	if len(groupName) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
+		return merr.WrapErrDatabaseNameInvalid(groupName,
+			fmt.Sprintf("the length of a privilege group name must be less than %d characters", Params.ProxyCfg.MaxNameLength.GetAsInt()))
+	}
+
+	firstChar := groupName[0]
+	if firstChar != '_' && !isAlpha(firstChar) {
+		return merr.WrapErrDatabaseNameInvalid(groupName,
+			"the first character of a privilege group name must be an underscore or letter")
+	}
+
+	for i := 1; i < len(groupName); i++ {
+		c := groupName[i]
+		if c != '_' && !isAlpha(c) && !isNumber(c) {
+			return merr.WrapErrDatabaseNameInvalid(groupName,
+				"privilege group name can only contain numbers, letters and underscores")
 		}
 	}
 	return nil
@@ -1204,7 +1230,7 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary bool) ([]string, []string, []string, error) {
 	var primaryFieldName string
 	var dynamicField *schemapb.FieldSchema
-	allFieldNameMap := make(map[string]int64)
+	allFieldNameMap := make(map[string]*schemapb.FieldSchema)
 	resultFieldNameMap := make(map[string]bool)
 	resultFieldNames := make([]string, 0)
 	userOutputFieldsMap := make(map[string]bool)
@@ -1219,23 +1245,26 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 		if field.IsDynamic {
 			dynamicField = field
 		}
-		allFieldNameMap[field.Name] = field.GetFieldID()
+		allFieldNameMap[field.Name] = field
 	}
 
 	for _, outputFieldName := range outputFields {
 		outputFieldName = strings.TrimSpace(outputFieldName)
 		if outputFieldName == "*" {
-			for fieldName, fieldID := range allFieldNameMap {
-				// skip Cold field
-				if schema.IsFieldLoaded(fieldID) {
+			for fieldName, field := range allFieldNameMap {
+				// skip Cold field and fields that can't be output
+				if schema.IsFieldLoaded(field.GetFieldID()) && schema.CanRetrieveRawFieldData(field) {
 					resultFieldNameMap[fieldName] = true
 					userOutputFieldsMap[fieldName] = true
 				}
 			}
 			useAllDyncamicFields = true
 		} else {
-			if fieldID, ok := allFieldNameMap[outputFieldName]; ok {
-				if schema.IsFieldLoaded(fieldID) {
+			if field, ok := allFieldNameMap[outputFieldName]; ok {
+				if !schema.CanRetrieveRawFieldData(field) {
+					return nil, nil, nil, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
+				}
+				if schema.IsFieldLoaded(field.GetFieldID()) {
 					resultFieldNameMap[outputFieldName] = true
 					userOutputFieldsMap[outputFieldName] = true
 				} else {

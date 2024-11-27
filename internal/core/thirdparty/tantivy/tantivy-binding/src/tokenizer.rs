@@ -1,9 +1,12 @@
 use log::warn;
 use std::collections::HashMap;
 use tantivy::tokenizer::*;
+use tantivy::tokenizer::StopWordFilter;
 use serde_json as json;
 
+use crate::stop_words;
 use crate::tokenizer_filter::*;
+use crate::jieba_tokenizer::JiebaTokenizer;
 use crate::error::TantivyError;
 use crate::util::*;
 
@@ -11,8 +14,29 @@ use crate::util::*;
 // default build-in analyzer
 pub(crate) fn standard_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
     let builder = standard_builder()
+        .filter(LowerCaser);
+
+    if stop_words.len() > 0{
+        return builder.filter(StopWordFilter::remove(stop_words)).build();
+    }
+
+    builder.build()
+}
+
+fn chinese_analyzer(stop_words: Vec<String>) -> TextAnalyzer{
+    let builder = jieba_builder().filter(CnAlphaNumOnlyFilter);
+    if stop_words.len() > 0{
+        return builder.filter(StopWordFilter::remove(stop_words)).build();
+    }
+
+    builder.build()
+}
+
+fn english_analyzer(stop_words: Vec<String>) -> TextAnalyzer{
+    let builder = standard_builder()
         .filter(LowerCaser)
-        .filter(RemoveLongFilter::limit(40));
+        .filter(Stemmer::new(Language::English))
+        .filter(StopWordFilter::remove(stop_words::ENGLISH.iter().map(|&word| word.to_owned())));
 
     if stop_words.len() > 0{
         return builder.filter(StopWordFilter::remove(stop_words)).build();
@@ -29,10 +53,15 @@ fn whitespace_builder()-> TextAnalyzerBuilder{
     TextAnalyzer::builder(WhitespaceTokenizer::default()).dynamic()
 }
 
+fn jieba_builder() -> TextAnalyzerBuilder{
+    TextAnalyzer::builder(JiebaTokenizer::new()).dynamic()
+}
+
 fn get_builder_by_name(name:&String) -> Result<TextAnalyzerBuilder, TantivyError>{
     match name.as_str() {
         "standard" => Ok(standard_builder()),
         "whitespace" => Ok(whitespace_builder()),
+        "jieba" => Ok(jieba_builder()),
         other => {
             warn!("unsupported tokenizer: {}", other);
             Err(format!("unsupported tokenizer: {}", other).into())
@@ -92,6 +121,7 @@ impl AnalyzerBuilder<'_>{
         }
     
         let filters = params.as_array().unwrap();
+
         for filter in filters{
             if filter.is_string(){
                 let filter_name = filter.as_str().unwrap();
@@ -127,30 +157,34 @@ impl AnalyzerBuilder<'_>{
                     // build with filter if filter param exist
                     builder=self.build_filter(builder, value)?;
                 },
-                "max_token_length" => {
-                    if !value.is_u64(){
-                        return Err("max token length should be int type".into());
-                    }
-                    builder = builder.filter_dynamic(RemoveLongFilter::limit(value.as_u64().unwrap() as usize));
-                }
                 other => return Err(format!("unknown analyzer option key: {}", other).into()),
             }
         }
         Ok(builder)
     }
 
+    fn get_stop_words_option(&self) -> Result<Vec<String>, TantivyError>{
+        let value = self.params.get("stop_words");
+        match value{
+            Some(value)=>{
+                let str_list = get_string_list(value, "filter stop_words")?;
+                Ok(get_stop_words_list(str_list))
+            }
+            None => Ok(vec![])
+        }        
+    }
+
     fn build_template(self, type_: &str)-> Result<TextAnalyzer, TantivyError>{
         match type_{
             "standard" => {
-                let value = self.params.get("stop_words");
-                match value{
-                    Some(value)=>{
-                        let str_list = get_string_list(value, "filter stop_words")?;
-                        Ok(standard_analyzer(str_list))
-                    }
-                    None => Ok(standard_analyzer(vec![]))
-                }                
+                Ok(standard_analyzer(self.get_stop_words_option()?))
             },
+            "chinese" => {
+                Ok(chinese_analyzer(self.get_stop_words_option()?))
+            },
+            "english" => {
+                Ok(english_analyzer(self.get_stop_words_option()?))
+            }
             other_ => Err(format!("unknown build-in analyzer type: {}", other_).into())
         }
     } 
@@ -168,13 +202,7 @@ impl AnalyzerBuilder<'_>{
         };
 
         //build custom analyzer
-        let tokenizer_name = self.get_tokenizer_name()?; 
-
-        // jieba analyzer can't add filter.     
-        if tokenizer_name == "jieba"{
-            return Ok(tantivy_jieba::JiebaTokenizer{}.into());
-        }
-
+        let tokenizer_name = self.get_tokenizer_name()?;
         let mut builder=get_builder_by_name(&tokenizer_name)?;
         
         // build with option
@@ -227,28 +255,37 @@ pub(crate) fn create_tokenizer(params: &String) -> Result<TextAnalyzer, TantivyE
 #[cfg(test)]
 mod tests {
     use crate::tokenizer::create_tokenizer;
+    use regex;
 
     #[test]
-    fn test_create_tokenizer() {
-        let params = r#"{"tokenizer": "standard"}"#;
+    fn test_standard_analyzer() {
+        let params = r#"{
+            "type": "standard",
+            "stop_words": ["_english_"]
+        }"#;
 
         let tokenizer = create_tokenizer(&params.to_string());
-        assert!(tokenizer.is_ok());
+        assert!(tokenizer.is_ok(),  "error: {}", tokenizer.err().unwrap().reason());
     }
 
     #[test]
-    fn test_jieba_tokenizer() {
-        let params = r#"{"tokenizer": "jieba"}"#;
+    fn test_chinese_analyzer() {
+        let params = r#"{
+            "type": "chinese"
+        }"#;
 
         let tokenizer = create_tokenizer(&params.to_string());
-        assert!(tokenizer.is_ok());
+        assert!(tokenizer.is_ok(),  "error: {}", tokenizer.err().unwrap().reason());
         let mut bining = tokenizer.unwrap();
-
-        let mut stream = bining.token_stream("系统安全");
+        let mut stream = bining.token_stream("系统安全;,'';lxyz密码");
+        
+        let mut results = Vec::<String>::new();
         while stream.advance(){
             let token = stream.token();
-            let text = token.text.clone();
-            print!("test token :{}\n", text.as_str())
+            results.push(token.text.clone());
         }
+
+        print!("test tokens :{:?}\n", results)
     }
+
 }

@@ -89,9 +89,7 @@ class TestMilvusClientCollectionInvalid(TestcaseBase):
         client = self._connect(enable_milvus_client_api=True)
         # 1. create collection
         collection_name = "a".join("a" for i in range(256))
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
-                                             f"the length of a collection name must be less than 255 characters: "
-                                             f"invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
         client_w.create_collection(client, collection_name, default_dim,
                                    check_task=CheckTasks.err_res, check_items=error)
 
@@ -120,7 +118,11 @@ class TestMilvusClientCollectionInvalid(TestcaseBase):
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        error = {ct.err_code: 65535, ct.err_msg: f"invalid dimension: {dim}. should be in range 2 ~ 32768"}
+        error = {ct.err_code: 65535, ct.err_msg: f"invalid dimension: {dim}. "
+                                                 f"float vector dimension should be in range 2 ~ 32768"}
+        if dim < ct.min_dim:
+            error = {ct.err_code: 65535, ct.err_msg: f"invalid dimension: {dim}. "
+                                                     f"should be in range 2 ~ 32768"}
         client_w.create_collection(client, collection_name, dim,
                                    check_task=CheckTasks.err_res, check_items=error)
         client_w.drop_collection(client, collection_name)
@@ -625,13 +627,11 @@ class TestMilvusClientCollectionValid(TestcaseBase):
 
 class TestMilvusClientDropCollectionInvalid(TestcaseBase):
     """ Test case of drop collection interface """
-
     """
     ******************************************************************
     #  The following are invalid base cases
     ******************************************************************
     """
-
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
     def test_milvus_client_drop_collection_invalid_collection_name(self, name):
@@ -641,8 +641,8 @@ class TestMilvusClientDropCollectionInvalid(TestcaseBase):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._connect(enable_milvus_client_api=True)
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. collection name can only "
-                                                f"contain numbers, letters and underscores: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. "
+                                                f"the first character of a collection name must be an underscore or letter"}
         client_w.drop_collection(client, name,
                                  check_task=CheckTasks.err_res, check_items=error)
 
@@ -660,13 +660,11 @@ class TestMilvusClientDropCollectionInvalid(TestcaseBase):
 
 class TestMilvusClientReleaseCollectionInvalid(TestcaseBase):
     """ Test case of release collection interface """
-
     """
     ******************************************************************
     #  The following are invalid base cases
     ******************************************************************
     """
-
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
     def test_milvus_client_release_collection_invalid_collection_name(self, name):
@@ -676,8 +674,9 @@ class TestMilvusClientReleaseCollectionInvalid(TestcaseBase):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._connect(enable_milvus_client_api=True)
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. collection name can only "
-                                                f"contain numbers, letters and underscores: invalid parameter"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"Invalid collection name: {name}. "
+                             f"the first character of a collection name must be an underscore or letter"}
         client_w.release_collection(client, name,
                                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -705,9 +704,7 @@ class TestMilvusClientReleaseCollectionInvalid(TestcaseBase):
         client = self._connect(enable_milvus_client_api=True)
         # 1. create collection
         collection_name = "a".join("a" for i in range(256))
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
-                                                f"the length of a collection name must be less than 255 characters: "
-                                                f"invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
         client_w.release_collection(client, collection_name, default_dim,
                                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -773,13 +770,11 @@ class TestMilvusClientReleaseCollectionValid(TestcaseBase):
 
 class TestMilvusClientLoadCollectionInvalid(TestcaseBase):
     """ Test case of search interface """
-
     """
     ******************************************************************
     #  The following are invalid base cases
     ******************************************************************
     """
-
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
     def test_milvus_client_load_collection_invalid_collection_name(self, name):
@@ -789,8 +784,9 @@ class TestMilvusClientLoadCollectionInvalid(TestcaseBase):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._connect(enable_milvus_client_api=True)
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. collection name can only "
-                                                f"contain numbers, letters and underscores: invalid parameter"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"Invalid collection name: {name}. "
+                             f"the first character of a collection name must be an underscore or letter"}
         client_w.load_collection(client, name,
                                  check_task=CheckTasks.err_res, check_items=error)
 
@@ -817,11 +813,11 @@ class TestMilvusClientLoadCollectionInvalid(TestcaseBase):
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = "a".join("a" for i in range(256))
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {collection_name}. "
                                                 f"the length of a collection name must be less than 255 characters: "
                                                 f"invalid parameter"}
         client_w.load_collection(client, collection_name,
-                                    check_task=CheckTasks.err_res, check_items=error)
+                                 check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_load_collection_without_index(self):
@@ -904,13 +900,11 @@ class TestMilvusClientLoadCollectionValid(TestcaseBase):
 
 class TestMilvusClientDescribeCollectionInvalid(TestcaseBase):
     """ Test case of search interface """
-
     """
     ******************************************************************
     #  The following are invalid base cases
     ******************************************************************
     """
-
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
     def test_milvus_client_describe_collection_invalid_collection_name(self, name):
@@ -920,8 +914,9 @@ class TestMilvusClientDescribeCollectionInvalid(TestcaseBase):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._connect(enable_milvus_client_api=True)
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. collection name can only "
-                                                f"contain numbers, letters and underscores: invalid parameter"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"Invalid collection name: {name}. "
+                             f"the first character of a collection name must be an underscore or letter"}
         client_w.describe_collection(client, name,
                                      check_task=CheckTasks.err_res, check_items=error)
 
@@ -934,8 +929,7 @@ class TestMilvusClientDescribeCollectionInvalid(TestcaseBase):
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = "nonexisted"
-        error = {ct.err_code: 100, ct.err_msg: f"can't find collection collection not "
-                                               f"found[database=default][collection=nonexisted]"}
+        error = {ct.err_code: 100, ct.err_msg: "can't find collection[database=default][collection=nonexisted]"}
         client_w.describe_collection(client, collection_name,
                                      check_task=CheckTasks.err_res, check_items=error)
 
@@ -951,21 +945,18 @@ class TestMilvusClientDescribeCollectionInvalid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim)
         client_w.drop_collection(client, collection_name)
-        error = {ct.err_code: 100, ct.err_msg: f"can't find collection collection not "
-                                               f"found[database=default]"}
+        error = {ct.err_code: 100, ct.err_msg: f"can't find collection[database=default][collection={collection_name}]"}
         client_w.describe_collection(client, collection_name,
                                      check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientHasCollectionInvalid(TestcaseBase):
     """ Test case of search interface """
-
     """
     ******************************************************************
     #  The following are invalid base cases
     ******************************************************************
     """
-
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
     def test_milvus_client_has_collection_invalid_collection_name(self, name):
@@ -975,8 +966,9 @@ class TestMilvusClientHasCollectionInvalid(TestcaseBase):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._connect(enable_milvus_client_api=True)
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. collection name can only "
-                                                f"contain numbers, letters and underscores: invalid parameter"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"Invalid collection name: {name}. "
+                             f"the first character of a collection name must be an underscore or letter"}
         client_w.has_collection(client, name,
                                 check_task=CheckTasks.err_res, check_items=error)
 
@@ -1054,7 +1046,7 @@ class TestMilvusClientRenameCollectionInValid(TestcaseBase):
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 65535, ct.err_msg: f"duplicated new collection name default:{collection_name}"
+        error = {ct.err_code: 65535, ct.err_msg: f"duplicated new collection name default:{collection_name} "
                                                  f"with other collection name or alias"}
         client_w.rename_collection(client, collection_name, collection_name,
                                    check_task=CheckTasks.err_res, check_items=error)
@@ -1071,10 +1063,9 @@ class TestMilvusClientRenameCollectionInValid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim)
         client_w.drop_collection(client, collection_name)
-        error = {ct.err_code: 100, ct.err_msg: f"can't find collection collection not "
-                                               f"found[database=default]"}
+        error = {ct.err_code: 100, ct.err_msg: f"{collection_name}: collection not found[collection=default]"}
         client_w.rename_collection(client, collection_name, "new_collection",
-                                     check_task=CheckTasks.err_res, check_items=error)
+                                   check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientRenameCollectionValid(TestcaseBase):

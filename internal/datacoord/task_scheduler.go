@@ -91,7 +91,7 @@ func newTaskScheduler(
 		handler:                   handler,
 		indexEngineVersionManager: indexEngineVersionManager,
 		allocator:                 allocator,
-		taskStats:                 expirable.NewLRU[UniqueID, Task](1024, nil, time.Minute*5),
+		taskStats:                 expirable.NewLRU[UniqueID, Task](64, nil, time.Minute*15),
 	}
 	ts.reloadFromMeta()
 	return ts
@@ -111,7 +111,7 @@ func (s *taskScheduler) Stop() {
 func (s *taskScheduler) reloadFromMeta() {
 	segments := s.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
-		for _, segIndex := range s.meta.indexMeta.getSegmentIndexes(segment.ID) {
+		for _, segIndex := range s.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
 			if segIndex.IsDeleted {
 				continue
 			}

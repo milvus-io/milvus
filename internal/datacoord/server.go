@@ -38,12 +38,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
-	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -237,7 +237,7 @@ func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64)
 }
 
 func defaultRootCoordCreatorFunc(ctx context.Context) (types.RootCoordClient, error) {
-	return rootcoordclient.NewClient(ctx)
+	return coordclient.GetRootCoordClient(ctx), nil
 }
 
 // QuitSignal returns signal when server quits
@@ -408,7 +408,7 @@ func (s *Server) initDataCoord() error {
 
 	s.initGarbageCollection(storageCli)
 
-	s.importMeta, err = NewImportMeta(s.meta.catalog)
+	s.importMeta, err = NewImportMeta(s.ctx, s.meta.catalog)
 	if err != nil {
 		return err
 	}
@@ -765,9 +765,9 @@ func (s *Server) startTaskScheduler() {
 	s.startIndexService(s.serverLoopCtx)
 }
 
-func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
+func (s *Server) updateSegmentStatistics(ctx context.Context, stats []*commonpb.SegmentStats) {
 	for _, stat := range stats {
-		segment := s.meta.GetSegment(stat.GetSegmentID())
+		segment := s.meta.GetSegment(ctx, stat.GetSegmentID())
 		if segment == nil {
 			log.Warn("skip updating row number for not exist segment",
 				zap.Int64("segmentID", stat.GetSegmentID()),
@@ -786,7 +786,7 @@ func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
 		if segment.currRows < stat.GetNumRows() {
 			log.Debug("Updating segment number of rows",
 				zap.Int64("segmentID", stat.GetSegmentID()),
-				zap.Int64("old value", s.meta.GetSegment(stat.GetSegmentID()).GetNumOfRows()),
+				zap.Int64("old value", s.meta.GetSegment(ctx, stat.GetSegmentID()).GetNumOfRows()),
 				zap.Int64("new value", stat.GetNumRows()),
 			)
 			s.meta.SetCurrentRows(stat.GetSegmentID(), stat.GetNumRows())
@@ -794,10 +794,10 @@ func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
 	}
 }
 
-func (s *Server) getFlushableSegmentsInfo(flushableIDs []int64) []*SegmentInfo {
+func (s *Server) getFlushableSegmentsInfo(ctx context.Context, flushableIDs []int64) []*SegmentInfo {
 	res := make([]*SegmentInfo, 0, len(flushableIDs))
 	for _, id := range flushableIDs {
-		sinfo := s.meta.GetHealthySegment(id)
+		sinfo := s.meta.GetHealthySegment(ctx, id)
 		if sinfo == nil {
 			log.Error("get segment from meta error", zap.Int64("id", id))
 			continue
@@ -1006,7 +1006,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 // 3. change segment state to `Flushed` in meta
 func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	log := log.Ctx(ctx)
-	segment := s.meta.GetHealthySegment(segmentID)
+	segment := s.meta.GetHealthySegment(ctx, segmentID)
 	if segment == nil {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
 	}
@@ -1014,7 +1014,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	var operators []UpdateOperator
 	operators = append(operators, SetSegmentIsInvisible(segmentID, true))
 	operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
-	err := s.meta.UpdateSegmentsInfo(operators...)
+	err := s.meta.UpdateSegmentsInfo(ctx, operators...)
 	if err != nil {
 		log.Warn("flush segment complete failed", zap.Error(err))
 		return err
@@ -1145,41 +1145,50 @@ func (s *Server) registerMetricsRequest() {
 			return s.getSystemInfoMetrics(ctx, req)
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataDist,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DistKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.getDistJSON(ctx, req), nil
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ImportTasks,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ImportTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return s.importMeta.TaskStatsJSON(), nil
+			return s.importMeta.TaskStatsJSON(ctx), nil
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.CompactionTasks,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.CompactionTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.meta.compactionTaskMeta.TaskStatsJSON(), nil
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.BuildIndexTasks,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.BuildIndexTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.meta.indexMeta.TaskStatsJSON(), nil
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTasks,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.getSyncTaskJSON(ctx, req)
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataSegments,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return s.getSegmentsJSON(ctx, req)
+			return s.getSegmentsJSON(ctx, req, jsonReq)
 		})
 
-	s.metricsRequest.RegisterMetricsRequest(metricsinfo.DataChannels,
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.getChannelsJSON(ctx, req)
 		})
 
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.IndexKey,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			v := jsonReq.Get(metricsinfo.MetricRequestParamCollectionIDKey)
+			collectionID := int64(0)
+			if v.Exists() {
+				collectionID = v.Int()
+			}
+			return s.meta.indexMeta.GetIndexJSON(collectionID), nil
+		})
 	log.Info("register metrics actions finished")
 }
 

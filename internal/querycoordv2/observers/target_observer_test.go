@@ -57,6 +57,7 @@ type TargetObserverSuite struct {
 	partitionID        int64
 	nextTargetSegments []*datapb.SegmentInfo
 	nextTargetChannels []*datapb.VchannelInfo
+	ctx                context.Context
 }
 
 func (suite *TargetObserverSuite) SetupSuite() {
@@ -77,6 +78,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 		config.EtcdTLSMinVersion.GetValue())
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
+	suite.ctx = context.Background()
 
 	// meta
 	nodeMgr := session.NewNodeManager()
@@ -100,14 +102,14 @@ func (suite *TargetObserverSuite) SetupTest() {
 
 	testCollection := utils.CreateTestCollection(suite.collectionID, 1)
 	testCollection.Status = querypb.LoadStatus_Loaded
-	err = suite.meta.CollectionManager.PutCollection(testCollection)
+	err = suite.meta.CollectionManager.PutCollection(suite.ctx, testCollection)
 	suite.NoError(err)
-	err = suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collectionID, suite.partitionID))
+	err = suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
 	suite.NoError(err)
 	replicas[0].AddRWNode(2)
-	err = suite.meta.ReplicaManager.Put(replicas...)
+	err = suite.meta.ReplicaManager.Put(suite.ctx, replicas...)
 	suite.NoError(err)
 
 	suite.nextTargetChannels = []*datapb.VchannelInfo{
@@ -140,9 +142,11 @@ func (suite *TargetObserverSuite) SetupTest() {
 }
 
 func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
+	ctx := suite.ctx
+
 	suite.Eventually(func() bool {
-		return len(suite.targetMgr.GetSealedSegmentsByCollection(suite.collectionID, meta.NextTarget)) == 2 &&
-			len(suite.targetMgr.GetDmChannelsByCollection(suite.collectionID, meta.NextTarget)) == 2
+		return len(suite.targetMgr.GetSealedSegmentsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 2 &&
+			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 2
 	}, 5*time.Second, 1*time.Second)
 
 	suite.distMgr.LeaderViewManager.Update(2,
@@ -166,7 +170,7 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 
 	// Never update current target if it's empty, even the next target is ready
 	suite.Eventually(func() bool {
-		return len(suite.targetMgr.GetDmChannelsByCollection(suite.collectionID, meta.CurrentTarget)) == 0
+		return len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.CurrentTarget)) == 0
 	}, 3*time.Second, 1*time.Second)
 
 	suite.broker.AssertExpectations(suite.T())
@@ -176,7 +180,7 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 		PartitionID:   suite.partitionID,
 		InsertChannel: "channel-1",
 	})
-	suite.targetMgr.UpdateCollectionCurrentTarget(suite.collectionID)
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, suite.collectionID)
 
 	// Pull next again
 	suite.broker.EXPECT().
@@ -184,8 +188,8 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 		Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
 
 	suite.Eventually(func() bool {
-		return len(suite.targetMgr.GetSealedSegmentsByCollection(suite.collectionID, meta.NextTarget)) == 3 &&
-			len(suite.targetMgr.GetDmChannelsByCollection(suite.collectionID, meta.NextTarget)) == 2
+		return len(suite.targetMgr.GetSealedSegmentsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 3 &&
+			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 2
 	}, 7*time.Second, 1*time.Second)
 	suite.broker.AssertExpectations(suite.T())
 
@@ -226,18 +230,19 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 		default:
 		}
 		return isReady &&
-			len(suite.targetMgr.GetSealedSegmentsByCollection(suite.collectionID, meta.CurrentTarget)) == 3 &&
-			len(suite.targetMgr.GetDmChannelsByCollection(suite.collectionID, meta.CurrentTarget)) == 2
+			len(suite.targetMgr.GetSealedSegmentsByCollection(ctx, suite.collectionID, meta.CurrentTarget)) == 3 &&
+			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.CurrentTarget)) == 2
 	}, 7*time.Second, 1*time.Second)
 }
 
 func (suite *TargetObserverSuite) TestTriggerRelease() {
+	ctx := suite.ctx
 	// Manually update next target
 	_, err := suite.observer.UpdateNextTarget(suite.collectionID)
 	suite.NoError(err)
 
 	// manually release partition
-	partitions := suite.meta.CollectionManager.GetPartitionsByCollection(suite.collectionID)
+	partitions := suite.meta.CollectionManager.GetPartitionsByCollection(ctx, suite.collectionID)
 	partitionIDs := lo.Map(partitions, func(partition *meta.Partition, _ int) int64 { return partition.PartitionID })
 	suite.observer.ReleasePartition(suite.collectionID, partitionIDs[0])
 
@@ -265,6 +270,7 @@ type TargetObserverCheckSuite struct {
 
 	collectionID int64
 	partitionID  int64
+	ctx          context.Context
 }
 
 func (suite *TargetObserverCheckSuite) SetupSuite() {
@@ -284,6 +290,7 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 		config.EtcdTLSMinVersion.GetValue())
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
+	suite.ctx = context.Background()
 
 	// meta
 	store := querycoord.NewCatalog(suite.kv)
@@ -306,14 +313,14 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
 
-	err = suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(suite.collectionID, 1))
+	err = suite.meta.CollectionManager.PutCollection(suite.ctx, utils.CreateTestCollection(suite.collectionID, 1))
 	suite.NoError(err)
-	err = suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collectionID, suite.partitionID))
+	err = suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
 	suite.NoError(err)
 	replicas[0].AddRWNode(2)
-	err = suite.meta.ReplicaManager.Put(replicas...)
+	err = suite.meta.ReplicaManager.Put(suite.ctx, replicas...)
 	suite.NoError(err)
 }
 

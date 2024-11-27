@@ -325,7 +325,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		MsgID:       channel.SeekPosition.MsgID,
 		Timestamp:   channel.SeekPosition.Timestamp,
 	}
-	err = pipeline.ConsumeMsgStream(position)
+	err = pipeline.ConsumeMsgStream(ctx, position)
 	if err != nil {
 		err = merr.WrapErrServiceUnavailable(err.Error(), "InitPipelineFailed")
 		log.Warn(err.Error(),
@@ -455,6 +455,14 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 			log.Warn(msg)
 			err := merr.WrapErrChannelNotFound(segment.GetInsertChannel())
 			return merr.Status(err), nil
+		}
+
+		if len(req.GetInfos()) > 0 && req.GetInfos()[0].Level == datapb.SegmentLevel_L0 {
+			// force l0 segment to load on delegator
+			if req.DstNodeID != node.GetNodeID() {
+				log.Info("unexpected L0 segment load on non-delegator node, force to load on delegator")
+				req.DstNodeID = node.GetNodeID()
+			}
 		}
 
 		req.NeedTransfer = false
@@ -1364,7 +1372,7 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 		return merr.Status(err), nil
 	}
 
-	pks := storage.ParseIDs2PrimaryKeys(req.GetPrimaryKeys())
+	pks := storage.ParseIDs2PrimaryKeysBatch(req.GetPrimaryKeys())
 	for _, segment := range segments {
 		err := segment.Delete(ctx, pks, req.GetTimestamps())
 		if err != nil {
@@ -1419,7 +1427,7 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 		log.Warn("Delete batch find missing ids", zap.Int64s("missing_ids", missingIDs.Collect()))
 	}
 
-	pks := storage.ParseIDs2PrimaryKeys(req.GetPrimaryKeys())
+	pks := storage.ParseIDs2PrimaryKeysBatch(req.GetPrimaryKeys())
 
 	// control the execution batch parallel with P number
 	// maybe it shall be lower in case of heavy CPU usage may impacting search/query

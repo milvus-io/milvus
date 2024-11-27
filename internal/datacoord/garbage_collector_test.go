@@ -487,40 +487,40 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
 				segID: {
 					indexID: {
-						SegmentID:     segID,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						NumRows:       1026,
-						IndexID:       indexID,
-						BuildID:       buildID,
-						NodeID:        1,
-						IndexVersion:  1,
-						IndexState:    commonpb.IndexState_Finished,
-						FailReason:    "",
-						IsDeleted:     false,
-						CreateTime:    10,
-						IndexFileKeys: []string{"file1", "file2"},
-						IndexSize:     0,
-						WriteHandoff:  false,
+						SegmentID:      segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumRows:        1026,
+						IndexID:        indexID,
+						BuildID:        buildID,
+						NodeID:         1,
+						IndexVersion:   1,
+						IndexState:     commonpb.IndexState_Finished,
+						FailReason:     "",
+						IsDeleted:      false,
+						CreatedUTCTime: 10,
+						IndexFileKeys:  []string{"file1", "file2"},
+						IndexSize:      0,
+						WriteHandoff:   false,
 					},
 				},
 				segID + 1: {
 					indexID: {
-						SegmentID:     segID + 1,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						NumRows:       1026,
-						IndexID:       indexID,
-						BuildID:       buildID + 1,
-						NodeID:        1,
-						IndexVersion:  1,
-						IndexState:    commonpb.IndexState_Finished,
-						FailReason:    "",
-						IsDeleted:     false,
-						CreateTime:    10,
-						IndexFileKeys: []string{"file1", "file2"},
-						IndexSize:     0,
-						WriteHandoff:  false,
+						SegmentID:      segID + 1,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumRows:        1026,
+						IndexID:        indexID,
+						BuildID:        buildID + 1,
+						NodeID:         1,
+						IndexVersion:   1,
+						IndexState:     commonpb.IndexState_Finished,
+						FailReason:     "",
+						IsDeleted:      false,
+						CreatedUTCTime: 10,
+						IndexFileKeys:  []string{"file1", "file2"},
+						IndexSize:      0,
+						WriteHandoff:   false,
 					},
 				},
 			},
@@ -532,37 +532,37 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 	}
 
 	meta.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
-		SegmentID:     segID,
-		CollectionID:  collID,
-		PartitionID:   partID,
-		NumRows:       1026,
-		IndexID:       indexID,
-		BuildID:       buildID,
-		NodeID:        1,
-		IndexVersion:  1,
-		IndexState:    commonpb.IndexState_Finished,
-		FailReason:    "",
-		IsDeleted:     false,
-		CreateTime:    10,
-		IndexFileKeys: []string{"file1", "file2"},
-		IndexSize:     0,
+		SegmentID:      segID,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        1026,
+		IndexID:        indexID,
+		BuildID:        buildID,
+		NodeID:         1,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_Finished,
+		FailReason:     "",
+		IsDeleted:      false,
+		CreatedUTCTime: 10,
+		IndexFileKeys:  []string{"file1", "file2"},
+		IndexSize:      0,
 	})
 
 	meta.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
-		SegmentID:     segID + 1,
-		CollectionID:  collID,
-		PartitionID:   partID,
-		NumRows:       1026,
-		IndexID:       indexID,
-		BuildID:       buildID + 1,
-		NodeID:        1,
-		IndexVersion:  1,
-		IndexState:    commonpb.IndexState_Finished,
-		FailReason:    "",
-		IsDeleted:     false,
-		CreateTime:    10,
-		IndexFileKeys: []string{"file1", "file2"},
-		IndexSize:     0,
+		SegmentID:      segID + 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        1026,
+		IndexID:        indexID,
+		BuildID:        buildID + 1,
+		NodeID:         1,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_Finished,
+		FailReason:     "",
+		IsDeleted:      false,
+		CreatedUTCTime: 10,
+		IndexFileKeys:  []string{"file1", "file2"},
+		IndexSize:      0,
 	})
 
 	for id, segment := range segments {
@@ -652,40 +652,40 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
 				segID: {
 					indexID: {
-						SegmentID:     segID,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						NumRows:       1026,
-						IndexID:       indexID,
-						BuildID:       buildID,
-						NodeID:        1,
-						IndexVersion:  1,
-						IndexState:    commonpb.IndexState_Finished,
-						FailReason:    "",
-						IsDeleted:     false,
-						CreateTime:    10,
-						IndexFileKeys: []string{"file1", "file2"},
-						IndexSize:     0,
-						WriteHandoff:  false,
+						SegmentID:      segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumRows:        1026,
+						IndexID:        indexID,
+						BuildID:        buildID,
+						NodeID:         1,
+						IndexVersion:   1,
+						IndexState:     commonpb.IndexState_Finished,
+						FailReason:     "",
+						IsDeleted:      false,
+						CreatedUTCTime: 10,
+						IndexFileKeys:  []string{"file1", "file2"},
+						IndexSize:      0,
+						WriteHandoff:   false,
 					},
 				},
 				segID + 1: {
 					indexID: {
-						SegmentID:     segID + 1,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						NumRows:       1026,
-						IndexID:       indexID,
-						BuildID:       buildID + 1,
-						NodeID:        1,
-						IndexVersion:  1,
-						IndexState:    commonpb.IndexState_InProgress,
-						FailReason:    "",
-						IsDeleted:     false,
-						CreateTime:    10,
-						IndexFileKeys: nil,
-						IndexSize:     0,
-						WriteHandoff:  false,
+						SegmentID:      segID + 1,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumRows:        1026,
+						IndexID:        indexID,
+						BuildID:        buildID + 1,
+						NodeID:         1,
+						IndexVersion:   1,
+						IndexState:     commonpb.IndexState_InProgress,
+						FailReason:     "",
+						IsDeleted:      false,
+						CreatedUTCTime: 10,
+						IndexFileKeys:  nil,
+						IndexSize:      0,
+						WriteHandoff:   false,
 					},
 				},
 			},
@@ -710,38 +710,38 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 		},
 	}
 	meta.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
-		SegmentID:     segID,
-		CollectionID:  collID,
-		PartitionID:   partID,
-		NumRows:       1026,
-		IndexID:       indexID,
-		BuildID:       buildID,
-		NodeID:        1,
-		IndexVersion:  1,
-		IndexState:    commonpb.IndexState_Finished,
-		FailReason:    "",
-		IsDeleted:     false,
-		CreateTime:    10,
-		IndexFileKeys: []string{"file1", "file2"},
-		IndexSize:     0,
-		WriteHandoff:  false,
+		SegmentID:      segID,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        1026,
+		IndexID:        indexID,
+		BuildID:        buildID,
+		NodeID:         1,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_Finished,
+		FailReason:     "",
+		IsDeleted:      false,
+		CreatedUTCTime: 10,
+		IndexFileKeys:  []string{"file1", "file2"},
+		IndexSize:      0,
+		WriteHandoff:   false,
 	})
 	meta.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
-		SegmentID:     segID + 1,
-		CollectionID:  collID,
-		PartitionID:   partID,
-		NumRows:       1026,
-		IndexID:       indexID,
-		BuildID:       buildID + 1,
-		NodeID:        1,
-		IndexVersion:  1,
-		IndexState:    commonpb.IndexState_InProgress,
-		FailReason:    "",
-		IsDeleted:     false,
-		CreateTime:    10,
-		IndexFileKeys: nil,
-		IndexSize:     0,
-		WriteHandoff:  false,
+		SegmentID:      segID + 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        1026,
+		IndexID:        indexID,
+		BuildID:        buildID + 1,
+		NodeID:         1,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_InProgress,
+		FailReason:     "",
+		IsDeleted:      false,
+		CreatedUTCTime: 10,
+		IndexFileKeys:  nil,
+		IndexSize:      0,
+		WriteHandoff:   false,
 	})
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
@@ -1052,40 +1052,40 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
 				segID: {
 					indexID: {
-						SegmentID:     segID,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						NumRows:       5000,
-						IndexID:       indexID,
-						BuildID:       buildID,
-						NodeID:        0,
-						IndexVersion:  1,
-						IndexState:    commonpb.IndexState_Finished,
-						FailReason:    "",
-						IsDeleted:     false,
-						CreateTime:    0,
-						IndexFileKeys: []string{"file1", "file2"},
-						IndexSize:     1024,
-						WriteHandoff:  false,
+						SegmentID:      segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumRows:        5000,
+						IndexID:        indexID,
+						BuildID:        buildID,
+						NodeID:         0,
+						IndexVersion:   1,
+						IndexState:     commonpb.IndexState_Finished,
+						FailReason:     "",
+						IsDeleted:      false,
+						CreatedUTCTime: 0,
+						IndexFileKeys:  []string{"file1", "file2"},
+						IndexSize:      1024,
+						WriteHandoff:   false,
 					},
 				},
 				segID + 1: {
 					indexID: {
-						SegmentID:     segID + 1,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						NumRows:       5000,
-						IndexID:       indexID,
-						BuildID:       buildID + 1,
-						NodeID:        0,
-						IndexVersion:  1,
-						IndexState:    commonpb.IndexState_Finished,
-						FailReason:    "",
-						IsDeleted:     false,
-						CreateTime:    0,
-						IndexFileKeys: []string{"file3", "file4"},
-						IndexSize:     1024,
-						WriteHandoff:  false,
+						SegmentID:      segID + 1,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumRows:        5000,
+						IndexID:        indexID,
+						BuildID:        buildID + 1,
+						NodeID:         0,
+						IndexVersion:   1,
+						IndexState:     commonpb.IndexState_Finished,
+						FailReason:     "",
+						IsDeleted:      false,
+						CreatedUTCTime: 0,
+						IndexFileKeys:  []string{"file3", "file4"},
+						IndexSize:      1024,
+						WriteHandoff:   false,
 					},
 				},
 			},
@@ -1138,39 +1138,39 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	}
 
 	m.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
-		SegmentID:     segID,
-		CollectionID:  collID,
-		PartitionID:   partID,
-		NumRows:       5000,
-		IndexID:       indexID,
-		BuildID:       buildID,
-		NodeID:        0,
-		IndexVersion:  1,
-		IndexState:    commonpb.IndexState_Finished,
-		FailReason:    "",
-		IsDeleted:     false,
-		CreateTime:    0,
-		IndexFileKeys: []string{"file1", "file2"},
-		IndexSize:     1024,
-		WriteHandoff:  false,
+		SegmentID:      segID,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        5000,
+		IndexID:        indexID,
+		BuildID:        buildID,
+		NodeID:         0,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_Finished,
+		FailReason:     "",
+		IsDeleted:      false,
+		CreatedUTCTime: 0,
+		IndexFileKeys:  []string{"file1", "file2"},
+		IndexSize:      1024,
+		WriteHandoff:   false,
 	})
 
 	m.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
-		SegmentID:     segID + 1,
-		CollectionID:  collID,
-		PartitionID:   partID,
-		NumRows:       5000,
-		IndexID:       indexID,
-		BuildID:       buildID + 1,
-		NodeID:        0,
-		IndexVersion:  1,
-		IndexState:    commonpb.IndexState_Finished,
-		FailReason:    "",
-		IsDeleted:     false,
-		CreateTime:    0,
-		IndexFileKeys: []string{"file3", "file4"},
-		IndexSize:     1024,
-		WriteHandoff:  false,
+		SegmentID:      segID + 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        5000,
+		IndexID:        indexID,
+		BuildID:        buildID + 1,
+		NodeID:         0,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_Finished,
+		FailReason:     "",
+		IsDeleted:      false,
+		CreatedUTCTime: 0,
+		IndexFileKeys:  []string{"file3", "file4"},
+		IndexSize:      1024,
+		WriteHandoff:   false,
 	})
 
 	for id, segment := range segments {
@@ -1411,25 +1411,25 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 
 		conclusion: only G is GCed.
 	*/
-	segA := gc.meta.GetSegment(segID)
+	segA := gc.meta.GetSegment(context.TODO(), segID)
 	assert.NotNil(t, segA)
-	segB := gc.meta.GetSegment(segID + 1)
+	segB := gc.meta.GetSegment(context.TODO(), segID+1)
 	assert.NotNil(t, segB)
-	segC := gc.meta.GetSegment(segID + 2)
+	segC := gc.meta.GetSegment(context.TODO(), segID+2)
 	assert.NotNil(t, segC)
-	segD := gc.meta.GetSegment(segID + 3)
+	segD := gc.meta.GetSegment(context.TODO(), segID+3)
 	assert.NotNil(t, segD)
-	segE := gc.meta.GetSegment(segID + 4)
+	segE := gc.meta.GetSegment(context.TODO(), segID+4)
 	assert.NotNil(t, segE)
-	segF := gc.meta.GetSegment(segID + 5)
+	segF := gc.meta.GetSegment(context.TODO(), segID+5)
 	assert.NotNil(t, segF)
-	segG := gc.meta.GetSegment(segID + 6)
+	segG := gc.meta.GetSegment(context.TODO(), segID+6)
 	assert.NotNil(t, segG)
-	segH := gc.meta.GetSegment(segID + 7)
+	segH := gc.meta.GetSegment(context.TODO(), segID+7)
 	assert.NotNil(t, segH)
-	segG = gc.meta.GetSegment(segID + 8)
+	segG = gc.meta.GetSegment(context.TODO(), segID+8)
 	assert.Nil(t, segG)
-	err := gc.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
+	err := gc.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 		SegmentID:    segID + 4,
 		CollectionID: collID,
 		PartitionID:  partID,
@@ -1459,9 +1459,9 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		D: dropped, not indexed, should be GCed since E is indexed
 	*/
 
-	segC = gc.meta.GetSegment(segID + 2)
+	segC = gc.meta.GetSegment(context.TODO(), segID+2)
 	assert.Nil(t, segC)
-	segD = gc.meta.GetSegment(segID + 3)
+	segD = gc.meta.GetSegment(context.TODO(), segID+3)
 	assert.Nil(t, segD)
 
 	gc.recycleDroppedSegments(context.TODO())
@@ -1469,9 +1469,9 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		A: compacted became false due to C is GCed already, A should be GCed since dropTolernace is meet
 		B: compacted became false due to C is GCed already, B should be GCed since dropTolerance is meet
 	*/
-	segA = gc.meta.GetSegment(segID)
+	segA = gc.meta.GetSegment(context.TODO(), segID)
 	assert.Nil(t, segA)
-	segB = gc.meta.GetSegment(segID + 1)
+	segB = gc.meta.GetSegment(context.TODO(), segID+1)
 	assert.Nil(t, segB)
 }
 

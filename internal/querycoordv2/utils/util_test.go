@@ -59,13 +59,13 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliable() {
 	}
 
 	mockTargetManager := meta.NewMockTargetManager(suite.T())
-	mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
+	mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
 		2: {
 			ID:            2,
 			InsertChannel: "test",
 		},
 	}).Maybe()
-	mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything).Return(1011).Maybe()
+	mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
 
 	suite.setNodeAvailable(1, 2)
 	err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
@@ -81,13 +81,13 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 			TargetVersion: 1011,
 		}
 		mockTargetManager := meta.NewMockTargetManager(suite.T())
-		mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
+		mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
 			2: {
 				ID:            2,
 				InsertChannel: "test",
 			},
 		}).Maybe()
-		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything).Return(1011).Maybe()
+		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
 		// leader nodeID=1 not available
 		suite.setNodeAvailable(2)
 		err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
@@ -103,13 +103,13 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 		}
 
 		mockTargetManager := meta.NewMockTargetManager(suite.T())
-		mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
+		mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
 			2: {
 				ID:            2,
 				InsertChannel: "test",
 			},
 		}).Maybe()
-		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything).Return(1011).Maybe()
+		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
 		// leader nodeID=2 not available
 		suite.setNodeAvailable(1)
 		err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
@@ -124,14 +124,14 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 			TargetVersion: 1011,
 		}
 		mockTargetManager := meta.NewMockTargetManager(suite.T())
-		mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
+		mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
 			// target segmentID=1 not in leadView
 			1: {
 				ID:            1,
 				InsertChannel: "test",
 			},
 		}).Maybe()
-		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything).Return(1011).Maybe()
+		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
 		suite.setNodeAvailable(1, 2)
 		err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
 		suite.Error(err)
@@ -144,14 +144,14 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 			Segments: map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
 		}
 		mockTargetManager := meta.NewMockTargetManager(suite.T())
-		mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
+		mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
 			// target segmentID=1 not in leadView
 			1: {
 				ID:            1,
 				InsertChannel: "test",
 			},
 		}).Maybe()
-		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything).Return(1011).Maybe()
+		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
 		suite.setNodeAvailable(1, 2)
 		err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
 		suite.Error(err)

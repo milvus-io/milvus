@@ -67,9 +67,10 @@ const (
 )
 
 type LBPolicyImpl struct {
-	getBalancer func() LBBalancer
-	clientMgr   shardClientMgr
-	balancerMap map[string]LBBalancer
+	getBalancer    func() LBBalancer
+	clientMgr      shardClientMgr
+	balancerMap    map[string]LBBalancer
+	retryOnReplica int
 }
 
 func NewLBPolicyImpl(clientMgr shardClientMgr) *LBPolicyImpl {
@@ -77,18 +78,21 @@ func NewLBPolicyImpl(clientMgr shardClientMgr) *LBPolicyImpl {
 	balancerMap[LookAside] = NewLookAsideBalancer(clientMgr)
 	balancerMap[RoundRobin] = NewRoundRobinBalancer()
 
+	balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 	getBalancer := func() LBBalancer {
-		balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 		if _, ok := balancerMap[balancePolicy]; !ok {
 			return balancerMap[LookAside]
 		}
 		return balancerMap[balancePolicy]
 	}
 
+	retryOnReplica := Params.ProxyCfg.RetryTimesOnReplica.GetAsInt()
+
 	return &LBPolicyImpl{
-		getBalancer: getBalancer,
-		clientMgr:   clientMgr,
-		balancerMap: balancerMap,
+		getBalancer:    getBalancer,
+		clientMgr:      clientMgr,
+		balancerMap:    balancerMap,
+		retryOnReplica: retryOnReplica,
 	}
 }
 
@@ -106,9 +110,8 @@ func (lb *LBPolicyImpl) GetShardLeaders(ctx context.Context, dbName string, coll
 		var err error
 		shardLeaders, err = globalMetaCache.GetShards(ctx, withCache, dbName, collName, collectionID)
 		if err != nil {
-			return !errors.Is(err, merr.ErrCollectionLoaded), err
+			return !errors.Is(err, merr.ErrCollectionNotLoaded), err
 		}
-
 		return false, nil
 	})
 
@@ -200,10 +203,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				zap.Error(err))
 			excludeNodes.Insert(targetNode.nodeID)
 
-			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode, workload.channel)
+			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode.nodeID, workload.channel)
 			return lastErr
 		}
-		defer lb.clientMgr.ReleaseClientRef(targetNode.nodeID)
 
 		err = workload.exec(ctx, targetNode.nodeID, client, workload.channel)
 		if err != nil {
@@ -213,7 +215,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				zap.Int64("nodeID", targetNode.nodeID),
 				zap.Error(err))
 			excludeNodes.Insert(targetNode.nodeID)
-			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode, workload.channel)
+			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode.nodeID, workload.channel)
 			return lastErr
 		}
 
@@ -232,12 +234,11 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 	}
 
 	// let every request could retry at least twice, which could retry after update shard leader cache
-	retryTimes := Params.ProxyCfg.RetryTimesOnReplica.GetAsInt()
 	wg, ctx := errgroup.WithContext(ctx)
 	for k, v := range dml2leaders {
 		channel := k
 		nodes := v
-		channelRetryTimes := retryTimes
+		channelRetryTimes := lb.retryOnReplica
 		if len(nodes) > 0 {
 			channelRetryTimes *= len(nodes)
 		}

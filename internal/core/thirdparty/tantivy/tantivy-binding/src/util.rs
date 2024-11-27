@@ -1,9 +1,10 @@
 use std::ffi::c_void;
 use std::ops::Bound;
 use serde_json as json;
-use crate::error::TantivyError;
-
 use tantivy::{directory::MmapDirectory, Index};
+
+use crate::stop_words;
+use crate::error::TantivyError;
 
 pub fn index_exist(path: &str) -> bool {
     let dir = MmapDirectory::open(path).unwrap();
@@ -45,4 +46,23 @@ pub(crate) fn get_string_list(value: &json::Value, label: &str) -> Result<Vec<St
         }
     };
     Ok(str_list)
+}
+
+pub(crate) fn get_stop_words_list(str_list:Vec<String>) -> Vec<String>{
+    let mut stop_words = Vec::new();
+    for str in str_list{
+        if str.len()>0 && str.chars().nth(0).unwrap() == '_'{
+            match str.as_str(){
+                "_english_" =>{
+                    for word in stop_words::ENGLISH{
+                        stop_words.push(word.to_string());
+                    }
+                    continue;
+                }
+                _other => {}
+            }
+        }
+        stop_words.push(str);
+    }
+    stop_words
 }

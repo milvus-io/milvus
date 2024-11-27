@@ -51,7 +51,7 @@ import (
 
 var _ task = (*statsTask)(nil)
 
-const statsBatchSize = 10000
+const statsBatchSize = 100
 
 type statsTask struct {
 	ident  string

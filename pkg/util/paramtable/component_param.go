@@ -80,7 +80,10 @@ type ComponentParam struct {
 	HTTPCfg        httpConfig
 	LogCfg         logConfig
 	RoleCfg        roleConfig
+	RbacConfig     rbacConfig
 	StreamingCfg   streamingConfig
+
+	InternalTLSCfg InternalTLSConfig
 
 	RootCoordGrpcServerCfg     GrpcServerConfig
 	ProxyGrpcServerCfg         GrpcServerConfig
@@ -134,8 +137,11 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
+	p.RbacConfig.init(bt)
 	p.GpuConfig.init(bt)
 	p.KnowhereConfig.init(bt)
+
+	p.InternalTLSCfg.Init(bt)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
 	p.ProxyGrpcServerCfg.Init("proxy", bt)
@@ -277,6 +283,9 @@ type commonConfig struct {
 	ReadOnlyPrivileges                  ParamItem `refreshable:"false"`
 	ReadWritePrivileges                 ParamItem `refreshable:"false"`
 	AdminPrivileges                     ParamItem `refreshable:"false"`
+
+	// Local RPC enabled for milvus internal communication when mix or standalone mode.
+	LocalRPCEnabled ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -650,8 +659,8 @@ like the old password verification when updating the credential`,
 	p.DefaultRootPassword = ParamItem{
 		Key:          "common.security.defaultRootPassword",
 		Version:      "2.4.7",
-		Doc:          "default password for root user",
-		DefaultValue: "Milvus",
+		Doc:          "default password for root user. The maximum length is 72 characters, and double quotes are required.",
+		DefaultValue: "\"Milvus\"",
 		Export:       true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
@@ -918,6 +927,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Doc:     `use to override the default value of admin privileges,  example: "PrivilegeCreateOwnership,PrivilegeDropOwnership"`,
 	}
 	p.AdminPrivileges.Init(base.mgr)
+
+	p.LocalRPCEnabled = ParamItem{
+		Key:          "common.localRPCEnabled",
+		Version:      "2.4.18",
+		DefaultValue: "false",
+		Doc:          `enable local rpc for internal communication when mix or standalone mode.`,
+		Export:       true,
+	}
+	p.LocalRPCEnabled.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -1114,10 +1132,11 @@ type rootCoordConfig struct {
 	MaxPartitionNum             ParamItem `refreshable:"true"`
 	MinSegmentSizeToEnableIndex ParamItem `refreshable:"true"`
 	EnableActiveStandby         ParamItem `refreshable:"false"`
-	MaxDatabaseNum              ParamItem `refreshable:"false"`
+	MaxDatabaseNum              ParamItem `refreshable:"true"`
 	MaxGeneralCapacity          ParamItem `refreshable:"true"`
 	GracefulStopTimeout         ParamItem `refreshable:"true"`
 	UseLockScheduler            ParamItem `refreshable:"true"`
+	DefaultDBProperties         ParamItem `refreshable:"false"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -1201,6 +1220,15 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 		Export:       false,
 	}
 	p.UseLockScheduler.Init(base.mgr)
+
+	p.DefaultDBProperties = ParamItem{
+		Key:          "rootCoord.defaultDBProperties",
+		Version:      "2.4.16",
+		DefaultValue: "{}",
+		Doc:          "default db properties, should be a json string",
+		Export:       false,
+	}
+	p.DefaultDBProperties.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1241,6 +1269,8 @@ type proxyConfig struct {
 	MaxUserNum                   ParamItem `refreshable:"true"`
 	MaxRoleNum                   ParamItem `refreshable:"true"`
 	MaxTaskNum                   ParamItem `refreshable:"false"`
+	DDLConcurrency               ParamItem `refreshable:"true"`
+	DCLConcurrency               ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval     ParamItem `refreshable:"false"`
 	ReplicaSelectionPolicy       ParamItem `refreshable:"false"`
 	CheckQueryNodeHealthInterval ParamItem `refreshable:"false"`
@@ -1328,8 +1358,15 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.MaxPasswordLength = ParamItem{
 		Key:          "proxy.maxPasswordLength",
-		DefaultValue: "256",
+		DefaultValue: "72", // bcrypt max length
 		Version:      "2.0.0",
+		Formatter: func(v string) string {
+			n := getAsInt(v)
+			if n <= 0 || n > 72 {
+				return "72"
+			}
+			return v
+		},
 		PanicIfEmpty: true,
 	}
 	p.MaxPasswordLength.Init(base.mgr)
@@ -1386,6 +1423,24 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxTaskNum.Init(base.mgr)
+
+	p.DDLConcurrency = ParamItem{
+		Key:          "proxy.ddlConcurrency",
+		Version:      "2.5.0",
+		DefaultValue: "16",
+		Doc:          "The concurrent execution number of DDL at proxy.",
+		Export:       true,
+	}
+	p.DDLConcurrency.Init(base.mgr)
+
+	p.DCLConcurrency = ParamItem{
+		Key:          "proxy.dclConcurrency",
+		Version:      "2.5.0",
+		DefaultValue: "16",
+		Doc:          "The concurrent execution number of DCL at proxy.",
+		Export:       true,
+	}
+	p.DCLConcurrency.Init(base.mgr)
 
 	p.GinLogging = ParamItem{
 		Key:          "proxy.ginLogging",
@@ -3173,12 +3228,13 @@ user-task-polling:
 // --- datacoord ---
 type dataCoordConfig struct {
 	// --- CHANNEL ---
-	WatchTimeoutInterval         ParamItem `refreshable:"false"`
-	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
-	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
-	ChannelBalanceInterval       ParamItem `refreshable:"true"`
-	ChannelCheckInterval         ParamItem `refreshable:"true"`
-	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
+	WatchTimeoutInterval             ParamItem `refreshable:"false"`
+	LegacyVersionWithoutRPCWatch     ParamItem `refreshable:"false"`
+	ChannelBalanceSilentDuration     ParamItem `refreshable:"true"`
+	ChannelBalanceInterval           ParamItem `refreshable:"true"`
+	ChannelCheckInterval             ParamItem `refreshable:"true"`
+	ChannelOperationRPCTimeout       ParamItem `refreshable:"true"`
+	MaxConcurrentChannelTaskNumPerDN ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
@@ -3348,6 +3404,15 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	}
 	p.ChannelOperationRPCTimeout.Init(base.mgr)
 
+	p.MaxConcurrentChannelTaskNumPerDN = ParamItem{
+		Key:          "dataCoord.channel.maxConcurrentChannelTaskNumPerDN",
+		Version:      "2.5",
+		DefaultValue: "32",
+		Doc:          "The maximum concurrency for each DataNode executing channel tasks (watch, release).",
+		Export:       true,
+	}
+	p.MaxConcurrentChannelTaskNumPerDN.Init(base.mgr)
+
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
 		Version:      "2.0.0",
@@ -3494,7 +3559,7 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 	p.CompactionTaskQueueCapacity = ParamItem{
 		Key:          "dataCoord.compaction.taskQueueCapacity",
 		Version:      "2.5.0",
-		DefaultValue: "256",
+		DefaultValue: "100000",
 		Doc:          `compaction task queue size`,
 		Export:       true,
 	}
@@ -4215,6 +4280,7 @@ type dataNodeConfig struct {
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
 	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
+	UseMergeSort             ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -4545,6 +4611,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.L0CompactionMaxBatchSize.Init(base.mgr)
+
+	p.UseMergeSort = ParamItem{
+		Key:          "dataNode.compaction.useMergeSort",
+		Version:      "2.5.0",
+		Doc:          "Whether to enable mergeSort mode when performing mixCompaction.",
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.UseMergeSort.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",

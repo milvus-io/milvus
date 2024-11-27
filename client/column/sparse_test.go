@@ -57,12 +57,24 @@ func TestColumnSparseEmbedding(t *testing.T) {
 		fd := column.FieldData()
 		assert.NotNil(t, fd)
 		assert.Equal(t, fd.GetFieldName(), columnName)
+
+		result, err := FieldDataColumn(fd, 0, -1)
+		assert.NoError(t, err)
+
+		parsed, ok := result.(*ColumnSparseFloatVector)
+		if assert.True(t, ok) {
+			assert.Equal(t, columnName, parsed.Name())
+			assert.Equal(t, entity.FieldTypeSparseVector, parsed.Type())
+			assert.Equal(t, columnLen, parsed.Len())
+			// dim not equal
+			// assert.EqualValues(t, v, parsed.Data())
+		}
 	})
 
 	t.Run("test column value by idx", func(t *testing.T) {
-		_, err := column.ValueByIdx(-1)
+		_, err := column.Value(-1)
 		assert.Error(t, err)
-		_, err = column.ValueByIdx(columnLen)
+		_, err = column.Value(columnLen)
 		assert.Error(t, err)
 
 		_, err = column.Get(-1)
@@ -71,12 +83,21 @@ func TestColumnSparseEmbedding(t *testing.T) {
 		assert.Error(t, err)
 
 		for i := 0; i < columnLen; i++ {
-			v, err := column.ValueByIdx(i)
+			v, err := column.Value(i)
 			assert.NoError(t, err)
-			assert.Equal(t, column.vectors[i], v)
+			assert.Equal(t, column.values[i], v)
 			getV, err := column.Get(i)
 			assert.NoError(t, err)
 			assert.Equal(t, v, getV)
+		}
+	})
+
+	t.Run("test_column_slice", func(t *testing.T) {
+		l := rand.Intn(columnLen)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnSparseFloatVector)
+		if assert.True(t, ok) {
+			assert.Equal(t, column.Data()[:l], slicedColumn.Data())
 		}
 	})
 }

@@ -77,25 +77,25 @@ func (job *ReleaseCollectionJob) Execute() error {
 	req := job.req
 	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", req.GetCollectionID()))
 
-	if !job.meta.CollectionManager.Exist(req.GetCollectionID()) {
+	if !job.meta.CollectionManager.Exist(job.ctx, req.GetCollectionID()) {
 		log.Info("release collection end, the collection has not been loaded into QueryNode")
 		return nil
 	}
 
-	loadedPartitions := job.meta.CollectionManager.GetPartitionsByCollection(req.GetCollectionID())
+	loadedPartitions := job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionID())
 	toRelease := lo.Map(loadedPartitions, func(partition *meta.Partition, _ int) int64 {
 		return partition.GetPartitionID()
 	})
 	releasePartitions(job.ctx, job.meta, job.cluster, req.GetCollectionID(), toRelease...)
 
-	err := job.meta.CollectionManager.RemoveCollection(req.GetCollectionID())
+	err := job.meta.CollectionManager.RemoveCollection(job.ctx, req.GetCollectionID())
 	if err != nil {
 		msg := "failed to remove collection"
 		log.Warn(msg, zap.Error(err))
 		return errors.Wrap(err, msg)
 	}
 
-	err = job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
+	err = job.meta.ReplicaManager.RemoveCollection(job.ctx, req.GetCollectionID())
 	if err != nil {
 		msg := "failed to remove replicas"
 		log.Warn(msg, zap.Error(err))
@@ -166,12 +166,12 @@ func (job *ReleasePartitionJob) Execute() error {
 		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 	)
 
-	if !job.meta.CollectionManager.Exist(req.GetCollectionID()) {
+	if !job.meta.CollectionManager.Exist(job.ctx, req.GetCollectionID()) {
 		log.Info("release collection end, the collection has not been loaded into QueryNode")
 		return nil
 	}
 
-	loadedPartitions := job.meta.CollectionManager.GetPartitionsByCollection(req.GetCollectionID())
+	loadedPartitions := job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionID())
 	toRelease := lo.FilterMap(loadedPartitions, func(partition *meta.Partition, _ int) (int64, bool) {
 		return partition.GetPartitionID(), lo.Contains(req.GetPartitionIDs(), partition.GetPartitionID())
 	})
@@ -185,13 +185,13 @@ func (job *ReleasePartitionJob) Execute() error {
 	// If all partitions are released, clear all
 	if len(toRelease) == len(loadedPartitions) {
 		log.Info("release partitions covers all partitions, will remove the whole collection")
-		err := job.meta.CollectionManager.RemoveCollection(req.GetCollectionID())
+		err := job.meta.CollectionManager.RemoveCollection(job.ctx, req.GetCollectionID())
 		if err != nil {
 			msg := "failed to release partitions from store"
 			log.Warn(msg, zap.Error(err))
 			return errors.Wrap(err, msg)
 		}
-		err = job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
+		err = job.meta.ReplicaManager.RemoveCollection(job.ctx, req.GetCollectionID())
 		if err != nil {
 			log.Warn("failed to remove replicas", zap.Error(err))
 		}
@@ -207,7 +207,7 @@ func (job *ReleasePartitionJob) Execute() error {
 
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
 	} else {
-		err := job.meta.CollectionManager.RemovePartition(req.GetCollectionID(), toRelease...)
+		err := job.meta.CollectionManager.RemovePartition(job.ctx, req.GetCollectionID(), toRelease...)
 		if err != nil {
 			msg := "failed to release partitions from store"
 			log.Warn(msg, zap.Error(err))

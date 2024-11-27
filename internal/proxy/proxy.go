@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -130,6 +131,8 @@ type Proxy struct {
 
 	// delete rate limiter
 	enableComplexDeleteLimit bool
+
+	slowQueries *expirable.LRU[Timestamp, *metricsinfo.SlowQuery]
 }
 
 // NewProxy returns a Proxy struct.
@@ -152,6 +155,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		lbPolicy:               lbPolicy,
 		resourceManager:        resourceManager,
 		replicateStreamManager: replicateStreamManager,
+		slowQueries:            expirable.NewLRU[Timestamp, *metricsinfo.SlowQuery](20, nil, time.Minute*15),
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	expr.Register("proxy", node)

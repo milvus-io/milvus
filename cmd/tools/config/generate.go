@@ -68,6 +68,9 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 			item := subVal.Interface().(paramtable.ParamItem) //nolint:govet
 			refreshable := tag.Get("refreshable")
 			defaultValue := params.GetWithDefault(item.Key, item.DefaultValue)
+			if strings.HasPrefix(item.DefaultValue, "\"") && strings.HasSuffix(item.DefaultValue, "\"") {
+				defaultValue = fmt.Sprintf("\"%s\"", defaultValue)
+			}
 			log.Debug("got key", zap.String("key", item.Key), zap.Any("value", defaultValue), zap.String("variable", val.Type().Field(j).Name))
 			*data = append(*data, DocContent{item.Key, defaultValue, item.Version, refreshable, item.Export, item.Doc})
 		} else if t == "paramtable.ParamGroup" {
@@ -85,7 +88,7 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 			for _, key := range keys {
 				value := m[key]
 				log.Debug("got group entry", zap.String("key", key), zap.String("value", value))
-				*data = append(*data, DocContent{fmt.Sprintf("%s%s", item.KeyPrefix, key), quoteIfNeeded(value), item.Version, refreshable, item.Export, ""})
+				*data = append(*data, DocContent{fmt.Sprintf("%s%s", item.KeyPrefix, key), quoteIfNeeded(value), item.Version, refreshable, item.Export, item.GetDoc(key)})
 			}
 		} else {
 			collectRecursive(params, data, &subVal)
@@ -298,6 +301,10 @@ func WriteYaml(w io.Writer) {
 			header: "\n# Configure the proxy tls enable.",
 		},
 		{
+			name:   "internaltls",
+			header: "\n# Configure the node-tls enable.",
+		},
+		{
 			name: "common",
 		},
 		{
@@ -337,6 +344,11 @@ func WriteYaml(w io.Writer) {
 			name: "streaming",
 			header: `
 # Any configuration related to the streaming service.`,
+		},
+		{
+			name: "knowhere",
+			header: `
+# Any configuration related to the knowhere vector search engine`,
 		},
 	}
 	marshller := YamlMarshaller{w, groups, result}

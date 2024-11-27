@@ -14,6 +14,10 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "SearchOnGrowing.h"
+#include <cstddef>
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "log/Log.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnIndex.h"
 
@@ -109,6 +113,15 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         dataset::SearchDataset search_dataset{
             metric_type, num_queries, topk, round_decimal, dim, query_data};
         int32_t current_chunk_id = 0;
+
+        // get K1 and B from index for bm25 brute force
+        std::map<std::string, std::string> index_info;
+        if (metric_type == knowhere::metric::BM25) {
+            index_info = segment.get_indexing_record()
+                             .get_field_index_meta(vecfield_id)
+                             .GetIndexParams();
+        }
+
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_data_base(vecfield_id);
         auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
@@ -123,29 +136,23 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 std::min(active_count, (chunk_id + 1) * vec_size_per_chunk);
             auto size_per_chunk = element_end - element_begin;
 
-            auto sub_view = bitset.subview(element_begin, size_per_chunk);
+            auto sub_data = query::dataset::RawDataset{
+                element_begin, dim, size_per_chunk, chunk_data};
             if (info.group_by_field_id_.has_value()) {
                 auto sub_qr = BruteForceSearchIterators(search_dataset,
-                                                        chunk_data,
-                                                        size_per_chunk,
+                                                        sub_data,
                                                         info,
-                                                        sub_view,
+                                                        index_info,
+                                                        bitset,
                                                         data_type);
                 final_qr.merge(sub_qr);
             } else {
                 auto sub_qr = BruteForceSearch(search_dataset,
-                                               chunk_data,
-                                               size_per_chunk,
+                                               sub_data,
                                                info,
-                                               sub_view,
+                                               index_info,
+                                               bitset,
                                                data_type);
-
-                // convert chunk uid to segment uid
-                for (auto& x : sub_qr.mutable_seg_offsets()) {
-                    if (x != -1) {
-                        x += chunk_id * vec_size_per_chunk;
-                    }
-                }
                 final_qr.merge(sub_qr);
             }
         }

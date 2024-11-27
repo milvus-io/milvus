@@ -88,6 +88,19 @@ func (c *dispatcherManager) Add(ctx context.Context, vchannel string, pos *Pos, 
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if _, ok := c.soloDispatchers[vchannel]; ok {
+		// current dispatcher didn't allow multiple subscriptions on same vchannel at same time
+		log.Warn("unreachable: solo vchannel dispatcher already exists")
+		return nil, fmt.Errorf("solo vchannel dispatcher already exists")
+	}
+	if c.mainDispatcher != nil {
+		if _, err := c.mainDispatcher.GetTarget(vchannel); err == nil {
+			// current dispatcher didn't allow multiple subscriptions on same vchannel at same time
+			log.Warn("unreachable: vchannel has been registered in main dispatcher, ")
+			return nil, fmt.Errorf("vchannel has been registered in main dispatcher")
+		}
+	}
+
 	isMain := c.mainDispatcher == nil
 	d, err := NewDispatcher(ctx, c.factory, isMain, c.pchannel, pos, c.constructSubName(vchannel, isMain), subPos, c.lagNotifyChan, c.lagTargets, false)
 	if err != nil {

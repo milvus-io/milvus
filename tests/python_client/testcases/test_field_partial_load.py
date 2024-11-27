@@ -70,7 +70,6 @@ class TestFieldPartialLoad(TestcaseBase):
                and not_load_int64_field.name in res[0][0].fields.keys()
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #36353")
     def test_skip_load_dynamic_field(self):
         """
         target: test skip load dynamic field

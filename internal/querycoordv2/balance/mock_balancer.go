@@ -3,6 +3,8 @@
 package balance
 
 import (
+	context "context"
+
 	meta "github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -20,17 +22,17 @@ func (_m *MockBalancer) EXPECT() *MockBalancer_Expecter {
 	return &MockBalancer_Expecter{mock: &_m.Mock}
 }
 
-// AssignChannel provides a mock function with given fields: channels, nodes, manualBalance
-func (_m *MockBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
-	ret := _m.Called(channels, nodes, manualBalance)
+// AssignChannel provides a mock function with given fields: ctx, channels, nodes, manualBalance
+func (_m *MockBalancer) AssignChannel(ctx context.Context, channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
+	ret := _m.Called(ctx, channels, nodes, manualBalance)
 
 	if len(ret) == 0 {
 		panic("no return value specified for AssignChannel")
 	}
 
 	var r0 []ChannelAssignPlan
-	if rf, ok := ret.Get(0).(func([]*meta.DmChannel, []int64, bool) []ChannelAssignPlan); ok {
-		r0 = rf(channels, nodes, manualBalance)
+	if rf, ok := ret.Get(0).(func(context.Context, []*meta.DmChannel, []int64, bool) []ChannelAssignPlan); ok {
+		r0 = rf(ctx, channels, nodes, manualBalance)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]ChannelAssignPlan)
@@ -46,16 +48,17 @@ type MockBalancer_AssignChannel_Call struct {
 }
 
 // AssignChannel is a helper method to define mock.On call
+//   - ctx context.Context
 //   - channels []*meta.DmChannel
 //   - nodes []int64
 //   - manualBalance bool
-func (_e *MockBalancer_Expecter) AssignChannel(channels interface{}, nodes interface{}, manualBalance interface{}) *MockBalancer_AssignChannel_Call {
-	return &MockBalancer_AssignChannel_Call{Call: _e.mock.On("AssignChannel", channels, nodes, manualBalance)}
+func (_e *MockBalancer_Expecter) AssignChannel(ctx interface{}, channels interface{}, nodes interface{}, manualBalance interface{}) *MockBalancer_AssignChannel_Call {
+	return &MockBalancer_AssignChannel_Call{Call: _e.mock.On("AssignChannel", ctx, channels, nodes, manualBalance)}
 }
 
-func (_c *MockBalancer_AssignChannel_Call) Run(run func(channels []*meta.DmChannel, nodes []int64, manualBalance bool)) *MockBalancer_AssignChannel_Call {
+func (_c *MockBalancer_AssignChannel_Call) Run(run func(ctx context.Context, channels []*meta.DmChannel, nodes []int64, manualBalance bool)) *MockBalancer_AssignChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]*meta.DmChannel), args[1].([]int64), args[2].(bool))
+		run(args[0].(context.Context), args[1].([]*meta.DmChannel), args[2].([]int64), args[3].(bool))
 	})
 	return _c
 }
@@ -65,22 +68,22 @@ func (_c *MockBalancer_AssignChannel_Call) Return(_a0 []ChannelAssignPlan) *Mock
 	return _c
 }
 
-func (_c *MockBalancer_AssignChannel_Call) RunAndReturn(run func([]*meta.DmChannel, []int64, bool) []ChannelAssignPlan) *MockBalancer_AssignChannel_Call {
+func (_c *MockBalancer_AssignChannel_Call) RunAndReturn(run func(context.Context, []*meta.DmChannel, []int64, bool) []ChannelAssignPlan) *MockBalancer_AssignChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// AssignSegment provides a mock function with given fields: collectionID, segments, nodes, manualBalance
-func (_m *MockBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
-	ret := _m.Called(collectionID, segments, nodes, manualBalance)
+// AssignSegment provides a mock function with given fields: ctx, collectionID, segments, nodes, manualBalance
+func (_m *MockBalancer) AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
+	ret := _m.Called(ctx, collectionID, segments, nodes, manualBalance)
 
 	if len(ret) == 0 {
 		panic("no return value specified for AssignSegment")
 	}
 
 	var r0 []SegmentAssignPlan
-	if rf, ok := ret.Get(0).(func(int64, []*meta.Segment, []int64, bool) []SegmentAssignPlan); ok {
-		r0 = rf(collectionID, segments, nodes, manualBalance)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []*meta.Segment, []int64, bool) []SegmentAssignPlan); ok {
+		r0 = rf(ctx, collectionID, segments, nodes, manualBalance)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]SegmentAssignPlan)
@@ -96,17 +99,18 @@ type MockBalancer_AssignSegment_Call struct {
 }
 
 // AssignSegment is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
 //   - segments []*meta.Segment
 //   - nodes []int64
 //   - manualBalance bool
-func (_e *MockBalancer_Expecter) AssignSegment(collectionID interface{}, segments interface{}, nodes interface{}, manualBalance interface{}) *MockBalancer_AssignSegment_Call {
-	return &MockBalancer_AssignSegment_Call{Call: _e.mock.On("AssignSegment", collectionID, segments, nodes, manualBalance)}
+func (_e *MockBalancer_Expecter) AssignSegment(ctx interface{}, collectionID interface{}, segments interface{}, nodes interface{}, manualBalance interface{}) *MockBalancer_AssignSegment_Call {
+	return &MockBalancer_AssignSegment_Call{Call: _e.mock.On("AssignSegment", ctx, collectionID, segments, nodes, manualBalance)}
 }
 
-func (_c *MockBalancer_AssignSegment_Call) Run(run func(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool)) *MockBalancer_AssignSegment_Call {
+func (_c *MockBalancer_AssignSegment_Call) Run(run func(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool)) *MockBalancer_AssignSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].([]*meta.Segment), args[2].([]int64), args[3].(bool))
+		run(args[0].(context.Context), args[1].(int64), args[2].([]*meta.Segment), args[3].([]int64), args[4].(bool))
 	})
 	return _c
 }
@@ -116,14 +120,14 @@ func (_c *MockBalancer_AssignSegment_Call) Return(_a0 []SegmentAssignPlan) *Mock
 	return _c
 }
 
-func (_c *MockBalancer_AssignSegment_Call) RunAndReturn(run func(int64, []*meta.Segment, []int64, bool) []SegmentAssignPlan) *MockBalancer_AssignSegment_Call {
+func (_c *MockBalancer_AssignSegment_Call) RunAndReturn(run func(context.Context, int64, []*meta.Segment, []int64, bool) []SegmentAssignPlan) *MockBalancer_AssignSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// BalanceReplica provides a mock function with given fields: replica
-func (_m *MockBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
-	ret := _m.Called(replica)
+// BalanceReplica provides a mock function with given fields: ctx, replica
+func (_m *MockBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+	ret := _m.Called(ctx, replica)
 
 	if len(ret) == 0 {
 		panic("no return value specified for BalanceReplica")
@@ -131,19 +135,19 @@ func (_m *MockBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPl
 
 	var r0 []SegmentAssignPlan
 	var r1 []ChannelAssignPlan
-	if rf, ok := ret.Get(0).(func(*meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan)); ok {
-		return rf(replica)
+	if rf, ok := ret.Get(0).(func(context.Context, *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan)); ok {
+		return rf(ctx, replica)
 	}
-	if rf, ok := ret.Get(0).(func(*meta.Replica) []SegmentAssignPlan); ok {
-		r0 = rf(replica)
+	if rf, ok := ret.Get(0).(func(context.Context, *meta.Replica) []SegmentAssignPlan); ok {
+		r0 = rf(ctx, replica)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]SegmentAssignPlan)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*meta.Replica) []ChannelAssignPlan); ok {
-		r1 = rf(replica)
+	if rf, ok := ret.Get(1).(func(context.Context, *meta.Replica) []ChannelAssignPlan); ok {
+		r1 = rf(ctx, replica)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([]ChannelAssignPlan)
@@ -159,14 +163,15 @@ type MockBalancer_BalanceReplica_Call struct {
 }
 
 // BalanceReplica is a helper method to define mock.On call
+//   - ctx context.Context
 //   - replica *meta.Replica
-func (_e *MockBalancer_Expecter) BalanceReplica(replica interface{}) *MockBalancer_BalanceReplica_Call {
-	return &MockBalancer_BalanceReplica_Call{Call: _e.mock.On("BalanceReplica", replica)}
+func (_e *MockBalancer_Expecter) BalanceReplica(ctx interface{}, replica interface{}) *MockBalancer_BalanceReplica_Call {
+	return &MockBalancer_BalanceReplica_Call{Call: _e.mock.On("BalanceReplica", ctx, replica)}
 }
 
-func (_c *MockBalancer_BalanceReplica_Call) Run(run func(replica *meta.Replica)) *MockBalancer_BalanceReplica_Call {
+func (_c *MockBalancer_BalanceReplica_Call) Run(run func(ctx context.Context, replica *meta.Replica)) *MockBalancer_BalanceReplica_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*meta.Replica))
+		run(args[0].(context.Context), args[1].(*meta.Replica))
 	})
 	return _c
 }
@@ -176,7 +181,7 @@ func (_c *MockBalancer_BalanceReplica_Call) Return(_a0 []SegmentAssignPlan, _a1 
 	return _c
 }
 
-func (_c *MockBalancer_BalanceReplica_Call) RunAndReturn(run func(*meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan)) *MockBalancer_BalanceReplica_Call {
+func (_c *MockBalancer_BalanceReplica_Call) RunAndReturn(run func(context.Context, *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan)) *MockBalancer_BalanceReplica_Call {
 	_c.Call.Return(run)
 	return _c
 }

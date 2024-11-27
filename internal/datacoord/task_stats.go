@@ -78,7 +78,7 @@ func (st *statsTask) ResetTask(mt *meta) {
 	st.nodeID = 0
 	// reset isCompacting
 
-	mt.SetSegmentsCompacting([]UniqueID{st.segmentID}, false)
+	mt.SetSegmentsCompacting(context.TODO(), []UniqueID{st.segmentID}, false)
 }
 
 func (st *statsTask) SetQueueTime(t time.Time) {
@@ -110,7 +110,7 @@ func (st *statsTask) GetTaskType() string {
 }
 
 func (st *statsTask) CheckTaskHealthy(mt *meta) bool {
-	seg := mt.GetHealthySegment(st.segmentID)
+	seg := mt.GetHealthySegment(context.TODO(), st.segmentID)
 	return seg != nil
 }
 
@@ -129,7 +129,7 @@ func (st *statsTask) GetFailReason() string {
 
 func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error {
 	// mark compacting
-	if exist, canDo := meta.CheckAndSetSegmentsCompacting([]UniqueID{st.segmentID}); !exist || !canDo {
+	if exist, canDo := meta.CheckAndSetSegmentsCompacting(ctx, []UniqueID{st.segmentID}); !exist || !canDo {
 		log.Warn("segment is not exist or is compacting, skip stats",
 			zap.Bool("exist", exist), zap.Bool("canDo", canDo))
 		st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
@@ -150,7 +150,7 @@ func (st *statsTask) UpdateMetaBuildingState(meta *meta) error {
 func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bool {
 	// set segment compacting
 	log := log.Ctx(ctx).With(zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
-	segment := dependency.meta.GetHealthySegment(st.segmentID)
+	segment := dependency.meta.GetHealthySegment(ctx, st.segmentID)
 	if segment == nil {
 		log.Warn("segment is node healthy, skip stats")
 		st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")

@@ -18,7 +18,6 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
@@ -35,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -182,7 +183,7 @@ func TestGetChannelsJSON(t *testing.T) {
 		{
 			Name:           "fake-ch-_1",
 			WatchState:     "Healthy",
-			LatestTimeTick: typeutil.TimestampToString(0),
+			LatestTimeTick: tsoutil.PhysicalTimeFormat(0),
 			NodeID:         paramtable.GetNodeID(),
 			CollectionID:   1,
 		},

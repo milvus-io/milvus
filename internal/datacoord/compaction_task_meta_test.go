@@ -18,13 +18,13 @@ package datacoord
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -59,7 +59,7 @@ func newTestCompactionTaskMeta(t *testing.T) *compactionTaskMeta {
 }
 
 func (suite *CompactionTaskMetaSuite) TestGetCompactionTasksByCollection() {
-	suite.meta.SaveCompactionTask(&datapb.CompactionTask{
+	suite.meta.SaveCompactionTask(context.TODO(), &datapb.CompactionTask{
 		TriggerID:    1,
 		PlanID:       10,
 		CollectionID: 100,
@@ -69,12 +69,12 @@ func (suite *CompactionTaskMetaSuite) TestGetCompactionTasksByCollection() {
 }
 
 func (suite *CompactionTaskMetaSuite) TestGetCompactionTasksByCollectionAbnormal() {
-	suite.meta.SaveCompactionTask(&datapb.CompactionTask{
+	suite.meta.SaveCompactionTask(context.TODO(), &datapb.CompactionTask{
 		TriggerID:    1,
 		PlanID:       10,
 		CollectionID: 100,
 	})
-	suite.meta.SaveCompactionTask(&datapb.CompactionTask{
+	suite.meta.SaveCompactionTask(context.TODO(), &datapb.CompactionTask{
 		TriggerID:    2,
 		PlanID:       11,
 		CollectionID: 101,
@@ -111,11 +111,11 @@ func (suite *CompactionTaskMetaSuite) TestTaskStatsJSON() {
 
 	// testing return empty string
 	actualJSON := suite.meta.TaskStatsJSON()
-	suite.Equal("", actualJSON)
+	suite.Equal("[]", actualJSON)
 
-	err := suite.meta.SaveCompactionTask(task1)
+	err := suite.meta.SaveCompactionTask(context.TODO(), task1)
 	suite.NoError(err)
-	err = suite.meta.SaveCompactionTask(task2)
+	err = suite.meta.SaveCompactionTask(context.TODO(), task2)
 	suite.NoError(err)
 
 	expectedTasks := []*metricsinfo.CompactionTask{

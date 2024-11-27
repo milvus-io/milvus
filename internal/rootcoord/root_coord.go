@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -451,7 +453,7 @@ func (c *Core) initInternal() error {
 	c.scheduler = newScheduler(c.ctx, c.idAllocator, c.tsoAllocator)
 
 	c.factory.Init(Params)
-	chanMap := c.meta.ListCollectionPhysicalChannels()
+	chanMap := c.meta.ListCollectionPhysicalChannels(c.ctx)
 	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
 	log.Info("create TimeTick sync done")
 
@@ -548,11 +550,15 @@ func (c *Core) Init() error {
 }
 
 func (c *Core) initCredentials() error {
-	credInfo, _ := c.meta.GetCredential(util.UserRoot)
+	credInfo, _ := c.meta.GetCredential(c.ctx, util.UserRoot)
 	if credInfo == nil {
-		log.Debug("RootCoord init user root")
-		encryptedRootPassword, _ := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
-		err := c.meta.AddCredential(&internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
+		encryptedRootPassword, err := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
+		if err != nil {
+			log.Warn("RootCoord init user root failed", zap.Error(err))
+			return err
+		}
+		log.Info("RootCoord init user root")
+		err = c.meta.AddCredential(c.ctx, &internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
 		return err
 	}
 	return nil
@@ -562,7 +568,7 @@ func (c *Core) initRbac() error {
 	var err error
 	// create default roles, including admin, public
 	for _, role := range util.DefaultRoles {
-		err = c.meta.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
+		err = c.meta.CreateRole(c.ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
 		if err != nil && !common.IsIgnorableError(err) {
 			return errors.Wrap(err, "failed to create role")
 		}
@@ -592,7 +598,7 @@ func (c *Core) initPublicRolePrivilege() error {
 
 	var err error
 	for _, globalPrivilege := range globalPrivileges {
-		err = c.meta.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
+		err = c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: util.RolePublic},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
 			ObjectName: util.AnyWord,
@@ -607,7 +613,7 @@ func (c *Core) initPublicRolePrivilege() error {
 		}
 	}
 	for _, collectionPrivilege := range collectionPrivileges {
-		err = c.meta.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
+		err = c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: util.RolePublic},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 			ObjectName: util.AnyWord,
@@ -624,10 +630,54 @@ func (c *Core) initPublicRolePrivilege() error {
 	return nil
 }
 
+func (c *Core) initBuiltinPrivilegeGroups() []*milvuspb.PrivilegeGroupInfo {
+	// init built in privilege groups, override by config if rbac config enabled
+	builtinGroups := make([]*milvuspb.PrivilegeGroupInfo, 0)
+	for groupName, privileges := range util.BuiltinPrivilegeGroups {
+		if Params.RbacConfig.Enabled.GetAsBool() {
+			var confPrivs []string
+			switch groupName {
+			case "ClusterReadOnly":
+				confPrivs = Params.RbacConfig.ClusterReadOnlyPrivileges.GetAsStrings()
+			case "ClusterReadWrite":
+				confPrivs = Params.RbacConfig.ClusterReadWritePrivileges.GetAsStrings()
+			case "ClusterAdmin":
+				confPrivs = Params.RbacConfig.ClusterAdminPrivileges.GetAsStrings()
+			case "DatabaseReadOnly":
+				confPrivs = Params.RbacConfig.DBReadOnlyPrivileges.GetAsStrings()
+			case "DatabaseReadWrite":
+				confPrivs = Params.RbacConfig.DBReadWritePrivileges.GetAsStrings()
+			case "DatabaseAdmin":
+				confPrivs = Params.RbacConfig.DBAdminPrivileges.GetAsStrings()
+			case "CollectionReadOnly":
+				confPrivs = Params.RbacConfig.CollectionReadOnlyPrivileges.GetAsStrings()
+			case "CollectionReadWrite":
+				confPrivs = Params.RbacConfig.CollectionReadWritePrivileges.GetAsStrings()
+			case "CollectionAdmin":
+				confPrivs = Params.RbacConfig.CollectionAdminPrivileges.GetAsStrings()
+			default:
+				return nil
+			}
+			if len(confPrivs) > 0 {
+				privileges = confPrivs
+			}
+		}
+
+		privs := lo.Map(privileges, func(name string, _ int) *milvuspb.PrivilegeEntity {
+			return &milvuspb.PrivilegeEntity{Name: name}
+		})
+		builtinGroups = append(builtinGroups, &milvuspb.PrivilegeGroupInfo{
+			GroupName:  groupName,
+			Privileges: privs,
+		})
+	}
+	return builtinGroups
+}
+
 func (c *Core) initBuiltinRoles() error {
 	rolePrivilegesMap := Params.RoleCfg.Roles.GetAsRoleDetails()
 	for role, privilegesJSON := range rolePrivilegesMap {
-		err := c.meta.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
+		err := c.meta.CreateRole(c.ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
 		if err != nil && !common.IsIgnorableError(err) {
 			log.Error("create a builtin role fail", zap.String("roleName", role), zap.Error(err))
 			return errors.Wrapf(err, "failed to create a builtin role: %s", role)
@@ -635,13 +685,13 @@ func (c *Core) initBuiltinRoles() error {
 		for _, privilege := range privilegesJSON[util.RoleConfigPrivileges] {
 			privilegeName := privilege[util.RoleConfigPrivilege]
 			if !util.IsAnyWord(privilege[util.RoleConfigPrivilege]) {
-				dbPrivName, err := c.getMetastorePrivilegeName(privilege[util.RoleConfigPrivilege])
+				dbPrivName, err := c.getMetastorePrivilegeName(c.ctx, privilege[util.RoleConfigPrivilege])
 				if err != nil {
 					return errors.Wrapf(err, "failed to get metastore privilege name for: %s", privilege[util.RoleConfigPrivilege])
 				}
 				privilegeName = dbPrivName
 			}
-			err := c.meta.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
+			err := c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: role},
 				Object:     &milvuspb.ObjectEntity{Name: privilege[util.RoleConfigObjectType]},
 				ObjectName: privilege[util.RoleConfigObjectName],
@@ -1131,13 +1181,19 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	return t.Rsp, nil
 }
 
-// getRealCollectionName get origin collection name to avoid the alias name
-func (c *Core) getRealCollectionName(ctx context.Context, db, collection string) string {
-	realName, err := c.meta.DescribeAlias(ctx, db, collection, 0)
-	if err != nil {
-		return collection
+// getCollectionIDStr get collectionID string to avoid the alias name
+func (c *Core) getCollectionIDStr(ctx context.Context, db, collectionName string, collectionID int64) string {
+	// When neither the collection name nor the collectionID exists, no error is returned at this point.
+	// An error will be returned during the execution phase.
+	if collectionID != 0 {
+		return strconv.FormatInt(collectionID, 10)
 	}
-	return realName
+
+	coll, err := c.meta.GetCollectionByName(ctx, db, collectionName, typeutil.MaxTimestamp)
+	if err != nil {
+		return "-1"
+	}
+	return strconv.FormatInt(coll.CollectionID, 10)
 }
 
 func (c *Core) describeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest, allowUnavailable bool) (*model.Collection, error) {
@@ -1615,7 +1671,7 @@ func (c *Core) GetPChannelInfo(ctx context.Context, in *rootcoordpb.GetPChannelI
 			Status: merr.Status(err),
 		}, nil
 	}
-	return c.meta.GetPChannelInfo(in.GetPchannel()), nil
+	return c.meta.GetPChannelInfo(ctx, in.GetPchannel()), nil
 }
 
 // AllocTimestamp alloc timestamp
@@ -2031,7 +2087,7 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 	}
 
 	// insert to db
-	err := c.meta.AddCredential(credInfo)
+	err := c.meta.AddCredential(ctx, credInfo)
 	if err != nil {
 		ctxLog.Warn("CreateCredential save credential failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
@@ -2063,7 +2119,7 @@ func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialR
 		return &rootcoordpb.GetCredentialResponse{Status: merr.Status(err)}, nil
 	}
 
-	credInfo, err := c.meta.GetCredential(in.Username)
+	credInfo, err := c.meta.GetCredential(ctx, in.Username)
 	if err != nil {
 		ctxLog.Warn("GetCredential query credential failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
@@ -2093,7 +2149,7 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 		return merr.Status(err), nil
 	}
 	// update data on storage
-	err := c.meta.AlterCredential(credInfo)
+	err := c.meta.AlterCredential(ctx, credInfo)
 	if err != nil {
 		ctxLog.Warn("UpdateCredential save credential failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
@@ -2132,7 +2188,7 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 
 	redoTask := newBaseRedoTask(c.stepExecutor)
 	redoTask.AddSyncStep(NewSimpleStep("delete credential meta data", func(ctx context.Context) ([]nestedStep, error) {
-		err := c.meta.DeleteCredential(in.Username)
+		err := c.meta.DeleteCredential(ctx, in.Username)
 		if err != nil {
 			ctxLog.Warn("delete credential meta data failed", zap.Error(err))
 		}
@@ -2183,7 +2239,7 @@ func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequ
 		return &milvuspb.ListCredUsersResponse{Status: merr.Status(err)}, nil
 	}
 
-	credInfo, err := c.meta.ListCredentialUsernames()
+	credInfo, err := c.meta.ListCredentialUsernames(ctx)
 	if err != nil {
 		ctxLog.Warn("ListCredUsers query usernames failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
@@ -2218,7 +2274,7 @@ func (c *Core) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) (
 	}
 	entity := in.Entity
 
-	err := c.meta.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name})
+	err := c.meta.CreateRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name})
 	if err != nil {
 		errMsg := "fail to create role"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -2254,14 +2310,14 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 		err := merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be dropped", in.GetRoleName())
 		return merr.Status(err), nil
 	}
-	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
+	if _, err := c.meta.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
 		errMsg := "not found the role, maybe the role isn't existed or internal system error"
 		ctxLog.Warn(errMsg, zap.Error(err))
 		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DropRoleFailure), nil
 	}
 
 	if !in.ForceDrop {
-		grantEntities, err := c.meta.SelectGrant(util.DefaultTenant, &milvuspb.GrantEntity{
+		grantEntities, err := c.meta.SelectGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
 			Role: &milvuspb.RoleEntity{Name: in.RoleName},
 		})
 		if len(grantEntities) != 0 {
@@ -2272,7 +2328,7 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	}
 	redoTask := newBaseRedoTask(c.stepExecutor)
 	redoTask.AddSyncStep(NewSimpleStep("drop role meta data", func(ctx context.Context) ([]nestedStep, error) {
-		err := c.meta.DropRole(util.DefaultTenant, in.RoleName)
+		err := c.meta.DropRole(ctx, util.DefaultTenant, in.RoleName)
 		if err != nil {
 			ctxLog.Warn("drop role mata data failed", zap.Error(err))
 		}
@@ -2282,7 +2338,7 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 		if !in.ForceDrop {
 			return nil, nil
 		}
-		err := c.meta.DropGrant(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName})
+		err := c.meta.DropGrant(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName})
 		if err != nil {
 			ctxLog.Warn("drop the privilege list failed for the role", zap.Error(err))
 		}
@@ -2329,13 +2385,13 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 		return merr.Status(err), nil
 	}
 
-	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
+	if _, err := c.meta.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
 		errMsg := "not found the role, maybe the role isn't existed or internal system error"
 		ctxLog.Warn(errMsg, zap.Error(err))
 		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperateUserRoleFailure), nil
 	}
 	if in.Type != milvuspb.OperateUserRoleType_RemoveUserFromRole {
-		if _, err := c.meta.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, false); err != nil {
+		if _, err := c.meta.SelectUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, false); err != nil {
 			errMsg := "not found the user, maybe the user isn't existed or internal system error"
 			ctxLog.Warn(errMsg, zap.Error(err))
 			return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperateUserRoleFailure), nil
@@ -2344,7 +2400,7 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 
 	redoTask := newBaseRedoTask(c.stepExecutor)
 	redoTask.AddSyncStep(NewSimpleStep("operate user role meta data", func(ctx context.Context) ([]nestedStep, error) {
-		err := c.meta.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, &milvuspb.RoleEntity{Name: in.RoleName}, in.Type)
+		err := c.meta.OperateUserRole(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, &milvuspb.RoleEntity{Name: in.RoleName}, in.Type)
 		if err != nil && !common.IsIgnorableError(err) {
 			log.Warn("operate user role mata data failed", zap.Error(err))
 			return nil, err
@@ -2401,7 +2457,7 @@ func (c *Core) SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest) (
 	}
 
 	if in.Role != nil {
-		if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.Role.Name}, false); err != nil {
+		if _, err := c.meta.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.Role.Name}, false); err != nil {
 			if errors.Is(err, merr.ErrIoKeyNotFound) {
 				return &milvuspb.SelectRoleResponse{
 					Status: merr.Success(),
@@ -2414,7 +2470,7 @@ func (c *Core) SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest) (
 			}, nil
 		}
 	}
-	roleResults, err := c.meta.SelectRole(util.DefaultTenant, in.Role, in.IncludeUserInfo)
+	roleResults, err := c.meta.SelectRole(ctx, util.DefaultTenant, in.Role, in.IncludeUserInfo)
 	if err != nil {
 		errMsg := "fail to select the role"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -2448,7 +2504,7 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 	}
 
 	if in.User != nil {
-		if _, err := c.meta.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: in.User.Name}, false); err != nil {
+		if _, err := c.meta.SelectUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: in.User.Name}, false); err != nil {
 			if errors.Is(err, merr.ErrIoKeyNotFound) {
 				return &milvuspb.SelectUserResponse{
 					Status: merr.Success(),
@@ -2461,7 +2517,7 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 			}, nil
 		}
 	}
-	userResults, err := c.meta.SelectUser(util.DefaultTenant, in.User, in.IncludeRoleInfo)
+	userResults, err := c.meta.SelectUser(ctx, util.DefaultTenant, in.User, in.IncludeRoleInfo)
 	if err != nil {
 		errMsg := "fail to select the user"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -2486,7 +2542,7 @@ func (c *Core) isValidRole(entity *milvuspb.RoleEntity) error {
 	if entity.Name == "" {
 		return errors.New("the name in the role entity is empty")
 	}
-	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name}, false); err != nil {
+	if _, err := c.meta.SelectRole(c.ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name}, false); err != nil {
 		log.Warn("fail to select the role", zap.String("role_name", entity.Name), zap.Error(err))
 		return errors.New("not found the role, maybe the role isn't existed or internal system error")
 	}
@@ -2503,44 +2559,72 @@ func (c *Core) isValidObject(entity *milvuspb.ObjectEntity) error {
 	return nil
 }
 
-func (c *Core) isValidGrantor(entity *milvuspb.GrantorEntity, object string) error {
-	if entity == nil {
-		return errors.New("the grantor entity is nil")
-	}
-	if entity.User == nil || entity.User.Name == "" {
-		return errors.New("the user entity in the grantor entity is nil or empty")
-	}
-	if _, err := c.meta.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: entity.User.Name}, false); err != nil {
-		log.Warn("fail to select the user", zap.String("username", entity.User.Name), zap.Error(err))
-		return errors.New("not found the user, maybe the user isn't existed or internal system error")
-	}
-	if entity.Privilege == nil {
-		return errors.New("the privilege entity in the grantor entity is nil")
-	}
-	if util.IsAnyWord(entity.Privilege.Name) {
+func (c *Core) isValidPrivilege(ctx context.Context, privilegeName string, object string) error {
+	if util.IsAnyWord(privilegeName) {
 		return nil
 	}
+	customPrivGroup, err := c.meta.IsCustomPrivilegeGroup(ctx, privilegeName)
+	if err != nil {
+		return err
+	}
+	if customPrivGroup {
+		return fmt.Errorf("can not operate the custom privilege group [%s]", privilegeName)
+	}
+	if lo.Contains(lo.Keys(util.BuiltinPrivilegeGroups), privilegeName) {
+		return fmt.Errorf("can not operate the built-in privilege group [%s]", privilegeName)
+	}
 	// check object privileges for built-in privileges
-	if util.IsPrivilegeNameDefined(entity.Privilege.Name) {
+	if util.IsPrivilegeNameDefined(privilegeName) {
 		privileges, ok := util.ObjectPrivileges[object]
 		if !ok {
 			return fmt.Errorf("not found the object type[name: %s], supported the object types: %v", object, lo.Keys(commonpb.ObjectType_value))
 		}
 		for _, privilege := range privileges {
-			if privilege == entity.Privilege.Name {
+			if privilege == privilegeName {
 				return nil
 			}
 		}
 	}
-	// check if it is a custom privilege group
-	customPrivGroup, err := c.meta.IsCustomPrivilegeGroup(entity.Privilege.Name)
-	if err != nil {
-		return err
-	}
-	if customPrivGroup {
+	return fmt.Errorf("not found the privilege name[%s] in object[%s]", privilegeName, object)
+}
+
+func (c *Core) isValidPrivilegeV2(ctx context.Context, privilegeName, dbName, collectionName string) error {
+	if util.IsAnyWord(privilegeName) {
 		return nil
 	}
-	return fmt.Errorf("not found the privilege name[%s] in object[%s]", entity.Privilege.Name, object)
+	var privilegeLevel string
+	for group, privileges := range util.BuiltinPrivilegeGroups {
+		if privilegeName == group || lo.Contains(privileges, privilegeName) {
+			privilegeLevel = group
+			break
+		}
+	}
+	if privilegeLevel == "" {
+		customPrivGroup, err := c.meta.IsCustomPrivilegeGroup(ctx, privilegeName)
+		if err != nil {
+			return err
+		}
+		if customPrivGroup {
+			return nil
+		}
+		return fmt.Errorf("not found the privilege name[%s] in the custom privilege groups", privilegeName)
+	}
+	switch {
+	case strings.HasPrefix(privilegeLevel, milvuspb.PrivilegeLevel_Cluster.String()):
+		if !util.IsAnyWord(dbName) || !util.IsAnyWord(collectionName) {
+			return fmt.Errorf("dbName and collectionName should be * for the cluster level privilege: %s", privilegeName)
+		}
+		return nil
+	case strings.HasPrefix(privilegeLevel, milvuspb.PrivilegeLevel_Database.String()):
+		if collectionName != "" && collectionName != util.AnyWord {
+			return fmt.Errorf("collectionName should be empty or * for the database level privilege: %s", privilegeName)
+		}
+		return nil
+	case strings.HasPrefix(privilegeLevel, milvuspb.PrivilegeLevel_Collection.String()):
+		return nil
+	default:
+		return nil
+	}
 }
 
 // OperatePrivilege operate the privilege, including grant and revoke
@@ -2557,51 +2641,43 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
 	ctxLog.Debug(method)
 
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	if in.Type != milvuspb.OperatePrivilegeType_Grant && in.Type != milvuspb.OperatePrivilegeType_Revoke {
-		errMsg := fmt.Sprintf("invalid operate privilege type, current type: %s, valid value: [%s, %s]", in.Type, milvuspb.OperatePrivilegeType_Grant, milvuspb.OperatePrivilegeType_Revoke)
-		ctxLog.Warn(errMsg)
-		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperatePrivilegeFailure), nil
-	}
-	if in.Entity == nil {
-		errMsg := "the grant entity in the request is nil"
-		ctxLog.Error(errMsg)
-		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperatePrivilegeFailure), nil
-	}
-	if err := c.isValidObject(in.Entity.Object); err != nil {
-		ctxLog.Warn("", zap.Error(err))
+	if err := c.operatePrivilegeCommonCheck(ctx, in); err != nil {
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
 	}
-	if err := c.isValidRole(in.Entity.Role); err != nil {
-		ctxLog.Warn("", zap.Error(err))
-		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
-	}
-	if err := c.isValidGrantor(in.Entity.Grantor, in.Entity.Object.Name); err != nil {
-		ctxLog.Error("", zap.Error(err))
-		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
+
+	switch in.Version {
+	case "v2":
+		if err := c.isValidPrivilegeV2(ctx, in.Entity.Grantor.Privilege.Name,
+			in.Entity.DbName, in.Entity.ObjectName); err != nil {
+			ctxLog.Error("", zap.Error(err))
+			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
+		}
+	default:
+		if err := c.isValidPrivilege(ctx, in.Entity.Grantor.Privilege.Name, in.Entity.Object.Name); err != nil {
+			ctxLog.Error("", zap.Error(err))
+			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
+		}
+		// set up object name if it is global object type and not built in privilege group
+		if in.Entity.Object.Name == commonpb.ObjectType_Global.String() && !lo.Contains(lo.Keys(util.BuiltinPrivilegeGroups), in.Entity.Grantor.Privilege.Name) {
+			in.Entity.ObjectName = util.AnyWord
+		}
 	}
 
 	// set up privilege name for metastore
 	privName := in.Entity.Grantor.Privilege.Name
-	ctxLog.Debug("before PrivilegeNameForMetastore", zap.String("privilege", privName))
-	if !util.IsAnyWord(privName) {
-		dbPrivName, err := c.getMetastorePrivilegeName(privName)
-		if err != nil {
-			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
-		}
-		in.Entity.Grantor.Privilege.Name = dbPrivName
-	}
-	ctxLog.Debug("after PrivilegeNameForMetastore", zap.String("privilege", privName))
-
-	if in.Entity.Object.Name == commonpb.ObjectType_Global.String() {
-		in.Entity.ObjectName = util.AnyWord
-	}
 
 	redoTask := newBaseRedoTask(c.stepExecutor)
 	redoTask.AddSyncStep(NewSimpleStep("operate privilege meta data", func(ctx context.Context) ([]nestedStep, error) {
-		err := c.meta.OperatePrivilege(util.DefaultTenant, in.Entity, in.Type)
+		if !util.IsAnyWord(privName) {
+			// set up privilege name for metastore
+			dbPrivName, err := c.getMetastorePrivilegeName(ctx, privName)
+			if err != nil {
+				return nil, err
+			}
+			in.Entity.Grantor.Privilege.Name = dbPrivName
+		}
+
+		err := c.meta.OperatePrivilege(ctx, util.DefaultTenant, in.Entity, in.Type)
 		if err != nil && !common.IsIgnorableError(err) {
 			log.Warn("fail to operate the privilege", zap.Any("in", in), zap.Error(err))
 			return nil, err
@@ -2609,6 +2685,8 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 		return nil, nil
 	}))
 	redoTask.AddAsyncStep(NewSimpleStep("operate privilege cache", func(ctx context.Context) ([]nestedStep, error) {
+		// set back to expand privilege group
+		in.Entity.Grantor.Privilege.Name = privName
 		var opType int32
 		switch in.Type {
 		case milvuspb.OperatePrivilegeType_Grant:
@@ -2619,9 +2697,23 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 			log.Warn("invalid operate type for the OperatePrivilege api", zap.Any("in", in))
 			return nil, nil
 		}
+		grants := []*milvuspb.GrantEntity{in.Entity}
+
+		allGroups, err := c.meta.ListPrivilegeGroups(ctx)
+		allGroups = append(allGroups, c.initBuiltinPrivilegeGroups()...)
+		if err != nil {
+			return nil, err
+		}
+		groups := lo.SliceToMap(allGroups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
+			return group.GroupName, group.Privileges
+		})
+		expandGrants, err := c.expandPrivilegeGroups(ctx, grants, groups)
+		if err != nil {
+			return nil, err
+		}
 		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 			OpType: opType,
-			OpKey:  funcutil.PolicyForPrivilege(in.Entity.Role.Name, in.Entity.Object.Name, in.Entity.ObjectName, in.Entity.Grantor.Privilege.Name, in.Entity.DbName),
+			OpKey:  funcutil.PolicyForPrivileges(expandGrants),
 		}); err != nil {
 			log.Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
 			return nil, err
@@ -2642,13 +2734,48 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 	return merr.Success(), nil
 }
 
-func (c *Core) getMetastorePrivilegeName(privName string) (string, error) {
+func (c *Core) operatePrivilegeCommonCheck(ctx context.Context, in *milvuspb.OperatePrivilegeRequest) error {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return err
+	}
+	if in.Type != milvuspb.OperatePrivilegeType_Grant && in.Type != milvuspb.OperatePrivilegeType_Revoke {
+		errMsg := fmt.Sprintf("invalid operate privilege type, current type: %s, valid value: [%s, %s]", in.Type, milvuspb.OperatePrivilegeType_Grant, milvuspb.OperatePrivilegeType_Revoke)
+		return errors.New(errMsg)
+	}
+	if in.Entity == nil {
+		errMsg := "the grant entity in the request is nil"
+		return errors.New(errMsg)
+	}
+	if err := c.isValidObject(in.Entity.Object); err != nil {
+		return errors.New("the object entity in the request is nil or invalid")
+	}
+	if err := c.isValidRole(in.Entity.Role); err != nil {
+		return err
+	}
+	entity := in.Entity.Grantor
+	if entity == nil {
+		return errors.New("the grantor entity is nil")
+	}
+	if entity.User == nil || entity.User.Name == "" {
+		return errors.New("the user entity in the grantor entity is nil or empty")
+	}
+	if _, err := c.meta.SelectUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: entity.User.Name}, false); err != nil {
+		log.Warn("fail to select the user", zap.String("username", entity.User.Name), zap.Error(err))
+		return errors.New("not found the user, maybe the user isn't existed or internal system error")
+	}
+	if entity.Privilege == nil {
+		return errors.New("the privilege entity in the grantor entity is nil")
+	}
+	return nil
+}
+
+func (c *Core) getMetastorePrivilegeName(ctx context.Context, privName string) (string, error) {
 	// if it is built-in privilege, return the privilege name directly
 	if util.IsPrivilegeNameDefined(privName) {
 		return util.PrivilegeNameForMetastore(privName), nil
 	}
 	// return the privilege group name if it is a custom privilege group
-	customGroup, err := c.meta.IsCustomPrivilegeGroup(privName)
+	customGroup, err := c.meta.IsCustomPrivilegeGroup(ctx, privName)
 	if err != nil {
 		return "", err
 	}
@@ -2697,7 +2824,7 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 		}
 	}
 
-	grantEntities, err := c.meta.SelectGrant(util.DefaultTenant, in.Entity)
+	grantEntities, err := c.meta.SelectGrant(ctx, util.DefaultTenant, in.Entity)
 	if errors.Is(err, merr.ErrIoKeyNotFound) {
 		return &milvuspb.SelectGrantResponse{
 			Status:   merr.Success(),
@@ -2734,7 +2861,7 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 		}, nil
 	}
 
-	policies, err := c.meta.ListPolicy(util.DefaultTenant)
+	policies, err := c.meta.ListPolicy(ctx, util.DefaultTenant)
 	if err != nil {
 		errMsg := "fail to list policy"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -2742,7 +2869,7 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
-	userRoles, err := c.meta.ListUserRole(util.DefaultTenant)
+	userRoles, err := c.meta.ListUserRole(ctx, util.DefaultTenant)
 	if err != nil {
 		errMsg := "fail to list user-role"
 		ctxLog.Warn(errMsg, zap.Any("in", in), zap.Error(err))
@@ -2750,7 +2877,7 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
-	privGroups, err := c.meta.ListPrivilegeGroups()
+	privGroups, err := c.meta.ListPrivilegeGroups(ctx)
 	if err != nil {
 		errMsg := "fail to list privilege groups"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -2979,7 +3106,7 @@ func (c *Core) CreatePrivilegeGroup(ctx context.Context, in *milvuspb.CreatePriv
 		return merr.Status(err), nil
 	}
 
-	if err := c.meta.CreatePrivilegeGroup(in.GroupName); err != nil {
+	if err := c.meta.CreatePrivilegeGroup(ctx, in.GroupName); err != nil {
 		ctxLog.Warn("fail to create privilege group", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -3002,7 +3129,7 @@ func (c *Core) DropPrivilegeGroup(ctx context.Context, in *milvuspb.DropPrivileg
 		return merr.Status(err), nil
 	}
 
-	if err := c.meta.DropPrivilegeGroup(in.GroupName); err != nil {
+	if err := c.meta.DropPrivilegeGroup(ctx, in.GroupName); err != nil {
 		ctxLog.Warn("fail to drop privilege group", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -3027,7 +3154,7 @@ func (c *Core) ListPrivilegeGroups(ctx context.Context, in *milvuspb.ListPrivile
 		}, nil
 	}
 
-	privGroups, err := c.meta.ListPrivilegeGroups()
+	privGroups, err := c.meta.ListPrivilegeGroups(ctx)
 	if err != nil {
 		ctxLog.Warn("fail to list privilege group", zap.Error(err))
 		return &milvuspb.ListPrivilegeGroupsResponse{
@@ -3038,6 +3165,18 @@ func (c *Core) ListPrivilegeGroups(ctx context.Context, in *milvuspb.ListPrivile
 	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	// append built in privilege groups
+	for groupName, privileges := range util.BuiltinPrivilegeGroups {
+		privGroups = append(privGroups, &milvuspb.PrivilegeGroupInfo{
+			GroupName: groupName,
+			Privileges: lo.Map(privileges, func(p string, _ int) *milvuspb.PrivilegeEntity {
+				return &milvuspb.PrivilegeEntity{
+					Name: p,
+				}
+			}),
+		})
+	}
 	return &milvuspb.ListPrivilegeGroupsResponse{
 		Status:          merr.Success(),
 		PrivilegeGroups: privGroups,
@@ -3057,7 +3196,7 @@ func (c *Core) OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePr
 
 	redoTask := newBaseRedoTask(c.stepExecutor)
 	redoTask.AddSyncStep(NewSimpleStep("operate privilege group", func(ctx context.Context) ([]nestedStep, error) {
-		groups, err := c.meta.ListPrivilegeGroups()
+		groups, err := c.meta.ListPrivilegeGroups(ctx)
 		if err != nil && !common.IsIgnorableError(err) {
 			log.Warn("fail to list privilege groups", zap.Error(err))
 			return nil, err
@@ -3067,7 +3206,7 @@ func (c *Core) OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePr
 		})
 
 		// get roles granted to the group
-		roles, err := c.meta.GetPrivilegeGroupRoles(in.GroupName)
+		roles, err := c.meta.GetPrivilegeGroupRoles(ctx, in.GroupName)
 		if err != nil {
 			return nil, err
 		}
@@ -3084,6 +3223,14 @@ func (c *Core) OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePr
 				newGroups[k] = lo.UniqBy(newPrivs, func(p *milvuspb.PrivilegeEntity) string {
 					return p.Name
 				})
+
+				// check if privileges are the same object type
+				objectTypes := lo.SliceToMap(newPrivs, func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
+					return util.GetObjectType(p.Name), struct{}{}
+				})
+				if len(objectTypes) > 1 {
+					return nil, errors.New("privileges are not the same object type")
+				}
 			case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
 				newPrivs, _ := lo.Difference(v, in.Privileges)
 				newGroups[k] = newPrivs
@@ -3095,23 +3242,29 @@ func (c *Core) OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePr
 		rolesToRevoke := []*milvuspb.GrantEntity{}
 		rolesToGrant := []*milvuspb.GrantEntity{}
 		compareGrants := func(a, b *milvuspb.GrantEntity) bool {
-			return a.Role.GetName() == b.Role.GetName() &&
-				a.Object.GetName() == b.Object.GetName() &&
+			return a.Role.Name == b.Role.Name &&
+				a.Object.Name == b.Object.Name &&
 				a.ObjectName == b.ObjectName &&
-				a.Grantor.GetUser().GetName() == b.Grantor.GetUser().GetName() &&
-				a.Grantor.GetPrivilege().GetName() == b.Grantor.GetPrivilege().GetName() &&
+				a.Grantor.User.Name == b.Grantor.User.Name &&
+				a.Grantor.Privilege.Name == b.Grantor.Privilege.Name &&
 				a.DbName == b.DbName
 		}
 		for _, role := range roles {
-			grants, err := c.meta.SelectGrant(util.DefaultTenant, &milvuspb.GrantEntity{
+			grants, err := c.meta.SelectGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
 				Role:   role,
 				DbName: util.AnyWord,
 			})
 			if err != nil {
 				return nil, err
 			}
-			currGrants := c.expandPrivilegeGroups(grants, currGroups)
-			newGrants := c.expandPrivilegeGroups(grants, newGroups)
+			currGrants, err := c.expandPrivilegeGroups(ctx, grants, currGroups)
+			if err != nil {
+				return nil, err
+			}
+			newGrants, err := c.expandPrivilegeGroups(ctx, grants, newGroups)
+			if err != nil {
+				return nil, err
+			}
 
 			toRevoke := lo.Filter(currGrants, func(item *milvuspb.GrantEntity, _ int) bool {
 				return !lo.ContainsBy(newGrants, func(newItem *milvuspb.GrantEntity) bool {
@@ -3154,7 +3307,7 @@ func (c *Core) OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePr
 	}))
 
 	redoTask.AddSyncStep(NewSimpleStep("operate privilege group meta data", func(ctx context.Context) ([]nestedStep, error) {
-		err := c.meta.OperatePrivilegeGroup(in.GroupName, in.Privileges, in.Type)
+		err := c.meta.OperatePrivilegeGroup(ctx, in.GroupName, in.Privileges, in.Type)
 		if err != nil && !common.IsIgnorableError(err) {
 			log.Warn("fail to operate privilege group", zap.Error(err))
 		}
@@ -3175,28 +3328,50 @@ func (c *Core) OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePr
 	return merr.Success(), nil
 }
 
-func (c *Core) expandPrivilegeGroups(grants []*milvuspb.GrantEntity, groups map[string][]*milvuspb.PrivilegeEntity) []*milvuspb.GrantEntity {
+func (c *Core) expandPrivilegeGroups(ctx context.Context, grants []*milvuspb.GrantEntity, groups map[string][]*milvuspb.PrivilegeEntity) ([]*milvuspb.GrantEntity, error) {
 	newGrants := []*milvuspb.GrantEntity{}
+	createGrantEntity := func(grant *milvuspb.GrantEntity, privilegeName string) (*milvuspb.GrantEntity, error) {
+		metaName, err := c.getMetastorePrivilegeName(ctx, privilegeName)
+		if err != nil {
+			return nil, err
+		}
+		if objectType := util.GetObjectType(privilegeName); objectType != "" {
+			grant.Object.Name = objectType
+		}
+		return &milvuspb.GrantEntity{
+			Role:       grant.Role,
+			Object:     grant.Object,
+			ObjectName: grant.ObjectName,
+			Grantor: &milvuspb.GrantorEntity{
+				User: grant.Grantor.User,
+				Privilege: &milvuspb.PrivilegeEntity{
+					Name: metaName,
+				},
+			},
+			DbName: grant.DbName,
+		}, nil
+	}
+
 	for _, grant := range grants {
-		if groups[grant.Grantor.Privilege.Name] == nil {
-			newGrants = append(newGrants, grant)
+		privName := grant.Grantor.Privilege.Name
+		if privGroup, exists := groups[privName]; !exists {
+			newGrant, err := createGrantEntity(grant, privName)
+			if err != nil {
+				return nil, err
+			}
+			newGrants = append(newGrants, newGrant)
 		} else {
-			for _, priv := range groups[grant.Grantor.Privilege.Name] {
-				newGrants = append(newGrants, &milvuspb.GrantEntity{
-					Role:       grant.Role,
-					Object:     grant.Object,
-					ObjectName: grant.ObjectName,
-					Grantor: &milvuspb.GrantorEntity{
-						User:      grant.Grantor.User,
-						Privilege: priv,
-					},
-					DbName: grant.DbName,
-				})
+			for _, priv := range privGroup {
+				newGrant, err := createGrantEntity(grant, priv.Name)
+				if err != nil {
+					return nil, err
+				}
+				newGrants = append(newGrants, newGrant)
 			}
 		}
 	}
 	// uniq by role + object + object name + grantor user + privilege name + db name
 	return lo.UniqBy(newGrants, func(g *milvuspb.GrantEntity) string {
 		return fmt.Sprintf("%s-%s-%s-%s-%s-%s", g.Role, g.Object, g.ObjectName, g.Grantor.User, g.Grantor.Privilege.Name, g.DbName)
-	})
+	}), nil
 }

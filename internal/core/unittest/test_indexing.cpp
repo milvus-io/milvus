@@ -173,13 +173,16 @@ TEST(Indexing, BinaryBruteForce) {
     };
 
     SearchInfo search_info;
+    auto index_info = std::map<std::string, std::string>{};
     search_info.topk_ = topk;
     search_info.round_decimal_ = round_decimal;
     search_info.metric_type_ = metric_type;
+    auto base_dataset = query::dataset::RawDataset{
+        int64_t(0), dim, N, (const void*)bin_vec.data()};
     auto sub_result = query::BruteForceSearch(search_dataset,
-                                              bin_vec.data(),
-                                              N,
+                                              base_dataset,
                                               search_info,
+                                              index_info,
                                               nullptr,
                                               DataType::VECTOR_BINARY);
 

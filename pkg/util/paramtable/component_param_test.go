@@ -134,6 +134,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 0, len(Params.ReadOnlyPrivileges.GetAsStrings()))
 		assert.Equal(t, 0, len(Params.ReadWritePrivileges.GetAsStrings()))
 		assert.Equal(t, 0, len(Params.AdminPrivileges.GetAsStrings()))
+
+		assert.False(t, params.CommonCfg.LocalRPCEnabled.GetAsBool())
+		params.Save("common.localRPCEnabled", "true")
+		assert.True(t, params.CommonCfg.LocalRPCEnabled.GetAsBool())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -148,6 +152,10 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("rootCoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+
+		assert.Equal(t, "{}", Params.DefaultDBProperties.GetValue())
+		params.Save("rootCoord.defaultDBProperties", "{\"key\":\"value\"}")
+		assert.Equal(t, "{\"key\":\"value\"}", Params.DefaultDBProperties.GetValue())
 
 		SetCreateTime(time.Now())
 		SetUpdateTime(time.Now())
@@ -211,6 +219,15 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, int64(10), Params.CheckWorkloadRequestNum.GetAsInt64())
 		assert.Equal(t, float64(0.1), Params.WorkloadToleranceFactor.GetAsFloat())
+
+		assert.Equal(t, int64(16), Params.DDLConcurrency.GetAsInt64())
+		assert.Equal(t, int64(16), Params.DCLConcurrency.GetAsInt64())
+
+		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
+		params.Save("proxy.maxPasswordLength", "100")
+		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
+		params.Save("proxy.maxPasswordLength", "-10")
+		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {
@@ -326,8 +343,8 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 1000, Params.SegmentCheckInterval.GetAsInt())
 		assert.Equal(t, 1000, Params.ChannelCheckInterval.GetAsInt())
-		params.Save(Params.BalanceCheckInterval.Key, "10000")
-		assert.Equal(t, 10000, Params.BalanceCheckInterval.GetAsInt())
+		params.Save(Params.BalanceCheckInterval.Key, "3000")
+		assert.Equal(t, 3000, Params.BalanceCheckInterval.GetAsInt())
 		assert.Equal(t, 10000, Params.IndexCheckInterval.GetAsInt())
 		assert.Equal(t, 3, Params.CollectionRecoverTimesLimit.GetAsInt())
 		assert.Equal(t, true, Params.AutoBalance.GetAsBool())
@@ -512,6 +529,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 4, Params.L0DeleteCompactionSlotUsage.GetAsInt())
 		params.Save("datacoord.scheduler.taskSlowThreshold", "1000")
 		assert.Equal(t, 1000*time.Second, Params.TaskSlowThreshold.GetAsDuration(time.Second))
+		assert.Equal(t, 32, Params.MaxConcurrentChannelTaskNumPerDN.GetAsInt())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {

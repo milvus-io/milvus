@@ -940,9 +940,18 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         AssertInfo(num_rows_.has_value(), "Can't get row count value");
         auto row_count = num_rows_.value();
         auto vec_data = fields_.at(field_id);
+
+        // get index params for bm25 brute force
+        std::map<std::string, std::string> index_info;
+        if (search_info.metric_type_ == knowhere::metric::BM25) {
+            auto index_info =
+                col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
+        }
+
         query::SearchOnSealed(*schema_,
                               vec_data,
                               search_info,
+                              index_info,
                               query_data,
                               query_count,
                               row_count,
@@ -1230,8 +1239,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
                         return elem < value;
                     });
                 auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
-                for (; it != src + pk_column->NumRows() && *it == target;
-                     ++it) {
+                for (; it != src + chunk_row_num && *it == target; ++it) {
                     auto offset = it - src + num_rows_until_chunk;
                     if (condition(offset)) {
                         pk_offsets.emplace_back(offset);
@@ -1255,7 +1263,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
                 auto string_chunk = std::dynamic_pointer_cast<StringChunk>(
                     var_column->GetChunk(i));
                 auto offset = string_chunk->binary_search_string(target);
-                for (; offset != -1 && offset < var_column->NumRows() &&
+                for (; offset != -1 && offset < string_chunk->RowNums() &&
                        var_column->RawAt(offset) == target;
                      ++offset) {
                     auto segment_offset = offset + num_rows_until_chunk;
@@ -1511,16 +1519,19 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     const auto& field_meta = schema_->operator[](field_id);
     auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
     std::unique_ptr<index::TextMatchIndex> index;
+    std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
     if (!cfg.GetScalarIndexEnableMmap()) {
         // build text index in ram.
         index = std::make_unique<index::TextMatchIndex>(
             std::numeric_limits<int64_t>::max(),
+            unique_id.c_str(),
             "milvus_tokenizer",
             field_meta.get_analyzer_params().c_str());
     } else {
         // build text index using mmap.
         index = std::make_unique<index::TextMatchIndex>(
             cfg.GetMmapPath(),
+            unique_id.c_str(),
             "milvus_tokenizer",
             field_meta.get_analyzer_params().c_str());
     }
@@ -1538,7 +1549,8 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
                 field_id.get());
             auto n = column->NumRows();
             for (size_t i = 0; i < n; i++) {
-                index->AddText(std::string(column->RawAt(i)), i);
+                index->AddText(
+                    std::string(column->RawAt(i)), column->IsValid(i), i);
             }
         } else {  // fetch raw data from index.
             auto field_index_iter = scalar_indexings_.find(field_id);
@@ -1557,9 +1569,9 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
             for (size_t i = 0; i < n; i++) {
                 auto raw = impl->Reverse_Lookup(i);
                 if (!raw.has_value()) {
-                    continue;
+                    index->AddNull(i);
                 }
-                index->AddText(raw.value(), i);
+                index->AddText(raw.value(), true, i);
             }
         }
     }
@@ -2105,7 +2117,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
             field_binlog_config->GetIndexType(),
             index_metric,
             knowhere::Version::GetCurrentVersion().VersionNumber());
-        auto num_chunk = fields_.at(field_id)->num_chunks();
+        auto num_chunk = vec_data->num_chunks();
         for (int i = 0; i < num_chunk; ++i) {
             auto dataset = knowhere::GenDataSet(
                 vec_data->chunk_row_nums(i), dim, vec_data->Data(i));

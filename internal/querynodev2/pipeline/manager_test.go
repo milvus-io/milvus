@@ -101,7 +101,7 @@ func (suite *PipelineManagerTestSuite) TestBasic() {
 	suite.NotNil(pipeline)
 
 	// Init Consumer
-	err = pipeline.ConsumeMsgStream(&msgpb.MsgPosition{})
+	err = pipeline.ConsumeMsgStream(context.Background(), &msgpb.MsgPosition{})
 	suite.NoError(err)
 
 	// Start pipeline

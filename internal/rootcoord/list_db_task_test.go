@@ -58,7 +58,7 @@ func Test_ListDBTask(t *testing.T) {
 	})
 
 	t.Run("ok", func(t *testing.T) {
-		ret := []*model.Database{model.NewDefaultDatabase()}
+		ret := []*model.Database{model.NewDefaultDatabase(nil)}
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("ListDatabases",
 			mock.Anything,
@@ -89,7 +89,7 @@ func Test_ListDBTask(t *testing.T) {
 	t.Run("list db with auth", func(t *testing.T) {
 		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
 		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
-		ret := []*model.Database{model.NewDefaultDatabase()}
+		ret := []*model.Database{model.NewDefaultDatabase(nil)}
 		meta := mockrootcoord.NewIMetaTable(t)
 
 		core := newTestCore(withMeta(meta))
@@ -132,7 +132,7 @@ func Test_ListDBTask(t *testing.T) {
 
 		{
 			// select role fail
-			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 				Return(nil, errors.New("mock select user error")).Once()
 			ctx := GetContext(context.Background(), "foo:root")
 			task := getTask()
@@ -142,7 +142,7 @@ func Test_ListDBTask(t *testing.T) {
 
 		{
 			// select role, empty result
-			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 				Return([]*milvuspb.UserResult{}, nil).Once()
 			ctx := GetContext(context.Background(), "foo:root")
 			task := getTask()
@@ -153,7 +153,7 @@ func Test_ListDBTask(t *testing.T) {
 
 		{
 			// select role, the user is added to admin role
-			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 				Return([]*milvuspb.UserResult{
 					{
 						User: &milvuspb.UserEntity{
@@ -176,7 +176,7 @@ func Test_ListDBTask(t *testing.T) {
 
 		{
 			// select grant fail
-			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 				Return([]*milvuspb.UserResult{
 					{
 						User: &milvuspb.UserEntity{
@@ -189,7 +189,7 @@ func Test_ListDBTask(t *testing.T) {
 						},
 					},
 				}, nil).Once()
-			meta.EXPECT().SelectGrant(mock.Anything, mock.Anything).
+			meta.EXPECT().SelectGrant(mock.Anything, mock.Anything, mock.Anything).
 				Return(nil, errors.New("mock select grant error")).Once()
 			ctx := GetContext(context.Background(), "foo:root")
 			task := getTask()
@@ -199,7 +199,7 @@ func Test_ListDBTask(t *testing.T) {
 
 		{
 			// normal user
-			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 				Return([]*milvuspb.UserResult{
 					{
 						User: &milvuspb.UserEntity{
@@ -220,7 +220,7 @@ func Test_ListDBTask(t *testing.T) {
 					Name: "default",
 				},
 			}, nil).Once()
-			meta.EXPECT().SelectGrant(mock.Anything, mock.Anything).
+			meta.EXPECT().SelectGrant(mock.Anything, mock.Anything, mock.Anything).
 				Return([]*milvuspb.GrantEntity{
 					{
 						DbName: "fooDB",
@@ -236,7 +236,7 @@ func Test_ListDBTask(t *testing.T) {
 
 		{
 			// normal user with any db privilege
-			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 				Return([]*milvuspb.UserResult{
 					{
 						User: &milvuspb.UserEntity{
@@ -257,7 +257,7 @@ func Test_ListDBTask(t *testing.T) {
 					Name: "default",
 				},
 			}, nil).Once()
-			meta.EXPECT().SelectGrant(mock.Anything, mock.Anything).
+			meta.EXPECT().SelectGrant(mock.Anything, mock.Anything, mock.Anything).
 				Return([]*milvuspb.GrantEntity{
 					{
 						DbName: "*",

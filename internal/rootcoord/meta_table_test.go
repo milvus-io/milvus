@@ -48,7 +48,7 @@ func generateMetaTable(t *testing.T) *MetaTable {
 
 func TestRbacAddCredential(t *testing.T) {
 	mt := generateMetaTable(t)
-	err := mt.AddCredential(&internalpb.CredentialInfo{
+	err := mt.AddCredential(context.TODO(), &internalpb.CredentialInfo{
 		Username: "user1",
 		Tenant:   util.DefaultTenant,
 	})
@@ -73,7 +73,7 @@ func TestRbacAddCredential(t *testing.T) {
 				paramtable.Get().Save(Params.ProxyCfg.MaxUserNum.Key, "3")
 			}
 			defer paramtable.Get().Reset(Params.ProxyCfg.MaxUserNum.Key)
-			err := mt.AddCredential(test.info)
+			err := mt.AddCredential(context.TODO(), test.info)
 			assert.Error(t, err)
 		})
 	}
@@ -84,9 +84,9 @@ func TestRbacCreateRole(t *testing.T) {
 
 	paramtable.Get().Save(Params.ProxyCfg.MaxRoleNum.Key, "2")
 	defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleNum.Key)
-	err := mt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
 	require.NoError(t, err)
-	err = mt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: "role2"})
+	err = mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role2"})
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -100,12 +100,12 @@ func TestRbacCreateRole(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			err := mt.CreateRole(util.DefaultTenant, test.inEntity)
+			err := mt.CreateRole(context.TODO(), util.DefaultTenant, test.inEntity)
 			assert.Error(t, err)
 		})
 	}
 	t.Run("role has existed", func(t *testing.T) {
-		err := mt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+		err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
 		assert.Error(t, err)
 		assert.True(t, common.IsIgnorableError(err))
 	})
@@ -119,7 +119,7 @@ func TestRbacCreateRole(t *testing.T) {
 			mock.Anything,
 		).Return(nil, errors.New("error mock list role"))
 		mockMt := &MetaTable{catalog: mockCata}
-		err := mockMt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+		err := mockMt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
 		assert.Error(t, err)
 	}
 }
@@ -127,7 +127,7 @@ func TestRbacCreateRole(t *testing.T) {
 func TestRbacDropRole(t *testing.T) {
 	mt := generateMetaTable(t)
 
-	err := mt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -141,7 +141,7 @@ func TestRbacDropRole(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			err := mt.DropRole(util.DefaultTenant, test.roleName)
+			err := mt.DropRole(context.TODO(), util.DefaultTenant, test.roleName)
 			assert.NoError(t, err)
 		})
 	}
@@ -149,7 +149,7 @@ func TestRbacDropRole(t *testing.T) {
 
 func TestRbacOperateRole(t *testing.T) {
 	mt := generateMetaTable(t)
-	err := mt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -168,7 +168,7 @@ func TestRbacOperateRole(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			err := mt.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: test.user}, &milvuspb.RoleEntity{Name: test.role}, test.oType)
+			err := mt.OperateUserRole(context.TODO(), util.DefaultTenant, &milvuspb.UserEntity{Name: test.user}, &milvuspb.RoleEntity{Name: test.role}, test.oType)
 			assert.Error(t, err)
 		})
 	}
@@ -185,7 +185,7 @@ func TestRbacSelect(t *testing.T) {
 	}
 
 	for _, role := range roles {
-		err := mt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
+		err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
 		require.NoError(t, err)
 	}
 
@@ -198,6 +198,7 @@ func TestRbacSelect(t *testing.T) {
 		require.NoError(t, err)
 		for _, r := range rs {
 			err := mt.OperateUserRole(
+				context.TODO(),
 				util.DefaultTenant,
 				&milvuspb.UserEntity{Name: user},
 				&milvuspb.RoleEntity{Name: r},
@@ -226,7 +227,7 @@ func TestRbacSelect(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			res, err := mt.SelectUser(util.DefaultTenant, test.inEntity, test.includeRoleInfo)
+			res, err := mt.SelectUser(context.TODO(), util.DefaultTenant, test.inEntity, test.includeRoleInfo)
 
 			if test.isValid {
 				assert.NoError(t, err)
@@ -264,7 +265,7 @@ func TestRbacSelect(t *testing.T) {
 
 	for _, test := range testRoles {
 		t.Run(test.description, func(t *testing.T) {
-			res, err := mt.SelectRole(util.DefaultTenant, test.inEntity, test.includeUserInfo)
+			res, err := mt.SelectRole(context.TODO(), util.DefaultTenant, test.inEntity, test.includeUserInfo)
 
 			if test.isValid {
 				assert.NoError(t, err)
@@ -357,7 +358,7 @@ func TestRbacOperatePrivilege(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			err := mt.OperatePrivilege(util.DefaultTenant, test.entity, test.oType)
+			err := mt.OperatePrivilege(context.TODO(), util.DefaultTenant, test.entity, test.oType)
 			assert.Error(t, err)
 		})
 	}
@@ -372,7 +373,7 @@ func TestRbacOperatePrivilege(t *testing.T) {
 		ObjectName: "obj_name",
 	}
 
-	err := mt.OperatePrivilege(util.DefaultTenant, &validEntity, milvuspb.OperatePrivilegeType_Grant)
+	err := mt.OperatePrivilege(context.TODO(), util.DefaultTenant, &validEntity, milvuspb.OperatePrivilegeType_Grant)
 	assert.NoError(t, err)
 }
 
@@ -399,7 +400,7 @@ func TestRbacSelectGrant(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			entities, err := mt.SelectGrant(util.DefaultTenant, test.entity)
+			entities, err := mt.SelectGrant(context.TODO(), util.DefaultTenant, test.entity)
 			if test.isValid {
 				assert.NoError(t, err)
 				assert.Equal(t, 0, len(entities))
@@ -426,7 +427,7 @@ func TestRbacDropGrant(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			err := mt.DropGrant(util.DefaultTenant, test.role)
+			err := mt.DropGrant(context.TODO(), util.DefaultTenant, test.role)
 			if test.isValid {
 				assert.NoError(t, err)
 			} else {
@@ -439,11 +440,11 @@ func TestRbacDropGrant(t *testing.T) {
 func TestRbacListPolicy(t *testing.T) {
 	mt := generateMetaTable(t)
 
-	policies, err := mt.ListPolicy(util.DefaultTenant)
+	policies, err := mt.ListPolicy(context.TODO(), util.DefaultTenant)
 	assert.NoError(t, err)
 	assert.Empty(t, policies)
 
-	userRoles, err := mt.ListUserRole(util.DefaultTenant)
+	userRoles, err := mt.ListUserRole(context.TODO(), util.DefaultTenant)
 	assert.NoError(t, err)
 	assert.Equal(t, 0, len(userRoles))
 }
@@ -460,7 +461,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 		meta := &MetaTable{
 			catalog: catalog,
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
 		}
@@ -480,7 +481,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 		meta := &MetaTable{
 			catalog: catalog,
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
 		}
@@ -594,7 +595,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		).Return(nil, errors.New("error mock GetCollectionByName"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
@@ -615,7 +616,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		).Return(&model.Collection{State: pb.CollectionState_CollectionDropped}, nil)
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
@@ -645,7 +646,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
@@ -1176,7 +1177,7 @@ func TestMetaTable_reload(t *testing.T) {
 		catalog.On("ListDatabases",
 			mock.Anything,
 			mock.Anything,
-		).Return([]*model.Database{model.NewDefaultDatabase()}, nil)
+		).Return([]*model.Database{model.NewDefaultDatabase(nil)}, nil)
 		catalog.On("ListCollections",
 			mock.Anything,
 			mock.Anything,
@@ -1478,7 +1479,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 	t.Run("new collection name already exist-1", func(t *testing.T) {
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
@@ -1505,7 +1506,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		).Return(nil, errors.New("error mock GetCollectionByID"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			catalog: catalog,
 			names:   newNameDb(),
@@ -1535,7 +1536,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			catalog: catalog,
 			names:   newNameDb(),
@@ -1562,7 +1563,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		).Return(nil, merr.WrapErrCollectionNotFound("error"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 				"db1":              model.NewDatabase(2, "db1", pb.DatabaseState_DatabaseCreated, nil),
 			},
 			catalog: catalog,
@@ -1592,7 +1593,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		).Return(nil, merr.WrapErrCollectionNotFound("error"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 				"db1":              model.NewDatabase(2, "db1", pb.DatabaseState_DatabaseCreated, nil),
 			},
 			catalog: catalog,
@@ -1629,7 +1630,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		).Return(nil, merr.WrapErrCollectionNotFound("error"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			catalog: catalog,
 			names:   newNameDb(),
@@ -1892,7 +1893,7 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 		mt := &MetaTable{
 			names: newNameDb(),
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 				"db2":              model.NewDatabase(2, "db2", pb.DatabaseState_DatabaseCreated, nil),
 			},
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
@@ -2091,24 +2092,24 @@ func TestMetaTable_PrivilegeGroup(t *testing.T) {
 		aliases: newNameDb(),
 		catalog: catalog,
 	}
-	err := mt.CreatePrivilegeGroup("pg1")
+	err := mt.CreatePrivilegeGroup(context.TODO(), "pg1")
 	assert.Error(t, err)
-	err = mt.CreatePrivilegeGroup("")
+	err = mt.CreatePrivilegeGroup(context.TODO(), "")
 	assert.Error(t, err)
-	err = mt.CreatePrivilegeGroup("Insert")
+	err = mt.CreatePrivilegeGroup(context.TODO(), "Insert")
 	assert.Error(t, err)
-	err = mt.CreatePrivilegeGroup("pg2")
+	err = mt.CreatePrivilegeGroup(context.TODO(), "pg2")
 	assert.NoError(t, err)
-	err = mt.DropPrivilegeGroup("")
+	err = mt.DropPrivilegeGroup(context.TODO(), "")
 	assert.Error(t, err)
-	err = mt.DropPrivilegeGroup("pg1")
+	err = mt.DropPrivilegeGroup(context.TODO(), "pg1")
 	assert.NoError(t, err)
-	err = mt.OperatePrivilegeGroup("", []*milvuspb.PrivilegeEntity{}, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
+	err = mt.OperatePrivilegeGroup(context.TODO(), "", []*milvuspb.PrivilegeEntity{}, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
 	assert.Error(t, err)
-	err = mt.OperatePrivilegeGroup("pg3", []*milvuspb.PrivilegeEntity{}, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
+	err = mt.OperatePrivilegeGroup(context.TODO(), "pg3", []*milvuspb.PrivilegeEntity{}, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
 	assert.Error(t, err)
-	_, err = mt.GetPrivilegeGroupRoles("")
+	_, err = mt.GetPrivilegeGroupRoles(context.TODO(), "")
 	assert.Error(t, err)
-	_, err = mt.ListPrivilegeGroups()
+	_, err = mt.ListPrivilegeGroups(context.TODO())
 	assert.NoError(t, err)
 }

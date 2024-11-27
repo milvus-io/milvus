@@ -75,6 +75,8 @@ const (
 	ClusterDependenciesPath = "/_cluster/dependencies"
 	// HookConfigsPath is the path to get hook configurations.
 	HookConfigsPath = "/_hook/configs"
+	// SlowQueryPath is the path to get slow queries metrics
+	SlowQueryPath = "/_cluster/slow_query"
 
 	// QCDistPath is the path to get QueryCoord distribution.
 	QCDistPath = "/_qc/dist"
@@ -86,6 +88,8 @@ const (
 	QCResourceGroupPath = "/_qc/resource_group"
 	// QCAllTasksPath is the path to get all tasks in QueryCoord.
 	QCAllTasksPath = "/_qc/tasks"
+	// QCSegmentsPath is the path to get segments in QueryCoord.
+	QCSegmentsPath = "/_qc/segments"
 
 	// QNSegmentsPath is the path to get segments in QueryNode.
 	QNSegmentsPath = "/_qn/segments"
@@ -100,6 +104,8 @@ const (
 	DCCompactionTasksPath = "/_dc/tasks/compaction"
 	// DCBuildIndexTasksPath is the path to get build index tasks in DataCoord.
 	DCBuildIndexTasksPath = "/_dc/tasks/build_index"
+	// DCSegmentsPath is the path to get segments in DataCoord.
+	DCSegmentsPath = "/_dc/segments"
 
 	// DNSyncTasksPath is the path to get sync tasks in DataNode.
 	DNSyncTasksPath = "/_dn/tasks/sync"
@@ -107,4 +113,17 @@ const (
 	DNSegmentsPath = "/_dn/segments"
 	// DNChannelsPath is the path to get channels in DataNode.
 	DNChannelsPath = "/_dn/channels"
+
+	// DatabaseListPath is the path to get all databases.
+	DatabaseListPath = "/_db/list"
+	//	DatabaseDescPath is the path to get database description.
+	DatabaseDescPath = "/_db/desc"
+
+	// CollectionListPath is the path to get all collections.
+	CollectionListPath = "/_collection/list"
+	// CollectionDescPath is the path to get collection description.
+	CollectionDescPath = "/_collection/desc"
+
+	// IndexListPath is the path to get all indexes.
+	IndexListPath = "/_index/list"
 )

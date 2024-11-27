@@ -79,7 +79,7 @@ class TestInsertParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("data", [pd.DataFrame()])
-    def test_insert_empty_data(self, data):
+    def test_insert_empty_dataframe(self, data):
         """
         target: test insert empty dataFrame()
         method: insert empty
@@ -101,7 +101,7 @@ class TestInsertParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        error = {ct.err_code: 999, ct.err_msg: "The data don't match with schema fields"}
+        error = {ct.err_code: 999, ct.err_msg: "The data doesn't match with schema fields"}
         collection_w.insert(
             data=data, check_task=CheckTasks.err_res, check_items=error)
 
@@ -134,7 +134,7 @@ class TestInsertParams(TestcaseBase):
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_int64_field_name: ' '}, inplace=True)
         error = {ct.err_code: 999,
-                 ct.err_msg: "The name of field don't match, expected: int64"}
+                 ct.err_msg: "The name of field doesn't match, expected: int64"}
         collection_w.insert(
             data=df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -152,7 +152,7 @@ class TestInsertParams(TestcaseBase):
         df.rename(
             columns={ct.default_int64_field_name: invalid_field_name}, inplace=True)
         error = {ct.err_code: 999,
-                 ct.err_msg: f"The name of field don't match, expected: int64, got {invalid_field_name}"}
+                 ct.err_msg: f"The name of field doesn't match, expected: int64, got {invalid_field_name}"}
         collection_w.insert(
             data=df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -218,6 +218,7 @@ class TestInsertParams(TestcaseBase):
         assert collection_w.num_entities == 1
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #37543")
     def test_insert_dim_not_match(self):
         """
         target: test insert with not match dim
@@ -227,8 +228,8 @@ class TestInsertParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         dim = 129
-        df = cf.gen_default_dataframe_data(ct.default_nb, dim=dim)
-        error = {ct.err_code: 65535,
+        df = cf.gen_default_dataframe_data(nb=20, dim=dim)
+        error = {ct.err_code: 999,
                  ct.err_msg: f'Collection field dim is {ct.default_dim}, but entities field dim is {dim}'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -246,7 +247,7 @@ class TestInsertParams(TestcaseBase):
         df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb, dim=dim)
         error = {ct.err_code: 1100,
                  ct.err_msg: f'the dim ({dim}) of field data(binary_vector) is not equal to schema dim '
-                             f'({ct.default_dim}): invalid parameter[expected={dim}][actual={ct.default_dim}]'}
+                             f'({ct.default_dim}): invalid parameter[expected={ct.default_dim}][actual={dim}]'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -260,7 +261,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_float_field_name: "int"}, inplace=True)
-        error = {ct.err_code: 999, ct.err_msg: "The name of field don't match, expected: float, got int"}
+        error = {ct.err_code: 999, ct.err_msg: "The name of field doesn't match, expected: float, got int"}
         collection_w.insert(
             data=df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -337,7 +338,7 @@ class TestInsertParams(TestcaseBase):
             field_data = cf.gen_data_by_collection_field(fields, nb=nb)
             data.append(field_data)
         data.append([1 for _ in range(nb)])
-        error = {ct.err_code: 999, ct.err_msg: "The data don't match with schema fields"}
+        error = {ct.err_code: 999, ct.err_msg: "The data doesn't match with schema fields"}
         collection_w.insert(
             data=data, check_task=CheckTasks.err_res, check_items=error)
 
@@ -533,7 +534,7 @@ class TestInsertOperation(TestcaseBase):
             field_data = cf.gen_data_by_collection_field(field, nb=nb)
             if field.dtype != DataType.FLOAT_VECTOR:
                 data.append(field_data)
-        error = {ct.err_code: 999, ct.err_msg: f"The data don't match with schema fields, "
+        error = {ct.err_code: 999, ct.err_msg: f"The data doesn't match with schema fields, "
                                                f"expect {len(fields)} list, got {len(data)}"}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1320,8 +1321,7 @@ class TestInsertInvalid(TestcaseBase):
         collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
         data = cf.gen_dataframe_all_data_type(nb=1)
         data[ct.default_int8_field_name] = [invalid_int8]
-        error = {ct.err_code: 1100, 'err_msg': "The data type of field int8 doesn't match, "
-                                               "expected: INT8, got INT64"}
+        error = {ct.err_code: 1100, ct.err_msg: f"the 0th element ({invalid_int8}) out of range: [-128, 127]"}
         collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1335,8 +1335,7 @@ class TestInsertInvalid(TestcaseBase):
         collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
         data = cf.gen_dataframe_all_data_type(nb=1)
         data[ct.default_int16_field_name] = [invalid_int16]
-        error = {ct.err_code: 1100, 'err_msg': "The data type of field int16 doesn't match, "
-                                               "expected: INT16, got INT64"}
+        error = {ct.err_code: 1100, ct.err_msg: f"the 0th element ({invalid_int16}) out of range: [-32768, 32767]"}
         collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2239,7 +2238,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, with_json=False)
         data = cf.gen_default_binary_dataframe_data()[0]
         error = {ct.err_code: 999,
-                 ct.err_msg: "The name of field don't match, expected: float_vector, got binary_vector"}
+                 ct.err_msg: "The name of field doesn't match, expected: float_vector, got binary_vector"}
         collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2254,7 +2253,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w = self.init_collection_general(pre_upsert, True, is_binary=True)[0]
         data = cf.gen_default_binary_dataframe_data(dim=dim)[0]
         error = {ct.err_code: 1100,
-                 ct.err_msg: f"Collection field dim is 128, but entities field dim is {dim}"}
+                 ct.err_msg: f"the dim ({dim}) of field data(binary_vector) is not equal to schema dim ({ct.default_dim})"}
         collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2501,10 +2500,9 @@ class TestInsertArray(TestcaseBase):
         collection_w = self.init_collection_wrap(schema=schema)
         # Insert actual array length > max_capacity
         arr_len = ct.default_max_capacity + 1
-        data = cf.gen_row_data_by_schema(schema=schema,nb=11)
+        data = cf.gen_row_data_by_schema(schema=schema, nb=11)
         data[1][ct.default_float_array_field_name] = [np.float32(i) for i in range(arr_len)]
-        err_msg = (f"the length (101) of 1th array exceeds max capacity ({ct.default_max_capacity}): "
-                   f"expected=valid length array, actual=array length exceeds max capacity: invalid parameter")
+        err_msg = (f"the length ({arr_len}) of 1th array exceeds max capacity ({ct.default_max_capacity})")
         collection_w.insert(data=data, check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1100, ct.err_msg: err_msg})
 

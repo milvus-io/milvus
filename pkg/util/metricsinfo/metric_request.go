@@ -44,51 +44,59 @@ const (
 	// MetricRequestParamsSeparator is a separator that parameter value will be joined be separator
 	MetricRequestParamsSeparator = ","
 
-	// QuerySegmentDist request for segment distribution on the query node
-	QuerySegments = "qn_segments"
+	// SegmentKey request for get segments from the datanode/querynode/datacoord/querycoord
+	SegmentKey = "segments"
 
-	// QueryChannelDist request for channel distribution on the query node
-	QueryChannels = "qn_channels"
+	// ChannelKey request for get channels from the datanode/querynode/datacoord/querycoord
+	ChannelKey = "channels"
 
-	// QueryDist request for segment/channel/leader view distribution on querycoord
-	QueryDist = "qc_dist"
+	// DistKey request for segment/channel/leader view distribution on querycoord
+	// DistKey request for get segments on the datacoord
+	DistKey = "dist"
 
-	// QueryTarget request for segment/channel target on the querycoord
-	QueryTarget = "qc_target"
+	// TargetKey request for segment/channel target on the querycoord
+	TargetKey = "qc_target"
 
-	// QueryCoordAllTasks request for get tasks on the querycoord
-	QueryCoordAllTasks = "qc_tasks_all"
+	// AllTaskKey request for get all tasks on the querycoord
+	AllTaskKey = "tasks_all"
 
-	// QueryReplicas request for get replica on the querycoord
-	QueryReplicas = "qc_replica"
+	// ReplicaKey request for get replica on the querycoord
+	ReplicaKey = "replica"
 
-	// QueryResourceGroups request for get resource groups on the querycoord
-	QueryResourceGroups = "qc_resource_group"
+	// ResourceGroupKey request for get resource groups on the querycoord
+	ResourceGroupKey = "resource_group"
 
-	// DataDist request for get segments on the datacoord
-	DataDist = "dc_segments"
+	// ImportTaskKey request for get import tasks from the datacoord
+	ImportTaskKey = "import_tasks"
 
-	// ImportTasks request for get import tasks from the datacoord
-	ImportTasks = "dc_import_tasks"
+	// CompactionTaskKey request for get compaction tasks from the datacoord
+	CompactionTaskKey = "compaction_tasks"
 
-	// CompactionTasks request for get compaction tasks from the datacoord
-	CompactionTasks = "dc_compaction_tasks"
+	// BuildIndexTaskKey request for get building index tasks from the datacoord
+	BuildIndexTaskKey = "build_index_tasks"
 
-	// BuildIndexTasks request for get building index tasks from the datacoord
-	BuildIndexTasks = "dc_build_index_tasks"
+	// IndexKey request for get index list/detail from the datacoord
+	IndexKey = "index"
 
-	// SyncTasks request for get sync tasks from the datanode
-	SyncTasks = "dn_sync_tasks"
-
-	// DataSegments request for get segments from the datanode
-	DataSegments = "dn_segments"
-
-	// DataChannels request for get channels from the datanode
-	DataChannels = "dn_channels"
+	// SyncTaskKey request for get sync tasks from the datanode
+	SyncTaskKey = "sync_tasks"
 
 	// MetricRequestParamVerboseKey as a request parameter decide to whether return verbose value
 	MetricRequestParamVerboseKey = "verbose"
+
+	MetricRequestParamTargetScopeKey = "target_scope"
+
+	MetricRequestParamINKey = "in"
+
+	MetricRequestParamCollectionIDKey = "collection_id"
 )
+
+var MetricRequestParamINValue = map[string]struct{}{
+	"dc": {},
+	"qc": {},
+	"dn": {},
+	"qn": {},
+}
 
 type MetricsRequestAction func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error)
 

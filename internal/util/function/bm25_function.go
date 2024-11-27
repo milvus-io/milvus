@@ -64,7 +64,6 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 	for _, field := range coll.GetFields() {
 		if field.GetFieldID() == schema.GetOutputFieldIds()[0] {
 			runner.outputField = field
-			break
 		}
 
 		if field.GetFieldID() == schema.GetInputFieldIds()[0] {
@@ -108,7 +107,7 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 
 func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 	if len(inputs) > 1 {
-		return nil, fmt.Errorf("BM25 function receieve more than one input")
+		return nil, fmt.Errorf("BM25 function received more than one input column")
 	}
 
 	text, ok := inputs[0].([]string)
@@ -159,16 +158,18 @@ func (v *BM25FunctionRunner) GetOutputFields() []*schemapb.FieldSchema {
 }
 
 func buildSparseFloatArray(mapdata []map[uint32]float32) *schemapb.SparseFloatArray {
-	dim := 0
+	dim := int64(0)
 	bytes := lo.Map(mapdata, func(sparseMap map[uint32]float32, _ int) []byte {
-		if len(sparseMap) > dim {
-			dim = len(sparseMap)
+		row := typeutil.CreateAndSortSparseFloatRow(sparseMap)
+		rowDim := typeutil.SparseFloatRowDim(row)
+		if rowDim > dim {
+			dim = rowDim
 		}
-		return typeutil.CreateAndSortSparseFloatRow(sparseMap)
+		return row
 	})
 
 	return &schemapb.SparseFloatArray{
 		Contents: bytes,
-		Dim:      int64(dim),
+		Dim:      dim,
 	}
 }

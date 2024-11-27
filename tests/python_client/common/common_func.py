@@ -2227,7 +2227,7 @@ def gen_invalid_search_params_type():
         if index_type == "FLAT":
             continue
         # search_params.append({"index_type": index_type, "search_params": {"invalid_key": invalid_search_key}})
-        if index_type in ["IVF_FLAT", "IVF_SQ8", "IVF_PQ"]:
+        if index_type in ["IVF_FLAT", "IVF_SQ8", "IVF_PQ", "BIN_FLAT", "BIN_IVF_FLAT"]:
             for nprobe in ct.get_invalid_ints:
                 ivf_search_params = {"index_type": index_type, "search_params": {"nprobe": nprobe}}
                 search_params.append(ivf_search_params)
@@ -2307,35 +2307,6 @@ def gen_autoindex_search_params():
     return search_params
 
 
-def gen_invalid_search_param(index_type, metric_type="L2"):
-    search_params = []
-    if index_type in ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"] \
-            or index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]:
-        for nprobe in [-1]:
-            ivf_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
-            search_params.append(ivf_search_params)
-    elif index_type in ["HNSW"]:
-        for ef in [-1]:
-            hnsw_search_param = {"metric_type": metric_type, "params": {"ef": ef}}
-            search_params.append(hnsw_search_param)
-    elif index_type == "ANNOY":
-        for search_k in ["-2"]:
-            annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
-            search_params.append(annoy_search_param)
-    elif index_type == "DISKANN":
-        for search_list in ["-1"]:
-            diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
-            search_params.append(diskann_search_param)
-    elif index_type == "SCANN":
-        for reorder_k in [-1]:
-            scann_search_param = {"metric_type": metric_type, "params": {"reorder_k": reorder_k, "nprobe": 10}}
-            search_params.append(scann_search_param)
-    else:
-        log.error("Invalid index_type.")
-        raise Exception("Invalid index_type.")
-    return search_params
-
-
 def gen_all_type_fields():
     fields = []
     for k, v in DataType.__members__.items():
@@ -2345,49 +2316,98 @@ def gen_all_type_fields():
     return fields
 
 
-def gen_normal_expressions():
+def gen_normal_expressions_and_templates():
+    """
+    Gen a list of filter in expression-format(as a string) and template-format(as a dict)
+    The two formats equals to each other.
+    """
     expressions = [
-        "",
-        "int64 > 0",
-        "(int64 > 0 && int64 < 400) or (int64 > 500 && int64 < 1000)",
-        "int64 not in [1, 2, 3]",
-        "int64 in [1, 2, 3] and float != 2",
-        "int64 == 0 || float == 10**2 || (int64 + 1) == 3",
-        "0 <= int64 < 400 and int64 % 100 == 0",
-        "200+300 < int64 <= 500+500",
-        "int64 > 400 && int64 < 200",
-        "int64 in [300/2, 900%40, -10*30+800, (100+200)*2] or float in [+3**6, 2**10/2]",
-        "float <= -4**5/2 && float > 500-1 && float != 500/2+260"
+        ["", {"expr": "", "expr_params": {}}],
+        ["int64 > 0", {"expr": "int64 > {value_0}", "expr_params": {"value_0": 0}}],
+        ["(int64 > 0 && int64 < 400) or (int64 > 500 && int64 < 1000)",
+         {"expr": "(int64 > {value_0} && int64 < {value_1}) or (int64 > {value_2} && int64 < {value_3})",
+          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 500, "value_3": 1000}}],
+        ["int64 not in [1, 2, 3]", {"expr": "int64 not in {value_0}", "expr_params": {"value_0": [1, 2, 3]}}],
+        ["int64 in [1, 2, 3] and float != 2", {"expr": "int64 in {value_0} and float != {value_1}",
+                                               "expr_params": {"value_0": [1, 2, 3], "value_1": 2}}],
+        ["int64 == 0 || float == 10**2 || (int64 + 1) == 3",
+         {"expr": "int64 == {value_0} || float == {value_1} || (int64 + {value_2}) == {value_3}",
+          "expr_params": {"value_0": 0, "value_1": 10**2, "value_2": 1, "value_3": 3}}],
+        ["0 <= int64 < 400 and int64 % 100 == 0",
+         {"expr": "{value_0} <= int64 < {value_1} and int64 % {value_2} == {value_0}",
+          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 100}}],
+        ["200+300 < int64 <= 500+500", {"expr": "{value_0} < int64 <= {value_1}",
+                                        "expr_params": {"value_1": 500+500, "value_0": 200+300}}],
+        ["int64 > 400 && int64 < 200", {"expr": "int64 > {value_0} && int64 < {value_1}",
+                                        "expr_params": {"value_0": 400, "value_1": 200}}],
+        ["int64 in [300/2, 900%40, -10*30+800, (100+200)*2] or float in [+3**6, 2**10/2]",
+         {"expr": "int64 in {value_0} or float in {value_1}",
+          "expr_params": {"value_0": [int(300/2), 900%40, -10*30+800, (100+200)*2], "value_1": [+3**6*1.0, 2**10/2*1.0]}}],
+        ["float <= -4**5/2 && float > 500-1 && float != 500/2+260",
+         {"expr": "float <= {value_0} && float > {value_1} && float != {value_2}",
+          "expr_params": {"value_0": -4**5/2, "value_1": 500-1, "value_2": 500/2+260}}],
     ]
     return expressions
 
 
-def gen_json_field_expressions():
+def gen_json_field_expressions_and_templates():
+    """
+    Gen a list of filter in expression-format(as a string) and template-format(as a dict)
+    The two formats equals to each other.
+    """
     expressions = [
-        "json_field['number'] > 0",
-        "0 <= json_field['number'] < 400 or 1000 > json_field['number'] >= 500",
-        "json_field['number'] not in [1, 2, 3]",
-        "json_field['number'] in [1, 2, 3] and json_field['float'] != 2",
-        "json_field['number'] == 0 || json_field['float'] == 10**2 || json_field['number'] + 1 == 3",
-        "json_field['number'] < 400 and json_field['number'] >= 100 and json_field['number'] % 100 == 0",
-        "json_field['float'] > 400 && json_field['float'] < 200",
-        "json_field['number'] in [300/2, -10*30+800, (100+200)*2] or json_field['float'] in [+3**6, 2**10/2]",
-        "json_field['float'] <= -4**5/2 && json_field['float'] > 500-1 && json_field['float'] != 500/2+260"
+        ["json_field['number'] > 0", {"expr": "json_field['number'] > {value_0}", "expr_params": {"value_0": 0}}],
+        ["0 <= json_field['number'] < 400 or 1000 > json_field['number'] >= 500",
+         {"expr": "{value_0} <= json_field['number'] < {value_1} or {value_2} > json_field['number'] >= {value_3}",
+          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 1000, "value_3": 500}}],
+        ["json_field['number'] not in [1, 2, 3]", {"expr": "json_field['number'] not in {value_0}",
+                                                   "expr_params": {"value_0": [1, 2, 3]}}],
+        ["json_field['number'] in [1, 2, 3] and json_field['float'] != 2",
+         {"expr": "json_field['number'] in {value_0} and json_field['float'] != {value_1}",
+          "expr_params": {"value_0": [1, 2, 3], "value_1": 2}}],
+        ["json_field['number'] == 0 || json_field['float'] == 10**2 || json_field['number'] + 1 == 3",
+         {"expr": "json_field['number'] == {value_0} || json_field['float'] == {value_1} || json_field['number'] + {value_2} == {value_3}",
+          "expr_params": {"value_0": 0, "value_1": 10**2, "value_2": 1, "value_3": 3}}],
+        ["json_field['number'] < 400 and json_field['number'] >= 100 and json_field['number'] % 100 == 0",
+         {"expr": "json_field['number'] < {value_0} and json_field['number'] >= {value_1} and json_field['number'] % {value_1} == 0",
+          "expr_params": {"value_0": 400, "value_1": 100}}],
+        ["json_field['float'] > 400 && json_field['float'] < 200", {"expr": "json_field['float'] > {value_0} && json_field['float'] < {value_1}",
+                                                                    "expr_params": {"value_0": 400, "value_1": 200}}],
+        ["json_field['number'] in [300/2, -10*30+800, (100+200)*2] or json_field['float'] in [+3**6, 2**10/2]",
+         {"expr": "json_field['number'] in {value_0} or json_field['float'] in {value_1}",
+          "expr_params": {"value_0": [int(300/2), -10*30+800, (100+200)*2], "value_1": [+3**6*1.0, 2**10/2*1.0]}}],
+        ["json_field['float'] <= -4**5/2 && json_field['float'] > 500-1 && json_field['float'] != 500/2+260",
+         {"expr": "json_field['float'] <= {value_0} && json_field['float'] > {value_1} && json_field['float'] != {value_2}",
+          "expr_params": {"value_0": -4**5/2, "value_1": 500-1, "value_2": 500/2+260}}],
     ]
     return expressions
 
 
-def gen_array_field_expressions():
+def gen_array_field_expressions_and_templates():
+    """
+    Gen a list of filter in expression-format(as a string) and template-format(as a dict) for a field.
+    The two formats equals to each other.
+    """
     expressions = [
-        "int32_array[0] > 0",
-        "0 <= int32_array[0] < 400 or 1000 > float_array[1] >= 500",
-        "int32_array[1] not in [1, 2, 3]",
-        "int32_array[1] in [1, 2, 3] and string_array[1] != '2'",
-        "int32_array == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]",
-        "int32_array[1] + 1 == 3 && int32_array[0] - 1 != 1",
-        "int32_array[1] % 100 == 0 && string_array[1] in ['1', '2']",
-        "int32_array[1] in [300/2, -10*30+800, (200-100)*2] "
-        "or (float_array[1] <= -4**5/2 || 100 <= int32_array[1] < 200)"
+        ["int32_array[0] > 0", {"expr": "int32_array[0] > {value_0}", "expr_params": {"value_0": 0}}],
+        ["0 <= int32_array[0] < 400 or 1000 > float_array[1] >= 500",
+         {"expr": "{value_0} <= int32_array[0] < {value_1} or {value_2} > float_array[1] >= {value_3}",
+          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 1000, "value_3": 500}}],
+        ["int32_array[1] not in [1, 2, 3]", {"expr": "int32_array[1] not in {value_0}", "expr_params": {"value_0": [1, 2, 3]}}],
+        ["int32_array[1] in [1, 2, 3] and string_array[1] != '2'",
+         {"expr": "int32_array[1] in {value_0} and string_array[1] != {value_2}",
+          "expr_params": {"value_0": [1, 2, 3], "value_2": "2"}}],
+        ["int32_array == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]", {"expr": "int32_array == {value_0}",
+                                                            "expr_params": {"value_0": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}}],
+        ["int32_array[1] + 1 == 3 && int32_array[0] - 1 != 1",
+         {"expr": "int32_array[1] + {value_0} == {value_2} && int32_array[0] - {value_0} != {value_0}",
+          "expr_params": {"value_0": 1, "value_2": 3}}],
+        ["int32_array[1] % 100 == 0 && string_array[1] in ['1', '2']",
+         {"expr": "int32_array[1] % {value_0} == {value_1} && string_array[1] in {value_2}",
+          "expr_params": {"value_0": 100, "value_1": 0, "value_2": ["1", "2"]}}],
+        ["int32_array[1] in [300/2, -10*30+800, (200-100)*2] or (float_array[1] <= -4**5/2 || 100 <= int32_array[1] < 200)",
+         {"expr": "int32_array[1] in {value_0} or (float_array[1] <= {value_1} || {value_2} <= int32_array[1] < {value_3})",
+          "expr_params": {"value_0": [int(300/2), -10*30+800, (200-100)*2], "value_1": -4**5/2, "value_2": 100, "value_3": 200}}]
     ]
     return expressions
 
@@ -2437,37 +2457,42 @@ def gen_invalid_string_expressions():
     return expressions
 
 
-def gen_invalid_bool_expressions():
-    expressions = [
-        "bool",
-        "!bool",
-        "true",
-        "false",
-        "int64 > 0 and bool",
-        "int64 > 0 or false"
+def gen_normal_expressions_and_templates_field(field):
+    """
+    Gen a list of filter in expression-format(as a string) and template-format(as a dict) for a field.
+    The two formats equals to each other.
+    """
+    expressions_and_templates = [
+        ["", {"expr": "", "expr_params": {}}],
+        [f"{field} > 0", {"expr": f"{field} > {{value_0}}", "expr_params": {"value_0": 0}}],
+        [f"({field} > 0 && {field} < 400) or ({field} > 500 && {field} < 1000)",
+         {"expr": f"({field} > {{value_0}} && {field} < {{value_1}}) or ({field} > {{value_2}} && {field} < {{value_3}})",
+          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 500, "value_3": 1000}}],
+        [f"{field} not in [1, 2, 3]", {"expr": f"{field} not in {{value_0}}", "expr_params": {"value_0": [1, 2, 3]}}],
+        [f"{field} in [1, 2, 3] and {field} != 2", {"expr": f"{field} in {{value_0}} and {field} != {{value_1}}", "expr_params": {"value_0": [1, 2, 3], "value_1": 2}}],
+        [f"{field} == 0 || {field} == 1 || {field} == 2", {"expr": f"{field} == {{value_0}} || {field} == {{value_1}} || {field} == {{value_2}}",
+         "expr_params": {"value_0": 0, "value_1": 1, "value_2": 2}}],
+        [f"0 < {field} < 400", {"expr": f"{{value_0}} < {field} < {{value_1}}", "expr_params": {"value_0": 0, "value_1": 400}}],
+        [f"500 <= {field} <= 1000", {"expr": f"{{value_0}} <= {field} <= {{value_1}}", "expr_params": {"value_0": 500, "value_1": 1000}}],
+        [f"200+300 <= {field} <= 500+500", {"expr": f"{{value_0}} <= {field} <= {{value_1}}", "expr_params": {"value_0": 200+300, "value_1": 500+500}}],
+        [f"{field} in [300/2, 900%40, -10*30+800, 2048/2%200, (100+200)*2]", {"expr": f"{field} in {{value_0}}", "expr_params": {"value_0": [300*1.0/2, 900*1.0%40, -10*30*1.0+800, 2048*1.0/2%200, (100+200)*1.0*2]}}],
+        [f"{field} in [+3**6, 2**10/2]", {"expr": f"{field} in {{value_0}}", "expr_params": {"value_0": [+3**6*1.0, 2**10*1.0/2]}}],
+        [f"{field} <= 4**5/2 && {field} > 500-1 && {field} != 500/2+260", {"expr": f"{field} <= {{value_0}} && {field} > {{value_1}} && {field} != {{value_2}}",
+         "expr_params": {"value_0": 4**5/2, "value_1": 500-1, "value_2": 500/2+260}}],
+        [f"{field} > 400 && {field} < 200", {"expr": f"{field} > {{value_0}} && {field} < {{value_1}}", "expr_params": {"value_0": 400, "value_1": 200}}],
+        [f"{field} < -2**8", {"expr": f"{field} < {{value_0}}", "expr_params": {"value_0": -2**8}}],
+        [f"({field} + 1) == 3 || {field} * 2 == 64 || {field} == 10**2", {"expr": f"({field} + {{value_0}}) == {{value_1}} || {field} * {{value_2}} == {{value_3}} || {field} == {{value_4}}",
+         "expr_params": {"value_0": 1, "value_1": 3, "value_2": 2, "value_3": 64, "value_4": 10**2}}]
     ]
-    return expressions
+    return expressions_and_templates
 
 
-def gen_normal_expressions_field(field):
-    expressions = [
-        "",
-        f"{field} > 0",
-        f"({field} > 0 && {field} < 400) or ({field} > 500 && {field} < 1000)",
-        f"{field} not in [1, 2, 3]",
-        f"{field} in [1, 2, 3] and {field} != 2",
-        f"{field} == 0 || {field} == 1 || {field} == 2",
-        f"0 < {field} < 400",
-        f"500 <= {field} <= 1000",
-        f"200+300 <= {field} <= 500+500",
-        f"{field} in [300/2, 900%40, -10*30+800, 2048/2%200, (100+200)*2]",
-        f"{field} in [+3**6, 2**10/2]",
-        f"{field} <= 4**5/2 && {field} > 500-1 && {field} != 500/2+260",
-        f"{field} > 400 && {field} < 200",
-        f"{field} < -2**8",
-        f"({field} + 1) == 3 || {field} * 2 == 64 || {field} == 10**2"
-    ]
-    return expressions
+def get_expr_from_template(template={}):
+    return template.get("expr", None)
+
+
+def get_expr_params_from_template(template={}):
+    return template.get("expr_params", None)
 
 
 def gen_integer_overflow_expressions():

@@ -17,6 +17,7 @@
 package balance
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -50,6 +51,7 @@ func (suite *BalanceTestSuite) SetupTest() {
 }
 
 func (suite *BalanceTestSuite) TestAssignBalance() {
+	ctx := context.Background()
 	cases := []struct {
 		name        string
 		nodeIDs     []int64
@@ -108,13 +110,14 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 					suite.mockScheduler.EXPECT().GetSegmentTaskDelta(c.nodeIDs[i], int64(-1)).Return(c.deltaCnts[i])
 				}
 			}
-			plans := suite.roundRobinBalancer.AssignSegment(0, c.assignments, c.nodeIDs, false)
+			plans := suite.roundRobinBalancer.AssignSegment(ctx, 0, c.assignments, c.nodeIDs, false)
 			suite.ElementsMatch(c.expectPlans, plans)
 		})
 	}
 }
 
 func (suite *BalanceTestSuite) TestAssignChannel() {
+	ctx := context.Background()
 	cases := []struct {
 		name        string
 		nodeIDs     []int64
@@ -174,7 +177,7 @@ func (suite *BalanceTestSuite) TestAssignChannel() {
 					suite.mockScheduler.EXPECT().GetChannelTaskDelta(c.nodeIDs[i], int64(-1)).Return(c.deltaCnts[i])
 				}
 			}
-			plans := suite.roundRobinBalancer.AssignChannel(c.assignments, c.nodeIDs, false)
+			plans := suite.roundRobinBalancer.AssignChannel(ctx, c.assignments, c.nodeIDs, false)
 			suite.ElementsMatch(c.expectPlans, plans)
 		})
 	}

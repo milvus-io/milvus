@@ -98,13 +98,9 @@ class TestIndexParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         index_params = copy.deepcopy(default_index_params)
         index_params["index_type"] = index_type
-        if not isinstance(index_params["index_type"], str):
-            msg = "must be str"
-        else:
-            msg = "invalid index type"
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params,
                                    check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1100, ct.err_msg: msg})
+                                   check_items={ct.err_code: 1100, ct.err_msg: "invalid parameter["})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_type_not_supported(self):
@@ -238,8 +234,8 @@ class TestIndexOperation(TestcaseBase):
         collection_w.create_index(ct.default_int64_field_name, {})
         collection_w.load(check_task=CheckTasks.err_res,
                           check_items={ct.err_code: 65535,
-                                       ct.err_msg: f"there is no vector index on field: [float_vector], "
-                                                   f"please create index firstly: collection={collection_w.name}: index not found"})
+                                       ct.err_msg: "there is no vector index on field: [float_vector], "
+                                                   "please create index firstly"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_index_create_on_array_field(self):
@@ -1092,9 +1088,8 @@ class TestNewIndexBinary(TestcaseBase):
         binary_index_params = {'index_type': 'BIN_IVF_FLAT', 'metric_type': 'L2', 'params': {'nlist': 64}}
         collection_w.create_index(default_binary_vec_field_name, binary_index_params,
                                   index_name=binary_field_name, check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1100,
-                                               ct.err_msg: "metric type L2 not found or not supported, supported: "
-                                                           "[HAMMING JACCARD SUBSTRUCTURE SUPERSTRUCTURE]"})
+                                  check_items={ct.err_code: 999,
+                                               ct.err_msg: "binary vector index does not support metric type: L2"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric_type", ["L2", "IP", "COSINE", "JACCARD", "HAMMING"])
@@ -1107,12 +1102,12 @@ class TestNewIndexBinary(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
         binary_index_params = {'index_type': 'HNSW', "M": '18', "efConstruction": '240', 'metric_type': metric_type}
+        error = {ct.err_code: 999, ct.err_msg: f"binary vector index does not support metric type: {metric_type}"}
+        if metric_type in ["JACCARD", "HAMMING"]:
+            error = {ct.err_code: 999, ct.err_msg: f"data type BinaryVector can't build with this index HNSW"}
         collection_w.create_index(default_binary_vec_field_name, binary_index_params,
                                   check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1100,
-                                               ct.err_msg: "HNSW only support float vector data type: invalid "
-                                                           "parameter[expected=valid index params][actual=invalid "
-                                                           "index params]"})
+                                  check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric", ct.binary_metrics)
@@ -1257,7 +1252,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.create_index(ct.default_json_field_name,
                                   check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 1100,
-                                               ct.err_msg: "create index on JSON field is not supported"})
+                                               ct.err_msg: "create auto index on type:JSON is not supported"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_scalar_index_on_vector_field(self, scalar_index, vector_data_type):
@@ -1286,7 +1281,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.create_index(ct.default_binary_vec_field_name, index_params=scalar_index_params,
                                   check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 1100,
-                                               ct.err_msg: f"invalid index type: {scalar_index}"})
+                                               ct.err_msg: "metric type not set for vector index"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_inverted_index_on_json_field(self, vector_data_type):
@@ -1300,7 +1295,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.create_index(ct.default_json_field_name, index_params=scalar_index_params,
                                   check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 1100,
-                                               ct.err_msg: "create index on JSON field is not supported"})
+                                               ct.err_msg: "INVERTED are not supported on JSON field"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_inverted_index_on_array_field(self):
@@ -1433,7 +1428,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.alter_index(ct.default_index_name, {"error_param_key": 123},
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 1100,
-                                              ct.err_msg: f"error_param is not configable index param"})
+                                              ct.err_msg: f"error_param_key is not configable index param"})
         collection_w.alter_index(ct.default_index_name, ["error_param_type"],
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 1,
@@ -1483,8 +1478,8 @@ class TestIndexInvalid(TestcaseBase):
         data = cf.gen_default_list_sparse_data()
         collection_w.insert(data=data)
         params = {"index_type": index, "metric_type": "IP", "params": {"drop_ratio_build": ratio}}
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"invalid drop_ratio_build: {ratio}, must be in range [0, 1): invalid parameter[expected=valid index params"}
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"Out of range in json: param 'drop_ratio_build' ({ratio*1.0}) should be in range [0.000000, 1.000000)"}
         index, _ = self.index_wrap.init_index(collection_w.collection, ct.default_sparse_vec_field_name, params,
                                               check_task=CheckTasks.err_res,
                                               check_items=error)
@@ -2016,7 +2011,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w.create_index(default_binary_vec_field_name, ct.default_diskann_index, index_name=binary_field_name,
                                   check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 1100,
-                                               ct.err_msg: "float or float16 vector are only supported"})
+                                               ct.err_msg: "binary vector index does not support metric type: COSINE"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_diskann_index_multithread(self):
@@ -2181,7 +2176,7 @@ class TestScaNNIndex(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_index=False)[0]
         index_params = {"index_type": "SCANN", "metric_type": "L2", "params": {"nlist": nlist}}
-        error = {ct.err_code: 1100, ct.err_msg: "nlist out of range: [1, 65536]"}
+        error = {ct.err_code: 999, ct.err_msg: f"Out of range in json: param 'nlist' ({nlist}) should be in range [1, 65536]"}
         collection_w.create_index(default_field_name, index_params,
                                   check_task=CheckTasks.err_res, check_items=error)
 
@@ -2196,7 +2191,7 @@ class TestScaNNIndex(TestcaseBase):
         collection_w = self.init_collection_general(prefix, is_index=False, dim=dim)[0]
         index_params = {"index_type": "SCANN", "metric_type": "L2", "params": {"nlist": 1024}}
         error = {ct.err_code: 1100,
-                 ct.err_msg: f"dimension must be able to be divided by 2, dimension: {dim}"}
+                 ct.err_msg: f"The dimension of a vector (dim) should be a multiple of 2. Dimension:{dim}"}
         collection_w.create_index(default_field_name, index_params,
                                   check_task=CheckTasks.err_res, check_items=error)
 
@@ -2386,7 +2381,7 @@ class TestBitmapIndex(TestcaseBase):
         for msg, index_params in {
             iem.VectorMetricTypeExist: IndexPrams(index_type=IndexName.BITMAP),
             iem.SparseFloatVectorMetricType: IndexPrams(index_type=IndexName.BITMAP, metric_type=MetricType.L2),
-            iem.CheckVectorIndex.format(DataType.SPARSE_FLOAT_VECTOR, IndexName.BITMAP): IndexPrams(
+            iem.CheckVectorIndex.format("SparseFloatVector", IndexName.BITMAP): IndexPrams(
                 index_type=IndexName.BITMAP, metric_type=MetricType.IP)
         }.items():
             self.collection_wrap.create_index(
@@ -2947,7 +2942,7 @@ class TestBitmapIndex(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("bitmap_cardinality_limit", [-10, 0, 1001])
-    # @pytest.mark.skip("valid now")
+    @pytest.mark.skip("need hybrid index config, not available now")
     def test_bitmap_cardinality_limit_invalid(self, request, bitmap_cardinality_limit):
         """
         target:

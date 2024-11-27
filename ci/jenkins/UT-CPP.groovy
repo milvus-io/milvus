@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.67.0') _
+@Library('jenkins-shared-library@v0.71.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 def milvus_helm_chart_version = '4.2.8'
@@ -9,7 +9,8 @@ pipeline {
         parallelsAlwaysFailFast()
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         preserveStashes(buildCount: 5)
-        disableConcurrentBuilds(abortPrevious: true)
+        // abort previous build if it's a PR, otherwise queue the build
+        disableConcurrentBuilds(abortPrevious: env.CHANGE_ID != null)
         timeout(time: 6, unit: 'HOURS')
         throttleJobProperty(
             categories: ['cpp-unit-test'],

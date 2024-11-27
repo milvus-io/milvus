@@ -207,15 +207,6 @@ get_dict_without_host_port = [
     {"": ""}
 ]
 
-get_dict_invalid_host_port = [
-    {"port": "port"},
-    # ["host", "port"],
-    # ("host", "port"),
-    {"host": -1},
-    {"port": ["192.168.1.1"]},
-    {"port": "-1", "host": "hostlocal"},
-]
-
 get_wrong_format_dict = [
     {"host": "string_host", "port": {}},
     {"host": 0, "port": 19520}

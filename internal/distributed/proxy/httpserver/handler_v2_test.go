@@ -1,9 +1,24 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package httpserver
 
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	mhttp "github.com/milvus-io/milvus/internal/http"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy"
@@ -1129,7 +1145,7 @@ func TestMethodGet(t *testing.T) {
 	mp.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(&milvuspb.BoolResponse{Status: commonErrorStatus}, nil).Once()
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false),
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
 	}, nil).Twice()
@@ -1438,7 +1454,8 @@ func TestMethodPost(t *testing.T) {
 	mp.EXPECT().UpdateCredential(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().OperateUserRole(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
 	mp.EXPECT().CreateRole(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
+	mp.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(2)
+	mp.EXPECT().OperatePrivilegeV2(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(2)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Once()
 	mp.EXPECT().CreateAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
@@ -1512,6 +1529,12 @@ func TestMethodPost(t *testing.T) {
 		path: versionalV2(RoleCategory, RevokePrivilegeAction),
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(RoleCategory, GrantPrivilegeActionV2),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(RoleCategory, RevokePrivilegeActionV2),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(IndexCategory, CreateAction),
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
@@ -1577,6 +1600,29 @@ func TestMethodPost(t *testing.T) {
 	}
 }
 
+func validateTestCases(t *testing.T, testEngine *gin.Engine, queryTestCases []requestBodyTestCase, allowInt64 bool) {
+	for i, testcase := range queryTestCases {
+		t.Run(testcase.path, func(t *testing.T) {
+			bodyReader := bytes.NewReader(testcase.requestBody)
+			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, testcase.path), bodyReader)
+			if allowInt64 {
+				req.Header.Set(HTTPHeaderAllowInt64, "true")
+			}
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code, "case %d: ", i, string(testcase.requestBody))
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err, "case %d: ", i)
+			assert.Equal(t, testcase.errCode, returnBody.Code, "case %d: ", i, string(testcase.requestBody))
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message, "case %d: ", i, string(testcase.requestBody))
+			}
+			fmt.Println(w.Body.String())
+		})
+	}
+}
+
 func TestDML(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
@@ -1585,7 +1631,7 @@ func TestDML(t *testing.T) {
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false),
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
 	}, nil).Times(6)
@@ -1607,7 +1653,7 @@ func TestDML(t *testing.T) {
 	mp.EXPECT().Delete(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus}, nil).Once()
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true),
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
 	}, nil).Once()
@@ -1692,23 +1738,7 @@ func TestDML(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "book", "data": [{"book_id": 0, "word_count": 0, "book_intro": [0.11825, 0.6]}]}`),
 	})
 
-	for _, testcase := range queryTestCases {
-		t.Run(testcase.path, func(t *testing.T) {
-			bodyReader := bytes.NewReader(testcase.requestBody)
-			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, testcase.path), bodyReader)
-			w := httptest.NewRecorder()
-			testEngine.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code)
-			returnBody := &ReturnErrMsg{}
-			err := json.Unmarshal(w.Body.Bytes(), returnBody)
-			assert.Nil(t, err)
-			assert.Equal(t, testcase.errCode, returnBody.Code)
-			if testcase.errCode != 0 {
-				assert.Equal(t, testcase.errMsg, returnBody.Message)
-			}
-			fmt.Println(w.Body.String())
-		})
-	}
+	validateTestCases(t, testEngine, queryTestCases, false)
 }
 
 func TestAllowInt64(t *testing.T) {
@@ -1729,31 +1759,190 @@ func TestAllowInt64(t *testing.T) {
 	})
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false),
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
 	}, nil).Twice()
 	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
 	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
 
-	for _, testcase := range queryTestCases {
-		t.Run(testcase.path, func(t *testing.T) {
-			bodyReader := bytes.NewReader(testcase.requestBody)
-			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, testcase.path), bodyReader)
-			req.Header.Set(HTTPHeaderAllowInt64, "true")
-			w := httptest.NewRecorder()
-			testEngine.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code)
-			returnBody := &ReturnErrMsg{}
-			err := json.Unmarshal(w.Body.Bytes(), returnBody)
-			assert.Nil(t, err)
-			assert.Equal(t, testcase.errCode, returnBody.Code)
-			if testcase.errCode != 0 {
-				assert.Equal(t, testcase.errMsg, returnBody.Message)
-			}
-			fmt.Println(w.Body.String())
-		})
+	validateTestCases(t, testEngine, queryTestCases, true)
+}
+
+func generateCollectionSchemaWithVectorFields() *schemapb.CollectionSchema {
+	collSchema := generateCollectionSchema(schemapb.DataType_Int64, false, true)
+	binaryVectorField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)
+	binaryVectorField.Name = "binaryVector"
+	float16VectorField := generateVectorFieldSchema(schemapb.DataType_Float16Vector)
+	float16VectorField.Name = "float16Vector"
+	bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
+	bfloat16VectorField.Name = "bfloat16Vector"
+	sparseFloatVectorField := generateVectorFieldSchema(schemapb.DataType_SparseFloatVector)
+	sparseFloatVectorField.Name = "sparseFloatVector"
+	collSchema.Fields = append(collSchema.Fields, binaryVectorField)
+	collSchema.Fields = append(collSchema.Fields, float16VectorField)
+	collSchema.Fields = append(collSchema.Fields, bfloat16VectorField)
+	collSchema.Fields = append(collSchema.Fields, sparseFloatVectorField)
+	return collSchema
+}
+
+func TestFp16Bf16VectorsV2(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	mp := mocks.NewMockProxy(t)
+	collSchema := generateCollectionSchemaWithVectorFields()
+	testEngine := initHTTPServerV2(mp, false)
+	queryTestCases := []requestBodyTestCase{}
+	for _, path := range []string{InsertAction, UpsertAction} {
+		queryTestCases = append(queryTestCases,
+			requestBodyTestCase{
+				path: path,
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": [3.0],
+							"bfloat16Vector": [4.4, 442],
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						}
+					]
+				}`),
+				errCode: 1804,
+				errMsg:  "fail to deal the insert data, error: []byte size 2 doesn't equal to vector dimension 2 of Float16Vector",
+			}, requestBodyTestCase{
+				path: path,
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": [3, 3.0],
+							"bfloat16Vector": [4.4, 442],
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						}
+					]
+				}`),
+			}, requestBodyTestCase{
+				path: path,
+				// [3, 3] shouble be converted to [float(3), float(3)]
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": [3, 3],
+							"bfloat16Vector": [4.4, 442],
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						}
+					]
+				}`),
+			}, requestBodyTestCase{
+				path: path,
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": "AQIDBA==",
+							"bfloat16Vector": "AQIDBA==",
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						}
+					]
+				}`),
+			}, requestBodyTestCase{
+				path: path,
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": [3, 3.0, 3],
+							"bfloat16Vector": [4.4, 44],
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						}
+					]
+				}`),
+				errMsg:  "fail to deal the insert data, error: []byte size 6 doesn't equal to vector dimension 2 of Float16Vector",
+				errCode: 1804,
+			}, requestBodyTestCase{
+				path: path,
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": [3, 3.0],
+							"bfloat16Vector": [4.4, 442, 44],
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						}
+					]
+				}`),
+				errMsg:  "fail to deal the insert data, error: []byte size 6 doesn't equal to vector dimension 2 of BFloat16Vector",
+				errCode: 1804,
+			}, requestBodyTestCase{
+				path: path,
+				requestBody: []byte(
+					`{
+					"collectionName": "book",
+					"data": [
+						{
+							"book_id": 0,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": "AQIDBA==",
+							"bfloat16Vector": [4.4, 442],
+							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+						},
+						{
+							"book_id": 1,
+							"word_count": 0,
+							"book_intro": [0.11825, 0.6],
+							"binaryVector": "AQ==",
+							"float16Vector": [3.1, 3.1],
+							"bfloat16Vector": "AQIDBA==",
+							"sparseFloatVector": {"3": 1.1, "2": 0.44}
+						}
+					]
+				}`),
+			})
 	}
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         collSchema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(len(queryTestCases))
+	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Times(4)
+	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Times(4)
+	validateTestCases(t, testEngine, queryTestCases, false)
 }
 
 func TestSearchV2(t *testing.T) {
@@ -1765,7 +1954,7 @@ func TestSearchV2(t *testing.T) {
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false),
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
 	}, nil).Times(11)
@@ -1788,26 +1977,14 @@ func TestSearchV2(t *testing.T) {
 		Ids:          generateIDs(schemapb.DataType_Int64, 3),
 		Scores:       DefaultScores,
 	}}, nil).Once()
-	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
-	collSchema := generateCollectionSchema(schemapb.DataType_Int64, false)
-	binaryVectorField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)
-	binaryVectorField.Name = "binaryVector"
-	float16VectorField := generateVectorFieldSchema(schemapb.DataType_Float16Vector)
-	float16VectorField.Name = "float16Vector"
-	bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
-	bfloat16VectorField.Name = "bfloat16Vector"
-	sparseFloatVectorField := generateVectorFieldSchema(schemapb.DataType_SparseFloatVector)
-	sparseFloatVectorField.Name = "sparseFloatVector"
-	collSchema.Fields = append(collSchema.Fields, binaryVectorField)
-	collSchema.Fields = append(collSchema.Fields, float16VectorField)
-	collSchema.Fields = append(collSchema.Fields, bfloat16VectorField)
-	collSchema.Fields = append(collSchema.Fields, sparseFloatVectorField)
+	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(5)
+	collSchema := generateCollectionSchemaWithVectorFields()
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         collSchema,
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Times(10)
+	}, nil).Times(14)
 	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{
@@ -1848,7 +2025,7 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [["0.1", "0.2"]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
-		errMsg:      "can only accept json format request, error: Mismatch type float32 with value string \"at index 8: mismatched type with value\\n\\n\\t[\\\"0.1\\\", \\\"0.2\\\"]\\n\\t........^.....\\n\": invalid parameter[expected=FloatVector][actual=[\"0.1\", \"0.2\"]]",
+		errMsg:      "can only accept json format request, error: Mismatch type float32 with value string \"at index 9: mismatched type with value\\n\\n\\t[[\\\"0.1\\\", \\\"0.2\\\"]]\\n\\t.........^......\\n\": invalid parameter[expected=FloatVector][actual=[[\"0.1\", \"0.2\"]]]",
 		errCode:     1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
@@ -1911,6 +2088,50 @@ func TestSearchV2(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
 			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
 			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": [[0.1, 0.23]], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": [[0.1, 0.43]], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
+	})
+
+	// -2, -1, 1, 3 should be float32
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path: AdvancedSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": [[-2, -1]], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": [[1, 3]], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
+	})
+	// invalid fp32 vectors for fp16/bf16
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path: AdvancedSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": [[0.23]], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": [[0.1, 0.43]], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
+		errCode: 1801,
+		errMsg:  "can only accept json format request, error: dimension: 2, but length of []float: 1: invalid parameter[expected=Float16Vector][actual=[[0.23]]]",
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path: AdvancedSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": [[0.23, 4.4]], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": [[0.1]], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
+		errCode: 1801,
+		errMsg:  "can only accept json format request, error: dimension: 2, but length of []float: 1: invalid parameter[expected=BFloat16Vector][actual=[[0.1]]]",
+	})
+
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path: AdvancedSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
 			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
 			`{"data": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
 			`], "consistencyLevel":"unknown","rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
@@ -1925,7 +2146,7 @@ func TestSearchV2(t *testing.T) {
 			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
 			`{"data": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
 			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
-		errMsg:  "can only accept json format request, error: dimension: 2, but length of []float: 3: invalid parameter[expected=FloatVector][actual=[0.1, 0.2, 0.3]]",
+		errMsg:  "can only accept json format request, error: dimension: 2, but length of []float: 3: invalid parameter[expected=FloatVector][actual=[[0.1, 0.2, 0.3]]]",
 		errCode: 1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
@@ -1983,22 +2204,5 @@ func TestSearchV2(t *testing.T) {
 		errMsg:      "mock",
 		errCode:     1100, // ErrParameterInvalid
 	})
-
-	for _, testcase := range queryTestCases {
-		t.Run(testcase.path, func(t *testing.T) {
-			bodyReader := bytes.NewReader(testcase.requestBody)
-			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, testcase.path), bodyReader)
-			w := httptest.NewRecorder()
-			testEngine.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code)
-			returnBody := &ReturnErrMsg{}
-			err := json.Unmarshal(w.Body.Bytes(), returnBody)
-			assert.Nil(t, err)
-			assert.Equal(t, testcase.errCode, returnBody.Code)
-			if testcase.errCode != 0 {
-				assert.Equal(t, testcase.errMsg, returnBody.Message)
-			}
-			fmt.Println(w.Body.String())
-		})
-	}
+	validateTestCases(t, testEngine, queryTestCases, false)
 }

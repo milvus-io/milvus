@@ -40,9 +40,7 @@ func (s *ColumnDynamicSuite) TestGetInt() {
 
 	for _, c := range cases {
 		s.Run(c.input, func() {
-			column := NewColumnDynamic(&ColumnJSONBytes{
-				values: [][]byte{[]byte(c.input)},
-			}, "field")
+			column := NewColumnDynamic(NewColumnJSONBytes("", [][]byte{[]byte(c.input)}), "field")
 			v, err := column.GetAsInt64(0)
 			if c.expectErr {
 				s.Error(err)
@@ -68,9 +66,10 @@ func (s *ColumnDynamicSuite) TestGetString() {
 
 	for _, c := range cases {
 		s.Run(c.input, func() {
-			column := NewColumnDynamic(&ColumnJSONBytes{
-				values: [][]byte{[]byte(c.input)},
-			}, "field")
+			// column := NewColumnDynamic(&ColumnJSONBytes{
+			// 	values: [][]byte{[]byte(c.input)},
+			// }, "field")
+			column := NewColumnDynamic(NewColumnJSONBytes("", [][]byte{[]byte(c.input)}), "field")
 			v, err := column.GetAsString(0)
 			if c.expectErr {
 				s.Error(err)
@@ -96,9 +95,10 @@ func (s *ColumnDynamicSuite) TestGetBool() {
 
 	for _, c := range cases {
 		s.Run(c.input, func() {
-			column := NewColumnDynamic(&ColumnJSONBytes{
-				values: [][]byte{[]byte(c.input)},
-			}, "field")
+			// column := NewColumnDynamic(&ColumnJSONBytes{
+			// 	values: [][]byte{[]byte(c.input)},
+			// }, "field")
+			column := NewColumnDynamic(NewColumnJSONBytes("", [][]byte{[]byte(c.input)}), "field")
 			v, err := column.GetAsBool(0)
 			if c.expectErr {
 				s.Error(err)
@@ -124,9 +124,10 @@ func (s *ColumnDynamicSuite) TestGetDouble() {
 
 	for _, c := range cases {
 		s.Run(c.input, func() {
-			column := NewColumnDynamic(&ColumnJSONBytes{
-				values: [][]byte{[]byte(c.input)},
-			}, "field")
+			// column := NewColumnDynamic(&ColumnJSONBytes{
+			// 	values: [][]byte{[]byte(c.input)},
+			// }, "field")
+			column := NewColumnDynamic(NewColumnJSONBytes("", [][]byte{[]byte(c.input)}), "field")
 			v, err := column.GetAsDouble(0)
 			if c.expectErr {
 				s.Error(err)
@@ -140,7 +141,7 @@ func (s *ColumnDynamicSuite) TestGetDouble() {
 
 func (s *ColumnDynamicSuite) TestIndexOutOfRange() {
 	var err error
-	column := NewColumnDynamic(&ColumnJSONBytes{}, "field")
+	column := NewColumnDynamic(NewColumnJSONBytes("", nil), "field")
 
 	s.Equal("field", column.Name())
 

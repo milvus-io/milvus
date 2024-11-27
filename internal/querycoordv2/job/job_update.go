@@ -62,7 +62,7 @@ func NewUpdateLoadConfigJob(ctx context.Context,
 }
 
 func (job *UpdateLoadConfigJob) Execute() error {
-	if !job.meta.CollectionManager.Exist(job.collectionID) {
+	if !job.meta.CollectionManager.Exist(job.ctx, job.collectionID) {
 		msg := "modify replica for unloaded collection is not supported"
 		err := merr.WrapErrCollectionNotLoaded(msg)
 		log.Warn(msg, zap.Error(err))
@@ -83,7 +83,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 
 	var err error
 	// 2. reassign
-	toSpawn, toTransfer, toRelease, err := utils.ReassignReplicaToRG(job.meta, job.collectionID, job.newReplicaNumber, job.newResourceGroups)
+	toSpawn, toTransfer, toRelease, err := utils.ReassignReplicaToRG(job.ctx, job.meta, job.collectionID, job.newReplicaNumber, job.newResourceGroups)
 	if err != nil {
 		log.Warn("failed to reassign replica", zap.Error(err))
 		return err
@@ -98,8 +98,8 @@ func (job *UpdateLoadConfigJob) Execute() error {
 		zap.Any("toRelease", toRelease))
 
 	// 3. try to spawn new replica
-	channels := job.targetMgr.GetDmChannelsByCollection(job.collectionID, meta.CurrentTargetFirst)
-	newReplicas, spawnErr := job.meta.ReplicaManager.Spawn(job.collectionID, toSpawn, lo.Keys(channels))
+	channels := job.targetMgr.GetDmChannelsByCollection(job.ctx, job.collectionID, meta.CurrentTargetFirst)
+	newReplicas, spawnErr := job.meta.ReplicaManager.Spawn(job.ctx, job.collectionID, toSpawn, lo.Keys(channels))
 	if spawnErr != nil {
 		log.Warn("failed to spawn replica", zap.Error(spawnErr))
 		err := spawnErr
@@ -109,7 +109,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 		if err != nil {
 			// roll back replica from meta
 			replicaIDs := lo.Map(newReplicas, func(r *meta.Replica, _ int) int64 { return r.GetID() })
-			err := job.meta.ReplicaManager.RemoveReplicas(job.collectionID, replicaIDs...)
+			err := job.meta.ReplicaManager.RemoveReplicas(job.ctx, job.collectionID, replicaIDs...)
 			if err != nil {
 				log.Warn("failed to remove replicas", zap.Int64s("replicaIDs", replicaIDs), zap.Error(err))
 			}
@@ -125,7 +125,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 				replicaOldRG[replica.GetID()] = replica.GetResourceGroup()
 			}
 
-			if transferErr := job.meta.ReplicaManager.MoveReplica(rg, replicas); transferErr != nil {
+			if transferErr := job.meta.ReplicaManager.MoveReplica(job.ctx, rg, replicas); transferErr != nil {
 				log.Warn("failed to transfer replica for collection", zap.Int64("collectionID", collectionID), zap.Error(transferErr))
 				err = transferErr
 				return err
@@ -138,7 +138,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 				for _, replica := range replicas {
 					oldRG := replicaOldRG[replica.GetID()]
 					if replica.GetResourceGroup() != oldRG {
-						if err := job.meta.ReplicaManager.TransferReplica(replica.GetID(), replica.GetResourceGroup(), oldRG, 1); err != nil {
+						if err := job.meta.ReplicaManager.TransferReplica(job.ctx, replica.GetID(), replica.GetResourceGroup(), oldRG, 1); err != nil {
 							log.Warn("failed to roll back replicas", zap.Int64("replica", replica.GetID()), zap.Error(err))
 						}
 					}
@@ -148,17 +148,17 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	}()
 
 	// 5. remove replica from meta
-	err = job.meta.ReplicaManager.RemoveReplicas(job.collectionID, toRelease...)
+	err = job.meta.ReplicaManager.RemoveReplicas(job.ctx, job.collectionID, toRelease...)
 	if err != nil {
 		log.Warn("failed to remove replicas", zap.Int64s("replicaIDs", toRelease), zap.Error(err))
 		return err
 	}
 
 	// 6. recover node distribution among replicas
-	utils.RecoverReplicaOfCollection(job.meta, job.collectionID)
+	utils.RecoverReplicaOfCollection(job.ctx, job.meta, job.collectionID)
 
 	// 7. update replica number in meta
-	err = job.meta.UpdateReplicaNumber(job.collectionID, job.newReplicaNumber)
+	err = job.meta.UpdateReplicaNumber(job.ctx, job.collectionID, job.newReplicaNumber)
 	if err != nil {
 		msg := "failed to update replica number"
 		log.Warn(msg, zap.Error(err))

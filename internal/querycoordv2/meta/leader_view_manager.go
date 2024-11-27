@@ -351,7 +351,10 @@ func (mgr *LeaderViewManager) GetLeaderView() []*metricsinfo.LeaderView {
 			}
 
 			for _, seg := range lv.GrowingSegments {
-				leaderView.GrowingSegments = append(leaderView.GrowingSegments, newSegmentMetricsFrom(seg))
+				leaderView.GrowingSegments = append(leaderView.GrowingSegments, &metricsinfo.Segment{
+					SegmentID: seg.ID,
+					NodeID:    seg.Node,
+				})
 			}
 
 			leaderViews = append(leaderViews, leaderView)

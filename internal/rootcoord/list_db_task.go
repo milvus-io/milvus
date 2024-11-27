@@ -58,7 +58,7 @@ func (t *listDatabaseTask) Execute(ctx context.Context) error {
 			privilegeDBs.Insert(util.AnyWord)
 			return privilegeDBs, nil
 		}
-		userRoles, err := t.core.meta.SelectUser("", &milvuspb.UserEntity{
+		userRoles, err := t.core.meta.SelectUser(ctx, "", &milvuspb.UserEntity{
 			Name: curUser,
 		}, true)
 		if err != nil {
@@ -72,7 +72,7 @@ func (t *listDatabaseTask) Execute(ctx context.Context) error {
 				privilegeDBs.Insert(util.AnyWord)
 				return privilegeDBs, nil
 			}
-			entities, err := t.core.meta.SelectGrant("", &milvuspb.GrantEntity{
+			entities, err := t.core.meta.SelectGrant(ctx, "", &milvuspb.GrantEntity{
 				Role:   role,
 				DbName: util.AnyWord,
 			})
@@ -112,15 +112,18 @@ func (t *listDatabaseTask) Execute(ctx context.Context) error {
 	}
 
 	dbNames := make([]string, 0, len(ret))
+	dbIDs := make([]int64, 0, len(ret))
 	createdTimes := make([]uint64, 0, len(ret))
 	for _, db := range ret {
 		if !isVisibleDBForCurUser(db.Name, visibleDBs) {
 			continue
 		}
 		dbNames = append(dbNames, db.Name)
+		dbIDs = append(dbIDs, db.ID)
 		createdTimes = append(createdTimes, db.CreatedTime)
 	}
 	t.Resp.DbNames = dbNames
+	t.Resp.DbIds = dbIDs
 	t.Resp.CreatedTimestamp = createdTimes
 	return nil
 }

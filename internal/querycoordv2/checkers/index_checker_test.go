@@ -78,7 +78,7 @@ func (suite *IndexCheckerSuite) SetupTest() {
 	suite.targetMgr = meta.NewMockTargetManager(suite.T())
 	suite.checker = NewIndexChecker(suite.meta, distManager, suite.broker, suite.nodeMgr, suite.targetMgr)
 
-	suite.targetMgr.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(cid, sid int64, i3 int32) *datapb.SegmentInfo {
+	suite.targetMgr.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cid, sid int64, i3 int32) *datapb.SegmentInfo {
 		return &datapb.SegmentInfo{
 			ID:    sid,
 			Level: datapb.SegmentLevel_L1,
@@ -92,12 +92,13 @@ func (suite *IndexCheckerSuite) TearDownTest() {
 
 func (suite *IndexCheckerSuite) TestLoadIndex() {
 	checker := suite.checker
+	ctx := context.Background()
 
 	// meta
 	coll := utils.CreateTestCollection(1, 1)
 	coll.FieldIndexID = map[int64]int64{101: 1000}
-	checker.meta.CollectionManager.PutCollection(coll)
-	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, coll)
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -108,22 +109,22 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(1)
-	checker.meta.ResourceManager.HandleNodeUp(2)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
 
 	// dist
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
 
 	// broker
 	suite.broker.EXPECT().GetIndexInfo(mock.Anything, int64(1), int64(2)).
-		Return([]*querypb.FieldIndexInfo{
+		Return(map[int64][]*querypb.FieldIndexInfo{2: {
 			{
 				FieldID:        101,
 				IndexID:        1000,
 				EnableIndex:    true,
 				IndexFilePaths: []string{"index"},
 			},
-		}, nil)
+		}}, nil)
 
 	suite.broker.EXPECT().ListIndexes(mock.Anything, int64(1)).Return([]*indexpb.IndexInfo{
 		{
@@ -147,8 +148,8 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 	// test skip load index for read only node
 	suite.nodeMgr.Stopping(1)
 	suite.nodeMgr.Stopping(2)
-	suite.meta.ResourceManager.HandleNodeStopping(1)
-	suite.meta.ResourceManager.HandleNodeStopping(2)
+	suite.meta.ResourceManager.HandleNodeStopping(ctx, 1)
+	suite.meta.ResourceManager.HandleNodeStopping(ctx, 2)
 	utils.RecoverAllCollection(suite.meta)
 	tasks = checker.Check(context.Background())
 	suite.Require().Len(tasks, 0)
@@ -156,12 +157,13 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 
 func (suite *IndexCheckerSuite) TestIndexInfoNotMatch() {
 	checker := suite.checker
+	ctx := context.Background()
 
 	// meta
 	coll := utils.CreateTestCollection(1, 1)
 	coll.FieldIndexID = map[int64]int64{101: 1000}
-	checker.meta.CollectionManager.PutCollection(coll)
-	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, coll)
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -172,36 +174,36 @@ func (suite *IndexCheckerSuite) TestIndexInfoNotMatch() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(1)
-	checker.meta.ResourceManager.HandleNodeUp(2)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
 
 	// dist
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 3, 1, 1, "test-insert-channel"))
 
 	// broker
-	suite.broker.EXPECT().GetIndexInfo(mock.Anything, int64(1), mock.AnythingOfType("int64")).Call.
-		Return(func(ctx context.Context, collectionID, segmentID int64) []*querypb.FieldIndexInfo {
-			if segmentID == 2 {
-				return []*querypb.FieldIndexInfo{
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, int64(1), mock.AnythingOfType("int64")).
+		RunAndReturn(func(ctx context.Context, collectionID int64, segmentIDs ...int64) (map[int64][]*querypb.FieldIndexInfo, error) {
+			if segmentIDs[0] == 2 {
+				return map[int64][]*querypb.FieldIndexInfo{2: {
 					{
 						FieldID:     101,
 						IndexID:     1000,
 						EnableIndex: false,
 					},
-				}
+				}}, nil
 			}
-			if segmentID == 3 {
-				return []*querypb.FieldIndexInfo{
+			if segmentIDs[0] == 3 {
+				return map[int64][]*querypb.FieldIndexInfo{3: {
 					{
 						FieldID:     101,
 						IndexID:     1002,
 						EnableIndex: false,
 					},
-				}
+				}}, nil
 			}
-			return nil
-		}, nil)
+			return nil, nil
+		})
 
 	suite.broker.EXPECT().ListIndexes(mock.Anything, int64(1)).Return([]*indexpb.IndexInfo{
 		{
@@ -216,12 +218,13 @@ func (suite *IndexCheckerSuite) TestIndexInfoNotMatch() {
 
 func (suite *IndexCheckerSuite) TestGetIndexInfoFailed() {
 	checker := suite.checker
+	ctx := context.Background()
 
 	// meta
 	coll := utils.CreateTestCollection(1, 1)
 	coll.FieldIndexID = map[int64]int64{101: 1000}
-	checker.meta.CollectionManager.PutCollection(coll)
-	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, coll)
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -232,8 +235,8 @@ func (suite *IndexCheckerSuite) TestGetIndexInfoFailed() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(1)
-	checker.meta.ResourceManager.HandleNodeUp(2)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
 
 	// dist
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
@@ -255,12 +258,13 @@ func (suite *IndexCheckerSuite) TestGetIndexInfoFailed() {
 
 func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 	checker := suite.checker
+	ctx := context.Background()
 
 	// meta
 	coll := utils.CreateTestCollection(1, 1)
 	coll.FieldIndexID = map[int64]int64{101: 1000}
-	checker.meta.CollectionManager.PutCollection(coll)
-	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, coll)
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -271,8 +275,8 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(1)
-	checker.meta.ResourceManager.HandleNodeUp(2)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
 
 	// dist
 	segment := utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel")
@@ -298,23 +302,21 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 			}, nil
 		},
 	)
-	suite.broker.EXPECT().GetIndexInfo(mock.Anything, mock.Anything, mock.AnythingOfType("int64")).Call.
-		Return(func(ctx context.Context, collectionID, segmentID int64) []*querypb.FieldIndexInfo {
-			return []*querypb.FieldIndexInfo{
-				{
-					FieldID:        101,
-					IndexID:        1000,
-					EnableIndex:    true,
-					IndexFilePaths: []string{"index"},
-				},
-				{
-					FieldID:        102,
-					IndexID:        1001,
-					EnableIndex:    true,
-					IndexFilePaths: []string{"index"},
-				},
-			}
-		}, nil)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, mock.Anything, mock.AnythingOfType("int64")).
+		Return(map[int64][]*querypb.FieldIndexInfo{2: {
+			{
+				FieldID:        101,
+				IndexID:        1000,
+				EnableIndex:    true,
+				IndexFilePaths: []string{"index"},
+			},
+			{
+				FieldID:        102,
+				IndexID:        1001,
+				EnableIndex:    true,
+				IndexFilePaths: []string{"index"},
+			},
+		}}, nil)
 
 	tasks := checker.Check(context.Background())
 	suite.Len(tasks, 1)

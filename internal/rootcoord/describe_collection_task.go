@@ -45,7 +45,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 
-	aliases := t.core.meta.ListAliasesByID(coll.CollectionID)
+	aliases := t.core.meta.ListAliasesByID(ctx, coll.CollectionID)
 	db, err := t.core.meta.GetDatabaseByID(ctx, coll.DBID, t.GetTs())
 	if err != nil {
 		return err
@@ -55,10 +55,10 @@ func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
 }
 
 func (t *describeCollectionTask) GetLockerKey() LockerKey {
-	collectionName := t.core.getRealCollectionName(t.ctx, t.Req.GetDbName(), t.Req.GetCollectionName())
+	collection := t.core.getCollectionIDStr(t.ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), t.Req.GetCollectionID())
 	return NewLockerKeyChain(
 		NewClusterLockerKey(false),
 		NewDatabaseLockerKey(t.Req.GetDbName(), false),
-		NewCollectionLockerKey(collectionName, false),
+		NewCollectionLockerKey(collection, false),
 	)
 }

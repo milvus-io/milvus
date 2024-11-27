@@ -198,7 +198,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 
 	for _, segID := range taskProto.GetInputSegments() {
-		segInfo := t.meta.GetHealthySegment(segID)
+		segInfo := t.meta.GetHealthySegment(context.TODO(), segID)
 		if segInfo == nil {
 			return nil, merr.WrapErrSegmentNotFound(segID)
 		}
@@ -268,7 +268,7 @@ func (t *clusteringCompactionTask) processExecuting() error {
 			return segment.GetSegmentID()
 		})
 
-		_, metricMutation, err := t.meta.CompleteCompactionMutation(t.GetTaskProto(), t.result)
+		_, metricMutation, err := t.meta.CompleteCompactionMutation(context.TODO(), t.GetTaskProto(), t.result)
 		if err != nil {
 			return err
 		}
@@ -435,7 +435,7 @@ func (t *clusteringCompactionTask) markResultSegmentsVisible() error {
 		operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(segID, t.GetTaskProto().GetPlanID()))
 	}
 
-	err := t.meta.UpdateSegmentsInfo(operators...)
+	err := t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
 	if err != nil {
 		log.Warn("markResultSegmentVisible UpdateSegmentsInfo fail", zap.Error(err))
 		return merr.WrapErrClusteringCompactionMetaError("markResultSegmentVisible UpdateSegmentsInfo", err)
@@ -449,7 +449,7 @@ func (t *clusteringCompactionTask) markInputSegmentsDropped() error {
 	for _, segID := range t.GetTaskProto().GetInputSegments() {
 		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
 	}
-	err := t.meta.UpdateSegmentsInfo(operators...)
+	err := t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
 	if err != nil {
 		log.Warn("markInputSegmentsDropped UpdateSegmentsInfo fail", zap.Error(err))
 		return merr.WrapErrClusteringCompactionMetaError("markInputSegmentsDropped UpdateSegmentsInfo", err)
@@ -519,7 +519,7 @@ func (t *clusteringCompactionTask) processAnalyzing() error {
 }
 
 func (t *clusteringCompactionTask) resetSegmentCompacting() {
-	t.meta.SetSegmentsCompacting(t.GetTaskProto().GetInputSegments(), false)
+	t.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
 }
 
 func (t *clusteringCompactionTask) processFailedOrTimeout() error {
@@ -532,7 +532,7 @@ func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 	}
 	isInputDropped := false
 	for _, segID := range t.GetTaskProto().GetInputSegments() {
-		if t.meta.GetHealthySegment(segID) == nil {
+		if t.meta.GetHealthySegment(context.TODO(), segID) == nil {
 			isInputDropped = true
 			break
 		}
@@ -559,7 +559,7 @@ func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 			operators = append(operators, UpdateSegmentLevelOperator(segID, datapb.SegmentLevel_L1))
 			operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(segID, 0))
 		}
-		err := t.meta.UpdateSegmentsInfo(operators...)
+		err := t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
 		if err != nil {
 			log.Warn("UpdateSegmentsInfo fail", zap.Error(err))
 			return merr.WrapErrClusteringCompactionMetaError("UpdateSegmentsInfo", err)
@@ -576,7 +576,7 @@ func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 			// tmpSegment is always invisible
 			operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
 		}
-		err := t.meta.UpdateSegmentsInfo(operators...)
+		err := t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
 		if err != nil {
 			log.Warn("UpdateSegmentsInfo fail", zap.Error(err))
 			return merr.WrapErrClusteringCompactionMetaError("UpdateSegmentsInfo", err)
@@ -593,7 +593,7 @@ func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 		Version:      t.GetTaskProto().GetPlanID(),
 		SegmentIDs:   t.GetTaskProto().GetResultSegments(),
 	}
-	err := t.meta.CleanPartitionStatsInfo(partitionStatsInfo)
+	err := t.meta.CleanPartitionStatsInfo(context.TODO(), partitionStatsInfo)
 	if err != nil {
 		log.Warn("gcPartitionStatsInfo fail", zap.Error(err))
 	}
@@ -703,7 +703,7 @@ func (t *clusteringCompactionTask) checkTimeout() bool {
 }
 
 func (t *clusteringCompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
-	return t.meta.SaveCompactionTask(task)
+	return t.meta.SaveCompactionTask(context.TODO(), task)
 }
 
 func (t *clusteringCompactionTask) SaveTaskMeta() error {
