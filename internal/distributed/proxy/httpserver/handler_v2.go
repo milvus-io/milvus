@@ -131,6 +131,8 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(RoleCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.dropRole))))
 	router.POST(RoleCategory+GrantPrivilegeAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.addPrivilegeToRole))))
 	router.POST(RoleCategory+RevokePrivilegeAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.removePrivilegeFromRole))))
+	router.POST(RoleCategory+GrantPrivilegeActionV2, timeoutMiddleware(wrapperPost(func() any { return &GrantV2Req{} }, wrapperTraceLog(h.grantV2))))
+	router.POST(RoleCategory+RevokePrivilegeActionV2, timeoutMiddleware(wrapperPost(func() any { return &GrantV2Req{} }, wrapperTraceLog(h.revokeV2))))
 
 	// privilege group
 	router.POST(PrivilegeGroupCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.createPrivilegeGroup))))
@@ -169,7 +171,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		req := newReq()
 		if err := c.ShouldBindBodyWith(req, binding.JSON); err != nil {
 			log.Warn("high level restful api, read parameters from request body fail", zap.Error(err),
-				zap.Any("url", c.Request.URL.Path), zap.Any("request", req))
+				zap.Any("url", c.Request.URL.Path))
 			if _, ok := err.(validator.ValidationErrors); ok {
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
@@ -206,7 +208,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		ctx = log.WithTraceID(ctx, traceID)
 		c.Keys["traceID"] = traceID
 		log.Ctx(ctx).Debug("high level restful api, read parameters from request body, then start to handle.",
-			zap.Any("url", c.Request.URL.Path), zap.Any("request", req))
+			zap.Any("url", c.Request.URL.Path))
 		v2(ctx, c, req, dbName)
 	}
 }
@@ -311,7 +313,7 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 			return nil, RestRequestInterceptorErr
 		}
 	}
-	log.Ctx(ctx).Debug("high level restful api, try to do a grpc call", zap.Any("grpcRequest", req))
+	log.Ctx(ctx).Debug("high level restful api, try to do a grpc call")
 	username, ok := c.Get(ContextUsername)
 	if !ok {
 		username = ""
@@ -324,7 +326,7 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 		}
 	}
 	if err != nil {
-		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err), zap.Any("grpcRequest", req))
+		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err))
 		if !ignoreErr {
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		}
@@ -348,7 +350,7 @@ func (h *HandlersV2) wrapperCheckDatabase(v2 handlerFuncV2) handlerFuncV2 {
 				return v2(ctx, c, req, dbName)
 			}
 		}
-		log.Ctx(ctx).Warn("high level restful api, non-exist database", zap.String("database", dbName), zap.Any("request", req))
+		log.Ctx(ctx).Warn("high level restful api, non-exist database", zap.String("database", dbName))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrDatabaseNotFound),
 			HTTPReturnMessage: merr.ErrDatabaseNotFound.Error() + ", database: " + dbName,
@@ -1700,6 +1702,33 @@ func (h *HandlersV2) operatePrivilegeToRole(ctx context.Context, c *gin.Context,
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
+}
+
+func (h *HandlersV2) operatePrivilegeToRoleV2(ctx context.Context, c *gin.Context, httpReq *GrantV2Req, operateType milvuspb.OperatePrivilegeType) (interface{}, error) {
+	req := &milvuspb.OperatePrivilegeV2Request{
+		Role: &milvuspb.RoleEntity{Name: httpReq.RoleName},
+		Grantor: &milvuspb.GrantorEntity{
+			Privilege: &milvuspb.PrivilegeEntity{Name: httpReq.Privilege},
+		},
+		Type:           operateType,
+		DbName:         httpReq.DbName,
+		CollectionName: httpReq.CollectionName,
+	}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/OperatePrivilege", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.OperatePrivilegeV2(reqCtx, req.(*milvuspb.OperatePrivilegeV2Request))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) grantV2(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	return h.operatePrivilegeToRoleV2(ctx, c, anyReq.(*GrantV2Req), milvuspb.OperatePrivilegeType_Grant)
+}
+
+func (h *HandlersV2) revokeV2(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	return h.operatePrivilegeToRoleV2(ctx, c, anyReq.(*GrantV2Req), milvuspb.OperatePrivilegeType_Revoke)
 }
 
 func (h *HandlersV2) addPrivilegeToRole(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {

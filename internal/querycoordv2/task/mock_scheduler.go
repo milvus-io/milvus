@@ -168,13 +168,19 @@ func (_c *MockScheduler_GetChannelTaskDelta_Call) RunAndReturn(run func(int64, i
 	return _c
 }
 
-// GetChannelTaskNum provides a mock function with given fields:
-func (_m *MockScheduler) GetChannelTaskNum() int {
-	ret := _m.Called()
+// GetChannelTaskNum provides a mock function with given fields: filters
+func (_m *MockScheduler) GetChannelTaskNum(filters ...TaskFilter) int {
+	_va := make([]interface{}, len(filters))
+	for _i := range filters {
+		_va[_i] = filters[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	var r0 int
-	if rf, ok := ret.Get(0).(func() int); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(...TaskFilter) int); ok {
+		r0 = rf(filters...)
 	} else {
 		r0 = ret.Get(0).(int)
 	}
@@ -188,13 +194,21 @@ type MockScheduler_GetChannelTaskNum_Call struct {
 }
 
 // GetChannelTaskNum is a helper method to define mock.On call
-func (_e *MockScheduler_Expecter) GetChannelTaskNum() *MockScheduler_GetChannelTaskNum_Call {
-	return &MockScheduler_GetChannelTaskNum_Call{Call: _e.mock.On("GetChannelTaskNum")}
+//   - filters ...TaskFilter
+func (_e *MockScheduler_Expecter) GetChannelTaskNum(filters ...interface{}) *MockScheduler_GetChannelTaskNum_Call {
+	return &MockScheduler_GetChannelTaskNum_Call{Call: _e.mock.On("GetChannelTaskNum",
+		append([]interface{}{}, filters...)...)}
 }
 
-func (_c *MockScheduler_GetChannelTaskNum_Call) Run(run func()) *MockScheduler_GetChannelTaskNum_Call {
+func (_c *MockScheduler_GetChannelTaskNum_Call) Run(run func(filters ...TaskFilter)) *MockScheduler_GetChannelTaskNum_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		variadicArgs := make([]TaskFilter, len(args)-0)
+		for i, a := range args[0:] {
+			if a != nil {
+				variadicArgs[i] = a.(TaskFilter)
+			}
+		}
+		run(variadicArgs...)
 	})
 	return _c
 }
@@ -204,7 +218,7 @@ func (_c *MockScheduler_GetChannelTaskNum_Call) Return(_a0 int) *MockScheduler_G
 	return _c
 }
 
-func (_c *MockScheduler_GetChannelTaskNum_Call) RunAndReturn(run func() int) *MockScheduler_GetChannelTaskNum_Call {
+func (_c *MockScheduler_GetChannelTaskNum_Call) RunAndReturn(run func(...TaskFilter) int) *MockScheduler_GetChannelTaskNum_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -296,13 +310,19 @@ func (_c *MockScheduler_GetSegmentTaskDelta_Call) RunAndReturn(run func(int64, i
 	return _c
 }
 
-// GetSegmentTaskNum provides a mock function with given fields:
-func (_m *MockScheduler) GetSegmentTaskNum() int {
-	ret := _m.Called()
+// GetSegmentTaskNum provides a mock function with given fields: filters
+func (_m *MockScheduler) GetSegmentTaskNum(filters ...TaskFilter) int {
+	_va := make([]interface{}, len(filters))
+	for _i := range filters {
+		_va[_i] = filters[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	var r0 int
-	if rf, ok := ret.Get(0).(func() int); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(...TaskFilter) int); ok {
+		r0 = rf(filters...)
 	} else {
 		r0 = ret.Get(0).(int)
 	}
@@ -316,13 +336,21 @@ type MockScheduler_GetSegmentTaskNum_Call struct {
 }
 
 // GetSegmentTaskNum is a helper method to define mock.On call
-func (_e *MockScheduler_Expecter) GetSegmentTaskNum() *MockScheduler_GetSegmentTaskNum_Call {
-	return &MockScheduler_GetSegmentTaskNum_Call{Call: _e.mock.On("GetSegmentTaskNum")}
+//   - filters ...TaskFilter
+func (_e *MockScheduler_Expecter) GetSegmentTaskNum(filters ...interface{}) *MockScheduler_GetSegmentTaskNum_Call {
+	return &MockScheduler_GetSegmentTaskNum_Call{Call: _e.mock.On("GetSegmentTaskNum",
+		append([]interface{}{}, filters...)...)}
 }
 
-func (_c *MockScheduler_GetSegmentTaskNum_Call) Run(run func()) *MockScheduler_GetSegmentTaskNum_Call {
+func (_c *MockScheduler_GetSegmentTaskNum_Call) Run(run func(filters ...TaskFilter)) *MockScheduler_GetSegmentTaskNum_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		variadicArgs := make([]TaskFilter, len(args)-0)
+		for i, a := range args[0:] {
+			if a != nil {
+				variadicArgs[i] = a.(TaskFilter)
+			}
+		}
+		run(variadicArgs...)
 	})
 	return _c
 }
@@ -332,7 +360,7 @@ func (_c *MockScheduler_GetSegmentTaskNum_Call) Return(_a0 int) *MockScheduler_G
 	return _c
 }
 
-func (_c *MockScheduler_GetSegmentTaskNum_Call) RunAndReturn(run func() int) *MockScheduler_GetSegmentTaskNum_Call {
+func (_c *MockScheduler_GetSegmentTaskNum_Call) RunAndReturn(run func(...TaskFilter) int) *MockScheduler_GetSegmentTaskNum_Call {
 	_c.Call.Return(run)
 	return _c
 }

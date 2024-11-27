@@ -162,8 +162,8 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 
 	e := getEnforcer()
 	for _, roleName := range roleNames {
-		permitFunc := func(resName string) (bool, error) {
-			object := funcutil.PolicyForResource(dbName, objectType, resName)
+		permitFunc := func(objectName string) (bool, error) {
+			object := funcutil.PolicyForResource(dbName, objectType, objectName)
 			isPermit, cached, version := GetPrivilegeCache(roleName, object, objectPrivilege)
 			if cached {
 				return isPermit, nil

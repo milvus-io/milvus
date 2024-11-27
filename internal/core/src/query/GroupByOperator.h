@@ -50,7 +50,11 @@ class GrowingDataGetter : public DataGetter<T> {
 
     T
     Get(int64_t idx) const {
-        return growing_raw_data_->operator[](idx);
+        if constexpr (std::is_same_v<std::string, T>) {
+            return T(growing_raw_data_->view_element(idx));
+        } else {
+            return growing_raw_data_->operator[](idx);
+        }
     }
 };
 
