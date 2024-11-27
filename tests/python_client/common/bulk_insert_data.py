@@ -27,6 +27,7 @@ class DataField:
     vec_field = "vectors"
     float_vec_field = "float32_vectors"
     sparse_vec_field = "sparse_vectors"
+    bm25_sparse_vec_field = "bm25_sparse_vectors"
     image_float_vec_field = "image_float_vec_field"
     text_float_vec_field = "text_float_vec_field"
     binary_vec_field = "binary_vec_field"
