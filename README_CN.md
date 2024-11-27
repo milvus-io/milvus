@@ -145,6 +145,10 @@ $ make milvus
 
 迅速检索相似化学分子式。
 
+### 教程
+
+你可以从[教程概述](https://milvus.io/docs/tutorials-overview.md)中，找到涵盖 RAG（检索增强生成）、语义搜索、混合搜索、问答、推荐系统等主题以及各种快速入门指南。这些资源旨在帮助你快速高效地入门。
+
 ## 训练营
 
 Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解向量数据库的操作及各种应用场景。通过 Milvus 训练营探索如何进行 Milvus 性能测评，搭建智能问答机器人、推荐系统、以图搜图系统、分子式检索系统等。

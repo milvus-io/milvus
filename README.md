@@ -89,25 +89,9 @@ Milvus is designed to handle vector search at scale. Users can store vectors, wh
 
 Milvus is trusted by AI developers to build applications such as text and image search, Retrieval-Augmented Generation (RAG), and recommendation systems. Milvus powers [many mission-critical business]((https://milvus.io/use-cases)) for startups and enterprises.
 
-## Demos and Tutorials 
-Here is a selection of demos and tutorials to show how to build various types of AI applications made with Milvus:
+## Demos and Tutorials
 
-| Tutorial | Use Case | Related Milvus Features | 
-| -------- | -------- | --------- |
-| [Build RAG with Milvus](build-rag-with-milvus.md) |  RAG | vector search |
-| [Multimodal RAG with Milvus](multimodal_rag_with_milvus.md) | RAG | vector search, dynamic field |
-| [Image Search with Milvus](image_similarity_search.md) | Semantic Search | vector search, dynamic field |
-| [Hybrid Search with Milvus](hybrid_search_with_milvus.md) | Hybrid Search | hybrid search, multi vector, dense embedding, sparse embedding |
-| [Multimodal Search using Multi Vectors](multimodal_rag_with_milvus.md) | Semantic Search | multi vector, hybrid search |
-| [Recommender System](recommendation_system.md) | Recommendation System | vector search |
-| [Video Similarity Search](video_similarity_search.md) | Semantic Search | vector search |
-| [Audio Similarity Search](audio_similarity_search.md) | Semantic Search | vector search |
-| [DNA Classification](dna_sequence_classification.md) | Classification | vector search |
-| [Graph RAG with Milvus](graph_rag_with_milvus.md) | RAG | vector search |
-| [Contextual Retrieval with Milvus](contextual_retrieval_with_milvus.md) | RAG, Semantic Search | vector search |
-| [HDBSCAN Clustering with Milvus](hdbscan_clustering_with_milvus.md) | Clustering | vector search |
-| [Use ColPali for Multi-Modal Retrieval with Milvus](use_ColPali_with_milvus.md) | RAG, Semantic Search | vector search |
-| [Vector Visualization](vector_visualization.md) | Data Visualization | vector search |
+Here is a selection of demos and tutorials to show how to build various types of AI applications made with Milvus:
 
 <table>
   <tr>
@@ -139,6 +123,8 @@ Here is a selection of demos and tutorials to show how to build various types of
     </th>
   </tr>
 </table>
+
+You can explore a comprehensive [Tutorials Overview](https://milvus.io/docs/tutorials-overview.md) covering topics such as Retrieval-Augmented Generation (RAG), Semantic Search, Hybrid Search, Question Answering, Recommendation Systems, and various quick-start guides. These resources are designed to help you get started quickly and efficiently.
 
 ## Ecosystem and Integration
    Milvus integrates with a comprehensive suite of [AI development tools](https://milvus.io/docs/integrations_overview.md), such as LangChain, LlamaIndex, OpenAI and HuggingFace, making it an ideal vector store for GenAI applications such as Retrieval-Augmented Generation (RAG). Milvus works with both open-source embedding models and embedding service, in text, image and video modalities. Milvus also provides a convenient util [`pymilvus[model]`](https://milvus.io/docs/embeddings.md), users can use the simple wrapper code to transform unstructured data into vector embeddings and leverage reranking models for optimized search results. The Milvus ecosystem also includes [Attu](https://github.com/zilliztech/attu?tab=readme-ov-file#attu) for GUI-based administration, [Birdwatcher](https://milvus.io/docs/birdwatcher_overview.md) for system debugging, [Prometheus/Grafana](https://milvus.io/docs/monitor_overview.md) for monitoring, [Milvus CDC](https://milvus.io/docs/milvus-cdc-overview.md) for data synchronization, [VTS](https://github.com/zilliztech/vts?tab=readme-ov-file#vts) for data migration and data connectors for [Spark](https://milvus.io/docs/integrate_with_spark.md#Spark-Milvus-Connector-User-Guide), [Kafka](https://github.com/zilliztech/kafka-connect-milvus?tab=readme-ov-file#kafka-connect-milvus-connector), [Fivetran](https://fivetran.com/docs/destinations/milvus), and [Airbyte](https://milvus.io/docs/integrate_with_airbyte.md) to build search pipelines.
