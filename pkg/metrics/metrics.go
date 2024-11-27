@@ -178,5 +178,6 @@ func Register(r prometheus.Registerer) {
 	r.MustRegister(LockCosts)
 	r.MustRegister(BuildInfo)
 	r.MustRegister(RuntimeInfo)
+	r.MustRegister(ThreadNum)
 	metricRegisterer = r
 }

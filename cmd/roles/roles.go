@@ -336,6 +336,11 @@ func (mr *MilvusRoles) Run() {
 
 	mr.printLDPreLoad()
 
+	// start milvus thread watcher to update actual thread number metrics
+	thw := internalmetrics.NewThreadWatcher()
+	thw.Start()
+	defer thw.Stop()
+
 	// only standalone enable localMsg
 	if mr.Local {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode); err != nil {
