@@ -241,7 +241,7 @@ Reference to cite when you use Milvus in a research paper:
 }
 ```
 <!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-418-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-419-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
@@ -413,6 +413,7 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/del-zhenwu"><img src="https://avatars.githubusercontent.com/u/56623710?v=4" width="30px" /></a>
 <a href="https://github.com/dengxiaohai"><img src="https://avatars.githubusercontent.com/u/137682492?v=4" width="30px" /></a>
 <a href="https://github.com/disflyer"><img src="https://avatars.githubusercontent.com/u/22723892?v=4" width="30px" /></a>
+<a href="https://github.com/dnoliver"><img src="https://avatars.githubusercontent.com/u/7730267?v=4" width="30px" /></a>
 <a href="https://github.com/donno2048"><img src="https://avatars.githubusercontent.com/u/61805754?v=4" width="30px" /></a>
 <a href="https://github.com/douglarek"><img src="https://avatars.githubusercontent.com/u/1488134?v=4" width="30px" /></a>
 <a href="https://github.com/drow931"><img src="https://avatars.githubusercontent.com/u/11514434?v=4" width="30px" /></a>
