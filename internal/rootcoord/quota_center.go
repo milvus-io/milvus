@@ -1056,7 +1056,7 @@ func (q *QuotaCenter) getGrowingSegmentsSizeFactor() map[int64]float64 {
 	return collectionFactor
 }
 
-// getL0SegmentsDeleteCountFactor checks wether any collection
+// getL0SegmentsDeleteCountFactor checks wether any collection's L0 segments delete entries count exceeds watermark
 func (q *QuotaCenter) getL0SegmentsDeleteCountFactor() map[int64]float64 {
 	if !Params.QuotaConfig.L0SegmentRowCountProtectionEnabled.GetAsBool() {
 		return nil
@@ -1082,7 +1082,7 @@ func (q *QuotaCenter) getL0SegmentsDeleteCountFactor() map[int64]float64 {
 	return collectionFactor
 }
 
-// getL0SegmentsSizeFactor checks wether any collection
+// getL0SegmentsSizeFactor checks wether any collection's L0 segments total delta size exceeds watermark
 func (q *QuotaCenter) getL0SegmentsSizeFactor() map[int64]float64 {
 	if !Params.QuotaConfig.L0SegmentSizeProtectionEnabled.GetAsBool() {
 		return nil
