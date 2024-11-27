@@ -264,6 +264,7 @@ type partitionInfo struct {
 	partitionID         typeutil.UniqueID
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
+	isDefault           bool
 }
 
 func (info *collectionInfo) isCollectionCached() bool {
@@ -427,12 +428,14 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, merr.WrapErrParameterInvalidMsg("partition names and timestamps number is not aligned, response: %s", partitions.String())
 	}
 
+	defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
 	infos := lo.Map(partitions.GetPartitionIDs(), func(partitionID int64, idx int) *partitionInfo {
 		return &partitionInfo{
 			name:                partitions.PartitionNames[idx],
 			partitionID:         partitions.PartitionIDs[idx],
 			createdTimestamp:    partitions.CreatedTimestamps[idx],
 			createdUtcTimestamp: partitions.CreatedUtcTimestamps[idx],
+			isDefault:           partitions.PartitionNames[idx] == defaultPartitionName,
 		}
 	})
 
@@ -628,6 +631,14 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionNa
 	partitions, err := m.GetPartitionInfos(ctx, database, collectionName)
 	if err != nil {
 		return nil, err
+	}
+
+	if partitionName == "" {
+		for _, info := range partitions.partitionInfos {
+			if info.isDefault {
+				return info, nil
+			}
+		}
 	}
 
 	info, ok := partitions.name2Info[partitionName]
