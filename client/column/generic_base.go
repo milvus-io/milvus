@@ -53,6 +53,9 @@ func (c *genericColumnBase[T]) Len() int {
 }
 
 func (c *genericColumnBase[T]) AppendValue(a any) error {
+	if a == nil {
+		return c.AppendNull()
+	}
 	v, ok := a.(T)
 	if !ok {
 		return errors.Newf("unexpected append value type %T, field type %v", a, c.fieldType)
@@ -177,6 +180,10 @@ func (c *genericColumnBase[T]) IsNull(idx int) (bool, error) {
 		return false, nil
 	}
 	return !c.validData[idx], nil
+}
+
+func (c *genericColumnBase[T]) Nullable() bool {
+	return c.nullable
 }
 
 func (c *genericColumnBase[T]) withValidData(validData []bool) {

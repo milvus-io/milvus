@@ -26,8 +26,6 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
-//go:generate go run gen/gen.go
-
 // Column interface field type for column-based data frame
 type Column interface {
 	Name() string
@@ -44,6 +42,7 @@ type Column interface {
 	// nullable related API
 	AppendNull() error
 	IsNull(int) (bool, error)
+	Nullable() bool
 }
 
 var errFieldDataTypeNotMatch = errors.New("FieldData type not matched")
