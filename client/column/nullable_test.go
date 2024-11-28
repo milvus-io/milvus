@@ -21,8 +21,9 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
 type NullableScalarSuite struct {
