@@ -306,7 +306,7 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 }
 
 func (ob *CollectionObserver) observeChannelStatus(ctx context.Context, collectionID int64) (int, int) {
-	channelTargets := ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTarget)
+	channelTargets := ob.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
 
 	channelTargetNum := len(channelTargets)
 	if channelTargetNum == 0 {
@@ -318,7 +318,7 @@ func (ob *CollectionObserver) observeChannelStatus(ctx context.Context, collecti
 	for _, channel := range channelTargets {
 		views := ob.dist.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel.GetChannelName()))
 		nodes := lo.Map(views, func(v *meta.LeaderView, _ int) int64 { return v.ID })
-		group := utils.GroupNodesByReplica(ctx, ob.meta.ReplicaManager, collectionID, nodes)
+		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager, collectionID, nodes)
 		subChannelCount += len(group)
 	}
 	return channelTargetNum, subChannelCount
@@ -389,7 +389,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 func (ob *CollectionObserver) observeCollectionLoadStatus(ctx context.Context, collectionID int64) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 
-	collectionPercentage, err := ob.meta.CollectionManager.UpdateCollectionLoadPercent(ctx, collectionID)
+	collectionPercentage, err := ob.meta.CollectionManager.UpdateCollectionLoadPercent(collectionID)
 	if err != nil {
 		log.Warn("failed to update collection load percentage")
 	}
