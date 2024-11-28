@@ -86,14 +86,14 @@ func (sd *shardDelegator) forwardStreamingDeletion(ctx context.Context, deleteDa
 }
 
 func (sd *shardDelegator) addL0ForGrowing(ctx context.Context, segment segments.Segment) error {
-	switch policy := paramtable.Get().QueryNodeCfg.StreamingDeltaForwardPolicy.GetValue(); policy {
-	case ForwardPolicyDefault, StreamingForwardPolicyBF:
+	switch sd.l0ForwardPolicy {
+	case ForwardPolicyDefault, L0ForwardPolicyBF:
 		return sd.addL0GrowingBF(ctx, segment)
-	case StreamingForwardPolicyDirect:
+	case L0ForwardPolicyRemoteLoad:
 		// forward streaming deletion without bf filtering
 		return sd.addL0ForGrowingLoad(ctx, segment)
 	default:
-		log.Fatal("unsupported streaming forward policy", zap.String("policy", policy))
+		log.Fatal("unsupported l0 forward policy", zap.String("policy", sd.l0ForwardPolicy))
 	}
 	return nil
 }
