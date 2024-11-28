@@ -6,7 +6,7 @@ toolchain go1.21.11
 
 require (
 	github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d
-	github.com/milvus-io/milvus/pkg v0.0.2-0.20241111021426-5e90f348fcbb
+	github.com/milvus-io/milvus/pkg v0.0.2-0.20241126032235-cb6542339e84
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/stretchr/testify v1.9.0
 	github.com/x448/float16 v0.8.4
@@ -14,7 +14,7 @@ require (
 	google.golang.org/grpc v1.65.0
 )
 
-replace github.com/milvus-io/milvus/client/v2 v2.0.0-20240805024817-4b553b0333f4 => ../../../milvus/client
+replace github.com/milvus-io/milvus/client/v2 => ../../../milvus/client
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -70,6 +70,7 @@ require (
 	github.com/sirupsen/logrus v1.9.0 // indirect
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
+	github.com/spf13/cast v1.3.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/tidwall/gjson v1.17.1 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
