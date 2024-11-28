@@ -53,7 +53,7 @@ type CompactionPlanHandlerSuite struct {
 
 func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
-	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Maybe()
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.mockCm = NewMockChannelManager(s.T())
 	s.mockSessMgr = session.NewMockDataNodeManager(s.T())
@@ -604,7 +604,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		2: t2,
 		3: t3,
 	}
-	s.mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything).RunAndReturn(func(i int64) []*datapb.CompactionTask {
+	s.mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i int64) []*datapb.CompactionTask {
 		var ret []*datapb.CompactionTask
 		for _, t := range inTasks {
 			if t.GetTaskProto().GetTriggerID() != i {
@@ -621,7 +621,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 
 	s.handler.schedule()
 
-	info := s.handler.getCompactionInfo(1)
+	info := s.handler.getCompactionInfo(context.TODO(), 1)
 	s.Equal(1, info.completedCnt)
 	s.Equal(1, info.executingCnt)
 	s.Equal(1, info.failedCnt)
@@ -629,7 +629,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.SetupTest()
-	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything).Return(true, true).Maybe()
+	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()
 	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil, nil)
 
 	task := &datapb.CompactionTask{
@@ -669,7 +669,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		}, nil).Once()
 
 	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
-	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything).Return()
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return()
 
 	t1 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:           1,
@@ -747,8 +747,8 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 
 	// s.mockSessMgr.EXPECT().SyncSegments(int64(111), mock.Anything).Return(nil)
 	// s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything).Return(nil)
-	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).RunAndReturn(
-		func(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
+	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
 			if t.GetPlanID() == 2 {
 				segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
 				return []*SegmentInfo{segment}, &segMetricMutation{}, nil
@@ -815,7 +815,7 @@ func (s *CompactionPlanHandlerSuite) TestCompactionGC() {
 	s.NoError(err)
 	s.handler.meta = &meta{compactionTaskMeta: compactionTaskMeta}
 	for _, t := range inTasks {
-		s.handler.meta.SaveCompactionTask(t)
+		s.handler.meta.SaveCompactionTask(context.TODO(), t)
 	}
 
 	s.handler.cleanCompactionTaskMeta()
@@ -828,9 +828,9 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 	s.SetupTest()
 
 	// s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(nil).Once()
-	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything).Return().Once()
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Once()
 	segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
-	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
+	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(
 		[]*SegmentInfo{segment},
 		&segMetricMutation{}, nil).Once()
 

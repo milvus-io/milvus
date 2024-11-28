@@ -820,7 +820,7 @@ common:
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
-    defaultRootPassword: Milvus # default password for root user
+    defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
     rbac:
       overrideBuiltInPrivilgeGroups:
         enabled: false # Whether to override build-in privilege groups
@@ -871,6 +871,7 @@ common:
   usePartitionKeyAsClusteringKey: false # if true, do clustering compaction and segment prune on partition key field
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction
+  localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

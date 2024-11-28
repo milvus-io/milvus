@@ -134,6 +134,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 0, len(Params.ReadOnlyPrivileges.GetAsStrings()))
 		assert.Equal(t, 0, len(Params.ReadWritePrivileges.GetAsStrings()))
 		assert.Equal(t, 0, len(Params.AdminPrivileges.GetAsStrings()))
+
+		assert.False(t, params.CommonCfg.LocalRPCEnabled.GetAsBool())
+		params.Save("common.localRPCEnabled", "true")
+		assert.True(t, params.CommonCfg.LocalRPCEnabled.GetAsBool())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -148,6 +152,10 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("rootCoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+
+		assert.Equal(t, "{}", Params.DefaultDBProperties.GetValue())
+		params.Save("rootCoord.defaultDBProperties", "{\"key\":\"value\"}")
+		assert.Equal(t, "{\"key\":\"value\"}", Params.DefaultDBProperties.GetValue())
 
 		SetCreateTime(time.Now())
 		SetUpdateTime(time.Now())
@@ -214,6 +222,12 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, int64(16), Params.DDLConcurrency.GetAsInt64())
 		assert.Equal(t, int64(16), Params.DCLConcurrency.GetAsInt64())
+
+		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
+		params.Save("proxy.maxPasswordLength", "100")
+		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
+		params.Save("proxy.maxPasswordLength", "-10")
+		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {

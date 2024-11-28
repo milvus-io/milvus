@@ -243,7 +243,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			chunkManager: mockChMgr,
 		}
 
-		infos, mutation, err := m.CompleteCompactionMutation(task, result)
+		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		assert.NoError(suite.T(), err)
 		suite.Equal(1, len(infos))
 		info := infos[0]
@@ -261,7 +261,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 
 		// check compactFrom segments
 		for _, segID := range []int64{1, 2} {
-			seg := m.GetSegment(segID)
+			seg := m.GetSegment(context.TODO(), segID)
 			suite.Equal(commonpb.SegmentState_Dropped, seg.GetState())
 			suite.NotEmpty(seg.GetDroppedAt())
 
@@ -304,7 +304,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			chunkManager: mockChMgr,
 		}
 
-		infos, mutation, err := m.CompleteCompactionMutation(task, result)
+		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		assert.NoError(suite.T(), err)
 		suite.Equal(1, len(infos))
 		info := infos[0]
@@ -335,7 +335,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 
 		// check compactFrom segments
 		for _, segID := range []int64{1, 2} {
-			seg := m.GetSegment(segID)
+			seg := m.GetSegment(context.TODO(), segID)
 			suite.Equal(commonpb.SegmentState_Dropped, seg.GetState())
 			suite.NotEmpty(seg.GetDroppedAt())
 
@@ -498,42 +498,42 @@ func TestMeta_Basic(t *testing.T) {
 		assert.NoError(t, err)
 
 		// check GetSegment
-		info0_0 := meta.GetHealthySegment(segID0_0)
+		info0_0 := meta.GetHealthySegment(context.TODO(), segID0_0)
 		assert.NotNil(t, info0_0)
 		assert.True(t, proto.Equal(info0_0, segInfo0_0))
-		info1_0 := meta.GetHealthySegment(segID1_0)
+		info1_0 := meta.GetHealthySegment(context.TODO(), segID1_0)
 		assert.NotNil(t, info1_0)
 		assert.True(t, proto.Equal(info1_0, segInfo1_0))
 
 		// check GetSegmentsOfCollection
-		segIDs := meta.GetSegmentsIDOfCollection(collID)
+		segIDs := meta.GetSegmentsIDOfCollection(context.TODO(), collID)
 		assert.EqualValues(t, 3, len(segIDs))
 		assert.Contains(t, segIDs, segID0_0)
 		assert.Contains(t, segIDs, segID1_0)
 		assert.Contains(t, segIDs, segID1_1)
 
 		// check GetSegmentsOfPartition
-		segIDs = meta.GetSegmentsIDOfPartition(collID, partID0)
+		segIDs = meta.GetSegmentsIDOfPartition(context.TODO(), collID, partID0)
 		assert.EqualValues(t, 1, len(segIDs))
 		assert.Contains(t, segIDs, segID0_0)
-		segIDs = meta.GetSegmentsIDOfPartition(collID, partID1)
+		segIDs = meta.GetSegmentsIDOfPartition(context.TODO(), collID, partID1)
 		assert.EqualValues(t, 2, len(segIDs))
 		assert.Contains(t, segIDs, segID1_0)
 		assert.Contains(t, segIDs, segID1_1)
 
 		// check DropSegment
-		err = meta.DropSegment(segID1_0)
+		err = meta.DropSegment(context.TODO(), segID1_0)
 		assert.NoError(t, err)
-		segIDs = meta.GetSegmentsIDOfPartition(collID, partID1)
+		segIDs = meta.GetSegmentsIDOfPartition(context.TODO(), collID, partID1)
 		assert.EqualValues(t, 1, len(segIDs))
 		assert.Contains(t, segIDs, segID1_1)
 
-		err = meta.SetState(segID0_0, commonpb.SegmentState_Sealed)
+		err = meta.SetState(context.TODO(), segID0_0, commonpb.SegmentState_Sealed)
 		assert.NoError(t, err)
-		err = meta.SetState(segID0_0, commonpb.SegmentState_Flushed)
+		err = meta.SetState(context.TODO(), segID0_0, commonpb.SegmentState_Flushed)
 		assert.NoError(t, err)
 
-		info0_0 = meta.GetHealthySegment(segID0_0)
+		info0_0 = meta.GetHealthySegment(context.TODO(), segID0_0)
 		assert.NotNil(t, info0_0)
 		assert.EqualValues(t, commonpb.SegmentState_Flushed, info0_0.State)
 	})
@@ -564,13 +564,13 @@ func TestMeta_Basic(t *testing.T) {
 		meta, err = newMeta(context.TODO(), catalog, nil)
 		assert.NoError(t, err)
 		// nil, since no segment yet
-		err = meta.DropSegment(0)
+		err = meta.DropSegment(context.TODO(), 0)
 		assert.NoError(t, err)
 		// nil, since Save error not injected
 		err = meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{}))
 		assert.NoError(t, err)
 		// error injected
-		err = meta.DropSegment(0)
+		err = meta.DropSegment(context.TODO(), 0)
 		assert.Error(t, err)
 
 		catalog = datacoord.NewCatalog(metakv, "", "")
@@ -602,7 +602,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.NoError(t, err)
 
 		// check partition/collection statistics
-		nums = meta.GetNumRowsOfPartition(collID, partID0)
+		nums = meta.GetNumRowsOfPartition(context.TODO(), collID, partID0)
 		assert.EqualValues(t, (rowCount0 + rowCount1), nums)
 		nums = meta.GetNumRowsOfCollection(collID)
 		assert.EqualValues(t, (rowCount0 + rowCount1), nums)
@@ -748,6 +748,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.EqualValues(t, 0, segment1.getDeltaCount())
 
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
 			AddBinlogsOperator(1,
 				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 1)},
@@ -760,7 +761,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		)
 		assert.NoError(t, err)
 
-		updated := meta.GetHealthySegment(1)
+		updated := meta.GetHealthySegment(context.TODO(), 1)
 		assert.EqualValues(t, -1, updated.deltaRowcount.Load())
 		assert.EqualValues(t, 1, updated.getDeltaCount())
 
@@ -789,6 +790,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		// segment not found
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateCompactedOperator(1),
 		)
 		assert.NoError(t, err)
@@ -803,6 +805,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateCompactedOperator(1),
 		)
 		assert.NoError(t, err)
@@ -812,51 +815,60 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			AddBinlogsOperator(1, nil, nil, nil, nil),
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateBinlogsOperator(1, nil, nil, nil),
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateDmlPosition(1, nil),
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateDmlPosition(1, &msgpb.MsgPosition{MsgID: []byte{1}}),
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateImportedRows(1, 0),
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateIsImporting(1, true),
 		)
 		assert.NoError(t, err)
 
-		err = meta.UpdateSegmentsInfo(UpdateAsDroppedIfEmptyWhenFlushing(1))
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateAsDroppedIfEmptyWhenFlushing(1))
 		assert.NoError(t, err)
 	})
 
@@ -865,6 +877,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 		meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing}})
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
 			UpdateAsDroppedIfEmptyWhenFlushing(1),
 		)
@@ -880,11 +893,12 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}}),
 		)
 
 		assert.NoError(t, err)
-		assert.Nil(t, meta.GetHealthySegment(2))
+		assert.Nil(t, meta.GetHealthySegment(context.TODO(), 2))
 	})
 
 	t.Run("test save etcd failed", func(t *testing.T) {
@@ -907,6 +921,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		meta.segments.SetSegment(1, segmentInfo)
 
 		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
 			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
 			AddBinlogsOperator(1,
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
@@ -920,7 +935,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Equal(t, "mocked fail", err.Error())
-		segmentInfo = meta.GetHealthySegment(1)
+		segmentInfo = meta.GetHealthySegment(context.TODO(), 1)
 		assert.EqualValues(t, 0, segmentInfo.NumOfRows)
 		assert.Equal(t, commonpb.SegmentState_Growing, segmentInfo.State)
 		assert.Nil(t, segmentInfo.Binlogs)
@@ -971,8 +986,8 @@ func Test_meta_SetSegmentsCompacting(t *testing.T) {
 				catalog:  &datacoord.Catalog{MetaKv: tt.fields.client},
 				segments: tt.fields.segments,
 			}
-			m.SetSegmentsCompacting([]UniqueID{tt.args.segmentID}, tt.args.compacting)
-			segment := m.GetHealthySegment(tt.args.segmentID)
+			m.SetSegmentsCompacting(context.TODO(), []UniqueID{tt.args.segmentID}, tt.args.compacting)
+			segment := m.GetHealthySegment(context.TODO(), tt.args.segmentID)
 			assert.Equal(t, tt.args.compacting, segment.isCompacting)
 		})
 	}
@@ -1008,7 +1023,7 @@ func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 	}
 	expectedSeg := map[int64]commonpb.SegmentState{1: commonpb.SegmentState_Flushed, 2: commonpb.SegmentState_Growing}
 	m := &meta{segments: storedSegments}
-	got := m.GetSegmentsOfCollection(1)
+	got := m.GetSegmentsOfCollection(context.TODO(), 1)
 	assert.Equal(t, len(expectedSeg), len(got))
 	for _, gotInfo := range got {
 		expected, ok := expectedSeg[gotInfo.ID]
@@ -1016,10 +1031,10 @@ func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 		assert.Equal(t, expected, gotInfo.GetState())
 	}
 
-	got = m.GetSegmentsOfCollection(-1)
+	got = m.GetSegmentsOfCollection(context.TODO(), -1)
 	assert.Equal(t, 3, len(got))
 
-	got = m.GetSegmentsOfCollection(10)
+	got = m.GetSegmentsOfCollection(context.TODO(), 10)
 	assert.Equal(t, 0, len(got))
 }
 
@@ -1066,7 +1081,7 @@ func Test_meta_GetSegmentsWithChannel(t *testing.T) {
 	got = m.GetSegmentsByChannel("h3")
 	assert.Equal(t, 0, len(got))
 
-	got = m.SelectSegments(WithCollection(1), WithChannel("h1"), SegmentFilterFunc(func(segment *SegmentInfo) bool {
+	got = m.SelectSegments(context.TODO(), WithCollection(1), WithChannel("h1"), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return segment != nil && segment.GetState() == commonpb.SegmentState_Flushed
 	}))
 	assert.Equal(t, 1, len(got))
@@ -1151,10 +1166,10 @@ func TestMeta_GetAllSegments(t *testing.T) {
 		},
 	}
 
-	seg1 := m.GetHealthySegment(1)
-	seg1All := m.GetSegment(1)
-	seg2 := m.GetHealthySegment(2)
-	seg2All := m.GetSegment(2)
+	seg1 := m.GetHealthySegment(context.TODO(), 1)
+	seg1All := m.GetSegment(context.TODO(), 1)
+	seg2 := m.GetHealthySegment(context.TODO(), 2)
+	seg2All := m.GetSegment(context.TODO(), 2)
 	assert.NotNil(t, seg1)
 	assert.NotNil(t, seg1All)
 	assert.Nil(t, seg2)
@@ -1190,10 +1205,10 @@ func TestChannelCP(t *testing.T) {
 		assert.NoError(t, err)
 
 		// nil position
-		err = meta.UpdateChannelCheckpoint(mockVChannel, nil)
+		err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, nil)
 		assert.Error(t, err)
 
-		err = meta.UpdateChannelCheckpoint(mockVChannel, pos)
+		err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, pos)
 		assert.NoError(t, err)
 	})
 
@@ -1202,11 +1217,11 @@ func TestChannelCP(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(meta.channelCPs.checkpoints))
 
-		err = meta.UpdateChannelCheckpoints(nil)
+		err = meta.UpdateChannelCheckpoints(context.TODO(), nil)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(meta.channelCPs.checkpoints))
 
-		err = meta.UpdateChannelCheckpoints([]*msgpb.MsgPosition{pos, {
+		err = meta.UpdateChannelCheckpoints(context.TODO(), []*msgpb.MsgPosition{pos, {
 			ChannelName: "",
 		}})
 		assert.NoError(t, err)
@@ -1220,7 +1235,7 @@ func TestChannelCP(t *testing.T) {
 		position := meta.GetChannelCheckpoint(mockVChannel)
 		assert.Nil(t, position)
 
-		err = meta.UpdateChannelCheckpoint(mockVChannel, pos)
+		err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, pos)
 		assert.NoError(t, err)
 		position = meta.GetChannelCheckpoint(mockVChannel)
 		assert.NotNil(t, position)
@@ -1235,7 +1250,7 @@ func TestChannelCP(t *testing.T) {
 		err = meta.DropChannelCheckpoint(mockVChannel)
 		assert.NoError(t, err)
 
-		err = meta.UpdateChannelCheckpoint(mockVChannel, pos)
+		err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, pos)
 		assert.NoError(t, err)
 		err = meta.DropChannelCheckpoint(mockVChannel)
 		assert.NoError(t, err)

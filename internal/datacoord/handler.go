@@ -269,7 +269,7 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ..
 	var minPos *msgpb.MsgPosition
 	var minPosSegID int64
 	var minPosTs uint64
-	segments := h.s.meta.SelectSegments(WithChannel(channel))
+	segments := h.s.meta.SelectSegments(context.TODO(), WithChannel(channel))
 
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
 	partitionSet := typeutil.NewUniqueSet(validPartitions...)

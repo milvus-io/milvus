@@ -728,7 +728,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
-	).Return(model.NewDefaultDatabase(), nil)
+	).Return(model.NewDefaultDatabase(nil), nil)
 	meta.On("ListAllAvailCollections",
 		mock.Anything,
 	).Return(map[int64][]int64{
@@ -1154,7 +1154,7 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
-	).Return(model.NewDefaultDatabase(), nil)
+	).Return(model.NewDefaultDatabase(nil), nil)
 	meta.On("ListAllAvailCollections",
 		mock.Anything,
 	).Return(map[int64][]int64{

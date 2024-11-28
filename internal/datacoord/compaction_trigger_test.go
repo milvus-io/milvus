@@ -54,7 +54,7 @@ func (h *spyCompactionHandler) getCompactionTasksNumBySignalID(signalID int64) i
 	return 0
 }
 
-func (h *spyCompactionHandler) getCompactionInfo(signalID int64) *compactionInfo {
+func (h *spyCompactionHandler) getCompactionInfo(ctx context.Context, signalID int64) *compactionInfo {
 	return nil
 }
 
@@ -2357,7 +2357,7 @@ func (s *CompactionTriggerSuite) SetupTest() {
 			},
 		},
 	}
-	s.meta.UpdateChannelCheckpoint(s.channel, &msgpb.MsgPosition{
+	s.meta.UpdateChannelCheckpoint(context.TODO(), s.channel, &msgpb.MsgPosition{
 		ChannelName: s.channel,
 		Timestamp:   tsoutil.ComposeTSByTime(time.Now(), 0),
 		MsgID:       []byte{1, 2, 3, 4},

@@ -89,25 +89,34 @@ Milvus is designed to handle vector search at scale. Users can store vectors, wh
 
 Milvus is trusted by AI developers to build applications such as text and image search, Retrieval-Augmented Generation (RAG), and recommendation systems. Milvus powers [many mission-critical business]((https://milvus.io/use-cases)) for startups and enterprises.
 
-## Demos and Tutorials 
+## Demos and Tutorials
+
 Here is a selection of demos and tutorials to show how to build various types of AI applications made with Milvus:
 
-| Tutorial | Use Case | Related Milvus Features | 
+You can explore a comprehensive [Tutorials Overview](https://milvus.io/docs/tutorials-overview.md) covering topics such as Retrieval-Augmented Generation (RAG), Semantic Search, Hybrid Search, Question Answering, Recommendation Systems, and various quick-start guides. These resources are designed to help you get started quickly and efficiently.
+
+| Tutorial | Use Case | Related Milvus Features |
 | -------- | -------- | --------- |
-| [Build RAG with Milvus](build-rag-with-milvus.md) |  RAG | vector search |
-| [Multimodal RAG with Milvus](multimodal_rag_with_milvus.md) | RAG | vector search, dynamic field |
-| [Image Search with Milvus](image_similarity_search.md) | Semantic Search | vector search, dynamic field |
-| [Hybrid Search with Milvus](hybrid_search_with_milvus.md) | Hybrid Search | hybrid search, multi vector, dense embedding, sparse embedding |
-| [Multimodal Search using Multi Vectors](multimodal_rag_with_milvus.md) | Semantic Search | multi vector, hybrid search |
-| [Recommender System](recommendation_system.md) | Recommendation System | vector search |
-| [Video Similarity Search](video_similarity_search.md) | Semantic Search | vector search |
-| [Audio Similarity Search](audio_similarity_search.md) | Semantic Search | vector search |
-| [DNA Classification](dna_sequence_classification.md) | Classification | vector search |
-| [Graph RAG with Milvus](graph_rag_with_milvus.md) | RAG | vector search |
-| [Contextual Retrieval with Milvus](contextual_retrieval_with_milvus.md) | RAG, Semantic Search | vector search |
-| [HDBSCAN Clustering with Milvus](hdbscan_clustering_with_milvus.md) | Clustering | vector search |
-| [Use ColPali for Multi-Modal Retrieval with Milvus](use_ColPali_with_milvus.md) | RAG, Semantic Search | vector search |
-| [Vector Visualization](vector_visualization.md) | Data Visualization | vector search |
+| [Build RAG with Milvus](https://milvus.io/docs/build-rag-with-milvus.md) |  RAG | vector search |
+| [Multimodal RAG with Milvus](https://milvus.io/docs/multimodal_rag_with_milvus.md) | RAG | vector search, dynamic field |
+| [Image Search with Milvus](https://milvus.io/docs/image_similarity_search.md) | Semantic Search | vector search, dynamic field |
+| [Hybrid Search with Milvus](https://milvus.io/docs/hybrid_search_with_milvus.md) | Hybrid Search | hybrid search, multi vector, dense embedding, sparse embedding |
+| [Multimodal Search using Multi Vectors](https://milvus.io/docs/multimodal_rag_with_milvus.md) | Semantic Search | multi vector, hybrid search |
+| [Question Answering System](https://milvus.io/docs/question_answering_system.md) | Question Answering | vector search |
+| [Recommender System](https://milvus.io/docs/recommendation_system.md) | Recommendation System | vector search |
+| [Video Similarity Search](https://milvus.io/docs/video_similarity_search.md) | Semantic Search | vector search |
+| [Audio Similarity Search](https://milvus.io/docs/audio_similarity_search.md) | Semantic Search | vector search |
+| [DNA Classification](https://milvus.io/docs/dna_sequence_classification.md) | Classification | vector search |
+| [Text Search Engine](https://milvus.io/docs/text_search_engine.md) | Semantic Search | vector search |
+| [Search Image by Text](https://milvus.io/docs/text_image_search.md) | Semantic Search | vector search |
+| [Image Deduplication](https://milvus.io/docs/image_deduplication_system.md) | Deduplication | vector search |
+| [Graph RAG with Milvus](https://milvus.io/docs/graph_rag_with_milvus.md) | RAG | graph search |
+| [Contextual Retrieval with Milvus](https://milvus.io/docs/contextual_retrieval_with_milvus.md) | Quickstart | vector search |
+| [HDBSCAN Clustering with Milvus](https://milvus.io/docs/hdbscan_clustering_with_milvus.md) | Quickstart | vector search |
+| [Use ColPali for Multi-Modal Retrieval with Milvus](https://milvus.io/docs/use_ColPali_with_milvus.md) | Quickstart | vector search |
+| [Vector Visualization](https://milvus.io/docs/vector_visualization.md) | Quickstart | vector search |
+| [Movie Recommendation with Milvus](https://milvus.io/docs/movie_recommendation_with_milvus.md) | Recommendation System | vector search |
+| [Funnel Search with Matryoshka Embeddings](https://milvus.io/docs/funnel_search_with_matryoshka.md) | Quickstart | vector search |
 
 <table>
   <tr>
@@ -241,7 +250,7 @@ Reference to cite when you use Milvus in a research paper:
 }
 ```
 <!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-418-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-419-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
@@ -413,6 +422,7 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/del-zhenwu"><img src="https://avatars.githubusercontent.com/u/56623710?v=4" width="30px" /></a>
 <a href="https://github.com/dengxiaohai"><img src="https://avatars.githubusercontent.com/u/137682492?v=4" width="30px" /></a>
 <a href="https://github.com/disflyer"><img src="https://avatars.githubusercontent.com/u/22723892?v=4" width="30px" /></a>
+<a href="https://github.com/dnoliver"><img src="https://avatars.githubusercontent.com/u/7730267?v=4" width="30px" /></a>
 <a href="https://github.com/donno2048"><img src="https://avatars.githubusercontent.com/u/61805754?v=4" width="30px" /></a>
 <a href="https://github.com/douglarek"><img src="https://avatars.githubusercontent.com/u/1488134?v=4" width="30px" /></a>
 <a href="https://github.com/drow931"><img src="https://avatars.githubusercontent.com/u/11514434?v=4" width="30px" /></a>

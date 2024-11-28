@@ -2381,7 +2381,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 	s := &Server{meta: m}
 
 	t.Run("normal", func(t *testing.T) {
-		segments := s.getUnIndexTaskSegments()
+		segments := s.getUnIndexTaskSegments(context.TODO())
 		assert.Equal(t, 1, len(segments))
 		assert.Equal(t, segID, segments[0].ID)
 
@@ -2404,7 +2404,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segments := s.getUnIndexTaskSegments()
+		segments := s.getUnIndexTaskSegments(context.TODO())
 		assert.Equal(t, 1, len(segments))
 		assert.Equal(t, segID, segments[0].ID)
 	})
@@ -2417,7 +2417,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segments := s.getUnIndexTaskSegments()
+		segments := s.getUnIndexTaskSegments(context.TODO())
 		assert.Equal(t, 0, len(segments))
 	})
 }

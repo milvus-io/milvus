@@ -59,7 +59,7 @@ func newTestCompactionTaskMeta(t *testing.T) *compactionTaskMeta {
 }
 
 func (suite *CompactionTaskMetaSuite) TestGetCompactionTasksByCollection() {
-	suite.meta.SaveCompactionTask(&datapb.CompactionTask{
+	suite.meta.SaveCompactionTask(context.TODO(), &datapb.CompactionTask{
 		TriggerID:    1,
 		PlanID:       10,
 		CollectionID: 100,
@@ -69,12 +69,12 @@ func (suite *CompactionTaskMetaSuite) TestGetCompactionTasksByCollection() {
 }
 
 func (suite *CompactionTaskMetaSuite) TestGetCompactionTasksByCollectionAbnormal() {
-	suite.meta.SaveCompactionTask(&datapb.CompactionTask{
+	suite.meta.SaveCompactionTask(context.TODO(), &datapb.CompactionTask{
 		TriggerID:    1,
 		PlanID:       10,
 		CollectionID: 100,
 	})
-	suite.meta.SaveCompactionTask(&datapb.CompactionTask{
+	suite.meta.SaveCompactionTask(context.TODO(), &datapb.CompactionTask{
 		TriggerID:    2,
 		PlanID:       11,
 		CollectionID: 101,
@@ -113,9 +113,9 @@ func (suite *CompactionTaskMetaSuite) TestTaskStatsJSON() {
 	actualJSON := suite.meta.TaskStatsJSON()
 	suite.Equal("[]", actualJSON)
 
-	err := suite.meta.SaveCompactionTask(task1)
+	err := suite.meta.SaveCompactionTask(context.TODO(), task1)
 	suite.NoError(err)
-	err = suite.meta.SaveCompactionTask(task2)
+	err = suite.meta.SaveCompactionTask(context.TODO(), task2)
 	suite.NoError(err)
 
 	expectedTasks := []*metricsinfo.CompactionTask{

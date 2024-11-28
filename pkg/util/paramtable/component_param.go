@@ -283,6 +283,9 @@ type commonConfig struct {
 	ReadOnlyPrivileges                  ParamItem `refreshable:"false"`
 	ReadWritePrivileges                 ParamItem `refreshable:"false"`
 	AdminPrivileges                     ParamItem `refreshable:"false"`
+
+	// Local RPC enabled for milvus internal communication when mix or standalone mode.
+	LocalRPCEnabled ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -656,8 +659,8 @@ like the old password verification when updating the credential`,
 	p.DefaultRootPassword = ParamItem{
 		Key:          "common.security.defaultRootPassword",
 		Version:      "2.4.7",
-		Doc:          "default password for root user",
-		DefaultValue: "Milvus",
+		Doc:          "default password for root user. The maximum length is 72 characters, and double quotes are required.",
+		DefaultValue: "\"Milvus\"",
 		Export:       true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
@@ -924,6 +927,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Doc:     `use to override the default value of admin privileges,  example: "PrivilegeCreateOwnership,PrivilegeDropOwnership"`,
 	}
 	p.AdminPrivileges.Init(base.mgr)
+
+	p.LocalRPCEnabled = ParamItem{
+		Key:          "common.localRPCEnabled",
+		Version:      "2.4.18",
+		DefaultValue: "false",
+		Doc:          `enable local rpc for internal communication when mix or standalone mode.`,
+		Export:       true,
+	}
+	p.LocalRPCEnabled.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -1124,6 +1136,7 @@ type rootCoordConfig struct {
 	MaxGeneralCapacity          ParamItem `refreshable:"true"`
 	GracefulStopTimeout         ParamItem `refreshable:"true"`
 	UseLockScheduler            ParamItem `refreshable:"true"`
+	DefaultDBProperties         ParamItem `refreshable:"false"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -1207,6 +1220,15 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 		Export:       false,
 	}
 	p.UseLockScheduler.Init(base.mgr)
+
+	p.DefaultDBProperties = ParamItem{
+		Key:          "rootCoord.defaultDBProperties",
+		Version:      "2.4.16",
+		DefaultValue: "{}",
+		Doc:          "default db properties, should be a json string",
+		Export:       false,
+	}
+	p.DefaultDBProperties.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1336,8 +1358,15 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.MaxPasswordLength = ParamItem{
 		Key:          "proxy.maxPasswordLength",
-		DefaultValue: "256",
+		DefaultValue: "72", // bcrypt max length
 		Version:      "2.0.0",
+		Formatter: func(v string) string {
+			n := getAsInt(v)
+			if n <= 0 || n > 72 {
+				return "72"
+			}
+			return v
+		},
 		PanicIfEmpty: true,
 	}
 	p.MaxPasswordLength.Init(base.mgr)

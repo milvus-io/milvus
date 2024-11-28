@@ -1359,16 +1359,16 @@ func TestCatalog_Import(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
-		err := kc.SaveImportJob(job)
+		err := kc.SaveImportJob(context.TODO(), job)
 		assert.NoError(t, err)
 
-		err = kc.SaveImportJob(nil)
+		err = kc.SaveImportJob(context.TODO(), nil)
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
-		err = kc.SaveImportJob(job)
+		err = kc.SaveImportJob(context.TODO(), job)
 		assert.Error(t, err)
 	})
 
@@ -1378,20 +1378,20 @@ func TestCatalog_Import(t *testing.T) {
 		assert.NoError(t, err)
 		txn.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, []string{string(value)}, nil)
 		kc.MetaKv = txn
-		jobs, err := kc.ListImportJobs()
+		jobs, err := kc.ListImportJobs(context.TODO())
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(jobs))
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, []string{"@#%#^#"}, nil)
 		kc.MetaKv = txn
-		_, err = kc.ListImportJobs()
+		_, err = kc.ListImportJobs(context.TODO())
 		assert.Error(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, mockErr)
 		kc.MetaKv = txn
-		_, err = kc.ListImportJobs()
+		_, err = kc.ListImportJobs(context.TODO())
 		assert.Error(t, err)
 	})
 
@@ -1399,13 +1399,13 @@ func TestCatalog_Import(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		txn.EXPECT().Remove(mock.Anything).Return(nil)
 		kc.MetaKv = txn
-		err := kc.DropImportJob(job.GetJobID())
+		err := kc.DropImportJob(context.TODO(), job.GetJobID())
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().Remove(mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
-		err = kc.DropImportJob(job.GetJobID())
+		err = kc.DropImportJob(context.TODO(), job.GetJobID())
 		assert.Error(t, err)
 	})
 
@@ -1413,16 +1413,16 @@ func TestCatalog_Import(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
-		err := kc.SavePreImportTask(pit)
+		err := kc.SavePreImportTask(context.TODO(), pit)
 		assert.NoError(t, err)
 
-		err = kc.SavePreImportTask(nil)
+		err = kc.SavePreImportTask(context.TODO(), nil)
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
-		err = kc.SavePreImportTask(pit)
+		err = kc.SavePreImportTask(context.TODO(), pit)
 		assert.Error(t, err)
 	})
 
@@ -1432,20 +1432,20 @@ func TestCatalog_Import(t *testing.T) {
 		assert.NoError(t, err)
 		txn.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, []string{string(value)}, nil)
 		kc.MetaKv = txn
-		tasks, err := kc.ListPreImportTasks()
+		tasks, err := kc.ListPreImportTasks(context.TODO())
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(tasks))
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, []string{"@#%#^#"}, nil)
 		kc.MetaKv = txn
-		_, err = kc.ListPreImportTasks()
+		_, err = kc.ListPreImportTasks(context.TODO())
 		assert.Error(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, mockErr)
 		kc.MetaKv = txn
-		_, err = kc.ListPreImportTasks()
+		_, err = kc.ListPreImportTasks(context.TODO())
 		assert.Error(t, err)
 	})
 
@@ -1453,13 +1453,13 @@ func TestCatalog_Import(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		txn.EXPECT().Remove(mock.Anything).Return(nil)
 		kc.MetaKv = txn
-		err := kc.DropPreImportTask(pit.GetTaskID())
+		err := kc.DropPreImportTask(context.TODO(), pit.GetTaskID())
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().Remove(mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
-		err = kc.DropPreImportTask(pit.GetTaskID())
+		err = kc.DropPreImportTask(context.TODO(), pit.GetTaskID())
 		assert.Error(t, err)
 	})
 
@@ -1467,16 +1467,16 @@ func TestCatalog_Import(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
-		err := kc.SaveImportTask(it)
+		err := kc.SaveImportTask(context.TODO(), it)
 		assert.NoError(t, err)
 
-		err = kc.SaveImportTask(nil)
+		err = kc.SaveImportTask(context.TODO(), nil)
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
-		err = kc.SaveImportTask(it)
+		err = kc.SaveImportTask(context.TODO(), it)
 		assert.Error(t, err)
 	})
 
@@ -1486,20 +1486,20 @@ func TestCatalog_Import(t *testing.T) {
 		assert.NoError(t, err)
 		txn.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, []string{string(value)}, nil)
 		kc.MetaKv = txn
-		tasks, err := kc.ListImportTasks()
+		tasks, err := kc.ListImportTasks(context.TODO())
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(tasks))
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, []string{"@#%#^#"}, nil)
 		kc.MetaKv = txn
-		_, err = kc.ListImportTasks()
+		_, err = kc.ListImportTasks(context.TODO())
 		assert.Error(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, mockErr)
 		kc.MetaKv = txn
-		_, err = kc.ListImportTasks()
+		_, err = kc.ListImportTasks(context.TODO())
 		assert.Error(t, err)
 	})
 
@@ -1507,13 +1507,13 @@ func TestCatalog_Import(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		txn.EXPECT().Remove(mock.Anything).Return(nil)
 		kc.MetaKv = txn
-		err := kc.DropImportTask(it.GetTaskID())
+		err := kc.DropImportTask(context.TODO(), it.GetTaskID())
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().Remove(mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
-		err = kc.DropImportTask(it.GetTaskID())
+		err = kc.DropImportTask(context.TODO(), it.GetTaskID())
 		assert.Error(t, err)
 	})
 }

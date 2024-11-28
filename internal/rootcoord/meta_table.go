@@ -260,7 +260,13 @@ func (mt *MetaTable) createDefaultDb() error {
 		return err
 	}
 
-	return mt.createDatabasePrivate(mt.ctx, model.NewDefaultDatabase(), ts)
+	s := Params.RootCoordCfg.DefaultDBProperties.GetValue()
+	defaultProperties, err := funcutil.String2KeyValuePair(s)
+	if err != nil {
+		return err
+	}
+
+	return mt.createDatabasePrivate(mt.ctx, model.NewDefaultDatabase(defaultProperties), ts)
 }
 
 func (mt *MetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {

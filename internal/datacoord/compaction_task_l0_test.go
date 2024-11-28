@@ -60,7 +60,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
 	channel := "Ch-1"
 	deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 
-	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything).Return(
+	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return(
 		[]*SegmentInfo{
 			{SegmentInfo: &datapb.SegmentInfo{
 				ID:            200,
@@ -80,7 +80,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
 		},
 	)
 
-	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
 		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            segID,
 			Level:         datapb.SegmentLevel_L0,
@@ -115,7 +115,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
 
 func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SegmentNotFoundL0() {
 	channel := "Ch-1"
-	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
 		return nil
 	}).Once()
 	task := newL0CompactionTask(&datapb.CompactionTask{
@@ -141,7 +141,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SegmentNotFoundL0() {
 func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 	channel := "Ch-1"
 	deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
-	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
 		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            segID,
 			Level:         datapb.SegmentLevel_L0,
@@ -150,7 +150,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 			Deltalogs:     deltaLogs,
 		}}
 	}).Times(2)
-	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything).Return(nil).Once()
+	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	task := newL0CompactionTask(&datapb.CompactionTask{
 		PlanID:        1,
@@ -213,7 +213,7 @@ func (s *L0CompactionTaskSuite) generateTestL0Task(state datapb.CompactionTaskSt
 func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	s.Run("test pipelining needReassignNodeID", func() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t.updateAndSaveTaskMeta(setNodeID(NullNodeID))
 		got := t.Process()
 		s.False(got)
@@ -222,14 +222,14 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test pipelining Compaction failed", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		channel := "ch-1"
 		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 
-		s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything).Return(
+		s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return(
 			[]*SegmentInfo{
 				{SegmentInfo: &datapb.SegmentInfo{
 					ID:            200,
@@ -239,7 +239,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 			},
 		)
 
-		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
 			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID:            segID,
 				Level:         datapb.SegmentLevel_L0,
@@ -248,7 +248,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				Deltalogs:     deltaLogs,
 			}}
 		}).Twice()
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 
 		s.mockSessMgr.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error {
 			s.Require().EqualValues(t.GetTaskProto().NodeID, nodeID)
@@ -262,14 +262,14 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test pipelining success", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		channel := "ch-1"
 		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 
-		s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything).Return(
+		s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return(
 			[]*SegmentInfo{
 				{SegmentInfo: &datapb.SegmentInfo{
 					ID:            200,
@@ -279,7 +279,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 			},
 		)
 
-		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
 			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID:            segID,
 				Level:         datapb.SegmentLevel_L0,
@@ -301,7 +301,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 
 	// stay in executing state when GetCompactionPlanResults error except ErrNodeNotFound
 	s.Run("test executing GetCompactionPlanResult fail NodeNotFound", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
@@ -316,7 +316,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 
 	// stay in executing state when GetCompactionPlanResults error except ErrNodeNotFound
 	s.Run("test executing GetCompactionPlanResult fail mock error", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
@@ -331,7 +331,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test executing with result executing", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
@@ -347,7 +347,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test executing with result completed", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
@@ -359,16 +359,16 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 			}, nil).Once()
 		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetTaskProto().GetNodeID(), mock.Anything).Return(nil)
 
-		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Times(2)
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).Return().Once()
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).Return().Once()
 
 		got := t.Process()
 		s.True(got)
 		s.Equal(datapb.CompactionTaskState_completed, t.GetTaskProto().GetState())
 	})
 	s.Run("test executing with result completed save segment meta failed", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
@@ -379,7 +379,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				State:  datapb.CompactionTaskState_completed,
 			}, nil).Once()
 
-		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(errors.New("mock error")).Once()
 
 		got := t.Process()
@@ -387,7 +387,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		s.Equal(datapb.CompactionTaskState_executing, t.GetTaskProto().GetState())
 	})
 	s.Run("test executing with result completed save compaction meta failed", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
@@ -398,8 +398,8 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				State:  datapb.CompactionTaskState_completed,
 			}, nil).Once()
 
-		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(errors.New("mock error")).Once()
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		got := t.Process()
 		s.False(got)
@@ -407,7 +407,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test executing with result failed", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
@@ -418,14 +418,14 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				State:  datapb.CompactionTaskState_failed,
 			}, nil).Once()
 		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetTaskProto().GetNodeID(), mock.Anything).Return(nil)
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).Return().Once()
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).Return().Once()
 
 		got := t.Process()
 		s.True(got)
 		s.Equal(datapb.CompactionTaskState_cleaned, t.GetTaskProto().GetState())
 	})
 	s.Run("test executing with result failed save compaction meta failed", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
@@ -435,7 +435,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				PlanID: t.GetTaskProto().GetPlanID(),
 				State:  datapb.CompactionTaskState_failed,
 			}, nil).Once()
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(errors.New("mock error")).Once()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		got := t.Process()
 		s.False(got)
@@ -443,13 +443,13 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test metaSaved success", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_meta_saved)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
 		t.result = &datapb.CompactionPlanResult{}
 
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
 			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
 		}).Once()
 		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetTaskProto().GetNodeID(), mock.Anything).Return(nil).Once()
@@ -460,13 +460,13 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test metaSaved failed", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
 		t := s.generateTestL0Task(datapb.CompactionTaskState_meta_saved)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
 		t.result = &datapb.CompactionPlanResult{}
 
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(errors.New("mock error")).Once()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		got := t.Process()
 		s.False(got)
@@ -474,13 +474,13 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test complete drop failed", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_completed)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
 		t.result = &datapb.CompactionPlanResult{}
 		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetTaskProto().GetNodeID(), mock.Anything).Return(errors.New("mock error")).Once()
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
 			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
 		}).Once()
 
@@ -490,13 +490,13 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test complete success", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_completed)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
 		t.result = &datapb.CompactionPlanResult{}
 		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetTaskProto().GetNodeID(), mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
 			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
 		}).Once()
 
@@ -506,12 +506,12 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test process failed success", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_failed)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
 		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetTaskProto().GetNodeID(), mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
 			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
 		}).Once()
 
@@ -521,12 +521,12 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test process failed failed", func() {
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_failed)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
 		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetTaskProto().GetNodeID(), mock.Anything).Return(errors.New("mock error")).Once()
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
 			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
 		}).Once()
 
@@ -544,7 +544,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 }
 
 func (s *L0CompactionTaskSuite) TestSetterGetter() {
-	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 	t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 
 	span := t.GetSpan()
@@ -572,7 +572,7 @@ func (s *L0CompactionTaskSuite) TestSetterGetter() {
 	s.Run("set NodeID", func() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t.SetNodeID(1000)
 		s.EqualValues(1000, t.GetTaskProto().GetNodeID())
 	})
