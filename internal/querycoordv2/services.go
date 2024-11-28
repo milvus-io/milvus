@@ -602,7 +602,7 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 
 	// try best to wait partition valid
 	// shall not block partition creation
-	job.WaitPartitionValid(ctx, s.targetMgr, req.GetCollectionID(), req.GetPartitionID())
+	// job.WaitPartitionValid(ctx, s.targetMgr, req.GetCollectionID(), req.GetPartitionID())
 
 	return merr.Success(), nil
 }

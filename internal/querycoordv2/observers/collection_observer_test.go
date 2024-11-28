@@ -174,6 +174,7 @@ func (suite *CollectionObserverSuite) SetupSuite() {
 }
 
 func (suite *CollectionObserverSuite) SetupTest() {
+	suite.ctx = context.Background()
 	// Mocks
 	var err error
 	suite.idAllocator = RandomIncrementIDAllocator()
@@ -238,7 +239,6 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID: 3,
 	}))
-	suite.ctx = context.Background()
 }
 
 func (suite *CollectionObserverSuite) TearDownTest() {
