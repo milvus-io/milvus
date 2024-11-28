@@ -35,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+const MaxSegmentNumPerGetIndexInfoRPC = 1024
+
 var _ Checker = (*IndexChecker)(nil)
 
 // IndexChecker perform segment index check.
@@ -132,18 +134,21 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	}
 
 	segmentsToUpdate := typeutil.NewSet[int64]()
-	for segment, fields := range targets {
-		missingFields := typeutil.NewSet(fields...)
-		infos, err := c.broker.GetIndexInfo(ctx, collection.GetCollectionID(), segment)
+	for _, segmentIDs := range lo.Chunk(lo.Keys(idSegments), MaxSegmentNumPerGetIndexInfoRPC) {
+		segmentIndexInfos, err := c.broker.GetIndexInfo(ctx, collection.GetCollectionID(), segmentIDs...)
 		if err != nil {
-			log.Warn("failed to get indexInfo for segment", zap.Int64("segmentID", segment), zap.Error(err))
+			log.Warn("failed to get indexInfo for segments", zap.Int64s("segmentIDs", segmentIDs), zap.Error(err))
 			continue
 		}
-		for _, info := range infos {
-			if missingFields.Contain(info.GetFieldID()) &&
-				info.GetEnableIndex() &&
-				len(info.GetIndexFilePaths()) > 0 {
-				segmentsToUpdate.Insert(segment)
+		for segmentID, segmentIndexInfo := range segmentIndexInfos {
+			fields := targets[segmentID]
+			missingFields := typeutil.NewSet(fields...)
+			for _, fieldIndexInfo := range segmentIndexInfo {
+				if missingFields.Contain(fieldIndexInfo.GetFieldID()) &&
+					fieldIndexInfo.GetEnableIndex() &&
+					len(fieldIndexInfo.GetIndexFilePaths()) > 0 {
+					segmentsToUpdate.Insert(segmentID)
+				}
 			}
 		}
 	}
