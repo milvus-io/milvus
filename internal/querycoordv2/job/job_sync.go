@@ -25,17 +25,19 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type SyncNewCreatedPartitionJob struct {
 	*BaseJob
-	req       *querypb.SyncNewCreatedPartitionRequest
-	meta      *meta.Meta
-	cluster   session.Cluster
-	broker    meta.Broker
-	targetMgr meta.TargetManagerInterface
+	req            *querypb.SyncNewCreatedPartitionRequest
+	meta           *meta.Meta
+	cluster        session.Cluster
+	broker         meta.Broker
+	targetObserver *observers.TargetObserver
+	targetMgr      meta.TargetManagerInterface
 }
 
 func NewSyncNewCreatedPartitionJob(
@@ -43,14 +45,16 @@ func NewSyncNewCreatedPartitionJob(
 	req *querypb.SyncNewCreatedPartitionRequest,
 	meta *meta.Meta,
 	broker meta.Broker,
+	targetObserver *observers.TargetObserver,
 	targetMgr meta.TargetManagerInterface,
 ) *SyncNewCreatedPartitionJob {
 	return &SyncNewCreatedPartitionJob{
-		BaseJob:   NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
-		req:       req,
-		meta:      meta,
-		broker:    broker,
-		targetMgr: targetMgr,
+		BaseJob:        NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
+		req:            req,
+		meta:           meta,
+		broker:         broker,
+		targetObserver: targetObserver,
+		targetMgr:      targetMgr,
 	}
 }
 
@@ -92,9 +96,20 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		return errors.Wrap(err, msg)
 	}
 
-	// job.meta.TargetManager
+	// manual trigger update next target
+	ready, err := job.targetObserver.UpdateNextTarget(req.GetCollectionID())
+	if err != nil {
+		log.Warn("failed to update next target for sync partition job", zap.Error(err))
+		return err
+	}
 
-	// TODO wait target synced
-
-	return nil
+	// accelerate check
+	job.targetObserver.TriggerUpdateCurrentTarget(req.GetCollectionID())
+	// wait current target ready
+	select {
+	case <-ready:
+		return nil
+	case <-job.ctx.Done():
+		return job.ctx.Err()
+	}
 }

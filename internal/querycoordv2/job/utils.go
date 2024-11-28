@@ -17,7 +17,6 @@
 package job
 
 import (
-	"context"
 	"time"
 
 	"github.com/samber/lo"
@@ -26,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -61,25 +59,5 @@ func waitCollectionReleased(dist *meta.DistributionManager, checkerController *c
 		// trigger check more frequently
 		checkerController.Check()
 		time.Sleep(200 * time.Millisecond)
-	}
-}
-
-func WaitPartitionValid(ctx context.Context, targetMgr meta.TargetManagerInterface, collection int64, partition int64) error {
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			partitions, err := targetMgr.GetPartitions(ctx, collection, meta.CurrentTarget)
-			if err != nil {
-				return err
-			}
-			// current target contains partition
-			if funcutil.SliceContain(partitions, partition) {
-				return nil
-			}
-		case <-ctx.Done():
-			return ctx.Err()
-		}
 	}
 }

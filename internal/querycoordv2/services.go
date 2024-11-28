@@ -592,17 +592,13 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 		return merr.Status(err), nil
 	}
 
-	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.broker, s.targetMgr)
+	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.broker, s.targetObserver, s.targetMgr)
 	s.jobScheduler.Add(syncJob)
 	err := syncJob.Wait()
 	if err != nil {
 		log.Warn(failedMsg, zap.Error(err))
 		return merr.Status(err), nil
 	}
-
-	// try best to wait partition valid
-	// shall not block partition creation
-	// job.WaitPartitionValid(ctx, s.targetMgr, req.GetCollectionID(), req.GetPartitionID())
 
 	return merr.Success(), nil
 }

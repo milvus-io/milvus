@@ -19,6 +19,7 @@ package job
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -138,6 +140,7 @@ func (suite *JobSuite) SetupSuite() {
 		Return(nil, nil).Maybe()
 
 	suite.cluster = session.NewMockCluster(suite.T())
+	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
 	suite.proxyManager = proxyutil.NewMockProxyClientManager(suite.T())
 	suite.proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -1354,15 +1357,21 @@ func (suite *JobSuite) TestSyncNewCreatedPartition() {
 
 	// test sync new created partition
 	suite.loadAll()
+	collectionID := suite.collections[0]
+	// make collection able to get into loaded state
+	suite.updateChannelDist(ctx, collectionID)
+	suite.updateSegmentDist(collectionID, 3000)
+
 	req := &querypb.SyncNewCreatedPartitionRequest{
-		CollectionID: suite.collections[0],
+		CollectionID: collectionID,
 		PartitionID:  newPartition,
 	}
 	job := NewSyncNewCreatedPartitionJob(
-		context.Background(),
+		ctx,
 		req,
 		suite.meta,
 		suite.broker,
+		suite.targetObserver,
 		suite.targetMgr,
 	)
 	suite.scheduler.Add(job)
@@ -1378,10 +1387,11 @@ func (suite *JobSuite) TestSyncNewCreatedPartition() {
 		PartitionID:  newPartition,
 	}
 	job = NewSyncNewCreatedPartitionJob(
-		context.Background(),
+		ctx,
 		req,
 		suite.meta,
 		suite.broker,
+		suite.targetObserver,
 		suite.targetMgr,
 	)
 	suite.scheduler.Add(job)
@@ -1394,10 +1404,11 @@ func (suite *JobSuite) TestSyncNewCreatedPartition() {
 		PartitionID:  newPartition,
 	}
 	job = NewSyncNewCreatedPartitionJob(
-		context.Background(),
+		ctx,
 		req,
 		suite.meta,
 		suite.broker,
+		suite.targetObserver,
 		suite.targetMgr,
 	)
 	suite.scheduler.Add(job)
@@ -1536,6 +1547,48 @@ func (suite *JobSuite) assertPartitionReleased(collection int64, partitionIDs ..
 		segments := suite.segments[collection][partition]
 		for _, segment := range segments {
 			suite.Nil(suite.targetMgr.GetSealedSegment(ctx, collection, segment, meta.CurrentTarget))
+		}
+	}
+}
+
+func (suite *JobSuite) updateSegmentDist(collection, node int64) {
+	metaSegments := make([]*meta.Segment, 0)
+	for partition, segments := range suite.segments[collection] {
+		for _, segment := range segments {
+			metaSegments = append(metaSegments,
+				utils.CreateTestSegment(collection, partition, segment, node, 1, "test-channel"))
+		}
+	}
+	suite.dist.SegmentDistManager.Update(node, metaSegments...)
+}
+
+func (suite *JobSuite) updateChannelDist(ctx context.Context, collection int64) {
+	channels := suite.channels[collection]
+	segments := lo.Flatten(lo.Values(suite.segments[collection]))
+
+	replicas := suite.meta.ReplicaManager.GetByCollection(ctx, collection)
+	for _, replica := range replicas {
+		i := 0
+		for _, node := range replica.GetNodes() {
+			suite.dist.ChannelDistManager.Update(node, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
+				CollectionID: collection,
+				ChannelName:  channels[i],
+			}))
+			suite.dist.LeaderViewManager.Update(node, &meta.LeaderView{
+				ID:           node,
+				CollectionID: collection,
+				Channel:      channels[i],
+				Segments: lo.SliceToMap(segments, func(segment int64) (int64, *querypb.SegmentDist) {
+					return segment, &querypb.SegmentDist{
+						NodeID:  node,
+						Version: time.Now().Unix(),
+					}
+				}),
+			})
+			i++
+			if i >= len(channels) {
+				break
+			}
 		}
 	}
 }
