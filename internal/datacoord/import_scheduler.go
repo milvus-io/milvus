@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"sort"
 	"strconv"
 	"sync"
@@ -91,13 +92,13 @@ func (s *importScheduler) Close() {
 }
 
 func (s *importScheduler) process() {
-	jobs := s.imeta.GetJobBy()
+	jobs := s.imeta.GetJobBy(context.TODO())
 	sort.Slice(jobs, func(i, j int) bool {
 		return jobs[i].GetJobID() < jobs[j].GetJobID()
 	})
 	nodeSlots := s.peekSlots()
 	for _, job := range jobs {
-		tasks := s.imeta.GetTaskBy(WithJob(job.GetJobID()))
+		tasks := s.imeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()))
 		for _, task := range tasks {
 			switch task.GetState() {
 			case datapb.ImportTaskStateV2_Pending:
@@ -174,14 +175,14 @@ func (s *importScheduler) processPendingPreImport(task ImportTask, nodeID int64)
 		return
 	}
 	log.Info("processing pending preimport task...", WrapTaskLog(task)...)
-	job := s.imeta.GetJob(task.GetJobID())
+	job := s.imeta.GetJob(context.TODO(), task.GetJobID())
 	req := AssemblePreImportRequest(task, job)
 	err := s.cluster.PreImport(nodeID, req)
 	if err != nil {
 		log.Warn("preimport failed", WrapTaskLog(task, zap.Error(err))...)
 		return
 	}
-	err = s.imeta.UpdateTask(task.GetTaskID(),
+	err = s.imeta.UpdateTask(context.TODO(), task.GetTaskID(),
 		UpdateState(datapb.ImportTaskStateV2_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
@@ -198,7 +199,7 @@ func (s *importScheduler) processPendingImport(task ImportTask, nodeID int64) {
 		return
 	}
 	log.Info("processing pending import task...", WrapTaskLog(task)...)
-	job := s.imeta.GetJob(task.GetJobID())
+	job := s.imeta.GetJob(context.TODO(), task.GetJobID())
 	req, err := AssembleImportRequest(task, job, s.meta, s.alloc)
 	if err != nil {
 		log.Warn("assemble import request failed", WrapTaskLog(task, zap.Error(err))...)
@@ -209,7 +210,7 @@ func (s *importScheduler) processPendingImport(task ImportTask, nodeID int64) {
 		log.Warn("import failed", WrapTaskLog(task, zap.Error(err))...)
 		return
 	}
-	err = s.imeta.UpdateTask(task.GetTaskID(),
+	err = s.imeta.UpdateTask(context.TODO(), task.GetTaskID(),
 		UpdateState(datapb.ImportTaskStateV2_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
@@ -228,7 +229,7 @@ func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 	}
 	resp, err := s.cluster.QueryPreImport(task.GetNodeID(), req)
 	if err != nil {
-		updateErr := s.imeta.UpdateTask(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
+		updateErr := s.imeta.UpdateTask(context.TODO(), task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		if updateErr != nil {
 			log.Warn("failed to update preimport task state to pending", WrapTaskLog(task, zap.Error(updateErr))...)
 		}
@@ -236,7 +237,7 @@ func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
-		err = s.imeta.UpdateJob(task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),
+		err = s.imeta.UpdateJob(context.TODO(), task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),
 			UpdateJobReason(resp.GetReason()))
 		if err != nil {
 			log.Warn("failed to update job state to Failed", zap.Int64("jobID", task.GetJobID()), zap.Error(err))
@@ -248,7 +249,7 @@ func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		actions = append(actions, UpdateState(datapb.ImportTaskStateV2_Completed))
 	}
-	err = s.imeta.UpdateTask(task.GetTaskID(), actions...)
+	err = s.imeta.UpdateTask(context.TODO(), task.GetTaskID(), actions...)
 	if err != nil {
 		log.Warn("update preimport task failed", WrapTaskLog(task, zap.Error(err))...)
 		return
@@ -269,7 +270,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 	}
 	resp, err := s.cluster.QueryImport(task.GetNodeID(), req)
 	if err != nil {
-		updateErr := s.imeta.UpdateTask(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
+		updateErr := s.imeta.UpdateTask(context.TODO(), task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		if updateErr != nil {
 			log.Warn("failed to update import task state to pending", WrapTaskLog(task, zap.Error(updateErr))...)
 		}
@@ -277,7 +278,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
-		err = s.imeta.UpdateJob(task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),
+		err = s.imeta.UpdateJob(context.TODO(), task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),
 			UpdateJobReason(resp.GetReason()))
 		if err != nil {
 			log.Warn("failed to update job state to Failed", zap.Int64("jobID", task.GetJobID()), zap.Error(err))
@@ -293,13 +294,13 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 	}
 
 	for _, info := range resp.GetImportSegmentsInfo() {
-		segment := s.meta.GetSegment(info.GetSegmentID())
+		segment := s.meta.GetSegment(context.TODO(), info.GetSegmentID())
 		if info.GetImportedRows() <= segment.GetNumOfRows() {
 			continue // rows not changed, no need to update
 		}
 		diff := info.GetImportedRows() - segment.GetNumOfRows()
 		op := UpdateImportedRows(info.GetSegmentID(), info.GetImportedRows())
-		err = s.meta.UpdateSegmentsInfo(op)
+		err = s.meta.UpdateSegmentsInfo(context.TODO(), op)
 		if err != nil {
 			log.Warn("update import segment rows failed", WrapTaskLog(task, zap.Error(err))...)
 			return
@@ -321,14 +322,14 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 			}
 			op1 := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), info.GetDeltalogs())
 			op2 := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
-			err = s.meta.UpdateSegmentsInfo(op1, op2)
+			err = s.meta.UpdateSegmentsInfo(context.TODO(), op1, op2)
 			if err != nil {
 				log.Warn("update import segment binlogs failed", WrapTaskLog(task, zap.Error(err))...)
 				return
 			}
 		}
 		completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
-		err = s.imeta.UpdateTask(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))
+		err = s.imeta.UpdateTask(context.TODO(), task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))
 		if err != nil {
 			log.Warn("update import task failed", WrapTaskLog(task, zap.Error(err))...)
 			return
@@ -355,14 +356,14 @@ func (s *importScheduler) processFailed(task ImportTask) {
 		segments := append(originSegmentIDs, statsSegmentIDs...)
 		for _, segment := range segments {
 			op := UpdateStatusOperator(segment, commonpb.SegmentState_Dropped)
-			err := s.meta.UpdateSegmentsInfo(op)
+			err := s.meta.UpdateSegmentsInfo(context.TODO(), op)
 			if err != nil {
 				log.Warn("drop import segment failed", WrapTaskLog(task, zap.Int64("segment", segment), zap.Error(err))...)
 				return
 			}
 		}
 		if len(segments) > 0 {
-			err := s.imeta.UpdateTask(task.GetTaskID(), UpdateSegmentIDs(nil), UpdateStatsSegmentIDs(nil))
+			err := s.imeta.UpdateTask(context.TODO(), task.GetTaskID(), UpdateSegmentIDs(nil), UpdateStatsSegmentIDs(nil))
 			if err != nil {
 				log.Warn("update import task segments failed", WrapTaskLog(task, zap.Error(err))...)
 			}

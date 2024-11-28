@@ -140,7 +140,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		return false
 	}
 
-	segment := dependency.meta.GetSegment(segIndex.SegmentID)
+	segment := dependency.meta.GetSegment(ctx, segIndex.SegmentID)
 	if !isSegmentHealthy(segment) || !dependency.meta.indexMeta.IsIndexExist(segIndex.CollectionID, segIndex.IndexID) {
 		log.Ctx(ctx).Info("task is no need to build index, remove it", zap.Int64("taskID", it.taskID))
 		it.SetState(indexpb.JobState_JobStateNone, "task is no need to build index")

@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -200,6 +201,10 @@ func (o *idfOracle) SyncDistribution(snapshot *snapshot) {
 
 	for _, item := range sealed {
 		for _, segment := range item.Segments {
+			if segment.Level == datapb.SegmentLevel_L0 {
+				continue
+			}
+
 			if stats, ok := o.sealed[segment.SegmentID]; ok {
 				stats.targetVersion = segment.TargetVersion
 			} else {

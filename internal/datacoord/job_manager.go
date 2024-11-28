@@ -85,7 +85,7 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 
 		case segID := <-getStatsTaskChSingleton():
 			log.Info("receive new segment to trigger stats task", zap.Int64("segmentID", segID))
-			segment := jm.mt.GetSegment(segID)
+			segment := jm.mt.GetSegment(jm.ctx, segID)
 			if segment == nil {
 				log.Warn("segment is not exist, no need to do stats task", zap.Int64("segmentID", segID))
 				continue
@@ -96,7 +96,7 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 }
 
 func (jm *statsJobManager) triggerSortStatsTask() {
-	segments := jm.mt.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
+	segments := jm.mt.SelectSegments(jm.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
 		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting()
 	}))
 	for _, segment := range segments {
@@ -156,7 +156,7 @@ func (jm *statsJobManager) triggerTextStatsTask() {
 			}
 			needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 		}
-		segments := jm.mt.SelectSegments(WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
+		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
 			return needDoTextIndex(seg, needTriggerFieldIDs)
 		}))
 
@@ -180,7 +180,7 @@ func (jm *statsJobManager) triggerBM25StatsTask() {
 				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 			}
 		}
-		segments := jm.mt.SelectSegments(WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
+		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
 			return needDoBM25(seg, needTriggerFieldIDs)
 		}))
 
@@ -229,7 +229,7 @@ func (jm *statsJobManager) cleanupStatsTasksLoop() {
 func (jm *statsJobManager) SubmitStatsTask(originSegmentID, targetSegmentID int64,
 	subJobType indexpb.StatsSubJob, canRecycle bool,
 ) error {
-	originSegment := jm.mt.GetHealthySegment(originSegmentID)
+	originSegment := jm.mt.GetHealthySegment(jm.ctx, originSegmentID)
 	if originSegment == nil {
 		return merr.WrapErrSegmentNotFound(originSegmentID)
 	}

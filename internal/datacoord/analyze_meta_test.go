@@ -136,7 +136,7 @@ func (s *AnalyzeMetaSuite) Test_AnalyzeMeta() {
 	})
 
 	s.Run("DropAnalyzeTask", func() {
-		err := am.DropAnalyzeTask(7)
+		err := am.DropAnalyzeTask(ctx, 7)
 		s.NoError(err)
 		s.Equal(6, len(am.GetAllTasks()))
 	})
@@ -212,7 +212,7 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 	})
 
 	s.Run("DropAnalyzeTask", func() {
-		err := am.DropAnalyzeTask(1)
+		err := am.DropAnalyzeTask(ctx, 1)
 		s.Error(err)
 		s.NotNil(am.GetTask(1))
 	})

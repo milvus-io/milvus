@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -49,6 +50,9 @@ type LocalClientRoleConfig struct {
 
 // EnableLocalClientRole init localable roles
 func EnableLocalClientRole(cfg *LocalClientRoleConfig) {
+	if !paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
+		return
+	}
 	if cfg.ServerType != typeutil.StandaloneRole && cfg.ServerType != typeutil.MixtureRole {
 		return
 	}

@@ -1,6 +1,7 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 
 	"github.com/samber/lo"
@@ -33,7 +34,7 @@ func (s *MixCompactionTaskSuite) SetupTest() {
 func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 	channel := "Ch-1"
 	binLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
-	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
 		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            segID,
 			Level:         datapb.SegmentLevel_L1,
@@ -69,7 +70,7 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 	channel := "Ch-1"
 	s.Run("segment_not_found", func() {
-		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
 			return nil
 		}).Once()
 		task := newMixCompactionTask(&datapb.CompactionTask{

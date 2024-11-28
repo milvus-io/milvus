@@ -56,6 +56,7 @@ type deleteTask struct {
 	primaryKeys      *schemapb.IDs
 	collectionID     UniqueID
 	partitionID      UniqueID
+	dbID             UniqueID
 	partitionKeyMode bool
 
 	// set by scheduler
@@ -148,14 +149,11 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 
 	result, numRows, err := repackDeleteMsgByHash(
 		ctx,
-		dt.primaryKeys,
-		dt.vChannels,
-		dt.idAllocator,
-		dt.ts,
-		dt.collectionID,
-		dt.req.GetCollectionName(),
-		dt.partitionID,
-		dt.req.GetPartitionName(),
+		dt.primaryKeys, dt.vChannels,
+		dt.idAllocator, dt.ts,
+		dt.collectionID, dt.req.GetCollectionName(),
+		dt.partitionID, dt.req.GetPartitionName(),
+		dt.req.GetDbName(),
 	)
 	if err != nil {
 		return err
@@ -204,6 +202,7 @@ func repackDeleteMsgByHash(
 	collectionName string,
 	partitionID int64,
 	partitionName string,
+	dbName string,
 ) (map[uint32][]*msgstream.DeleteMsg, int64, error) {
 	maxSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
 	hashValues := typeutil.HashPK2Channels(primaryKeys, vChannels)
@@ -233,6 +232,7 @@ func repackDeleteMsgByHash(
 				PartitionID:    partitionID,
 				CollectionName: collectionName,
 				PartitionName:  partitionName,
+				DbName:         dbName,
 				PrimaryKeys:    &schemapb.IDs{},
 				ShardName:      vchannel,
 			},
@@ -413,6 +413,7 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs) 
 		partitionKeyMode: dr.partitionKeyMode,
 		vChannels:        dr.vChannels,
 		primaryKeys:      primaryKeys,
+		dbID:             dr.dbID,
 	}
 	var enqueuedTask task = dt
 	if streamingutil.IsStreamingServiceEnabled() {

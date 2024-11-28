@@ -916,3 +916,24 @@ func TestChannelConvert(t *testing.T) {
 		assert.Equal(t, "by-dev-rootcoord-dml_2_1001v0", channel)
 	})
 }
+
+func TestString2KeyValuePair(t *testing.T) {
+	t.Run("normal", func(t *testing.T) {
+		kvs, err := String2KeyValuePair("{\"key\": \"value\"}")
+		assert.NoError(t, err)
+		assert.Len(t, kvs, 1)
+		assert.Equal(t, "key", kvs[0].Key)
+		assert.Equal(t, "value", kvs[0].Value)
+	})
+
+	t.Run("err", func(t *testing.T) {
+		_, err := String2KeyValuePair("{aa}")
+		assert.Error(t, err)
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		kvs, err := String2KeyValuePair("{}")
+		assert.NoError(t, err)
+		assert.Len(t, kvs, 0)
+	})
+}

@@ -87,7 +87,7 @@ type Manager interface {
 	// GetFlushableSegments returns flushable segment ids
 	GetFlushableSegments(ctx context.Context, channel string, ts Timestamp) ([]UniqueID, error)
 	// ExpireAllocations notifies segment status to expire old allocations
-	ExpireAllocations(channel string, ts Timestamp)
+	ExpireAllocations(ctx context.Context, channel string, ts Timestamp)
 	// DropSegmentsOfChannel drops all segments in a channel
 	DropSegmentsOfChannel(ctx context.Context, channel string)
 }
@@ -302,7 +302,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	segmentInfos := make([]*SegmentInfo, 0)
 	growing, _ := s.channel2Growing.Get(channelName)
 	growing.Range(func(segmentID int64) bool {
-		segment := s.meta.GetHealthySegment(segmentID)
+		segment := s.meta.GetHealthySegment(context.TODO(), segmentID)
 		if segment == nil {
 			log.Warn("failed to get segment, remove it", zap.String("channel", channelName), zap.Int64("segmentID", segmentID))
 			growing.Remove(segmentID)
@@ -441,7 +441,7 @@ func (s *SegmentManager) DropSegment(ctx context.Context, channel string, segmen
 		sealed.Remove(segmentID)
 	}
 
-	segment := s.meta.GetHealthySegment(segmentID)
+	segment := s.meta.GetHealthySegment(context.TODO(), segmentID)
 	if segment == nil {
 		log.Warn("Failed to get segment", zap.Int64("id", segmentID))
 		return
@@ -486,7 +486,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, channel string, se
 	ret = append(ret, sealedSegments...)
 
 	for _, id := range growingSegments {
-		if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
+		if err := s.meta.SetState(ctx, id, commonpb.SegmentState_Sealed); err != nil {
 			return nil, err
 		}
 		sealed.Insert(id)
@@ -505,12 +505,12 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 	defer s.channelLock.Unlock(channel)
 
 	// TODO:move tryToSealSegment and dropEmptySealedSegment outside
-	if err := s.tryToSealSegment(t, channel); err != nil {
+	if err := s.tryToSealSegment(ctx, t, channel); err != nil {
 		return nil, err
 	}
 
 	// TODO: It's too frequent; perhaps each channel could check once per minute instead.
-	s.cleanupSealedSegment(t, channel)
+	s.cleanupSealedSegment(ctx, t, channel)
 
 	sealed, ok := s.channel2Sealed.Get(channel)
 	if !ok {
@@ -519,7 +519,7 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 
 	ret := make([]UniqueID, 0, sealed.Len())
 	sealed.Range(func(segmentID int64) bool {
-		info := s.meta.GetHealthySegment(segmentID)
+		info := s.meta.GetHealthySegment(ctx, segmentID)
 		if info == nil {
 			return true
 		}
@@ -533,7 +533,7 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 }
 
 // ExpireAllocations notify segment status to expire old allocations
-func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) {
+func (s *SegmentManager) ExpireAllocations(ctx context.Context, channel string, ts Timestamp) {
 	s.channelLock.Lock(channel)
 	defer s.channelLock.Unlock(channel)
 
@@ -543,7 +543,7 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) {
 	}
 
 	growing.Range(func(id int64) bool {
-		segment := s.meta.GetHealthySegment(id)
+		segment := s.meta.GetHealthySegment(ctx, id)
 		if segment == nil {
 			log.Warn("failed to get segment, remove it", zap.String("channel", channel), zap.Int64("segmentID", id))
 			growing.Remove(id)
@@ -563,13 +563,13 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) {
 	})
 }
 
-func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
+func (s *SegmentManager) cleanupSealedSegment(ctx context.Context, ts Timestamp, channel string) {
 	sealed, ok := s.channel2Sealed.Get(channel)
 	if !ok {
 		return
 	}
 	sealed.Range(func(id int64) bool {
-		segment := s.meta.GetHealthySegment(id)
+		segment := s.meta.GetHealthySegment(ctx, id)
 		if segment == nil {
 			log.Warn("failed to get segment, remove it", zap.String("channel", channel), zap.Int64("segmentID", id))
 			sealed.Remove(id)
@@ -590,7 +590,7 @@ func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
 }
 
 // tryToSealSegment applies segment & channel seal policies
-func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
+func (s *SegmentManager) tryToSealSegment(ctx context.Context, ts Timestamp, channel string) error {
 	growing, ok := s.channel2Growing.Get(channel)
 	if !ok {
 		return nil
@@ -602,7 +602,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 
 	var setStateErr error
 	growing.Range(func(id int64) bool {
-		info := s.meta.GetHealthySegment(id)
+		info := s.meta.GetHealthySegment(ctx, id)
 		if info == nil {
 			return true
 		}
@@ -611,7 +611,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 		for _, policy := range s.segmentSealPolicies {
 			if shouldSeal, reason := policy.ShouldSeal(info, ts); shouldSeal {
 				log.Info("Seal Segment for policy matched", zap.Int64("segmentID", info.GetID()), zap.String("reason", reason))
-				if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
+				if err := s.meta.SetState(ctx, id, commonpb.SegmentState_Sealed); err != nil {
 					setStateErr = err
 					return false
 				}
@@ -634,7 +634,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 			if _, ok := sealedSegments[info.GetID()]; ok {
 				continue
 			}
-			if err := s.meta.SetState(info.GetID(), commonpb.SegmentState_Sealed); err != nil {
+			if err := s.meta.SetState(ctx, info.GetID(), commonpb.SegmentState_Sealed); err != nil {
 				return err
 			}
 			log.Info("seal segment for channel seal policy matched",
@@ -658,7 +658,7 @@ func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel stri
 		return
 	}
 	growing.Range(func(sid int64) bool {
-		segment := s.meta.GetHealthySegment(sid)
+		segment := s.meta.GetHealthySegment(ctx, sid)
 		if segment == nil {
 			log.Warn("failed to get segment, remove it", zap.String("channel", channel), zap.Int64("segmentID", sid))
 			growing.Remove(sid)

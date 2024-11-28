@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -263,6 +264,7 @@ type partitionInfo struct {
 	partitionID         typeutil.UniqueID
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
+	isDefault           bool
 }
 
 func (info *collectionInfo) isCollectionCached() bool {
@@ -350,6 +352,7 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 	if err != nil {
 		return err
 	}
+	expr.Register("cache", globalMetaCache)
 
 	// The privilege info is a little more. And to get this info, the query operation of involving multiple table queries is required.
 	resp, err := rootCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
@@ -425,12 +428,14 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, merr.WrapErrParameterInvalidMsg("partition names and timestamps number is not aligned, response: %s", partitions.String())
 	}
 
+	defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
 	infos := lo.Map(partitions.GetPartitionIDs(), func(partitionID int64, idx int) *partitionInfo {
 		return &partitionInfo{
 			name:                partitions.PartitionNames[idx],
 			partitionID:         partitions.PartitionIDs[idx],
 			createdTimestamp:    partitions.CreatedTimestamps[idx],
 			createdUtcTimestamp: partitions.CreatedUtcTimestamps[idx],
+			isDefault:           partitions.PartitionNames[idx] == defaultPartitionName,
 		}
 	})
 
@@ -626,6 +631,14 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionNa
 	partitions, err := m.GetPartitionInfos(ctx, database, collectionName)
 	if err != nil {
 		return nil, err
+	}
+
+	if partitionName == "" {
+		for _, info := range partitions.partitionInfos {
+			if info.isDefault {
+				return info, nil
+			}
+		}
 	}
 
 	info, ok := partitions.name2Info[partitionName]

@@ -550,14 +550,14 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			s.mt.catalog = catalog
 			s.mt.statsTaskMeta.catalog = catalog
 			updateStateOp := UpdateStatusOperator(s.segID, commonpb.SegmentState_Flushed)
-			err := s.mt.UpdateSegmentsInfo(updateStateOp)
+			err := s.mt.UpdateSegmentsInfo(context.TODO(), updateStateOp)
 			s.NoError(err)
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 
 			s.NoError(st.SetJobInfo(s.mt))
-			s.NotNil(s.mt.GetHealthySegment(s.targetID))
+			s.NotNil(s.mt.GetHealthySegment(context.TODO(), s.targetID))
 			s.Equal(indexpb.JobState_JobStateFinished, s.mt.statsTaskMeta.tasks[s.taskID].GetState())
-			s.Equal(datapb.SegmentLevel_L2, s.mt.GetHealthySegment(s.targetID).GetLevel())
+			s.Equal(datapb.SegmentLevel_L2, s.mt.GetHealthySegment(context.TODO(), s.targetID).GetLevel())
 		})
 	})
 }

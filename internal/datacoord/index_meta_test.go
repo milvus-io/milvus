@@ -283,7 +283,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 			UserIndexParams: userIndexParams,
 		}
 
-		err = m.CreateIndex(index)
+		err = m.CreateIndex(context.TODO(), index)
 		assert.NoError(t, err)
 
 		tmpIndexID, err = m.CanCreateIndex(req)
@@ -481,7 +481,7 @@ func TestMeta_CreateIndex(t *testing.T) {
 		).Return(nil)
 
 		m := newSegmentIndexMeta(sc)
-		err := m.CreateIndex(index)
+		err := m.CreateIndex(context.TODO(), index)
 		assert.NoError(t, err)
 	})
 
@@ -493,7 +493,7 @@ func TestMeta_CreateIndex(t *testing.T) {
 		).Return(errors.New("fail"))
 
 		m := newSegmentIndexMeta(ec)
-		err := m.CreateIndex(index)
+		err := m.CreateIndex(context.TODO(), index)
 		assert.Error(t, err)
 	})
 }
@@ -534,13 +534,13 @@ func TestMeta_AddSegmentIndex(t *testing.T) {
 	}
 
 	t.Run("save meta fail", func(t *testing.T) {
-		err := m.AddSegmentIndex(segmentIndex)
+		err := m.AddSegmentIndex(context.TODO(), segmentIndex)
 		assert.Error(t, err)
 	})
 
 	t.Run("success", func(t *testing.T) {
 		m.catalog = sc
-		err := m.AddSegmentIndex(segmentIndex)
+		err := m.AddSegmentIndex(context.TODO(), segmentIndex)
 		assert.NoError(t, err)
 	})
 }
@@ -848,19 +848,19 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 
 	t.Run("fail", func(t *testing.T) {
 		m.catalog = ec
-		err := m.MarkIndexAsDeleted(collID, []UniqueID{indexID, indexID + 1, indexID + 2})
+		err := m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID, indexID + 1, indexID + 2})
 		assert.Error(t, err)
 	})
 
 	t.Run("success", func(t *testing.T) {
 		m.catalog = sc
-		err := m.MarkIndexAsDeleted(collID, []UniqueID{indexID, indexID + 1, indexID + 2})
+		err := m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID, indexID + 1, indexID + 2})
 		assert.NoError(t, err)
 
-		err = m.MarkIndexAsDeleted(collID, []UniqueID{indexID, indexID + 1, indexID + 2})
+		err = m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID, indexID + 1, indexID + 2})
 		assert.NoError(t, err)
 
-		err = m.MarkIndexAsDeleted(collID+1, []UniqueID{indexID, indexID + 1, indexID + 2})
+		err = m.MarkIndexAsDeleted(context.TODO(), collID+1, []UniqueID{indexID, indexID + 1, indexID + 2})
 		assert.NoError(t, err)
 	})
 }
@@ -1436,7 +1436,7 @@ func TestRemoveIndex(t *testing.T) {
 			Return(expectedErr)
 
 		m := newSegmentIndexMeta(catalog)
-		err := m.RemoveIndex(collID, indexID)
+		err := m.RemoveIndex(context.TODO(), collID, indexID)
 		assert.Error(t, err)
 		assert.EqualError(t, err, "error")
 	})
@@ -1456,7 +1456,7 @@ func TestRemoveIndex(t *testing.T) {
 			},
 		}
 
-		err := m.RemoveIndex(collID, indexID)
+		err := m.RemoveIndex(context.TODO(), collID, indexID)
 		assert.NoError(t, err)
 		assert.Equal(t, len(m.indexes), 0)
 	})
@@ -1471,7 +1471,7 @@ func TestRemoveSegmentIndex(t *testing.T) {
 			Return(expectedErr)
 
 		m := newSegmentIndexMeta(catalog)
-		err := m.RemoveSegmentIndex(0, 0, 0, 0, 0)
+		err := m.RemoveSegmentIndex(context.TODO(), 0, 0, 0, 0, 0)
 
 		assert.Error(t, err)
 		assert.EqualError(t, err, "error")
@@ -1493,7 +1493,7 @@ func TestRemoveSegmentIndex(t *testing.T) {
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
 		}
 
-		err := m.RemoveSegmentIndex(collID, partID, segID, indexID, buildID)
+		err := m.RemoveSegmentIndex(context.TODO(), collID, partID, segID, indexID, buildID)
 		assert.NoError(t, err)
 
 		assert.Equal(t, len(m.segmentIndexes), 0)
