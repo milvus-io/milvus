@@ -250,7 +250,7 @@ Reference to cite when you use Milvus in a research paper:
 }
 ```
 <!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-419-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-420-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
@@ -295,6 +295,7 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/Hard-Coder05"><img src="https://avatars.githubusercontent.com/u/54059881?v=4" width="30px" /></a>
 <a href="https://github.com/Heisenberg-Y"><img src="https://avatars.githubusercontent.com/u/35055583?v=4" width="30px" /></a>
 <a href="https://github.com/HesterG"><img src="https://avatars.githubusercontent.com/u/17645053?v=4" width="30px" /></a>
+<a href="https://github.com/HuaSheng2000"><img src="https://avatars.githubusercontent.com/u/34791273?v=4" width="30px" /></a>
 <a href="https://github.com/HuangHua"><img src="https://avatars.githubusercontent.com/u/2274405?v=4" width="30px" /></a>
 <a href="https://github.com/Ice-YcY"><img src="https://avatars.githubusercontent.com/u/85332705?v=4" width="30px" /></a>
 <a href="https://github.com/JackLCL"><img src="https://avatars.githubusercontent.com/u/53512883?v=4" width="30px" /></a>
