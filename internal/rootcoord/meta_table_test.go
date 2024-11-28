@@ -537,6 +537,24 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 }
 
 func TestMetaTable_GetCollectionByName(t *testing.T) {
+	t.Run("db not found", func(t *testing.T) {
+		meta := &MetaTable{
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					State:      pb.CollectionState_CollectionCreated,
+					CreateTime: 99,
+					Partitions: []*model.Partition{},
+				},
+			},
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
+			},
+		}
+		ctx := context.Background()
+		_, err := meta.GetCollectionByName(ctx, "not_exist", "name", 101)
+		assert.Error(t, err)
+	})
 	t.Run("get by alias", func(t *testing.T) {
 		meta := &MetaTable{
 			aliases: newNameDb(),
@@ -549,6 +567,9 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
 					},
 				},
+			},
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 		}
 		meta.aliases.insert(util.DefaultDBName, "alias", 100)
@@ -573,6 +594,9 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
 					},
 				},
+			},
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 		}
 		meta.names.insert(util.DefaultDBName, "name", 100)
@@ -661,7 +685,13 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 
 	t.Run("get latest version", func(t *testing.T) {
 		ctx := context.Background()
-		meta := &MetaTable{names: newNameDb(), aliases: newNameDb()}
+		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
 		_, err := meta.GetCollectionByName(ctx, "", "not_exist", typeutil.MaxTimestamp)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
@@ -1879,6 +1909,9 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 			aliases: newNameDb(),
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				1: {CollectionID: 1},
+			},
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 		}
 
