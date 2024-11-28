@@ -302,7 +302,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	segmentInfos := make([]*SegmentInfo, 0)
 	growing, _ := s.channel2Growing.Get(channelName)
 	growing.Range(func(segmentID int64) bool {
-		segment := s.meta.GetHealthySegment(context.TODO(), segmentID)
+		segment := s.meta.GetHealthySegment(ctx, segmentID)
 		if segment == nil {
 			log.Warn("failed to get segment, remove it", zap.String("channel", channelName), zap.Int64("segmentID", segmentID))
 			growing.Remove(segmentID)
@@ -441,7 +441,7 @@ func (s *SegmentManager) DropSegment(ctx context.Context, channel string, segmen
 		sealed.Remove(segmentID)
 	}
 
-	segment := s.meta.GetHealthySegment(context.TODO(), segmentID)
+	segment := s.meta.GetHealthySegment(ctx, segmentID)
 	if segment == nil {
 		log.Warn("Failed to get segment", zap.Int64("id", segmentID))
 		return
@@ -578,7 +578,7 @@ func (s *SegmentManager) cleanupSealedSegment(ctx context.Context, ts Timestamp,
 		// Check if segment is empty
 		if segment.GetLastExpireTime() <= ts && segment.currRows == 0 {
 			log.Info("remove empty sealed segment", zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id))
-			if err := s.meta.SetState(id, commonpb.SegmentState_Dropped); err != nil {
+			if err := s.meta.SetState(ctx, id, commonpb.SegmentState_Dropped); err != nil {
 				log.Warn("failed to set segment state to dropped", zap.String("channel", channel),
 					zap.Int64("segmentID", id), zap.Error(err))
 			} else {

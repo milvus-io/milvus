@@ -214,9 +214,9 @@ func (_c *MockManager_DropSegmentsOfChannel_Call) RunAndReturn(run func(context.
 	return _c
 }
 
-// ExpireAllocations provides a mock function with given fields: channel, ts
-func (_m *MockManager) ExpireAllocations(channel string, ts uint64) {
-	_m.Called(channel, ts)
+// ExpireAllocations provides a mock function with given fields: ctx, channel, ts
+func (_m *MockManager) ExpireAllocations(ctx context.Context, channel string, ts uint64) {
+	_m.Called(ctx, channel, ts)
 }
 
 // MockManager_ExpireAllocations_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ExpireAllocations'
@@ -225,15 +225,16 @@ type MockManager_ExpireAllocations_Call struct {
 }
 
 // ExpireAllocations is a helper method to define mock.On call
+//   - ctx context.Context
 //   - channel string
 //   - ts uint64
-func (_e *MockManager_Expecter) ExpireAllocations(channel interface{}, ts interface{}) *MockManager_ExpireAllocations_Call {
-	return &MockManager_ExpireAllocations_Call{Call: _e.mock.On("ExpireAllocations", channel, ts)}
+func (_e *MockManager_Expecter) ExpireAllocations(ctx interface{}, channel interface{}, ts interface{}) *MockManager_ExpireAllocations_Call {
+	return &MockManager_ExpireAllocations_Call{Call: _e.mock.On("ExpireAllocations", ctx, channel, ts)}
 }
 
-func (_c *MockManager_ExpireAllocations_Call) Run(run func(channel string, ts uint64)) *MockManager_ExpireAllocations_Call {
+func (_c *MockManager_ExpireAllocations_Call) Run(run func(ctx context.Context, channel string, ts uint64)) *MockManager_ExpireAllocations_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(uint64))
+		run(args[0].(context.Context), args[1].(string), args[2].(uint64))
 	})
 	return _c
 }
@@ -243,7 +244,7 @@ func (_c *MockManager_ExpireAllocations_Call) Return() *MockManager_ExpireAlloca
 	return _c
 }
 
-func (_c *MockManager_ExpireAllocations_Call) RunAndReturn(run func(string, uint64)) *MockManager_ExpireAllocations_Call {
+func (_c *MockManager_ExpireAllocations_Call) RunAndReturn(run func(context.Context, string, uint64)) *MockManager_ExpireAllocations_Call {
 	_c.Call.Return(run)
 	return _c
 }

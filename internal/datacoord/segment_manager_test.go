@@ -857,7 +857,7 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 				channel2Sealed:  typeutil.NewConcurrentMap[string, typeutil.UniqueSet](),
 			}
 			for _, segmentID := range tt.fields.segments {
-				segmentInfo := tt.fields.meta.GetSegment(segmentID)
+				segmentInfo := tt.fields.meta.GetSegment(context.Background(), segmentID)
 				channel := tt.args.channel
 				if segmentInfo != nil {
 					channel = segmentInfo.GetInsertChannel()
