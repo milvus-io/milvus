@@ -456,7 +456,6 @@ func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leade
 		ReplicaID:    replicaID,
 		Channel:      leaderView.Channel,
 		Actions:      diffs,
-		// Schema:       collectionInfo.GetSchema(),
 		LoadMeta: &querypb.LoadMetaInfo{
 			LoadType:      ob.meta.GetLoadType(ctx, leaderView.CollectionID),
 			CollectionID:  leaderView.CollectionID,
