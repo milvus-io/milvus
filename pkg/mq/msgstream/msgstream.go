@@ -21,6 +21,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/common"
@@ -91,14 +92,14 @@ func GetReplicateConfig(replicateID, dbName, colName string) *ReplicateConfig {
 	replicateConfig := &ReplicateConfig{
 		ReplicateID: replicateID,
 		CheckFunc: func(msg *ReplicateMsg) bool {
+			if !msg.IsEnd {
+				return false
+			}
 			log.Info("check replicate msg",
 				zap.String("replicateID", replicateID),
 				zap.String("dbName", dbName),
 				zap.String("colName", colName),
 				zap.Any("msg", msg))
-			if !msg.IsEnd {
-				return false
-			}
 			if msg.IsCluster {
 				return true
 			}
@@ -106,6 +107,19 @@ func GetReplicateConfig(replicateID, dbName, colName string) *ReplicateConfig {
 		},
 	}
 	return replicateConfig
+}
+
+func GetReplicateID(msg TsMsg) string {
+	msgBase, ok := msg.(interface{ GetBase() *commonpb.MsgBase })
+	if !ok {
+		log.Warn("fail to get msg base, please check it", zap.Any("type", msg.Type()))
+		return ""
+	}
+	return msgBase.GetBase().GetReplicateInfo().GetReplicateID()
+}
+
+func MatchReplicateID(msg TsMsg, replicateID string) bool {
+	return GetReplicateID(msg) == replicateID
 }
 
 type Factory interface {

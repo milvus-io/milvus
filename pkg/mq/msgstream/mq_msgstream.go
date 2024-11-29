@@ -485,10 +485,6 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 				log.Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
 				continue
 			}
-			isMatch, _ := ms.checkReplicateID(tsMsg)
-			if !isMatch {
-				continue
-			}
 			pos := tsMsg.Position()
 			tsMsg.SetPosition(&MsgPosition{
 				ChannelName: pos.ChannelName,
@@ -764,18 +760,15 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 							timeTickMsg = v
 							continue
 						}
-						if v.Type() == commonpb.MsgType_Replicate {
-							containsEndBufferMsg = true
-							continue
-						}
-						if v.EndTs() <= currTs {
+						if v.EndTs() <= currTs ||
+							GetReplicateID(v) != "" {
 							size += uint64(v.Size())
 							timeTickBuf = append(timeTickBuf, v)
 						} else {
 							tempBuffer = append(tempBuffer, v)
 						}
 						// when drop collection, force to exit the buffer loop
-						if v.Type() == commonpb.MsgType_DropCollection {
+						if v.Type() == commonpb.MsgType_DropCollection || v.Type() == commonpb.MsgType_Replicate {
 							containsEndBufferMsg = true
 						}
 					}
@@ -866,13 +859,6 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 			if err != nil {
 				log.Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
 				continue
-			}
-			isMatch, isReplicate := ms.checkReplicateID(tsMsg)
-			if !isMatch {
-				continue
-			}
-			if isReplicate && ms.checkReplicateEndMsg(tsMsg) {
-				log.Info("replicate end message received")
 			}
 
 			ms.chanMsgBufMutex.Lock()
@@ -1007,12 +993,9 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 				if err != nil {
 					return fmt.Errorf("failed to unmarshal tsMsg, err %s", err.Error())
 				}
-				isMatch, isReplicate := ms.checkReplicateID(tsMsg)
-				if !isMatch {
+				// skip the replicate msg because it must have been consumed
+				if GetReplicateID(tsMsg) != "" {
 					continue
-				}
-				if isReplicate && ms.checkReplicateEndMsg(tsMsg) {
-					log.Info("replicate end msg in the seek loop", zap.String("channel", mp.ChannelName))
 				}
 				if tsMsg.Type() == commonpb.MsgType_TimeTick && tsMsg.BeginTs() >= mp.Timestamp {
 					runLoop = false
