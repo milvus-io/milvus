@@ -31,12 +31,16 @@ type ResultSetSuite struct {
 
 func (s *ResultSetSuite) TestResultsetUnmarshal() {
 	type MyData struct {
-		A int64     `milvus:"name:id"`
-		V []float32 `milvus:"name:vector"`
+		A     int64     `milvus:"name:id"`
+		V     []float32 `milvus:"name:vector"`
+		Fp16V []byte    `milvus:"name:fp16_vector"`
+		Bf16V []byte    `milvus:"name:bf16_vector"`
 	}
 	type OtherData struct {
-		A string    `milvus:"name:id"`
-		V []float32 `milvus:"name:vector"`
+		A     string    `milvus:"name:id"`
+		V     []float32 `milvus:"name:vector"`
+		Fp16V []byte    `milvus:"name:fp16_vector"`
+		Bf16V []byte    `milvus:"name:bf16_vector"`
 	}
 
 	var (
@@ -51,6 +55,8 @@ func (s *ResultSetSuite) TestResultsetUnmarshal() {
 	rs := DataSet([]column.Column{
 		column.NewColumnInt64("id", idData),
 		column.NewColumnFloatVector("vector", 2, vectorData),
+		column.NewColumnFloat16VectorFromFp32Vector("fp16_vector", 2, vectorData),
+		column.NewColumnBFloat16VectorFromFp32Vector("bf16_vector", 2, vectorData),
 	})
 	err := rs.Unmarshal([]MyData{})
 	s.Error(err)
@@ -66,6 +72,8 @@ func (s *ResultSetSuite) TestResultsetUnmarshal() {
 	for idx, row := range ptrReceiver {
 		s.Equal(row.A, idData[idx])
 		s.Equal(row.V, vectorData[idx])
+		s.Equal(entity.Float16Vector(row.Fp16V), entity.FloatVector(vectorData[idx]).ToFloat16Vector())
+		s.Equal(entity.BFloat16Vector(row.Bf16V), entity.FloatVector(vectorData[idx]).ToBFloat16Vector())
 	}
 
 	var otherReceiver []*OtherData
@@ -75,12 +83,16 @@ func (s *ResultSetSuite) TestResultsetUnmarshal() {
 
 func (s *ResultSetSuite) TestSearchResultUnmarshal() {
 	type MyData struct {
-		A int64     `milvus:"name:id"`
-		V []float32 `milvus:"name:vector"`
+		A     int64     `milvus:"name:id"`
+		V     []float32 `milvus:"name:vector"`
+		Fp16V []byte    `milvus:"name:fp16_vector"`
+		Bf16V []byte    `milvus:"name:bf16_vector"`
 	}
 	type OtherData struct {
-		A string    `milvus:"name:id"`
-		V []float32 `milvus:"name:vector"`
+		A     string    `milvus:"name:id"`
+		V     []float32 `milvus:"name:vector"`
+		Fp16V []byte    `milvus:"name:fp16_vector"`
+		Bf16V []byte    `milvus:"name:bf16_vector"`
 	}
 
 	var (
@@ -95,10 +107,14 @@ func (s *ResultSetSuite) TestSearchResultUnmarshal() {
 	sr := ResultSet{
 		sch: entity.NewSchema().
 			WithField(entity.NewField().WithName("id").WithIsPrimaryKey(true).WithDataType(entity.FieldTypeInt64)).
-			WithField(entity.NewField().WithName("vector").WithDim(2).WithDataType(entity.FieldTypeFloatVector)),
+			WithField(entity.NewField().WithName("vector").WithDim(2).WithDataType(entity.FieldTypeFloatVector)).
+			WithField(entity.NewField().WithName("fp16_vector").WithDim(2).WithDataType(entity.FieldTypeFloat16Vector)).
+			WithField(entity.NewField().WithName("bf16_vector").WithDim(2).WithDataType(entity.FieldTypeBFloat16Vector)),
 		IDs: column.NewColumnInt64("id", idData),
 		Fields: DataSet([]column.Column{
 			column.NewColumnFloatVector("vector", 2, vectorData),
+			column.NewColumnFloat16VectorFromFp32Vector("fp16_vector", 2, vectorData),
+			column.NewColumnBFloat16VectorFromFp32Vector("bf16_vector", 2, vectorData),
 		}),
 	}
 	err := sr.Unmarshal([]MyData{})
@@ -115,6 +131,8 @@ func (s *ResultSetSuite) TestSearchResultUnmarshal() {
 	for idx, row := range ptrReceiver {
 		s.Equal(row.A, idData[idx])
 		s.Equal(row.V, vectorData[idx])
+		s.Equal(entity.Float16Vector(row.Fp16V), entity.FloatVector(vectorData[idx]).ToFloat16Vector())
+		s.Equal(entity.BFloat16Vector(row.Bf16V), entity.FloatVector(vectorData[idx]).ToBFloat16Vector())
 	}
 
 	var otherReceiver []*OtherData
