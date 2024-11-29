@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -48,8 +49,12 @@ func (a *alterCollectionTask) Prepare(ctx context.Context) error {
 
 func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	// Now we only support alter properties of collection
-	if a.Req.GetProperties() == nil {
-		return errors.New("only support alter collection properties, but collection properties is empty")
+	if a.Req.GetProperties() == nil && a.Req.GetDeleteKeys() == nil {
+		return errors.New("The collection properties to alter and keys to delete must not be empty at the same time")
+	}
+
+	if len(a.Req.GetProperties()) > 0 && len(a.Req.GetDeleteKeys()) > 0 {
+		return errors.New("can not provide properties and deletekeys at the same time")
 	}
 
 	oldColl, err := a.core.meta.GetCollectionByName(ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.ts)
@@ -59,13 +64,16 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	if ContainsKeyPairArray(a.Req.GetProperties(), oldColl.Properties) {
-		log.Info("skip to alter collection due to no changes were detected in the properties", zap.Int64("collectionID", oldColl.CollectionID))
-		return nil
-	}
-
 	newColl := oldColl.Clone()
-	newColl.Properties = MergeProperties(oldColl.Properties, a.Req.GetProperties())
+	if len(a.Req.Properties) > 0 {
+		if ContainsKeyPairArray(a.Req.GetProperties(), oldColl.Properties) {
+			log.Info("skip to alter collection due to no changes were detected in the properties", zap.Int64("collectionID", oldColl.CollectionID))
+			return nil
+		}
+		newColl.Properties = MergeProperties(oldColl.Properties, a.Req.GetProperties())
+	} else if len(a.Req.DeleteKeys) > 0 {
+		newColl.Properties = DeleteProperties(oldColl.Properties, a.Req.GetDeleteKeys())
+	}
 
 	ts := a.GetTs()
 	redoTask := newBaseRedoTask(a.core.stepExecutor)
@@ -84,12 +92,12 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	})
 
 	// properties needs to be refreshed in the cache
-	aliases := a.core.meta.ListAliasesByID(oldColl.CollectionID)
+	collectionNames := []string{}
 	redoTask.AddSyncStep(&expireCacheStep{
 		baseStep:        baseStep{core: a.core},
 		dbName:          a.Req.GetDbName(),
-		collectionNames: append(aliases, a.Req.GetCollectionName()),
-		collectionID:    oldColl.CollectionID,
+		collectionNames: append(collectionNames, a.Req.GetCollectionName()),
+		collectionID:    InvalidCollectionID,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
 	})
 
@@ -123,6 +131,147 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	return redoTask.Execute(ctx)
+}
+
+func DeleteProperties(oldProps []*commonpb.KeyValuePair, deleteKeys []string) []*commonpb.KeyValuePair {
+	propsMap := make(map[string]string)
+	for _, prop := range oldProps {
+		propsMap[prop.Key] = prop.Value
+	}
+	for _, key := range deleteKeys {
+		delete(propsMap, key)
+	}
+	propKV := make([]*commonpb.KeyValuePair, 0, len(propsMap))
+	for key, value := range propsMap {
+		propKV = append(propKV, &commonpb.KeyValuePair{Key: key, Value: value})
+	}
+	log.Info("Alter Collection Drop Properties", zap.Any("newProperties", propKV))
+	return propKV
+}
+
+type alterCollectionFieldTask struct {
+	baseTask
+	Req *milvuspb.AlterCollectionFieldRequest
+}
+
+func (a *alterCollectionFieldTask) Prepare(ctx context.Context) error {
+	if a.Req.GetCollectionName() == "" {
+		return fmt.Errorf("alter collection field failed, collection name does not exists")
+	}
+
+	if a.Req.GetFieldName() == "" {
+		return fmt.Errorf("alter collection field failed, filed name does not exists")
+	}
+
+	err := IsValidateUpdatedFieldProps(a.Req.GetProperties())
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (a *alterCollectionFieldTask) Execute(ctx context.Context) error {
+	if a.Req.GetProperties() == nil {
+		return errors.New("only support alter collection properties, but collection field properties is empty")
+	}
+
+	oldColl, err := a.core.meta.GetCollectionByName(ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.ts)
+	if err != nil {
+		log.Warn("get collection failed during changing collection state",
+			zap.String("collectionName", a.Req.GetCollectionName()),
+			zap.String("fieldName", a.Req.GetFieldName()),
+			zap.Uint64("ts", a.ts))
+		return err
+	}
+
+	newColl := oldColl.Clone()
+	err = UpdateFieldProperties(newColl, a.Req.GetFieldName(), a.Req.GetProperties())
+	if err != nil {
+		return err
+	}
+	ts := a.GetTs()
+	redoTask := newBaseRedoTask(a.core.stepExecutor)
+	redoTask.AddSyncStep(&AlterCollectionStep{
+		baseStep: baseStep{core: a.core},
+		oldColl:  oldColl,
+		newColl:  newColl,
+		ts:       ts,
+	})
+
+	redoTask.AddSyncStep(&BroadcastAlteredCollectionStep{
+		baseStep: baseStep{core: a.core},
+		req: &milvuspb.AlterCollectionRequest{
+			Base:           a.Req.Base,
+			DbName:         a.Req.DbName,
+			CollectionName: a.Req.CollectionName,
+			CollectionID:   oldColl.CollectionID,
+		},
+		core: a.core,
+	})
+	collectionNames := []string{}
+	redoTask.AddSyncStep(&expireCacheStep{
+		baseStep:        baseStep{core: a.core},
+		dbName:          a.Req.GetDbName(),
+		collectionNames: append(collectionNames, a.Req.GetCollectionName()),
+		collectionID:    InvalidCollectionID,
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
+	})
+
+	return redoTask.Execute(ctx)
+}
+
+var allowedProps = []string{
+	common.MaxLengthKey,
+}
+
+func IsKeyAllowed(key string) bool {
+	for _, allowedKey := range allowedProps {
+		if key == allowedKey {
+			return true
+		}
+	}
+	return false
+}
+
+func IsValidateUpdatedFieldProps(updatedProps []*commonpb.KeyValuePair) error {
+	for _, prop := range updatedProps {
+		if !IsKeyAllowed(prop.Key) {
+			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
+		}
+	}
+	return nil
+}
+
+func UpdateFieldProperties(coll *model.Collection, fieldName string, updatedProps []*commonpb.KeyValuePair) error {
+	for i, field := range coll.Fields {
+		if field.Name == fieldName {
+			coll.Fields[i].TypeParams = UpdateFieldPropertyParams(field.TypeParams, updatedProps)
+			return nil
+		}
+	}
+	return merr.WrapErrParameterInvalidMsg("field %s does not exist in collection", fieldName)
+}
+
+func UpdateFieldPropertyParams(oldProps, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	props := make(map[string]string)
+	for _, prop := range oldProps {
+		props[prop.Key] = prop.Value
+	}
+	log.Info("UpdateFieldPropertyParams", zap.Any("oldprops", props), zap.Any("newprops", updatedProps))
+	for _, prop := range updatedProps {
+		props[prop.Key] = prop.Value
+	}
+	log.Info("UpdateFieldPropertyParams", zap.Any("newprops", props))
+	propKV := make([]*commonpb.KeyValuePair, 0)
+	for key, value := range props {
+		propKV = append(propKV, &commonpb.KeyValuePair{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	return propKV
 }
 
 func (a *alterCollectionTask) GetLockerKey() LockerKey {

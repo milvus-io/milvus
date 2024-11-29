@@ -629,6 +629,41 @@ func TestServer_AlterIndex(t *testing.T) {
 		req.Params[0].Value = "true"
 	})
 
+	t.Run("delete_params", func(t *testing.T) {
+		deleteReq := &indexpb.AlterIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			DeleteKeys:   []string{common.MmapEnabledKey},
+		}
+		resp, err := s.AlterIndex(ctx, deleteReq)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		describeResp, err := s.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Timestamp:    createTS,
+		})
+		assert.NoError(t, merr.CheckRPCCall(describeResp, err))
+		for _, param := range describeResp.IndexInfos[0].GetUserIndexParams() {
+			assert.NotEqual(t, common.MmapEnabledKey, param.GetKey())
+		}
+	})
+	t.Run("update_and_delete_params", func(t *testing.T) {
+		updateAndDeleteReq := &indexpb.AlterIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Params: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MmapEnabledKey,
+					Value: "true",
+				},
+			},
+			DeleteKeys: []string{common.MmapEnabledKey},
+		}
+		resp, err := s.AlterIndex(ctx, updateAndDeleteReq)
+		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	})
+
 	t.Run("success", func(t *testing.T) {
 		resp, err := s.AlterIndex(ctx, req)
 		assert.NoError(t, merr.CheckRPCCall(resp, err))

@@ -117,41 +117,46 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	log.Info("received request to invalidate collection meta cache")
 
 	collectionName := request.CollectionName
-	collectionID := request.CollectionID
 	msgType := request.GetBase().GetMsgType()
 	var aliasName []string
 
 	if globalMetaCache != nil {
 		switch msgType {
-		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
+		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias:
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
 				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
 			}
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+			invalidateCollectionAliasShardCache(ctx, request)
+			log.Info("complete to invalidate collection meta cache with collection name", zap.String("type", request.GetBase().GetMsgType().String()))
+		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
+			// All the request from query use collectionID
+			invalidateCollectionAliasShardCache(ctx, request)
+			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
+		case commonpb.MsgType_CreatePartition, commonpb.MsgType_DropPartition:
+			if request.GetPartitionName() == "" {
+				log.Warn("invalidate collection meta cache failed. partitionName is empty")
+				return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
 			}
-			log.Info("complete to invalidate collection meta cache with collection name", zap.String("collectionName", collectionName))
-		case commonpb.MsgType_DropPartition:
-			if collectionName != "" && request.GetPartitionName() != "" {
-				globalMetaCache.RemovePartition(ctx, request.GetDbName(), request.GetCollectionName(), request.GetPartitionName())
-			} else {
-				log.Warn("invalidate collection meta cache failed. collectionName or partitionName is empty",
-					zap.String("collectionName", collectionName),
-					zap.String("partitionName", request.GetPartitionName()))
-				return merr.Status(merr.WrapErrPartitionNotFound(request.GetPartitionName(), "partition name not specified")), nil
-			}
+			// no need to deprecate shard cache because shard won't change when create or drop partition
+			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
+			// drop all the alias as well
+			invalidateCollectionAliasShardCache(ctx, request)
+			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
+		case commonpb.MsgType_AlterCollection:
+			if collectionName != "" {
+				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
+			}
+			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		default:
 			log.Warn("receive unexpected msgType of invalidate collection meta cache", zap.String("msgType", request.GetBase().GetMsgType().String()))
 
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
 			}
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
-			}
+			invalidateCollectionAliasShardCache(ctx, request)
 		}
 	}
 
@@ -171,6 +176,15 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	log.Info("complete to invalidate collection meta cache")
 
 	return merr.Success(), nil
+}
+
+func invalidateCollectionAliasShardCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) {
+	if request.CollectionID != UniqueID(0) {
+		aliasName := globalMetaCache.RemoveCollectionsByID(ctx, request.CollectionID)
+		for _, name := range aliasName {
+			globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+		}
+	}
 }
 
 // InvalidateCollectionMetaCache invalidate the meta cache of specific collection.
@@ -1247,6 +1261,72 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 
 	log.Info(
 		rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(act); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		return merr.Status(err), nil
+	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", act.BeginTs()),
+		zap.Uint64("EndTs", act.EndTs()),
+		zap.Uint64("timestamp", request.Base.Timestamp))
+
+	if err := act.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", act.BeginTs()),
+			zap.Uint64("EndTs", act.EndTs()))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcDone(method),
+		zap.Uint64("BeginTs", act.BeginTs()),
+		zap.Uint64("EndTs", act.EndTs()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return act.result, nil
+}
+
+func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollectionField")
+	defer sp.End()
+	method := "AlterCollectionField"
+	tr := timerecord.NewTimeRecorder(method)
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+
+	act := &alterCollectionFieldTask{
+		ctx:                         ctx,
+		Condition:                   NewTaskCondition(ctx),
+		AlterCollectionFieldRequest: request,
+		rootCoord:                   node.rootCoord,
+		queryCoord:                  node.queryCoord,
+		dataCoord:                   node.dataCoord,
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("fieldName", request.FieldName),
+		zap.Any("props", request.Properties))
+
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(act); err != nil {
 		log.Warn(

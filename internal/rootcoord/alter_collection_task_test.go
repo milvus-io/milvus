@@ -310,4 +310,42 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			Value: "true",
 		})
 	})
+
+	t.Run("test delete collection props", func(t *testing.T) {
+		coll := &model.Collection{
+			Properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.CollectionTTLConfigKey,
+					Value: "1",
+				},
+				{
+					Key:   common.CollectionAutoCompactionKey,
+					Value: "true",
+				},
+			},
+		}
+
+		deleteKeys := []string{common.CollectionTTLConfigKey}
+		coll.Properties = DeleteProperties(coll.Properties, deleteKeys)
+		assert.NotContains(t, coll.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionTTLConfigKey,
+			Value: "1",
+		})
+
+		assert.Contains(t, coll.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionAutoCompactionKey,
+			Value: "true",
+		})
+
+		deleteKeys = []string{"nonexistent.key"}
+		coll.Properties = DeleteProperties(coll.Properties, deleteKeys)
+		assert.Contains(t, coll.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionAutoCompactionKey,
+			Value: "true",
+		})
+
+		deleteKeys = []string{common.CollectionAutoCompactionKey}
+		coll.Properties = DeleteProperties(coll.Properties, deleteKeys)
+		assert.Empty(t, coll.Properties)
+	})
 }
