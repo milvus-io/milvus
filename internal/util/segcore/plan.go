@@ -14,11 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package segments
+package segcore
 
 /*
 #cgo pkg-config: milvus_core
 
+#include "common/type_c.h"
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
 #include "segcore/plan_c.h"
@@ -26,15 +27,14 @@ package segments
 import "C"
 
 import (
-	"context"
-	"fmt"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	. "github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // SearchPlan is a wrapper of the underlying C-structure C.CSearchPlan
@@ -42,22 +42,16 @@ type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
 }
 
-func createSearchPlanByExpr(ctx context.Context, col *Collection, expr []byte) (*SearchPlan, error) {
-	if col.collectionPtr == nil {
-		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
-	}
+func createSearchPlanByExpr(col *CCollection, expr []byte) (*SearchPlan, error) {
 	var cPlan C.CSearchPlan
-	status := C.CreateSearchPlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
-
-	err1 := HandleCStatus(ctx, &status, "Create Plan by expr failed")
-	if err1 != nil {
-		return nil, err1
+	status := C.CreateSearchPlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, errors.Wrap(err, "Create Plan by expr failed")
 	}
-
 	return &SearchPlan{cSearchPlan: cPlan}, nil
 }
 
-func (plan *SearchPlan) getTopK() int64 {
+func (plan *SearchPlan) GetTopK() int64 {
 	topK := C.GetTopK(plan.cSearchPlan)
 	return int64(topK)
 }
@@ -82,15 +76,15 @@ func (plan *SearchPlan) delete() {
 type SearchRequest struct {
 	plan              *SearchPlan
 	cPlaceholderGroup C.CPlaceholderGroup
-	msgID             UniqueID
-	searchFieldID     UniqueID
-	mvccTimestamp     Timestamp
+	msgID             int64
+	searchFieldID     int64
+	mvccTimestamp     typeutil.Timestamp
 }
 
-func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
+func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
 	metricType := req.GetReq().GetMetricType()
 	expr := req.Req.SerializedExprPlan
-	plan, err := createSearchPlanByExpr(ctx, collection, expr)
+	plan, err := createSearchPlanByExpr(collection, expr)
 	if err != nil {
 		return nil, err
 	}
@@ -104,10 +98,9 @@ func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.
 	blobSize := C.int64_t(len(placeholderGrp))
 	var cPlaceholderGroup C.CPlaceholderGroup
 	status := C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
-
-	if err := HandleCStatus(ctx, &status, "parser searchRequest failed"); err != nil {
+	if err := ConsumeCStatusIntoError(&status); err != nil {
 		plan.delete()
-		return nil, err
+		return nil, errors.Wrap(err, "parser searchRequest failed")
 	}
 
 	metricTypeInPlan := plan.GetMetricType()
@@ -118,29 +111,31 @@ func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.
 
 	var fieldID C.int64_t
 	status = C.GetFieldID(plan.cSearchPlan, &fieldID)
-	if err = HandleCStatus(ctx, &status, "get fieldID from plan failed"); err != nil {
+	if err := ConsumeCStatusIntoError(&status); err != nil {
 		plan.delete()
-		return nil, err
+		return nil, errors.Wrap(err, "get fieldID from plan failed")
 	}
 
-	ret := &SearchRequest{
+	return &SearchRequest{
 		plan:              plan,
 		cPlaceholderGroup: cPlaceholderGroup,
 		msgID:             req.GetReq().GetBase().GetMsgID(),
 		searchFieldID:     int64(fieldID),
 		mvccTimestamp:     req.GetReq().GetMvccTimestamp(),
-	}
-
-	return ret, nil
+	}, nil
 }
 
-func (req *SearchRequest) getNumOfQuery() int64 {
+func (req *SearchRequest) GetNumOfQuery() int64 {
 	numQueries := C.GetNumOfQueries(req.cPlaceholderGroup)
 	return int64(numQueries)
 }
 
 func (req *SearchRequest) Plan() *SearchPlan {
 	return req.plan
+}
+
+func (req *SearchRequest) SearchFieldID() int64 {
+	return req.searchFieldID
 }
 
 func (req *SearchRequest) Delete() {
@@ -150,57 +145,47 @@ func (req *SearchRequest) Delete() {
 	C.DeletePlaceholderGroup(req.cPlaceholderGroup)
 }
 
-func parseSearchRequest(ctx context.Context, plan *SearchPlan, searchRequestBlob []byte) (*SearchRequest, error) {
-	if len(searchRequestBlob) == 0 {
-		return nil, fmt.Errorf("empty search request")
-	}
-	blobPtr := unsafe.Pointer(&searchRequestBlob[0])
-	blobSize := C.int64_t(len(searchRequestBlob))
-	var cPlaceholderGroup C.CPlaceholderGroup
-	status := C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
-
-	if err := HandleCStatus(ctx, &status, "parser searchRequest failed"); err != nil {
-		return nil, err
-	}
-
-	ret := &SearchRequest{cPlaceholderGroup: cPlaceholderGroup, plan: plan}
-	return ret, nil
-}
-
 // RetrievePlan is a wrapper of the underlying C-structure C.CRetrievePlan
 type RetrievePlan struct {
 	cRetrievePlan C.CRetrievePlan
-	Timestamp     Timestamp
-	msgID         UniqueID // only used to debug.
+	Timestamp     typeutil.Timestamp
+	msgID         int64 // only used to debug.
+	maxLimitSize  int64
 	ignoreNonPk   bool
 }
 
-func NewRetrievePlan(ctx context.Context, col *Collection, expr []byte, timestamp Timestamp, msgID UniqueID) (*RetrievePlan, error) {
-	col.mu.RLock()
-	defer col.mu.RUnlock()
-
-	if col.collectionPtr == nil {
-		return nil, merr.WrapErrCollectionNotFound(col.id, "collection released")
+func NewRetrievePlan(col *CCollection, expr []byte, timestamp typeutil.Timestamp, msgID int64) (*RetrievePlan, error) {
+	if col.rawPointer() == nil {
+		return nil, errors.New("collection is released")
 	}
-
 	var cPlan C.CRetrievePlan
-	status := C.CreateRetrievePlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
-
-	err := HandleCStatus(ctx, &status, "Create retrieve plan by expr failed")
-	if err != nil {
-		return nil, err
+	status := C.CreateRetrievePlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, errors.Wrap(err, "Create retrieve plan by expr failed")
 	}
-
-	newPlan := &RetrievePlan{
+	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
+	return &RetrievePlan{
 		cRetrievePlan: cPlan,
 		Timestamp:     timestamp,
 		msgID:         msgID,
-	}
-	return newPlan, nil
+		maxLimitSize:  maxLimitSize,
+	}, nil
 }
 
 func (plan *RetrievePlan) ShouldIgnoreNonPk() bool {
 	return bool(C.ShouldIgnoreNonPk(plan.cRetrievePlan))
+}
+
+func (plan *RetrievePlan) SetIgnoreNonPk(ignore bool) {
+	plan.ignoreNonPk = ignore
+}
+
+func (plan *RetrievePlan) IsIgnoreNonPk() bool {
+	return plan.ignoreNonPk
+}
+
+func (plan *RetrievePlan) MsgID() int64 {
+	return plan.msgID
 }
 
 func (plan *RetrievePlan) Delete() {

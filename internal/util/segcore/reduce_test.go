@@ -14,13 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package segments
+package segcore_test
 
 import (
 	"context"
 	"fmt"
 	"log"
 	"math"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -29,11 +30,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	storage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -49,8 +52,8 @@ type ReduceSuite struct {
 	collectionID int64
 	partitionID  int64
 	segmentID    int64
-	collection   *Collection
-	segment      Segment
+	collection   *segcore.CCollection
+	segment      segcore.CSegment
 }
 
 func (suite *ReduceSuite) SetupSuite() {
@@ -58,7 +61,10 @@ func (suite *ReduceSuite) SetupSuite() {
 }
 
 func (suite *ReduceSuite) SetupTest() {
-	var err error
+	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	initcore.InitLocalChunkManager(localDataRootPath)
+	err := initcore.InitMmapManager(paramtable.Get())
+	suite.NoError(err)
 	ctx := context.Background()
 	msgLength := 100
 
@@ -70,29 +76,22 @@ func (suite *ReduceSuite) SetupTest() {
 	suite.collectionID = 100
 	suite.partitionID = 10
 	suite.segmentID = 1
-	schema := GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64, true)
-	suite.collection = NewCollection(suite.collectionID,
-		schema,
-		GenTestIndexMeta(suite.collectionID, schema),
-		&querypb.LoadMetaInfo{
-			LoadType: querypb.LoadType_LoadCollection,
-		})
-	suite.segment, err = NewSegment(ctx,
-		suite.collection,
-		SegmentTypeSealed,
-		0,
-		&querypb.SegmentLoadInfo{
-			SegmentID:     suite.segmentID,
-			CollectionID:  suite.collectionID,
-			PartitionID:   suite.partitionID,
-			NumOfRows:     int64(msgLength),
-			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-			Level:         datapb.SegmentLevel_Legacy,
-		},
-	)
+	schema := mock_segcore.GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64, true)
+	suite.collection, err = segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
+		CollectionID: suite.collectionID,
+		Schema:       schema,
+		IndexMeta:    mock_segcore.GenTestIndexMeta(suite.collectionID, schema),
+	})
+	suite.NoError(err)
+	suite.segment, err = segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
+		Collection:  suite.collection,
+		SegmentID:   suite.segmentID,
+		SegmentType: segcore.SegmentTypeSealed,
+		IsSorted:    false,
+	})
 	suite.Require().NoError(err)
 
-	binlogs, _, err := SaveBinLog(ctx,
+	binlogs, _, err := mock_segcore.SaveBinLog(ctx,
 		suite.collectionID,
 		suite.partitionID,
 		suite.segmentID,
@@ -101,15 +100,19 @@ func (suite *ReduceSuite) SetupTest() {
 		suite.chunkManager,
 	)
 	suite.Require().NoError(err)
-	for _, binlog := range binlogs {
-		err = suite.segment.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLength), binlog)
-		suite.Require().NoError(err)
+	req := &segcore.LoadFieldDataRequest{
+		RowCount: int64(msgLength),
 	}
+	for _, binlog := range binlogs {
+		req.Fields = append(req.Fields, segcore.LoadFieldDataInfo{Field: binlog})
+	}
+	_, err = suite.segment.LoadFieldData(ctx, req)
+	suite.Require().NoError(err)
 }
 
 func (suite *ReduceSuite) TearDownTest() {
-	suite.segment.Release(context.Background())
-	DeleteCollection(suite.collection)
+	suite.segment.Release()
+	suite.collection.Release()
 	ctx := context.Background()
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
@@ -118,7 +121,7 @@ func (suite *ReduceSuite) TestReduceParseSliceInfo() {
 	originNQs := []int64{2, 3, 2}
 	originTopKs := []int64{10, 5, 20}
 	nqPerSlice := int64(2)
-	sInfo := ParseSliceInfo(originNQs, originTopKs, nqPerSlice)
+	sInfo := segcore.ParseSliceInfo(originNQs, originTopKs, nqPerSlice)
 
 	expectedSliceNQs := []int64{2, 2, 1, 2}
 	expectedSliceTopKs := []int64{10, 5, 5, 20}
@@ -130,7 +133,7 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 	nq := int64(10)
 
 	// TODO: replace below by genPlaceholderGroup(nq)
-	vec := testutils.GenerateFloatVectors(1, defaultDim)
+	vec := testutils.GenerateFloatVectors(1, mock_segcore.DefaultDim)
 	var searchRawData []byte
 	for i, ele := range vec {
 		buf := make([]byte, 4)
@@ -167,35 +170,73 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
                  >
                  placeholder_tag: "$0"
                >`
-	var planpb planpb.PlanNode
+	var planNode planpb.PlanNode
 	// proto.UnmarshalText(planStr, &planpb)
-	prototext.Unmarshal([]byte(planStr), &planpb)
-	serializedPlan, err := proto.Marshal(&planpb)
+	prototext.Unmarshal([]byte(planStr), &planNode)
+	serializedPlan, err := proto.Marshal(&planNode)
 	suite.NoError(err)
-	plan, err := createSearchPlanByExpr(context.Background(), suite.collection, serializedPlan)
-	suite.NoError(err)
-	searchReq, err := parseSearchRequest(context.Background(), plan, placeGroupByte)
-	searchReq.mvccTimestamp = typeutil.MaxTimestamp
+	searchReq, err := segcore.NewSearchRequest(suite.collection, &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			SerializedExprPlan: serializedPlan,
+			MvccTimestamp:      typeutil.MaxTimestamp,
+		},
+	}, placeGroupByte)
+
 	suite.NoError(err)
 	defer searchReq.Delete()
 
 	searchResult, err := suite.segment.Search(context.Background(), searchReq)
 	suite.NoError(err)
 
-	err = checkSearchResult(context.Background(), nq, plan, searchResult)
+	err = mock_segcore.CheckSearchResult(context.Background(), nq, searchReq.Plan(), searchResult)
 	suite.NoError(err)
+
+	// Test Illegal Query
+	retrievePlan, err := segcore.NewRetrievePlan(
+		suite.collection,
+		[]byte(fmt.Sprintf("%d > 100", mock_segcore.RowIDField.ID)),
+		typeutil.MaxTimestamp,
+		0)
+	suite.Error(err)
+	suite.Nil(retrievePlan)
+
+	plan := planpb.PlanNode{
+		Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{
+				IsCount: true,
+			},
+		},
+	}
+	expr, err := proto.Marshal(&plan)
+	suite.NoError(err)
+	retrievePlan, err = segcore.NewRetrievePlan(
+		suite.collection,
+		expr,
+		typeutil.MaxTimestamp,
+		0)
+	suite.NotNil(retrievePlan)
+	suite.NoError(err)
+
+	retrieveResult, err := suite.segment.Retrieve(context.Background(), retrievePlan)
+	suite.NotNil(retrieveResult)
+	suite.NoError(err)
+	result, err := retrieveResult.GetResult()
+	suite.NoError(err)
+	suite.NotNil(result)
+	suite.Equal(int64(100), result.AllRetrieveCount)
+	retrieveResult.Release()
 }
 
 func (suite *ReduceSuite) TestReduceInvalid() {
-	plan := &SearchPlan{}
-	_, err := ReduceSearchResultsAndFillData(context.Background(), plan, nil, 1, nil, nil)
+	plan := &segcore.SearchPlan{}
+	_, err := segcore.ReduceSearchResultsAndFillData(context.Background(), plan, nil, 1, nil, nil)
 	suite.Error(err)
 
-	searchReq, err := genSearchPlanAndRequests(suite.collection, []int64{suite.segmentID}, IndexHNSW, 10)
+	searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection, []int64{suite.segmentID}, mock_segcore.IndexHNSW, 10)
 	suite.NoError(err)
-	searchResults := make([]*SearchResult, 0)
+	searchResults := make([]*segcore.SearchResult, 0)
 	searchResults = append(searchResults, nil)
-	_, err = ReduceSearchResultsAndFillData(context.Background(), searchReq.plan, searchResults, 1, []int64{10}, []int64{10})
+	_, err = segcore.ReduceSearchResultsAndFillData(context.Background(), searchReq.Plan(), searchResults, 1, []int64{10}, []int64{10})
 	suite.Error(err)
 }
 

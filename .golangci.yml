@@ -49,7 +49,7 @@ linters-settings:
     custom-order: true
   govet:
     enable: # add extra linters
-      - nilness 
+      - nilness
   gofumpt:
     lang-version: "1.18"
     module-path: github.com/milvus-io
@@ -147,6 +147,8 @@ issues:
     - path: .+_test\.go
       linters:
         - forbidigo
+    - path: mocks\/(.)+mock_(.+)\.go
+      text: "don't use an underscore in package name"
   exclude:
     - should have a package comment
     - should have comment
