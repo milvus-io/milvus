@@ -228,7 +228,7 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 }
 
 func (ob *TargetObserver) GetVersionUpdatedCollections() []int64 {
-	loaded := lo.FilterMap(ob.meta.GetAllCollections(ctx), func(collection *meta.Collection, _ int) (int64, bool) {
+	loaded := lo.FilterMap(ob.meta.GetAllCollections(context.TODO()), func(collection *meta.Collection, _ int) (int64, bool) {
 		if collection.GetStatus() == querypb.LoadStatus_Loaded {
 			return collection.GetCollectionID(), true
 		}

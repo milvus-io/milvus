@@ -971,7 +971,7 @@ func (s *Server) pullNewDataView(collectionID int64) (*dataview.DataView, error)
 
 	segments := make([]int64, 0)
 	for id := range flushedIDs {
-		segment := s.meta.GetSegment(id)
+		segment := s.meta.GetSegment(context.TODO(), id)
 		if segment == nil {
 			err := merr.WrapErrSegmentNotFound(id)
 			log.Warn("failed to get segment", zap.Int64("segmentID", id))
