@@ -358,7 +358,7 @@ func (c *compactionPlanHandler) loadMeta() {
 							zap.Error(err),
 						)
 						// ignore the drop error
-						c.meta.DropCompactionTask(task)
+						c.meta.DropCompactionTask(context.Background(), task)
 						continue
 					}
 					log.Info("compactionPlanHandler loadMeta submitTask",
@@ -611,7 +611,7 @@ func (c *compactionPlanHandler) enqueueCompaction(task *datapb.CompactionTask) e
 	}
 	if err = c.submitTask(t); err != nil {
 		log.Warn("submit compaction task failed", zap.Error(err))
-		c.meta.SetSegmentsCompacting(t.GetTaskProto().GetInputSegments(), false)
+		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)
 		return err
 	}
 	log.Info("Compaction plan submitted")
