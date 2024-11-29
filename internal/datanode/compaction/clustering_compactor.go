@@ -59,6 +59,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+const (
+	expectedBinlogSize = 16 * 1024 * 1024
+)
+
 var _ Compactor = (*clusteringCompactionTask)(nil)
 
 type clusteringCompactionTask struct {
@@ -525,6 +529,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		fieldBinlogPaths = append(fieldBinlogPaths, ps)
 	}
 
+	var offset int64 = -1
 	for _, paths := range fieldBinlogPaths {
 		allValues, err := t.binlogIO.Download(ctx, paths)
 		if err != nil {
@@ -540,7 +545,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 			return err
 		}
 
-		var offset int64 = -1
 		for {
 			err := pkIter.Next()
 			if err != nil {
@@ -1032,6 +1036,7 @@ func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[inter
 		zap.Int64("collectionID", t.GetCollection()),
 		zap.Int64("partitionID", t.partitionID),
 		zap.Int("segments", len(inputSegments)),
+		zap.Int("clustering num", len(analyzeDict)),
 		zap.Duration("elapse", time.Since(analyzeStart)))
 	return analyzeDict, nil
 }
@@ -1146,19 +1151,10 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	return analyzeResult, nil
 }
 
-func (t *clusteringCompactionTask) scalarPlan(dict map[interface{}]int64) [][]interface{} {
-	keys := lo.MapToSlice(dict, func(k interface{}, _ int64) interface{} {
-		return k
-	})
-	sort.Slice(keys, func(i, j int) bool {
-		return storage.NewScalarFieldValue(t.clusteringKeyField.DataType, keys[i]).LE(storage.NewScalarFieldValue(t.clusteringKeyField.DataType, keys[j]))
-	})
-
+func (t *clusteringCompactionTask) generatedScalarPlan(maxRows, preferRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {
 	buckets := make([][]interface{}, 0)
 	currentBucket := make([]interface{}, 0)
 	var currentBucketSize int64 = 0
-	maxRows := t.plan.MaxSegmentRows
-	preferRows := t.plan.PreferSegmentRows
 	for _, key := range keys {
 		// todo can optimize
 		if dict[key] > preferRows {
@@ -1184,6 +1180,33 @@ func (t *clusteringCompactionTask) scalarPlan(dict map[interface{}]int64) [][]in
 	}
 	buckets = append(buckets, currentBucket)
 	return buckets
+}
+
+func (t *clusteringCompactionTask) switchPolicyForScalarPlan(totalRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {
+	bufferNumBySegmentMaxRows := totalRows / t.plan.MaxSegmentRows
+	bufferNumBySegmentMemoryBuffer := t.memoryBufferSize / expectedBinlogSize
+	log.Info("switchPolicyForScalarPlan", zap.Int64("totalRows", totalRows),
+		zap.Int64("bufferNumBySegmentMaxRows", bufferNumBySegmentMaxRows),
+		zap.Int64("bufferNumBySegmentMemoryBuffer", bufferNumBySegmentMemoryBuffer))
+	if bufferNumBySegmentMemoryBuffer > bufferNumBySegmentMaxRows {
+		return t.generatedScalarPlan(t.plan.GetMaxSegmentRows(), t.plan.GetPreferSegmentRows(), keys, dict)
+	}
+
+	maxRows := totalRows / bufferNumBySegmentMemoryBuffer
+	return t.generatedScalarPlan(maxRows, int64(float64(maxRows)*paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat()), keys, dict)
+}
+
+func (t *clusteringCompactionTask) scalarPlan(dict map[interface{}]int64) [][]interface{} {
+	totalRows := int64(0)
+	keys := lo.MapToSlice(dict, func(k interface{}, v int64) interface{} {
+		totalRows += v
+		return k
+	})
+	sort.Slice(keys, func(i, j int) bool {
+		return storage.NewScalarFieldValue(t.clusteringKeyField.DataType, keys[i]).LE(storage.NewScalarFieldValue(t.clusteringKeyField.DataType, keys[j]))
+	})
+
+	return t.switchPolicyForScalarPlan(totalRows, keys, dict)
 }
 
 func (t *clusteringCompactionTask) refreshBufferWriterWithPack(buffer *ClusterBuffer) (bool, error) {

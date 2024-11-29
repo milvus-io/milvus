@@ -4537,7 +4537,7 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.clusteringCompaction.memoryBufferRatio",
 		Version:      "2.4.6",
 		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.",
-		DefaultValue: "0.1",
+		DefaultValue: "0.3",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
