@@ -380,22 +380,18 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
-	if err != nil {
-		log.Warn("delegator failed to search, current distribution is not serviceable")
-		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
-	}
-	defer sd.distribution.Unpin(version)
 	targetPartitions, err := sd.getTargetPartitions(req.GetReq().GetPartitionIDs())
 	if err != nil {
 		return nil, err
 	}
 	// set target partition ids to sub task request
 	req.Req.PartitionIDs = targetPartitions
-	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
-		return funcutil.SliceContain(targetPartitions, segment.PartitionID)
-	})
-
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	if err != nil {
+		log.Warn("delegator failed to search, current distribution is not serviceable")
+		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
+	}
+	defer sd.distribution.Unpin(version)
 	if req.GetReq().GetIsAdvanced() {
 		futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetSubReqs()))
 		for index, subReq := range req.GetReq().GetSubReqs() {
@@ -497,13 +493,6 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
-	if err != nil {
-		log.Warn("delegator failed to query, current distribution is not serviceable")
-		return merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
-	}
-	defer sd.distribution.Unpin(version)
-
 	targetPartitions, err := sd.getTargetPartitions(req.GetReq().GetPartitionIDs())
 	if err != nil {
 		return err
@@ -511,9 +500,13 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	// set target partition ids to sub task request
 	req.Req.PartitionIDs = targetPartitions
 
-	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
-		return funcutil.SliceContain(targetPartitions, segment.PartitionID)
-	})
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	if err != nil {
+		log.Warn("delegator failed to query, current distribution is not serviceable")
+		return merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
+	}
+	defer sd.distribution.Unpin(version)
+
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
 	}
@@ -570,13 +563,6 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
-	if err != nil {
-		log.Warn("delegator failed to query, current distribution is not serviceable")
-		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
-	}
-	defer sd.distribution.Unpin(version)
-
 	targetPartitions, err := sd.getTargetPartitions(req.GetReq().GetPartitionIDs())
 	if err != nil {
 		return nil, err
@@ -584,12 +570,15 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	// set target partition ids to sub task request
 	req.Req.PartitionIDs = targetPartitions
 
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	if err != nil {
+		log.Warn("delegator failed to query, current distribution is not serviceable")
+		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
+	}
+	defer sd.distribution.Unpin(version)
+
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
-	} else {
-		growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
-			return funcutil.SliceContain(targetPartitions, segment.PartitionID)
-		})
 	}
 
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
