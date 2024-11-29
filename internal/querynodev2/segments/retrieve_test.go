@@ -161,10 +161,9 @@ func (suite *RetrieveSuite) TestRetrieveSealed() {
 		Scope:      querypb.DataScope_Historical,
 	}
 
-	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
+	res, err := Retrieve(context.TODO(), suite.manager, plan, req)
 	suite.NoError(err)
 	suite.Len(res[0].Result.Offset, 3)
-	suite.manager.Segment.Unpin(segments)
 
 	resultByOffsets, err := suite.sealed.RetrieveByOffsets(context.Background(), &segcore.RetrievePlanWithOffsets{
 		RetrievePlan: plan,
@@ -187,10 +186,9 @@ func (suite *RetrieveSuite) TestRetrieveGrowing() {
 		Scope:      querypb.DataScope_Streaming,
 	}
 
-	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
+	res, err := Retrieve(context.TODO(), suite.manager, plan, req)
 	suite.NoError(err)
 	suite.Len(res[0].Result.Offset, 3)
-	suite.manager.Segment.Unpin(segments)
 
 	resultByOffsets, err := suite.growing.RetrieveByOffsets(context.Background(), &segcore.RetrievePlanWithOffsets{
 		RetrievePlan: plan,
@@ -220,9 +218,8 @@ func (suite *RetrieveSuite) TestRetrieveStreamSealed() {
 	server := client.CreateServer()
 
 	go func() {
-		segments, err := RetrieveStream(ctx, suite.manager, plan, req, server)
+		err := RetrieveStream(ctx, suite.manager, plan, req, server)
 		suite.NoError(err)
-		suite.manager.Segment.Unpin(segments)
 		server.FinishSend(err)
 	}()
 
@@ -257,10 +254,9 @@ func (suite *RetrieveSuite) TestRetrieveNonExistSegment() {
 		Scope:      querypb.DataScope_Streaming,
 	}
 
-	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
+	res, err := Retrieve(context.TODO(), suite.manager, plan, req)
 	suite.Error(err)
 	suite.Len(res, 0)
-	suite.manager.Segment.Unpin(segments)
 }
 
 func (suite *RetrieveSuite) TestRetrieveNilSegment() {
@@ -277,10 +273,9 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 		Scope:      querypb.DataScope_Historical,
 	}
 
-	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
+	res, err := Retrieve(context.TODO(), suite.manager, plan, req)
 	suite.ErrorIs(err, merr.ErrSegmentNotLoaded)
 	suite.Len(res, 0)
-	suite.manager.Segment.Unpin(segments)
 }
 
 func TestRetrieve(t *testing.T) {

@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -153,29 +152,26 @@ func (t *SearchTask) Execute() error {
 	defer searchReq.Delete()
 
 	var (
-		results          []*segments.SearchResult
-		searchedSegments []segments.Segment
+		results         []*segments.SearchResult
+		relatedDataSize int64
 	)
+
 	if req.GetScope() == querypb.DataScope_Historical {
-		results, searchedSegments, err = segments.SearchHistorical(
+		results, relatedDataSize, err = segments.SearchHistorical(
 			t.ctx,
 			t.segmentManager,
 			searchReq,
-			req.GetReq().GetCollectionID(),
-			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
 		)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
-		results, searchedSegments, err = segments.SearchStreaming(
+		results, relatedDataSize, err = segments.SearchStreaming(
 			t.ctx,
 			t.segmentManager,
 			searchReq,
-			req.GetReq().GetCollectionID(),
-			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
 		)
 	}
-	defer t.segmentManager.Segment.Unpin(searchedSegments)
+
 	if err != nil {
 		return err
 	}
@@ -210,11 +206,6 @@ func (t *SearchTask) Execute() error {
 		}
 		return nil
 	}
-
-	relatedDataSize := lo.Reduce(searchedSegments, func(acc int64, seg segments.Segment, _ int) int64 {
-		return acc + segments.GetSegmentRelatedDataSize(seg)
-	}, 0)
-
 	tr.RecordSpan()
 	blobs, err := segcore.ReduceSearchResultsAndFillData(
 		t.ctx,
@@ -448,16 +439,13 @@ func (t *StreamingSearchTask) Execute() error {
 			reduceErr := t.streamReduce(t.ctx, searchReq.Plan(), result, t.originNqs, t.originTopks)
 			return reduceErr
 		}
-		pinnedSegments, err := segments.SearchHistoricalStreamly(
+		relatedDataSize, err = segments.SearchHistoricalStreamly(
 			t.ctx,
 			t.segmentManager,
 			searchReq,
-			req.GetReq().GetCollectionID(),
-			nil,
 			req.GetSegmentIDs(),
 			streamReduceFunc)
 		defer segcore.DeleteStreamReduceHelper(t.streamReducer)
-		defer t.segmentManager.Segment.Unpin(pinnedSegments)
 		if err != nil {
 			log.Error("Failed to search sealed segments streamly", zap.Error(err))
 			return err
@@ -468,20 +456,15 @@ func (t *StreamingSearchTask) Execute() error {
 			log.Error("Failed to get stream-reduced search result")
 			return err
 		}
-		relatedDataSize = lo.Reduce(pinnedSegments, func(acc int64, seg segments.Segment, _ int) int64 {
-			return acc + segments.GetSegmentRelatedDataSize(seg)
-		}, 0)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
-		results, pinnedSegments, err := segments.SearchStreaming(
+		var results []*segments.SearchResult
+		results, relatedDataSize, err = segments.SearchStreaming(
 			t.ctx,
 			t.segmentManager,
 			searchReq,
-			req.GetReq().GetCollectionID(),
-			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
 		)
 		defer segments.DeleteSearchResults(results)
-		defer t.segmentManager.Segment.Unpin(pinnedSegments)
 		if err != nil {
 			return err
 		}
@@ -508,9 +491,6 @@ func (t *StreamingSearchTask) Execute() error {
 			metrics.ReduceSegments,
 			metrics.BatchReduce).
 			Observe(float64(tr.RecordSpan().Milliseconds()))
-		relatedDataSize = lo.Reduce(pinnedSegments, func(acc int64, seg segments.Segment, _ int) int64 {
-			return acc + segments.GetSegmentRelatedDataSize(seg)
-		}, 0)
 	}
 
 	// 2. reorganize blobs to original search request
