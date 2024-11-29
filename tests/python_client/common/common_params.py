@@ -56,7 +56,7 @@ class ExprBase:
         return self.expr
 
     @property
-    def value(self):
+    def value(self) -> str:
         return self.expr
 
 
