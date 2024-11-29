@@ -60,6 +60,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+const (
+	expectedBinlogSize = 16 * 1024 * 1024
+)
+
 var _ Compactor = (*clusteringCompactionTask)(nil)
 
 type clusteringCompactionTask struct {
@@ -576,6 +580,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		fieldBinlogPaths = append(fieldBinlogPaths, ps)
 	}
 
+	var offset int64 = -1
 	for _, paths := range fieldBinlogPaths {
 		allValues, err := t.binlogIO.Download(ctx, paths)
 		if err != nil {
@@ -592,7 +597,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 			return err
 		}
 
-		var offset int64 = -1
 		for {
 			err := pkIter.Next()
 			if err != nil {
@@ -1105,6 +1109,7 @@ func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[inter
 		zap.Int64("collectionID", t.GetCollection()),
 		zap.Int64("partitionID", t.partitionID),
 		zap.Int("segments", len(inputSegments)),
+		zap.Int("clustering num", len(analyzeDict)),
 		zap.Duration("elapse", time.Since(analyzeStart)))
 	return analyzeDict, nil
 }
@@ -1219,25 +1224,12 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	return analyzeResult, nil
 }
 
-func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{}]int64) ([][]interface{}, bool) {
-	keys := lo.MapToSlice(dict, func(k interface{}, _ int64) interface{} {
-		return k
-	})
-
-	notNullKeys := lo.Filter(keys, func(i interface{}, j int) bool {
-		return i != nil
-	})
-	sort.Slice(notNullKeys, func(i, j int) bool {
-		return storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[i]).LE(storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[j]))
-	})
-
+func (t *clusteringCompactionTask) generatedScalarPlan(maxRows, preferRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {
 	buckets := make([][]interface{}, 0)
 	currentBucket := make([]interface{}, 0)
 	var currentBucketSize int64 = 0
-	maxRows := t.plan.MaxSegmentRows
-	preferRows := t.plan.PreferSegmentRows
-	containsNull := len(keys) > len(notNullKeys)
-	for _, key := range notNullKeys {
+	for _, key := range keys {
+		// todo can optimize
 		if dict[key] > preferRows {
 			if len(currentBucket) != 0 {
 				buckets = append(buckets, currentBucket)
@@ -1260,7 +1252,38 @@ func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{
 		}
 	}
 	buckets = append(buckets, currentBucket)
-	return buckets, containsNull
+	return buckets
+}
+
+func (t *clusteringCompactionTask) switchPolicyForScalarPlan(totalRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {
+	bufferNumBySegmentMaxRows := totalRows / t.plan.MaxSegmentRows
+	bufferNumBySegmentMemory := t.memoryBufferSize / expectedBinlogSize
+	log.Info("switchPolicyForScalarPlan", zap.Int64("totalRows", totalRows),
+		zap.Int64("bufferNumBySegmentMaxRows", bufferNumBySegmentMaxRows),
+		zap.Int64("bufferNumBySegmentMemory", bufferNumBySegmentMemory))
+	if bufferNumBySegmentMemory > bufferNumBySegmentMaxRows {
+		return t.generatedScalarPlan(t.plan.GetMaxSegmentRows(), t.plan.GetPreferSegmentRows(), keys, dict)
+	}
+
+	maxRows := totalRows / bufferNumBySegmentMemory
+	return t.generatedScalarPlan(maxRows, int64(float64(maxRows)*paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat()), keys, dict)
+}
+
+func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{}]int64) ([][]interface{}, bool) {
+	totalRows := int64(0)
+	keys := lo.MapToSlice(dict, func(k interface{}, v int64) interface{} {
+		totalRows += v
+		return k
+	})
+
+	notNullKeys := lo.Filter(keys, func(i interface{}, j int) bool {
+		return i != nil
+	})
+	sort.Slice(notNullKeys, func(i, j int) bool {
+		return storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[i]).LE(storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[j]))
+	})
+
+	return t.switchPolicyForScalarPlan(totalRows, notNullKeys, dict), len(keys) > len(notNullKeys)
 }
 
 func (t *clusteringCompactionTask) refreshBufferWriterWithPack(buffer *ClusterBuffer) (bool, error) {
