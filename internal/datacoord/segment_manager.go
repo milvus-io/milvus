@@ -461,17 +461,12 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, channel string, se
 	defer s.channelLock.Unlock(channel)
 
 	sealed, _ := s.channel2Sealed.GetOrInsert(channel, typeutil.NewUniqueSet())
-	growing, ok := s.channel2Growing.Get(channel)
-	if !ok {
-		return sealed.Collect(), nil
-	}
+	growing, _ := s.channel2Growing.Get(channel)
 
-	sealedSegments := s.meta.GetSegments(sealed.Collect(), func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment)
-	})
-	growingSegments := s.meta.GetSegments(growing.Collect(), func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment)
-	})
+	var (
+		sealedSegments  []int64
+		growingSegments []int64
+	)
 
 	if len(segIDs) != 0 {
 		sealedSegments = s.meta.GetSegments(segIDs, func(segment *SegmentInfo) bool {
@@ -479,6 +474,13 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, channel string, se
 		})
 		growingSegments = s.meta.GetSegments(segIDs, func(segment *SegmentInfo) bool {
 			return isSegmentHealthy(segment) && segment.State == commonpb.SegmentState_Growing
+		})
+	} else {
+		sealedSegments = s.meta.GetSegments(sealed.Collect(), func(segment *SegmentInfo) bool {
+			return isSegmentHealthy(segment)
+		})
+		growingSegments = s.meta.GetSegments(growing.Collect(), func(segment *SegmentInfo) bool {
+			return isSegmentHealthy(segment)
 		})
 	}
 
