@@ -61,21 +61,11 @@ func (s *PrivilegeGroupTestSuite) TestBuiltinPrivilegeGroup() {
 	s.NoError(err)
 	s.True(merr.Ok(createRoleResp))
 
-	resp, _ := s.operatePrivilege(ctx, roleName, "ReadOnly", commonpb.ObjectType_Collection.String(), milvuspb.OperatePrivilegeType_Grant)
-	s.True(merr.Ok(resp))
-	resp, _ = s.operatePrivilege(ctx, roleName, "ReadWrite", commonpb.ObjectType_Collection.String(), milvuspb.OperatePrivilegeType_Grant)
-	s.True(merr.Ok(resp))
-	resp, _ = s.operatePrivilege(ctx, roleName, "Admin", commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
-	s.True(merr.Ok(resp))
-
+	// can not grant built in privilege group for operatePrivilege v1
 	for _, builtinGroup := range lo.Keys(util.BuiltinPrivilegeGroups) {
-		fmt.Println("!!! builtinGroup: ", builtinGroup)
-		resp, _ = s.operatePrivilege(ctx, roleName, builtinGroup, commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
+		resp, _ := s.operatePrivilege(ctx, roleName, builtinGroup, commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
 		s.False(merr.Ok(resp))
 	}
-
-	s.validateGrants(ctx, roleName, commonpb.ObjectType_Global.String(), 1)
-	s.validateGrants(ctx, roleName, commonpb.ObjectType_Collection.String(), 2)
 }
 
 func (s *PrivilegeGroupTestSuite) TestInvalidPrivilegeGroup() {
@@ -145,24 +135,14 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2BuiltinPrivilegeGroup() {
 	s.NoError(err)
 	s.True(merr.Ok(createRoleResp))
 
-	resp, _ := s.operatePrivilegeV2(ctx, roleName, "ClusterReadOnly", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
+	resp, _ := s.operatePrivilegeV2(ctx, roleName, "ClusterAdmin", "", "", milvuspb.OperatePrivilegeType_Grant)
 	s.True(merr.Ok(resp))
-	resp, _ = s.operatePrivilegeV2(ctx, roleName, "ClusterReadWrite", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
+	resp, _ = s.operatePrivilegeV2(ctx, roleName, "ClusterReadWrite", "", "", milvuspb.OperatePrivilegeType_Grant)
 	s.True(merr.Ok(resp))
-	resp, _ = s.operatePrivilegeV2(ctx, roleName, "ClusterAdmin", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
+	resp, _ = s.operatePrivilegeV2(ctx, roleName, "ClusterReadOnly", "", "", milvuspb.OperatePrivilegeType_Grant)
 	s.True(merr.Ok(resp))
-	resp, _ = s.operatePrivilegeV2(ctx, roleName, "DatabaseReadOnly", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
-	s.True(merr.Ok(resp))
-	resp, _ = s.operatePrivilegeV2(ctx, roleName, "DatabaseReadWrite", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
-	s.True(merr.Ok(resp))
-	resp, _ = s.operatePrivilegeV2(ctx, roleName, "DatabaseAdmin", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
-	s.True(merr.Ok(resp))
-	resp, _ = s.operatePrivilegeV2(ctx, roleName, "CollectionReadOnly", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
-	s.True(merr.Ok(resp))
-	resp, _ = s.operatePrivilegeV2(ctx, roleName, "CollectionReadWrite", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
-	s.True(merr.Ok(resp))
-	resp, _ = s.operatePrivilegeV2(ctx, roleName, "CollectionAdmin", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
-	s.True(merr.Ok(resp))
+	selectResp, _ := s.validateGrants(ctx, roleName, commonpb.ObjectType_Global.String(), util.AnyWord, util.AnyWord)
+	s.Len(selectResp.GetEntities(), 3)
 
 	resp, _ = s.operatePrivilegeV2(ctx, roleName, "ClusterAdmin", "db1", util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
 	s.False(merr.Ok(resp))
@@ -171,7 +151,7 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2BuiltinPrivilegeGroup() {
 	resp, _ = s.operatePrivilegeV2(ctx, roleName, "ClusterAdmin", util.AnyWord, "col1", milvuspb.OperatePrivilegeType_Grant)
 	s.False(merr.Ok(resp))
 	resp, _ = s.operatePrivilegeV2(ctx, roleName, "DatabaseAdmin", "db1", util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
-	s.True(merr.Ok(resp))
+	s.False(merr.Ok(resp))
 	resp, _ = s.operatePrivilegeV2(ctx, roleName, "DatabaseAdmin", "db1", "col1", milvuspb.OperatePrivilegeType_Grant)
 	s.False(merr.Ok(resp))
 	resp, _ = s.operatePrivilegeV2(ctx, roleName, "DatabaseAdmin", util.AnyWord, "col1", milvuspb.OperatePrivilegeType_Grant)
@@ -181,7 +161,7 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2BuiltinPrivilegeGroup() {
 	resp, _ = s.operatePrivilegeV2(ctx, roleName, "CollectionAdmin", "db1", "col1", milvuspb.OperatePrivilegeType_Grant)
 	s.True(merr.Ok(resp))
 	resp, _ = s.operatePrivilegeV2(ctx, roleName, "CollectionAdmin", util.AnyWord, "col1", milvuspb.OperatePrivilegeType_Grant)
-	s.True(merr.Ok(resp))
+	s.False(merr.Ok(resp))
 }
 
 func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
@@ -233,12 +213,14 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 	s.True(merr.Ok(createRoleResp))
 	resp, _ := s.operatePrivilegeV2(ctx, role, "Insert", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
 	s.True(merr.Ok(resp))
-	s.validateGrants(ctx, role, commonpb.ObjectType_Global.String(), 1)
+	selectResp, _ := s.validateGrants(ctx, role, commonpb.ObjectType_Collection.String(), util.AnyWord, util.AnyWord)
+	s.Len(selectResp.GetEntities(), 1)
 
 	// grant group1 to role -> role: insert, group1(query, search)
 	resp, _ = s.operatePrivilegeV2(ctx, role, "group1", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
 	s.True(merr.Ok(resp))
-	s.validateGrants(ctx, role, commonpb.ObjectType_Global.String(), 2)
+	selectResp, _ = s.validateGrants(ctx, role, commonpb.ObjectType_Global.String(), util.AnyWord, util.AnyWord)
+	s.Len(selectResp.GetEntities(), 1)
 
 	// create group2: query, delete
 	createResp2, err := s.Cluster.Proxy.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
@@ -256,7 +238,8 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 	// grant group2 to role -> role: insert, group1(query, search), group2(query, delete)
 	resp, _ = s.operatePrivilegeV2(ctx, role, "group2", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
 	s.True(merr.Ok(resp))
-	s.validateGrants(ctx, role, commonpb.ObjectType_Global.String(), 3)
+	selectResp, _ = s.validateGrants(ctx, role, commonpb.ObjectType_Global.String(), util.AnyWord, util.AnyWord)
+	s.Len(selectResp.GetEntities(), 2)
 
 	// add query, load to group1 -> group1: query, search, load -> role: insert, group1(query, search, load), group2(query, delete)
 	operatePrivilegeGroup("group1", milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup, []*milvuspb.PrivilegeEntity{
@@ -264,7 +247,8 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 		{Name: "Load"},
 	})
 	validatePrivilegeGroup("group1", 3)
-	s.validateGrants(ctx, role, commonpb.ObjectType_Global.String(), 3)
+	selectResp, _ = s.validateGrants(ctx, role, commonpb.ObjectType_Global.String(), util.AnyWord, util.AnyWord)
+	s.Len(selectResp.GetEntities(), 2)
 
 	// add different object type privileges to group1 is not allowed
 	resp, _ = s.Cluster.Proxy.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
@@ -279,7 +263,8 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 		{Name: "Query"},
 	})
 	validatePrivilegeGroup("group1", 2)
-	s.validateGrants(ctx, role, commonpb.ObjectType_Global.String(), 3)
+	selectResp, _ = s.validateGrants(ctx, role, commonpb.ObjectType_Global.String(), util.AnyWord, util.AnyWord)
+	s.Len(selectResp.GetEntities(), 2)
 
 	// Drop the group during any role usage will cause error
 	dropResp, _ := s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
@@ -334,6 +319,176 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 	s.True(merr.Ok(dropRoleResp))
 }
 
+func (s *PrivilegeGroupTestSuite) TestVersionCrossed() {
+	ctx := GetContext(context.Background(), "root:123456")
+
+	role := "role1"
+	createRoleResp, err := s.Cluster.Proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{Name: role},
+	})
+	s.NoError(err)
+	s.True(merr.Ok(createRoleResp))
+	resp, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
+		Type: milvuspb.OperatePrivilegeType_Grant,
+		Entity: &milvuspb.GrantEntity{
+			Role:       &milvuspb.RoleEntity{Name: role},
+			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
+			ObjectName: "collection1",
+			DbName:     "",
+			Grantor: &milvuspb.GrantorEntity{
+				User:      &milvuspb.UserEntity{Name: util.UserRoot},
+				Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"},
+			},
+		},
+	})
+	s.NoError(err)
+	s.True(merr.Ok(resp))
+	selectResp, err := s.Cluster.Proxy.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
+		Entity: &milvuspb.GrantEntity{
+			Role:       &milvuspb.RoleEntity{Name: role},
+			Object:     nil,
+			ObjectName: "",
+			DbName:     "",
+		},
+	})
+	s.NoError(err)
+	s.True(merr.Ok(selectResp.GetStatus()))
+	s.Len(selectResp.GetEntities(), 1)
+
+	revoke, err := s.operatePrivilegeV2(ctx, role, "Insert", "default", "collection1", milvuspb.OperatePrivilegeType_Revoke)
+	s.NoError(err)
+	s.True(merr.Ok(revoke))
+
+	selectResp, err = s.Cluster.Proxy.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
+		Entity: &milvuspb.GrantEntity{
+			Role:       &milvuspb.RoleEntity{Name: role},
+			Object:     nil,
+			ObjectName: "",
+			DbName:     "",
+		},
+	})
+	s.NoError(err)
+	s.True(merr.Ok(selectResp.GetStatus()))
+	s.Len(selectResp.GetEntities(), 0)
+}
+
+func (s *PrivilegeGroupTestSuite) TestAdjustLevelAnyWordDatabase() {
+	ctx := GetContext(context.Background(), "root:123456")
+
+	roleName := "test_role"
+	createRoleResp, err := s.Cluster.Proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{Name: roleName},
+	})
+	s.NoError(err)
+	s.True(merr.Ok(createRoleResp))
+
+	// database = *, collection = * -> collection level on all collections under all databases
+	for _, groupName := range util.AdjustBuiltinPrivilegeGroups {
+		resp, _ := s.operatePrivilegeV2(ctx, roleName, groupName, util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
+		s.True(merr.Ok(resp))
+	}
+	selectResp, _ := s.validateGrants(ctx, roleName, commonpb.ObjectType_Global.String(), util.AnyWord, util.AnyWord)
+	grants := s.marshalGrants(selectResp)
+	s.NotNil(grants["Global-CollectionAdmin-*-*"])
+	s.NotNil(grants["Global-CollectionReadWrite-*-*"])
+	s.NotNil(grants["Global-CollectionReadOnly-*-*"])
+
+	// database = *, collection = col1 -> throw error
+	for _, groupName := range util.AdjustBuiltinPrivilegeGroups {
+		resp, _ := s.operatePrivilegeV2(ctx, roleName, groupName, util.AnyWord, "col1", milvuspb.OperatePrivilegeType_Grant)
+		s.False(merr.Ok(resp))
+	}
+
+	// database = *, collection = col -> database level on all databases
+	for _, groupName := range util.AdjustBuiltinPrivilegeGroups {
+		resp, _ := s.operatePrivilegeV2(ctx, roleName, groupName, util.AnyWord, "", milvuspb.OperatePrivilegeType_Grant)
+		s.True(merr.Ok(resp))
+	}
+	selectResp, _ = s.validateGrants(ctx, roleName, commonpb.ObjectType_Global.String(), util.AnyWord, util.AnyWord)
+	grants = s.marshalGrants(selectResp)
+	s.NotNil(grants["Global-DatabaseAdmin-*-*"])
+	s.NotNil(grants["Global-DatabaseReadWrite-*-*"])
+	s.NotNil(grants["Global-DatabaseReadOnly-*-*"])
+}
+
+func (s *PrivilegeGroupTestSuite) TestAdjustLevelDbNameDatabase() {
+	ctx := GetContext(context.Background(), "root:123456")
+
+	roleName := "test_role"
+	createRoleResp, err := s.Cluster.Proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{Name: roleName},
+	})
+	s.NoError(err)
+	s.True(merr.Ok(createRoleResp))
+
+	// database = db1, collection = * -> collection level on all collections under db1
+	for _, groupName := range util.AdjustBuiltinPrivilegeGroups {
+		resp, _ := s.operatePrivilegeV2(ctx, roleName, groupName, "db1", util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
+		s.True(merr.Ok(resp))
+	}
+	selectResp, _ := s.validateGrants(ctx, roleName, commonpb.ObjectType_Global.String(), "db1", util.AnyWord)
+	grants := s.marshalGrants(selectResp)
+	s.NotNil(grants["Global-CollectionAdmin-db1-*"])
+	s.NotNil(grants["Global-CollectionReadWrite-db1-*"])
+	s.NotNil(grants["Global-CollectionReadOnly-db1-*"])
+
+	// database = db1, collection = col1 -> collection level on col1 under db1
+	for _, groupName := range util.AdjustBuiltinPrivilegeGroups {
+		resp, _ := s.operatePrivilegeV2(ctx, roleName, groupName, "db1", "col1", milvuspb.OperatePrivilegeType_Grant)
+		s.True(merr.Ok(resp))
+	}
+	selectResp, _ = s.validateGrants(ctx, roleName, commonpb.ObjectType_Global.String(), "db1", "col1")
+	grants = s.marshalGrants(selectResp)
+	s.NotNil(grants["Global-CollectionAdmin-db1-col1"])
+	s.NotNil(grants["Global-CollectionReadWrite-db1-col1"])
+	s.NotNil(grants["Global-CollectionReadOnly-db1-col1"])
+
+	// database = db1, collection = null -> database level on db1
+	for _, groupName := range util.AdjustBuiltinPrivilegeGroups {
+		resp, _ := s.operatePrivilegeV2(ctx, roleName, groupName, "db1", "", milvuspb.OperatePrivilegeType_Grant)
+		s.True(merr.Ok(resp))
+	}
+	selectResp, _ = s.validateGrants(ctx, roleName, commonpb.ObjectType_Global.String(), "db1", util.AnyWord)
+	grants = s.marshalGrants(selectResp)
+	s.NotNil(grants["Global-DatabaseAdmin-db1-*"])
+	s.NotNil(grants["Global-DatabaseReadWrite-db1-*"])
+	s.NotNil(grants["Global-DatabaseReadOnly-db1-*"])
+}
+
+func (s *PrivilegeGroupTestSuite) TestAdjustLevelEmptyDatabase() {
+	ctx := GetContext(context.Background(), "root:123456")
+
+	roleName := "test_role"
+	createRoleResp, err := s.Cluster.Proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{Name: roleName},
+	})
+	s.NoError(err)
+	s.True(merr.Ok(createRoleResp))
+
+	// database = "", collection = * -> throw error
+	for _, groupName := range util.AdjustBuiltinPrivilegeGroups {
+		resp, _ := s.operatePrivilegeV2(ctx, roleName, groupName, "", util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
+		s.False(merr.Ok(resp))
+	}
+
+	// database = "", collection = col1 -> throw error
+	for _, groupName := range util.AdjustBuiltinPrivilegeGroups {
+		resp, _ := s.operatePrivilegeV2(ctx, roleName, groupName, "", "col1", milvuspb.OperatePrivilegeType_Grant)
+		s.False(merr.Ok(resp))
+	}
+
+	// database = "", collection = "" -> cluster level
+	for _, groupName := range util.AdjustBuiltinPrivilegeGroups {
+		resp, _ := s.operatePrivilegeV2(ctx, roleName, groupName, "", "", milvuspb.OperatePrivilegeType_Grant)
+		s.True(merr.Ok(resp))
+	}
+	selectResp, _ := s.validateGrants(ctx, roleName, commonpb.ObjectType_Global.String(), "", util.AnyWord)
+	grants := s.marshalGrants(selectResp)
+	s.NotNil(grants["Global-ClusterAdmin-*-*"])
+	s.NotNil(grants["Global-ClusterReadWrite-*-*"])
+	s.NotNil(grants["Global-ClusterReadOnly-*-*"])
+}
+
 func (s *PrivilegeGroupTestSuite) operatePrivilege(ctx context.Context, role, privilege, objectType string, operateType milvuspb.OperatePrivilegeType) (*commonpb.Status, error) {
 	resp, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
 		Type: operateType,
@@ -352,35 +507,37 @@ func (s *PrivilegeGroupTestSuite) operatePrivilege(ctx context.Context, role, pr
 }
 
 func (s *PrivilegeGroupTestSuite) operatePrivilegeV2(ctx context.Context, role, privilege, dbName, collectionName string, operateType milvuspb.OperatePrivilegeType) (*commonpb.Status, error) {
-	resp, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
-		Type: operateType,
-		Entity: &milvuspb.GrantEntity{
-			Role:       &milvuspb.RoleEntity{Name: role},
-			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
-			ObjectName: collectionName,
-			DbName:     dbName,
-			Grantor: &milvuspb.GrantorEntity{
-				User:      &milvuspb.UserEntity{Name: util.UserRoot},
-				Privilege: &milvuspb.PrivilegeEntity{Name: privilege},
-			},
+	resp, err := s.Cluster.Proxy.OperatePrivilegeV2(ctx, &milvuspb.OperatePrivilegeV2Request{
+		Role: &milvuspb.RoleEntity{Name: role},
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: util.UserRoot},
+			Privilege: &milvuspb.PrivilegeEntity{Name: privilege},
 		},
-		Version: "v2",
+		Type:           operateType,
+		DbName:         dbName,
+		CollectionName: collectionName,
 	})
 	return resp, err
 }
 
-func (s *PrivilegeGroupTestSuite) validateGrants(ctx context.Context, roleName, objectType string, expectedCount int) {
+func (s *PrivilegeGroupTestSuite) validateGrants(ctx context.Context, roleName, objectType, database, resource string) (*milvuspb.SelectGrantResponse, error) {
 	resp, err := s.Cluster.Proxy.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
 		Entity: &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: roleName},
 			Object:     &milvuspb.ObjectEntity{Name: objectType},
-			ObjectName: util.AnyWord,
-			DbName:     util.AnyWord,
+			ObjectName: resource,
+			DbName:     database,
 		},
 	})
 	s.NoError(err)
 	s.True(merr.Ok(resp.GetStatus()))
-	s.Len(resp.GetEntities(), expectedCount)
+	return resp, err
+}
+
+func (s *PrivilegeGroupTestSuite) marshalGrants(selectResp *milvuspb.SelectGrantResponse) map[string]*milvuspb.GrantEntity {
+	return lo.SliceToMap(selectResp.GetEntities(), func(e *milvuspb.GrantEntity) (string, *milvuspb.GrantEntity) {
+		return fmt.Sprintf("%s-%s-%s-%s", e.Object.Name, e.Grantor.Privilege.Name, e.DbName, e.ObjectName), e
+	})
 }
 
 func TestPrivilegeGroup(t *testing.T) {

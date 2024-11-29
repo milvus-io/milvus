@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
@@ -74,19 +73,14 @@ func (s *RBACBackupTestSuite) TestBackup() {
 	}
 
 	operatePrivilege := func(role, privilege, objectName, dbName string, operateType milvuspb.OperatePrivilegeType) {
-		resp, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
-			Type: operateType,
-			Entity: &milvuspb.GrantEntity{
-				Role:       &milvuspb.RoleEntity{Name: role},
-				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
-				ObjectName: collectionName,
-				DbName:     dbName,
-				Grantor: &milvuspb.GrantorEntity{
-					User:      &milvuspb.UserEntity{Name: util.UserRoot},
-					Privilege: &milvuspb.PrivilegeEntity{Name: privilege},
-				},
+		resp, err := s.Cluster.Proxy.OperatePrivilegeV2(ctx, &milvuspb.OperatePrivilegeV2Request{
+			Role: &milvuspb.RoleEntity{Name: role},
+			Grantor: &milvuspb.GrantorEntity{
+				Privilege: &milvuspb.PrivilegeEntity{Name: privilege},
 			},
-			Version: "v2",
+			Type:           operateType,
+			DbName:         dbName,
+			CollectionName: collectionName,
 		})
 		s.NoError(err)
 		s.True(merr.Ok(resp))

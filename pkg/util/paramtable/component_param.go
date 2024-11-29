@@ -280,10 +280,6 @@ type commonConfig struct {
 	MinimumGOGCConfig ParamItem `refreshable:"false"`
 
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
-	ReadOnlyPrivileges                  ParamItem `refreshable:"false"`
-	ReadWritePrivileges                 ParamItem `refreshable:"false"`
-	AdminPrivileges                     ParamItem `refreshable:"false"`
-
 	// Local RPC enabled for milvus internal communication when mix or standalone mode.
 	LocalRPCEnabled ParamItem `refreshable:"false"`
 }
@@ -906,27 +902,6 @@ This helps Milvus-CDC synchronize incremental data`,
 		DefaultValue: "30",
 	}
 	p.MinimumGOGCConfig.Init(base.mgr)
-
-	p.ReadOnlyPrivileges = ParamItem{
-		Key:     "common.security.readonly.privileges",
-		Version: "2.4.7",
-		Doc:     `use to override the default value of read-only privileges,  example: "PrivilegeQuery,PrivilegeSearch"`,
-	}
-	p.ReadOnlyPrivileges.Init(base.mgr)
-
-	p.ReadWritePrivileges = ParamItem{
-		Key:     "common.security.readwrite.privileges",
-		Version: "2.4.7",
-		Doc:     `use to override the default value of read-write privileges,  example: "PrivilegeCreateCollection,PrivilegeDropCollection"`,
-	}
-	p.ReadWritePrivileges.Init(base.mgr)
-
-	p.AdminPrivileges = ParamItem{
-		Key:     "common.security.admin.privileges",
-		Version: "2.4.7",
-		Doc:     `use to override the default value of admin privileges,  example: "PrivilegeCreateOwnership,PrivilegeDropOwnership"`,
-	}
-	p.AdminPrivileges.Init(base.mgr)
 
 	p.LocalRPCEnabled = ParamItem{
 		Key:          "common.localRPCEnabled",

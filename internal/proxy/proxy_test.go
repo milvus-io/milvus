@@ -4428,8 +4428,8 @@ func testProxyOperatePrivilegeV2(ctx context.Context, t *testing.T, proxy *Proxy
 		roleReq = &milvuspb.OperatePrivilegeV2Request{
 			Role:           &milvuspb.RoleEntity{Name: "public"},
 			Grantor:        &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterReadOnly.String())}},
-			DbName:         util.AnyWord,
-			CollectionName: util.AnyWord,
+			DbName:         "",
+			CollectionName: "",
 			Type:           milvuspb.OperatePrivilegeType_Grant,
 		}
 		resp, _ = proxy.OperatePrivilegeV2(ctx, roleReq)
@@ -4473,7 +4473,7 @@ func testProxyOperatePrivilegeV2(ctx context.Context, t *testing.T, proxy *Proxy
 			Type:           milvuspb.OperatePrivilegeType_Grant,
 		}
 		resp, _ = proxy.OperatePrivilegeV2(ctx, roleReq)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	wg.Wait()

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -5332,7 +5333,7 @@ func (node *Proxy) validPrivilegeParams(req *milvuspb.OperatePrivilegeRequest) e
 	return nil
 }
 
-func (node *Proxy) validOperatePrivilegeV2Params(req *milvuspb.OperatePrivilegeV2Request) error {
+func (node *Proxy) validateOperatePrivilegeV2Params(req *milvuspb.OperatePrivilegeV2Request) error {
 	if req.Role == nil {
 		return fmt.Errorf("the role in the request is nil")
 	}
@@ -5345,11 +5346,36 @@ func (node *Proxy) validOperatePrivilegeV2Params(req *milvuspb.OperatePrivilegeV
 	if req.Type != milvuspb.OperatePrivilegeType_Grant && req.Type != milvuspb.OperatePrivilegeType_Revoke {
 		return fmt.Errorf("the type in the request not grant or revoke")
 	}
-	if err := ValidateObjectName(req.DbName); err != nil {
-		return err
+	privName := req.Grantor.Privilege.Name
+	if util.IsBuiltinPrivilegeGroup(privName) || util.IsAdjustBuiltinPrivilegeGroup(privName) {
+		// (db = *, col = collectionName) or (db = null, col != null)
+		// will throw error for built-in privilege group
+		if (util.IsAnyWord(req.DbName) && util.IsCustomName(req.CollectionName)) ||
+			(req.DbName == "" && req.CollectionName != "") {
+			return fmt.Errorf("please specify database name for the collection [%s]", req.CollectionName)
+		}
 	}
-	if err := ValidateObjectName(req.CollectionName); err != nil {
-		return err
+	// validate built in privilege group level parameters
+	if util.IsBuiltinPrivilegeGroup(privName) {
+		if strings.HasPrefix(privName, milvuspb.PrivilegeLevel_Cluster.String()) &&
+			(req.DbName != "" || req.CollectionName != "") {
+			return fmt.Errorf("database name and collection name should be empty for cluster level built-in privilege group")
+		}
+		if strings.HasPrefix(privName, milvuspb.PrivilegeLevel_Database.String()) && req.CollectionName != "" {
+			return fmt.Errorf("should not pass collection name for database level built-in privilege group")
+		}
+	}
+	// if database name is null, use the default database
+	if req.DbName != "" && !util.IsAnyWord(req.DbName) {
+		if err := ValidateDatabaseName(req.DbName); err != nil {
+			return err
+		}
+	}
+	// collection name can be null, *, or collection name
+	if req.CollectionName != "" && !util.IsAnyWord(req.CollectionName) {
+		if err := ValidateObjectName(req.CollectionName); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -5365,7 +5391,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if err := node.validOperatePrivilegeV2Params(req); err != nil {
+	if err := node.validateOperatePrivilegeV2Params(req); err != nil {
 		return merr.Status(err), nil
 	}
 	curUser, err := GetCurUserFromContext(ctx)

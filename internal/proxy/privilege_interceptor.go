@@ -9,7 +9,6 @@ import (
 
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -21,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type PrivilegeFunc func(ctx context.Context, req interface{}) (context.Context, error)
@@ -48,34 +46,9 @@ m = r.sub == p.sub && globMatch(r.obj, p.obj) && globMatch(r.act, p.act) || r.su
 var templateModel = getPolicyModel(ModelStr)
 
 var (
-	enforcer                *casbin.SyncedEnforcer
-	initOnce                sync.Once
-	initPrivilegeGroupsOnce sync.Once
+	enforcer *casbin.SyncedEnforcer
+	initOnce sync.Once
 )
-
-var roPrivileges, rwPrivileges, adminPrivileges map[string]struct{}
-
-func initPrivilegeGroups() {
-	initPrivilegeGroupsOnce.Do(func() {
-		roGroup := paramtable.Get().CommonCfg.ReadOnlyPrivileges.GetAsStrings()
-		if len(roGroup) == 0 {
-			roGroup = util.ReadOnlyPrivilegeGroup
-		}
-		roPrivileges = lo.SliceToMap(roGroup, func(item string) (string, struct{}) { return item, struct{}{} })
-
-		rwGroup := paramtable.Get().CommonCfg.ReadWritePrivileges.GetAsStrings()
-		if len(rwGroup) == 0 {
-			rwGroup = util.ReadWritePrivilegeGroup
-		}
-		rwPrivileges = lo.SliceToMap(rwGroup, func(item string) (string, struct{}) { return item, struct{}{} })
-
-		adminGroup := paramtable.Get().CommonCfg.AdminPrivileges.GetAsStrings()
-		if len(adminGroup) == 0 {
-			adminGroup = util.AdminPrivilegeGroup
-		}
-		adminPrivileges = lo.SliceToMap(adminGroup, func(item string) (string, struct{}) { return item, struct{}{} })
-	})
-}
 
 func getEnforcer() *casbin.SyncedEnforcer {
 	initOnce.Do(func() {
@@ -103,7 +76,6 @@ func getPolicyModel(modelString string) model.Model {
 
 // UnaryServerInterceptor returns a new unary server interceptors that performs per-request privilege access.
 func UnaryServerInterceptor(privilegeFunc PrivilegeFunc) grpc.UnaryServerInterceptor {
-	initPrivilegeGroups()
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		newCtx, err := privilegeFunc(ctx, req)
 		if err != nil {
@@ -256,32 +228,11 @@ func collMatch(requestObj, policyObj string) bool {
 }
 
 func PrivilegeGroupContains(args ...interface{}) (interface{}, error) {
-	requestPrivilege := args[0].(string)
 	policyPrivilege := args[1].(string)
-	requestObj := args[2].(string)
-	policyObj := args[3].(string)
 
 	switch policyPrivilege {
 	case commonpb.ObjectPrivilege_PrivilegeAll.String():
 		return true, nil
-	case commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String():
-		// read only belong to collection object
-		if !collMatch(requestObj, policyObj) {
-			return false, nil
-		}
-		_, ok := roPrivileges[requestPrivilege]
-		return ok, nil
-	case commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String():
-		// read write belong to collection object
-		if !collMatch(requestObj, policyObj) {
-			return false, nil
-		}
-		_, ok := rwPrivileges[requestPrivilege]
-		return ok, nil
-	case commonpb.ObjectPrivilege_PrivilegeGroupAdmin.String():
-		// admin belong to global object
-		_, ok := adminPrivileges[requestPrivilege]
-		return ok, nil
 	default:
 		return false, nil
 	}

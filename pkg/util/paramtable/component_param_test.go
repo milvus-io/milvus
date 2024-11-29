@@ -131,10 +131,6 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.gchelper.minimumGoGC", "80")
 		assert.Equal(t, 80, Params.MinimumGOGCConfig.GetAsInt())
 
-		assert.Equal(t, 0, len(Params.ReadOnlyPrivileges.GetAsStrings()))
-		assert.Equal(t, 0, len(Params.ReadWritePrivileges.GetAsStrings()))
-		assert.Equal(t, 0, len(Params.AdminPrivileges.GetAsStrings()))
-
 		assert.False(t, params.CommonCfg.LocalRPCEnabled.GetAsBool())
 		params.Save("common.localRPCEnabled", "true")
 		assert.True(t, params.CommonCfg.LocalRPCEnabled.GetAsBool())
