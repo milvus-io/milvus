@@ -14,15 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package segments
+package segcore
 
 /*
 #cgo pkg-config: milvus_core
 
-#include "segcore/collection_c.h"
-#include "common/type_c.h"
 #include "segcore/segment_c.h"
-#include "storage/storage_c.h"
 */
 import "C"
 
@@ -30,25 +27,30 @@ import (
 	"context"
 	"unsafe"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"go.opentelemetry.io/otel/trace"
 )
 
-// HandleCStatus deals with the error returned from CGO
-func HandleCStatus(ctx context.Context, status *C.CStatus, extraInfo string, fields ...zap.Field) error {
-	if status.error_code == 0 {
-		return nil
+// CTraceContext is the wrapper for `C.CTraceContext`
+// it stores the internal C.CTraceContext and
+type CTraceContext struct {
+	traceID trace.TraceID
+	spanID  trace.SpanID
+	ctx     C.CTraceContext
+}
+
+// ParseCTraceContext parses tracing span and convert it into `C.CTraceContext`.
+func ParseCTraceContext(ctx context.Context) *CTraceContext {
+	span := trace.SpanFromContext(ctx)
+
+	cctx := &CTraceContext{
+		traceID: span.SpanContext().TraceID(),
+		spanID:  span.SpanContext().SpanID(),
 	}
-	errorCode := status.error_code
-	errorMsg := C.GoString(status.error_msg)
-	defer C.free(unsafe.Pointer(status.error_msg))
+	cctx.ctx = C.CTraceContext{
+		traceID:    (*C.uint8_t)(unsafe.Pointer(&cctx.traceID[0])),
+		spanID:     (*C.uint8_t)(unsafe.Pointer(&cctx.spanID[0])),
+		traceFlags: (C.uint8_t)(span.SpanContext().TraceFlags()),
+	}
 
-	log := log.Ctx(ctx).With(fields...).
-		WithOptions(zap.AddCallerSkip(1)) // Add caller stack to show HandleCStatus caller
-
-	err := merr.SegcoreError(int32(errorCode), errorMsg)
-	log.Warn("CStatus returns err", zap.Error(err), zap.String("extra", extraInfo))
-	return err
+	return cctx
 }

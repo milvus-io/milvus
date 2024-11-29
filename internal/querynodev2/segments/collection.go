@@ -16,27 +16,18 @@
 
 package segments
 
-/*
-#cgo pkg-config: milvus_core
-
-#include "segcore/collection_c.h"
-#include "segcore/segment_c.h"
-*/
-import "C"
-
 import (
 	"sync"
-	"unsafe"
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -145,7 +136,7 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 // In a query node, `Collection` is a replica info of a collection in these query node.
 type Collection struct {
 	mu            sync.RWMutex // protects colllectionPtr
-	collectionPtr C.CCollection
+	ccollection   *segcore.CCollection
 	id            int64
 	partitions    *typeutil.ConcurrentSet[int64]
 	loadType      querypb.LoadType
@@ -176,6 +167,11 @@ func (c *Collection) GetResourceGroup() string {
 // ID returns collection id
 func (c *Collection) ID() int64 {
 	return c.id
+}
+
+// GetCCollection returns the CCollection of collection
+func (c *Collection) GetCCollection() *segcore.CCollection {
+	return c.ccollection
 }
 
 // Schema returns the schema of collection
@@ -254,23 +250,12 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		loadFieldIDs = typeutil.NewSet(lo.Map(loadSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })...)
 	}
 
-	schemaBlob, err := proto.Marshal(loadSchema)
-	if err != nil {
-		log.Warn("marshal schema failed", zap.Error(err))
-		return nil
-	}
-
-	collection := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)))
-
 	isGpuIndex := false
+	req := &segcore.CreateCCollectionRequest{
+		Schema: loadSchema,
+	}
 	if indexMeta != nil && len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
-		indexMetaBlob, err := proto.Marshal(indexMeta)
-		if err != nil {
-			log.Warn("marshal index meta failed", zap.Error(err))
-			return nil
-		}
-		C.SetIndexMeta(collection, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
-
+		req.IndexMeta = indexMeta
 		for _, indexMeta := range indexMeta.GetIndexMetas() {
 			isGpuIndex = lo.ContainsBy(indexMeta.GetIndexParams(), func(param *commonpb.KeyValuePair) bool {
 				return param.Key == common.IndexTypeKey && vecindexmgr.GetVecIndexMgrInstance().IsGPUVecIndex(param.Value)
@@ -281,8 +266,13 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		}
 	}
 
+	ccollection, err := segcore.CreateCCollection(req)
+	if err != nil {
+		log.Warn("create collection failed", zap.Error(err))
+		return nil
+	}
 	coll := &Collection{
-		collectionPtr: collection,
+		ccollection:   ccollection,
 		id:            collectionID,
 		partitions:    typeutil.NewConcurrentSet[int64](),
 		loadType:      loadMetaInfo.GetLoadType(),
@@ -330,10 +320,9 @@ func DeleteCollection(collection *Collection) {
 	collection.mu.Lock()
 	defer collection.mu.Unlock()
 
-	cPtr := collection.collectionPtr
-	if cPtr != nil {
-		C.DeleteCollection(cPtr)
+	if collection.ccollection == nil {
+		return
 	}
-
-	collection.collectionPtr = nil
+	collection.ccollection.Release()
+	collection.ccollection = nil
 }
