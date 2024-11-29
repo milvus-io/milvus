@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package segments
+package segcore
 
 /*
 #cgo pkg-config: milvus_core
@@ -27,6 +27,8 @@ import "C"
 import (
 	"context"
 	"fmt"
+
+	"github.com/cockroachdb/errors"
 )
 
 type SliceInfo struct {
@@ -34,21 +36,11 @@ type SliceInfo struct {
 	SliceTopKs []int64
 }
 
-// SearchResult contains a pointer to the search result in C++ memory
-type SearchResult struct {
-	cSearchResult C.CSearchResult
-}
-
 // SearchResultDataBlobs is the CSearchResultsDataBlobs in C++
 type (
 	SearchResultDataBlobs = C.CSearchResultDataBlobs
 	StreamSearchReducer   = C.CSearchStreamReducer
 )
-
-// RetrieveResult contains a pointer to the retrieve result in C++ memory
-type RetrieveResult struct {
-	cRetrieveResult C.CRetrieveResult
-}
 
 func ParseSliceInfo(originNQs []int64, originTopKs []int64, nqPerSlice int64) *SliceInfo {
 	sInfo := &SliceInfo{
@@ -94,8 +86,8 @@ func NewStreamReducer(ctx context.Context,
 
 	var streamReducer StreamSearchReducer
 	status := C.NewStreamReducer(plan.cSearchPlan, cSliceNQSPtr, cSliceTopKSPtr, cNumSlices, &streamReducer)
-	if err := HandleCStatus(ctx, &status, "MergeSearchResultsWithOutputFields failed"); err != nil {
-		return nil, err
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, errors.Wrap(err, "MergeSearchResultsWithOutputFields failed")
 	}
 	return streamReducer, nil
 }
@@ -108,8 +100,8 @@ func StreamReduceSearchResult(ctx context.Context,
 	cSearchResultPtr := &cSearchResults[0]
 
 	status := C.StreamReduce(streamReducer, cSearchResultPtr, 1)
-	if err := HandleCStatus(ctx, &status, "StreamReduceSearchResult failed"); err != nil {
-		return err
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return errors.Wrap(err, "StreamReduceSearchResult failed")
 	}
 	return nil
 }
@@ -117,8 +109,8 @@ func StreamReduceSearchResult(ctx context.Context,
 func GetStreamReduceResult(ctx context.Context, streamReducer StreamSearchReducer) (SearchResultDataBlobs, error) {
 	var cSearchResultDataBlobs SearchResultDataBlobs
 	status := C.GetStreamReduceResult(streamReducer, &cSearchResultDataBlobs)
-	if err := HandleCStatus(ctx, &status, "ReduceSearchResultsAndFillData failed"); err != nil {
-		return nil, err
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, errors.Wrap(err, "ReduceSearchResultsAndFillData failed")
 	}
 	return cSearchResultDataBlobs, nil
 }
@@ -154,8 +146,8 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searc
 	traceCtx := ParseCTraceContext(ctx)
 	status := C.ReduceSearchResultsAndFillData(traceCtx.ctx, &cSearchResultDataBlobs, plan.cSearchPlan, cSearchResultPtr,
 		cNumSegments, cSliceNQSPtr, cSliceTopKSPtr, cNumSlices)
-	if err := HandleCStatus(ctx, &status, "ReduceSearchResultsAndFillData failed"); err != nil {
-		return nil, err
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, errors.Wrap(err, "ReduceSearchResultsAndFillData failed")
 	}
 	return cSearchResultDataBlobs, nil
 }
@@ -163,10 +155,10 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searc
 func GetSearchResultDataBlob(ctx context.Context, cSearchResultDataBlobs SearchResultDataBlobs, blobIndex int) ([]byte, error) {
 	var blob C.CProto
 	status := C.GetSearchResultDataBlob(&blob, cSearchResultDataBlobs, C.int32_t(blobIndex))
-	if err := HandleCStatus(ctx, &status, "marshal failed"); err != nil {
-		return nil, err
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, errors.Wrap(err, "marshal failed")
 	}
-	return GetCProtoBlob(&blob), nil
+	return getCProtoBlob(&blob), nil
 }
 
 func DeleteSearchResultDataBlobs(cSearchResultDataBlobs SearchResultDataBlobs) {
@@ -175,15 +167,4 @@ func DeleteSearchResultDataBlobs(cSearchResultDataBlobs SearchResultDataBlobs) {
 
 func DeleteStreamReduceHelper(cStreamReduceHelper StreamSearchReducer) {
 	C.DeleteStreamSearchReducer(cStreamReduceHelper)
-}
-
-func DeleteSearchResults(results []*SearchResult) {
-	if len(results) == 0 {
-		return
-	}
-	for _, result := range results {
-		if result != nil {
-			C.DeleteSearchResult(result.cSearchResult)
-		}
-	}
 }
