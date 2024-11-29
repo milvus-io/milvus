@@ -16,7 +16,9 @@
 
 package column
 
-import "github.com/milvus-io/milvus/client/v2/entity"
+import (
+	"github.com/milvus-io/milvus/client/v2/entity"
+)
 
 /* bool */
 

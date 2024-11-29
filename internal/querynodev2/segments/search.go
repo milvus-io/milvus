@@ -55,7 +55,7 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 			metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
 		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.getNumOfQuery()))
+			metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.GetNumOfQuery()))
 		return nil
 	}
 
@@ -64,7 +64,7 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 	segmentsWithoutIndex := make([]int64, 0)
 	for _, segment := range segments {
 		seg := segment
-		if !seg.ExistIndex(searchReq.searchFieldID) {
+		if !seg.ExistIndex(searchReq.SearchFieldID()) {
 			segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
 		}
 		errGroup.Go(func() error {
@@ -148,7 +148,7 @@ func searchSegmentsStreamly(ctx context.Context,
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 			metrics.SearchLabel, searchLabel).Observe(float64(searchDuration))
 		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			metrics.SearchLabel, searchLabel).Observe(float64(searchDuration) / float64(searchReq.getNumOfQuery()))
+			metrics.SearchLabel, searchLabel).Observe(float64(searchDuration) / float64(searchReq.GetNumOfQuery()))
 		return nil
 	}
 

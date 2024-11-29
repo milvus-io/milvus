@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -323,7 +324,7 @@ func (node *QueryNode) Init() error {
 		node.factory.Init(paramtable.Get())
 
 		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
-		localUsedSize, err := segments.GetLocalUsedSize(node.ctx, localRootPath)
+		localUsedSize, err := segcore.GetLocalUsedSize(node.ctx, localRootPath)
 		if err != nil {
 			log.Warn("get local used size failed", zap.Error(err))
 			initError = err
