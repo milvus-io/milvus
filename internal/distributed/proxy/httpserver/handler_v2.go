@@ -2162,15 +2162,6 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 	}
 	c.Set(ContextRequest, req)
 
-	if h.checkAuth {
-		err := checkAuthorizationV2(ctx, c, false, &milvuspb.ListImportsAuthPlaceholder{
-			DbName:         dbName,
-			CollectionName: collectionName,
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ListImports", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListImports(reqCtx, req.(*internalpb.ListImportsRequest))
 	})
@@ -2214,16 +2205,6 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 	}
 	c.Set(ContextRequest, req)
 
-	if h.checkAuth {
-		err := checkAuthorizationV2(ctx, c, false, &milvuspb.ImportAuthPlaceholder{
-			DbName:         dbName,
-			CollectionName: collectionGetter.GetCollectionName(),
-			PartitionName:  partitionGetter.GetPartitionName(),
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ImportV2", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
 	})
@@ -2243,14 +2224,6 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 	}
 	c.Set(ContextRequest, req)
 
-	if h.checkAuth {
-		err := checkAuthorizationV2(ctx, c, false, &milvuspb.GetImportProgressAuthPlaceholder{
-			DbName: dbName,
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/GetImportProgress", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.GetImportProgress(reqCtx, req.(*internalpb.GetImportProgressRequest))
 	})
