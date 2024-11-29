@@ -98,7 +98,9 @@ func (suite *TargetObserverSuite) SetupTest() {
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
 
-	err = suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(suite.collectionID, 1))
+	testCollection := utils.CreateTestCollection(suite.collectionID, 1)
+	testCollection.Status = querypb.LoadStatus_Loaded
+	err = suite.meta.CollectionManager.PutCollection(testCollection)
 	suite.NoError(err)
 	err = suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
@@ -318,7 +320,8 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 func (s *TargetObserverCheckSuite) TestCheck() {
 	r := s.observer.Check(context.Background(), s.collectionID, common.AllPartitionsID)
 	s.False(r)
-	s.True(s.observer.dispatcher.tasks.Contain(s.collectionID))
+	s.False(s.observer.loadedDispatcher.tasks.Contain(s.collectionID))
+	s.True(s.observer.loadingDispatcher.tasks.Contain(s.collectionID))
 }
 
 func TestTargetObserver(t *testing.T) {
