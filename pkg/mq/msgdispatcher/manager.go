@@ -102,12 +102,12 @@ func (c *dispatcherManager) Add(ctx context.Context, streamConfig *StreamConfig)
 		}
 	}
 
-	isMain := c.mainDispatcher == nil && streamConfig.ReplicateConfig == nil
-	d, err := NewDispatcher(ctx, c.factory, isMain, c.pchannel, streamConfig.Pos, c.constructSubName(vchannel, isMain), streamConfig.SubPos, c.lagNotifyChan, c.lagTargets, false, streamConfig.ReplicateConfig)
+	isMain := c.mainDispatcher == nil
+	d, err := NewDispatcher(ctx, c.factory, isMain, c.pchannel, streamConfig.Pos, c.constructSubName(vchannel, isMain), streamConfig.SubPos, c.lagNotifyChan, c.lagTargets, false)
 	if err != nil {
 		return nil, err
 	}
-	t := newTarget(vchannel, streamConfig.Pos)
+	t := newTarget(vchannel, streamConfig.Pos, streamConfig.ReplicateConfig)
 	d.AddTarget(t)
 	if isMain {
 		c.mainDispatcher = d
@@ -247,7 +247,7 @@ func (c *dispatcherManager) split(t *target) {
 	var newSolo *Dispatcher
 	err := retry.Do(context.Background(), func() error {
 		var err error
-		newSolo, err = NewDispatcher(context.Background(), c.factory, false, c.pchannel, t.pos, c.constructSubName(t.vchannel, false), common.SubscriptionPositionUnknown, c.lagNotifyChan, c.lagTargets, true, nil)
+		newSolo, err = NewDispatcher(context.Background(), c.factory, false, c.pchannel, t.pos, c.constructSubName(t.vchannel, false), common.SubscriptionPositionUnknown, c.lagNotifyChan, c.lagTargets, true)
 		return err
 	}, retry.Attempts(10))
 	if err != nil {

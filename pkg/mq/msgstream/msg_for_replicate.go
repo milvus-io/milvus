@@ -67,8 +67,8 @@ func (r *ReplicateMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 		return nil, err
 	}
 	rr := &ReplicateMsg{ReplicateMsg: replicateMsg}
-	rr.BeginTimestamp = r.GetBase().GetTimestamp()
-	rr.EndTimestamp = r.GetBase().GetTimestamp()
+	rr.BeginTimestamp = replicateMsg.GetBase().GetTimestamp()
+	rr.EndTimestamp = replicateMsg.GetBase().GetTimestamp()
 
 	return rr, nil
 }
