@@ -198,7 +198,7 @@ struct UnaryElementFuncForArray {
                     auto array_data = src[i].template get_data<GetType>(index);
                     res[i] = matcher(array_data);
                 }
-            }else {
+            } else {
                 PanicInfo(OpTypeInvalid,
                           "unsupported op_type:{} for "
                           "UnaryElementFuncForArray",
