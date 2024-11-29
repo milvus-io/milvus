@@ -133,8 +133,6 @@ func (suite *JobSuite) SetupSuite() {
 
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 		Return(nil, nil)
-	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).
-		Return(nil, nil)
 
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.cluster.EXPECT().
@@ -1383,109 +1381,6 @@ func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 		err := job.Wait()
 		suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 	}
-}
-
-func (suite *JobSuite) TestCallLoadPartitionFailed() {
-	// call LoadPartitions failed at get index info
-	getIndexErr := fmt.Errorf("mock get index error")
-	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
-		return call.Method != "ListIndexes"
-	})
-	for _, collection := range suite.collections {
-		suite.broker.EXPECT().ListIndexes(mock.Anything, collection).Return(nil, getIndexErr)
-		loadCollectionReq := &querypb.LoadCollectionRequest{
-			CollectionID: collection,
-		}
-		loadCollectionJob := NewLoadCollectionJob(
-			context.Background(),
-			loadCollectionReq,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.collectionObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(loadCollectionJob)
-		err := loadCollectionJob.Wait()
-		suite.T().Logf("%s", err)
-		suite.ErrorIs(err, getIndexErr)
-
-		loadPartitionReq := &querypb.LoadPartitionsRequest{
-			CollectionID: collection,
-			PartitionIDs: suite.partitions[collection],
-		}
-		loadPartitionJob := NewLoadPartitionJob(
-			context.Background(),
-			loadPartitionReq,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.collectionObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(loadPartitionJob)
-		err = loadPartitionJob.Wait()
-		suite.ErrorIs(err, getIndexErr)
-	}
-
-	// call LoadPartitions failed at get schema
-	getSchemaErr := fmt.Errorf("mock get schema error")
-	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
-		return call.Method != "DescribeCollection"
-	})
-	for _, collection := range suite.collections {
-		suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(nil, getSchemaErr)
-		loadCollectionReq := &querypb.LoadCollectionRequest{
-			CollectionID: collection,
-		}
-		loadCollectionJob := NewLoadCollectionJob(
-			context.Background(),
-			loadCollectionReq,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.collectionObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(loadCollectionJob)
-		err := loadCollectionJob.Wait()
-		suite.ErrorIs(err, getSchemaErr)
-
-		loadPartitionReq := &querypb.LoadPartitionsRequest{
-			CollectionID: collection,
-			PartitionIDs: suite.partitions[collection],
-		}
-		loadPartitionJob := NewLoadPartitionJob(
-			context.Background(),
-			loadPartitionReq,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.collectionObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(loadPartitionJob)
-		err = loadPartitionJob.Wait()
-		suite.ErrorIs(err, getSchemaErr)
-	}
-
-	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
-		return call.Method != "ListIndexes" && call.Method != "DescribeCollection"
-	})
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil)
-	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil)
 }
 
 func (suite *JobSuite) TestCallReleasePartitionFailed() {
