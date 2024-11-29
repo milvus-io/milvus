@@ -33,9 +33,53 @@ func TestVectors(t *testing.T) {
 		}
 
 		fv := FloatVector(raw)
-
 		assert.Equal(t, dim, fv.Dim())
 		assert.Equal(t, dim*4, len(fv.Serialize()))
+
+		var fvConverted FloatVector
+
+		fp16v := fv.ToFloat16Vector()
+		assert.Equal(t, dim, fp16v.Dim())
+		assert.Equal(t, dim*2, len(fp16v.Serialize()))
+		fvConverted = fp16v.ToFloat32Vector()
+		assert.Equal(t, dim, fvConverted.Dim())
+		assert.Equal(t, dim*4, len(fvConverted.Serialize()))
+
+		bf16v := fv.ToBFloat16Vector()
+		assert.Equal(t, dim, bf16v.Dim())
+		assert.Equal(t, dim*2, len(bf16v.Serialize()))
+		fvConverted = bf16v.ToFloat32Vector()
+		assert.Equal(t, dim, fvConverted.Dim())
+		assert.Equal(t, dim*4, len(fvConverted.Serialize()))
+	})
+
+	t.Run("test fp32 <-> fp16/bf16 vector conversion", func(t *testing.T) {
+		raw := make([]float32, dim)
+		for i := 0; i < dim; i++ {
+			raw[i] = rand.Float32() // rand result [0.1, 1.0)
+		}
+
+		fv := FloatVector(raw)
+		fp16v := fv.ToFloat16Vector()
+		bf16v := fv.ToBFloat16Vector()
+
+		assert.Equal(t, dim, fp16v.Dim())
+		assert.Equal(t, dim*2, len(fp16v.Serialize()))
+		assert.Equal(t, dim, bf16v.Dim())
+		assert.Equal(t, dim*2, len(bf16v.Serialize()))
+
+		// TODO calculate max precision loss
+		maxDelta := float64(0.4)
+
+		fp32vFromfp16v := fp16v.ToFloat32Vector()
+		for i := 0; i < dim; i++ {
+			assert.InDelta(t, fv[i], fp32vFromfp16v[i], maxDelta)
+		}
+
+		fp32vFrombf16v := bf16v.ToFloat32Vector()
+		for i := 0; i < dim; i++ {
+			assert.InDelta(t, fp32vFromfp16v[i], fp32vFrombf16v[i], maxDelta)
+		}
 	})
 
 	t.Run("test binary vector", func(t *testing.T) {

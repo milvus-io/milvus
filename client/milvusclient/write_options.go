@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/row"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type InsertOption interface {
@@ -95,12 +96,17 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 		if col.Type() != field.DataType {
 			return nil, 0, fmt.Errorf("param column %s has type %v but collection field definition is %v", col.Name(), col.Type(), field.DataType)
 		}
-		if field.DataType == entity.FieldTypeFloatVector || field.DataType == entity.FieldTypeBinaryVector {
+		if field.DataType == entity.FieldTypeFloatVector || field.DataType == entity.FieldTypeBinaryVector ||
+			field.DataType == entity.FieldTypeFloat16Vector || field.DataType == entity.FieldTypeBFloat16Vector {
 			dim := 0
 			switch column := col.(type) {
 			case *column.ColumnFloatVector:
 				dim = column.Dim()
 			case *column.ColumnBinaryVector:
+				dim = column.Dim()
+			case *column.ColumnFloat16Vector:
+				dim = column.Dim()
+			case *column.ColumnBFloat16Vector:
 				dim = column.Dim()
 			}
 			if fmt.Sprintf("%d", dim) != field.TypeParams[entity.TypeParamDim] {
@@ -202,6 +208,24 @@ func (opt *columnBasedDataOption) WithVarcharColumn(colName string, data []strin
 
 func (opt *columnBasedDataOption) WithFloatVectorColumn(colName string, dim int, data [][]float32) *columnBasedDataOption {
 	column := column.NewColumnFloatVector(colName, dim, data)
+	return opt.WithColumns(column)
+}
+
+func (opt *columnBasedDataOption) WithFloat16VectorColumn(colName string, dim int, data [][]float32) *columnBasedDataOption {
+	f16v := make([][]byte, 0, len(data))
+	for i := 0; i < len(data); i++ {
+		f16v = append(f16v, typeutil.Float32ArrayToFloat16Bytes(data[i]))
+	}
+	column := column.NewColumnFloat16Vector(colName, dim, f16v)
+	return opt.WithColumns(column)
+}
+
+func (opt *columnBasedDataOption) WithBFloat16VectorColumn(colName string, dim int, data [][]float32) *columnBasedDataOption {
+	bf16v := make([][]byte, 0, len(data))
+	for i := 0; i < len(data); i++ {
+		bf16v = append(bf16v, typeutil.Float32ArrayToBFloat16Bytes(data[i]))
+	}
+	column := column.NewColumnBFloat16Vector(colName, dim, bf16v)
 	return opt.WithColumns(column)
 }
 
