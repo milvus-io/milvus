@@ -122,9 +122,10 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
             return chunk_data[current_chunk_pos++];
         };
     } else {
-        auto chunk_info =
-            segment_->chunk_view<std::string_view>(field_id, current_chunk_id);
-
+        auto span =
+            segment_->chunk_data<std::string>(field_id, current_chunk_id);
+        auto chunk_data = span.data();
+        auto chunk_valid_data = span.valid_data();
         auto current_chunk_size =
             segment_->chunk_size(field_id, current_chunk_id);
         return [=,
@@ -133,15 +134,14 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
             if (current_chunk_pos >= current_chunk_size) {
                 current_chunk_id++;
                 current_chunk_pos = 0;
-                chunk_info = segment_->chunk_view<std::string_view>(
-                    field_id, current_chunk_id);
+                auto span = segment_->chunk_data<std::string>(field_id,
+                                                              current_chunk_id);
+                chunk_data = span.data();
+                chunk_valid_data = span.valid_data();
                 current_chunk_size =
                     segment_->chunk_size(field_id, current_chunk_id);
             }
-            auto chunk_data = chunk_info.first;
-            auto chunk_valid_data = chunk_info.second;
-            if (current_chunk_pos < chunk_valid_data.size() &&
-                !chunk_valid_data[current_chunk_pos]) {
+            if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
                 current_chunk_pos++;
                 return std::nullopt;
             }
@@ -250,11 +250,11 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(FieldId field_id,
         };
     } else {
         auto chunk_info =
-            segment_->chunk_view<std::string_view>(field_id, chunk_id);
-        return [chunk_data = std::move(chunk_info.first),
-                chunk_valid_data = std::move(chunk_info.second)](
-                   int i) -> const data_access_type {
-            if (i < chunk_valid_data.size() && !chunk_valid_data[i]) {
+            segment_->chunk_data<std::string_view>(field_id, chunk_id);
+        return [chunk_data = chunk_info.data(),
+                chunk_valid_data =
+                    chunk_info.valid_data()](int i) -> const data_access_type {
+            if (chunk_valid_data && !chunk_valid_data[i]) {
                 return std::nullopt;
             }
             return std::string(chunk_data[i]);
