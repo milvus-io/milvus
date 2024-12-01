@@ -154,7 +154,7 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(nil)
 
-		core := newTestCore(withMeta(meta))
+		core := newTestCore(withMeta(meta), withValidProxyManager())
 		task := &alterDatabaseTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &rootcoordpb.AlterDatabaseRequest{

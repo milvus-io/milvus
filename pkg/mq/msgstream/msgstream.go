@@ -75,7 +75,6 @@ type MsgStream interface {
 	CheckTopicValid(channel string) error
 
 	EnableProduce(can bool)
-	SetReplicate(config *ReplicateConfig)
 }
 
 type ReplicateConfig struct {
