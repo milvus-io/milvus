@@ -275,15 +275,6 @@ func (ms *mqMsgStream) ForceEnableProduce(can bool) {
 	ms.forceEnableProduce.Store(can)
 }
 
-// SetReplicate not safe, please call it only onece before produce or consume
-func (ms *mqMsgStream) SetReplicate(config *ReplicateConfig) {
-	if config == nil {
-		return
-	}
-	ms.replicateID = config.ReplicateID
-	ms.checkFunc = config.CheckFunc
-}
-
 func (ms *mqMsgStream) isEnabledProduce() bool {
 	return ms.forceEnableProduce.Load().(bool) || ms.ttMsgEnable.Load().(bool)
 }

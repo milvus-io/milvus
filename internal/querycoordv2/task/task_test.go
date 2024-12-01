@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -230,6 +231,7 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 				},
 			}, nil
 		})
+	suite.broker.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{}, nil)
 	for channel, segment := range suite.growingSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).
 			Return([]*datapb.SegmentInfo{

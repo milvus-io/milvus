@@ -303,13 +303,16 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	return coll
 }
 
-func NewCollectionWithoutSchema(collectionID int64, loadType querypb.LoadType) *Collection {
-	return &Collection{
+// Only for test
+func NewTestCollection(collectionID int64, loadType querypb.LoadType, schema *schemapb.CollectionSchema) *Collection {
+	col := &Collection{
 		id:         collectionID,
 		partitions: typeutil.NewConcurrentSet[int64](),
 		loadType:   loadType,
 		refCount:   atomic.NewUint32(0),
 	}
+	col.schema.Store(schema)
+	return col
 }
 
 // new collection without segcore prepare

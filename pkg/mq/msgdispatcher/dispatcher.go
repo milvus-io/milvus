@@ -344,13 +344,6 @@ func (d *Dispatcher) groupingMsgs(pack *MsgPack) map[string]*MsgPack {
 			}
 			newMsgs = append(newMsgs, msg)
 		}
-		log.Info("fubang messages",
-			zap.String("vchannel", vchannel),
-			zap.Any("beginTs", beginTs),
-			zap.Any("endTs", endTs),
-			zap.Any("oldMsgs", targetPacks[vchannel].Msgs),
-			zap.Any("newMsgs", newMsgs),
-		)
 		targetPacks[vchannel].Msgs = newMsgs
 		d.resetMsgPackTS(targetPacks[vchannel], beginTs, endTs)
 	}

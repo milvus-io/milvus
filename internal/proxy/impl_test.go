@@ -1974,6 +1974,7 @@ func TestReplicateMessageForCollectionMode(t *testing.T) {
 
 		mockCache := NewMockCache(t)
 		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Twice()
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Twice()
 		globalMetaCache = mockCache
 
 		{
@@ -2185,8 +2186,8 @@ func TestAlterCollectionReplicateProperty(t *testing.T) {
 		CollectionName: "foo_collection",
 		Properties: []*commonpb.KeyValuePair{
 			{
-				Key:   "replicate.enable",
-				Value: "false",
+				Key:   "replicate.endTS",
+				Value: "1",
 			},
 		},
 	})

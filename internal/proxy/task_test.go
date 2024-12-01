@@ -4293,7 +4293,7 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("fail to alloc ts", func(t *testing.T) {
+	t.Run("invalid replicate id", func(t *testing.T) {
 		task := &alterCollectionTask{
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				CollectionName: "test",
@@ -4301,6 +4301,24 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 					{
 						Key:   common.ReplicateIDKey,
 						Value: "",
+					},
+				},
+			},
+			rootCoord: mockRootcoord,
+		}
+
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("fail to alloc ts", func(t *testing.T) {
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				CollectionName: "test",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.ReplicateEndTSKey,
+						Value: "100",
 					},
 				},
 			},

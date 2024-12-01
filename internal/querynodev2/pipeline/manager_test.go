@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/mq/common"
@@ -73,7 +75,7 @@ func (suite *PipelineManagerTestSuite) SetupTest() {
 func (suite *PipelineManagerTestSuite) TestBasic() {
 	// init mock
 	//  mock collection manager
-	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(&segments.Collection{})
+	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(segments.NewTestCollection(suite.collectionID, querypb.LoadType_UnKnownType, &schemapb.CollectionSchema{}))
 	//  mock mq factory
 	suite.msgDispatcher.EXPECT().Register(mock.Anything, mock.Anything).Return(suite.msgChan, nil)
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)
