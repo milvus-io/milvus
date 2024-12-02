@@ -548,7 +548,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 				},
 			},
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 		}
 		ctx := context.Background()
@@ -569,7 +569,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 				},
 			},
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 		}
 		meta.aliases.insert(util.DefaultDBName, "alias", 100)
@@ -596,7 +596,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 				},
 			},
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 		}
 		meta.names.insert(util.DefaultDBName, "name", 100)
@@ -687,7 +687,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		ctx := context.Background()
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
@@ -1911,7 +1911,7 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 				1: {CollectionID: 1},
 			},
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 		}
 

@@ -1157,6 +1157,42 @@ func (_c *MockCache_RemoveDatabase_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// RemovePartition provides a mock function with given fields: ctx, database, collectionName, partitionName
+func (_m *MockCache) RemovePartition(ctx context.Context, database string, collectionName string, partitionName string) {
+	_m.Called(ctx, database, collectionName, partitionName)
+}
+
+// MockCache_RemovePartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemovePartition'
+type MockCache_RemovePartition_Call struct {
+	*mock.Call
+}
+
+// RemovePartition is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+//   - collectionName string
+//   - partitionName string
+func (_e *MockCache_Expecter) RemovePartition(ctx interface{}, database interface{}, collectionName interface{}, partitionName interface{}) *MockCache_RemovePartition_Call {
+	return &MockCache_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, database, collectionName, partitionName)}
+}
+
+func (_c *MockCache_RemovePartition_Call) Run(run func(ctx context.Context, database string, collectionName string, partitionName string)) *MockCache_RemovePartition_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *MockCache_RemovePartition_Call) Return() *MockCache_RemovePartition_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCache_RemovePartition_Call) RunAndReturn(run func(context.Context, string, string, string)) *MockCache_RemovePartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateCredential provides a mock function with given fields: credInfo
 func (_m *MockCache) UpdateCredential(credInfo *internalpb.CredentialInfo) {
 	_m.Called(credInfo)
