@@ -22,7 +22,9 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/pingcap/log"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
@@ -97,6 +99,7 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 		for tokenStream.Advance() {
 			token := tokenStream.Token()
 			// TODO More Hash Option
+			log.Info("test-- ", zap.String("data", data[i]), zap.String("token", token))
 			hash := typeutil.HashString2Uint32(token)
 			embeddingMap[hash] += 1
 		}
