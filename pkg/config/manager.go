@@ -119,7 +119,11 @@ func (m *Manager) CASCachedValue(key string, origin string, value interface{}) b
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
 	current, err := m.GetConfig(key)
-	if err != nil && !errors.Is(err, ErrKeyNotFound) {
+	if errors.Is(err, ErrKeyNotFound) {
+		m.configCache[key] = value
+		return true
+	}
+	if err != nil {
 		return false
 	}
 	if current != origin {

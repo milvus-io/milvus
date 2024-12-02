@@ -21,6 +21,7 @@
 
 #include "DeletedRecord.h"
 #include "FieldIndexing.h"
+#include "common/Common.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/SystemProperty.h"
@@ -148,9 +149,7 @@ class SegmentInternalInterface : public SegmentInterface {
     template <typename ViewType>
     std::pair<std::vector<ViewType>, FixedVector<bool>>
     chunk_view(FieldId field_id, int64_t chunk_id) const {
-        auto chunk_info = chunk_view_impl(field_id, chunk_id);
-        auto string_views = chunk_info.first;
-        auto valid_data = chunk_info.second;
+        auto [string_views, valid_data] = chunk_view_impl(field_id, chunk_id);
         if constexpr (std::is_same_v<ViewType, std::string_view>) {
             return std::make_pair(std::move(string_views),
                                   std::move(valid_data));
@@ -179,13 +178,24 @@ class SegmentInternalInterface : public SegmentInterface {
         BufferView buffer = chunk_info.first;
         std::vector<ViewType> res;
         res.reserve(length);
-        char* pos = buffer.data_;
-        for (size_t j = 0; j < length; j++) {
-            uint32_t size;
-            size = *reinterpret_cast<uint32_t*>(pos);
-            pos += sizeof(uint32_t);
-            res.emplace_back(ViewType(pos, size));
-            pos += size;
+        if (buffer.data_.index() == 1) {
+            char* pos = std::get<1>(buffer.data_).first;
+            for (size_t j = 0; j < length; j++) {
+                uint32_t size;
+                size = *reinterpret_cast<uint32_t*>(pos);
+                pos += sizeof(uint32_t);
+                res.emplace_back(ViewType(pos, size));
+                pos += size;
+            }
+        } else {
+            auto elements = std::get<0>(buffer.data_);
+            for (auto& element : elements) {
+                for (int i = element.start_; i < element.end_; i++) {
+                    res.emplace_back(ViewType(
+                        element.data_ + element.offsets_[i],
+                        element.offsets_[i + 1] - element.offsets_[i]));
+                }
+            }
         }
         return std::make_pair(res, chunk_info.second);
     }
@@ -199,6 +209,13 @@ class SegmentInternalInterface : public SegmentInterface {
         auto ptr = dynamic_cast<const IndexType*>(base_ptr);
         AssertInfo(ptr, "entry mismatch");
         return *ptr;
+    }
+
+    // union(segment_id, field_id) as unique id
+    virtual std::string
+    GetUniqueFieldId(int64_t field_id) const {
+        return std::to_string(get_segment_id()) + "_" +
+               std::to_string(field_id);
     }
 
     std::unique_ptr<SearchResult>
@@ -246,6 +263,10 @@ class SegmentInternalInterface : public SegmentInterface {
     set_field_avg_size(FieldId field_id,
                        int64_t num_rows,
                        int64_t field_size) override;
+    virtual bool
+    is_chunked() const {
+        return false;
+    }
 
     const SkipIndex&
     GetSkipIndex() const;
@@ -258,10 +279,13 @@ class SegmentInternalInterface : public SegmentInterface {
                            const bool* valid_data,
                            int64_t count);
 
+    template <typename T>
     void
     LoadStringSkipIndex(FieldId field_id,
                         int64_t chunk_id,
-                        const milvus::VariableColumn<std::string>& var_column);
+                        const T& var_column) {
+        skip_index_.LoadString(field_id, chunk_id, var_column);
+    }
 
     virtual DataType
     GetFieldDataType(FieldId fieldId) const = 0;
@@ -291,6 +315,9 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual int64_t
     num_chunk_data(FieldId field_id) const = 0;
 
+    virtual int64_t
+    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const = 0;
+
     // bitset 1 means not hit. 0 means hit.
     virtual void
     mask_with_timestamps(BitsetTypeView& bitset_chunk,
@@ -298,7 +325,13 @@ class SegmentInternalInterface : public SegmentInterface {
 
     // count of chunks
     virtual int64_t
-    num_chunk() const = 0;
+    num_chunk(FieldId field_id) const = 0;
+
+    virtual int64_t
+    chunk_size(FieldId field_id, int64_t chunk_id) const = 0;
+
+    virtual std::pair<int64_t, int64_t>
+    get_chunk_by_offset(FieldId field_id, int64_t offset) const = 0;
 
     // element size in each chunk
     virtual int64_t
@@ -384,7 +417,13 @@ class SegmentInternalInterface : public SegmentInterface {
     // internal API: return chunk_index in span, support scalar index only
     virtual const index::IndexBase*
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const = 0;
+    virtual void
+    check_search(const query::Plan* plan) const = 0;
 
+    virtual const ConcurrentVector<Timestamp>&
+    get_timestamps() const = 0;
+
+ public:
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
     virtual void
     bulk_subscript(SystemFieldType system_type,
@@ -404,12 +443,6 @@ class SegmentInternalInterface : public SegmentInterface {
         const int64_t* seg_offsets,
         int64_t count,
         const std::vector<std::string>& dynamic_field_names) const = 0;
-
-    virtual void
-    check_search(const query::Plan* plan) const = 0;
-
-    virtual const ConcurrentVector<Timestamp>&
-    get_timestamps() const = 0;
 
  protected:
     mutable std::shared_mutex mutex_;

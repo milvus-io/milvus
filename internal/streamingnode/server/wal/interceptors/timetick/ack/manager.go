@@ -3,8 +3,10 @@ package ack
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -22,12 +24,14 @@ type AckManager struct {
 	// It is used to detect the concurrent operation to find the last confirmed message id.
 	acknowledgedDetails  sortedDetails         // All ack details which time tick less than lastConfirmedTimeTick will be temporarily kept here until sync operation happens.
 	lastConfirmedManager *lastConfirmedManager // The last confirmed message id manager.
+	metrics              *metricsutil.TimeTickMetrics
 }
 
 // NewAckManager creates a new timestampAckHelper.
 func NewAckManager(
 	lastConfirmedTimeTick uint64,
 	lastConfirmedMessageID message.MessageID,
+	metrics *metricsutil.TimeTickMetrics,
 ) *AckManager {
 	return &AckManager{
 		cond:                  syncutil.NewContextCond(&sync.Mutex{}),
@@ -36,6 +40,7 @@ func NewAckManager(
 		ackHeap:               typeutil.NewHeap[*Acker](&ackersOrderByEndTimestamp{}),
 		lastConfirmedTimeTick: lastConfirmedTimeTick,
 		lastConfirmedManager:  newLastConfirmedManager(lastConfirmedMessageID),
+		metrics:               metrics,
 	}
 }
 
@@ -65,6 +70,7 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 		return nil, err
 	}
 	ta.lastAllocatedTimeTick = ts
+	ta.metrics.CountAllocateTimeTick(ts)
 
 	// create new timestampAck for ack process.
 	// add ts to heap wait for ack.
@@ -81,7 +87,7 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 // Concurrent safe to call with Allocate.
 func (ta *AckManager) SyncAndGetAcknowledged(ctx context.Context) ([]*AckDetail, error) {
 	// local timestamp may out of date, sync the underlying allocator before get last all acknowledged.
-	resource.Resource().TSOAllocator().Sync()
+	resource.Resource().TSOAllocator().SyncIfExpired(50 * time.Millisecond)
 
 	// Allocate may be uncalled in long term, and the recorder may be out of date.
 	// Do a Allocate and Ack, can sync up the recorder with internal timetick.TimestampAllocator latest time.
@@ -107,6 +113,7 @@ func (ta *AckManager) ack(acker *Acker) {
 	acker.acknowledged = true
 	acker.detail.EndTimestamp = ta.lastAllocatedTimeTick
 	ta.ackHeap.Push(acker)
+	ta.metrics.CountAcknowledgeTimeTick(acker.ackDetail().IsSync)
 	ta.popUntilLastAllAcknowledged()
 }
 
@@ -127,6 +134,7 @@ func (ta *AckManager) popUntilLastAllAcknowledged() {
 
 	// update last confirmed time tick.
 	ta.lastConfirmedTimeTick = acknowledgedDetails[len(acknowledgedDetails)-1].BeginTimestamp
+	ta.metrics.UpdateLastConfirmedTimeTick(ta.lastConfirmedTimeTick)
 
 	// pop all EndTimestamp is less than lastConfirmedTimeTick.
 	// All the messages which EndTimetick less than lastConfirmedTimeTick have been committed into wal.

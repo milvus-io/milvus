@@ -212,7 +212,7 @@ func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeReques
 		return merr.Status(err), nil
 	}
 
-	s.meta.ResourceManager.HandleNodeDown(req.GetNodeID())
+	s.meta.ResourceManager.HandleNodeDown(ctx, req.GetNodeID())
 	return merr.Success(), nil
 }
 
@@ -233,7 +233,7 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 		return merr.Status(err), nil
 	}
 
-	s.meta.ResourceManager.HandleNodeUp(req.GetNodeID())
+	s.meta.ResourceManager.HandleNodeUp(ctx, req.GetNodeID())
 
 	return merr.Success(), nil
 }
@@ -262,7 +262,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 		return merr.Status(err), nil
 	}
 
-	replicas := s.meta.ReplicaManager.GetByNode(req.GetSourceNodeID())
+	replicas := s.meta.ReplicaManager.GetByNode(ctx, req.GetSourceNodeID())
 	for _, replica := range replicas {
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
@@ -292,7 +292,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 				return merr.Status(err), nil
 			}
 
-			existInTarget := s.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
+			existInTarget := s.targetMgr.GetSealedSegment(ctx, segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
 			if !existInTarget {
 				log.Info("segment doesn't exist in current target, skip it", zap.Int64("segmentID", req.GetSegmentID()))
 			} else {
@@ -334,7 +334,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		return merr.Status(err), nil
 	}
 
-	replicas := s.meta.ReplicaManager.GetByNode(req.GetSourceNodeID())
+	replicas := s.meta.ReplicaManager.GetByNode(ctx, req.GetSourceNodeID())
 	for _, replica := range replicas {
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
@@ -362,7 +362,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 				err := merr.WrapErrChannelNotFound(req.GetChannelName(), "channel not found in source node")
 				return merr.Status(err), nil
 			}
-			existInTarget := s.targetMgr.GetDmChannel(channel.GetCollectionID(), channel.GetChannelName(), meta.CurrentTarget) != nil
+			existInTarget := s.targetMgr.GetDmChannel(ctx, channel.GetCollectionID(), channel.GetChannelName(), meta.CurrentTarget) != nil
 			if !existInTarget {
 				log.Info("channel doesn't exist in current target, skip it", zap.String("channelName", channel.GetChannelName()))
 			} else {
@@ -414,7 +414,7 @@ func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.Ch
 		return ch.GetChannelName(), ch
 	})
 	for _, ch := range channelOnSrc {
-		if s.targetMgr.GetDmChannel(ch.GetCollectionID(), ch.GetChannelName(), meta.CurrentTargetFirst) == nil {
+		if s.targetMgr.GetDmChannel(ctx, ch.GetCollectionID(), ch.GetChannelName(), meta.CurrentTargetFirst) == nil {
 			continue
 		}
 
@@ -430,7 +430,7 @@ func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.Ch
 		return s.GetID(), s
 	})
 	for _, segment := range segmentOnSrc {
-		if s.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTargetFirst) == nil {
+		if s.targetMgr.GetSealedSegment(ctx, segment.GetCollectionID(), segment.GetID(), meta.CurrentTargetFirst) == nil {
 			continue
 		}
 

@@ -17,9 +17,11 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "boost/filesystem/path.hpp"
 #include "storage/MemFileManagerImpl.h"
 #include "pb/clustering.pb.h"
 #include "knowhere/cluster/cluster_factory.h"
@@ -61,27 +63,32 @@ class KmeansClustering {
     GetRemoteCentroidsObjectPrefix() const {
         auto index_meta_ = file_manager_->GetIndexMeta();
         auto field_meta_ = file_manager_->GetFieldDataMeta();
-        return file_manager_->GetChunkManager()->GetRootPath() + "/" +
-               std::string(ANALYZE_ROOT_PATH) + "/" +
-               std::to_string(index_meta_.build_id) + "/" +
-               std::to_string(index_meta_.index_version) + "/" +
-               std::to_string(field_meta_.collection_id) + "/" +
-               std::to_string(field_meta_.partition_id) + "/" +
-               std::to_string(field_meta_.field_id);
+        boost::filesystem::path prefix =
+            file_manager_->GetChunkManager()->GetRootPath();
+        boost::filesystem::path path =
+            std::to_string(index_meta_.build_id) + "/" +
+            std::to_string(index_meta_.index_version) + "/" +
+            std::to_string(field_meta_.collection_id) + "/" +
+            std::to_string(field_meta_.partition_id) + "/" +
+            std::to_string(field_meta_.field_id);
+        return (prefix / path).string();
     }
 
     inline std::string
     GetRemoteCentroidIdMappingObjectPrefix(int64_t segment_id) const {
         auto index_meta_ = file_manager_->GetIndexMeta();
         auto field_meta_ = file_manager_->GetFieldDataMeta();
-        return file_manager_->GetChunkManager()->GetRootPath() + "/" +
-               std::string(ANALYZE_ROOT_PATH) + "/" +
-               std::to_string(index_meta_.build_id) + "/" +
-               std::to_string(index_meta_.index_version) + "/" +
-               std::to_string(field_meta_.collection_id) + "/" +
-               std::to_string(field_meta_.partition_id) + "/" +
-               std::to_string(field_meta_.field_id) + "/" +
-               std::to_string(segment_id);
+        boost::filesystem::path prefix =
+            file_manager_->GetChunkManager()->GetRootPath();
+        boost::filesystem::path path = std::string(ANALYZE_ROOT_PATH);
+        boost::filesystem::path path1 =
+            std::to_string(index_meta_.build_id) + "/" +
+            std::to_string(index_meta_.index_version) + "/" +
+            std::to_string(field_meta_.collection_id) + "/" +
+            std::to_string(field_meta_.partition_id) + "/" +
+            std::to_string(field_meta_.field_id) + "/" +
+            std::to_string(segment_id);
+        return (prefix / path / path1).string();
     }
 
     ~KmeansClustering() = default;

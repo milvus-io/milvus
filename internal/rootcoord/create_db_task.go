@@ -38,7 +38,7 @@ func (t *createDatabaseTask) Prepare(ctx context.Context) error {
 	}
 
 	cfgMaxDatabaseNum := Params.RootCoordCfg.MaxDatabaseNum.GetAsInt()
-	if len(dbs) > cfgMaxDatabaseNum {
+	if len(dbs) >= cfgMaxDatabaseNum {
 		return merr.WrapErrDatabaseNumLimitExceeded(cfgMaxDatabaseNum)
 	}
 
@@ -52,4 +52,8 @@ func (t *createDatabaseTask) Prepare(ctx context.Context) error {
 func (t *createDatabaseTask) Execute(ctx context.Context) error {
 	db := model.NewDatabase(t.dbID, t.Req.GetDbName(), etcdpb.DatabaseState_DatabaseCreated, t.Req.GetProperties())
 	return t.core.meta.CreateDatabase(ctx, db, t.GetTs())
+}
+
+func (t *createDatabaseTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(NewClusterLockerKey(true))
 }

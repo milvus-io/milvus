@@ -11,6 +11,9 @@
 
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -55,6 +58,9 @@ GetCurrentIndexVersion();
 
 int32_t
 GetMinimalIndexVersion();
+
+void
+SetThreadName(const char*);
 
 #ifdef __cplusplus
 }

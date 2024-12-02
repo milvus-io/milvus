@@ -233,7 +233,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	log.Info("compact done")
 
 	// search
-	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
+	expr := "clustering > 0"
 	nq := 10
 	topk := 10
 	roundDecimal := -1

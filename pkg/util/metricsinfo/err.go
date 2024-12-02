@@ -15,7 +15,7 @@ import "github.com/cockroachdb/errors"
 
 const (
 	// MsgUnimplementedMetric represents that user requests an unimplemented metric type
-	MsgUnimplementedMetric           = "sorry, but this metric type is not implemented"
+	MsgUnimplementedMetric           = "metric request type is not implemented"
 	msgInvalidSystemInfosMetricCache = "system infos metric is invalid"
 )
 

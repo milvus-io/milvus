@@ -49,7 +49,7 @@ type PipelineParams struct {
 	WriteBufferManager writebuffer.BufferManager
 	CheckpointUpdater  *ChannelCheckpointUpdater
 	Allocator          allocator.Interface
-	FlushMsgHandler    flusher.FlushMsgHandler
+	MsgHandler         flusher.MsgHandler
 }
 
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp

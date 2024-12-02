@@ -75,6 +75,7 @@ func TestResumableProducer(t *testing.T) {
 	})
 
 	msg := mock_message.NewMockMutableMessage(t)
+	msg.EXPECT().EstimateSize().Return(100)
 	id, err := rp.Produce(context.Background(), msg)
 	assert.NotNil(t, id)
 	assert.NoError(t, err)

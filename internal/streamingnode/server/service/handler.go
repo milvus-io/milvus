@@ -4,9 +4,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/producer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var _ HandlerService = (*handlerServiceImpl)(nil)
@@ -32,9 +30,6 @@ type handlerServiceImpl struct {
 
 // Produce creates a new producer for the channel on this log node.
 func (hs *handlerServiceImpl) Produce(streamServer streamingpb.StreamingNodeHandlerService_ProduceServer) error {
-	metrics.StreamingNodeProducerTotal.WithLabelValues(paramtable.GetStringNodeID()).Inc()
-	defer metrics.StreamingNodeProducerTotal.WithLabelValues(paramtable.GetStringNodeID()).Dec()
-
 	p, err := producer.CreateProduceServer(hs.walManager, streamServer)
 	if err != nil {
 		return err
@@ -44,9 +39,6 @@ func (hs *handlerServiceImpl) Produce(streamServer streamingpb.StreamingNodeHand
 
 // Consume creates a new consumer for the channel on this log node.
 func (hs *handlerServiceImpl) Consume(streamServer streamingpb.StreamingNodeHandlerService_ConsumeServer) error {
-	metrics.StreamingNodeConsumerTotal.WithLabelValues(paramtable.GetStringNodeID()).Inc()
-	defer metrics.StreamingNodeConsumerTotal.WithLabelValues(paramtable.GetStringNodeID()).Dec()
-
 	c, err := consumer.CreateConsumeServer(hs.walManager, streamServer)
 	if err != nil {
 		return err

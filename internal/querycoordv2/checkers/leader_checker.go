@@ -65,9 +65,9 @@ func (c *LeaderChecker) Description() string {
 	return "LeaderChecker checks the difference of leader view between dist, and try to correct it"
 }
 
-func (c *LeaderChecker) readyToCheck(collectionID int64) bool {
-	metaExist := (c.meta.GetCollection(collectionID) != nil)
-	targetExist := c.target.IsNextTargetExist(collectionID) || c.target.IsCurrentTargetExist(collectionID, common.AllPartitionsID)
+func (c *LeaderChecker) readyToCheck(ctx context.Context, collectionID int64) bool {
+	metaExist := (c.meta.GetCollection(ctx, collectionID) != nil)
+	targetExist := c.target.IsNextTargetExist(ctx, collectionID) || c.target.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
 
 	return metaExist && targetExist
 }
@@ -77,20 +77,20 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 		return nil
 	}
 
-	collectionIDs := c.meta.CollectionManager.GetAll()
+	collectionIDs := c.meta.CollectionManager.GetAll(ctx)
 	tasks := make([]task.Task, 0)
 
 	for _, collectionID := range collectionIDs {
-		if !c.readyToCheck(collectionID) {
+		if !c.readyToCheck(ctx, collectionID) {
 			continue
 		}
-		collection := c.meta.CollectionManager.GetCollection(collectionID)
+		collection := c.meta.CollectionManager.GetCollection(ctx, collectionID)
 		if collection == nil {
 			log.Warn("collection released during check leader", zap.Int64("collection", collectionID))
 			continue
 		}
 
-		replicas := c.meta.ReplicaManager.GetByCollection(collectionID)
+		replicas := c.meta.ReplicaManager.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
 			for _, node := range replica.GetRWNodes() {
 				leaderViews := c.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(replica.GetCollectionID()), meta.WithNodeID2LeaderView(node))
@@ -109,7 +109,7 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 
 func (c *LeaderChecker) findNeedSyncPartitionStats(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, nodeID int64) []task.Task {
 	ret := make([]task.Task, 0)
-	curDmlChannel := c.target.GetDmChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
+	curDmlChannel := c.target.GetDmChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
 	if curDmlChannel == nil {
 		return ret
 	}
@@ -163,7 +163,7 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 
 	latestNodeDist := utils.FindMaxVersionSegments(dist)
 	for _, s := range latestNodeDist {
-		segment := c.target.GetSealedSegment(leaderView.CollectionID, s.GetID(), meta.CurrentTargetFirst)
+		segment := c.target.GetSealedSegment(ctx, leaderView.CollectionID, s.GetID(), meta.CurrentTargetFirst)
 		existInTarget := segment != nil
 		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
 		// shouldn't set l0 segment location to delegator. l0 segment should be reload in delegator
@@ -213,7 +213,7 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *me
 
 	for sid, s := range leaderView.Segments {
 		_, ok := distMap[sid]
-		segment := c.target.GetSealedSegment(leaderView.CollectionID, sid, meta.CurrentTargetFirst)
+		segment := c.target.GetSealedSegment(ctx, leaderView.CollectionID, sid, meta.CurrentTargetFirst)
 		existInTarget := segment != nil
 		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
 		if ok || existInTarget || isL0Segment {

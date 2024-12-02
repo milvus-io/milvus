@@ -59,6 +59,11 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	if ContainsKeyPairArray(a.Req.GetProperties(), oldColl.Properties) {
+		log.Info("skip to alter collection due to no changes were detected in the properties", zap.Int64("collectionID", oldColl.CollectionID))
+		return nil
+	}
+
 	newColl := oldColl.Clone()
 	newColl.Properties = MergeProperties(oldColl.Properties, a.Req.GetProperties())
 
@@ -79,12 +84,12 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	})
 
 	// properties needs to be refreshed in the cache
-	aliases := a.core.meta.ListAliasesByID(oldColl.CollectionID)
+	aliases := a.core.meta.ListAliasesByID(ctx, oldColl.CollectionID)
 	redoTask.AddSyncStep(&expireCacheStep{
 		baseStep:        baseStep{core: a.core},
 		dbName:          a.Req.GetDbName(),
 		collectionNames: append(aliases, a.Req.GetCollectionName()),
-		collectionID:    oldColl.CollectionID,
+		collectionID:    InvalidCollectionID,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
 	})
 
@@ -118,4 +123,13 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	return redoTask.Execute(ctx)
+}
+
+func (a *alterCollectionTask) GetLockerKey() LockerKey {
+	collection := a.core.getCollectionIDStr(a.ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.Req.GetCollectionID())
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(a.Req.GetDbName(), false),
+		NewCollectionLockerKey(collection, true),
+	)
 }

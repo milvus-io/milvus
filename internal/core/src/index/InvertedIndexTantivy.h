@@ -94,7 +94,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      * deprecated, only used in small chunk index.
      */
     void
-    Build(size_t n, const T* values) override {
+    Build(size_t n, const T* values, const bool* valid_data) override {
         PanicInfo(ErrorCode::NotImplemented, "Build should not be called");
     }
 
@@ -136,7 +136,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         return false;
     }
 
-    T
+    std::optional<T>
     Reverse_Lookup(size_t offset) const override {
         PanicInfo(ErrorCode::NotImplemented,
                   "Reverse_Lookup should not be handled by inverted index");

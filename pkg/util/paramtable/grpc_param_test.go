@@ -178,3 +178,19 @@ func TestGrpcClientParams(t *testing.T) {
 	assert.Equal(t, clientConfig.ServerKeyPath.GetValue(), "/key")
 	assert.Equal(t, clientConfig.CaPemPath.GetValue(), "/ca")
 }
+
+func TestInternalTLSParams(t *testing.T) {
+	base := ComponentParam{}
+	base.Init(NewBaseTable(SkipRemote(true)))
+	var internalTLSCfg InternalTLSConfig
+	internalTLSCfg.Init(base.baseTable)
+
+	base.Save("common.security.internalTlsEnabled", "true")
+	base.Save("internaltls.serverPemPath", "/pem")
+	base.Save("internaltls.serverKeyPath", "/key")
+	base.Save("internaltls.caPemPath", "/ca")
+	assert.Equal(t, internalTLSCfg.InternalTLSEnabled.GetAsBool(), true)
+	assert.Equal(t, internalTLSCfg.InternalTLSServerPemPath.GetValue(), "/pem")
+	assert.Equal(t, internalTLSCfg.InternalTLSServerKeyPath.GetValue(), "/key")
+	assert.Equal(t, internalTLSCfg.InternalTLSCaPemPath.GetValue(), "/ca")
+}

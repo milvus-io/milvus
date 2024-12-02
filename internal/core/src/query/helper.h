@@ -19,7 +19,12 @@
 
 namespace milvus::query {
 namespace dataset {
-
+struct RawDataset {
+    int64_t begin_id = 0;
+    int64_t dim;
+    int64_t num_raw_data;
+    const void* raw_data;
+};
 struct SearchDataset {
     knowhere::MetricType metric_type;
     int64_t num_queries;

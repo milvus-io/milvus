@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -44,7 +45,7 @@ func TestAck(t *testing.T) {
 	)
 	resource.InitForTest(t, resource.OptRootCoordClient(rc))
 
-	ackManager := NewAckManager(0, nil)
+	ackManager := NewAckManager(0, nil, metricsutil.NewTimeTickMetrics("test"))
 
 	ackers := map[uint64]*Acker{}
 	for i := 0; i < 10; i++ {
@@ -161,7 +162,7 @@ func TestAckManager(t *testing.T) {
 	)
 	resource.InitForTest(t, resource.OptRootCoordClient(rc))
 
-	ackManager := NewAckManager(0, walimplstest.NewTestMessageID(0))
+	ackManager := NewAckManager(0, walimplstest.NewTestMessageID(0), metricsutil.NewTimeTickMetrics("test"))
 
 	// Test Concurrent Collect.
 	wg := sync.WaitGroup{}

@@ -179,13 +179,13 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) 
 		}
 		return column.NewColumnDoubleArray(fieldName, doubleValues)
 	case entity.FieldTypeVarChar:
-		varcharValues := make([][][]byte, 0, nb)
+		varcharValues := make([][]string, 0, nb)
 		for i := start; i < start+nb; i++ {
-			varcharArray := make([][]byte, 0, capacity)
+			varcharArray := make([]string, 0, capacity)
 			for j := 0; j < capacity; j++ {
 				var buf bytes.Buffer
 				buf.WriteString(strconv.Itoa(i + j))
-				varcharArray = append(varcharArray, buf.Bytes())
+				varcharArray = append(varcharArray, buf.String())
 			}
 			varcharValues = append(varcharValues, varcharArray)
 		}
@@ -367,6 +367,36 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 	}
 }
 
+func GenColumnDataWithFp32VecConversion(nb int, fieldType entity.FieldType, option GenDataOption) column.Column {
+	dim := option.dim
+	start := option.start
+	fieldName := option.fieldName
+	if option.fieldName == "" {
+		fieldName = GetFieldNameByFieldType(fieldType, TWithElementType(option.elementType))
+	}
+	switch fieldType {
+	case entity.FieldTypeFloat16Vector:
+		fp16Vectors := make([][]byte, 0, nb)
+		for i := start; i < start+nb; i++ {
+			vec := entity.FloatVector(common.GenFloatVector(dim)).ToFloat16Vector()
+			fp16Vectors = append(fp16Vectors, vec)
+		}
+		return column.NewColumnFloat16Vector(fieldName, dim, fp16Vectors)
+
+	case entity.FieldTypeBFloat16Vector:
+		bf16Vectors := make([][]byte, 0, nb)
+		for i := start; i < start+nb; i++ {
+			vec := entity.FloatVector(common.GenFloatVector(dim)).ToBFloat16Vector()
+			bf16Vectors = append(bf16Vectors, vec)
+		}
+		return column.NewColumnBFloat16Vector(fieldName, dim, bf16Vectors)
+
+	default:
+		log.Fatal("GenFp16OrBf16ColumnDataFromFloatVector failed", zap.Any("FieldType", fieldType))
+		return nil
+	}
+}
+
 func GenDynamicColumnData(start int, nb int) []column.Column {
 	type ListStruct struct {
 		List []int64 `json:"list" milvus:"name:list"`
@@ -434,6 +464,32 @@ func GenColumnsBasedSchema(schema *entity.Schema, option *GenDataOption) ([]colu
 			continue
 		}
 		columns = append(columns, GenColumnData(option.nb, field.DataType, *option))
+	}
+	if schema.EnableDynamicField {
+		dynamicColumns = GenDynamicColumnData(option.start, option.nb)
+	}
+	return columns, dynamicColumns
+}
+
+func GenColumnsBasedSchemaWithFp32VecConversion(schema *entity.Schema, option *GenDataOption) ([]column.Column, []column.Column) {
+	if nil == schema || schema.CollectionName == "" {
+		log.Fatal("[GenColumnsBasedSchema] Nil Schema is not expected")
+	}
+	fields := schema.Fields
+	columns := make([]column.Column, 0, len(fields)+1)
+	var dynamicColumns []column.Column
+	for _, field := range fields {
+		if field.DataType == entity.FieldTypeArray {
+			option.TWithElementType(field.ElementType)
+		}
+		if field.AutoID {
+			continue
+		}
+		if field.DataType == entity.FieldTypeFloat16Vector || field.DataType == entity.FieldTypeBFloat16Vector {
+			columns = append(columns, GenColumnDataWithFp32VecConversion(option.nb, field.DataType, *option))
+		} else {
+			columns = append(columns, GenColumnData(option.nb, field.DataType, *option))
+		}
 	}
 	if schema.EnableDynamicField {
 		dynamicColumns = GenDynamicColumnData(option.start, option.nb)

@@ -17,9 +17,7 @@
 package entity
 
 import (
-	"strconv"
-
-	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -62,6 +60,7 @@ type Schema struct {
 	AutoID             bool
 	Fields             []*Field
 	EnableDynamicField bool
+	Functions          []*Function
 
 	pkField *Field
 }
@@ -102,6 +101,11 @@ func (s *Schema) WithField(f *Field) *Schema {
 	return s
 }
 
+func (s *Schema) WithFunction(f *Function) *Schema {
+	s.Functions = append(s.Functions, f)
+	return s
+}
+
 // ProtoMessage returns corresponding server.CollectionSchema
 func (s *Schema) ProtoMessage() *schemapb.CollectionSchema {
 	r := &schemapb.CollectionSchema{
@@ -110,10 +114,14 @@ func (s *Schema) ProtoMessage() *schemapb.CollectionSchema {
 		AutoID:             s.AutoID,
 		EnableDynamicField: s.EnableDynamicField,
 	}
-	r.Fields = make([]*schemapb.FieldSchema, 0, len(s.Fields))
-	for _, field := range s.Fields {
-		r.Fields = append(r.Fields, field.ProtoMessage())
-	}
+	r.Fields = lo.Map(s.Fields, func(field *Field, _ int) *schemapb.FieldSchema {
+		return field.ProtoMessage()
+	})
+
+	r.Functions = lo.Map(s.Functions, func(function *Function, _ int) *schemapb.FunctionSchema {
+		return function.ProtoMessage()
+	})
+
 	return r
 }
 
@@ -121,6 +129,8 @@ func (s *Schema) ProtoMessage() *schemapb.CollectionSchema {
 func (s *Schema) ReadProto(p *schemapb.CollectionSchema) *Schema {
 	s.Description = p.GetDescription()
 	s.CollectionName = p.GetName()
+	s.EnableDynamicField = p.GetEnableDynamicField()
+	// fields
 	s.Fields = make([]*Field, 0, len(p.GetFields()))
 	for _, fp := range p.GetFields() {
 		field := NewField().ReadProto(fp)
@@ -132,7 +142,11 @@ func (s *Schema) ReadProto(p *schemapb.CollectionSchema) *Schema {
 		}
 		s.Fields = append(s.Fields, field)
 	}
-	s.EnableDynamicField = p.GetEnableDynamicField()
+	// functions
+	s.Functions = lo.Map(p.GetFunctions(), func(fn *schemapb.FunctionSchema, _ int) *Function {
+		return NewFunction().ReadProto(fn)
+	})
+
 	return s
 }
 
@@ -147,210 +161,6 @@ func (s *Schema) PKFieldName() string {
 // PKField returns PK Field schema for this schema.
 func (s *Schema) PKField() *Field {
 	return s.pkField
-}
-
-// Field represent field schema in milvus
-type Field struct {
-	ID              int64  // field id, generated when collection is created, input value is ignored
-	Name            string // field name
-	PrimaryKey      bool   // is primary key
-	AutoID          bool   // is auto id
-	Description     string
-	DataType        FieldType
-	TypeParams      map[string]string
-	IndexParams     map[string]string
-	IsDynamic       bool
-	IsPartitionKey  bool
-	IsClusteringKey bool
-	ElementType     FieldType
-}
-
-// ProtoMessage generates corresponding FieldSchema
-func (f *Field) ProtoMessage() *schemapb.FieldSchema {
-	return &schemapb.FieldSchema{
-		FieldID:         f.ID,
-		Name:            f.Name,
-		Description:     f.Description,
-		IsPrimaryKey:    f.PrimaryKey,
-		AutoID:          f.AutoID,
-		DataType:        schemapb.DataType(f.DataType),
-		TypeParams:      MapKvPairs(f.TypeParams),
-		IndexParams:     MapKvPairs(f.IndexParams),
-		IsDynamic:       f.IsDynamic,
-		IsPartitionKey:  f.IsPartitionKey,
-		IsClusteringKey: f.IsClusteringKey,
-		ElementType:     schemapb.DataType(f.ElementType),
-	}
-}
-
-// NewField creates a new Field with map initialized.
-func NewField() *Field {
-	return &Field{
-		TypeParams:  make(map[string]string),
-		IndexParams: make(map[string]string),
-	}
-}
-
-func (f *Field) WithName(name string) *Field {
-	f.Name = name
-	return f
-}
-
-func (f *Field) WithDescription(desc string) *Field {
-	f.Description = desc
-	return f
-}
-
-func (f *Field) WithDataType(dataType FieldType) *Field {
-	f.DataType = dataType
-	return f
-}
-
-func (f *Field) WithIsPrimaryKey(isPrimaryKey bool) *Field {
-	f.PrimaryKey = isPrimaryKey
-	return f
-}
-
-func (f *Field) WithIsAutoID(isAutoID bool) *Field {
-	f.AutoID = isAutoID
-	return f
-}
-
-func (f *Field) WithIsDynamic(isDynamic bool) *Field {
-	f.IsDynamic = isDynamic
-	return f
-}
-
-func (f *Field) WithIsPartitionKey(isPartitionKey bool) *Field {
-	f.IsPartitionKey = isPartitionKey
-	return f
-}
-
-func (f *Field) WithIsClusteringKey(isClusteringKey bool) *Field {
-	f.IsClusteringKey = isClusteringKey
-	return f
-}
-
-/*
-func (f *Field) WithDefaultValueBool(defaultValue bool) *Field {
-	f.DefaultValue = &schemapb.ValueField{
-		Data: &schemapb.ValueField_BoolData{
-			BoolData: defaultValue,
-		},
-	}
-	return f
-}
-
-func (f *Field) WithDefaultValueInt(defaultValue int32) *Field {
-	f.DefaultValue = &schemapb.ValueField{
-		Data: &schemapb.ValueField_IntData{
-			IntData: defaultValue,
-		},
-	}
-	return f
-}
-
-func (f *Field) WithDefaultValueLong(defaultValue int64) *Field {
-	f.DefaultValue = &schemapb.ValueField{
-		Data: &schemapb.ValueField_LongData{
-			LongData: defaultValue,
-		},
-	}
-	return f
-}
-
-func (f *Field) WithDefaultValueFloat(defaultValue float32) *Field {
-	f.DefaultValue = &schemapb.ValueField{
-		Data: &schemapb.ValueField_FloatData{
-			FloatData: defaultValue,
-		},
-	}
-	return f
-}
-
-func (f *Field) WithDefaultValueDouble(defaultValue float64) *Field {
-	f.DefaultValue = &schemapb.ValueField{
-		Data: &schemapb.ValueField_DoubleData{
-			DoubleData: defaultValue,
-		},
-	}
-	return f
-}
-
-func (f *Field) WithDefaultValueString(defaultValue string) *Field {
-	f.DefaultValue = &schemapb.ValueField{
-		Data: &schemapb.ValueField_StringData{
-			StringData: defaultValue,
-		},
-	}
-	return f
-}*/
-
-func (f *Field) WithTypeParams(key string, value string) *Field {
-	if f.TypeParams == nil {
-		f.TypeParams = make(map[string]string)
-	}
-	f.TypeParams[key] = value
-	return f
-}
-
-func (f *Field) WithDim(dim int64) *Field {
-	if f.TypeParams == nil {
-		f.TypeParams = make(map[string]string)
-	}
-	f.TypeParams[TypeParamDim] = strconv.FormatInt(dim, 10)
-	return f
-}
-
-func (f *Field) GetDim() (int64, error) {
-	dimStr, has := f.TypeParams[TypeParamDim]
-	if !has {
-		return -1, errors.New("field with no dim")
-	}
-	dim, err := strconv.ParseInt(dimStr, 10, 64)
-	if err != nil {
-		return -1, errors.Newf("field with bad format dim: %s", err.Error())
-	}
-	return dim, nil
-}
-
-func (f *Field) WithMaxLength(maxLen int64) *Field {
-	if f.TypeParams == nil {
-		f.TypeParams = make(map[string]string)
-	}
-	f.TypeParams[TypeParamMaxLength] = strconv.FormatInt(maxLen, 10)
-	return f
-}
-
-func (f *Field) WithElementType(eleType FieldType) *Field {
-	f.ElementType = eleType
-	return f
-}
-
-func (f *Field) WithMaxCapacity(maxCap int64) *Field {
-	if f.TypeParams == nil {
-		f.TypeParams = make(map[string]string)
-	}
-	f.TypeParams[TypeParamMaxCapacity] = strconv.FormatInt(maxCap, 10)
-	return f
-}
-
-// ReadProto parses FieldSchema
-func (f *Field) ReadProto(p *schemapb.FieldSchema) *Field {
-	f.ID = p.GetFieldID()
-	f.Name = p.GetName()
-	f.PrimaryKey = p.GetIsPrimaryKey()
-	f.AutoID = p.GetAutoID()
-	f.Description = p.GetDescription()
-	f.DataType = FieldType(p.GetDataType())
-	f.TypeParams = KvPairsMap(p.GetTypeParams())
-	f.IndexParams = KvPairsMap(p.GetIndexParams())
-	f.IsDynamic = p.GetIsDynamic()
-	f.IsPartitionKey = p.GetIsPartitionKey()
-	f.IsClusteringKey = p.GetIsClusteringKey()
-	f.ElementType = FieldType(p.GetElementType())
-
-	return f
 }
 
 // MapKvPairs converts map into commonpb.KeyValuePair slice

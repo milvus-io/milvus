@@ -19,6 +19,7 @@ package idalloc
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/types"
 )
@@ -57,11 +58,15 @@ type Allocator interface {
 	// Sync expire the local allocator messages,
 	// syncs the local allocator and remote allocator.
 	Sync()
+
+	// SyncIfExpired syncs the local allocator and remote allocator if the duration since last sync operation is greater than expire.
+	SyncIfExpired(expire time.Duration)
 }
 
 type allocatorImpl struct {
 	mu              sync.Mutex
 	remoteAllocator remoteBatchAllocator
+	lastSyncTime    time.Time
 	localAllocator  *localAllocator
 }
 
@@ -87,6 +92,15 @@ func (ta *allocatorImpl) Sync() {
 	ta.localAllocator.exhausted()
 }
 
+func (ta *allocatorImpl) SyncIfExpired(expire time.Duration) {
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+
+	if time.Since(ta.lastSyncTime) > expire {
+		ta.localAllocator.exhausted()
+	}
+}
+
 // allocateRemote allocates timestamp from remote root coordinator.
 func (ta *allocatorImpl) allocateRemote(ctx context.Context) (uint64, error) {
 	// Update local allocator from remote.
@@ -95,6 +109,7 @@ func (ta *allocatorImpl) allocateRemote(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 	ta.localAllocator.update(start, count)
+	ta.lastSyncTime = time.Now()
 
 	// Get from local again.
 	return ta.localAllocator.allocateOne()

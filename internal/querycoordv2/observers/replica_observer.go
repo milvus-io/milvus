@@ -71,7 +71,7 @@ func (ob *ReplicaObserver) schedule(ctx context.Context) {
 	defer ob.wg.Done()
 	log.Info("Start check replica loop")
 
-	listener := ob.meta.ResourceManager.ListenNodeChanged()
+	listener := ob.meta.ResourceManager.ListenNodeChanged(ctx)
 	for {
 		ob.waitNodeChangedOrTimeout(ctx, listener)
 		// stop if the context is canceled.
@@ -92,15 +92,16 @@ func (ob *ReplicaObserver) waitNodeChangedOrTimeout(ctx context.Context, listene
 }
 
 func (ob *ReplicaObserver) checkNodesInReplica() {
-	log := log.Ctx(context.Background()).WithRateGroup("qcv2.replicaObserver", 1, 60)
-	collections := ob.meta.GetAll()
+	ctx := context.Background()
+	log := log.Ctx(ctx).WithRateGroup("qcv2.replicaObserver", 1, 60)
+	collections := ob.meta.GetAll(ctx)
 	for _, collectionID := range collections {
-		utils.RecoverReplicaOfCollection(ob.meta, collectionID)
+		utils.RecoverReplicaOfCollection(ctx, ob.meta, collectionID)
 	}
 
 	// check all ro nodes, remove it from replica if all segment/channel has been moved
 	for _, collectionID := range collections {
-		replicas := ob.meta.ReplicaManager.GetByCollection(collectionID)
+		replicas := ob.meta.ReplicaManager.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
 			roNodes := replica.GetRONodes()
 			rwNodes := replica.GetRWNodes()
@@ -130,7 +131,7 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 				zap.Int64s("roNodes", roNodes),
 				zap.Int64s("rwNodes", rwNodes),
 			)
-			if err := ob.meta.ReplicaManager.RemoveNode(replica.GetID(), removeNodes...); err != nil {
+			if err := ob.meta.ReplicaManager.RemoveNode(ctx, replica.GetID(), removeNodes...); err != nil {
 				logger.Warn("fail to remove node from replica", zap.Error(err))
 				continue
 			}

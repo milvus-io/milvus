@@ -68,6 +68,7 @@ PhyFilterBitsNode::GetOutput() {
         operator_context_->get_exec_context(), exprs_.get(), input_.get());
 
     TargetBitmap bitset;
+    TargetBitmap valid_bitset;
     while (num_processed_rows_ < need_process_rows_) {
         exprs_->Eval(0, 1, true, eval_ctx, results_);
 
@@ -75,23 +76,38 @@ PhyFilterBitsNode::GetOutput() {
                    "PhyFilterBitsNode result size should be size one and not "
                    "be nullptr");
 
-        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results_[0]);
-        auto col_vec_size = col_vec->size();
-        TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-        bitset.append(view);
-        num_processed_rows_ += col_vec_size;
+        if (auto col_vec =
+                std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
+            if (col_vec->IsBitmap()) {
+                auto col_vec_size = col_vec->size();
+                TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
+                bitset.append(view);
+                TargetBitmapView valid_view(col_vec->GetValidRawData(),
+                                            col_vec_size);
+                valid_bitset.append(valid_view);
+                num_processed_rows_ += col_vec_size;
+            } else {
+                PanicInfo(ExprInvalid,
+                          "PhyFilterBitsNode result should be bitmap");
+            }
+        } else {
+            PanicInfo(ExprInvalid,
+                      "PhyFilterBitsNode result should be ColumnVector");
+        }
     }
     bitset.flip();
     Assert(bitset.size() == need_process_rows_);
+    Assert(valid_bitset.size() == need_process_rows_);
     // num_processed_rows_ = need_process_rows_;
     std::vector<VectorPtr> col_res;
-    col_res.push_back(std::make_shared<ColumnVector>(std::move(bitset)));
+    col_res.push_back(std::make_shared<ColumnVector>(std::move(bitset),
+                                                     std::move(valid_bitset)));
     std::chrono::high_resolution_clock::time_point scalar_end =
         std::chrono::high_resolution_clock::now();
     double scalar_cost =
         std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
             .count();
-    monitor::internal_core_search_latency_scalar.Observe(scalar_cost);
+    monitor::internal_core_search_latency_scalar.Observe(scalar_cost / 1000);
 
     return std::make_shared<RowVector>(col_res);
 }

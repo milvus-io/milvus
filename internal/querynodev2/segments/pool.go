@@ -16,6 +16,16 @@
 
 package segments
 
+/*
+#cgo pkg-config: milvus_core
+
+#include <stdlib.h>
+#include <stdint.h>
+#include "common/init_c.h"
+#include "segcore/segcore_init_c.h"
+*/
+import "C"
+
 import (
 	"context"
 	"math"
@@ -46,8 +56,17 @@ var (
 	warmupPool atomic.Pointer[conc.Pool[any]]
 	warmupOnce sync.Once
 
+	deletePool     atomic.Pointer[conc.Pool[struct{}]]
+	deletePoolOnce sync.Once
+
 	bfPool      atomic.Pointer[conc.Pool[any]]
 	bfApplyOnce sync.Once
+
+	// intentionally leaked CGO tag names
+	cgoTagSQ      = C.CString("CGO_SQ")
+	cgoTagLoad    = C.CString("CGO_LOAD")
+	cgoTagDynamic = C.CString("CGO_DYN")
+	cgoTagWarmup  = C.CString("CGO_WARMUP")
 )
 
 // initSQPool initialize
@@ -60,7 +79,10 @@ func initSQPool() {
 			conc.WithPreAlloc(false), // pre alloc must be false to resize pool dynamically, use warmup to alloc worker here
 			conc.WithDisablePurge(true),
 		)
-		conc.WarmupPool(pool, runtime.LockOSThread)
+		conc.WarmupPool(pool, func() {
+			runtime.LockOSThread()
+			C.SetThreadName(cgoTagSQ)
+		})
 		sqp.Store(pool)
 
 		pt.Watch(pt.QueryNodeCfg.MaxReadConcurrency.Key, config.NewHandler("qn.sqpool.maxconc", ResizeSQPool))
@@ -71,15 +93,19 @@ func initSQPool() {
 
 func initDynamicPool() {
 	dynOnce.Do(func() {
+		size := hardware.GetCPUNum()
 		pool := conc.NewPool[any](
-			hardware.GetCPUNum(),
+			size,
 			conc.WithPreAlloc(false),
 			conc.WithDisablePurge(false),
-			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
+			conc.WithPreHandler(func() {
+				runtime.LockOSThread()
+				C.SetThreadName(cgoTagDynamic)
+			}), // lock os thread for cgo thread disposal
 		)
 
 		dp.Store(pool)
-		log.Info("init dynamicPool done", zap.Int("size", hardware.GetCPUNum()))
+		log.Info("init dynamicPool done", zap.Int("size", size))
 	})
 }
 
@@ -91,7 +117,10 @@ func initLoadPool() {
 			poolSize,
 			conc.WithPreAlloc(false),
 			conc.WithDisablePurge(false),
-			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
+			conc.WithPreHandler(func() {
+				runtime.LockOSThread()
+				C.SetThreadName(cgoTagLoad)
+			}), // lock os thread for cgo thread disposal
 		)
 
 		loadPool.Store(pool)
@@ -109,8 +138,11 @@ func initWarmupPool() {
 			poolSize,
 			conc.WithPreAlloc(false),
 			conc.WithDisablePurge(false),
-			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
-			conc.WithNonBlocking(true),                // make warming up non blocking
+			conc.WithPreHandler(func() {
+				runtime.LockOSThread()
+				C.SetThreadName(cgoTagWarmup)
+			}), // lock os thread for cgo thread disposal
+			conc.WithNonBlocking(true), // make warming up non blocking
 		)
 
 		warmupPool.Store(pool)
@@ -128,6 +160,13 @@ func initBFApplyPool() {
 
 		bfPool.Store(pool)
 		pt.Watch(pt.QueryNodeCfg.BloomFilterApplyParallelFactor.Key, config.NewHandler("qn.bfapply.parallel", ResizeBFApplyPool))
+	})
+}
+
+func initDeletePool() {
+	deletePoolOnce.Do(func() {
+		pool := conc.NewPool[struct{}](runtime.GOMAXPROCS(0))
+		deletePool.Store(pool)
 	})
 }
 
@@ -156,6 +195,11 @@ func GetWarmupPool() *conc.Pool[any] {
 func GetBFApplyPool() *conc.Pool[any] {
 	initBFApplyPool()
 	return bfPool.Load()
+}
+
+func GetDeletePool() *conc.Pool[struct{}] {
+	initDeletePool()
+	return deletePool.Load()
 }
 
 func ResizeSQPool(evt *config.Event) {

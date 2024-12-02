@@ -59,5 +59,5 @@ func TestDatabaseCloneAndEqual(t *testing.T) {
 
 func TestDatabaseAvailable(t *testing.T) {
 	assert.True(t, dbModel.Available())
-	assert.True(t, NewDefaultDatabase().Available())
+	assert.True(t, NewDefaultDatabase(nil).Available())
 }

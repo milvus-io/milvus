@@ -111,6 +111,7 @@ type ImmutableNodeInfo struct {
 	Address  string
 	Hostname string
 	Version  semver.Version
+	Labels   map[string]string
 }
 
 const (
@@ -147,6 +148,10 @@ func (n *NodeInfo) Hostname() string {
 	return n.immutableInfo.Hostname
 }
 
+func (n *NodeInfo) Labels() map[string]string {
+	return n.immutableInfo.Labels
+}
+
 func (n *NodeInfo) SegmentCnt() int {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
@@ -157,6 +162,13 @@ func (n *NodeInfo) ChannelCnt() int {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.stats.getChannelCnt()
+}
+
+// return node's memory capacity in mb
+func (n *NodeInfo) MemCapacity() float64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.stats.getMemCapacity()
 }
 
 func (n *NodeInfo) SetLastHeartbeat(time time.Time) {
@@ -216,5 +228,11 @@ func WithSegmentCnt(cnt int) StatsOption {
 func WithChannelCnt(cnt int) StatsOption {
 	return func(n *NodeInfo) {
 		n.setChannelCnt(cnt)
+	}
+}
+
+func WithMemCapacity(capacity float64) StatsOption {
+	return func(n *NodeInfo) {
+		n.setMemCapacity(capacity)
 	}
 }

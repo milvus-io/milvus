@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -183,7 +183,7 @@ func TestDropPartitionData(t *testing.T) {
 
 	// insert data into partition -> query check
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema).TWithPartitionName(parName), hp.TNewDataOption())
-	res, errQ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithPartitions([]string{parName}).WithOutputFields([]string{common.QueryCountFieldName}))
+	res, errQ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithPartitions(parName).WithOutputFields(common.QueryCountFieldName))
 	common.CheckErr(t, errQ, true)
 	count, _ := res.GetColumn(common.QueryCountFieldName).Get(0)
 	require.EqualValues(t, common.DefaultNb, count)

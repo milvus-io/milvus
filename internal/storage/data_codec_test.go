@@ -574,9 +574,11 @@ func TestDeleteCodec(t *testing.T) {
 
 		pid, sid, data, err := deleteCodec.Deserialize([]*Blob{blob})
 		assert.NoError(t, err)
+		intPks, ok := data.DeletePks().(*Int64PrimaryKeys)
+		require.True(t, ok)
 		assert.Equal(t, pid, int64(1))
 		assert.Equal(t, sid, int64(1))
-		assert.Equal(t, data, deleteData)
+		assert.Equal(t, []int64{1, 2}, intPks.values)
 	})
 
 	t.Run("string pk", func(t *testing.T) {
@@ -591,9 +593,11 @@ func TestDeleteCodec(t *testing.T) {
 
 		pid, sid, data, err := deleteCodec.Deserialize([]*Blob{blob})
 		assert.NoError(t, err)
+		strPks, ok := data.DeletePks().(*VarcharPrimaryKeys)
+		require.True(t, ok)
 		assert.Equal(t, pid, int64(1))
 		assert.Equal(t, sid, int64(1))
-		assert.Equal(t, data, deleteData)
+		assert.Equal(t, []string{"test1", "test2"}, strPks.values)
 	})
 }
 
@@ -633,8 +637,10 @@ func TestUpgradeDeleteLog(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int64(1), parID)
 		assert.Equal(t, int64(1), segID)
-		assert.ElementsMatch(t, dData.Pks, deleteData.Pks)
-		assert.ElementsMatch(t, dData.Tss, deleteData.Tss)
+		intPks, ok := deleteData.DeletePks().(*Int64PrimaryKeys)
+		require.True(t, ok)
+		assert.ElementsMatch(t, []int64{1, 2}, intPks.values)
+		assert.ElementsMatch(t, dData.Tss, deleteData.DeleteTimestamps())
 	})
 
 	t.Run("with split lenth error", func(t *testing.T) {

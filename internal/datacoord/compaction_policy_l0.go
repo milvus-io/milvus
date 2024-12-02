@@ -26,11 +26,10 @@ func newL0CompactionPolicy(meta *meta) *l0CompactionPolicy {
 }
 
 func (policy *l0CompactionPolicy) Enable() bool {
-	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() && Params.DataCoordCfg.EnableLevelZeroSegment.GetAsBool()
+	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
 }
 
 func (policy *l0CompactionPolicy) Trigger() (map[CompactionTriggerType][]CompactionView, error) {
-	log.Info("start trigger l0CompactionPolicy...")
 	// support config hot refresh
 	events := policy.generateEventForLevelZeroViewChange()
 	if len(events) != 0 {

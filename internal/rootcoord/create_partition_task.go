@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -45,7 +46,7 @@ func (t *createPartitionTask) Prepare(ctx context.Context) error {
 		return err
 	}
 	t.collMeta = collMeta
-	return checkGeneralCapacity(ctx, 0, 1, 0, t.core, t.ts)
+	return checkGeneralCapacity(ctx, 0, 1, 0, t.core)
 }
 
 func (t *createPartitionTask) Execute(ctx context.Context) error {
@@ -84,6 +85,7 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 		collectionID:    t.collMeta.CollectionID,
 		partitionName:   t.Req.GetPartitionName(),
 		ts:              t.GetTs(),
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_CreatePartition)},
 	}, &nullStep{})
 
 	undoTask.AddStep(&addPartitionMetaStep{
@@ -127,4 +129,13 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 	}, &nullStep{})
 
 	return undoTask.Execute(ctx)
+}
+
+func (t *createPartitionTask) GetLockerKey() LockerKey {
+	collection := t.core.getCollectionIDStr(t.ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), 0)
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(t.Req.GetDbName(), false),
+		NewCollectionLockerKey(collection, true),
+	)
 }

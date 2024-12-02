@@ -146,6 +146,15 @@ var (
 			Help:      "The number of roles",
 		})
 
+	// RootCoordNumOfPrivilegeGroups counts the number of credentials.
+	RootCoordNumOfPrivilegeGroups = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "num_of_privilege_groups",
+			Help:      "The number of privilege groups",
+		})
+
 	// RootCoordTtDelay records the max time tick delay of flow graphs in DataNodes and QueryNodes.
 	RootCoordTtDelay = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -275,6 +284,8 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 
 	registry.MustRegister(QueryNodeMemoryHighWaterLevel)
 	registry.MustRegister(DiskQuota)
+
+	RegisterStreamingServiceClient(registry)
 }
 
 func CleanupRootCoordDBMetrics(dbName string) {

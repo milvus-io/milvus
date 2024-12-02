@@ -188,15 +188,15 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                                      }),
                       files_value.end());
 
-    auto index_valid_data_file =
-        mem_file_manager_->GetRemoteIndexObjectPrefix() +
-        std::string("/index_null_offset");
-    auto it = std::find(
-        files_value.begin(), files_value.end(), index_valid_data_file);
+    auto it = std::find_if(
+        files_value.begin(), files_value.end(), [](const std::string& file) {
+            return file.substr(file.find_last_of('/') + 1) ==
+                   "index_null_offset";
+        });
     if (it != files_value.end()) {
-        files_value.erase(it);
         std::vector<std::string> file;
-        file.push_back(index_valid_data_file);
+        file.push_back(*it);
+        files_value.erase(it);
         auto index_datas = mem_file_manager_->LoadIndexToMemory(file);
         AssembleIndexDatas(index_datas);
         BinarySet binary_set;

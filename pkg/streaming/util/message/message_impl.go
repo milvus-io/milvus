@@ -65,33 +65,20 @@ func (m *messageImpl) WithWALTerm(term int64) MutableMessage {
 
 // WithTimeTick sets the time tick of current message.
 func (m *messageImpl) WithTimeTick(tt uint64) MutableMessage {
-	if m.properties.Exist(messageTimeTick) {
-		panic("time tick already set in properties of message")
-	}
 	m.properties.Set(messageTimeTick, EncodeUint64(tt))
 	return m
 }
 
 // WithLastConfirmed sets the last confirmed message id of current message.
 func (m *messageImpl) WithLastConfirmed(id MessageID) MutableMessage {
-	if m.properties.Exist(messageLastConfirmedIDSameWithMessageID) {
-		panic("last confirmed message already set in properties of message")
-	}
-	if m.properties.Exist(messageLastConfirmed) {
-		panic("last confirmed message already set in properties of message")
-	}
+	m.properties.Delete(messageLastConfirmedIDSameWithMessageID)
 	m.properties.Set(messageLastConfirmed, id.Marshal())
 	return m
 }
 
 // WithLastConfirmedUseMessageID sets the last confirmed message id of current message to be the same as message id.
 func (m *messageImpl) WithLastConfirmedUseMessageID() MutableMessage {
-	if m.properties.Exist(messageLastConfirmedIDSameWithMessageID) {
-		panic("last confirmed message already set in properties of message")
-	}
-	if m.properties.Exist(messageLastConfirmed) {
-		panic("last confirmed message already set in properties of message")
-	}
+	m.properties.Delete(messageLastConfirmed)
 	m.properties.Set(messageLastConfirmedIDSameWithMessageID, "")
 	return m
 }
@@ -218,6 +205,15 @@ type immutableTxnMessageImpl struct {
 // Begin returns the begin message of the transaction message.
 func (m *immutableTxnMessageImpl) Begin() ImmutableMessage {
 	return m.begin
+}
+
+// EstimateSize returns the estimated size of current message.
+func (m *immutableTxnMessageImpl) EstimateSize() int {
+	size := 0
+	for _, msg := range m.messages {
+		size += msg.EstimateSize()
+	}
+	return size
 }
 
 // RangeOver iterates over the underlying messages in the transaction message.

@@ -105,6 +105,7 @@ func Test_describeCollectionTask_Execute(t *testing.T) {
 		}, nil)
 		meta.On("ListAliasesByID",
 			mock.Anything,
+			mock.Anything,
 		).Return([]string{alias1, alias2})
 		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
 			ID:   1,

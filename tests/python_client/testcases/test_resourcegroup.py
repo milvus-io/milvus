@@ -1,4 +1,5 @@
 import pytest
+from pymilvus.client.types import ResourceGroupConfig
 
 from base.client_base import TestcaseBase
 from common import common_func as cf
@@ -81,7 +82,7 @@ class TestResourceGroupParams(TestcaseBase):
                                                   check_items=source_rg_info)
 
         # try to drop my rg
-        error = {ct.err_code: 999, ct.err_msg: 'failed to drop resource group, err=delete non-empty rg is not permitted'}
+        error = {ct.err_code: 999, ct.err_msg: "resource group's limits node num is not 0"}
         self.utility_wrap.drop_resource_group(name=m_rg_name, check_task=ct.CheckTasks.err_res,
                                               check_items=error)
 
@@ -98,7 +99,7 @@ class TestResourceGroupParams(TestcaseBase):
         self.utility_wrap.drop_resource_group(name=m_rg_name)
         rgs, _ = self.utility_wrap.list_resource_groups()
         assert len(rgs) == rgs_count
-        error = {ct.err_code: 999, ct.err_msg: "failed to describe resource group, err=resource group doesn't exist"}
+        error = {ct.err_code: 999, ct.err_msg: f"resource group not found[rg={m_rg_name}]"}
         self.utility_wrap.describe_resource_group(name=m_rg_name,
                                                   check_task=ct.CheckTasks.err_res,
                                                   check_items=error)
@@ -145,7 +146,7 @@ class TestResourceGroupParams(TestcaseBase):
         method:
         1. create a rg with name starts with "_"
         2. create a rg with name abc again
-        verify: fail with error msg when creating with a dup name
+        verify: success when creating with a dup name and config
         """
         self._connect()
         rg_name = cf.gen_unique_str('_rg')
@@ -153,11 +154,8 @@ class TestResourceGroupParams(TestcaseBase):
         self.utility_wrap.describe_resource_group(name=rg_name,
                                                   check_task=ct.CheckTasks.check_rg_property,
                                                   check_items={"name": rg_name})
-        error = {ct.err_code: 999,
-                 ct.err_msg: "resource group already exist"}
         self.init_resource_group(name=rg_name,
-                                 check_task=ct.CheckTasks.err_res,
-                                 check_items=error)
+                                 check_task=ct.CheckTasks.check_nothing)
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
     def test_create_rg_dropped_name(self):
@@ -182,7 +180,7 @@ class TestResourceGroupParams(TestcaseBase):
         self.utility_wrap.drop_resource_group(name=rg_name)
         assert len(self.utility_wrap.list_resource_groups()[0]) == rgs_count - 1
         error = {ct.err_code: 999,
-                 ct.err_msg: "failed to describe resource group, err=resource group doesn't exist"}
+                 ct.err_msg: f"resource group not found[rg={rg_name}]"}
         self.utility_wrap.describe_resource_group(name=rg_name,
                                                   check_task=ct.CheckTasks.err_res,
                                                   check_items=error)
@@ -277,7 +275,7 @@ class TestResourceGroupParams(TestcaseBase):
         self.utility_wrap.describe_resource_group(name=ct.default_resource_group_name,
                                                   check_task=ct.CheckTasks.check_rg_property,
                                                   check_items=default_rg_info)
-        error = {ct.err_code: 5, ct.err_msg: 'delete default rg is not permitted'}
+        error = {ct.err_code: 5, ct.err_msg: 'default resource group is not deletable'}
         self.utility_wrap.drop_resource_group(name=ct.default_resource_group_name,
                                               check_task=CheckTasks.err_res,
                                               check_items=error)
@@ -383,7 +381,89 @@ class TestTransferNode(TestcaseBase):
 
         # drop rgB
         error = {ct.err_code: 999,
-                 ct.err_msg: 'failed to drop resource group, err=delete non-empty rg is not permitted'}
+                 ct.err_msg: f"resource group's limits node num is not 0: invalid parameter"
+                             f"[expected=not empty resource group][actual={rg2_name}]"}
+        self.utility_wrap.drop_resource_group(name=rg2_name,
+                                              check_task=CheckTasks.err_res,
+                                              check_items=error
+                                              )
+        self.utility_wrap.drop_resource_group(name=rg1_name)
+
+    @pytest.mark.tags(CaseLabel.MultiQueryNodes)
+    def test_transfer_node_by_update_rg(self):
+        """
+        Method:
+        1. create 2 rgs: RgA and RgB
+        2. transfer 1 node from RgA to RgB
+        verify failure with error
+        3. transfer 1 node from default to RgA
+        verify transfer successfully
+        4. transfer 1 node from RgA to RgB
+        verify transfer successfully
+        5. drop rg RgB
+        verify fail with error
+        6. drop rg RgA
+        verify success rg RgA
+        """
+        self._connect()
+        rg1_name = cf.gen_unique_str('rg1')
+        rg2_name = cf.gen_unique_str('rg2')
+        self.init_resource_group(rg1_name)
+        self.init_resource_group(rg2_name)
+        self.utility_wrap.transfer_node(source=ct.default_resource_group_name, target=rg1_name, num_node=1)
+        rg_init_cap = 0
+        rg_init_available_node = 0
+        rg1_info = {"name": rg1_name,
+                    "capacity": rg_init_cap + 1,
+                    "num_available_node": rg_init_available_node + 1,
+                    "num_loaded_replica": {},
+                    "num_outgoing_node": {},
+                    "num_incoming_node": {}
+                    }
+        self.utility_wrap.describe_resource_group(name=rg1_name,
+                                                  check_task=CheckTasks.check_rg_property,
+                                                  check_items=rg1_info)
+
+        # transfer a query node to rgB
+        expected_num_nodes_in_default, expected_num_nodes_in_rg = 0, 1
+        self.utility_wrap.update_resource_group({
+            rg1_name: ResourceGroupConfig(
+                requests={"node_num": expected_num_nodes_in_default},
+                limits={"node_num": expected_num_nodes_in_default},
+            ),
+            rg2_name: ResourceGroupConfig(
+                requests={"node_num": expected_num_nodes_in_rg},
+                limits={"node_num": expected_num_nodes_in_rg},
+            )
+        }, using="default")
+        # update_resource_groups ensures atomicity for multiple configuration changes,
+        # so no intermediate states will be visible to Milvus.
+        time.sleep(10)
+        rg2_info = {"name": rg2_name,
+                    "capacity": rg_init_cap + 1,
+                    "num_available_node": rg_init_available_node + 1,
+                    "num_loaded_replica": {},
+                    "num_outgoing_node": {},
+                    "num_incoming_node": {}
+                    }
+        self.utility_wrap.describe_resource_group(name=rg2_name,
+                                                  check_task=CheckTasks.check_rg_property,
+                                                  check_items=rg2_info)
+        rg1_info = {"name": rg1_name,
+                    "capacity": rg_init_cap,
+                    "num_available_node": rg_init_available_node,
+                    "num_loaded_replica": {},
+                    "num_outgoing_node": {},
+                    "num_incoming_node": {}
+                    }
+        self.utility_wrap.describe_resource_group(name=rg1_name,
+                                                  check_task=CheckTasks.check_rg_property,
+                                                  check_items=rg1_info)
+
+        # drop rgB
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"resource group's limits node num is not 0: invalid parameter"
+                             f"[expected=not empty resource group][actual={rg2_name}]"}
         self.utility_wrap.drop_resource_group(name=rg2_name,
                                               check_task=CheckTasks.err_res,
                                               check_items=error
@@ -444,13 +524,15 @@ class TestTransferNode(TestcaseBase):
             res, _ = collection_w.insert(cf.gen_default_list_data(nb=100))
             insert_ids.extend(res.primary_keys)
 
+        # autoBalance need time, num_outgoing_node/num_incoming_node can reduce
+        time.sleep(60)
         # verify rg state
         rg_info = {"name": rg_name,
                    "capacity": 1,
                    "num_available_node": 1,
                    "num_loaded_replica": {},
                    "num_outgoing_node": {},
-                   "num_incoming_node": {collection_w.name: 1}
+                   "num_incoming_node": {}
                    }
         self.utility_wrap.describe_resource_group(name=rg_name,
                                                   check_task=CheckTasks.check_rg_property,
@@ -459,7 +541,7 @@ class TestTransferNode(TestcaseBase):
                            "capacity": ct.default_resource_group_capacity,
                            "num_available_node": config_nodes - 1,
                            "num_loaded_replica": {collection_w.name: 1},
-                           "num_outgoing_node": {collection_w.name: 1},
+                           "num_outgoing_node": {},
                            "num_incoming_node": {}
                            }
         self.utility_wrap.describe_resource_group(name=ct.default_resource_group_name,
@@ -518,6 +600,150 @@ class TestTransferNode(TestcaseBase):
                                                   check_items=default_rg_info)
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
+    @pytest.mark.parametrize("with_growing", [True, False])
+    def test_transfer_node_from_default_rg_by_update_rg(self, with_growing):
+        """
+        Method:
+        1. prepare a collection to search
+        2. create a rgA
+        3. transfer the node from default rg to rgA
+        4. insert to make some growing
+        verify search keeps succ
+        5. transfer the node back to default rg
+        6. insert to make some growing
+        verify search keeps succ
+        """
+        # create a collectionA and insert data
+        dim = 128
+        collection_w, _, _, insert_ids, _ = self.init_collection_general(insert_data=True, dim=dim)
+        if with_growing:
+            res, _ = collection_w.insert(cf.gen_default_list_data(nb=100))
+            insert_ids.extend(res.primary_keys)
+        nq = 5
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        # verify search succ
+        collection_w.search(vectors[:nq],
+                            ct.default_float_vec_field_name,
+                            ct.default_search_params,
+                            ct.default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids.copy(),
+                                         "limit": ct.default_limit}
+                            )
+        default_rg_info = {"name": ct.default_resource_group_name,
+                           "capacity": ct.default_resource_group_capacity,
+                           "num_available_node": config_nodes,
+                           "num_loaded_replica": {collection_w.name: 1},
+                           "num_outgoing_node": {},
+                           "num_incoming_node": {}
+                           }
+        self.utility_wrap.describe_resource_group(name=ct.default_resource_group_name,
+                                                  check_task=CheckTasks.check_rg_property,
+                                                  check_items=default_rg_info)
+
+        # create a rgA
+        rg_name = cf.gen_unique_str('rg')
+        self.init_resource_group(rg_name)
+        # transfer query node from default to rgA
+        expected_num_nodes_in_default, expected_num_nodes_in_rg = 0, 1
+        self.utility_wrap.update_resource_group({
+            ct.default_resource_group_name: ResourceGroupConfig(
+                requests={"node_num": expected_num_nodes_in_default},
+                limits={"node_num": expected_num_nodes_in_default},
+            ),
+            rg_name: ResourceGroupConfig(
+                requests={"node_num": expected_num_nodes_in_rg},
+                limits={"node_num": expected_num_nodes_in_rg},
+            )
+        }, using="default")
+        if with_growing:
+            res, _ = collection_w.insert(cf.gen_default_list_data(nb=100))
+            insert_ids.extend(res.primary_keys)
+
+        # autoBalance need time, num_outgoing_node/num_incoming_node can reduce
+        time.sleep(60)
+        # verify rg state
+        rg_info = {"name": rg_name,
+                   "capacity": 1,
+                   "num_available_node": 1,
+                   "num_loaded_replica": {},
+                   "num_outgoing_node": {},
+                   "num_incoming_node": {}
+                   }
+        self.utility_wrap.describe_resource_group(name=rg_name,
+                                                  check_task=CheckTasks.check_rg_property,
+                                                  check_items=rg_info)
+        default_rg_info = {"name": ct.default_resource_group_name,
+                           "capacity": ct.default_resource_group_capacity,
+                           "num_available_node": config_nodes - 1,
+                           "num_loaded_replica": {collection_w.name: 1},
+                           "num_outgoing_node": {},
+                           "num_incoming_node": {}
+                           }
+        self.utility_wrap.describe_resource_group(name=ct.default_resource_group_name,
+                                                  check_task=CheckTasks.check_rg_property,
+                                                  check_items=default_rg_info)
+
+        # verify search keeps succ after transfer
+        collection_w.search(vectors[:nq],
+                            ct.default_float_vec_field_name,
+                            ct.default_search_params,
+                            ct.default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids.copy(),
+                                         "limit": ct.default_limit}
+                            )
+
+        # transfer query node back to default
+        self.utility_wrap.update_resource_group({
+            rg_name: ResourceGroupConfig(
+                requests={"node_num": expected_num_nodes_in_default},
+                limits={"node_num": expected_num_nodes_in_default},
+            ),
+            ct.default_resource_group_name: ResourceGroupConfig(
+                requests={"node_num": expected_num_nodes_in_rg},
+                limits={"node_num": expected_num_nodes_in_rg},
+            )
+        }, using="default")
+        if with_growing:
+            res, _ = collection_w.insert(cf.gen_default_list_data(nb=100))
+            insert_ids.extend(res.primary_keys)
+
+        # verify search keeps succ
+        collection_w.search(vectors[:nq],
+                            ct.default_float_vec_field_name,
+                            ct.default_search_params,
+                            ct.default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids.copy(),
+                                         "limit": ct.default_limit}
+                            )
+        # verify rg state
+        rg_info = {"name": rg_name,
+                   "capacity": 0,
+                   "num_available_node": 0,
+                   "num_loaded_replica": {},
+                   "num_outgoing_node": {},
+                   "num_incoming_node": {}
+                   }
+        self.utility_wrap.describe_resource_group(name=rg_name,
+                                                  check_task=CheckTasks.check_rg_property,
+                                                  check_items=rg_info)
+        default_rg_info = {"name": ct.default_resource_group_name,
+                           "capacity": ct.default_resource_group_capacity,
+                           "num_available_node": config_nodes,
+                           "num_loaded_replica": {collection_w.name: 1},
+                           "num_outgoing_node": {},
+                           "num_incoming_node": {}
+                           }
+        self.utility_wrap.describe_resource_group(name=ct.default_resource_group_name,
+                                                  check_task=CheckTasks.check_rg_property,
+                                                  check_items=default_rg_info)
+
+    @pytest.mark.tags(CaseLabel.MultiQueryNodes)
     @pytest.mark.parametrize("num_node", [0, 99, -1, 0.5, "str"])
     def test_transfer_node_with_wrong_num_node(self, num_node):
         """
@@ -531,11 +757,17 @@ class TestTransferNode(TestcaseBase):
         self.init_resource_group(rg_name)
 
         # transfer replicas
-        error = {ct.err_code: 999, ct.err_msg: f"failed to transfer node between resource group, err=nodes not enough"}
+        error = {ct.err_code: 999, ct.err_msg: f"resource group node not enough"}
         if num_node in [0, -1]:
-            error = {ct.err_code: 999, ct.err_msg: f"transfer node num can't be [{num_node}]"}
+            error = {ct.err_code: 999, ct.err_msg: f"invalid parameter[expected=NumNode > 0]"
+                                                   f"[actual=invalid NumNode {num_node}]"}
         if type(num_node) is not int:
-            error = {ct.err_code: 999, ct.err_msg: 'expected one of: int'}
+            if isinstance(num_node, str):
+                error = {ct.err_code: 999, ct.err_msg: f"Unexpected error, message=<'str' object cannot be interpreted "
+                                                       f"as an integer>"}
+            else:
+                error = {ct.err_code: 999, ct.err_msg: f"Unexpected error, message=<'float' object cannot be "
+                                                       f"interpreted as an integer>"}
         self.utility_wrap.transfer_node(source=ct.default_resource_group_name,
                                         target=rg_name,
                                         num_node=num_node,
@@ -543,7 +775,7 @@ class TestTransferNode(TestcaseBase):
                                         check_items=error)
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
-    @pytest.mark.parametrize("num_replica", [0, 99, -1, 0.5, True, "str"])
+    @pytest.mark.parametrize("num_replica", [0, 99, -1, 0.5, "str"])
     def test_transfer_replica_with_wrong_num_replica(self, num_replica):
         """
         Method:
@@ -560,12 +792,18 @@ class TestTransferNode(TestcaseBase):
 
         # transfer replicas
         error = {ct.err_code: 999, ct.err_msg: f"failed to transfer replica between resource group, err=nodes not enough"}
-        if not type(num_replica) in [int, bool]:
-            error = {ct.err_code: 999, ct.err_msg: 'expected one of: int'}
+        if type(num_replica) is not int:
+            if isinstance(num_replica, str):
+                error = {ct.err_code: 999, ct.err_msg: f"Unexpected error, message=<'str' object cannot be interpreted "
+                                                       f"as an integer>"}
+            elif isinstance(num_replica, float):
+                error = {ct.err_code: 999, ct.err_msg: f"Unexpected error, message=<'float' object cannot be "
+                                                       f"interpreted as an integer>"}
         if num_replica in [0, -1]:
-            error = {ct.err_code: 999, ct.err_msg: f"transfer replica num can't be [{num_replica}]"}
+            error = {ct.err_code: 999, ct.err_msg: f"invalid parameter[expected=NumReplica > 0]"
+                                                   f"[actual=invalid NumReplica {num_replica}]"}
         if num_replica == 99:
-            error = {ct.err_code: 999, ct.err_msg: f"only found [1] replicas in source resource group[__default_resource_group]"}
+            error = {ct.err_code: 999, ct.err_msg: f"NumReplica not greater than the number of replica"}
 
         self.utility_wrap.transfer_replica(source=ct.default_resource_group_name,
                                            target=rg_name,
@@ -608,7 +846,7 @@ class TestTransferNode(TestcaseBase):
                                         num_node=config_nodes)
         # 5. load the collection with default rg
         error = {ct.err_code: 999,
-                 ct.err_msg: 'failed to load collection, err=failed to spawn replica for collection[nodes not enough]'}
+                 ct.err_msg: 'failed to spawn replica for collection: resource group node not enough'}
         collection_w.load(check_task=CheckTasks.err_res, check_items=error)
 
         # 6. load the collection with rgA
@@ -661,12 +899,12 @@ class TestTransferNode(TestcaseBase):
                                          "ids": insert_ids.copy(),
                                          "limit": ct.default_limit}
                             )
-        # check rgA info after transfer
+        # check rgA info after transfer, auto balance can reduce num_outgoing_node
         rg_info = {"name": rg_name,
                    "capacity": 0,
                    "num_available_node": 0,
                    "num_loaded_replica": {},
-                   "num_outgoing_node": {collection_w.name: config_nodes},
+                   "num_outgoing_node": {collection_w.name: 2},
                    "num_incoming_node": {}
                    }
         self.utility_wrap.describe_resource_group(name=rg_name,
@@ -677,7 +915,7 @@ class TestTransferNode(TestcaseBase):
                            "num_available_node": config_nodes,
                            "num_loaded_replica": {},
                            "num_outgoing_node": {},
-                           "num_incoming_node": {collection_w.name: config_nodes}
+                           "num_incoming_node": {collection_w.name: 2}
                            }
         self.utility_wrap.describe_resource_group(name=ct.default_resource_group_name,
                                                   check_task=CheckTasks.check_rg_property,
@@ -716,7 +954,7 @@ class TestTransferNode(TestcaseBase):
                           check_task=CheckTasks.err_res, check_items=error)
 
         error = {ct.err_code: 999,
-                 ct.err_msg: "failed to load collection, err=load operation can't use default resource group and other resource group together"}
+                 ct.err_msg: "resource group num can only be 0, 1 or same as replica number"}
         collection_w.load(replica_number=replicas,
                           _resource_groups=[ct.default_resource_group_name, rgB_name],
                           check_task=CheckTasks.err_res, check_items=error)
@@ -732,7 +970,10 @@ class TestTransferNode(TestcaseBase):
         collection_w = self.init_collection_wrap()
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
         error = {ct.err_code: 999,
-                 ct.err_msg: "failed to load collection, err=failed to spawn replica for collection"}
+                 ct.err_msg: "failed to spawn replica for collection: resource group not found"}
+        if rg_names == "不合法":
+            error = {ct.err_code: 999,
+                     ct.err_msg: "resource group num can only be 0, 1 or same as replica number"}
         collection_w.load(_resource_groups=rg_names,
                           check_task=CheckTasks.err_res, check_items=error)
 
@@ -772,7 +1013,7 @@ class TestTransferNode(TestcaseBase):
                                         num_node=config_nodes)
         # 5. load the collection with default rg
         error = {ct.err_code: 999,
-                 ct.err_msg: 'failed to load partitions, err=failed to spawn replica for collection[nodes not enough]'}
+                 ct.err_msg: 'failed to spawn replica for collection: resource group node not enough'}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
 
         # 6. load the collection with rgA
@@ -830,7 +1071,7 @@ class TestTransferNode(TestcaseBase):
                    "capacity": 0,
                    "num_available_node": 0,
                    "num_loaded_replica": {},
-                   "num_outgoing_node": {collection_w.name: config_nodes},
+                   "num_outgoing_node": {collection_w.name: 1},
                    "num_incoming_node": {}
                    }
         self.utility_wrap.describe_resource_group(name=rg_name,
@@ -841,14 +1082,14 @@ class TestTransferNode(TestcaseBase):
                            "num_available_node": config_nodes,
                            "num_loaded_replica": {},
                            "num_outgoing_node": {},
-                           "num_incoming_node": {collection_w.name: config_nodes}
+                           "num_incoming_node": {collection_w.name: 1}
                            }
         self.utility_wrap.describe_resource_group(name=ct.default_resource_group_name,
                                                   check_task=CheckTasks.check_rg_property,
                                                   check_items=default_rg_info)
 
         # 8. load the collection without rg specified
-        partition_w.load()
+        partition_w.load(_resource_groups=[rg_name], check_task=CheckTasks.check_nothing)
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
     @pytest.mark.parametrize("replicas", [1, 3])
@@ -883,7 +1124,7 @@ class TestTransferNode(TestcaseBase):
                          check_task=CheckTasks.err_res, check_items=error)
 
         error = {ct.err_code: 999,
-                 ct.err_msg: "failed to load partitions, err=load operation should use collection's resource group"}
+                 ct.err_msg: "resource group num can only be 0, 1 or same as replica number"}
         partition_w.load(replica_number=replicas,
                          _resource_groups=[ct.default_resource_group_name, rgB_name],
                          check_task=CheckTasks.err_res, check_items=error)
@@ -904,7 +1145,13 @@ class TestTransferNode(TestcaseBase):
         partition_w = self.init_partition_wrap(collection_w, partition_name)
 
         error = {ct.err_code: 1,
-                 ct.err_msg: 'failed to load partitions, err=failed to spawn replica for collection[resource num can only be 0, 1 or same as replica number]'}
+                 ct.err_msg: 'failed to spawn replica for collection: resource group not found'}
+        if rg_names == "不合法":
+            error = {ct.err_code: 999,
+                     ct.err_msg: "resource group num can only be 0, 1 or same as replica number"}
+        if rg_names == [ct.default_resource_group_name, None]:
+            error = {ct.err_code: 999,
+                     ct.err_msg: "Unexpected error, message=<bad argument type for built-in operation>"}
         partition_w.load(_resource_groups=rg_names,
                          check_task=CheckTasks.err_res, check_items=error)
 
@@ -1048,7 +1295,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
 
         # load 5 replicas in rgA and verify error msg
         error = {ct.err_code: 999,
-                 ct.err_msg: 'failed to load collection, err=failed to spawn replica for collection[nodes not enough]'}
+                 ct.err_msg: 'failed to spawn replica for collection: resource group node not enough'}
         collection_w.load(replica_number=num_nodes_to_rg+1,
                           _resource_groups=[rg_name],
                           check_task=ct.CheckTasks.err_res,
@@ -1412,8 +1659,9 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         assert len(replicas[0].groups) == num_replica
         for rep in replicas[0].groups:
             assert rep.resource_group in [rgB_name]
-            assert rep.num_outbound_node == {rgA_name: 1}
-
+            assert rep.num_outbound_node == {}  # after autoBalance, num_outbound_node can reduce
+        '''
+        # because balance, num_outgoing_node/num_incoming_node may reduce, so no more assertions are made about them
         # verify rg state
         rgA_info = {"name": rgA_name,
                     "capacity": 2,
@@ -1435,7 +1683,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         self.utility_wrap.describe_resource_group(name=rgB_name,
                                                   check_task=CheckTasks.check_rg_property,
                                                   check_items=rgB_info)
-
+        '''
         # verify search succ
         nq = 5
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
@@ -1506,9 +1754,9 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         3. transfer 1 node to rgA and 2 nodes to rgB
         4. load 2 replicas in rgA and rgB
         5. transfer 1 replica from rgB to rgA
-        verify fail with error
+        verify success
         6. transfer 1 replica from rgA to rgB
-        verify fail with error
+        verify success
         7. release collection and reload 2 replicas into rgA
         8. transfer 2 replicas from rgA to rgB
         """
@@ -1557,19 +1805,11 @@ class TestResourceGroupMultiNodes(TestcaseBase):
                             )
 
         # transfer 1 replica from rgB to rgA
-        error = {ct.err_code: 999,
-                 ct.err_msg: f'found [1] replicas of same collection in target resource group[{rgA_name}], dynamically increase replica num is unsupported'}
-        self.utility_wrap.transfer_replica(source=rgB_name, target=rgA_name,
-                                           collection_name=collection_w.name, num_replica=1,
-                                           check_task=CheckTasks.err_res,
-                                           check_items=error)
+        self.utility_wrap.transfer_replica(source=rgB_name, target=rgA_name, collection_name=collection_w.name,
+                                           num_replica=1, check_task=CheckTasks.check_nothing)
         # transfer 1 replica from rgA to rgB
-        error = {ct.err_code: 999,
-                 ct.err_msg: f'found [1] replicas of same collection in target resource group[{rgB_name}], dynamically increase replica num is unsupported'}
-        self.utility_wrap.transfer_replica(source=rgA_name, target=rgB_name,
-                                           collection_name=collection_w.name, num_replica=1,
-                                           check_task=CheckTasks.err_res,
-                                           check_items=error)
+        self.utility_wrap.transfer_replica(source=rgA_name, target=rgB_name, collection_name=collection_w.name,
+                                           num_replica=1, check_task=CheckTasks.check_nothing)
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
     def test_load_multi_rgs_with_default_rg(self):
@@ -1578,7 +1818,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         1. prepare a rgA with 2 nodes
         2. create a collection
         3. load the collection into rgA and default rg
-        verify fail with error msg
+        verify search succ
         4. load the collection into rgA and rgB
         verify search succ
         5. transfer replica from rgB to default rg
@@ -1605,12 +1845,8 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
 
         # load the collection with rgA and default rg
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"failed to load collection, err=load operation can't use default resource group and other resource group together"}
-        collection_w.load(replica_number=2,
-                          _resource_groups=[rgA_name, ct.default_resource_group_name],
-                          check_task=CheckTasks.err_res,
-                          check_items=error)
+        collection_w.load(replica_number=2, _resource_groups=[rgA_name, ct.default_resource_group_name],
+                          check_task=CheckTasks.check_nothing)
 
         rgB_name = cf.gen_unique_str('rgB')
         self.init_resource_group(name=rgB_name)
@@ -1634,14 +1870,10 @@ class TestResourceGroupMultiNodes(TestcaseBase):
                                          "limit": ct.default_limit}
                             )
         # transfer the replica from rgB to default rg
-        error = {ct.err_code: 999,
-                 ct.err_msg: "transfer replica will cause replica loaded in both default rg and other rg"}
         self.utility_wrap.transfer_replica(source=rgB_name,
                                            target=ct.default_resource_group_name,
                                            collection_name=collection_w.name,
-                                           num_replica=1,
-                                           check_task=CheckTasks.err_res,
-                                           check_items=error)
+                                           num_replica=1)
 
         time.sleep(1)
         collection_w.search(vectors[:nq],
@@ -1697,7 +1929,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
 
         # transfer 2 replicas to rgA
         error = {ct.err_code: 5,
-                 ct.err_msg: f'only found [1] replicas in source resource group[{ct.default_resource_group_name}]'}
+                 ct.err_msg: f'NumReplica not greater than the number of replica'}
         self.utility_wrap.transfer_replica(source=ct.default_resource_group_name, target=rg_name,
                                            collection_name=collection_w.name, num_replica=2,
                                            check_task=CheckTasks.err_res,
@@ -1718,7 +1950,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         # transfer replica to a non_existing rg
         rg_name = "non_existing"
         error = {ct.err_code: 999,
-                 ct.err_msg: f"the target resource group[{rg_name}] doesn't exist, err=resource group doesn't exist"}
+                 ct.err_msg: f"the target resource group[{rg_name}] doesn't exist: resource group not found[rg={rg_name}]"}
         self.utility_wrap.transfer_replica(source=ct.default_resource_group_name,
                                            target=rg_name,
                                            collection_name=collection_w.name,
@@ -1728,7 +1960,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
 
         # transfer replica from a non_existing rg
         error = {ct.err_code: 999,
-                 ct.err_msg: f"the source resource group[{rg_name}] doesn't exist, err=resource group doesn't exist"}
+                 ct.err_msg: f"the source resource group[{rg_name}] doesn't exist: resource group not found[rg={rg_name}]"}
         self.utility_wrap.transfer_replica(source=rg_name,
                                            target=ct.default_resource_group_name,
                                            collection_name=collection_w.name,
@@ -1746,7 +1978,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         3. load 3 replicas into rgA, rgB and rgC
         verify search succ, replica info, rg state
         4. transfer 1 node from rgA to rgB
-        verify fail with error
+        verify success
         """
         dim = 128
         collection_w = self.init_collection_wrap(shards_num=4)
@@ -1758,7 +1990,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
             insert_ids.extend(res.primary_keys)
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
 
-        num_node =2
+        num_node = 2
         rgA_name = cf.gen_unique_str('rgA')
         self.init_resource_group(rgA_name)
         self.utility_wrap.transfer_node(source=ct.default_resource_group_name,
@@ -1804,12 +2036,8 @@ class TestResourceGroupMultiNodes(TestcaseBase):
                             )
 
         # transfer node from rgA to rgB
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"can't transfer node, cause the resource group[{rgA_name}] and the resource group[{rgB_name}] loaded same collection, err=resource group doesn't exist"}
         self.utility_wrap.transfer_node(source=rgA_name, target=rgB_name,
-                                        num_node=1,
-                                        check_task=CheckTasks.err_res,
-                                        check_items=error)
+                                        num_node=1, check_task=CheckTasks.check_nothing)
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
     @pytest.mark.parametrize("with_growing", [True, False])

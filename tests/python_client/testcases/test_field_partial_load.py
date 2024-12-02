@@ -70,7 +70,6 @@ class TestFieldPartialLoad(TestcaseBase):
                and not_load_int64_field.name in res[0][0].fields.keys()
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #36353")
     def test_skip_load_dynamic_field(self):
         """
         target: test skip load dynamic field
@@ -171,7 +170,6 @@ class TestFieldPartialLoad(TestcaseBase):
                                      check_items={"nq": nq, "limit": 100})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="fail to load 2 partition with same load_fields #36037 ")
     def test_partial_load_with_partition(self):
         """
         target: test partial load with partitions
@@ -235,9 +233,10 @@ class TestFieldPartialLoad(TestcaseBase):
 
         # load the collection with all fields
         collection_w.load(check_task=CheckTasks.err_res, check_items=error)
-        collection_w.search(data=search_vectors, anns_field=vector_field.name, params=search_params,
+        collection_w.search(data=search_vectors, anns_field=vector_field.name, param=search_params,
                             limit=100, output_fields=["*"],
-                            check_task=CheckTasks.err_res, check_items=error)
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq, "limit": 100})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_skip_load_on_all_scalar_field_types(self):

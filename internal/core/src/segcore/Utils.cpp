@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/Utils.h"
+#include <arrow/record_batch.h>
 
 #include <future>
 #include <memory>
@@ -22,6 +23,7 @@
 #include "index/ScalarIndex.h"
 #include "mmap/Utils.h"
 #include "log/Log.h"
+#include "storage/DataCodec.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
@@ -681,6 +683,11 @@ ReverseDataFromIndex(const index::IndexBase* index,
     data_array->set_field_id(field_meta.get_id().get());
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
+    auto nullable = field_meta.is_nullable();
+    std::vector<bool> valid_data;
+    if (nullable) {
+        valid_data.resize(count);
+    }
 
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
@@ -689,7 +696,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<bool> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_bool_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -700,7 +716,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<int8_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_int_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -711,7 +736,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<int16_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_int_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -722,7 +756,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<int32_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_int_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -733,7 +776,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<int64_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_long_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -744,7 +796,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<float> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_float_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -755,7 +816,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<double> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_double_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -766,7 +836,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<std::string> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
-                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_string_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
@@ -778,11 +857,52 @@ ReverseDataFromIndex(const index::IndexBase* index,
         }
     }
 
+    if (nullable) {
+        *(data_array->mutable_valid_data()) = {valid_data.begin(),
+                                               valid_data.end()};
+    }
+
     return data_array;
 }
 
 // init segcore storage config first, and create default remote chunk manager
 // segcore use default remote chunk manager to load data from minio/s3
+void
+LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
+                          std::shared_ptr<ArrowReaderChannel> channel) {
+    try {
+        auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
+                       .GetRemoteChunkManager();
+        auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
+
+        std::vector<std::future<std::shared_ptr<milvus::ArrowDataWrapper>>>
+            futures;
+        futures.reserve(remote_files.size());
+        for (const auto& file : remote_files) {
+            auto future = pool.Submit([&]() {
+                auto fileSize = rcm->Size(file);
+                auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
+                rcm->Read(file, buf.get(), fileSize);
+                auto result =
+                    storage::DeserializeFileData(buf, fileSize, false);
+                result->SetData(buf);
+                return result->GetReader();
+            });
+            futures.emplace_back(std::move(future));
+        }
+
+        for (auto& future : futures) {
+            auto field_data = future.get();
+            channel->push(field_data);
+        }
+
+        channel->close();
+    } catch (std::exception& e) {
+        LOG_INFO("failed to load data from remote: {}", e.what());
+        channel->close(std::current_exception());
+    }
+}
+
 void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                          FieldDataChannelPtr channel) {
@@ -815,7 +935,6 @@ LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
         channel->close(std::current_exception());
     }
 }
-
 int64_t
 upper_bound(const ConcurrentVector<Timestamp>& timestamps,
             int64_t first,

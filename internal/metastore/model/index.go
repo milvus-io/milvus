@@ -102,7 +102,7 @@ func MarshalIndexModel(index *Index) *indexpb.FieldIndex {
 //	}
 //
 //	newIdx.IsDeleted = b.IsDeleted
-//	newIdx.CreateTime = b.CreateTime
+//	newIdx.CreatedUTCTime = b.CreatedUTCTime
 //
 //	if newIdx.Extra == nil && b.Extra != nil {
 //		newIdx.Extra = b.Extra

@@ -7,10 +7,6 @@ on:
         description: "the milvus image tag"
         required: true
         type: string
-      oldImageTag:
-        description: "the milvus old image tag"
-        required: true
-        type: string
 
 jobs:
   update-knowhere-commits:
@@ -24,15 +20,14 @@ jobs:
         # continue-on-error: true
         shell: bash
         run: |
-          # sed -i "s#( image: milvusdb/milvus:.*#( image: milvusdb/milvus:${{ inputs.imageTag }} )#g" deployments/docker/standalone/docker-compose.yml
-          sed -i "s/milvusdb\/milvus:${{ inputs.oldImageTag }}/milvusdb\/milvus:${{ inputs.imageTag }}/g" deployments/docker/standalone/docker-compose.yml
-          sed -i "s/milvusdb\/milvus:${{ inputs.oldImageTag }}/milvusdb\/milvus:${{ inputs.imageTag }}/g" deployments/binary/README.md
-          sed -i "s/milvusdb\/milvus:${{ inputs.oldImageTag }}/milvusdb\/milvus:${{ inputs.imageTag }}/g" deployments/docker/gpu/standalone/docker-compose.yml
-          sed -i "s/milvusdb\/milvus:${{ inputs.oldImageTag }}/milvusdb\/milvus:${{ inputs.imageTag }}/g" deployments/docker/cluster-distributed-deployment/inventory.ini
+          sed -i 's/\(milvusdb\/milvus:\)[^[:space:]]*/\1${{ inputs.imageTag }}/' deployments/docker/standalone/docker-compose.yml
+          sed -i 's/\(milvusdb\/milvus:\)[^[:space:]]*/\1${{ inputs.imageTag }}/' deployments/binary/README.md
+          sed -i 's/\(milvusdb\/milvus:\)[^[:space:]]*-gpu/\1${{ inputs.imageTag }}-gpu/' deployments/docker/gpu/standalone/docker-compose.yml
+          sed -i 's/\(milvusdb\/milvus:\)[^[:space:]]*/\1${{ inputs.imageTag }}/' deployments/docker/cluster-distributed-deployment/inventory.ini
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
+          git diff
           git add deployments
-          git status
           git commit -m "Bump milvus version to ${{ inputs.imageTag }}"
       - name: Create Pull Request
         id: cpr

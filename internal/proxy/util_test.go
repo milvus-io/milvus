@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -804,8 +804,6 @@ func TestValidateName(t *testing.T) {
 		assert.Nil(t, ValidateRoleName(name))
 		assert.Nil(t, ValidateObjectName(name))
 		assert.Nil(t, ValidateObjectType(name))
-		assert.Nil(t, ValidatePrincipalName(name))
-		assert.Nil(t, ValidatePrincipalType(name))
 		assert.Nil(t, ValidatePrivilege(name))
 	}
 
@@ -828,8 +826,6 @@ func TestValidateName(t *testing.T) {
 		assert.NotNil(t, validateName(name, nameType))
 		assert.NotNil(t, ValidateRoleName(name))
 		assert.NotNil(t, ValidateObjectType(name))
-		assert.NotNil(t, ValidatePrincipalName(name))
-		assert.NotNil(t, ValidatePrincipalType(name))
 		assert.NotNil(t, ValidatePrivilege(name))
 	}
 	assert.NotNil(t, ValidateObjectName(" "))
@@ -2273,6 +2269,35 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		err = checkDynamicFieldData(schema, insertMsg)
 		assert.Error(t, err)
 	})
+	t.Run("key has static field name", func(t *testing.T) {
+		jsonData := make([][]byte, 0)
+		data := map[string]interface{}{
+			"bool":   true,
+			"int":    100,
+			"float":  1.2,
+			"string": "abc",
+			"json": map[string]interface{}{
+				"int":   20,
+				"array": []int{1, 2, 3},
+			},
+			"Int64Field": "error key",
+		}
+		jsonBytes, err := json.MarshalIndent(data, "", "  ")
+		assert.NoError(t, err)
+		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
+		schema := newTestSchema()
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err = checkDynamicFieldData(schema, insertMsg)
+		assert.Error(t, err)
+	})
 	t.Run("disable dynamic schema", func(t *testing.T) {
 		jsonData := make([][]byte, 0)
 		data := map[string]interface{}{
@@ -2636,4 +2661,421 @@ func TestValidateLoadFieldsList(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateFunction(t *testing.T) {
+	t.Run("Valid function schema", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+			},
+		}
+		err := validateFunction(schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Invalid function schema - duplicate function names", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+			},
+		}
+		err := validateFunction(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate function name")
+	})
+
+	t.Run("Invalid function schema - input field not found", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"non_existent_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+			},
+		}
+		err := validateFunction(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "input field not found")
+	})
+
+	t.Run("Invalid function schema - output field not found", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"non_existent_field"},
+				},
+			},
+		}
+		err := validateFunction(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "output field not found")
+	})
+
+	t.Run("Invalid function schema - nullable input field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}, Nullable: true},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+			},
+		}
+		err := validateFunction(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "function input field cannot be nullable")
+	})
+
+	t.Run("Invalid function schema - output field is primary key", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsPrimaryKey: true},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+			},
+		}
+		err := validateFunction(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "function output field cannot be primary key")
+	})
+
+	t.Run("Invalid function schema - output field is partition key", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsPartitionKey: true},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+			},
+		}
+		err := validateFunction(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "function output field cannot be partition key or clustering key")
+	})
+
+	t.Run("Invalid function schema - output field is clustering key", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsClusteringKey: true},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+			},
+		}
+		err := validateFunction(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "function output field cannot be partition key or clustering key")
+	})
+
+	t.Run("Invalid function schema - nullable output field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+			},
+		}
+		err := validateFunction(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "function output field cannot be nullable")
+	})
+}
+
+func TestValidateFunctionInputField(t *testing.T) {
+	t.Run("Valid BM25 function input", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_BM25,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType:   schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}},
+			},
+		}
+		err := checkFunctionInputField(function, fields)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Invalid BM25 function input - wrong data type", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_BM25,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_Int64,
+			},
+		}
+		err := checkFunctionInputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid BM25 function input - tokenizer not enabled", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_BM25,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType:   schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "false"}},
+			},
+		}
+		err := checkFunctionInputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid BM25 function input - multiple fields", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_BM25,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType:   schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}},
+			},
+			{
+				DataType:   schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}},
+			},
+		}
+		err := checkFunctionInputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Unknown function type", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_Unknown,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_VarChar,
+			},
+		}
+		err := checkFunctionInputField(function, fields)
+		assert.Error(t, err)
+	})
+}
+
+func TestValidateFunctionOutputField(t *testing.T) {
+	t.Run("Valid BM25 function output", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_BM25,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_SparseFloatVector,
+			},
+		}
+		err := checkFunctionOutputField(function, fields)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Invalid BM25 function output - wrong data type", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_BM25,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_Float,
+			},
+		}
+		err := checkFunctionOutputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid BM25 function output - multiple fields", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_BM25,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_SparseFloatVector,
+			},
+			{
+				DataType: schemapb.DataType_FloatVector,
+			},
+		}
+		err := checkFunctionOutputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Unknown function type", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_Unknown,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_FloatVector,
+			},
+		}
+		err := checkFunctionOutputField(function, fields)
+		assert.Error(t, err)
+	})
+}
+
+func TestValidateFunctionBasicParams(t *testing.T) {
+	t.Run("Valid function", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Name:             "validFunction",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"input1", "input2"},
+			OutputFieldNames: []string{"output1"},
+		}
+		err := checkFunctionBasicParams(function)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Empty function name", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Name:             "",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"input1"},
+			OutputFieldNames: []string{"output1"},
+		}
+		err := checkFunctionBasicParams(function)
+		assert.Error(t, err)
+	})
+
+	t.Run("Empty input field names", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Name:             "emptyInputs",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{},
+			OutputFieldNames: []string{"output1"},
+		}
+		err := checkFunctionBasicParams(function)
+		assert.Error(t, err)
+	})
+
+	t.Run("Empty output field names", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Name:             "emptyOutputs",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"input1"},
+			OutputFieldNames: []string{},
+		}
+		err := checkFunctionBasicParams(function)
+		assert.Error(t, err)
+	})
+
+	t.Run("Empty input field name", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Name:             "emptyInputName",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"input1", ""},
+			OutputFieldNames: []string{"output1"},
+		}
+		err := checkFunctionBasicParams(function)
+		assert.Error(t, err)
+	})
+
+	t.Run("Duplicate input field names", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Name:             "duplicateInputs",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"input1", "input1"},
+			OutputFieldNames: []string{"output1"},
+		}
+		err := checkFunctionBasicParams(function)
+		assert.Error(t, err)
+	})
+
+	t.Run("Empty output field name", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Name:             "emptyOutputName",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"input1"},
+			OutputFieldNames: []string{"output1", ""},
+		}
+		err := checkFunctionBasicParams(function)
+		assert.Error(t, err)
+	})
+
+	t.Run("Input field used as output", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Name:             "inputAsOutput",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"field1", "field2"},
+			OutputFieldNames: []string{"field1"},
+		}
+		err := checkFunctionBasicParams(function)
+		assert.Error(t, err)
+	})
+
+	t.Run("Duplicate output field names", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Name:             "duplicateOutputs",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"input1"},
+			OutputFieldNames: []string{"output1", "output1"},
+		}
+		err := checkFunctionBasicParams(function)
+		assert.Error(t, err)
+	})
 }

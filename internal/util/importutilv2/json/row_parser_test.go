@@ -17,7 +17,6 @@
 package json
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -25,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/common"
 )
 

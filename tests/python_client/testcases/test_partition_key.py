@@ -123,7 +123,7 @@ class TestPartitionKeyParams(TestcaseBase):
                                    check_task=CheckTasks.check_search_results,
                                    check_items={"nq": nq, "limit": entities_per_parkey})[0]
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_partition_key_off_in_field_but_enable_in_schema(self):
         """
         Method:
@@ -143,20 +143,9 @@ class TestPartitionKeyParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=schema, num_partitions=10)
         assert len(collection_w.partitions) == 10
 
-    @pytest.mark.skip("need more investigation")
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_partition_key_bulk_insert(self):
-        """
-        Method:
-        1. create a collection with partition key on
-        2. bulk insert data
-        3. verify the data bulk inserted and be searched successfully
-        """
-        pass
-
 
 class TestPartitionKeyInvalidParams(TestcaseBase):
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_max_partitions(self):
         """
         Method：
@@ -260,7 +249,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
                            check_task=CheckTasks.err_res,
                            check_items={"err_code": 2, "err_msg": err_msg})
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("num_partitions", [True, False, "", "invalid", 0.1, [], {}, ()])
     def test_invalid_partitions_values(self, num_partitions):
         """
@@ -360,7 +349,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
                                   check_task=CheckTasks.err_res,
                                   check_items={"err_code": 2, "err_msg": err_msg})
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_partition_key_on_and_off(self):
         """
         Method：
@@ -389,7 +378,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
                                  check_task=CheckTasks.err_res,
                                  check_items={"err_code": 2, "err_msg": err_msg})
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("field_type", [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR, DataType.FLOAT,
                                             DataType.DOUBLE, DataType.BOOL,  DataType.INT8,
                                             DataType.INT16, DataType.INT32, DataType.JSON])
@@ -422,7 +411,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
                                  check_task=CheckTasks.err_res,
                                  check_items={"err_code": 2, "err_msg": err_msg})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_partition_key_on_not_existed_fields(self):
         """
         Method：
@@ -466,7 +455,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
                                   check_task=CheckTasks.err_res,
                                   check_items={"err_code": 2, "err_msg": err_msg})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("invalid_data", [99, True, None, [], {}, ()])
     def test_partition_key_insert_invalid_data(self, invalid_data):
         """

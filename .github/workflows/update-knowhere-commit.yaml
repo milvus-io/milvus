@@ -29,6 +29,7 @@ jobs:
         id: get-knowhere-latest-commit
         run: | 
           cd ..
+          rm -fr Knowhere
           git clone https://github.com/zilliztech/Knowhere.git
           cd Knowhere
           export commit=$(git rev-parse --short HEAD)

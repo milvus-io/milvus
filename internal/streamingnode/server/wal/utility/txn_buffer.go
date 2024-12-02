@@ -3,15 +3,17 @@ package utility
 import (
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
 // NewTxnBuffer creates a new txn buffer.
-func NewTxnBuffer(logger *log.MLogger) *TxnBuffer {
+func NewTxnBuffer(logger *log.MLogger, metrics *metricsutil.ScannerMetrics) *TxnBuffer {
 	return &TxnBuffer{
 		logger:   logger,
 		builders: make(map[message.TxnID]*message.ImmutableTxnMessageBuilder),
+		metrics:  metrics,
 	}
 }
 
@@ -19,6 +21,12 @@ func NewTxnBuffer(logger *log.MLogger) *TxnBuffer {
 type TxnBuffer struct {
 	logger   *log.MLogger
 	builders map[message.TxnID]*message.ImmutableTxnMessageBuilder
+	metrics  *metricsutil.ScannerMetrics
+	bytes    int
+}
+
+func (b *TxnBuffer) Bytes() int {
+	return b.bytes
 }
 
 // HandleImmutableMessages handles immutable messages.
@@ -29,6 +37,7 @@ func (b *TxnBuffer) HandleImmutableMessages(msgs []message.ImmutableMessage, ts 
 	for _, msg := range msgs {
 		// Not a txn message, can be consumed right now.
 		if msg.TxnContext() == nil {
+			b.metrics.ObserveAutoCommitTxn()
 			result = append(result, msg)
 			continue
 		}
@@ -69,6 +78,7 @@ func (b *TxnBuffer) handleBeginTxn(msg message.ImmutableMessage) {
 		return
 	}
 	b.builders[beginMsg.TxnContext().TxnID] = message.NewImmutableTxnMessageBuilder(beginMsg)
+	b.bytes += beginMsg.EstimateSize()
 }
 
 // handleCommitTxn handles commit txn message.
@@ -93,9 +103,11 @@ func (b *TxnBuffer) handleCommitTxn(msg message.ImmutableMessage) message.Immuta
 	}
 
 	// build the txn message and remove it from buffer.
+	b.bytes -= builder.EstimateSize()
 	txnMsg, err := builder.Build(commitMsg)
 	delete(b.builders, commitMsg.TxnContext().TxnID)
 	if err != nil {
+		b.metrics.ObserveErrorTxn()
 		b.logger.Warn(
 			"failed to build txn message, it's a critical error, some data is lost",
 			zap.Int64("txnID", int64(commitMsg.TxnContext().TxnID)),
@@ -108,6 +120,7 @@ func (b *TxnBuffer) handleCommitTxn(msg message.ImmutableMessage) message.Immuta
 		zap.Int64("txnID", int64(commitMsg.TxnContext().TxnID)),
 		zap.Any("messageID", commitMsg.MessageID()),
 	)
+	b.metrics.ObserveTxn(message.TxnStateCommitted)
 	return txnMsg
 }
 
@@ -127,8 +140,12 @@ func (b *TxnBuffer) handleRollbackTxn(msg message.ImmutableMessage) {
 		zap.Int64("txnID", int64(rollbackMsg.TxnContext().TxnID)),
 		zap.Any("messageID", rollbackMsg.MessageID()),
 	)
-	// just drop the txn from buffer.
-	delete(b.builders, rollbackMsg.TxnContext().TxnID)
+	if builder, ok := b.builders[rollbackMsg.TxnContext().TxnID]; ok {
+		// just drop the txn from buffer.
+		delete(b.builders, rollbackMsg.TxnContext().TxnID)
+		b.bytes -= builder.EstimateSize()
+		b.metrics.ObserveTxn(message.TxnStateRollbacked)
+	}
 }
 
 // handleTxnBodyMessage handles txn body message.
@@ -143,6 +160,7 @@ func (b *TxnBuffer) handleTxnBodyMessage(msg message.ImmutableMessage) {
 		return
 	}
 	builder.Add(msg)
+	b.bytes += msg.EstimateSize()
 }
 
 // clearExpiredTxn clears the expired txn.
@@ -150,6 +168,8 @@ func (b *TxnBuffer) clearExpiredTxn(ts uint64) {
 	for txnID, builder := range b.builders {
 		if builder.ExpiredTimeTick() <= ts {
 			delete(b.builders, txnID)
+			b.bytes -= builder.EstimateSize()
+			b.metrics.ObserveExpiredTxn()
 			if b.logger.Level().Enabled(zap.DebugLevel) {
 				b.logger.Debug(
 					"the txn is expired, so drop the txn from buffer",

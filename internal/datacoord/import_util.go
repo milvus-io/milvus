@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"path"
 	"sort"
 	"time"
@@ -27,6 +28,8 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -36,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
@@ -44,6 +48,7 @@ func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
 		zap.Int64("jobID", task.GetJobID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
 		zap.String("type", task.GetType().String()),
+		zap.Int64("nodeID", task.GetNodeID()),
 	}
 	res = append(res, fields...)
 	return res
@@ -71,7 +76,9 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 				CollectionID: job.GetCollectionID(),
 				State:        datapb.ImportTaskStateV2_Pending,
 				FileStats:    fileStats,
+				CreatedTime:  time.Now().Format("2006-01-02T15:04:05Z07:00"),
 			},
+			tr: timerecord.NewTimeRecorder("preimport task"),
 		}
 		tasks = append(tasks, task)
 	}
@@ -79,9 +86,7 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 }
 
 func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
-	job ImportJob,
-	manager Manager,
-	alloc allocator.Allocator,
+	job ImportJob, alloc allocator.Allocator, meta *meta,
 ) ([]ImportTask, error) {
 	idBegin, _, err := alloc.AllocN(int64(len(fileGroups)))
 	if err != nil {
@@ -97,9 +102,11 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 				NodeID:       NullNodeID,
 				State:        datapb.ImportTaskStateV2_Pending,
 				FileStats:    group,
+				CreatedTime:  time.Now().Format("2006-01-02T15:04:05Z07:00"),
 			},
+			tr: timerecord.NewTimeRecorder("import task"),
 		}
-		segments, err := AssignSegments(job, task, manager)
+		segments, err := AssignSegments(job, task, alloc, meta)
 		if err != nil {
 			return nil, err
 		}
@@ -117,7 +124,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	return tasks, nil
 }
 
-func AssignSegments(job ImportJob, task ImportTask, manager Manager) ([]int64, error) {
+func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, meta *meta) ([]int64, error) {
 	// merge hashed sizes
 	hashedDataSize := make(map[string]map[int64]int64) // vchannel->(partitionID->size)
 	for _, fileStats := range task.GetFileStats() {
@@ -148,7 +155,8 @@ func AssignSegments(job ImportJob, task ImportTask, manager Manager) ([]int64, e
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		for size > 0 {
-			segmentInfo, err := manager.AllocImportSegment(ctx, task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel, segmentLevel)
+			segmentInfo, err := AllocImportSegment(ctx, alloc, meta,
+				task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel, segmentLevel)
 			if err != nil {
 				return err
 			}
@@ -167,6 +175,59 @@ func AssignSegments(job ImportJob, task ImportTask, manager Manager) ([]int64, e
 		}
 	}
 	return segments, nil
+}
+
+func AllocImportSegment(ctx context.Context,
+	alloc allocator.Allocator,
+	meta *meta,
+	taskID int64, collectionID UniqueID,
+	partitionID UniqueID,
+	channelName string,
+	level datapb.SegmentLevel,
+) (*SegmentInfo, error) {
+	log := log.Ctx(ctx)
+	id, err := alloc.AllocID(ctx)
+	if err != nil {
+		log.Error("failed to alloc id for import segment", zap.Error(err))
+		return nil, err
+	}
+	ts, err := alloc.AllocTimestamp(ctx)
+	if err != nil {
+		return nil, err
+	}
+	position := &msgpb.MsgPosition{
+		ChannelName: channelName,
+		MsgID:       nil,
+		Timestamp:   ts,
+	}
+
+	segmentInfo := &datapb.SegmentInfo{
+		ID:             id,
+		CollectionID:   collectionID,
+		PartitionID:    partitionID,
+		InsertChannel:  channelName,
+		NumOfRows:      0,
+		State:          commonpb.SegmentState_Importing,
+		MaxRowNum:      0,
+		Level:          level,
+		LastExpireTime: math.MaxUint64,
+		StartPosition:  position,
+		DmlPosition:    position,
+	}
+	segmentInfo.IsImporting = true
+	segment := NewSegmentInfo(segmentInfo)
+	if err = meta.AddSegment(ctx, segment); err != nil {
+		log.Error("failed to add import segment", zap.Error(err))
+		return nil, err
+	}
+	log.Info("add import segment done",
+		zap.Int64("taskID", taskID),
+		zap.Int64("collectionID", segmentInfo.CollectionID),
+		zap.Int64("segmentID", segmentInfo.ID),
+		zap.String("channel", segmentInfo.InsertChannel),
+		zap.String("level", level.String()))
+
+	return segment, nil
 }
 
 func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportRequest {
@@ -189,7 +250,7 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc allocator.Allocator) (*datapb.ImportRequest, error) {
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*importTask).GetSegmentIDs() {
-		segment := meta.GetSegment(segmentID)
+		segment := meta.GetSegment(context.TODO(), segmentID)
 		if segment == nil {
 			return nil, merr.WrapErrSegmentNotFound(segmentID, "assemble import request failed")
 		}
@@ -298,7 +359,7 @@ func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) 
 		requestedTotal       int64
 		requestedCollections = make(map[int64]int64)
 	)
-	for _, j := range imeta.GetJobBy() {
+	for _, j := range imeta.GetJobBy(context.TODO()) {
 		requested := j.GetRequestedDiskSize()
 		requestedTotal += requested
 		requestedCollections[j.GetCollectionID()] += requested
@@ -308,7 +369,7 @@ func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) 
 	quotaInfo := meta.GetQuotaInfo()
 	totalUsage, collectionsUsage := quotaInfo.TotalBinlogSize, quotaInfo.CollectionBinlogSize
 
-	tasks := imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
+	tasks := imeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(PreImportTaskType))
 	files := make([]*datapb.ImportFileStats, 0)
 	for _, task := range tasks {
 		files = append(files, task.GetFileStats()...)
@@ -342,11 +403,11 @@ func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) 
 }
 
 func getPendingProgress(jobID int64, imeta ImportMeta) float32 {
-	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(PreImportTaskType))
+	tasks := imeta.GetTaskBy(context.TODO(), WithJob(jobID), WithType(PreImportTaskType))
 	preImportingFiles := lo.SumBy(tasks, func(task ImportTask) int {
 		return len(task.GetFileStats())
 	})
-	totalFiles := len(imeta.GetJob(jobID).GetFiles())
+	totalFiles := len(imeta.GetJob(context.TODO(), jobID).GetFiles())
 	if totalFiles == 0 {
 		return 1
 	}
@@ -354,7 +415,7 @@ func getPendingProgress(jobID int64, imeta ImportMeta) float32 {
 }
 
 func getPreImportingProgress(jobID int64, imeta ImportMeta) float32 {
-	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(PreImportTaskType))
+	tasks := imeta.GetTaskBy(context.TODO(), WithJob(jobID), WithType(PreImportTaskType))
 	completedTasks := lo.Filter(tasks, func(task ImportTask, _ int) bool {
 		return task.GetState() == datapb.ImportTaskStateV2_Completed
 	})
@@ -365,7 +426,7 @@ func getPreImportingProgress(jobID int64, imeta ImportMeta) float32 {
 }
 
 func getImportRowsInfo(jobID int64, imeta ImportMeta, meta *meta) (importedRows, totalRows int64) {
-	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
+	tasks := imeta.GetTaskBy(context.TODO(), WithJob(jobID), WithType(ImportTaskType))
 	segmentIDs := make([]int64, 0)
 	for _, task := range tasks {
 		totalRows += lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
@@ -389,7 +450,7 @@ func getStatsProgress(jobID int64, imeta ImportMeta, sjm StatsJobManager) float3
 	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
 		return 1
 	}
-	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
+	tasks := imeta.GetTaskBy(context.TODO(), WithJob(jobID), WithType(ImportTaskType))
 	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
 	})
@@ -407,11 +468,11 @@ func getStatsProgress(jobID int64, imeta ImportMeta, sjm StatsJobManager) float3
 }
 
 func getIndexBuildingProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
-	job := imeta.GetJob(jobID)
+	job := imeta.GetJob(context.TODO(), jobID)
 	if !Params.DataCoordCfg.WaitForIndex.GetAsBool() {
 		return 1
 	}
-	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
+	tasks := imeta.GetTaskBy(context.TODO(), WithJob(jobID), WithType(ImportTaskType))
 	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
 	})
@@ -439,7 +500,7 @@ func getIndexBuildingProgress(jobID int64, imeta ImportMeta, meta *meta) float32
 // TODO: Wrap a function to map status to user status.
 // TODO: Save these progress to job instead of recalculating.
 func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta, sjm StatsJobManager) (int64, internalpb.ImportJobState, int64, int64, string) {
-	job := imeta.GetJob(jobID)
+	job := imeta.GetJob(context.TODO(), jobID)
 	if job == nil {
 		return 0, internalpb.ImportJobState_Failed, 0, 0, fmt.Sprintf("import job does not exist, jobID=%d", jobID)
 	}
@@ -478,7 +539,7 @@ func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta, sjm StatsJobManag
 
 func GetTaskProgresses(jobID int64, imeta ImportMeta, meta *meta) []*internalpb.ImportTaskProgress {
 	progresses := make([]*internalpb.ImportTaskProgress, 0)
-	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
+	tasks := imeta.GetTaskBy(context.TODO(), WithJob(jobID), WithType(ImportTaskType))
 	for _, task := range tasks {
 		totalRows := lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
 			return file.GetTotalRows()
@@ -517,7 +578,7 @@ func DropImportTask(task ImportTask, cluster Cluster, tm ImportMeta) error {
 		return err
 	}
 	log.Info("drop import in datanode done", WrapTaskLog(task)...)
-	return tm.UpdateTask(task.GetTaskID(), UpdateNodeID(NullNodeID))
+	return tm.UpdateTask(context.TODO(), task.GetTaskID(), UpdateNodeID(NullNodeID))
 }
 
 func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, importFile *internalpb.ImportFile) ([]*internalpb.ImportFile, error) {

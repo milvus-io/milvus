@@ -74,6 +74,8 @@ type RWChannelStore interface {
 	UpdateState(isSuccessful bool, channels ...RWChannel)
 	// SegLegacyChannelByNode is used by StateChannelStore only
 	SetLegacyChannelByNode(nodeIDs ...int64)
+
+	HasChannel(channel string) bool
 }
 
 // ChannelOpTypeNames implements zap log marshaller for ChannelOpSet.
@@ -545,10 +547,7 @@ func (c *StateChannelStore) updateMetaMemoryForSingleOp(op *ChannelOp) error {
 				storedChannel.setState(ToWatch)
 			}
 		case Delete: // Remove Channel
-			// if not Delete from bufferID, remove from channel
-			if op.NodeID != bufferID {
-				c.removeAssignment(op.NodeID, ch.GetName())
-			}
+			c.removeAssignment(op.NodeID, ch.GetName())
 		default:
 			log.Error("unknown opType in updateMetaMemoryForSingleOp", zap.Any("type", op.Type))
 		}

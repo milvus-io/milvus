@@ -26,6 +26,6 @@ func (b *interceptorBuilder) Build(param interceptors.InterceptorBuildParam) int
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
 	return &timeTickAppendInterceptor{
 		operator:   operator,
-		txnManager: txn.NewTxnManager(),
+		txnManager: txn.NewTxnManager(param.WALImpls.Channel()),
 	}
 }

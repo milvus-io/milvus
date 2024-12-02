@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -76,6 +77,8 @@ type JobSuite struct {
 
 	// Test objects
 	scheduler *Scheduler
+
+	ctx context.Context
 }
 
 func (suite *JobSuite) SetupSuite() {
@@ -159,6 +162,7 @@ func (suite *JobSuite) SetupTest() {
 		config.EtcdTLSMinVersion.GetValue())
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
+	suite.ctx = context.Background()
 
 	suite.store = querycoord.NewCatalog(suite.kv)
 	suite.dist = meta.NewDistributionManager()
@@ -170,6 +174,7 @@ func (suite *JobSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 		suite.cluster,
+		suite.nodeMgr,
 	)
 	suite.targetObserver.Start()
 	suite.scheduler = NewScheduler()
@@ -193,9 +198,9 @@ func (suite *JobSuite) SetupTest() {
 		Hostname: "localhost",
 	}))
 
-	suite.meta.HandleNodeUp(1000)
-	suite.meta.HandleNodeUp(2000)
-	suite.meta.HandleNodeUp(3000)
+	suite.meta.HandleNodeUp(suite.ctx, 1000)
+	suite.meta.HandleNodeUp(suite.ctx, 2000)
+	suite.meta.HandleNodeUp(suite.ctx, 3000)
 
 	suite.checkerController = &checkers.CheckerController{}
 	suite.collectionObserver = observers.NewCollectionObserver(
@@ -218,7 +223,7 @@ func (suite *JobSuite) BeforeTest(suiteName, testName string) {
 	for collection, partitions := range suite.partitions {
 		suite.broker.EXPECT().
 			GetPartitions(mock.Anything, collection).
-			Return(partitions, nil)
+			Return(partitions, nil).Maybe()
 	}
 }
 
@@ -251,8 +256,8 @@ func (suite *JobSuite) TestLoadCollection() {
 		suite.scheduler.Add(job)
 		err := job.Wait()
 		suite.NoError(err)
-		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
-		suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+		suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
+		suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 		suite.assertCollectionLoaded(collection)
 	}
 
@@ -289,32 +294,6 @@ func (suite *JobSuite) TestLoadCollection() {
 		req := &querypb.LoadCollectionRequest{
 			CollectionID:  collection,
 			ReplicaNumber: 3,
-		}
-		job := NewLoadCollectionJob(
-			ctx,
-			req,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.collectionObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(job)
-		err := job.Wait()
-		suite.ErrorIs(err, merr.ErrParameterInvalid)
-	}
-
-	// Test load existed collection with different load fields
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
-			continue
-		}
-		req := &querypb.LoadCollectionRequest{
-			CollectionID: collection,
-			LoadFields:   []int64{100, 101},
 		}
 		job := NewLoadCollectionJob(
 			ctx,
@@ -370,9 +349,9 @@ func (suite *JobSuite) TestLoadCollection() {
 		},
 	}
 
-	suite.meta.ResourceManager.AddResourceGroup("rg1", cfg)
-	suite.meta.ResourceManager.AddResourceGroup("rg2", cfg)
-	suite.meta.ResourceManager.AddResourceGroup("rg3", cfg)
+	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg1", cfg)
+	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg2", cfg)
+	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg3", cfg)
 
 	// Load with 3 replica on 1 rg
 	req := &querypb.LoadCollectionRequest{
@@ -450,6 +429,131 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 	}
 }
 
+func (suite *JobSuite) TestLoadCollectionWithLoadFields() {
+	ctx := context.Background()
+
+	suite.Run("init_load", func() {
+		// Test load collection
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+				continue
+			}
+			// Load with 1 replica
+			req := &querypb.LoadCollectionRequest{
+				CollectionID: collection,
+				LoadFields:   []int64{100, 101, 102},
+			}
+			job := NewLoadCollectionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.NoError(err)
+			suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
+			suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
+			suite.assertCollectionLoaded(collection)
+		}
+	})
+
+	suite.Run("load_again_same_fields", func() {
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+				continue
+			}
+			req := &querypb.LoadCollectionRequest{
+				CollectionID: collection,
+				LoadFields:   []int64{102, 101, 100}, // field id order shall not matter
+			}
+			job := NewLoadCollectionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.NoError(err)
+		}
+	})
+
+	suite.Run("load_again_diff_fields", func() {
+		// Test load existed collection with different load fields
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+				continue
+			}
+			req := &querypb.LoadCollectionRequest{
+				CollectionID: collection,
+				LoadFields:   []int64{100, 101},
+			}
+			job := NewLoadCollectionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.ErrorIs(err, merr.ErrParameterInvalid)
+		}
+	})
+
+	suite.Run("load_from_legacy_proxy", func() {
+		// Test load again with legacy proxy
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+				continue
+			}
+			req := &querypb.LoadCollectionRequest{
+				CollectionID: collection,
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100},
+						{FieldID: 101},
+						{FieldID: 102},
+					},
+				},
+			}
+			job := NewLoadCollectionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.NoError(err)
+		}
+	})
+}
+
 func (suite *JobSuite) TestLoadPartition() {
 	ctx := context.Background()
 
@@ -479,8 +583,8 @@ func (suite *JobSuite) TestLoadPartition() {
 		suite.scheduler.Add(job)
 		err := job.Wait()
 		suite.NoError(err)
-		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
-		suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+		suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
+		suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 		suite.assertCollectionLoaded(collection)
 	}
 
@@ -522,34 +626,6 @@ func (suite *JobSuite) TestLoadPartition() {
 			CollectionID:  collection,
 			PartitionIDs:  suite.partitions[collection],
 			ReplicaNumber: 3,
-		}
-		job := NewLoadPartitionJob(
-			ctx,
-			req,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.collectionObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(job)
-		err := job.Wait()
-		suite.ErrorIs(err, merr.ErrParameterInvalid)
-	}
-
-	// Test load partition with different load fields
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
-			continue
-		}
-
-		req := &querypb.LoadPartitionsRequest{
-			CollectionID: collection,
-			PartitionIDs: suite.partitions[collection],
-			LoadFields:   []int64{100, 101},
 		}
 		job := NewLoadPartitionJob(
 			ctx,
@@ -631,9 +707,9 @@ func (suite *JobSuite) TestLoadPartition() {
 			NodeNum: 1,
 		},
 	}
-	suite.meta.ResourceManager.AddResourceGroup("rg1", cfg)
-	suite.meta.ResourceManager.AddResourceGroup("rg2", cfg)
-	suite.meta.ResourceManager.AddResourceGroup("rg3", cfg)
+	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg1", cfg)
+	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg2", cfg)
+	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg3", cfg)
 
 	// test load 3 replica in 1 rg, should pass rg check
 	req := &querypb.LoadPartitionsRequest{
@@ -680,6 +756,140 @@ func (suite *JobSuite) TestLoadPartition() {
 	suite.scheduler.Add(job)
 	err = job.Wait()
 	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
+}
+
+func (suite *JobSuite) TestLoadPartitionWithLoadFields() {
+	ctx := context.Background()
+
+	suite.Run("init_load", func() {
+		// Test load partition
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
+				continue
+			}
+			// Load with 1 replica
+			req := &querypb.LoadPartitionsRequest{
+				CollectionID:  collection,
+				PartitionIDs:  suite.partitions[collection],
+				ReplicaNumber: 1,
+				LoadFields:    []int64{100, 101, 102},
+			}
+			job := NewLoadPartitionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.NoError(err)
+			suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
+			suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
+			suite.assertCollectionLoaded(collection)
+		}
+	})
+
+	suite.Run("load_with_same_load_fields", func() {
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
+				continue
+			}
+			// Load with 1 replica
+			req := &querypb.LoadPartitionsRequest{
+				CollectionID:  collection,
+				PartitionIDs:  suite.partitions[collection],
+				ReplicaNumber: 1,
+				LoadFields:    []int64{102, 101, 100},
+			}
+			job := NewLoadPartitionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.NoError(err)
+		}
+	})
+
+	suite.Run("load_with_diff_load_fields", func() {
+		// Test load partition with different load fields
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
+				continue
+			}
+
+			req := &querypb.LoadPartitionsRequest{
+				CollectionID: collection,
+				PartitionIDs: suite.partitions[collection],
+				LoadFields:   []int64{100, 101},
+			}
+			job := NewLoadPartitionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.ErrorIs(err, merr.ErrParameterInvalid)
+		}
+	})
+
+	suite.Run("load_legacy_proxy", func() {
+		for _, collection := range suite.collections {
+			if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
+				continue
+			}
+			// Load with 1 replica
+			req := &querypb.LoadPartitionsRequest{
+				CollectionID:  collection,
+				PartitionIDs:  suite.partitions[collection],
+				ReplicaNumber: 1,
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100},
+						{FieldID: 101},
+						{FieldID: 102},
+					},
+				},
+			}
+			job := NewLoadPartitionJob(
+				ctx,
+				req,
+				suite.dist,
+				suite.meta,
+				suite.broker,
+				suite.cluster,
+				suite.targetMgr,
+				suite.targetObserver,
+				suite.collectionObserver,
+				suite.nodeMgr,
+			)
+			suite.scheduler.Add(job)
+			err := job.Wait()
+			suite.NoError(err)
+		}
+	})
 }
 
 func (suite *JobSuite) TestDynamicLoad() {
@@ -734,7 +944,7 @@ func (suite *JobSuite) TestDynamicLoad() {
 	suite.scheduler.Add(job)
 	err := job.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 	suite.assertPartitionLoaded(collection, p0, p1, p2)
 
 	// loaded: p0, p1, p2
@@ -754,13 +964,13 @@ func (suite *JobSuite) TestDynamicLoad() {
 	suite.scheduler.Add(job)
 	err = job.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 	suite.assertPartitionLoaded(collection, p0, p1)
 	job = newLoadPartJob(p2)
 	suite.scheduler.Add(job)
 	err = job.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 	suite.assertPartitionLoaded(collection, p2)
 
 	// loaded: p0, p1
@@ -771,13 +981,13 @@ func (suite *JobSuite) TestDynamicLoad() {
 	suite.scheduler.Add(job)
 	err = job.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 	suite.assertPartitionLoaded(collection, p0, p1)
 	job = newLoadPartJob(p1, p2)
 	suite.scheduler.Add(job)
 	err = job.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 	suite.assertPartitionLoaded(collection, p2)
 
 	// loaded: p0, p1
@@ -788,13 +998,13 @@ func (suite *JobSuite) TestDynamicLoad() {
 	suite.scheduler.Add(job)
 	err = job.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 	suite.assertPartitionLoaded(collection, p0, p1)
 	colJob := newLoadColJob()
 	suite.scheduler.Add(colJob)
 	err = colJob.Wait()
 	suite.NoError(err)
-	suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 	suite.assertPartitionLoaded(collection, p2)
 }
 
@@ -851,6 +1061,7 @@ func (suite *JobSuite) TestReleaseCollection() {
 			suite.targetObserver,
 
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -873,6 +1084,7 @@ func (suite *JobSuite) TestReleaseCollection() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -902,6 +1114,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -925,6 +1138,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -950,12 +1164,13 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
 		suite.NoError(err)
-		suite.True(suite.meta.Exist(collection))
-		partitions := suite.meta.GetPartitionsByCollection(collection)
+		suite.True(suite.meta.Exist(ctx, collection))
+		partitions := suite.meta.GetPartitionsByCollection(ctx, collection)
 		suite.Len(partitions, 1)
 		suite.Equal(suite.partitions[collection][0], partitions[0].GetPartitionID())
 		suite.assertPartitionReleased(collection, suite.partitions[collection][1:]...)
@@ -983,6 +1198,7 @@ func (suite *JobSuite) TestDynamicRelease() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		return job
 	}
@@ -1000,6 +1216,7 @@ func (suite *JobSuite) TestDynamicRelease() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		return job
 	}
@@ -1033,7 +1250,7 @@ func (suite *JobSuite) TestDynamicRelease() {
 	err = job.Wait()
 	suite.NoError(err)
 	suite.assertPartitionReleased(col0, p0, p1, p2)
-	suite.False(suite.meta.Exist(col0))
+	suite.False(suite.meta.Exist(ctx, col0))
 
 	// loaded: p0, p1, p2
 	// action: release col
@@ -1061,14 +1278,15 @@ func (suite *JobSuite) TestDynamicRelease() {
 }
 
 func (suite *JobSuite) TestLoadCollectionStoreFailed() {
+	ctx := context.Background()
 	// Store collection failed
 	store := mocks.NewQueryCoordCatalog(suite.T())
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store, suite.nodeMgr)
 
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
-	suite.meta.HandleNodeUp(1000)
-	suite.meta.HandleNodeUp(2000)
-	suite.meta.HandleNodeUp(3000)
+	suite.meta.HandleNodeUp(ctx, 1000)
+	suite.meta.HandleNodeUp(ctx, 2000)
+	suite.meta.HandleNodeUp(ctx, 3000)
 
 	for _, collection := range suite.collections {
 		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
@@ -1076,9 +1294,9 @@ func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 		}
 		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
 		err := errors.New("failed to store collection")
-		store.EXPECT().SaveReplica(mock.Anything).Return(nil)
-		store.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(err)
-		store.EXPECT().ReleaseReplicas(collection).Return(nil)
+		store.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
+		store.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(err)
+		store.EXPECT().ReleaseReplicas(mock.Anything, collection).Return(nil)
 
 		req := &querypb.LoadCollectionRequest{
 			CollectionID: collection,
@@ -1102,14 +1320,15 @@ func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 }
 
 func (suite *JobSuite) TestLoadPartitionStoreFailed() {
+	ctx := context.Background()
 	// Store partition failed
 	store := mocks.NewQueryCoordCatalog(suite.T())
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store, suite.nodeMgr)
 
-	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
-	suite.meta.HandleNodeUp(1000)
-	suite.meta.HandleNodeUp(2000)
-	suite.meta.HandleNodeUp(3000)
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	suite.meta.HandleNodeUp(ctx, 1000)
+	suite.meta.HandleNodeUp(ctx, 2000)
+	suite.meta.HandleNodeUp(ctx, 3000)
 
 	err := errors.New("failed to store collection")
 	for _, collection := range suite.collections {
@@ -1117,9 +1336,9 @@ func (suite *JobSuite) TestLoadPartitionStoreFailed() {
 			continue
 		}
 
-		store.EXPECT().SaveReplica(mock.Anything).Return(nil)
-		store.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(err)
-		store.EXPECT().ReleaseReplicas(collection).Return(nil)
+		store.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
+		store.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(err)
+		store.EXPECT().ReleaseReplicas(mock.Anything, collection).Return(nil)
 
 		req := &querypb.LoadPartitionsRequest{
 			CollectionID: collection,
@@ -1298,6 +1517,7 @@ func (suite *JobSuite) TestCallReleasePartitionFailed() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(releaseCollectionJob)
 		err := releaseCollectionJob.Wait()
@@ -1317,6 +1537,7 @@ func (suite *JobSuite) TestCallReleasePartitionFailed() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(releasePartitionJob)
 		err = releasePartitionJob.Wait()
@@ -1332,6 +1553,7 @@ func (suite *JobSuite) TestCallReleasePartitionFailed() {
 
 func (suite *JobSuite) TestSyncNewCreatedPartition() {
 	newPartition := int64(999)
+	ctx := context.Background()
 
 	// test sync new created partition
 	suite.loadAll()
@@ -1349,7 +1571,7 @@ func (suite *JobSuite) TestSyncNewCreatedPartition() {
 	suite.scheduler.Add(job)
 	err := job.Wait()
 	suite.NoError(err)
-	partition := suite.meta.CollectionManager.GetPartition(newPartition)
+	partition := suite.meta.CollectionManager.GetPartition(ctx, newPartition)
 	suite.NotNil(partition)
 	suite.Equal(querypb.LoadStatus_Loaded, partition.GetStatus())
 
@@ -1408,11 +1630,11 @@ func (suite *JobSuite) loadAll() {
 			suite.scheduler.Add(job)
 			err := job.Wait()
 			suite.NoError(err)
-			suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
-			suite.True(suite.meta.Exist(collection))
-			suite.NotNil(suite.meta.GetCollection(collection))
-			suite.NotNil(suite.meta.GetPartitionsByCollection(collection))
-			suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+			suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
+			suite.True(suite.meta.Exist(ctx, collection))
+			suite.NotNil(suite.meta.GetCollection(ctx, collection))
+			suite.NotNil(suite.meta.GetPartitionsByCollection(ctx, collection))
+			suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 		} else {
 			req := &querypb.LoadPartitionsRequest{
 				CollectionID: collection,
@@ -1433,11 +1655,11 @@ func (suite *JobSuite) loadAll() {
 			suite.scheduler.Add(job)
 			err := job.Wait()
 			suite.NoError(err)
-			suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
-			suite.True(suite.meta.Exist(collection))
-			suite.NotNil(suite.meta.GetCollection(collection))
-			suite.NotNil(suite.meta.GetPartitionsByCollection(collection))
-			suite.targetMgr.UpdateCollectionCurrentTarget(collection)
+			suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
+			suite.True(suite.meta.Exist(ctx, collection))
+			suite.NotNil(suite.meta.GetCollection(ctx, collection))
+			suite.NotNil(suite.meta.GetPartitionsByCollection(ctx, collection))
+			suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 		}
 	}
 }
@@ -1458,6 +1680,7 @@ func (suite *JobSuite) releaseAll() {
 			suite.targetMgr,
 			suite.targetObserver,
 			suite.checkerController,
+			suite.proxyManager,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -1467,54 +1690,58 @@ func (suite *JobSuite) releaseAll() {
 }
 
 func (suite *JobSuite) assertCollectionLoaded(collection int64) {
-	suite.True(suite.meta.Exist(collection))
-	suite.NotEqual(0, len(suite.meta.ReplicaManager.GetByCollection(collection)))
+	ctx := context.Background()
+	suite.True(suite.meta.Exist(ctx, collection))
+	suite.NotEqual(0, len(suite.meta.ReplicaManager.GetByCollection(ctx, collection)))
 	for _, channel := range suite.channels[collection] {
-		suite.NotNil(suite.targetMgr.GetDmChannel(collection, channel, meta.CurrentTarget))
+		suite.NotNil(suite.targetMgr.GetDmChannel(ctx, collection, channel, meta.CurrentTarget))
 	}
 	for _, segments := range suite.segments[collection] {
 		for _, segment := range segments {
-			suite.NotNil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
+			suite.NotNil(suite.targetMgr.GetSealedSegment(ctx, collection, segment, meta.CurrentTarget))
 		}
 	}
 }
 
 func (suite *JobSuite) assertPartitionLoaded(collection int64, partitionIDs ...int64) {
-	suite.True(suite.meta.Exist(collection))
-	suite.NotEqual(0, len(suite.meta.ReplicaManager.GetByCollection(collection)))
+	ctx := context.Background()
+	suite.True(suite.meta.Exist(ctx, collection))
+	suite.NotEqual(0, len(suite.meta.ReplicaManager.GetByCollection(ctx, collection)))
 	for _, channel := range suite.channels[collection] {
-		suite.NotNil(suite.targetMgr.GetDmChannel(collection, channel, meta.CurrentTarget))
+		suite.NotNil(suite.targetMgr.GetDmChannel(ctx, collection, channel, meta.CurrentTarget))
 	}
 	for partitionID, segments := range suite.segments[collection] {
 		if !lo.Contains(partitionIDs, partitionID) {
 			continue
 		}
-		suite.NotNil(suite.meta.GetPartition(partitionID))
+		suite.NotNil(suite.meta.GetPartition(ctx, partitionID))
 		for _, segment := range segments {
-			suite.NotNil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
+			suite.NotNil(suite.targetMgr.GetSealedSegment(ctx, collection, segment, meta.CurrentTarget))
 		}
 	}
 }
 
 func (suite *JobSuite) assertCollectionReleased(collection int64) {
-	suite.False(suite.meta.Exist(collection))
-	suite.Equal(0, len(suite.meta.ReplicaManager.GetByCollection(collection)))
+	ctx := context.Background()
+	suite.False(suite.meta.Exist(ctx, collection))
+	suite.Equal(0, len(suite.meta.ReplicaManager.GetByCollection(ctx, collection)))
 	for _, channel := range suite.channels[collection] {
-		suite.Nil(suite.targetMgr.GetDmChannel(collection, channel, meta.CurrentTarget))
+		suite.Nil(suite.targetMgr.GetDmChannel(ctx, collection, channel, meta.CurrentTarget))
 	}
 	for _, partitions := range suite.segments[collection] {
 		for _, segment := range partitions {
-			suite.Nil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
+			suite.Nil(suite.targetMgr.GetSealedSegment(ctx, collection, segment, meta.CurrentTarget))
 		}
 	}
 }
 
 func (suite *JobSuite) assertPartitionReleased(collection int64, partitionIDs ...int64) {
+	ctx := context.Background()
 	for _, partition := range partitionIDs {
-		suite.Nil(suite.meta.GetPartition(partition))
+		suite.Nil(suite.meta.GetPartition(ctx, partition))
 		segments := suite.segments[collection][partition]
 		for _, segment := range segments {
-			suite.Nil(suite.targetMgr.GetSealedSegment(collection, segment, meta.CurrentTarget))
+			suite.Nil(suite.targetMgr.GetSealedSegment(ctx, collection, segment, meta.CurrentTarget))
 		}
 	}
 }

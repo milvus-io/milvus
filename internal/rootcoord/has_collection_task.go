@@ -47,3 +47,10 @@ func (t *hasCollectionTask) Execute(ctx context.Context) error {
 	t.Rsp.Value = err == nil
 	return nil
 }
+
+func (t *hasCollectionTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(t.Req.GetDbName(), false),
+	)
+}

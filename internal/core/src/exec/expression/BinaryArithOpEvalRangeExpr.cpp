@@ -113,9 +113,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto op_type = expr_->op_type_;
@@ -129,6 +131,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
 #define BinaryArithRangeJSONCompare(cmp)                           \
     do {                                                           \
         for (size_t i = 0; i < size; ++i) {                        \
+            if (valid_data != nullptr && !valid_data[i]) {         \
+                res[i] = false;                                    \
+                valid_res[i] = false;                              \
+                continue;                                          \
+            }                                                      \
             auto x = data[i].template at<GetType>(pointer);        \
             if (x.error()) {                                       \
                 if constexpr (std::is_same_v<GetType, int64_t>) {  \
@@ -146,6 +153,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
 #define BinaryArithRangeJSONCompareNotEqual(cmp)                   \
     do {                                                           \
         for (size_t i = 0; i < size; ++i) {                        \
+            if (valid_data != nullptr && !valid_data[i]) {         \
+                res[i] = false;                                    \
+                valid_res[i] = false;                              \
+                continue;                                          \
+            }                                                      \
             auto x = data[i].template at<GetType>(pointer);        \
             if (x.error()) {                                       \
                 if constexpr (std::is_same_v<GetType, int64_t>) {  \
@@ -161,8 +173,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
     } while (false)
 
     auto execute_sub_batch = [op_type, arith_type](const milvus::Json* data,
+                                                   const bool* valid_data,
                                                    const int size,
                                                    TargetBitmapView res,
+                                                   TargetBitmapView valid_res,
                                                    ValueType val,
                                                    ValueType right_operand,
                                                    const std::string& pointer) {
@@ -197,6 +211,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
                         for (size_t i = 0; i < size; ++i) {
+                            if (valid_data != nullptr && !valid_data[i]) {
+                                res[i] = false;
+                                valid_res[i] = false;
+                                continue;
+                            }
                             int array_length = 0;
                             auto doc = data[i].doc();
                             auto array = doc.at_pointer(pointer).get_array();
@@ -246,6 +265,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
                         for (size_t i = 0; i < size; ++i) {
+                            if (valid_data != nullptr && !valid_data[i]) {
+                                res[i] = false;
+                                valid_res[i] = false;
+                                continue;
+                            }
                             int array_length = 0;
                             auto doc = data[i].doc();
                             auto array = doc.at_pointer(pointer).get_array();
@@ -295,6 +319,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
                         for (size_t i = 0; i < size; ++i) {
+                            if (valid_data != nullptr && !valid_data[i]) {
+                                res[i] = false;
+                                valid_res[i] = false;
+                                continue;
+                            }
                             int array_length = 0;
                             auto doc = data[i].doc();
                             auto array = doc.at_pointer(pointer).get_array();
@@ -344,6 +373,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
                         for (size_t i = 0; i < size; ++i) {
+                            if (valid_data != nullptr && !valid_data[i]) {
+                                res[i] = false;
+                                valid_res[i] = false;
+                                continue;
+                            }
                             int array_length = 0;
                             auto doc = data[i].doc();
                             auto array = doc.at_pointer(pointer).get_array();
@@ -393,6 +427,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
                         for (size_t i = 0; i < size; ++i) {
+                            if (valid_data != nullptr && !valid_data[i]) {
+                                res[i] = false;
+                                valid_res[i] = false;
+                                continue;
+                            }
                             int array_length = 0;
                             auto doc = data[i].doc();
                             auto array = doc.at_pointer(pointer).get_array();
@@ -442,6 +481,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
                         for (size_t i = 0; i < size; ++i) {
+                            if (valid_data != nullptr && !valid_data[i]) {
+                                res[i] = false;
+                                valid_res[i] = false;
+                                continue;
+                            }
                             int array_length = 0;
                             auto doc = data[i].doc();
                             auto array = doc.at_pointer(pointer).get_array();
@@ -471,6 +515,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
     int64_t processed_size = ProcessDataChunks<milvus::Json>(execute_sub_batch,
                                                              std::nullptr_t{},
                                                              res,
+                                                             valid_res,
                                                              value,
                                                              right_operand,
                                                              pointer);
@@ -492,9 +537,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -511,6 +558,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
 #define BinaryArithRangeArrayCompare(cmp)                  \
     do {                                                   \
         for (size_t i = 0; i < size; ++i) {                \
+            if (valid_data != nullptr && !valid_data[i]) { \
+                res[i] = false;                            \
+                valid_res[i] = false;                      \
+                continue;                                  \
+            }                                              \
             if (index >= data[i].length()) {               \
                 res[i] = false;                            \
                 continue;                                  \
@@ -521,8 +573,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
     } while (false)
 
     auto execute_sub_batch = [op_type, arith_type](const ArrayView* data,
+                                                   const bool* valid_data,
                                                    const int size,
                                                    TargetBitmapView res,
+                                                   TargetBitmapView valid_res,
                                                    ValueType val,
                                                    ValueType right_operand,
                                                    int index) {
@@ -558,6 +612,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
                         for (size_t i = 0; i < size; ++i) {
+                            if (valid_data != nullptr && !valid_data[i]) {
+                                res[i] = valid_res[i] = false;
+                                continue;
+                            }
                             res[i] = data[i].length() == val;
                         }
                         break;
@@ -601,6 +659,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
                         for (size_t i = 0; i < size; ++i) {
+                            if (valid_data != nullptr && !valid_data[i]) {
+                                res[i] = valid_res[i] = false;
+                                continue;
+                            }
                             res[i] = data[i].length() != val;
                         }
                         break;
@@ -644,6 +706,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
                         for (size_t i = 0; i < size; ++i) {
+                            if (valid_data != nullptr && !valid_data[i]) {
+                                res[i] = valid_res[i] = false;
+                                continue;
+                            }
                             res[i] = data[i].length() > val;
                         }
                         break;
@@ -687,6 +753,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
                         for (size_t i = 0; i < size; ++i) {
+                            if (valid_data != nullptr && !valid_data[i]) {
+                                res[i] = valid_res[i] = false;
+                                continue;
+                            }
                             res[i] = data[i].length() >= val;
                         }
                         break;
@@ -730,6 +800,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
                         for (size_t i = 0; i < size; ++i) {
+                            if (valid_data != nullptr && !valid_data[i]) {
+                                res[i] = valid_res[i] = false;
+                                continue;
+                            }
                             res[i] = data[i].length() < val;
                         }
                         break;
@@ -773,6 +847,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
                         for (size_t i = 0; i < size; ++i) {
+                            if (valid_data != nullptr && !valid_data[i]) {
+                                res[i] = valid_res[i] = false;
+                                continue;
+                            }
                             res[i] = data[i].length() <= val;
                         }
                         break;
@@ -794,8 +872,14 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
         }
     };
 
-    int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
-        execute_sub_batch, std::nullptr_t{}, res, value, right_operand, index);
+    int64_t processed_size =
+        ProcessDataChunks<milvus::ArrayView>(execute_sub_batch,
+                                             std::nullptr_t{},
+                                             res,
+                                             valid_res,
+                                             value,
+                                             right_operand,
+                                             index);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -1185,12 +1269,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex() {
         return res;
     };
     auto res = ProcessIndexChunks<T>(execute_sub_batch, value, right_operand);
-    AssertInfo(res.size() == real_batch_size,
+    AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
-               res.size(),
+               res->size(),
                real_batch_size);
-    return std::make_shared<ColumnVector>(std::move(res));
+    // return std::make_shared<ColumnVector>(std::move(res));
+    return res;
 }
 
 template <typename T>
@@ -1209,16 +1294,20 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData() {
     auto value = GetValueFromProto<HighPrecisionType>(expr_->value_);
     auto right_operand =
         GetValueFromProto<HighPrecisionType>(expr_->right_operand_);
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
     auto execute_sub_batch = [op_type, arith_type](
                                  const T* data,
+                                 const bool* valid_data,
                                  const int size,
                                  TargetBitmapView res,
+                                 TargetBitmapView valid_res,
                                  HighPrecisionType value,
                                  HighPrecisionType right_operand) {
         switch (op_type) {
@@ -1534,9 +1623,23 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData() {
                           "arithmetic eval expr: {}",
                           op_type);
         }
+        // there is a batch operation in ArithOpElementFunc,
+        // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
+        // but to mask res with valid_data after the batch operation.
+        if (valid_data != nullptr) {
+            for (int i = 0; i < size; i++) {
+                if (!valid_data[i]) {
+                    res[i] = valid_res[i] = false;
+                }
+            }
+        }
     };
-    int64_t processed_size = ProcessDataChunks<T>(
-        execute_sub_batch, std::nullptr_t{}, res, value, right_operand);
+    int64_t processed_size = ProcessDataChunks<T>(execute_sub_batch,
+                                                  std::nullptr_t{},
+                                                  res,
+                                                  valid_res,
+                                                  value,
+                                                  right_operand);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",

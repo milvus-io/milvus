@@ -11,6 +11,7 @@ import (
 type ReOrderByTimeTickBuffer struct {
 	messageHeap     typeutil.Heap[message.ImmutableMessage]
 	lastPopTimeTick uint64
+	bytes           int
 }
 
 // NewReOrderBuffer creates a new ReOrderBuffer.
@@ -28,6 +29,7 @@ func (r *ReOrderByTimeTickBuffer) Push(msg message.ImmutableMessage) error {
 		return errors.Errorf("message time tick is less than last pop time tick: %d", r.lastPopTimeTick)
 	}
 	r.messageHeap.Push(msg)
+	r.bytes += msg.EstimateSize()
 	return nil
 }
 
@@ -36,6 +38,7 @@ func (r *ReOrderByTimeTickBuffer) Push(msg message.ImmutableMessage) error {
 func (r *ReOrderByTimeTickBuffer) PopUtilTimeTick(timetick uint64) []message.ImmutableMessage {
 	var res []message.ImmutableMessage
 	for r.messageHeap.Len() > 0 && r.messageHeap.Peek().TimeTick() <= timetick {
+		r.bytes -= r.messageHeap.Peek().EstimateSize()
 		res = append(res, r.messageHeap.Pop())
 	}
 	r.lastPopTimeTick = timetick
@@ -45,4 +48,8 @@ func (r *ReOrderByTimeTickBuffer) PopUtilTimeTick(timetick uint64) []message.Imm
 // Len returns the number of messages in the buffer.
 func (r *ReOrderByTimeTickBuffer) Len() int {
 	return r.messageHeap.Len()
+}
+
+func (r *ReOrderByTimeTickBuffer) Bytes() int {
+	return r.bytes
 }

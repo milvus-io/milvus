@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
+	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -176,11 +176,33 @@ func TestInsertDynamicExtraColumn(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	// query
-	res, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("int64 == 3000").WithOutputFields([]string{"*"}))
+	res, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("int64 == 3000").WithOutputFields("*"))
 	common.CheckOutputFields(t, []string{common.DefaultFloatVecFieldName, common.DefaultInt64FieldName, common.DefaultDynamicFieldName}, res.Fields)
 	for _, c := range res.Fields {
 		log.Debug("data", zap.Any("data", c.FieldData()))
 	}
+}
+
+func TestInsertFp16OrBf16VectorsWithFp32Vector(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	fp16VecField := entity.NewField().WithName(common.DefaultFloat16VecFieldName).WithDataType(entity.FieldTypeFloat16Vector).WithDim(common.DefaultDim)
+	bf16VecField := entity.NewField().WithName(common.DefaultBFloat16VecFieldName).WithDataType(entity.FieldTypeBFloat16Vector).WithDim(common.DefaultDim)
+
+	// create collection
+	collName := common.GenRandomString(prefix, 6)
+	schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(fp16VecField).WithField(bf16VecField)
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	// prepare data
+	int64Column := hp.GenColumnData(100, entity.FieldTypeInt64, *hp.TNewDataOption())
+	fp16VecColumn := hp.GenColumnDataWithFp32VecConversion(100, entity.FieldTypeFloat16Vector, *hp.TNewDataOption().TWithDim(128))
+	bf16VecColumn := hp.GenColumnDataWithFp32VecConversion(100, entity.FieldTypeBFloat16Vector, *hp.TNewDataOption().TWithDim(128))
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, int64Column, fp16VecColumn, bf16VecColumn))
+	common.CheckErr(t, err, true)
 }
 
 // test insert array column with empty data
@@ -301,7 +323,7 @@ func TestInsertColumnsMismatchFields(t *testing.T) {
 
 	// len(column) < len(fields)
 	_, errInsert := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, intColumn))
-	common.CheckErr(t, errInsert, false, "not passed")
+	common.CheckErr(t, errInsert, false, "has no corresponding fieldData pass in: invalid parameter")
 
 	// len(column) > len(fields)
 	_, errInsert2 := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, intColumn, vecColumn, vecColumn))
@@ -454,7 +476,7 @@ func TestInsertReadSparseEmptyVector(t *testing.T) {
 	require.EqualValues(t, 1, insertRes.InsertCount)
 
 	// query and check vector is empty
-	resQuery, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithLimit(10).WithOutputFields([]string{common.DefaultSparseVecFieldName}).WithConsistencyLevel(entity.ClStrong))
+	resQuery, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithLimit(10).WithOutputFields(common.DefaultSparseVecFieldName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	require.Equal(t, 1, resQuery.ResultCount)
 	log.Info("sparseVec", zap.Any("data", resQuery.GetColumn(common.DefaultSparseVecFieldName).(*column.ColumnSparseFloatVector).Data()))

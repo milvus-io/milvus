@@ -25,6 +25,15 @@ func (p *consumeGrpcServerHelper) SendCreated(resp *streamingpb.CreateConsumerRe
 	})
 }
 
+// SendCreated sends the create response to client.
+func (p *consumeGrpcServerHelper) SendCreateVChannelConsumer(resp *streamingpb.CreateVChannelConsumerResponse) error {
+	return p.Send(&streamingpb.ConsumeResponse{
+		Response: &streamingpb.ConsumeResponse_CreateVchannel{
+			CreateVchannel: resp,
+		},
+	})
+}
+
 // SendClosed sends the close response to client.
 // no more message should be sent after sending close response.
 func (p *consumeGrpcServerHelper) SendClosed() error {

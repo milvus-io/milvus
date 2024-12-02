@@ -1,7 +1,22 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package csv
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,7 +24,10 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -26,10 +44,20 @@ type rowParser struct {
 }
 
 func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey string) (RowParser, error) {
-	name2Field := lo.KeyBy(schema.GetFields(),
-		func(field *schemapb.FieldSchema) string {
-			return field.GetName()
-		})
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return nil, err
+	}
+	dynamicField := typeutil.GetDynamicField(schema)
+
+	name2Field := lo.SliceToMap(
+		lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+			return !field.GetIsFunctionOutput() && !typeutil.IsAutoPKField(field) && field.GetName() != dynamicField.GetName()
+		}),
+		func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
+			return field.GetName(), field
+		},
+	)
 
 	name2Dim := make(map[string]int)
 	for name, field := range name2Field {
@@ -40,20 +68,6 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 			}
 			name2Dim[name] = int(dim)
 		}
-	}
-
-	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return nil, err
-	}
-
-	if pkField.GetAutoID() {
-		delete(name2Field, pkField.GetName())
-	}
-
-	dynamicField := typeutil.GetDynamicField(schema)
-	if dynamicField != nil {
-		delete(name2Field, dynamicField.GetName())
 	}
 
 	// check if csv header provides the primary key while it should be auto-generated
@@ -228,6 +242,13 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		if nullable && obj == r.nullkey {
 			return nil, nil
 		}
+		maxLength, err := parameterutil.GetMaxLength(field)
+		if err != nil {
+			return nil, err
+		}
+		if err = common.CheckVarcharLength(obj, maxLength); err != nil {
+			return nil, err
+		}
 		return obj, nil
 	case schemapb.DataType_BinaryVector:
 		if nullable && obj == r.nullkey {
@@ -326,6 +347,13 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		err := desc.Decode(&vec)
 		if err != nil {
 			return nil, r.wrapTypeError(obj, field)
+		}
+		maxCapacity, err := parameterutil.GetMaxCapacity(field)
+		if err != nil {
+			return nil, err
+		}
+		if err = common.CheckArrayCapacity(len(vec), maxCapacity); err != nil {
+			return nil, err
 		}
 		// elements in array not support null value
 		scalarFieldData, err := r.arrayToFieldData(vec, field.GetElementType())

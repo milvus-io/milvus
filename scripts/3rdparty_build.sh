@@ -52,9 +52,14 @@ pushd ${BUILD_OUTPUT_DIR}
 export CONAN_REVISIONS_ENABLED=1
 export CXXFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
 export CFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
+
+# Determine the Conan remote URL, using the environment variable if set, otherwise defaulting
+CONAN_ARTIFACTORY_URL="${CONAN_ARTIFACTORY_URL:-https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local}"
+
 if [[ ! `conan remote list` == *default-conan-local* ]]; then
-    conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local
+    conan remote add default-conan-local $CONAN_ARTIFACTORY_URL
 fi
+
 unameOut="$(uname -s)"
 case "${unameOut}" in
   Darwin*)

@@ -17,62 +17,116 @@
 package datacoord
 
 import (
+	"context"
+	"time"
+
+	"github.com/hashicorp/golang-lru/v2/expirable"
+	"golang.org/x/exp/maps"
+
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type ImportMeta interface {
-	AddJob(job ImportJob) error
-	UpdateJob(jobID int64, actions ...UpdateJobAction) error
-	GetJob(jobID int64) ImportJob
-	GetJobBy(filters ...ImportJobFilter) []ImportJob
-	RemoveJob(jobID int64) error
+	AddJob(ctx context.Context, job ImportJob) error
+	UpdateJob(ctx context.Context, jobID int64, actions ...UpdateJobAction) error
+	GetJob(ctx context.Context, jobID int64) ImportJob
+	GetJobBy(ctx context.Context, filters ...ImportJobFilter) []ImportJob
+	CountJobBy(ctx context.Context, filters ...ImportJobFilter) int
+	RemoveJob(ctx context.Context, jobID int64) error
 
-	AddTask(task ImportTask) error
-	UpdateTask(taskID int64, actions ...UpdateAction) error
-	GetTask(taskID int64) ImportTask
-	GetTaskBy(filters ...ImportTaskFilter) []ImportTask
-	RemoveTask(taskID int64) error
+	AddTask(ctx context.Context, task ImportTask) error
+	UpdateTask(ctx context.Context, taskID int64, actions ...UpdateAction) error
+	GetTask(ctx context.Context, taskID int64) ImportTask
+	GetTaskBy(ctx context.Context, filters ...ImportTaskFilter) []ImportTask
+	RemoveTask(ctx context.Context, taskID int64) error
+	TaskStatsJSON(ctx context.Context) string
+}
+
+type importTasks struct {
+	tasks     map[int64]ImportTask
+	taskStats *expirable.LRU[int64, ImportTask]
+}
+
+func newImportTasks() *importTasks {
+	return &importTasks{
+		tasks:     make(map[int64]ImportTask),
+		taskStats: expirable.NewLRU[UniqueID, ImportTask](64, nil, time.Minute*30),
+	}
+}
+
+func (t *importTasks) get(taskID int64) ImportTask {
+	ret, ok := t.tasks[taskID]
+	if !ok {
+		return nil
+	}
+	return ret
+}
+
+func (t *importTasks) add(task ImportTask) {
+	t.tasks[task.GetTaskID()] = task
+	t.taskStats.Add(task.GetTaskID(), task)
+}
+
+func (t *importTasks) remove(taskID int64) {
+	task, ok := t.tasks[taskID]
+	if ok {
+		delete(t.tasks, taskID)
+		t.taskStats.Add(task.GetTaskID(), task)
+	}
+}
+
+func (t *importTasks) listTasks() []ImportTask {
+	return maps.Values(t.tasks)
+}
+
+func (t *importTasks) listTaskStats() []ImportTask {
+	return t.taskStats.Values()
 }
 
 type importMeta struct {
-	mu    lock.RWMutex // guards jobs and tasks
-	jobs  map[int64]ImportJob
-	tasks map[int64]ImportTask
-
+	mu      lock.RWMutex // guards jobs and tasks
+	jobs    map[int64]ImportJob
+	tasks   *importTasks
 	catalog metastore.DataCoordCatalog
 }
 
-func NewImportMeta(catalog metastore.DataCoordCatalog) (ImportMeta, error) {
-	restoredPreImportTasks, err := catalog.ListPreImportTasks()
+func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (ImportMeta, error) {
+	restoredPreImportTasks, err := catalog.ListPreImportTasks(ctx)
 	if err != nil {
 		return nil, err
 	}
-	restoredImportTasks, err := catalog.ListImportTasks()
+	restoredImportTasks, err := catalog.ListImportTasks(ctx)
 	if err != nil {
 		return nil, err
 	}
-	restoredJobs, err := catalog.ListImportJobs()
+	restoredJobs, err := catalog.ListImportJobs(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	tasks := make(map[int64]ImportTask)
+	tasks := newImportTasks()
+
 	for _, task := range restoredPreImportTasks {
-		tasks[task.GetTaskID()] = &preImportTask{
+		tasks.add(&preImportTask{
 			PreImportTask: task,
-		}
+			tr:            timerecord.NewTimeRecorder("preimport task"),
+		})
 	}
 	for _, task := range restoredImportTasks {
-		tasks[task.GetTaskID()] = &importTask{
+		tasks.add(&importTask{
 			ImportTaskV2: task,
-		}
+			tr:           timerecord.NewTimeRecorder("import task"),
+		})
 	}
 
 	jobs := make(map[int64]ImportJob)
 	for _, job := range restoredJobs {
 		jobs[job.GetJobID()] = &importJob{
 			ImportJob: job,
+			tr:        timerecord.NewTimeRecorder("import job"),
 		}
 	}
 
@@ -83,10 +137,10 @@ func NewImportMeta(catalog metastore.DataCoordCatalog) (ImportMeta, error) {
 	}, nil
 }
 
-func (m *importMeta) AddJob(job ImportJob) error {
+func (m *importMeta) AddJob(ctx context.Context, job ImportJob) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	err := m.catalog.SaveImportJob(job.(*importJob).ImportJob)
+	err := m.catalog.SaveImportJob(ctx, job.(*importJob).ImportJob)
 	if err != nil {
 		return err
 	}
@@ -94,7 +148,7 @@ func (m *importMeta) AddJob(job ImportJob) error {
 	return nil
 }
 
-func (m *importMeta) UpdateJob(jobID int64, actions ...UpdateJobAction) error {
+func (m *importMeta) UpdateJob(ctx context.Context, jobID int64, actions ...UpdateJobAction) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if job, ok := m.jobs[jobID]; ok {
@@ -102,7 +156,7 @@ func (m *importMeta) UpdateJob(jobID int64, actions ...UpdateJobAction) error {
 		for _, action := range actions {
 			action(updatedJob)
 		}
-		err := m.catalog.SaveImportJob(updatedJob.(*importJob).ImportJob)
+		err := m.catalog.SaveImportJob(ctx, updatedJob.(*importJob).ImportJob)
 		if err != nil {
 			return err
 		}
@@ -111,15 +165,19 @@ func (m *importMeta) UpdateJob(jobID int64, actions ...UpdateJobAction) error {
 	return nil
 }
 
-func (m *importMeta) GetJob(jobID int64) ImportJob {
+func (m *importMeta) GetJob(ctx context.Context, jobID int64) ImportJob {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.jobs[jobID]
 }
 
-func (m *importMeta) GetJobBy(filters ...ImportJobFilter) []ImportJob {
+func (m *importMeta) GetJobBy(ctx context.Context, filters ...ImportJobFilter) []ImportJob {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return m.getJobBy(filters...)
+}
+
+func (m *importMeta) getJobBy(filters ...ImportJobFilter) []ImportJob {
 	ret := make([]ImportJob, 0)
 OUTER:
 	for _, job := range m.jobs {
@@ -133,11 +191,17 @@ OUTER:
 	return ret
 }
 
-func (m *importMeta) RemoveJob(jobID int64) error {
+func (m *importMeta) CountJobBy(ctx context.Context, filters ...ImportJobFilter) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.getJobBy(filters...))
+}
+
+func (m *importMeta) RemoveJob(ctx context.Context, jobID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.jobs[jobID]; ok {
-		err := m.catalog.DropImportJob(jobID)
+		err := m.catalog.DropImportJob(ctx, jobID)
 		if err != nil {
 			return err
 		}
@@ -146,65 +210,65 @@ func (m *importMeta) RemoveJob(jobID int64) error {
 	return nil
 }
 
-func (m *importMeta) AddTask(task ImportTask) error {
+func (m *importMeta) AddTask(ctx context.Context, task ImportTask) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	switch task.GetType() {
 	case PreImportTaskType:
-		err := m.catalog.SavePreImportTask(task.(*preImportTask).PreImportTask)
+		err := m.catalog.SavePreImportTask(ctx, task.(*preImportTask).PreImportTask)
 		if err != nil {
 			return err
 		}
-		m.tasks[task.GetTaskID()] = task
+		m.tasks.add(task)
 	case ImportTaskType:
-		err := m.catalog.SaveImportTask(task.(*importTask).ImportTaskV2)
+		err := m.catalog.SaveImportTask(ctx, task.(*importTask).ImportTaskV2)
 		if err != nil {
 			return err
 		}
-		m.tasks[task.GetTaskID()] = task
+		m.tasks.add(task)
 	}
 	return nil
 }
 
-func (m *importMeta) UpdateTask(taskID int64, actions ...UpdateAction) error {
+func (m *importMeta) UpdateTask(ctx context.Context, taskID int64, actions ...UpdateAction) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if task, ok := m.tasks[taskID]; ok {
+	if task := m.tasks.get(taskID); task != nil {
 		updatedTask := task.Clone()
 		for _, action := range actions {
 			action(updatedTask)
 		}
 		switch updatedTask.GetType() {
 		case PreImportTaskType:
-			err := m.catalog.SavePreImportTask(updatedTask.(*preImportTask).PreImportTask)
+			err := m.catalog.SavePreImportTask(ctx, updatedTask.(*preImportTask).PreImportTask)
 			if err != nil {
 				return err
 			}
-			m.tasks[updatedTask.GetTaskID()] = updatedTask
+			m.tasks.add(updatedTask)
 		case ImportTaskType:
-			err := m.catalog.SaveImportTask(updatedTask.(*importTask).ImportTaskV2)
+			err := m.catalog.SaveImportTask(ctx, updatedTask.(*importTask).ImportTaskV2)
 			if err != nil {
 				return err
 			}
-			m.tasks[updatedTask.GetTaskID()] = updatedTask
+			m.tasks.add(updatedTask)
 		}
 	}
 
 	return nil
 }
 
-func (m *importMeta) GetTask(taskID int64) ImportTask {
+func (m *importMeta) GetTask(ctx context.Context, taskID int64) ImportTask {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.tasks[taskID]
+	return m.tasks.get(taskID)
 }
 
-func (m *importMeta) GetTaskBy(filters ...ImportTaskFilter) []ImportTask {
+func (m *importMeta) GetTaskBy(ctx context.Context, filters ...ImportTaskFilter) []ImportTask {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	ret := make([]ImportTask, 0)
 OUTER:
-	for _, task := range m.tasks {
+	for _, task := range m.tasks.listTasks() {
 		for _, f := range filters {
 			if !f(task) {
 				continue OUTER
@@ -215,23 +279,33 @@ OUTER:
 	return ret
 }
 
-func (m *importMeta) RemoveTask(taskID int64) error {
+func (m *importMeta) RemoveTask(ctx context.Context, taskID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if task, ok := m.tasks[taskID]; ok {
+	if task := m.tasks.get(taskID); task != nil {
 		switch task.GetType() {
 		case PreImportTaskType:
-			err := m.catalog.DropPreImportTask(taskID)
+			err := m.catalog.DropPreImportTask(ctx, taskID)
 			if err != nil {
 				return err
 			}
 		case ImportTaskType:
-			err := m.catalog.DropImportTask(taskID)
+			err := m.catalog.DropImportTask(ctx, taskID)
 			if err != nil {
 				return err
 			}
 		}
-		delete(m.tasks, taskID)
+		m.tasks.remove(taskID)
 	}
 	return nil
+}
+
+func (m *importMeta) TaskStatsJSON(ctx context.Context) string {
+	tasks := m.tasks.listTaskStats()
+
+	ret, err := json.Marshal(tasks)
+	if err != nil {
+		return ""
+	}
+	return string(ret)
 }

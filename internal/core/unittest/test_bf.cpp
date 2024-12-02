@@ -122,8 +122,9 @@ class TestFloatSearchBruteForce : public ::testing::Test {
 
         auto base = GenFloatVecs(dim, nb, metric_type);
         auto query = GenFloatVecs(dim, nq, metric_type);
+        auto index_info = std::map<std::string, std::string>{};
 
-        dataset::SearchDataset dataset{
+        dataset::SearchDataset query_dataset{
             metric_type, nq, topk, -1, dim, query.data()};
         if (!is_supported_float_metric(metric_type)) {
             // Memory leak in knowhere.
@@ -133,10 +134,12 @@ class TestFloatSearchBruteForce : public ::testing::Test {
         SearchInfo search_info;
         search_info.topk_ = topk;
         search_info.metric_type_ = metric_type;
-        auto result = BruteForceSearch(dataset,
-                                       base.data(),
-                                       nb,
+
+        auto raw_dataset = query::dataset::RawDataset{0, dim, nb, base.data()};
+        auto result = BruteForceSearch(query_dataset,
+                                       raw_dataset,
                                        search_info,
+                                       index_info,
                                        bitset_view,
                                        DataType::VECTOR_FLOAT);
         for (int i = 0; i < nq; i++) {

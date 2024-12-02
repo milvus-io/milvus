@@ -70,3 +70,21 @@ func TestNewMsgPackFromCreateCollectionMessage(t *testing.T) {
 	assert.Equal(t, tt, pack.BeginTs)
 	assert.Equal(t, tt, pack.EndTs)
 }
+
+func TestNewMsgPackFromCreateSegmentMessage(t *testing.T) {
+	id := rmq.NewRmqID(1)
+
+	tt := uint64(time.Now().UnixNano())
+	mutableMsg, err := message.NewCreateSegmentMessageBuilderV2().
+		WithHeader(&message.CreateSegmentMessageHeader{}).
+		WithBody(&message.CreateSegmentMessageBody{}).
+		WithVChannel("v1").
+		BuildMutable()
+	assert.NoError(t, err)
+	immutableCreateSegmentMsg := mutableMsg.WithTimeTick(tt).WithLastConfirmedUseMessageID().IntoImmutableMessage(id)
+	pack, err := NewMsgPackFromMessage(immutableCreateSegmentMsg)
+	assert.NoError(t, err)
+	assert.NotNil(t, pack)
+	assert.Equal(t, tt, pack.BeginTs)
+	assert.Equal(t, tt, pack.EndTs)
+}

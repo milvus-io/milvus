@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -36,6 +37,7 @@ func newTimeTickSyncOperator(param interceptors.InterceptorBuildParam) *timeTick
 		ackDetails:            ack.NewAckDetails(),
 		sourceID:              paramtable.GetNodeID(),
 		timeTickNotifier:      inspector.NewTimeTickNotifier(),
+		metrics:               metricsutil.NewTimeTickMetrics(param.WALImpls.Channel().Name),
 	}
 }
 
@@ -52,6 +54,7 @@ type timeTickSyncOperator struct {
 	ackDetails            *ack.AckDetails                    // all acknowledged details, all acked messages but not sent to wal will be kept here.
 	sourceID              int64                              // the current node id.
 	timeTickNotifier      *inspector.TimeTickNotifier        // used to notify the time tick change.
+	metrics               *metricsutil.TimeTickMetrics
 }
 
 // Channel returns the pchannel info.
@@ -143,7 +146,11 @@ func (impl *timeTickSyncOperator) blockUntilSyncTimeTickReady() error {
 			continue
 		}
 		// initialize ack manager.
-		impl.ackManager = ack.NewAckManager(ts, msgID)
+		impl.ackManager = ack.NewAckManager(ts, msgID, impl.metrics)
+		impl.logger.Info(
+			"send first time tick success",
+			zap.Uint64("timestamp", ts),
+			zap.String("messageID", msgID.String()))
 		break
 	}
 	// interceptor is ready now.
@@ -174,6 +181,7 @@ func (impl *timeTickSyncOperator) AckManager() *ack.AckManager {
 // Close close the time tick sync operator.
 func (impl *timeTickSyncOperator) Close() {
 	impl.cancel()
+	impl.metrics.Close()
 }
 
 // sendTsMsg sends first timestamp message to wal.
@@ -222,6 +230,12 @@ func (impl *timeTickSyncOperator) sendPersistentTsMsg(ctx context.Context,
 		)
 	}
 
+	// metrics updates
+	impl.metrics.CountPersistentTimeTickSync(ts)
+	impl.ackDetails.Range(func(detail *ack.AckDetail) bool {
+		impl.metrics.CountSyncTimeTick(detail.IsSync)
+		return true
+	})
 	// Ack details has been committed to wal, clear it.
 	impl.ackDetails.Clear()
 	// Update last time tick message id and time tick.
@@ -255,6 +269,12 @@ func (impl *timeTickSyncOperator) sendNoPersistentTsMsg(ctx context.Context, ts 
 		)
 	}
 
+	// metrics updates.
+	impl.metrics.CountMemoryTimeTickSync(ts)
+	impl.ackDetails.Range(func(detail *ack.AckDetail) bool {
+		impl.metrics.CountSyncTimeTick(detail.IsSync)
+		return true
+	})
 	// Ack details has been committed to wal, clear it.
 	impl.ackDetails.Clear()
 	// Only update time tick.

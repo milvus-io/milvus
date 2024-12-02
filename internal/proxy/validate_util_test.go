@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -6377,30 +6377,6 @@ func Test_validateUtil_checkJSONData(t *testing.T) {
 				},
 			},
 			IsDynamic: true,
-		}
-
-		err := v.checkJSONFieldData(data, f)
-		assert.Error(t, err)
-	})
-
-	t.Run("invalid_JSON_data", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck(), withMaxLenCheck())
-		jsonData := "hello"
-		f := &schemapb.FieldSchema{
-			DataType:  schemapb.DataType_JSON,
-			IsDynamic: true,
-		}
-		data := &schemapb.FieldData{
-			FieldName: "json",
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_JsonData{
-						JsonData: &schemapb.JSONArray{
-							Data: [][]byte{[]byte(jsonData)},
-						},
-					},
-				},
-			},
 		}
 
 		err := v.checkJSONFieldData(data, f)

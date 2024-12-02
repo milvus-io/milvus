@@ -24,10 +24,10 @@ func mergeSortMultipleSegments(ctx context.Context,
 	collectionID, partitionID, maxRows int64,
 	binlogIO io.BinlogIO,
 	binlogs []*datapb.CompactionSegmentBinlogs,
-	delta map[interface{}]typeutil.Timestamp,
 	tr *timerecord.TimeRecorder,
 	currentTs typeutil.Timestamp,
 	collectionTtl int64,
+	bm25FieldIds []int64,
 ) ([]*datapb.CompactionSegment, error) {
 	_ = tr.RecordSpan()
 
@@ -39,23 +39,12 @@ func mergeSortMultipleSegments(ctx context.Context,
 	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegmentIDs().GetBegin(), plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter := NewMultiSegmentWriter(binlogIO, compAlloc, plan, maxRows, partitionID, collectionID)
+	mWriter := NewMultiSegmentWriter(binlogIO, compAlloc, plan, maxRows, partitionID, collectionID, bm25FieldIds)
 
 	var (
 		expiredRowCount int64 // the number of expired entities
 		deletedRowCount int64
 	)
-
-	isValueDeleted := func(v *storage.Value) bool {
-		ts, ok := delta[v.PK.GetValue()]
-		// insert task and delete task has the same ts when upsert
-		// here should be < instead of <=
-		// to avoid the upsert data to be deleted after compact
-		if ok && uint64(v.Timestamp) < ts {
-			return true
-		}
-		return false
-	}
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	if err != nil {
@@ -65,6 +54,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 
 	// SegmentDeserializeReaderTest(binlogPaths, t.binlogIO, writer.GetPkID())
 	segmentReaders := make([]*SegmentDeserializeReader, len(binlogs))
+	segmentDelta := make([]map[interface{}]storage.Timestamp, len(binlogs))
 	for i, s := range binlogs {
 		var binlogBatchCount int
 		for _, b := range s.GetFieldBinlogs() {
@@ -87,14 +77,49 @@ func mergeSortMultipleSegments(ctx context.Context,
 			}
 			binlogPaths[idx] = batchPaths
 		}
-		segmentReaders[i] = NewSegmentDeserializeReader(ctx, binlogPaths, binlogIO, pkField.GetFieldID())
+		segmentReaders[i] = NewSegmentDeserializeReader(ctx, binlogPaths, binlogIO, pkField.GetFieldID(), bm25FieldIds)
+		deltalogPaths := make([]string, 0)
+		for _, d := range s.GetDeltalogs() {
+			for _, l := range d.GetBinlogs() {
+				deltalogPaths = append(deltalogPaths, l.GetLogPath())
+			}
+		}
+		segmentDelta[i], err = mergeDeltalogs(ctx, binlogIO, deltalogPaths)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	advanceRow := func(i int) (*storage.Value, error) {
+		for {
+			v, err := segmentReaders[i].Next()
+			if err != nil {
+				return nil, err
+			}
+
+			ts, ok := segmentDelta[i][v.PK.GetValue()]
+			// insert task and delete task has the same ts when upsert
+			// here should be < instead of <=
+			// to avoid the upsert data to be deleted after compact
+			if ok && uint64(v.Timestamp) < ts {
+				deletedRowCount++
+				continue
+			}
+
+			// Filtering expired entity
+			if isExpiredEntity(collectionTtl, currentTs, typeutil.Timestamp(v.Timestamp)) {
+				expiredRowCount++
+				continue
+			}
+			return v, nil
+		}
 	}
 
 	pq := make(PriorityQueue, 0)
 	heap.Init(&pq)
 
-	for i, r := range segmentReaders {
-		if v, err := r.Next(); err == nil {
+	for i := range segmentReaders {
+		if v, err := advanceRow(i); err == nil {
 			heap.Push(&pq, &PQItem{
 				Value: v,
 				Index: i,
@@ -106,24 +131,13 @@ func mergeSortMultipleSegments(ctx context.Context,
 		smallest := heap.Pop(&pq).(*PQItem)
 		v := smallest.Value
 
-		if isValueDeleted(v) {
-			deletedRowCount++
-			continue
-		}
-
-		// Filtering expired entity
-		if isExpiredEntity(collectionTtl, currentTs, typeutil.Timestamp(v.Timestamp)) {
-			expiredRowCount++
-			continue
-		}
-
 		err := mWriter.Write(v)
 		if err != nil {
 			log.Warn("compact wrong, failed to writer row", zap.Error(err))
 			return nil, err
 		}
 
-		iv, err := segmentReaders[smallest.Index].Next()
+		iv, err := advanceRow(smallest.Index)
 		if err != nil && err != sio.EOF {
 			return nil, err
 		}

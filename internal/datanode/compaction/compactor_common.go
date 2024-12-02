@@ -35,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+const compactionBatchSize = 100
+
 func isExpiredEntity(ttl int64, now, ts typeutil.Timestamp) bool {
 	// entity expire is not enabled if duration <= 0
 	if ttl <= 0 {
@@ -47,31 +49,25 @@ func isExpiredEntity(ttl int64, now, ts typeutil.Timestamp) bool {
 	return expireTime.Before(pnow)
 }
 
-func mergeDeltalogs(ctx context.Context, io io.BinlogIO, dpaths map[typeutil.UniqueID][]string) (map[interface{}]typeutil.Timestamp, error) {
+func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[interface{}]typeutil.Timestamp, error) {
 	pk2ts := make(map[interface{}]typeutil.Timestamp)
 
-	if len(dpaths) == 0 {
-		log.Info("compact with no deltalogs, skip merge deltalogs")
+	if len(paths) == 0 {
+		log.Debug("compact with no deltalogs, skip merge deltalogs")
 		return pk2ts, nil
 	}
 
 	blobs := make([]*storage.Blob, 0)
-	for segID, paths := range dpaths {
-		if len(paths) == 0 {
-			continue
-		}
-		binaries, err := io.Download(ctx, paths)
-		if err != nil {
-			log.Warn("compact wrong, fail to download deltalogs",
-				zap.Int64("segment", segID),
-				zap.Strings("path", paths),
-				zap.Error(err))
-			return nil, err
-		}
+	binaries, err := io.Download(ctx, paths)
+	if err != nil {
+		log.Warn("compact wrong, fail to download deltalogs",
+			zap.Strings("path", paths),
+			zap.Error(err))
+		return nil, err
+	}
 
-		for i := range binaries {
-			blobs = append(blobs, &storage.Blob{Value: binaries[i]})
-		}
+	for i := range binaries {
+		blobs = append(blobs, &storage.Blob{Value: binaries[i]})
 	}
 	reader, err := storage.CreateDeltalogReader(blobs)
 	if err != nil {
@@ -104,15 +100,18 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, dpaths map[typeutil.Uni
 	return pk2ts, nil
 }
 
-func composePaths(segments []*datapb.CompactionSegmentBinlogs) (map[typeutil.UniqueID][]string, [][]string, error) {
+func composePaths(segments []*datapb.CompactionSegmentBinlogs) (
+	deltaPaths map[typeutil.UniqueID][]string, insertPaths map[typeutil.UniqueID][]string, err error,
+) {
 	if err := binlog.DecompressCompactionBinlogs(segments); err != nil {
 		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
 		return nil, nil, err
 	}
 
-	deltaPaths := make(map[typeutil.UniqueID][]string) // segmentID to deltalog paths
-	allPath := make([][]string, 0)                     // group by binlog batch
+	deltaPaths = make(map[typeutil.UniqueID][]string)     // segmentID to deltalog paths
+	insertPaths = make(map[typeutil.UniqueID][]string, 0) // segmentID to binlog paths
 	for _, s := range segments {
+		segId := s.GetSegmentID()
 		// Get the batch count of field binlog files from non-empty segment
 		// each segment might contain different batches
 		var binlogBatchCount int
@@ -132,17 +131,17 @@ func composePaths(segments []*datapb.CompactionSegmentBinlogs) (map[typeutil.Uni
 			for _, f := range s.GetFieldBinlogs() {
 				batchPaths = append(batchPaths, f.GetBinlogs()[idx].GetLogPath())
 			}
-			allPath = append(allPath, batchPaths)
+			insertPaths[segId] = append(insertPaths[segId], batchPaths...)
 		}
 
 		deltaPaths[s.GetSegmentID()] = []string{}
 		for _, d := range s.GetDeltalogs() {
 			for _, l := range d.GetBinlogs() {
-				deltaPaths[s.GetSegmentID()] = append(deltaPaths[s.GetSegmentID()], l.GetLogPath())
+				deltaPaths[segId] = append(deltaPaths[s.GetSegmentID()], l.GetLogPath())
 			}
 		}
 	}
-	return deltaPaths, allPath, nil
+	return deltaPaths, insertPaths, nil
 }
 
 func serializeWrite(ctx context.Context, allocator allocator.Interface, writer *SegmentWriter) (kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
@@ -214,7 +213,7 @@ func uploadStatsBlobs(ctx context.Context, collectionID, partitionID, segmentID,
 		},
 	}
 	if err := io.Upload(ctx, kvs); err != nil {
-		log.Warn("failed to upload insert log", zap.Error(err))
+		log.Warn("failed to upload stats log", zap.Error(err))
 		return nil, err
 	}
 
@@ -228,4 +227,46 @@ func mergeFieldBinlogs(base, paths map[typeutil.UniqueID]*datapb.FieldBinlog) {
 		}
 		base[fID].Binlogs = append(base[fID].Binlogs, fpath.GetBinlogs()...)
 	}
+}
+
+func bm25SerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator.Interface, writer *SegmentWriter) ([]*datapb.FieldBinlog, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "bm25 stats log serializeWrite")
+	defer span.End()
+
+	stats, err := writer.GetBm25StatsBlob()
+	if err != nil {
+		return nil, err
+	}
+
+	logID, _, err := allocator.Alloc(uint32(len(stats)))
+	if err != nil {
+		return nil, err
+	}
+
+	kvs := make(map[string][]byte)
+	binlogs := []*datapb.FieldBinlog{}
+	for fieldID, blob := range stats {
+		key, _ := binlog.BuildLogPath(storage.BM25Binlog, writer.GetCollectionID(), writer.GetPartitionID(), writer.GetSegmentID(), fieldID, logID)
+		kvs[key] = blob.GetValue()
+		fieldLog := &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{
+				{
+					LogSize:    int64(len(blob.GetValue())),
+					MemorySize: int64(len(blob.GetValue())),
+					LogPath:    key,
+					EntriesNum: writer.GetRowNum(),
+				},
+			},
+		}
+
+		binlogs = append(binlogs, fieldLog)
+	}
+
+	if err := io.Upload(ctx, kvs); err != nil {
+		log.Warn("failed to upload bm25 log", zap.Error(err))
+		return nil, err
+	}
+
+	return binlogs, nil
 }

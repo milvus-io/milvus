@@ -29,10 +29,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -138,7 +140,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		return false
 	}
 
-	segment := dependency.meta.GetSegment(segIndex.SegmentID)
+	segment := dependency.meta.GetSegment(ctx, segIndex.SegmentID)
 	if !isSegmentHealthy(segment) || !dependency.meta.indexMeta.IsIndexExist(segIndex.CollectionID, segIndex.IndexID) {
 		log.Ctx(ctx).Info("task is no need to build index, remove it", zap.Int64("taskID", it.taskID))
 		it.SetState(indexpb.JobState_JobStateNone, "task is no need to build index")
@@ -146,7 +148,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	}
 	indexParams := dependency.meta.indexMeta.GetIndexParams(segIndex.CollectionID, segIndex.IndexID)
 	indexType := GetIndexType(indexParams)
-	if isFlatIndex(indexType) || segIndex.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
+	if isNoTrainIndex(indexType) || segIndex.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
 		log.Ctx(ctx).Info("segment does not need index really", zap.Int64("taskID", it.taskID),
 			zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("num rows", segIndex.NumRows))
 		it.SetStartTime(time.Now())
@@ -159,6 +161,19 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 
 	fieldID := dependency.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID)
 	binlogIDs := getBinLogIDs(segment, fieldID)
+
+	// When new index parameters are added, these parameters need to be updated to ensure they are included during the index-building process.
+	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) && Params.KnowhereConfig.Enable.GetAsBool() {
+		var ret error
+		indexParams, ret = Params.KnowhereConfig.UpdateIndexParams(GetIndexType(indexParams), paramtable.BuildStage, indexParams)
+
+		if ret != nil {
+			log.Ctx(ctx).Warn("failed to update index build params defined in yaml", zap.Int64("taskID", it.taskID), zap.Error(ret))
+			it.SetState(indexpb.JobState_JobStateInit, ret.Error())
+			return false
+		}
+	}
+
 	if isDiskANNIndex(GetIndexType(indexParams)) {
 		var err error
 		indexParams, err = indexparams.UpdateDiskIndexBuildParams(Params, indexParams)
@@ -202,24 +217,20 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 			it.SetState(indexpb.JobState_JobStateInit, err.Error())
 			return true
 		}
-		partitionKeyField, err := typeutil.GetPartitionKeyFieldSchema(schema)
-		if partitionKeyField == nil || err != nil {
-			log.Ctx(ctx).Warn("index builder get partition key field failed", zap.Int64("taskID", it.taskID), zap.Error(err))
-		} else {
-			if typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyField) {
-				optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
-					FieldID:   partitionKeyField.FieldID,
-					FieldName: partitionKeyField.Name,
-					FieldType: int32(partitionKeyField.DataType),
-					DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
-				})
-				iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collectionInfo.Properties)
-				if isoErr != nil {
-					log.Ctx(ctx).Warn("failed to parse partition key isolation", zap.Error(isoErr))
-				}
-				if iso {
-					partitionKeyIsolation = true
-				}
+		partitionKeyField, _ := typeutil.GetPartitionKeyFieldSchema(schema)
+		if partitionKeyField != nil && typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyField) {
+			optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
+				FieldID:   partitionKeyField.FieldID,
+				FieldName: partitionKeyField.Name,
+				FieldType: int32(partitionKeyField.DataType),
+				DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
+			})
+			iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collectionInfo.Properties)
+			if isoErr != nil {
+				log.Ctx(ctx).Warn("failed to parse partition key isolation", zap.Error(isoErr))
+			}
+			if iso {
+				partitionKeyIsolation = true
 			}
 		}
 	}

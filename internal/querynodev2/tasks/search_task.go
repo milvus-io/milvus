@@ -20,6 +20,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -30,8 +32,8 @@ import (
 )
 
 var (
-	_ Task      = &SearchTask{}
-	_ MergeTask = &SearchTask{}
+	_ scheduler.Task      = &SearchTask{}
+	_ scheduler.MergeTask = &SearchTask{}
 )
 
 type SearchTask struct {
@@ -144,7 +146,7 @@ func (t *SearchTask) Execute() error {
 	if err != nil {
 		return err
 	}
-	searchReq, err := segments.NewSearchRequest(t.ctx, t.collection, req, t.placeholderGroup)
+	searchReq, err := segcore.NewSearchRequest(t.collection.GetCCollection(), req, t.placeholderGroup)
 	if err != nil {
 		return err
 	}
@@ -160,7 +162,7 @@ func (t *SearchTask) Execute() error {
 			t.segmentManager,
 			searchReq,
 			req.GetReq().GetCollectionID(),
-			nil,
+			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
 		)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
@@ -169,7 +171,7 @@ func (t *SearchTask) Execute() error {
 			t.segmentManager,
 			searchReq,
 			req.GetReq().GetCollectionID(),
-			nil,
+			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
 		)
 	}
@@ -214,7 +216,7 @@ func (t *SearchTask) Execute() error {
 	}, 0)
 
 	tr.RecordSpan()
-	blobs, err := segments.ReduceSearchResultsAndFillData(
+	blobs, err := segcore.ReduceSearchResultsAndFillData(
 		t.ctx,
 		searchReq.Plan(),
 		results,
@@ -226,7 +228,7 @@ func (t *SearchTask) Execute() error {
 		log.Warn("failed to reduce search results", zap.Error(err))
 		return err
 	}
-	defer segments.DeleteSearchResultDataBlobs(blobs)
+	defer segcore.DeleteSearchResultDataBlobs(blobs)
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		fmt.Sprint(t.GetNodeID()),
 		metrics.SearchLabel,
@@ -234,7 +236,7 @@ func (t *SearchTask) Execute() error {
 		metrics.BatchReduce).
 		Observe(float64(tr.RecordSpan().Milliseconds()))
 	for i := range t.originNqs {
-		blob, err := segments.GetSearchResultDataBlob(t.ctx, blobs, i)
+		blob, err := segcore.GetSearchResultDataBlob(t.ctx, blobs, i)
 		if err != nil {
 			return err
 		}
@@ -346,7 +348,7 @@ func (t *SearchTask) NQ() int64 {
 	return t.nq
 }
 
-func (t *SearchTask) MergeWith(other Task) bool {
+func (t *SearchTask) MergeWith(other scheduler.Task) bool {
 	switch other := other.(type) {
 	case *SearchTask:
 		return t.Merge(other)
@@ -384,8 +386,8 @@ func (t *SearchTask) combinePlaceHolderGroups() error {
 type StreamingSearchTask struct {
 	SearchTask
 	others        []*StreamingSearchTask
-	resultBlobs   segments.SearchResultDataBlobs
-	streamReducer segments.StreamSearchReducer
+	resultBlobs   segcore.SearchResultDataBlobs
+	streamReducer segcore.StreamSearchReducer
 }
 
 func NewStreamingSearchTask(ctx context.Context,
@@ -416,7 +418,7 @@ func NewStreamingSearchTask(ctx context.Context,
 	}
 }
 
-func (t *StreamingSearchTask) MergeWith(other Task) bool {
+func (t *StreamingSearchTask) MergeWith(other scheduler.Task) bool {
 	return false
 }
 
@@ -432,7 +434,7 @@ func (t *StreamingSearchTask) Execute() error {
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "SearchTask")
 	req := t.req
 	t.combinePlaceHolderGroups()
-	searchReq, err := segments.NewSearchRequest(t.ctx, t.collection, req, t.placeholderGroup)
+	searchReq, err := segcore.NewSearchRequest(t.collection.GetCCollection(), req, t.placeholderGroup)
 	if err != nil {
 		return err
 	}
@@ -454,14 +456,14 @@ func (t *StreamingSearchTask) Execute() error {
 			nil,
 			req.GetSegmentIDs(),
 			streamReduceFunc)
-		defer segments.DeleteStreamReduceHelper(t.streamReducer)
+		defer segcore.DeleteStreamReduceHelper(t.streamReducer)
 		defer t.segmentManager.Segment.Unpin(pinnedSegments)
 		if err != nil {
 			log.Error("Failed to search sealed segments streamly", zap.Error(err))
 			return err
 		}
-		t.resultBlobs, err = segments.GetStreamReduceResult(t.ctx, t.streamReducer)
-		defer segments.DeleteSearchResultDataBlobs(t.resultBlobs)
+		t.resultBlobs, err = segcore.GetStreamReduceResult(t.ctx, t.streamReducer)
+		defer segcore.DeleteSearchResultDataBlobs(t.resultBlobs)
 		if err != nil {
 			log.Error("Failed to get stream-reduced search result")
 			return err
@@ -475,7 +477,7 @@ func (t *StreamingSearchTask) Execute() error {
 			t.segmentManager,
 			searchReq,
 			req.GetReq().GetCollectionID(),
-			nil,
+			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
 		)
 		defer segments.DeleteSearchResults(results)
@@ -487,7 +489,7 @@ func (t *StreamingSearchTask) Execute() error {
 			return nil
 		}
 		tr.RecordSpan()
-		t.resultBlobs, err = segments.ReduceSearchResultsAndFillData(
+		t.resultBlobs, err = segcore.ReduceSearchResultsAndFillData(
 			t.ctx,
 			searchReq.Plan(),
 			results,
@@ -499,7 +501,7 @@ func (t *StreamingSearchTask) Execute() error {
 			log.Warn("failed to reduce search results", zap.Error(err))
 			return err
 		}
-		defer segments.DeleteSearchResultDataBlobs(t.resultBlobs)
+		defer segcore.DeleteSearchResultDataBlobs(t.resultBlobs)
 		metrics.QueryNodeReduceLatency.WithLabelValues(
 			fmt.Sprint(t.GetNodeID()),
 			metrics.SearchLabel,
@@ -513,7 +515,7 @@ func (t *StreamingSearchTask) Execute() error {
 
 	// 2. reorganize blobs to original search request
 	for i := range t.originNqs {
-		blob, err := segments.GetSearchResultDataBlob(t.ctx, t.resultBlobs, i)
+		blob, err := segcore.GetSearchResultDataBlob(t.ctx, t.resultBlobs, i)
 		if err != nil {
 			return err
 		}
@@ -583,19 +585,19 @@ func (t *StreamingSearchTask) maybeReturnForEmptyResults(results []*segments.Sea
 }
 
 func (t *StreamingSearchTask) streamReduce(ctx context.Context,
-	plan *segments.SearchPlan,
+	plan *segcore.SearchPlan,
 	newResult *segments.SearchResult,
 	sliceNQs []int64,
 	sliceTopKs []int64,
 ) error {
 	if t.streamReducer == nil {
 		var err error
-		t.streamReducer, err = segments.NewStreamReducer(ctx, plan, sliceNQs, sliceTopKs)
+		t.streamReducer, err = segcore.NewStreamReducer(ctx, plan, sliceNQs, sliceTopKs)
 		if err != nil {
 			log.Error("Fail to init stream reducer, return")
 			return err
 		}
 	}
 
-	return segments.StreamReduceSearchResult(ctx, newResult, t.streamReducer)
+	return segcore.StreamReduceSearchResult(ctx, newResult, t.streamReducer)
 }

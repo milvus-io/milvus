@@ -36,6 +36,7 @@ import (
 
 type StatsUpdater interface {
 	Update(channel string, ts typeutil.Timestamp, stats []*commonpb.SegmentStats)
+	GetLatestTimestamp(channel string) typeutil.Timestamp
 }
 
 // TimeTickSender is to merge channel states updated by flow graph node and send to datacoord periodically
@@ -124,6 +125,17 @@ func (m *TimeTickSender) Update(channelName string, timestamp uint64, segStats [
 		}
 	}
 	m.statsCache[channelName].lastTs = timestamp
+}
+
+func (m *TimeTickSender) GetLatestTimestamp(channel string) typeutil.Timestamp {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	chStats, ok := m.statsCache[channel]
+	if !ok {
+		log.Warn("channel not found in TimeTickSender", zap.String("channel", channel))
+		return 0
+	}
+	return chStats.lastTs
 }
 
 func (m *TimeTickSender) assembleDatanodeTtMsg() ([]*msgpb.DataNodeTtMsg, map[string]uint64) {

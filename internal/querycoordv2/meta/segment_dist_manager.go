@@ -24,6 +24,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/metrics"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -130,6 +133,22 @@ func SegmentFromInfo(info *datapb.SegmentInfo) *Segment {
 	}
 }
 
+func newSegmentMetricsFrom(segment *Segment) *metricsinfo.Segment {
+	convertedSegment := metrics.NewSegmentFrom(segment.SegmentInfo)
+	convertedSegment.NodeID = segment.Node
+	convertedSegment.LoadedTimestamp = tsoutil.PhysicalTimeFormat(segment.LastDeltaTimestamp)
+	convertedSegment.IndexedFields = lo.Map(lo.Values(segment.IndexInfo), func(e *querypb.FieldIndexInfo, i int) *metricsinfo.IndexedField {
+		return &metricsinfo.IndexedField{
+			IndexFieldID: e.FieldID,
+			IndexID:      e.IndexID,
+			BuildID:      e.BuildID,
+			IndexSize:    e.IndexSize,
+			IsLoaded:     true,
+		}
+	})
+	return convertedSegment
+}
+
 func (segment *Segment) Clone() *Segment {
 	return &Segment{
 		SegmentInfo: proto.Clone(segment.SegmentInfo).(*datapb.SegmentInfo),
@@ -226,4 +245,20 @@ func (m *SegmentDistManager) GetByFilter(filters ...SegmentDistFilter) []*Segmen
 		ret = append(ret, nodeSegments.Filter(criterion, mergedFilters)...)
 	}
 	return ret
+}
+
+func (m *SegmentDistManager) GetSegmentDist(collectionID int64) []*metricsinfo.Segment {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	var segments []*metricsinfo.Segment
+	for _, nodeSeg := range m.segments {
+		for _, segment := range nodeSeg.segments {
+			if collectionID == 0 || segment.GetCollectionID() == collectionID {
+				segments = append(segments, newSegmentMetricsFrom(segment))
+			}
+		}
+	}
+
+	return segments
 }

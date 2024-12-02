@@ -7,18 +7,24 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // buildNewPartitionManagers builds new partition managers.
 func buildNewPartitionManagers(
+	wal *syncutil.Future[wal.WAL],
 	pchannel types.PChannelInfo,
 	rawMetas []*streamingpb.SegmentAssignmentMeta,
 	collectionInfos []*rootcoordpb.CollectionInfoOnPChannel,
+	metrics *metricsutil.SegmentAssignMetrics,
 ) (*partitionSegmentManagers, []*segmentAllocManager) {
 	// create a map to check if the partition exists.
 	partitionExist := make(map[int64]struct{}, len(collectionInfos))
@@ -35,11 +41,11 @@ func buildNewPartitionManagers(
 	waitForSealed := make([]*segmentAllocManager, 0)
 	metaMaps := make(map[int64][]*segmentAllocManager)
 	for _, rawMeta := range rawMetas {
-		m := newSegmentAllocManagerFromProto(pchannel, rawMeta)
+		m := newSegmentAllocManagerFromProto(pchannel, rawMeta, metrics)
 		if _, ok := partitionExist[rawMeta.GetPartitionId()]; !ok {
 			// related collection or partition is not exist.
 			// should be sealed right now.
-			waitForSealed = append(waitForSealed, m)
+			waitForSealed = append(waitForSealed, m.WithSealPolicy(policy.PolicyNamePartitionNotFound))
 			continue
 		}
 		if _, ok := metaMaps[rawMeta.GetPartitionId()]; !ok {
@@ -59,24 +65,30 @@ func buildNewPartitionManagers(
 			}
 			// otherwise, just create a new manager.
 			_, ok := managers.GetOrInsert(partition.GetPartitionId(), newPartitionSegmentManager(
+				wal,
 				pchannel,
 				collectionInfo.GetVchannel(),
 				collectionID,
 				partition.GetPartitionId(),
 				segmentManagers,
+				metrics,
 			))
 			if ok {
 				panic("partition manager already exists when buildNewPartitionManagers in segment assignment service, there's a bug in system")
 			}
 		}
 	}
-	return &partitionSegmentManagers{
+	m := &partitionSegmentManagers{
 		mu:              sync.Mutex{},
 		logger:          log.With(zap.Any("pchannel", pchannel)),
+		wal:             wal,
 		pchannel:        pchannel,
 		managers:        managers,
 		collectionInfos: collectionInfoMap,
-	}, waitForSealed
+		metrics:         metrics,
+	}
+	m.updateMetrics()
+	return m, waitForSealed
 }
 
 // partitionSegmentManagers is a collection of partition managers.
@@ -84,9 +96,11 @@ type partitionSegmentManagers struct {
 	mu sync.Mutex
 
 	logger          *log.MLogger
+	wal             *syncutil.Future[wal.WAL]
 	pchannel        types.PChannelInfo
 	managers        *typeutil.ConcurrentMap[int64, *partitionSegmentManager] // map partitionID to partition manager
 	collectionInfos map[int64]*rootcoordpb.CollectionInfoOnPChannel          // map collectionID to collectionInfo
+	metrics         *metricsutil.SegmentAssignMetrics
 }
 
 // NewCollection creates a new partition manager.
@@ -104,11 +118,13 @@ func (m *partitionSegmentManagers) NewCollection(collectionID int64, vchannel st
 	m.collectionInfos[collectionID] = newCollectionInfo(collectionID, vchannel, partitionID)
 	for _, partitionID := range partitionID {
 		if _, loaded := m.managers.GetOrInsert(partitionID, newPartitionSegmentManager(
+			m.wal,
 			m.pchannel,
 			vchannel,
 			collectionID,
 			partitionID,
 			make([]*segmentAllocManager, 0),
+			m.metrics,
 		)); loaded {
 			m.logger.Warn("partition already exists when NewCollection in segment assignment service, it's may be a bug in system",
 				zap.Int64("collectionID", collectionID),
@@ -116,6 +132,11 @@ func (m *partitionSegmentManagers) NewCollection(collectionID int64, vchannel st
 			)
 		}
 	}
+	m.logger.Info("collection created in segment assignment service",
+		zap.Int64("collectionID", collectionID),
+		zap.String("vchannel", vchannel),
+		zap.Int64s("partitionIDs", partitionID))
+	m.updateMetrics()
 }
 
 // NewPartition creates a new partition manager.
@@ -135,17 +156,24 @@ func (m *partitionSegmentManagers) NewPartition(collectionID int64, partitionID 
 	})
 
 	if _, loaded := m.managers.GetOrInsert(partitionID, newPartitionSegmentManager(
+		m.wal,
 		m.pchannel,
 		m.collectionInfos[collectionID].Vchannel,
 		collectionID,
 		partitionID,
 		make([]*segmentAllocManager, 0),
+		m.metrics,
 	)); loaded {
 		m.logger.Warn(
 			"partition already exists when NewPartition in segment assignment service, it's may be a bug in system",
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("partitionID", partitionID))
 	}
+	m.logger.Info("partition created in segment assignment service",
+		zap.Int64("collectionID", collectionID),
+		zap.String("vchannel", m.collectionInfos[collectionID].Vchannel),
+		zap.Int64("partitionID", partitionID))
+	m.updateMetrics()
 }
 
 // Get gets a partition manager from the partition managers.
@@ -171,13 +199,27 @@ func (m *partitionSegmentManagers) RemoveCollection(collectionID int64) []*segme
 	delete(m.collectionInfos, collectionID)
 
 	needSealed := make([]*segmentAllocManager, 0)
+	partitionIDs := make([]int64, 0, len(collectionInfo.Partitions))
+	segmentIDs := make([]int64, 0, len(collectionInfo.Partitions))
 	for _, partition := range collectionInfo.Partitions {
 		pm, ok := m.managers.Get(partition.PartitionId)
 		if ok {
-			needSealed = append(needSealed, pm.CollectAllCanBeSealedAndClear()...)
+			segments := pm.CollectAllCanBeSealedAndClear(policy.PolicyNameCollectionRemoved)
+			partitionIDs = append(partitionIDs, partition.PartitionId)
+			for _, segment := range segments {
+				segmentIDs = append(segmentIDs, segment.GetSegmentID())
+			}
+			needSealed = append(needSealed, segments...)
+			m.managers.Remove(partition.PartitionId)
 		}
-		m.managers.Remove(partition.PartitionId)
 	}
+	m.logger.Info(
+		"collection removed in segment assignment service",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64s("partitionIDs", partitionIDs),
+		zap.Int64s("segmentIDs", segmentIDs),
+	)
+	m.updateMetrics()
 	return needSealed
 }
 
@@ -206,11 +248,23 @@ func (m *partitionSegmentManagers) RemovePartition(collectionID int64, partition
 			zap.Int64("partitionID", partitionID))
 		return nil
 	}
-	return pm.CollectAllCanBeSealedAndClear()
+	segments := pm.CollectAllCanBeSealedAndClear(policy.PolicyNamePartitionRemoved)
+	segmentIDs := make([]int64, 0, len(segments))
+	for _, segment := range segments {
+		segmentIDs = append(segmentIDs, segment.GetSegmentID())
+	}
+	m.logger.Info(
+		"partition removed in segment assignment service",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("partitionID", partitionID),
+		zap.Int64s("segmentIDs", segmentIDs),
+	)
+	m.updateMetrics()
+	return segments
 }
 
-// SealAllSegmentsAndFenceUntil seals all segments and fence assign until timetick.
-func (m *partitionSegmentManagers) SealAllSegmentsAndFenceUntil(collectionID int64, timetick uint64) ([]*segmentAllocManager, error) {
+// SealAndFenceSegmentUntil seal all segment that contains the message less than the incoming timetick.
+func (m *partitionSegmentManagers) SealAndFenceSegmentUntil(collectionID int64, timetick uint64) ([]*segmentAllocManager, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -221,6 +275,7 @@ func (m *partitionSegmentManagers) SealAllSegmentsAndFenceUntil(collectionID int
 	}
 
 	sealedSegments := make([]*segmentAllocManager, 0)
+	segmentIDs := make([]int64, 0)
 	// collect all partitions
 	for _, partition := range collectionInfo.Partitions {
 		// Seal all segments and fence assign to the partition manager.
@@ -231,9 +286,18 @@ func (m *partitionSegmentManagers) SealAllSegmentsAndFenceUntil(collectionID int
 				zap.Int64("partitionID", partition.PartitionId))
 			return nil, errors.New("partition not found")
 		}
-		newSealedSegments := pm.SealAllSegmentsAndFenceUntil(timetick)
+		newSealedSegments := pm.SealAndFenceSegmentUntil(timetick)
+		for _, segment := range newSealedSegments {
+			segmentIDs = append(segmentIDs, segment.GetSegmentID())
+		}
 		sealedSegments = append(sealedSegments, newSealedSegments...)
 	}
+	m.logger.Info(
+		"all segments sealed and fence assign until timetick in segment assignment service",
+		zap.Int64("collectionID", collectionID),
+		zap.Uint64("timetick", timetick),
+		zap.Int64s("segmentIDs", segmentIDs),
+	)
 	return sealedSegments, nil
 }
 
@@ -243,6 +307,11 @@ func (m *partitionSegmentManagers) Range(f func(pm *partitionSegmentManager)) {
 		f(pm)
 		return true
 	})
+}
+
+func (m *partitionSegmentManagers) updateMetrics() {
+	m.metrics.UpdatePartitionCount(m.managers.Len())
+	m.metrics.UpdateCollectionCount(len(m.collectionInfos))
 }
 
 // newCollectionInfo creates a new collection info.

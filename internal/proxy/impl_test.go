@@ -20,10 +20,13 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
@@ -36,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -1819,4 +1823,43 @@ func TestProxy_InvalidateShardLeaderCache(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, merr.Ok(resp))
 	})
+}
+
+func TestRegisterRestRouter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+
+	dc := mocks.NewMockDataCoordClient(t)
+	dc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+	qc := mocks.NewMockQueryCoordClient(t)
+	qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+
+	proxy := &Proxy{
+		dataCoord:  dc,
+		queryCoord: qc,
+	}
+	proxy.RegisterRestRouter(router)
+
+	tests := []struct {
+		path       string
+		statusCode int
+	}{
+		{path: mhttp.QCTargetPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.QCDistPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.QCAllTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DNSyncTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DCCompactionTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DCImportTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DCBuildIndexTasksPath, statusCode: http.StatusInternalServerError},
+		{path: mhttp.DNSyncTasksPath, statusCode: http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			req, _ := http.NewRequest("GET", tt.path, nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			assert.Equal(t, tt.statusCode, w.Code)
+		})
+	}
 }

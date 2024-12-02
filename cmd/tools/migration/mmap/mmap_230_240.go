@@ -9,8 +9,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/tso"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 )
 
 // In Milvus 2.3.x, querynode.MmapDirPath is used to enable mmap and save mmap files.
@@ -84,7 +84,7 @@ func (m *MmapMigration) MigrateIndexCoordCollection(ctx context.Context) {
 
 	alteredIndexes := make([]*model.Index, 0)
 	for _, index := range fieldIndexes {
-		if !indexparamcheck.IsVectorMmapIndex(getIndexType(index.IndexParams)) {
+		if !vecindexmgr.GetVecIndexMgrInstance().IsMMapSupported(getIndexType(index.IndexParams)) {
 			continue
 		}
 		fmt.Printf("migrate index, collection:%v, indexId: %v, indexName: %s\n", index.CollectionID, index.IndexID, index.IndexName)

@@ -56,7 +56,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
     }
 
     void
-    Build(size_t n, const T* values) override;
+    Build(size_t n, const T* values, const bool* valid_data = nullptr) override;
 
     void
     Build(const Config& config = {}) override;
@@ -82,7 +82,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
           T upper_bound_value,
           bool ub_inclusive) override;
 
-    T
+    std::optional<T>
     Reverse_Lookup(size_t offset) const override;
 
     int64_t
@@ -127,8 +127,8 @@ class ScalarIndexSort : public ScalarIndex<T> {
     std::vector<IndexStructure<T>> data_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     size_t total_num_rows_{0};
-    // generate valid_bitset to speed up NotIn and IsNull and IsNotNull operate
-    TargetBitmap valid_bitset;
+    // generate valid_bitset_ to speed up NotIn and IsNull and IsNotNull operate
+    TargetBitmap valid_bitset_;
 };
 
 template <typename T>

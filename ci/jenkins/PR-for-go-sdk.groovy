@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.53.0') _
+@Library('jenkins-shared-library@v0.71.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
@@ -11,6 +11,13 @@ pipeline {
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         preserveStashes(buildCount: 5)
         disableConcurrentBuilds(abortPrevious: true)
+        timeout(time: 2, unit: 'HOURS')
+        throttleJobProperty(
+            categories: ['go-sdk'],
+            throttleEnabled: true,
+            throttleOption: 'category'
+
+        )
     }
     agent {
         kubernetes {
@@ -46,6 +53,7 @@ pipeline {
                                               gitBaseRef: gitBaseRef,
                                               pullRequestNumber: "$env.CHANGE_ID",
                                               suppress_suffix_of_image_tag: true,
+                                              make_cmd: "make clean && make install use_disk_index=ON",
                                               images: '["milvus","gotestsum","helm"]'
 
                         milvus_image_tag = tekton.query_result job_name, 'milvus-image-tag'

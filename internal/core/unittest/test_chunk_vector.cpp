@@ -22,8 +22,7 @@
 using namespace milvus::segcore;
 using namespace milvus;
 namespace pb = milvus::proto;
-
-class ChunkVectorTest : public testing::Test {
+class ChunkVectorTest : public ::testing::TestWithParam<bool> {
  public:
     void
     SetUp() override {
@@ -172,9 +171,126 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
                   num_inserted);
         EXPECT_EQ(float_array_result->scalars().array_data().data_size(),
                   num_inserted);
+        // checking dense/sparse vector
+        auto fp32_vec_res =
+            fp32_vec_result.get()->mutable_vectors()->float_vector().data();
+        auto fp16_vec_res = (float16*)fp16_vec_result.get()
+                                ->mutable_vectors()
+                                ->float16_vector()
+                                .data();
+        auto bf16_vec_res = (bfloat16*)bf16_vec_result.get()
+                                ->mutable_vectors()
+                                ->bfloat16_vector()
+                                .data();
+        auto sparse_vec_res = SparseBytesToRows(
+            sparse_vec_result->vectors().sparse_float_vector().contents());
+        EXPECT_TRUE(fp32_vec_res.size() == num_inserted * dim);
+        auto fp32_vec_gt = dataset.get_col<float>(fp32_vec);
+        auto fp16_vec_gt = dataset.get_col<float16>(fp16_vec);
+        auto bf16_vec_gt = dataset.get_col<bfloat16>(bf16_vec);
+        auto sparse_vec_gt =
+            dataset.get_col<knowhere::sparse::SparseRow<float>>(sparse_vec);
+
+        for (size_t i = 0; i < num_inserted; ++i) {
+            auto id = ids_ds->GetIds()[i];
+            // check dense vector
+            for (size_t j = 0; j < 128; ++j) {
+                EXPECT_TRUE(fp32_vec_res[i * dim + j] ==
+                            fp32_vec_gt[(id % per_batch) * dim + j]);
+                EXPECT_TRUE(fp16_vec_res[i * dim + j] ==
+                            fp16_vec_gt[(id % per_batch) * dim + j]);
+                EXPECT_TRUE(bf16_vec_res[i * dim + j] ==
+                            bf16_vec_gt[(id % per_batch) * dim + j]);
+            }
+            //check sparse vector
+            auto actual_row = sparse_vec_res[i];
+            auto expected_row = sparse_vec_gt[(id % per_batch)];
+            EXPECT_TRUE(actual_row.size() == expected_row.size());
+            for (size_t j = 0; j < actual_row.size(); ++j) {
+                EXPECT_TRUE(actual_row[j].id == expected_row[j].id);
+                EXPECT_TRUE(actual_row[j].val == expected_row[j].val);
+            }
+        }
     }
 }
 
+INSTANTIATE_TEST_SUITE_P(IsSparse, ChunkVectorTest, ::testing::Bool());
+TEST_P(ChunkVectorTest, SearchWithMmap) {
+    auto is_sparse = GetParam();
+    auto data_type =
+        is_sparse ? DataType::VECTOR_SPARSE_FLOAT : DataType::VECTOR_FLOAT;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto random = schema->AddDebugField("random", DataType::DOUBLE);
+    auto vec = schema->AddDebugField("embeddings", data_type, 128, metric_type);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta, 11, config);
+    auto segmentImplPtr = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto vector_anns = plan_node.mutable_vector_anns();
+    if (is_sparse) {
+        vector_anns->set_vector_type(
+            milvus::proto::plan::VectorType::SparseFloatVector);
+    } else {
+        vector_anns->set_vector_type(
+            milvus::proto::plan::VectorType::FloatVector);
+    }
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(102);
+    auto query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(5);
+    query_info->set_round_decimal(3);
+    query_info->set_metric_type(metric_type);
+    query_info->set_search_params(R"({"nprobe": 16})");
+    auto plan_str = plan_node.SerializeAsString();
+
+    int64_t per_batch = 10000;
+    int64_t n_batch = 3;
+    int64_t top_k = 5;
+    for (int64_t i = 0; i < n_batch; i++) {
+        auto dataset = DataGen(schema, per_batch);
+        auto offset = segment->PreInsert(per_batch);
+        auto pks = dataset.get_col<int64_t>(pk);
+        segment->Insert(offset,
+                        per_batch,
+                        dataset.row_ids_.data(),
+                        dataset.timestamps_.data(),
+                        dataset.raw_);
+        const VectorBase* field_data = nullptr;
+        if (is_sparse) {
+            field_data = segmentImplPtr->get_insert_record()
+                             .get_data<milvus::SparseFloatVector>(vec);
+        } else {
+            field_data = segmentImplPtr->get_insert_record()
+                             .get_data<milvus::FloatVector>(vec);
+        }
+        auto inserted = (i + 1) * per_batch;
+
+        auto num_queries = 5;
+        auto ph_group_raw =
+            is_sparse ? CreateSparseFloatPlaceholderGroup(num_queries)
+                      : CreatePlaceholderGroup(num_queries, 128, 1024);
+
+        auto plan = milvus::query::CreateSearchPlanByExpr(
+            *schema, plan_str.data(), plan_str.size());
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        Timestamp timestamp = 1000000;
+        auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+        EXPECT_EQ(sr->total_nq_, num_queries);
+        EXPECT_EQ(sr->unity_topK_, top_k);
+        EXPECT_EQ(sr->distances_.size(), num_queries * top_k);
+        EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
+        for (auto i = 0; i < num_queries; i++) {
+            for (auto k = 0; k < top_k; k++) {
+                EXPECT_NE(sr->seg_offsets_.data()[i * top_k + k], -1);
+                EXPECT_FALSE(std::isnan(sr->distances_.data()[i * top_k + k]));
+            }
+        }
+    }
+}
 TEST_F(ChunkVectorTest, QueryWithMmap) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(

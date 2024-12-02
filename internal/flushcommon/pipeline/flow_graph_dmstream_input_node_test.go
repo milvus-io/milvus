@@ -23,14 +23,11 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type mockMsgStreamFactory struct {
@@ -107,10 +104,16 @@ func (mtm *mockTtMsgStream) EnableProduce(can bool) {
 }
 
 func TestNewDmInputNode(t *testing.T) {
-	client := msgdispatcher.NewClient(&mockMsgStreamFactory{}, typeutil.DataNodeRole, paramtable.GetNodeID())
-	_, err := newDmInputNode(context.Background(), client, new(msgpb.MsgPosition), &nodeConfig{
+	assert.Panics(t, func() {
+		newDmInputNode(&nodeConfig{
+			msFactory:    &mockMsgStreamFactory{},
+			vChannelName: "mock_vchannel_0",
+		}, nil)
+	})
+
+	node := newDmInputNode(&nodeConfig{
 		msFactory:    &mockMsgStreamFactory{},
 		vChannelName: "mock_vchannel_0",
-	}, nil)
-	assert.NoError(t, err)
+	}, make(<-chan *msgstream.MsgPack))
+	assert.NotNil(t, node)
 }

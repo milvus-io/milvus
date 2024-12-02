@@ -9,10 +9,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -59,12 +57,11 @@ func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.
 	// wrap the wal into walExtend with cleanup function and interceptors.
 	wal := adaptImplsToWAL(l, o.interceptorBuilders, func() {
 		o.walInstances.Remove(id)
-		log.Info("wal deleted from allocator")
+		log.Info("wal deleted from opener")
 	})
 
 	o.walInstances.Insert(id, wal)
 	log.Info("new wal created")
-	metrics.StreamingNodeWALTotal.WithLabelValues(paramtable.GetStringNodeID()).Inc()
 	return wal, nil
 }
 

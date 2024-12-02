@@ -43,14 +43,23 @@ func TestYamlFile(t *testing.T) {
 	fileScanner := bufio.NewScanner(f)
 	codeScanner := bufio.NewScanner(&w)
 
-	for fileScanner.Scan() && codeScanner.Scan() {
+	msg := func(file, code string) string {
+		return fmt.Sprintf(`configs/milvus.yaml is not consistent with paramtable, file: [%s], code: [%s]. 
+Do not edit milvus.yaml directly, instead, run "make milvus-tools && ./bin/tools/config gen-yaml && mv milvus.yaml configs/milvus.yaml"`, file, code)
+	}
+	for fileScanner.Scan() {
+		if !codeScanner.Scan() {
+			assert.FailNow(t, msg(fileScanner.Text(), "EMPTY"))
+		}
 		if strings.Contains(codeScanner.Text(), "etcd:") || strings.Contains(codeScanner.Text(), "minio:") || strings.Contains(codeScanner.Text(), "pulsar:") {
 			// Skip check of endpoints given by .env
 			continue
 		}
 		if fileScanner.Text() != codeScanner.Text() {
-			assert.FailNow(t, fmt.Sprintf("configs/milvus.yaml is not consistent with paramtable, file: [%s], code: [%s]. Do not edit milvus.yaml directly.",
-				fileScanner.Text(), codeScanner.Text()))
+			assert.FailNow(t, msg(fileScanner.Text(), codeScanner.Text()))
 		}
+	}
+	if codeScanner.Scan() {
+		assert.FailNow(t, msg("EMPTY", codeScanner.Text()))
 	}
 }

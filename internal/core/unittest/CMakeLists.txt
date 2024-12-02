@@ -41,12 +41,14 @@ set(MILVUS_TEST_FILES
         test_concurrent_vector.cpp
         test_c_stream_reduce.cpp
         test_c_tokenizer.cpp
+        test_loading.cpp
         test_data_codec.cpp
         test_disk_file_manager_test.cpp
         test_exec.cpp
         test_expr.cpp
         test_expr_materialized_view.cpp
         test_float16.cpp
+        test_function.cpp
         test_futures.cpp
         test_group_by.cpp
         test_growing.cpp
@@ -83,6 +85,8 @@ set(MILVUS_TEST_FILES
         test_timestamp_index.cpp
         test_tracer.cpp
         test_utils.cpp
+        test_chunked_segment.cpp
+        test_chunked_column.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

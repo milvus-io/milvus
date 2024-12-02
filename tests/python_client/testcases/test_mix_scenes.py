@@ -74,6 +74,20 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
         # load collection
         self.collection_wrap.load()
 
+    def check_query_res(self, res, expr_field: str) -> list:
+        """ Ensure that primary key field values are unique """
+        real_data = {x[0]: x[1] for x in zip(self.insert_data.get(self.primary_field),
+                                             self.insert_data.get(expr_field))}
+
+        if len(real_data) != len(self.insert_data.get(self.primary_field)):
+            log.warning("[TestNoIndexDQLExpr] The primary key values are not unique, " +
+                        "only check whether the res value is within the inserted data")
+            return [(r.get(self.primary_field), r.get(expr_field)) for r in res if
+                    r.get(expr_field) not in self.insert_data.get(expr_field)]
+
+        return [(r[self.primary_field], r[expr_field], real_data[r[self.primary_field]]) for r in res if
+                r[expr_field] != real_data[r[self.primary_field]]]
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr, output_fields", [
         (Expr.In(Expr.MOD('INT8', 13).subset, [0, 1, 2]).value, ['INT8']),
@@ -116,6 +130,9 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
 
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr, expr_field, rex", cf.gen_varchar_expression(['VARCHAR']))
     @pytest.mark.parametrize("limit", [1, 10, 3000])
@@ -136,6 +153,9 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -158,6 +178,9 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("range_num, counts", [([-100, 200], 10), ([2000, 5000], 10), ([3000, 4000], 5)])
@@ -184,6 +207,8 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `in`
         self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -195,6 +220,8 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `not in`
         self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -263,6 +290,20 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         # load collection
         self.collection_wrap.load()
 
+    def check_query_res(self, res, expr_field: str) -> list:
+        """ Ensure that primary key field values are unique """
+        real_data = {x[0]: x[1] for x in zip(self.insert_data.get(self.primary_field),
+                                             self.insert_data.get(expr_field))}
+
+        if len(real_data) != len(self.insert_data.get(self.primary_field)):
+            log.warning("[TestHybridIndexDQLExpr] The primary key values are not unique, " +
+                        "only check whether the res value is within the inserted data")
+            return [(r.get(self.primary_field), r.get(expr_field)) for r in res if
+                    r.get(expr_field) not in self.insert_data.get(expr_field)]
+
+        return [(r[self.primary_field], r[expr_field], real_data[r[self.primary_field]]) for r in res if
+                r[expr_field] != real_data[r[self.primary_field]]]
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "expr, expr_field", cf.gen_modulo_expression(['int64_pk', 'INT8', 'INT16', 'INT32', 'INT64']))
@@ -286,6 +327,9 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
 
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr, expr_field, rex", cf.gen_varchar_expression(['VARCHAR']))
     @pytest.mark.parametrize("limit", [1, 10, 3000])
@@ -306,6 +350,9 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -328,6 +375,9 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("range_num, counts", [([-100, 200], 10), ([2000, 5000], 10), ([3000, 4000], 5)])
@@ -354,6 +404,8 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `in`
         self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -365,6 +417,8 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `not in`
         self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -396,6 +450,8 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `in`
         self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -407,6 +463,8 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `not in`
         self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -534,6 +592,20 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         # load collection
         self.collection_wrap.load()
 
+    def check_query_res(self, res, expr_field: str) -> list:
+        """ Ensure that primary key field values are unique """
+        real_data = {x[0]: x[1] for x in zip(self.insert_data.get(self.primary_field),
+                                             self.insert_data.get(expr_field))}
+
+        if len(real_data) != len(self.insert_data.get(self.primary_field)):
+            log.warning("[TestInvertedIndexDQLExpr] The primary key values are not unique, " +
+                        "only check whether the res value is within the inserted data")
+            return [(r.get(self.primary_field), r.get(expr_field)) for r in res if
+                    r.get(expr_field) not in self.insert_data.get(expr_field)]
+
+        return [(r[self.primary_field], r[expr_field], real_data[r[self.primary_field]]) for r in res if
+                r[expr_field] != real_data[r[self.primary_field]]]
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "expr, expr_field", cf.gen_modulo_expression(['int64_pk', 'INT8', 'INT16', 'INT32', 'INT64']))
@@ -557,6 +629,9 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
 
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr, expr_field, rex", cf.gen_varchar_expression(['VARCHAR']))
     @pytest.mark.parametrize("limit", [1, 10, 3000])
@@ -577,6 +652,9 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -599,6 +677,9 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("range_num, counts", [([-100, 200], 10), ([2000, 5000], 10), ([3000, 4000], 5)])
@@ -625,6 +706,8 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `in`
         self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -636,6 +719,8 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `not in`
         self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -667,6 +752,8 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `in`
         self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -678,6 +765,8 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `not in`
         self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -770,7 +859,20 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         # load collection
         self.collection_wrap.load()
 
-    # https://github.com/milvus-io/milvus/issues/36221
+    def check_query_res(self, res, expr_field: str) -> list:
+        """ Ensure that primary key field values are unique """
+        real_data = {x[0]: x[1] for x in zip(self.insert_data.get(self.primary_field),
+                                             self.insert_data.get(expr_field))}
+
+        if len(real_data) != len(self.insert_data.get(self.primary_field)):
+            log.warning("[TestBitmapIndexDQLExpr] The primary key values are not unique, " +
+                        "only check whether the res value is within the inserted data")
+            return [(r.get(self.primary_field), r.get(expr_field)) for r in res if
+                    r.get(expr_field) not in self.insert_data.get(expr_field)]
+
+        return [(r[self.primary_field], r[expr_field], real_data[r[self.primary_field]]) for r in res if
+                r[expr_field] != real_data[r[self.primary_field]]]
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_bitmap_index_query_with_invalid_array_params(self):
         """
@@ -786,11 +888,11 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         # query
         self.collection_wrap.query(
             expr=Expr.array_contains_any('ARRAY_VARCHAR', [['a', 'b']]).value, limit=1, check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 65535, ct.err_msg: "fail to Query on QueryNode"})
+            check_items={ct.err_code: 1100, ct.err_msg: qem.ParseExpressionFailed})
 
         self.collection_wrap.query(
             expr=Expr.array_contains_all('ARRAY_VARCHAR', [['a', 'b']]).value, limit=1, check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 65535, ct.err_msg: "fail to Query on QueryNode"})
+            check_items={ct.err_code: 1100, ct.err_msg: qem.ParseExpressionFailed})
 
         self.collection_wrap.query(
             expr=Expr.array_contains('ARRAY_VARCHAR', [['a', 'b']]).value, limit=1, check_task=CheckTasks.err_res,
@@ -818,6 +920,9 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
 
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr, expr_field, rex", cf.gen_varchar_expression(['VARCHAR']))
     @pytest.mark.parametrize("limit", [1, 10, 3000])
@@ -838,6 +943,9 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -860,6 +968,9 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("range_num, counts", [([-100, 200], 10), ([2000, 5000], 10), ([3000, 4000], 5)])
@@ -886,6 +997,8 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `in`
         self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -897,6 +1010,8 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `not in`
         self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -928,6 +1043,8 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `in`
         self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -939,6 +1056,8 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `not in`
         self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -1146,6 +1265,20 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         # load collection
         self.collection_wrap.load()
 
+    def check_query_res(self, res, expr_field: str) -> list:
+        """ Ensure that primary key field values are unique """
+        real_data = {x[0]: x[1] for x in zip(self.insert_data.get(self.primary_field),
+                                             self.insert_data.get(expr_field))}
+
+        if len(real_data) != len(self.insert_data.get(self.primary_field)):
+            log.warning("[TestBitmapIndexOffsetCache] The primary key values are not unique, " +
+                        "only check whether the res value is within the inserted data")
+            return [(r.get(self.primary_field), r.get(expr_field)) for r in res if
+                    r.get(expr_field) not in self.insert_data.get(expr_field)]
+
+        return [(r[self.primary_field], r[expr_field], real_data[r[self.primary_field]]) for r in res if
+                r[expr_field] != real_data[r[self.primary_field]]]
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr, expr_field", cf.gen_modulo_expression(['INT8', 'INT16', 'INT32', 'INT64']))
     @pytest.mark.parametrize("limit", [1, 10])
@@ -1168,6 +1301,9 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=['*'])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
 
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr, expr_field, rex", cf.gen_varchar_expression(['VARCHAR']))
     @pytest.mark.parametrize("limit", [1, 10])
@@ -1188,6 +1324,9 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=['*'])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -1210,6 +1349,9 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=['*'])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("range_num, counts", [([-100, 200], 10), ([2000, 5000], 10), ([3000, 4000], 5)])
@@ -1236,6 +1378,8 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `in`
         self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -1247,6 +1391,8 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `not in`
         self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -1278,6 +1424,8 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `in`
         self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -1289,6 +1437,8 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `not in`
         self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -1440,6 +1590,20 @@ class TestBitmapIndexMmap(TestCaseClassBase):
         # load collection
         self.collection_wrap.load()
 
+    def check_query_res(self, res, expr_field: str) -> list:
+        """ Ensure that primary key field values are unique """
+        real_data = {x[0]: x[1] for x in zip(self.insert_data.get(self.primary_field),
+                                             self.insert_data.get(expr_field))}
+
+        if len(real_data) != len(self.insert_data.get(self.primary_field)):
+            log.warning("[TestBitmapIndexMmap] The primary key values are not unique, " +
+                        "only check whether the res value is within the inserted data")
+            return [(r.get(self.primary_field), r.get(expr_field)) for r in res if
+                    r.get(expr_field) not in self.insert_data.get(expr_field)]
+
+        return [(r[self.primary_field], r[expr_field], real_data[r[self.primary_field]]) for r in res if
+                r[expr_field] != real_data[r[self.primary_field]]]
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr, expr_field", cf.gen_modulo_expression(['INT8', 'INT16', 'INT32', 'INT64']))
     @pytest.mark.parametrize("limit", [1, 10])
@@ -1462,6 +1626,9 @@ class TestBitmapIndexMmap(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
 
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr, expr_field, rex", cf.gen_varchar_expression(['VARCHAR']))
     @pytest.mark.parametrize("limit", [1, 10])
@@ -1482,6 +1649,9 @@ class TestBitmapIndexMmap(TestCaseClassBase):
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -1504,6 +1674,9 @@ class TestBitmapIndexMmap(TestCaseClassBase):
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("range_num, counts", [([-100, 200], 10), ([2000, 5000], 10), ([3000, 4000], 5)])
@@ -1530,6 +1703,8 @@ class TestBitmapIndexMmap(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `in`
         self.collection_wrap.query(expr=Expr.In(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -1541,6 +1716,8 @@ class TestBitmapIndexMmap(TestCaseClassBase):
         res, _ = self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, limit=limit,
                                             output_fields=[expr_field])
         assert len(res) == min(not_in_count, limit), f"actual: {len(res)} == expect: {min(not_in_count, limit)}"
+        # check query response data
+        assert self.check_query_res(res=res, expr_field=expr_field) == []
 
         # count `not in`
         self.collection_wrap.query(expr=Expr.Nin(expr_field, range_numbers).value, output_fields=['count(*)'],
@@ -1862,7 +2039,7 @@ class TestMixScenes(TestcaseBase):
         self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": []})
 
-        # upsert int64_pk = 10
+        # upsert int64_pk = 33333
         upsert_data = cf.gen_field_values(self.collection_wrap.schema, nb=1,
                                           default_values={primary_field: [33333]}, start_id=33333)
         self.collection_wrap.upsert(data=list(upsert_data.values()))
@@ -1871,20 +2048,24 @@ class TestMixScenes(TestcaseBase):
         self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": expected_upsert_res, "primary_field": primary_field})
 
-        # delete int64_pk = 10
+        # delete int64_pk = 33333
         self.collection_wrap.delete(expr=expr)
         # re-query
         self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": []})
 
         # search
-        nq, limit = 10, 10
+        expr_left, expr_right = Expr.GT(Expr.SUB('INT64', 37).subset, 13).value, Expr.LIKE('VARCHAR', '%a').value
+        expr, rex, nq, limit = Expr.AND(expr_left, expr_right).value, r'.*a$', 10, 10
+        # counts data match expr
+        counts = sum([eval(expr_left.replace('INT64', str(i))) and re.search(rex, j) is not None for i, j in
+                      zip(insert_data.get('INT64', []), insert_data.get('VARCHAR', []))])
+        check_task = None if counts == 0 else CheckTasks.check_search_results
         self.collection_wrap.search(
             data=cf.gen_field_values(self.collection_wrap.schema, nb=nq).get(DataType.FLOAT_VECTOR.name),
             anns_field=DataType.FLOAT_VECTOR.name, param={"metric_type": MetricType.L2, "ef": 32}, limit=limit,
-            expr=Expr.AND(Expr.GT(Expr.SUB('INT64', 37).subset, 13), Expr.LIKE('VARCHAR', '%a')).value,
-            output_fields=scalar_fields, check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": insert_data.get(DataType.INT64.name), "limit": limit,
+            expr=expr, output_fields=scalar_fields, check_task=check_task,
+            check_items={"nq": nq, "ids": insert_data.get(primary_field), "limit": min(limit, counts),
                          "output_fields": scalar_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1934,7 +2115,7 @@ class TestMixScenes(TestcaseBase):
         # load collection
         self.collection_wrap.load()
 
-        # query before upsert
+        # query
         expr = f'{scalar_field} == {expr_data}' if scalar_field == 'INT64' else f'{scalar_field} == "{expr_data}"'
         res, _ = self.collection_wrap.query(expr=expr, output_fields=[scalar_field], limit=100)
         assert set([r.get(scalar_field) for r in res]) == {expr_data}
@@ -2007,7 +2188,7 @@ class TestGroupSearch(TestCaseClassBase):
         index_params = {
             **DefaultVectorIndexParams.IVF_SQ8(DataType.FLOAT16_VECTOR.name, metric_type=MetricType.L2),
             **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name, metric_type=MetricType.IP),
-            **DefaultVectorIndexParams.IVF_FLAT(DataType.BFLOAT16_VECTOR.name, metric_type=MetricType.COSINE),
+            **DefaultVectorIndexParams.DISKANN(DataType.BFLOAT16_VECTOR.name, metric_type=MetricType.COSINE),
             **DefaultVectorIndexParams.SPARSE_WAND(DataType.SPARSE_FLOAT_VECTOR.name, metric_type=MetricType.IP),
             # index params for varchar field
             **DefaultScalarIndexParams.INVERTED(self.inverted_string_field)
@@ -2025,8 +2206,8 @@ class TestGroupSearch(TestCaseClassBase):
         """
         target:
             1. search on 4 different float vector fields with group by varchar field with group size
-        verify results entity = limit * group_size  and group size is full if group_strict_size is True
-        verify results group counts = limit if group_strict_size is False
+        verify results entity = limit * group_size  and group size is full if strict_group_size is True
+        verify results group counts = limit if strict_group_size is False
         """
         nq = 2
         limit = 50
@@ -2034,11 +2215,11 @@ class TestGroupSearch(TestCaseClassBase):
         for j in range(len(self.vector_fields)):
             search_vectors = cf.gen_vectors(nq, dim=self.dims[j], vector_data_type=self.vector_fields[j])
             search_params = {"params": cf.get_search_params_params(self.index_types[j])}
-            # when group_strict_size=true, it shall return results with entities = limit * group_size
+            # when strict_group_size=true, it shall return results with entities = limit * group_size
             res1 = self.collection_wrap.search(data=search_vectors, anns_field=self.vector_fields[j],
                                                param=search_params, limit=limit,
                                                group_by_field=group_by_field,
-                                               group_size=group_size, group_strict_size=True,
+                                               group_size=group_size, strict_group_size=True,
                                                output_fields=[group_by_field])[0]
             for i in range(nq):
                 assert len(res1[i]) == limit * group_size
@@ -2048,11 +2229,11 @@ class TestGroupSearch(TestCaseClassBase):
                         group_values.append(res1[i][l*group_size+k].fields.get(group_by_field))
                     assert len(set(group_values)) == 1
 
-            # when group_strict_size=false, it shall return results with group counts = limit
+            # when strict_group_size=false, it shall return results with group counts = limit
             res1 = self.collection_wrap.search(data=search_vectors, anns_field=self.vector_fields[j],
                                                param=search_params, limit=limit,
                                                group_by_field=group_by_field,
-                                               group_size=group_size, group_strict_size=False,
+                                               group_size=group_size, strict_group_size=False,
                                                output_fields=[group_by_field])[0]
             for i in range(nq):
                 group_values = []
@@ -2061,7 +2242,6 @@ class TestGroupSearch(TestCaseClassBase):
                 assert len(set(group_values)) == limit
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail()
     def test_hybrid_search_group_size(self):
         """
         hybrid search group by on 4 different float vector fields with group by varchar field with group size
@@ -2215,12 +2395,12 @@ class TestGroupSearch(TestCaseClassBase):
         all_pages_grpby_field_values = []
         for r in range(page_rounds):
             page_res = self.collection_wrap.search(search_vectors, anns_field=default_search_field,
-                                           param=search_param, limit=limit, offset=limit * r,
-                                           expr=default_search_exp, group_by_field=grpby_field,
-                                           output_fields=[grpby_field],
-                                           check_task=CheckTasks.check_search_results,
-                                           check_items={"nq": 1, "limit": limit},
-                                           )[0]
+                                                   param=search_param, limit=limit, offset=limit * r,
+                                                   expr=default_search_exp, group_by_field=grpby_field,
+                                                   output_fields=[grpby_field],
+                                                   check_task=CheckTasks.check_search_results,
+                                                   check_items={"nq": 1, "limit": limit},
+                                                   )[0]
             for j in range(limit):
                 all_pages_grpby_field_values.append(page_res[0][j].get(grpby_field))
             all_pages_ids += page_res[0].ids
@@ -2228,12 +2408,12 @@ class TestGroupSearch(TestCaseClassBase):
         assert hit_rate >= 0.8
 
         total_res = self.collection_wrap.search(search_vectors, anns_field=default_search_field,
-                                        param=search_param, limit=limit * page_rounds,
-                                        expr=default_search_exp, group_by_field=grpby_field,
-                                        output_fields=[grpby_field],
-                                        check_task=CheckTasks.check_search_results,
-                                        check_items={"nq": 1, "limit": limit * page_rounds}
-                                        )[0]
+                                                param=search_param, limit=limit * page_rounds,
+                                                expr=default_search_exp, group_by_field=grpby_field,
+                                                output_fields=[grpby_field],
+                                                check_task=CheckTasks.check_search_results,
+                                                check_items={"nq": 1, "limit": limit * page_rounds}
+                                                )[0]
         hit_num = len(set(total_res[0].ids).intersection(set(all_pages_ids)))
         hit_rate = round(hit_num / (limit * page_rounds), 3)
         assert hit_rate >= 0.8
@@ -2261,7 +2441,7 @@ class TestGroupSearch(TestCaseClassBase):
                                                    param=search_param, limit=limit, offset=limit * r,
                                                    expr=default_search_exp,
                                                    group_by_field=grpby_field, group_size=group_size,
-                                                   group_strict_size=True,
+                                                   strict_group_size=True,
                                                    output_fields=[grpby_field],
                                                    check_task=CheckTasks.check_search_results,
                                                    check_items={"nq": 1, "limit": res_count},
@@ -2282,7 +2462,7 @@ class TestGroupSearch(TestCaseClassBase):
                                                 param=search_param, limit=limit * page_rounds,
                                                 expr=default_search_exp,
                                                 group_by_field=grpby_field, group_size=group_size,
-                                                group_strict_size=True,
+                                                strict_group_size=True,
                                                 output_fields=[grpby_field],
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": 1, "limit": total_count}
@@ -2296,3 +2476,46 @@ class TestGroupSearch(TestCaseClassBase):
             grpby_field_values.append(total_res[0][i].fields.get(grpby_field))
         assert len(grpby_field_values) == total_count
         assert len(set(grpby_field_values)) == limit * page_rounds
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_group_size_min_max(self):
+        """
+        verify search group by works with min and max group size
+        """
+        group_by_field = self.inverted_string_field
+        default_search_field = self.vector_fields[1]
+        search_vectors = cf.gen_vectors(1, dim=self.dims[1], vector_data_type=self.vector_fields[1])
+        search_params = {}
+        limit = 10
+        max_group_size = 10
+        self.collection_wrap.search(data=search_vectors, anns_field=default_search_field,
+                                    param=search_params, limit=limit,
+                                    group_by_field=group_by_field,
+                                    group_size=max_group_size, strict_group_size=True,
+                                    output_fields=[group_by_field])
+        exceed_max_group_size = max_group_size + 1
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"input group size:{exceed_max_group_size} exceeds configured max "
+                             f"group size:{max_group_size}"}
+        self.collection_wrap.search(data=search_vectors, anns_field=default_search_field,
+                                    param=search_params, limit=limit,
+                                    group_by_field=group_by_field,
+                                    group_size=exceed_max_group_size, strict_group_size=True,
+                                    output_fields=[group_by_field],
+                                    check_task=CheckTasks.err_res, check_items=error)
+
+        min_group_size = 1
+        self.collection_wrap.search(data=search_vectors, anns_field=default_search_field,
+                                    param=search_params, limit=limit,
+                                    group_by_field=group_by_field,
+                                    group_size=max_group_size, strict_group_size=True,
+                                    output_fields=[group_by_field])
+        below_min_group_size = min_group_size - 1
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"input group size:{below_min_group_size} is negative"}
+        self.collection_wrap.search(data=search_vectors, anns_field=default_search_field,
+                                    param=search_params, limit=limit,
+                                    group_by_field=group_by_field,
+                                    group_size=below_min_group_size, strict_group_size=True,
+                                    output_fields=[group_by_field],
+                                    check_task=CheckTasks.err_res, check_items=error)

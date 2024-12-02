@@ -106,8 +106,7 @@ class TestMilvusClientDeleteInvalid(TestcaseBase):
                         check_items={"err_code": 1,
                                      "err_msg": "expr cannot be empty"})
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1870")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_delete_with_not_all_required_params(self):
         """
         target: test delete (high level api)
@@ -121,8 +120,8 @@ class TestMilvusClientDeleteInvalid(TestcaseBase):
         # 2. delete
         client_w.delete(client, collection_name,
                         check_task=CheckTasks.err_res,
-                        check_items={"err_code": 1,
-                                     "err_msg": "expr cannot be empty"})
+                        check_items={"err_code": 999,
+                                     "err_msg": "filter or ids cannot be empty"})
 
 
 class TestMilvusClientDeleteValid(TestcaseBase):

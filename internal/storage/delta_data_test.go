@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 type DeleteLogSuite struct {
@@ -149,4 +151,136 @@ func (s *DeleteLogSuite) TestUnmarshalJSON() {
 
 func TestDeleteLog(t *testing.T) {
 	suite.Run(t, new(DeleteLogSuite))
+}
+
+type DeltaDataSuite struct {
+	suite.Suite
+}
+
+func (s *DeltaDataSuite) TestCreateWithPkType() {
+	s.Run("int_pks", func() {
+		dd, err := NewDeltaDataWithPkType(10, schemapb.DataType_Int64)
+		s.Require().NoError(err)
+
+		s.Equal(schemapb.DataType_Int64, dd.PkType())
+		intPks, ok := dd.DeletePks().(*Int64PrimaryKeys)
+		s.Require().True(ok)
+		s.EqualValues(10, cap(intPks.values))
+	})
+
+	s.Run("varchar_pks", func() {
+		dd, err := NewDeltaDataWithPkType(10, schemapb.DataType_VarChar)
+		s.Require().NoError(err)
+
+		s.Equal(schemapb.DataType_VarChar, dd.PkType())
+		intPks, ok := dd.DeletePks().(*VarcharPrimaryKeys)
+		s.Require().True(ok)
+		s.EqualValues(10, cap(intPks.values))
+	})
+
+	s.Run("unsupport_pk_type", func() {
+		_, err := NewDeltaDataWithPkType(10, schemapb.DataType_Bool)
+		s.Error(err)
+	})
+}
+
+func (s *DeltaDataSuite) TestAppend() {
+	s.Run("normal_same_type", func() {
+		s.Run("int64_pk", func() {
+			dd, err := NewDeltaDataWithPkType(10, schemapb.DataType_Int64)
+			s.Require().NoError(err)
+
+			err = dd.Append(NewInt64PrimaryKey(100), 100)
+			s.NoError(err)
+
+			err = dd.Append(NewInt64PrimaryKey(200), 200)
+			s.NoError(err)
+
+			s.EqualValues(2, dd.DeleteRowCount())
+			s.Equal([]Timestamp{100, 200}, dd.DeleteTimestamps())
+			intPks, ok := dd.DeletePks().(*Int64PrimaryKeys)
+			s.Require().True(ok)
+			s.Equal([]int64{100, 200}, intPks.values)
+			s.EqualValues(32, dd.MemSize())
+		})
+
+		s.Run("varchar_pk", func() {
+			dd, err := NewDeltaDataWithPkType(10, schemapb.DataType_VarChar)
+			s.Require().NoError(err)
+
+			err = dd.Append(NewVarCharPrimaryKey("100"), 100)
+			s.NoError(err)
+
+			err = dd.Append(NewVarCharPrimaryKey("200"), 200)
+			s.NoError(err)
+
+			s.EqualValues(2, dd.DeleteRowCount())
+			s.Equal([]Timestamp{100, 200}, dd.DeleteTimestamps())
+			varcharPks, ok := dd.DeletePks().(*VarcharPrimaryKeys)
+			s.Require().True(ok)
+			s.Equal([]string{"100", "200"}, varcharPks.values)
+			s.EqualValues(54, dd.MemSize())
+		})
+	})
+
+	s.Run("deduct_pk_type", func() {
+		s.Run("int64_pk", func() {
+			dd := NewDeltaData(10)
+
+			err := dd.Append(NewInt64PrimaryKey(100), 100)
+			s.NoError(err)
+			s.Equal(schemapb.DataType_Int64, dd.PkType())
+
+			err = dd.Append(NewInt64PrimaryKey(200), 200)
+			s.NoError(err)
+			s.Equal(schemapb.DataType_Int64, dd.PkType())
+
+			s.EqualValues(2, dd.DeleteRowCount())
+			s.Equal([]Timestamp{100, 200}, dd.DeleteTimestamps())
+			intPks, ok := dd.DeletePks().(*Int64PrimaryKeys)
+			s.Require().True(ok)
+			s.Equal([]int64{100, 200}, intPks.values)
+		})
+
+		s.Run("varchar_pk", func() {
+			dd := NewDeltaData(10)
+
+			err := dd.Append(NewVarCharPrimaryKey("100"), 100)
+			s.NoError(err)
+			s.Equal(schemapb.DataType_VarChar, dd.PkType())
+
+			err = dd.Append(NewVarCharPrimaryKey("200"), 200)
+			s.NoError(err)
+			s.Equal(schemapb.DataType_VarChar, dd.PkType())
+
+			s.EqualValues(2, dd.DeleteRowCount())
+			s.Equal([]Timestamp{100, 200}, dd.DeleteTimestamps())
+			varcharPks, ok := dd.DeletePks().(*VarcharPrimaryKeys)
+			s.Require().True(ok)
+			s.Equal([]string{"100", "200"}, varcharPks.values)
+		})
+	})
+
+	// expect errors
+	s.Run("mixed_pk_type", func() {
+		s.Run("intpks_append_varchar", func() {
+			dd, err := NewDeltaDataWithPkType(10, schemapb.DataType_Int64)
+			s.Require().NoError(err)
+
+			err = dd.Append(NewVarCharPrimaryKey("100"), 100)
+			s.Error(err)
+		})
+
+		s.Run("varcharpks_append_int", func() {
+			dd, err := NewDeltaDataWithPkType(10, schemapb.DataType_VarChar)
+			s.Require().NoError(err)
+
+			err = dd.Append(NewInt64PrimaryKey(100), 100)
+			s.Error(err)
+		})
+	})
+}
+
+func TestDeltaData(t *testing.T) {
+	suite.Run(t, new(DeltaDataSuite))
 }

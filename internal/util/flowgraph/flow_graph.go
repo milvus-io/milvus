@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
@@ -123,11 +124,21 @@ func (fg *TimeTickedFlowGraph) Close() {
 	})
 }
 
+// Status returns the status of the pipeline, it will return "Healthy" if the input node
+// has received any msg in the last nodeTtInterval
+func (fg *TimeTickedFlowGraph) Status() string {
+	diff := time.Since(fg.nodeCtxManager.lastAccessTime.Load())
+	if diff > nodeCtxTtInterval {
+		return fmt.Sprintf("input node hasn't received any msg in the last %s", diff.String())
+	}
+	return "Healthy"
+}
+
 // NewTimeTickedFlowGraph create timetick flowgraph
 func NewTimeTickedFlowGraph(ctx context.Context) *TimeTickedFlowGraph {
 	flowGraph := TimeTickedFlowGraph{
 		nodeCtx:         make(map[string]*nodeCtx),
-		nodeCtxManager:  &nodeCtxManager{},
+		nodeCtxManager:  &nodeCtxManager{lastAccessTime: atomic.NewTime(time.Now())},
 		closeWg:         &sync.WaitGroup{},
 		closeGracefully: atomic.NewBool(CloseImmediately),
 	}

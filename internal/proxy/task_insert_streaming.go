@@ -97,6 +97,7 @@ func repackInsertDataForStreamingService(
 			return nil, err
 		}
 		for _, msg := range msgs {
+			insertRequest := msg.(*msgstream.InsertMsg).InsertRequest
 			newMsg, err := message.NewInsertMessageBuilderV1().
 				WithVChannel(channel).
 				WithHeader(&message.InsertMessageHeader{
@@ -104,12 +105,12 @@ func repackInsertDataForStreamingService(
 					Partitions: []*message.PartitionSegmentAssignment{
 						{
 							PartitionId: partitionID,
-							Rows:        uint64(len(rowOffsets)),
+							Rows:        insertRequest.GetNumRows(),
 							BinarySize:  0, // TODO: current not used, message estimate size is used.
 						},
 					},
 				}).
-				WithBody(msg.(*msgstream.InsertMsg).InsertRequest).
+				WithBody(insertRequest).
 				BuildMutable()
 			if err != nil {
 				return nil, err
@@ -175,6 +176,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 				return nil, err
 			}
 			for _, msg := range msgs {
+				insertRequest := msg.(*msgstream.InsertMsg).InsertRequest
 				newMsg, err := message.NewInsertMessageBuilderV1().
 					WithVChannel(channel).
 					WithHeader(&message.InsertMessageHeader{
@@ -182,12 +184,12 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 						Partitions: []*message.PartitionSegmentAssignment{
 							{
 								PartitionId: partitionIDs[partitionName],
-								Rows:        uint64(len(rowOffsets)),
+								Rows:        insertRequest.GetNumRows(),
 								BinarySize:  0, // TODO: current not used, message estimate size is used.
 							},
 						},
 					}).
-					WithBody(msg.(*msgstream.InsertMsg).InsertRequest).
+					WithBody(insertRequest).
 					BuildMutable()
 				if err != nil {
 					return nil, err

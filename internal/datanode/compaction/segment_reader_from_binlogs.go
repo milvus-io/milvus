@@ -21,9 +21,11 @@ type SegmentDeserializeReader struct {
 	PKFieldID     int64
 	binlogPaths   [][]string
 	binlogPathPos int
+
+	bm25FieldIDs []int64
 }
 
-func NewSegmentDeserializeReader(ctx context.Context, binlogPaths [][]string, binlogIO binlogIO.BinlogIO, PKFieldID int64) *SegmentDeserializeReader {
+func NewSegmentDeserializeReader(ctx context.Context, binlogPaths [][]string, binlogIO binlogIO.BinlogIO, PKFieldID int64, bm25FieldIDs []int64) *SegmentDeserializeReader {
 	return &SegmentDeserializeReader{
 		ctx:           ctx,
 		binlogIO:      binlogIO,
@@ -32,6 +34,7 @@ func NewSegmentDeserializeReader(ctx context.Context, binlogPaths [][]string, bi
 		PKFieldID:     PKFieldID,
 		binlogPaths:   binlogPaths,
 		binlogPathPos: 0,
+		bm25FieldIDs:  bm25FieldIDs,
 	}
 }
 

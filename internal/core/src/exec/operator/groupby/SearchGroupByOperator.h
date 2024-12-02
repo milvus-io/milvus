@@ -62,8 +62,7 @@ class SealedDataGetter : public DataGetter<T> {
     const index::ScalarIndex<T>* field_index_;
 
  public:
-    SealedDataGetter(const segcore::SegmentSealedImpl& segment,
-                     FieldId& field_id) {
+    SealedDataGetter(const segcore::SegmentSealed& segment, FieldId& field_id) {
         if (segment.HasFieldData(field_id)) {
             if constexpr (std::is_same_v<T, std::string>) {
                 str_field_data_ =
@@ -101,7 +100,9 @@ class SealedDataGetter : public DataGetter<T> {
             }
             return field_data_->operator[](idx);
         } else {
-            return (*field_index_).Reverse_Lookup(idx);
+            auto raw = (*field_index_).Reverse_Lookup(idx);
+            AssertInfo(raw.has_value(), "field data not found");
+            return raw.value();
         }
     }
 };
@@ -114,8 +115,8 @@ GetDataGetter(const segcore::SegmentInternalInterface& segment,
             dynamic_cast<const segcore::SegmentGrowingImpl*>(&segment)) {
         return std::make_shared<GrowingDataGetter<T>>(*growing_segment,
                                                       fieldId);
-    } else if (const segcore::SegmentSealedImpl* sealed_segment =
-                   dynamic_cast<const segcore::SegmentSealedImpl*>(&segment)) {
+    } else if (const segcore::SegmentSealed* sealed_segment =
+                   dynamic_cast<const segcore::SegmentSealed*>(&segment)) {
         return std::make_shared<SealedDataGetter<T>>(*sealed_segment, fieldId);
     } else {
         PanicInfo(UnexpectedError,
@@ -139,7 +140,7 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                     index.VectorIterators(dataset, search_conf, bitset);
             if (iterators_val.has_value()) {
                 search_result.AssembleChunkVectorIterators(
-                    nq, 1, -1, iterators_val.value());
+                    nq, 1, {0}, iterators_val.value());
             } else {
                 LOG_ERROR(
                     "Returned knowhere iterator has non-ready iterators "
@@ -182,7 +183,7 @@ GroupIteratorsByType(
     const std::vector<std::shared_ptr<VectorIterator>>& iterators,
     int64_t topK,
     int64_t group_size,
-    bool group_strict_size,
+    bool strict_group_size,
     const DataGetter<T>& data_getter,
     std::vector<GroupByValueType>& group_by_values,
     std::vector<int64_t>& seg_offsets,
@@ -242,7 +243,7 @@ void
 GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
                     int64_t topK,
                     int64_t group_size,
-                    bool group_strict_size,
+                    bool strict_group_size,
                     const DataGetter<T>& data_getter,
                     std::vector<GroupByValueType>& group_by_values,
                     std::vector<int64_t>& offsets,

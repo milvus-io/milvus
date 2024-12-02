@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -34,12 +33,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -48,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -151,6 +151,32 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 		c := entity[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
 			return merr.WrapErrParameterInvalidMsg("%s collection %s can only contain numbers, letters and underscores", invalidMsg, entityType)
+		}
+	}
+	return nil
+}
+
+func ValidatePrivilegeGroupName(groupName string) error {
+	if groupName == "" {
+		return merr.WrapErrPrivilegeGroupNameInvalid("privilege group name should not be empty")
+	}
+
+	if len(groupName) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
+		return merr.WrapErrPrivilegeGroupNameInvalid(
+			"the length of a privilege group name %s must be less than %s characters", groupName, Params.ProxyCfg.MaxNameLength.GetValue())
+	}
+
+	firstChar := groupName[0]
+	if firstChar != '_' && !isAlpha(firstChar) {
+		return merr.WrapErrPrivilegeGroupNameInvalid(
+			"the first character of a privilege group name %s must be an underscore or letter", groupName)
+	}
+
+	for i := 1; i < len(groupName); i++ {
+		c := groupName[i]
+		if c != '_' && !isAlpha(c) && !isNumber(c) {
+			return merr.WrapErrParameterInvalidMsg(
+				"privilege group name %s can only contain numbers, letters and underscores", groupName)
 		}
 	}
 	return nil
@@ -620,10 +646,14 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 	})
 	usedOutputField := typeutil.NewSet[string]()
 	usedFunctionName := typeutil.NewSet[string]()
-	// validate function
+
 	for _, function := range coll.GetFunctions() {
+		if err := checkFunctionBasicParams(function); err != nil {
+			return err
+		}
+
 		if usedFunctionName.Contain(function.GetName()) {
-			return fmt.Errorf("duplicate function name %s", function.GetName())
+			return fmt.Errorf("duplicate function name: %s", function.GetName())
 		}
 
 		usedFunctionName.Insert(function.GetName())
@@ -631,13 +661,15 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 		for _, name := range function.GetInputFieldNames() {
 			inputField, ok := nameMap[name]
 			if !ok {
-				return fmt.Errorf("function input field not found %s", function.InputFieldNames)
+				return fmt.Errorf("function input field not found: %s", name)
+			}
+			if inputField.GetNullable() {
+				return fmt.Errorf("function input field cannot be nullable: function %s, field %s", function.GetName(), inputField.GetName())
 			}
 			inputFields = append(inputFields, inputField)
 		}
 
-		err := checkFunctionInputField(function, inputFields)
-		if err != nil {
+		if err := checkFunctionInputField(function, inputFields); err != nil {
 			return err
 		}
 
@@ -645,21 +677,30 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 		for i, name := range function.GetOutputFieldNames() {
 			outputField, ok := nameMap[name]
 			if !ok {
-				return fmt.Errorf("function output field not found %s", function.InputFieldNames)
+				return fmt.Errorf("function output field not found: %s", name)
 			}
+
+			if outputField.GetIsPrimaryKey() {
+				return fmt.Errorf("function output field cannot be primary key: function %s, field %s", function.GetName(), outputField.GetName())
+			}
+
+			if outputField.GetIsPartitionKey() || outputField.GetIsClusteringKey() {
+				return fmt.Errorf("function output field cannot be partition key or clustering key: function %s, field %s", function.GetName(), outputField.GetName())
+			}
+
+			if outputField.GetNullable() {
+				return fmt.Errorf("function output field cannot be nullable: function %s, field %s", function.GetName(), outputField.GetName())
+			}
+
 			outputField.IsFunctionOutput = true
 			outputFields[i] = outputField
 			if usedOutputField.Contain(name) {
-				return fmt.Errorf("duplicate function output %s", name)
+				return fmt.Errorf("duplicate function output field: function %s, field %s", function.GetName(), name)
 			}
 			usedOutputField.Insert(name)
 		}
 
 		if err := checkFunctionOutputField(function, outputFields); err != nil {
-			return err
-		}
-
-		if err := checkFunctionParams(function); err != nil {
 			return err
 		}
 	}
@@ -670,19 +711,11 @@ func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schem
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
 		if len(fields) != 1 {
-			return fmt.Errorf("bm25 only need 1 output field, but now %d", len(fields))
+			return fmt.Errorf("BM25 function only need 1 output field, but got %d", len(fields))
 		}
 
 		if !typeutil.IsSparseFloatVectorType(fields[0].GetDataType()) {
-			return fmt.Errorf("bm25 only need sparse embedding output field, but now %s", fields[0].DataType.String())
-		}
-
-		if fields[0].GetIsPrimaryKey() {
-			return fmt.Errorf("bm25 output field can't be primary key")
-		}
-
-		if fields[0].GetIsPartitionKey() || fields[0].GetIsClusteringKey() {
-			return fmt.Errorf("bm25 output field can't be partition key or cluster key field")
+			return fmt.Errorf("BM25 function output field must be a SparseFloatVector field, but got %s", fields[0].DataType.String())
 		}
 	default:
 		return fmt.Errorf("check output field for unknown function type")
@@ -690,12 +723,25 @@ func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schem
 	return nil
 }
 
+func wasBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	for _, fun := range coll.GetFunctions() {
+		if fun.GetType() == schemapb.FunctionType_BM25 && field.GetName() == fun.GetInputFieldNames()[0] {
+			return true
+		}
+	}
+	return false
+}
+
 func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
 		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_VarChar {
-			return fmt.Errorf("only one VARCHAR input field is allowed for a BM25 Function, got %d field with type %s",
+			return fmt.Errorf("BM25 function input field must be a VARCHAR field, got %d field with type %s",
 				len(fields), fields[0].DataType.String())
+		}
+		h := typeutil.CreateFieldSchemaHelper(fields[0])
+		if !h.EnableAnalyzer() {
+			return fmt.Errorf("BM25 function input field must set enable_analyzer to true")
 		}
 
 	default:
@@ -704,46 +750,40 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 	return nil
 }
 
-func checkFunctionParams(function *schemapb.FunctionSchema) error {
+func checkFunctionBasicParams(function *schemapb.FunctionSchema) error {
+	if function.GetName() == "" {
+		return fmt.Errorf("function name cannot be empty")
+	}
+	if len(function.GetInputFieldNames()) == 0 {
+		return fmt.Errorf("function input field names cannot be empty, function: %s", function.GetName())
+	}
+	if len(function.GetOutputFieldNames()) == 0 {
+		return fmt.Errorf("function output field names cannot be empty, function: %s", function.GetName())
+	}
+	for _, input := range function.GetInputFieldNames() {
+		if input == "" {
+			return fmt.Errorf("function input field name cannot be empty string, function: %s", function.GetName())
+		}
+		// if input occurs more than once, error
+		if lo.Count(function.GetInputFieldNames(), input) > 1 {
+			return fmt.Errorf("each function input field should be used exactly once in the same function, function: %s, input field: %s", function.GetName(), input)
+		}
+	}
+	for _, output := range function.GetOutputFieldNames() {
+		if output == "" {
+			return fmt.Errorf("function output field name cannot be empty string, function: %s", function.GetName())
+		}
+		if lo.Count(function.GetInputFieldNames(), output) > 0 {
+			return fmt.Errorf("a single field cannot be both input and output in the same function, function: %s, field: %s", function.GetName(), output)
+		}
+		if lo.Count(function.GetOutputFieldNames(), output) > 1 {
+			return fmt.Errorf("each function output field should be used exactly once in the same function, function: %s, output field: %s", function.GetName(), output)
+		}
+	}
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
-		for _, kv := range function.GetParams() {
-			switch kv.GetKey() {
-			case "bm25_k1":
-				k1, err := strconv.ParseFloat(kv.GetValue(), 64)
-				if err != nil {
-					return fmt.Errorf("failed to parse bm25_k1 value, %w", err)
-				}
-
-				if k1 < 0 || k1 > 3 {
-					return fmt.Errorf("bm25_k1 must in [0,3] but now %f", k1)
-				}
-
-			case "bm25_b":
-				b, err := strconv.ParseFloat(kv.GetValue(), 64)
-				if err != nil {
-					return fmt.Errorf("failed to parse bm25_b value, %w", err)
-				}
-
-				if b < 0 || b > 1 {
-					return fmt.Errorf("bm25_b must in [0,1] but now %f", b)
-				}
-
-			case "bm25_avgdl":
-				avgdl, err := strconv.ParseFloat(kv.GetValue(), 64)
-				if err != nil {
-					return fmt.Errorf("failed to parse bm25_avgdl value, %w", err)
-				}
-
-				if avgdl <= 0 {
-					return fmt.Errorf("bm25_avgdl must large than zero but now %f", avgdl)
-				}
-
-			case "analyzer_params":
-				// TODO ADD tokenizer check
-			default:
-				return fmt.Errorf("invalid function params, key: %s, value:%s", kv.GetKey(), kv.GetValue())
-			}
+		if len(function.GetParams()) != 0 {
+			return fmt.Errorf("BM25 function accepts no params")
 		}
 	default:
 		return fmt.Errorf("check function params with unknown function type")
@@ -996,6 +1036,22 @@ func parseGuaranteeTs(ts, tMax typeutil.Timestamp) typeutil.Timestamp {
 	return ts
 }
 
+func getMaxMvccTsFromChannels(channelsTs map[string]uint64, beginTs typeutil.Timestamp) typeutil.Timestamp {
+	maxTs := typeutil.Timestamp(0)
+	for _, ts := range channelsTs {
+		if ts > maxTs {
+			maxTs = ts
+		}
+	}
+
+	if maxTs == 0 {
+		log.Warn("no channel ts found, use beginTs instead")
+		return beginTs
+	}
+
+	return maxTs
+}
+
 func validateName(entity string, nameType string) error {
 	entity = strings.TrimSpace(entity)
 
@@ -1043,19 +1099,11 @@ func ValidateObjectName(entity string) error {
 	if util.IsAnyWord(entity) {
 		return nil
 	}
-	return validateName(entity, "role name")
+	return validateName(entity, "object name")
 }
 
 func ValidateObjectType(entity string) error {
 	return validateName(entity, "ObjectType")
-}
-
-func ValidatePrincipalName(entity string) error {
-	return validateName(entity, "PrincipalName")
-}
-
-func ValidatePrincipalType(entity string) error {
-	return validateName(entity, "PrincipalType")
 }
 
 func ValidatePrivilege(entity string) error {
@@ -1063,6 +1111,31 @@ func ValidatePrivilege(entity string) error {
 		return nil
 	}
 	return validateName(entity, "Privilege")
+}
+
+func ValidateBuiltInPrivilegeGroup(entity string, dbName string, collectionName string) error {
+	if !util.IsBuiltinPrivilegeGroup(entity) {
+		return nil
+	}
+	switch {
+	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Cluster.String()):
+		if !util.IsAnyWord(dbName) || !util.IsAnyWord(collectionName) {
+			return merr.WrapErrParameterInvalidMsg("dbName and collectionName should be * for the cluster level privilege: %s", entity)
+		}
+		return nil
+	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Database.String()):
+		if collectionName != "" && collectionName != util.AnyWord {
+			return merr.WrapErrParameterInvalidMsg("collectionName should be * for the database level privilege: %s", entity)
+		}
+		return nil
+	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Collection.String()):
+		if util.IsAnyWord(dbName) && !util.IsAnyWord(collectionName) && collectionName != "" {
+			return merr.WrapErrParameterInvalidMsg("please specify database name for the collection level privilege: %s", entity)
+		}
+		return nil
+	default:
+		return nil
+	}
 }
 
 func GetCurUserFromContext(ctx context.Context) (string, error) {
@@ -1182,7 +1255,7 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary bool) ([]string, []string, []string, error) {
 	var primaryFieldName string
 	var dynamicField *schemapb.FieldSchema
-	allFieldNameMap := make(map[string]int64)
+	allFieldNameMap := make(map[string]*schemapb.FieldSchema)
 	resultFieldNameMap := make(map[string]bool)
 	resultFieldNames := make([]string, 0)
 	userOutputFieldsMap := make(map[string]bool)
@@ -1197,23 +1270,26 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 		if field.IsDynamic {
 			dynamicField = field
 		}
-		allFieldNameMap[field.Name] = field.GetFieldID()
+		allFieldNameMap[field.Name] = field
 	}
 
 	for _, outputFieldName := range outputFields {
 		outputFieldName = strings.TrimSpace(outputFieldName)
 		if outputFieldName == "*" {
-			for fieldName, fieldID := range allFieldNameMap {
-				// skip Cold field
-				if schema.IsFieldLoaded(fieldID) {
+			for fieldName, field := range allFieldNameMap {
+				// skip Cold field and fields that can't be output
+				if schema.IsFieldLoaded(field.GetFieldID()) && schema.CanRetrieveRawFieldData(field) {
 					resultFieldNameMap[fieldName] = true
 					userOutputFieldsMap[fieldName] = true
 				}
 			}
 			useAllDyncamicFields = true
 		} else {
-			if fieldID, ok := allFieldNameMap[outputFieldName]; ok {
-				if schema.IsFieldLoaded(fieldID) {
+			if field, ok := allFieldNameMap[outputFieldName]; ok {
+				if !schema.CanRetrieveRawFieldData(field) {
+					return nil, nil, nil, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
+				}
+				if schema.IsFieldLoaded(field.GetFieldID()) {
 					resultFieldNameMap[outputFieldName] = true
 					userOutputFieldsMap[outputFieldName] = true
 				} else {
@@ -1741,10 +1817,20 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 			for _, rowData := range field.GetScalars().GetJsonData().GetData() {
 				jsonData := make(map[string]interface{})
 				if err := json.Unmarshal(rowData, &jsonData); err != nil {
-					return err
+					log.Info("insert invalid dynamic data, milvus only support json map",
+						zap.ByteString("data", rowData),
+						zap.Error(err),
+					)
+					return merr.WrapErrIoFailedReason(err.Error())
 				}
 				if _, ok := jsonData[common.MetaFieldName]; ok {
 					return fmt.Errorf("cannot set json key to: %s", common.MetaFieldName)
+				}
+				for _, f := range schema.GetFields() {
+					if _, ok := jsonData[f.GetName()]; ok {
+						log.Info("dynamic field name include the static field name", zap.String("fieldName", f.GetName()))
+						return fmt.Errorf("dynamic field name cannot include the static field name: %s", f.GetName())
+					}
 				}
 			}
 		}

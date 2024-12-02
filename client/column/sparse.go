@@ -17,11 +17,7 @@
 package column
 
 import (
-	"encoding/binary"
-	"fmt"
-	"math"
-
-	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/entity"
@@ -30,112 +26,28 @@ import (
 var _ (Column) = (*ColumnSparseFloatVector)(nil)
 
 type ColumnSparseFloatVector struct {
-	ColumnBase
-
-	vectors []entity.SparseEmbedding
-	name    string
-}
-
-// Name returns column name.
-func (c *ColumnSparseFloatVector) Name() string {
-	return c.name
-}
-
-// Type returns column FieldType.
-func (c *ColumnSparseFloatVector) Type() entity.FieldType {
-	return entity.FieldTypeSparseVector
-}
-
-// Len returns column values length.
-func (c *ColumnSparseFloatVector) Len() int {
-	return len(c.vectors)
-}
-
-func (c *ColumnSparseFloatVector) Slice(start, end int) Column {
-	l := c.Len()
-	if start > l {
-		start = l
-	}
-	if end == -1 || end > l {
-		end = l
-	}
-	return &ColumnSparseFloatVector{
-		ColumnBase: c.ColumnBase,
-		name:       c.name,
-		vectors:    c.vectors[start:end],
-	}
-}
-
-// Get returns value at index as interface{}.
-func (c *ColumnSparseFloatVector) Get(idx int) (interface{}, error) {
-	if idx < 0 || idx >= c.Len() {
-		return nil, errors.New("index out of range")
-	}
-	return c.vectors[idx], nil
-}
-
-// ValueByIdx returns value of the provided index
-// error occurs when index out of range
-func (c *ColumnSparseFloatVector) ValueByIdx(idx int) (entity.SparseEmbedding, error) {
-	var r entity.SparseEmbedding // use default value
-	if idx < 0 || idx >= c.Len() {
-		return r, errors.New("index out of range")
-	}
-	return c.vectors[idx], nil
-}
-
-func (c *ColumnSparseFloatVector) FieldData() *schemapb.FieldData {
-	fd := &schemapb.FieldData{
-		Type:      schemapb.DataType_SparseFloatVector,
-		FieldName: c.name,
-	}
-
-	dim := int(0)
-	data := make([][]byte, 0, len(c.vectors))
-	for _, vector := range c.vectors {
-		row := make([]byte, 8*vector.Len())
-		for idx := 0; idx < vector.Len(); idx++ {
-			pos, value, _ := vector.Get(idx)
-			binary.LittleEndian.PutUint32(row[idx*8:], pos)
-			binary.LittleEndian.PutUint32(row[idx*8+4:], math.Float32bits(value))
-		}
-		data = append(data, row)
-		if vector.Dim() > dim {
-			dim = vector.Dim()
-		}
-	}
-
-	fd.Field = &schemapb.FieldData_Vectors{
-		Vectors: &schemapb.VectorField{
-			Dim: int64(dim),
-			Data: &schemapb.VectorField_SparseFloatVector{
-				SparseFloatVector: &schemapb.SparseFloatArray{
-					Dim:      int64(dim),
-					Contents: data,
-				},
-			},
-		},
-	}
-	return fd
-}
-
-func (c *ColumnSparseFloatVector) AppendValue(i interface{}) error {
-	v, ok := i.(entity.SparseEmbedding)
-	if !ok {
-		return fmt.Errorf("invalid type, expect SparseEmbedding interface, got %T", i)
-	}
-	c.vectors = append(c.vectors, v)
-
-	return nil
-}
-
-func (c *ColumnSparseFloatVector) Data() []entity.SparseEmbedding {
-	return c.vectors
+	*vectorBase[entity.SparseEmbedding]
 }
 
 func NewColumnSparseVectors(name string, values []entity.SparseEmbedding) *ColumnSparseFloatVector {
 	return &ColumnSparseFloatVector{
-		name:    name,
-		vectors: values,
+		// sparse embedding need not specify dimension
+		vectorBase: newVectorBase(name, 0, values, entity.FieldTypeSparseVector),
+	}
+}
+
+func (c *ColumnSparseFloatVector) FieldData() *schemapb.FieldData {
+	fd := c.vectorBase.FieldData()
+	max := lo.MaxBy(c.values, func(a, b entity.SparseEmbedding) bool {
+		return a.Dim() > b.Dim()
+	})
+	vectors := fd.GetVectors()
+	vectors.Dim = int64(max.Dim())
+	return fd
+}
+
+func (c *ColumnSparseFloatVector) Slice(start, end int) Column {
+	return &ColumnSparseFloatVector{
+		vectorBase: c.vectorBase.slice(start, end),
 	}
 }

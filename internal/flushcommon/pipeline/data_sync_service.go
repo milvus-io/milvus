@@ -77,6 +77,7 @@ type nodeConfig struct {
 	vChannelName string
 	metacache    metacache.MetaCache
 	serverID     typeutil.UniqueID
+	dropCallback func()
 }
 
 // Start the flow graph in dataSyncService
@@ -221,7 +222,9 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	info *datapb.ChannelWatchInfo, metacache metacache.MetaCache,
 	unflushed, flushed []*datapb.SegmentInfo, input <-chan *msgstream.MsgPack,
-) (*DataSyncService, error) {
+	wbTaskObserverCallback writebuffer.TaskObserverCallback,
+	dropCallback func(),
+) (dss *DataSyncService, err error) {
 	var (
 		channelName  = info.GetVchan().GetChannelName()
 		collectionID = info.GetVchan().GetCollectionID()
@@ -237,20 +240,8 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		vChannelName: channelName,
 		metacache:    metacache,
 		serverID:     serverID,
+		dropCallback: dropCallback,
 	}
-
-	err := params.WriteBufferManager.Register(channelName, metacache,
-		writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(params.Broker, config.serverID)),
-		writebuffer.WithIDAllocator(params.Allocator))
-	if err != nil {
-		log.Warn("failed to register channel buffer", zap.Error(err))
-		return nil, err
-	}
-	defer func() {
-		if err != nil {
-			defer params.WriteBufferManager.RemoveChannel(channelName)
-		}
-	}()
 
 	ctx, cancel := context.WithCancel(params.Ctx)
 	ds := &DataSyncService{
@@ -278,13 +269,10 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	fg := flowgraph.NewTimeTickedFlowGraph(params.Ctx)
 	nodeList := []flowgraph.Node{}
 
-	dmStreamNode, err := newDmInputNode(initCtx, params.DispClient, info.GetVchan().GetSeekPosition(), config, input)
-	if err != nil {
-		return nil, err
-	}
+	dmStreamNode := newDmInputNode(config, input)
 	nodeList = append(nodeList, dmStreamNode)
 
-	ddNode, err := newDDNode(
+	ddNode := newDDNode(
 		params.Ctx,
 		collectionID,
 		channelName,
@@ -292,11 +280,8 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		flushed,
 		unflushed,
 		params.CompactionExecutor,
-		params.FlushMsgHandler,
+		params.MsgHandler,
 	)
-	if err != nil {
-		return nil, err
-	}
 	nodeList = append(nodeList, ddNode)
 
 	if len(info.GetSchema().GetFunctions()) > 0 {
@@ -313,16 +298,25 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	}
 	nodeList = append(nodeList, writeNode)
 
-	ttNode, err := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
-	if err != nil {
-		return nil, err
-	}
+	ttNode := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
 	nodeList = append(nodeList, ttNode)
 
 	if err := fg.AssembleNodes(nodeList...); err != nil {
 		return nil, err
 	}
 	ds.fg = fg
+
+	// Register channel after channel pipeline is ready.
+	// This'll reject any FlushChannel and FlushSegments calls to prevent inconsistency between DN and DC over flushTs
+	// if fail to init flowgraph nodes.
+	err = params.WriteBufferManager.Register(channelName, metacache,
+		writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(params.Broker, config.serverID)),
+		writebuffer.WithIDAllocator(params.Allocator),
+		writebuffer.WithTaskObserverCallback(wbTaskObserverCallback))
+	if err != nil {
+		log.Warn("failed to register channel buffer", zap.String("channel", channelName), zap.Error(err))
+		return nil, err
+	}
 
 	return ds, nil
 }
@@ -355,10 +349,28 @@ func NewDataSyncService(initCtx context.Context, pipelineParams *util.PipelinePa
 	if metaCache, err = getMetaCacheWithTickler(initCtx, pipelineParams, info, tickler, unflushedSegmentInfos, flushedSegmentInfos); err != nil {
 		return nil, err
 	}
-	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, nil)
+
+	input, err := createNewInputFromDispatcher(initCtx, pipelineParams.DispClient, info.GetVchan().GetChannelName(), info.GetVchan().GetSeekPosition())
+	if err != nil {
+		return nil, err
+	}
+	ds, err := getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, input, nil, nil)
+	if err != nil {
+		// deregister channel if failed to init flowgraph to avoid resource leak.
+		pipelineParams.DispClient.Deregister(info.GetVchan().GetChannelName())
+		return nil, err
+	}
+	return ds, nil
 }
 
-func NewStreamingNodeDataSyncService(initCtx context.Context, pipelineParams *util.PipelineParams, info *datapb.ChannelWatchInfo, input <-chan *msgstream.MsgPack) (*DataSyncService, error) {
+func NewStreamingNodeDataSyncService(
+	initCtx context.Context,
+	pipelineParams *util.PipelineParams,
+	info *datapb.ChannelWatchInfo,
+	input <-chan *msgstream.MsgPack,
+	wbTaskObserverCallback writebuffer.TaskObserverCallback,
+	dropCallback func(),
+) (*DataSyncService, error) {
 	// recover segment checkpoints
 	var (
 		err                   error
@@ -383,7 +395,7 @@ func NewStreamingNodeDataSyncService(initCtx context.Context, pipelineParams *ut
 	if metaCache, err = getMetaCacheForStreaming(initCtx, pipelineParams, info, unflushedSegmentInfos, flushedSegmentInfos); err != nil {
 		return nil, err
 	}
-	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, input)
+	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, input, wbTaskObserverCallback, dropCallback)
 }
 
 func NewDataSyncServiceWithMetaCache(metaCache metacache.MetaCache) *DataSyncService {

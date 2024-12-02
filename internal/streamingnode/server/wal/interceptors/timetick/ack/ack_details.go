@@ -88,3 +88,12 @@ func (ad *AckDetails) EarliestLastConfirmedMessageID() message.MessageID {
 func (ad *AckDetails) Clear() {
 	ad.detail = nil
 }
+
+// Range iterates the AckDetail.
+func (ad *AckDetails) Range(fn func(detail *AckDetail) bool) {
+	for _, detail := range ad.detail {
+		if !fn(detail) {
+			break
+		}
+	}
+}

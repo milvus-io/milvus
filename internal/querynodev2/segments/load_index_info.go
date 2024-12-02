@@ -26,13 +26,17 @@ import "C"
 
 import (
 	"context"
+	"fmt"
 	"runtime"
+	"time"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/cgopb"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // LoadIndexInfo is a wrapper of the underlying C-structure C.CLoadIndexInfo
@@ -173,7 +177,7 @@ func (li *LoadIndexInfo) appendIndexEngineVersion(ctx context.Context, indexEngi
 	return HandleCStatus(ctx, &status, "AppendIndexEngineVersion failed")
 }
 
-func (li *LoadIndexInfo) finish(ctx context.Context, info *cgopb.LoadIndexInfo) error {
+func (li *LoadIndexInfo) appendLoadIndexInfo(ctx context.Context, info *cgopb.LoadIndexInfo) error {
 	marshaled, err := proto.Marshal(info)
 	if err != nil {
 		return err
@@ -185,11 +189,20 @@ func (li *LoadIndexInfo) finish(ctx context.Context, info *cgopb.LoadIndexInfo) 
 		return nil, nil
 	}).Await()
 
-	if err := HandleCStatus(ctx, &status, "FinishLoadIndexInfo failed"); err != nil {
-		return err
-	}
+	return HandleCStatus(ctx, &status, "FinishLoadIndexInfo failed")
+}
 
+func (li *LoadIndexInfo) loadIndex(ctx context.Context) error {
+	var status C.CStatus
 	_, _ = GetLoadPool().Submit(func() (any, error) {
+		start := time.Now()
+		defer func() {
+			metrics.QueryNodeCGOCallLatency.WithLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				"AppendIndexV2",
+				"Sync",
+			).Observe(float64(time.Since(start).Milliseconds()))
+		}()
 		traceCtx := ParseCTraceContext(ctx)
 		status = C.AppendIndexV2(traceCtx.ctx, li.cLoadIndexInfo)
 		runtime.KeepAlive(traceCtx)

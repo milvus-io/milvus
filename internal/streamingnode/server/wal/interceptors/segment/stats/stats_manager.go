@@ -4,10 +4,16 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+)
+
+var (
+	ErrNotEnoughSpace = errors.New("not enough space")
+	ErrTooLargeInsert = errors.New("insert too large")
 )
 
 // StatsManager is the manager of stats.
@@ -69,7 +75,7 @@ func (m *StatsManager) RegisterNewGrowingSegment(belongs SegmentBelongs, segment
 }
 
 // AllocRows alloc number of rows on current segment.
-func (m *StatsManager) AllocRows(segmentID int64, insert InsertMetrics) bool {
+func (m *StatsManager) AllocRows(segmentID int64, insert InsertMetrics) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -78,7 +84,8 @@ func (m *StatsManager) AllocRows(segmentID int64, insert InsertMetrics) bool {
 	if !ok {
 		panic(fmt.Sprintf("alloc rows on a segment %d that not exist", segmentID))
 	}
-	inserted := m.segmentStats[segmentID].AllocRows(insert)
+	stat := m.segmentStats[segmentID]
+	inserted := stat.AllocRows(insert)
 
 	// update the total stats if inserted.
 	if inserted {
@@ -91,12 +98,17 @@ func (m *StatsManager) AllocRows(segmentID int64, insert InsertMetrics) bool {
 			m.vchannelStats[info.VChannel] = &InsertMetrics{}
 		}
 		m.vchannelStats[info.VChannel].Collect(insert)
-		return true
+		return nil
 	}
 
-	// If not inserted, current segment can not hold the message, notify seal manager to do seal the segment.
-	m.sealNotifier.AddAndNotify(info)
-	return false
+	if stat.ShouldBeSealed() {
+		// notify seal manager to do seal the segment if stat reach the limit.
+		m.sealNotifier.AddAndNotify(info)
+	}
+	if stat.IsEmpty() {
+		return ErrTooLargeInsert
+	}
+	return ErrNotEnoughSpace
 }
 
 // SealNotifier returns the seal notifier.
@@ -112,9 +124,9 @@ func (m *StatsManager) GetStatsOfSegment(segmentID int64) *SegmentStats {
 	return m.segmentStats[segmentID].Copy()
 }
 
-// UpdateOnFlush updates the stats of segment on flush.
+// UpdateOnSync updates the stats of segment on sync.
 // It's an async update operation, so it's not necessary to do success.
-func (m *StatsManager) UpdateOnFlush(segmentID int64, flush FlushOperationMetrics) {
+func (m *StatsManager) UpdateOnSync(segmentID int64, syncMetric SyncOperationMetrics) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -122,7 +134,7 @@ func (m *StatsManager) UpdateOnFlush(segmentID int64, flush FlushOperationMetric
 	if _, ok := m.segmentIndex[segmentID]; !ok {
 		return
 	}
-	m.segmentStats[segmentID].UpdateOnFlush(flush)
+	m.segmentStats[segmentID].UpdateOnSync(syncMetric)
 
 	// binlog counter is updated, notify seal manager to do seal scanning.
 	m.sealNotifier.AddAndNotify(m.segmentIndex[segmentID])

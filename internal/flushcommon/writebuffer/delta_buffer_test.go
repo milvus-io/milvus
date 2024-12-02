@@ -39,8 +39,8 @@ func (s *DeltaBufferSuite) TestBuffer() {
 		})
 
 		memSize := deltaBuffer.Buffer(pks, tss, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
-		// 40 = (3*8+8)(string pk) + 8(ts)
-		s.EqualValues(100*40, memSize)
+		// 19 = (3+8)(string pk) + 8(ts)
+		s.EqualValues(100*19, memSize)
 	})
 }
 

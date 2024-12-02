@@ -29,4 +29,5 @@ const (
 	TANIMOTO       MetricType = "TANIMOTO"
 	SUBSTRUCTURE   MetricType = "SUBSTRUCTURE"
 	SUPERSTRUCTURE MetricType = "SUPERSTRUCTURE"
+	BM25           MetricType = "BM25"
 )

@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -9,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -296,7 +296,7 @@ func (v *validateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeuti
 }
 
 func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
-	err := checkValidData(field, fieldSchema, numRows)
+	err := nullutil.CheckValidData(field.GetValidData(), fieldSchema, numRows)
 	if err != nil {
 		return err
 	}
@@ -491,24 +491,11 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 		}
 	}
 
-	err = checkValidData(field, fieldSchema, numRows)
+	err = nullutil.CheckValidData(field.GetValidData(), fieldSchema, numRows)
 	if err != nil {
 		return err
 	}
 
-	return nil
-}
-
-func checkValidData(data *schemapb.FieldData, schema *schemapb.FieldSchema, numRows int) error {
-	expectedNum := 0
-	// if nullable, the length of ValidData is numRows
-	if schema.GetNullable() {
-		expectedNum = numRows
-	}
-	if len(data.GetValidData()) != expectedNum {
-		msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", data.GetFieldName())
-		return merr.WrapErrParameterInvalid(expectedNum, len(data.GetValidData()), msg)
-	}
 	return nil
 }
 
@@ -667,20 +654,6 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 				msg := fmt.Sprintf("the length (%d) of json field (%s) exceeds max length (%d)", len(s),
 					field.GetFieldName(), paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64())
 				return merr.WrapErrParameterInvalid("valid length json string", "length exceeds max length", msg)
-			}
-		}
-	}
-
-	if fieldSchema.GetIsDynamic() {
-		var jsonMap map[string]interface{}
-		for _, data := range jsonArray {
-			err := json.Unmarshal(data, &jsonMap)
-			if err != nil {
-				log.Warn("insert invalid JSON data, milvus only support json map without nesting",
-					zap.ByteString("data", data),
-					zap.Error(err),
-				)
-				return merr.WrapErrIoFailedReason(err.Error())
 			}
 		}
 	}

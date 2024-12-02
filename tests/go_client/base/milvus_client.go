@@ -9,8 +9,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -163,6 +163,12 @@ func (mc *MilvusClient) LoadPartitions(ctx context.Context, option client.LoadPa
 	return loadTask, err
 }
 
+// ReleasePartitions Release Partitions from memory
+func (mc *MilvusClient) ReleasePartitions(ctx context.Context, option client.ReleasePartitionsOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.ReleasePartitions(ctx, option, callOptions...)
+	return err
+}
+
 // -- index --
 
 // CreateIndex Create Index
@@ -224,6 +230,12 @@ func (mc *MilvusClient) Upsert(ctx context.Context, option client.UpsertOption, 
 func (mc *MilvusClient) LoadCollection(ctx context.Context, option client.LoadCollectionOption, callOptions ...grpc.CallOption) (client.LoadTask, error) {
 	loadTask, err := mc.mClient.LoadCollection(ctx, option, callOptions...)
 	return loadTask, err
+}
+
+// ReleaseCollection Release Collection
+func (mc *MilvusClient) ReleaseCollection(ctx context.Context, option client.ReleaseCollectionOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.ReleaseCollection(ctx, option, callOptions...)
+	return err
 }
 
 // Search search from collection

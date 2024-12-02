@@ -26,12 +26,18 @@ import (
 // pipeline used for querynode
 type Pipeline interface {
 	base.StreamPipeline
+	GetCollectionID() UniqueID
 }
 
 type pipeline struct {
 	base.StreamPipeline
 
-	collectionID UniqueID
+	collectionID  UniqueID
+	embeddingNode embeddingNode
+}
+
+func (p *pipeline) GetCollectionID() UniqueID {
+	return p.collectionID
 }
 
 func (p *pipeline) Close() {
@@ -54,8 +60,21 @@ func NewPipeLine(
 	}
 
 	filterNode := newFilterNode(collectionID, channel, manager, delegator, pipelineQueueLength)
+
+	embeddingNode, err := newEmbeddingNode(collectionID, channel, manager, pipelineQueueLength)
+	if err != nil {
+		return nil, err
+	}
+
 	insertNode := newInsertNode(collectionID, channel, manager, delegator, pipelineQueueLength)
 	deleteNode := newDeleteNode(collectionID, channel, manager, tSafeManager, delegator, pipelineQueueLength)
-	p.Add(filterNode, insertNode, deleteNode)
+
+	// skip add embedding node when collection has no function.
+	if embeddingNode != nil {
+		p.Add(filterNode, embeddingNode, insertNode, deleteNode)
+	} else {
+		p.Add(filterNode, insertNode, deleteNode)
+	}
+
 	return p, nil
 }

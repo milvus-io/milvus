@@ -2,7 +2,6 @@ package discoverer
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
@@ -10,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc/resolver"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
 	"github.com/milvus-io/milvus/pkg/log"

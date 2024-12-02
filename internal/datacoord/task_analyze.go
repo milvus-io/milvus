@@ -156,7 +156,7 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 	}
 
 	// When data analyze occurs, segments must not be discarded. Such as compaction, GC, etc.
-	segments := dependency.meta.SelectSegments(SegmentFilterFunc(func(info *SegmentInfo) bool {
+	segments := dependency.meta.SelectSegments(ctx, SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return isSegmentHealthy(info) && slices.Contains(t.SegmentIDs, info.ID)
 	}))
 	segmentsMap := lo.SliceToMap(segments, func(t *SegmentInfo) (int64, *SegmentInfo) {

@@ -6,10 +6,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 )
 
-var _ Task = &QueryStreamTask{}
+var _ scheduler.Task = &QueryStreamTask{}
 
 func NewQueryStreamTask(ctx context.Context,
 	collection *segments.Collection,
@@ -58,9 +60,8 @@ func (t *QueryStreamTask) PreExecute() error {
 }
 
 func (t *QueryStreamTask) Execute() error {
-	retrievePlan, err := segments.NewRetrievePlan(
-		t.ctx,
-		t.collection,
+	retrievePlan, err := segcore.NewRetrievePlan(
+		t.collection.GetCCollection(),
 		t.req.Req.GetSerializedExprPlan(),
 		t.req.Req.GetMvccTimestamp(),
 		t.req.Req.Base.GetMsgID(),

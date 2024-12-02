@@ -39,6 +39,7 @@ type Worker interface {
 	LoadSegments(context.Context, *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(context.Context, *querypb.ReleaseSegmentsRequest) error
 	Delete(ctx context.Context, req *querypb.DeleteRequest) error
+	DeleteBatch(ctx context.Context, req *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error)
 	SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error)
 	QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
 	QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
@@ -141,6 +142,52 @@ func (w *remoteWorker) Delete(ctx context.Context, req *querypb.DeleteRequest) e
 	return nil
 }
 
+func (w *remoteWorker) DeleteBatch(ctx context.Context, req *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("workerID", req.GetBase().GetTargetID()),
+	)
+	client := w.getClient()
+	resp, err := client.DeleteBatch(ctx, req)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		if errors.Is(err, merr.ErrServiceUnimplemented) {
+			log.Warn("invoke legacy querynode DeleteBatch method, fallback to ")
+			return w.splitDeleteBatch(ctx, req)
+		}
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (w *remoteWorker) splitDeleteBatch(ctx context.Context, req *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error) {
+	sReq := &querypb.DeleteRequest{
+		CollectionId: req.GetCollectionId(),
+		PartitionId:  req.GetPartitionId(),
+		VchannelName: req.GetVchannelName(),
+		PrimaryKeys:  req.GetPrimaryKeys(),
+		Timestamps:   req.GetTimestamps(),
+		Scope:        req.GetScope(),
+	}
+	// do fallback without parallel, to protect the mem limit
+	var missingIDs []int64
+	var failedIDs []int64
+	for _, segmentID := range req.GetSegmentIds() {
+		sReq.SegmentId = segmentID
+		err := w.Delete(ctx, sReq)
+		switch {
+		case errors.Is(err, merr.ErrSegmentNotFound):
+			missingIDs = append(missingIDs, segmentID)
+		case err != nil:
+			failedIDs = append(failedIDs, segmentID)
+		default:
+		}
+	}
+	return &querypb.DeleteBatchResponse{
+		Status:     merr.Success(),
+		FailedIds:  failedIDs,
+		MissingIds: missingIDs,
+	}, nil
+}
+
 func (w *remoteWorker) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
 	client := w.getClient()
 	ret, err := client.SearchSegments(ctx, req)
@@ -209,6 +256,7 @@ func (w *remoteWorker) Stop() {
 		for _, client := range w.clients {
 			client.Close()
 		}
+		return
 	}
 	if err := w.client.Close(); err != nil {
 		log.Warn("failed to call Close via grpc worker", zap.Error(err))

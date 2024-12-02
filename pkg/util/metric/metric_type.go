@@ -36,4 +36,8 @@ const (
 
 	// SUPERSTRUCTURE represents superstructure distance
 	SUPERSTRUCTURE MetricType = "SUPERSTRUCTURE"
+
+	BM25 MetricType = "BM25"
+
+	EMPTY MetricType = ""
 )

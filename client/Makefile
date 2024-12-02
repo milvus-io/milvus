@@ -30,4 +30,4 @@ unittest:
 
 generate-mockery:
 	@echo "Generating mockery Milvus service server"
-	@../bin/mockery --srcpkg=github.com/milvus-io/milvus-proto/go-api/v2/milvuspb --name=MilvusServiceServer --filename=mock_milvus_server_test.go --output=. --outpkg=client --with-expecter 
+	@../bin/mockery --srcpkg=github.com/milvus-io/milvus-proto/go-api/v2/milvuspb --name=MilvusServiceServer --filename=mock_milvus_server_test.go --output=milvusclient --outpkg=milvusclient --with-expecter 

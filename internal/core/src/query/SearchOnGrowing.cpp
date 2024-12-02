@@ -14,6 +14,10 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "SearchOnGrowing.h"
+#include <cstddef>
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "log/Log.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnIndex.h"
 
@@ -94,6 +98,13 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         FloatSegmentIndexSearch(
             segment, info, query_data, num_queries, bitset, search_result);
     } else {
+        std::shared_lock<std::shared_mutex> read_chunk_mutex(
+            segment.get_chunk_mutex());
+        // check SyncDataWithIndex() again, in case the vector chunks has been removed.
+        if (segment.get_indexing_record().SyncDataWithIndex(field.get_id())) {
+            return FloatSegmentIndexSearch(
+                segment, info, query_data, num_queries, bitset, search_result);
+        }
         SubSearchResult final_qr(num_queries, topk, metric_type, round_decimal);
         // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
         auto dim = field.get_data_type() == DataType::VECTOR_SPARSE_FLOAT
@@ -101,9 +112,16 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                        : field.get_dim();
         dataset::SearchDataset search_dataset{
             metric_type, num_queries, topk, round_decimal, dim, query_data};
-        std::shared_lock<std::shared_mutex> read_chunk_mutex(
-            segment.get_chunk_mutex());
         int32_t current_chunk_id = 0;
+
+        // get K1 and B from index for bm25 brute force
+        std::map<std::string, std::string> index_info;
+        if (metric_type == knowhere::metric::BM25) {
+            index_info = segment.get_indexing_record()
+                             .get_field_index_meta(vecfield_id)
+                             .GetIndexParams();
+        }
+
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_data_base(vecfield_id);
         auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
@@ -118,38 +136,33 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 std::min(active_count, (chunk_id + 1) * vec_size_per_chunk);
             auto size_per_chunk = element_end - element_begin;
 
-            auto sub_view = bitset.subview(element_begin, size_per_chunk);
+            auto sub_data = query::dataset::RawDataset{
+                element_begin, dim, size_per_chunk, chunk_data};
             if (info.group_by_field_id_.has_value()) {
                 auto sub_qr = BruteForceSearchIterators(search_dataset,
-                                                        chunk_data,
-                                                        size_per_chunk,
+                                                        sub_data,
                                                         info,
-                                                        sub_view,
+                                                        index_info,
+                                                        bitset,
                                                         data_type);
                 final_qr.merge(sub_qr);
             } else {
                 auto sub_qr = BruteForceSearch(search_dataset,
-                                               chunk_data,
-                                               size_per_chunk,
+                                               sub_data,
                                                info,
-                                               sub_view,
+                                               index_info,
+                                               bitset,
                                                data_type);
-
-                // convert chunk uid to segment uid
-                for (auto& x : sub_qr.mutable_seg_offsets()) {
-                    if (x != -1) {
-                        x += chunk_id * vec_size_per_chunk;
-                    }
-                }
                 final_qr.merge(sub_qr);
             }
         }
         if (info.group_by_field_id_.has_value()) {
+            std::vector<int64_t> chunk_rows(max_chunk, 0);
+            for (int i = 1; i < max_chunk; ++i) {
+                chunk_rows[i] = i * vec_size_per_chunk;
+            }
             search_result.AssembleChunkVectorIterators(
-                num_queries,
-                max_chunk,
-                vec_size_per_chunk,
-                final_qr.chunk_iterators());
+                num_queries, max_chunk, chunk_rows, final_qr.chunk_iterators());
         } else {
             search_result.distances_ = std::move(final_qr.mutable_distances());
             search_result.seg_offsets_ =

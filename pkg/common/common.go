@@ -140,6 +140,12 @@ const (
 	ConsistencyLevel          = "consistency_level"
 )
 
+// Doc-in-doc-out
+const (
+	EnableAnalyzerKey = `enable_analyzer`
+	AnalyzerParamKey  = `analyzer_params`
+)
+
 //  Collection properties key
 
 const (

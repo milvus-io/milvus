@@ -17,9 +17,11 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/spf13/cast"
 
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -28,6 +30,10 @@ var (
 	ErrNotInitial   = errors.New("config is not initialized")
 	ErrIgnoreChange = errors.New("ignore change")
 	ErrKeyNotFound  = errors.New("key not found")
+)
+
+const (
+	NotFormatPrefix = "knowhere."
 )
 
 func Init(opts ...Option) (*Manager, error) {
@@ -55,7 +61,17 @@ func Init(opts ...Option) (*Manager, error) {
 
 var formattedKeys = typeutil.NewConcurrentMap[string, string]()
 
+func lowerKey(key string) string {
+	if strings.HasPrefix(key, NotFormatPrefix) {
+		return key
+	}
+	return strings.ToLower(key)
+}
+
 func formatKey(key string) string {
+	if strings.HasPrefix(key, NotFormatPrefix) {
+		return key
+	}
 	cached, ok := formattedKeys.Get(key)
 	if ok {
 		return cached
@@ -63,4 +79,43 @@ func formatKey(key string) string {
 	result := strings.NewReplacer("/", "", "_", "", ".", "").Replace(strings.ToLower(key))
 	formattedKeys.Insert(key, result)
 	return result
+}
+
+func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {
+	for k, v := range m {
+		fullKey := k
+		if prefix != "" {
+			fullKey = prefix + "." + k
+		}
+
+		switch val := v.(type) {
+		case map[string]interface{}:
+			flattenAndMergeMap(fullKey, val, result)
+		case map[interface{}]interface{}:
+			flattenAndMergeMap(fullKey, cast.ToStringMap(val), result)
+		case []interface{}:
+			str := ""
+			for i, item := range val {
+				itemStr, err := cast.ToStringE(item)
+				if err != nil {
+					continue
+				}
+				if i == 0 {
+					str = itemStr
+				} else {
+					str = str + "," + itemStr
+				}
+			}
+			result[lowerKey(fullKey)] = str
+			result[formatKey(fullKey)] = str
+		default:
+			str, err := cast.ToStringE(val)
+			if err != nil {
+				fmt.Printf("cast to string failed %s, error = %s\n", fullKey, err.Error())
+				continue
+			}
+			result[lowerKey(fullKey)] = str
+			result[formatKey(fullKey)] = str
+		}
+	}
 }

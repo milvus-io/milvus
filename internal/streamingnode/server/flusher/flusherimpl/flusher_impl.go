@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
@@ -130,35 +131,62 @@ func (f *flusherImpl) Start() {
 	go f.cpUpdater.Start()
 	go func() {
 		defer f.stopWg.Done()
+		backoff := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
+			Default: 5 * time.Second,
+			Backoff: typeutil.BackoffConfig{
+				InitialInterval: 50 * time.Millisecond,
+				Multiplier:      2.0,
+				MaxInterval:     5 * time.Second,
+			},
+		})
+
+		var nextTimer <-chan time.Time
 		for {
 			select {
 			case <-f.stopChan.CloseCh():
 				log.Info("flusher exited")
 				return
 			case <-f.notifyCh:
-				futures := make([]*conc.Future[any], 0)
-				f.channelLifetimes.Range(func(vchannel string, lifetime ChannelLifetime) bool {
-					future := GetExecPool().Submit(func() (any, error) {
-						err := lifetime.Run()
-						if errors.Is(err, errChannelLifetimeUnrecoverable) {
-							log.Warn("channel lifetime is unrecoverable, removed", zap.String("vchannel", vchannel))
-							f.channelLifetimes.Remove(vchannel)
-							return nil, nil
-						}
-						if err != nil {
-							log.Warn("build pipeline failed", zap.String("vchannel", vchannel), zap.Error(err))
-							f.notify() // Notify to trigger retry.
-							return nil, err
-						}
-						return nil, nil
-					})
-					futures = append(futures, future)
-					return true
-				})
-				_ = conc.AwaitAll(futures...)
+				nextTimer = f.handle(backoff)
+			case <-nextTimer:
+				nextTimer = f.handle(backoff)
 			}
 		}
 	}()
+}
+
+func (f *flusherImpl) handle(backoff *typeutil.BackoffTimer) <-chan time.Time {
+	futures := make([]*conc.Future[any], 0)
+	failureCnt := atomic.NewInt64(0)
+	f.channelLifetimes.Range(func(vchannel string, lifetime ChannelLifetime) bool {
+		future := GetExecPool().Submit(func() (any, error) {
+			err := lifetime.Run()
+			if errors.Is(err, errChannelLifetimeUnrecoverable) {
+				log.Warn("channel lifetime is unrecoverable, removed", zap.String("vchannel", vchannel))
+				f.channelLifetimes.Remove(vchannel)
+				return nil, nil
+			}
+			if err != nil {
+				log.Warn("build pipeline failed", zap.String("vchannel", vchannel), zap.Error(err))
+				failureCnt.Inc()
+				return nil, err
+			}
+			return nil, nil
+		})
+		futures = append(futures, future)
+		return true
+	})
+	_ = conc.BlockOnAll(futures...)
+
+	if failureCnt.Load() > 0 {
+		backoff.EnableBackoff()
+		nextTimer, interval := backoff.NextTimer()
+		log.Warn("flusher lifetime trasition failed, retry with backoff...", zap.Int64("failureCnt", failureCnt.Load()), zap.Duration("interval", interval))
+		return nextTimer
+	}
+	// There's a failure, do no backoff.
+	backoff.DisableBackoff()
+	return nil
 }
 
 func (f *flusherImpl) Stop() {

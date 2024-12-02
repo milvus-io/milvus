@@ -19,7 +19,6 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
@@ -1035,7 +1035,7 @@ func TestRowBasedInsertMsgToInsertData(t *testing.T) {
 	fieldIDs = fieldIDs[:len(fieldIDs)-2]
 	msg, _, columns := genRowBasedInsertMsg(numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim)
 
-	idata, err := RowBasedInsertMsgToInsertData(msg, schema)
+	idata, err := RowBasedInsertMsgToInsertData(msg, schema, false)
 	assert.NoError(t, err)
 	for idx, fID := range fieldIDs {
 		column := columns[idx]
@@ -1096,7 +1096,7 @@ func TestRowBasedInsertMsgToInsertFloat16VectorDataError(t *testing.T) {
 			},
 		},
 	}
-	_, err := RowBasedInsertMsgToInsertData(msg, schema)
+	_, err := RowBasedInsertMsgToInsertData(msg, schema, false)
 	assert.Error(t, err)
 }
 
@@ -1139,7 +1139,7 @@ func TestRowBasedInsertMsgToInsertBFloat16VectorDataError(t *testing.T) {
 			},
 		},
 	}
-	_, err := RowBasedInsertMsgToInsertData(msg, schema)
+	_, err := RowBasedInsertMsgToInsertData(msg, schema, false)
 	assert.Error(t, err)
 }
 

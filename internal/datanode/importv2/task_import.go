@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -101,6 +102,17 @@ func (t *ImportTask) GetVchannels() []string {
 
 func (t *ImportTask) GetSchema() *schemapb.CollectionSchema {
 	return t.req.GetSchema()
+}
+
+func (t *ImportTask) GetSlots() int64 {
+	// Consider the following two scenarios:
+	// 1. Importing a large number of small files results in
+	//    a small total data size, making file count unsuitable as a slot number.
+	// 2. Importing a file with many shards number results in many segments and a small total data size,
+	//    making segment count unsuitable as a slot number.
+	// Taking these factors into account, we've decided to use the
+	// minimum value between segment count and file count as the slot number.
+	return int64(funcutil.Min(len(t.GetFileStats()), len(t.GetSegmentIDs()), paramtable.Get().DataNodeCfg.MaxTaskSlotNum.GetAsInt()))
 }
 
 func (t *ImportTask) Cancel() {
@@ -183,6 +195,12 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		if err != nil {
 			return err
 		}
+		if !importutilv2.IsBackup(t.req.GetOptions()) {
+			err = RunEmbeddingFunction(t, data)
+			if err != nil {
+				return err
+			}
+		}
 		hashedData, err := HashData(t, data)
 		if err != nil {
 			return err
@@ -224,8 +242,17 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 			if err != nil {
 				return nil, nil, err
 			}
+			bm25Stats := make(map[int64]*storage.BM25Stats)
+			for _, fn := range t.req.GetSchema().GetFunctions() {
+				if fn.GetType() == schemapb.FunctionType_BM25 {
+					// BM25 function guarantees single output field
+					outputSparseFieldId := fn.GetOutputFieldIds()[0]
+					bm25Stats[outputSparseFieldId] = storage.NewBM25Stats()
+					bm25Stats[outputSparseFieldId].AppendFieldData(data.Data[outputSparseFieldId].(*storage.SparseFloatVectorFieldData))
+				}
+			}
 			syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
-				segmentID, partitionID, t.GetCollectionID(), channel, data, nil)
+				segmentID, partitionID, t.GetCollectionID(), channel, data, nil, bm25Stats)
 			if err != nil {
 				return nil, nil, err
 			}

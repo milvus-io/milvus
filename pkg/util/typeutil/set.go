@@ -67,6 +67,9 @@ func (set Set[T]) Union(other Set[T]) Set[T] {
 
 // Complement returns the complement with the given set
 func (set Set[T]) Complement(other Set[T]) Set[T] {
+	if other == nil {
+		return set
+	}
 	ret := NewSet(set.Collect()...)
 	ret.Remove(other.Collect()...)
 	return ret

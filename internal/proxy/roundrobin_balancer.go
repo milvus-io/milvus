@@ -32,6 +32,8 @@ func NewRoundRobinBalancer() *RoundRobinBalancer {
 	return &RoundRobinBalancer{}
 }
 
+func (b *RoundRobinBalancer) RegisterNodeInfo(nodeInfos []nodeInfo) {}
+
 func (b *RoundRobinBalancer) SelectNode(ctx context.Context, availableNodes []int64, cost int64) (int64, error) {
 	if len(availableNodes) == 0 {
 		return -1, merr.ErrNodeNotAvailable

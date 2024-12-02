@@ -39,7 +39,7 @@ func TestSealedInspector(t *testing.T) {
 		return ops.Load()%2 == 0
 	})
 
-	inspector.RegsiterPChannelManager(o)
+	inspector.RegisterPChannelManager(o)
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 	go func() {

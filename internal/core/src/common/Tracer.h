@@ -80,6 +80,9 @@ GetTraceIDAsHexStr(const TraceContext* ctx);
 std::string
 GetSpanIDAsHexStr(const TraceContext* ctx);
 
+std::string
+GetTraceID();
+
 struct AutoSpan {
     explicit AutoSpan(const std::string& name,
                       TraceContext* ctx = nullptr,

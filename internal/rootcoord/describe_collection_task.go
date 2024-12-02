@@ -45,11 +45,20 @@ func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 
-	aliases := t.core.meta.ListAliasesByID(coll.CollectionID)
+	aliases := t.core.meta.ListAliasesByID(ctx, coll.CollectionID)
 	db, err := t.core.meta.GetDatabaseByID(ctx, coll.DBID, t.GetTs())
 	if err != nil {
 		return err
 	}
 	t.Rsp = convertModelToDesc(coll, aliases, db.Name)
 	return nil
+}
+
+func (t *describeCollectionTask) GetLockerKey() LockerKey {
+	collection := t.core.getCollectionIDStr(t.ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), t.Req.GetCollectionID())
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(t.Req.GetDbName(), false),
+		NewCollectionLockerKey(collection, false),
+	)
 }

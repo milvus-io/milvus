@@ -16,11 +16,14 @@
 
 #pragma once
 
+#include <arrow/record_batch.h>
+#include <cstdint>
 #include <vector>
 #include <memory>
 #include <utility>
 
 #include "common/FieldData.h"
+#include "storage/PayloadReader.h"
 #include "storage/Types.h"
 #include "storage/PayloadStream.h"
 #include "storage/BinlogReader.h"
@@ -31,6 +34,10 @@ class DataCodec {
  public:
     explicit DataCodec(FieldDataPtr data, CodecType type)
         : field_data_(std::move(data)), codec_type_(type) {
+    }
+
+    explicit DataCodec(std::shared_ptr<PayloadReader> reader, CodecType type)
+        : payload_reader_(reader), codec_type_(type) {
     }
 
     virtual ~DataCodec() = default;
@@ -69,18 +76,36 @@ class DataCodec {
         return field_data_;
     }
 
+    virtual std::shared_ptr<ArrowDataWrapper>
+    GetReader() {
+        auto ret = std::make_shared<ArrowDataWrapper>();
+        ret->reader = payload_reader_->get_reader();
+        ret->arrow_reader = payload_reader_->get_file_reader();
+        ret->file_data = data_;
+        return ret;
+    }
+
+    void
+    SetData(std::shared_ptr<uint8_t[]> data) {
+        data_ = data;
+    }
+
  protected:
     CodecType codec_type_;
     std::pair<Timestamp, Timestamp> time_range_;
     FieldDataPtr field_data_;
+    std::shared_ptr<PayloadReader> payload_reader_;
+    std::shared_ptr<uint8_t[]> data_;
 };
 
 // Deserialize the data stream of the file obtained from remote or local
 std::unique_ptr<DataCodec>
-DeserializeFileData(const std::shared_ptr<uint8_t[]> input, int64_t length);
+DeserializeFileData(const std::shared_ptr<uint8_t[]> input,
+                    int64_t length,
+                    bool is_field_data = true);
 
 std::unique_ptr<DataCodec>
-DeserializeRemoteFileData(BinlogReaderPtr reader);
+DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data);
 
 std::unique_ptr<DataCodec>
 DeserializeLocalFileData(BinlogReaderPtr reader);

@@ -131,7 +131,7 @@ func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 			}
 			task.mergedStatsBlob = mergedStatsBlob
 
-			if len(pack.bm25Stats) > 0 {
+			if hasBM25Function(s.schema) {
 				mergedBM25Blob, err := s.serializeMergedBM25Stats(pack)
 				if err != nil {
 					log.Warn("failed to serialize merged bm25 stats log", zap.Error(err))
@@ -169,7 +169,7 @@ func (s *storageV1Serializer) setTaskMeta(task *SyncTask, pack *SyncPack) {
 		WithPartitionID(pack.partitionID).
 		WithChannelName(pack.channelName).
 		WithSegmentID(pack.segmentID).
-		WithBatchSize(pack.batchSize).
+		WithBatchRows(pack.batchRows).
 		WithSchema(s.metacache.Schema()).
 		WithStartPosition(pack.startPosition).
 		WithCheckpoint(pack.checkpoint).
@@ -235,7 +235,7 @@ func (s *storageV1Serializer) serializeStatslog(pack *SyncPack) (*storage.Primar
 		stats.UpdateByMsgs(chunkPkData)
 	}
 
-	blob, err := s.inCodec.SerializePkStats(stats, pack.batchSize)
+	blob, err := s.inCodec.SerializePkStats(stats, pack.batchRows)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -248,7 +248,8 @@ func (s *storageV1Serializer) serializeMergedPkStats(pack *SyncPack) (*storage.B
 		return nil, merr.WrapErrSegmentNotFound(pack.segmentID)
 	}
 
-	return s.inCodec.SerializePkStatsList(lo.Map(segment.GetHistory(), func(pks *storage.PkStatistics, _ int) *storage.PrimaryKeyStats {
+	// Allow to flush empty segment to make streaming service easier to implement rollback transaction.
+	stats := lo.Map(segment.GetHistory(), func(pks *storage.PkStatistics, _ int) *storage.PrimaryKeyStats {
 		return &storage.PrimaryKeyStats{
 			FieldID: s.pkField.GetFieldID(),
 			MaxPk:   pks.MaxPK,
@@ -257,7 +258,11 @@ func (s *storageV1Serializer) serializeMergedPkStats(pack *SyncPack) (*storage.B
 			BF:      pks.PkFilter,
 			PkType:  int64(s.pkField.GetDataType()),
 		}
-	}), segment.NumOfRows())
+	})
+	if len(stats) == 0 {
+		return nil, nil
+	}
+	return s.inCodec.SerializePkStatsList(stats, segment.NumOfRows())
 }
 
 func (s *storageV1Serializer) serializeMergedBM25Stats(pack *SyncPack) (map[int64]*storage.Blob, error) {
@@ -267,8 +272,9 @@ func (s *storageV1Serializer) serializeMergedBM25Stats(pack *SyncPack) (map[int6
 	}
 
 	stats := segment.GetBM25Stats()
+	// Allow to flush empty segment to make streaming service easier to implement rollback transaction.
 	if stats == nil {
-		return nil, fmt.Errorf("searalize empty bm25 stats")
+		return nil, nil
 	}
 
 	fieldBytes, numRow, err := stats.Serialize()
@@ -310,4 +316,13 @@ func (s *storageV1Serializer) serializeDeltalog(pack *SyncPack) (*storage.Blob, 
 	}
 	writer.Close()
 	return finalizer()
+}
+
+func hasBM25Function(schema *schemapb.CollectionSchema) bool {
+	for _, function := range schema.GetFunctions() {
+		if function.GetType() == schemapb.FunctionType_BM25 {
+			return true
+		}
+	}
+	return false
 }

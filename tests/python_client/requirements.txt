@@ -13,7 +13,7 @@ pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.5.0
 
-pytest-rerunfailures==9.1.1
+pytest-rerunfailures==14.0
 git+https://github.com/Projectplace/pytest-tags
 ndg-httpsclient
 pyopenssl
@@ -27,8 +27,9 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.5.0rc81
-pymilvus[bulk_writer]==2.5.0rc81
+pymilvus==2.5.0rc121
+pymilvus[bulk_writer]==2.5.0rc121
+
 
 # for customize config test
 python-benedict==0.24.3
@@ -48,6 +49,7 @@ loguru==0.7.0
 # util
 psutil==5.9.4
 pandas==1.5.3
+numpy==1.26.4
 tenacity==8.1.0
 rich==13.7.0
 # for standby test
@@ -62,9 +64,11 @@ fastparquet==2023.7.0
 # for bf16 datatype
 ml-dtypes==0.2.0
 
-# for text match
+# for full text search
 bm25s==0.2.0
 jieba==0.42.1
+Unidecode==1.3.8
+
 
 # for perf test
 locust==2.25.0

@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -106,7 +107,7 @@ func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
 		{"channel cp < flush ts", 13, false},
 	}
 
-	err := s.testServer.meta.UpdateChannelCheckpoint("ch1", &msgpb.MsgPosition{
+	err := s.testServer.meta.UpdateChannelCheckpoint(context.TODO(), "ch1", &msgpb.MsgPosition{
 		MsgID:     []byte{1},
 		Timestamp: 12,
 	})
@@ -157,7 +158,7 @@ func (s *ServerSuite) TestGetFlushState_BySegment() {
 			})
 
 			s.Require().NoError(err)
-			err = s.testServer.meta.UpdateChannelCheckpoint("ch1", &msgpb.MsgPosition{
+			err = s.testServer.meta.UpdateChannelCheckpoint(context.TODO(), "ch1", &msgpb.MsgPosition{
 				MsgID:     []byte{1},
 				Timestamp: 12,
 			})
@@ -245,13 +246,19 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 	segments := map[int64]commonpb.SegmentState{
 		0: commonpb.SegmentState_Flushed,
 		1: commonpb.SegmentState_Sealed,
+		2: commonpb.SegmentState_Sealed,
 	}
 	for segID, state := range segments {
+		numOfRows := int64(100)
+		if segID == 2 {
+			numOfRows = 0
+		}
 		info := &datapb.SegmentInfo{
 			ID:            segID,
 			InsertChannel: "ch1",
 			State:         state,
 			Level:         datapb.SegmentLevel_L1,
+			NumOfRows:     numOfRows,
 		}
 		err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
 		s.Require().NoError(err)
@@ -262,11 +269,14 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 		inSegID     int64
 		inDropped   bool
 		inFlushed   bool
+		numOfRows   int64
 
 		expectedState commonpb.SegmentState
 	}{
-		{"segID=0, flushed to dropped", 0, true, false, commonpb.SegmentState_Dropped},
-		{"segID=1, sealed to flushing", 1, false, true, commonpb.SegmentState_Flushing},
+		{"segID=0, flushed to dropped", 0, true, false, 100, commonpb.SegmentState_Dropped},
+		{"segID=1, sealed to flushing", 1, false, true, 100, commonpb.SegmentState_Flushing},
+		// empty segment flush should be dropped directly.
+		{"segID=2, sealed to dropped", 2, false, true, 0, commonpb.SegmentState_Dropped},
 	}
 
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key, "False")
@@ -286,10 +296,10 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 			s.NoError(err)
 			s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
 
-			segment := s.testServer.meta.GetSegment(test.inSegID)
+			segment := s.testServer.meta.GetSegment(context.TODO(), test.inSegID)
 			s.NotNil(segment)
 			s.EqualValues(0, len(segment.GetBinlogs()))
-			s.EqualValues(segment.NumOfRows, 0)
+			s.EqualValues(segment.NumOfRows, test.numOfRows)
 
 			flushing := []commonpb.SegmentState{commonpb.SegmentState_Flushed, commonpb.SegmentState_Flushing}
 			if lo.Contains(flushing, test.expectedState) {
@@ -305,7 +315,7 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	s.mockChMgr.EXPECT().Match(int64(0), "ch1").Return(true)
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 
-	segment := s.testServer.meta.GetHealthySegment(1)
+	segment := s.testServer.meta.GetHealthySegment(context.TODO(), 1)
 	s.Require().Nil(segment)
 	ctx := context.Background()
 	resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
@@ -349,7 +359,7 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	s.NoError(err)
 	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
 
-	segment = s.testServer.meta.GetHealthySegment(1)
+	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 1)
 	s.NotNil(segment)
 	s.EqualValues(datapb.SegmentLevel_L0, segment.GetLevel())
 }
@@ -361,6 +371,7 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	segments := map[int64]int64{
 		0: 0,
 		1: 0,
+		2: 0,
 	}
 	for segID, collID := range segments {
 		info := &datapb.SegmentInfo{
@@ -429,7 +440,7 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.NoError(err)
 	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
 
-	segment := s.testServer.meta.GetHealthySegment(1)
+	segment := s.testServer.meta.GetHealthySegment(context.TODO(), 1)
 	s.NotNil(segment)
 	binlogs := segment.GetBinlogs()
 	s.EqualValues(1, len(binlogs))
@@ -445,6 +456,24 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.EqualValues(segment.DmlPosition.ChannelName, "ch1")
 	s.EqualValues(segment.DmlPosition.MsgID, []byte{1, 2, 3})
 	s.EqualValues(segment.NumOfRows, 10)
+
+	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:           2,
+		CollectionID:        0,
+		Channel:             "ch1",
+		Field2BinlogPaths:   []*datapb.FieldBinlog{},
+		Field2StatslogPaths: []*datapb.FieldBinlog{},
+		CheckPoints:         []*datapb.CheckPoint{},
+		Flushed:             true,
+	})
+	s.NoError(err)
+	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
+	segment = s.testServer.meta.GetSegment(context.TODO(), 2)
+	s.NotNil(segment)
+	s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
 }
 
 func (s *ServerSuite) TestFlush_NormalCase() {
@@ -816,14 +845,14 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   10,
 			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		})
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(&model.Index{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			TenantID:     "",
 			CollectionID: 0,
 			FieldID:      2,
@@ -872,7 +901,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
+		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg1.ID,
 			BuildID:   seg1.ID,
 		})
@@ -882,7 +911,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
+		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg2.ID,
 			BuildID:   seg2.ID,
 		})
@@ -925,7 +954,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
 			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
@@ -1048,7 +1077,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(&model.Index{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			TenantID:     "",
 			CollectionID: 0,
 			FieldID:      2,
@@ -1056,7 +1085,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			IndexName:    "",
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
+		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: segment.ID,
 			BuildID:   segment.ID,
 		})
@@ -1101,7 +1130,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
 			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
@@ -1146,7 +1175,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
 			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
@@ -1190,7 +1219,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
 			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
@@ -1214,7 +1243,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.CreateIndex(&model.Index{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			TenantID:        "",
 			CollectionID:    0,
 			FieldID:         2,
@@ -1229,20 +1258,20 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
-			SegmentID:     seg4.ID,
-			CollectionID:  0,
-			PartitionID:   0,
-			NumRows:       100,
-			IndexID:       0,
-			BuildID:       0,
-			NodeID:        0,
-			IndexVersion:  1,
-			IndexState:    commonpb.IndexState_Finished,
-			FailReason:    "",
-			IsDeleted:     false,
-			CreateTime:    0,
-			IndexFileKeys: nil,
-			IndexSize:     0,
+			SegmentID:      seg4.ID,
+			CollectionID:   0,
+			PartitionID:    0,
+			NumRows:        100,
+			IndexID:        0,
+			BuildID:        0,
+			NodeID:         0,
+			IndexVersion:   1,
+			IndexState:     commonpb.IndexState_Finished,
+			FailReason:     "",
+			IsDeleted:      false,
+			CreatedUTCTime: 0,
+			IndexFileKeys:  nil,
+			IndexSize:      0,
 		})
 
 		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
@@ -1319,6 +1348,12 @@ func TestImportV2(t *testing.T) {
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
 
 		// alloc failed
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+		s.importMeta, err = NewImportMeta(context.TODO(), catalog)
+		assert.NoError(t, err)
 		alloc := allocator.NewMockAllocator(t)
 		alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, mockErr)
 		s.allocator = alloc
@@ -1330,12 +1365,12 @@ func TestImportV2(t *testing.T) {
 		s.allocator = alloc
 
 		// add job failed
-		catalog := mocks.NewDataCoordCatalog(t)
-		catalog.EXPECT().ListImportJobs().Return(nil, nil)
-		catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
-		catalog.EXPECT().ListImportTasks().Return(nil, nil)
-		catalog.EXPECT().SaveImportJob(mock.Anything).Return(mockErr)
-		s.importMeta, err = NewImportMeta(catalog)
+		catalog = mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(mockErr)
+		s.importMeta, err = NewImportMeta(context.TODO(), catalog)
 		assert.NoError(t, err)
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
 			Files: []*internalpb.ImportFile{
@@ -1347,12 +1382,12 @@ func TestImportV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-		jobs := s.importMeta.GetJobBy()
+		jobs := s.importMeta.GetJobBy(context.TODO())
 		assert.Equal(t, 0, len(jobs))
 		catalog.ExpectedCalls = lo.Filter(catalog.ExpectedCalls, func(call *mock.Call, _ int) bool {
 			return call.Method != "SaveImportJob"
 		})
-		catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 
 		// normal case
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
@@ -1365,8 +1400,15 @@ func TestImportV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
-		jobs = s.importMeta.GetJobBy()
+		jobs = s.importMeta.GetJobBy(context.TODO())
 		assert.Equal(t, 1, len(jobs))
+
+		// number of jobs reached the limit
+		Params.Save(paramtable.Get().DataCoordCfg.MaxImportJobNum.Key, "1")
+		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{})
+		assert.NoError(t, err)
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+		Params.Reset(paramtable.Get().DataCoordCfg.MaxImportJobNum.Key)
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {
@@ -1387,11 +1429,11 @@ func TestImportV2(t *testing.T) {
 
 		// job does not exist
 		catalog := mocks.NewDataCoordCatalog(t)
-		catalog.EXPECT().ListImportJobs().Return(nil, nil)
-		catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
-		catalog.EXPECT().ListImportTasks().Return(nil, nil)
-		catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
-		s.importMeta, err = NewImportMeta(catalog)
+		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+		s.importMeta, err = NewImportMeta(context.TODO(), catalog)
 		assert.NoError(t, err)
 		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
 			JobID: "-1",
@@ -1407,7 +1449,7 @@ func TestImportV2(t *testing.T) {
 				State:  internalpb.ImportJobState_Failed,
 			},
 		}
-		err = s.importMeta.AddJob(job)
+		err = s.importMeta.AddJob(context.TODO(), job)
 		assert.NoError(t, err)
 		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
 			JobID: "0",
@@ -1429,12 +1471,12 @@ func TestImportV2(t *testing.T) {
 
 		// normal case
 		catalog := mocks.NewDataCoordCatalog(t)
-		catalog.EXPECT().ListImportJobs().Return(nil, nil)
-		catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
-		catalog.EXPECT().ListImportTasks().Return(nil, nil)
-		catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
-		catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
-		s.importMeta, err = NewImportMeta(catalog)
+		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
+		s.importMeta, err = NewImportMeta(context.TODO(), catalog)
 		assert.NoError(t, err)
 		var job ImportJob = &importJob{
 			ImportJob: &datapb.ImportJob{
@@ -1443,7 +1485,7 @@ func TestImportV2(t *testing.T) {
 				Schema:       &schemapb.CollectionSchema{},
 			},
 		}
-		err = s.importMeta.AddJob(job)
+		err = s.importMeta.AddJob(context.TODO(), job)
 		assert.NoError(t, err)
 		var task ImportTask = &preImportTask{
 			PreImportTask: &datapb.PreImportTask{
@@ -1452,7 +1494,7 @@ func TestImportV2(t *testing.T) {
 				State:  datapb.ImportTaskStateV2_Failed,
 			},
 		}
-		err = s.importMeta.AddTask(task)
+		err = s.importMeta.AddTask(context.TODO(), task)
 		assert.NoError(t, err)
 		resp, err = s.ListImports(ctx, &internalpb.ListImportsRequestInternal{
 			CollectionID: 1,
@@ -1478,11 +1520,9 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 
 	// get collection failed
-	handler := NewNMockHandler(t)
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).
-		Return(nil, errors.New("mock err"))
-	s.handler = handler
-	assert.NoError(t, err)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
+	s.broker = broker
 	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{
 		Vchannel: "ch-1",
 	})
@@ -1493,16 +1533,20 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 	channelInfo := &datapb.VchannelInfo{
 		CollectionID:        0,
 		ChannelName:         "ch-1",
-		SeekPosition:        nil,
+		SeekPosition:        &msgpb.MsgPosition{Timestamp: 10},
 		UnflushedSegmentIds: []int64{1},
 		FlushedSegmentIds:   []int64{2},
 		DroppedSegmentIds:   []int64{3},
 		IndexedSegmentIds:   []int64{4},
 	}
 
-	handler = NewNMockHandler(t)
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).
-		Return(&collectionInfo{Schema: &schemapb.CollectionSchema{}}, nil)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Unset()
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Schema: &schemapb.CollectionSchema{},
+		}, nil)
+	handler := NewNMockHandler(t)
 	handler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).Return(channelInfo)
 	s.handler = handler
 

@@ -108,9 +108,9 @@ func newMockAllocator(t *testing.T) *allocator.MockAllocator {
 
 func newMock0Allocator(t *testing.T) *allocator.MockAllocator {
 	mock0Allocator := allocator.NewMockAllocator(t)
-	mock0Allocator.EXPECT().AllocID(mock.Anything).Return(0, nil).Maybe()
-	mock0Allocator.EXPECT().AllocTimestamp(mock.Anything).Return(0, nil).Maybe()
-	mock0Allocator.EXPECT().AllocN(mock.Anything).Return(0, 0, nil).Maybe()
+	mock0Allocator.EXPECT().AllocID(mock.Anything).Return(100, nil).Maybe()
+	mock0Allocator.EXPECT().AllocTimestamp(mock.Anything).Return(1000, nil).Maybe()
+	mock0Allocator.EXPECT().AllocN(mock.Anything).Return(100, 200, nil).Maybe()
 	return mock0Allocator
 }
 
@@ -684,6 +684,22 @@ func (m *mockRootCoordClient) SelectGrant(ctx context.Context, req *milvuspb.Sel
 
 func (m *mockRootCoordClient) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest, opts ...grpc.CallOption) (*internalpb.ListPolicyResponse, error) {
 	return &internalpb.ListPolicyResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
+}
+
+func (m *mockRootCoordClient) CreatePrivilegeGroup(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordClient) DropPrivilegeGroup(ctx context.Context, req *milvuspb.DropPrivilegeGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordClient) ListPrivilegeGroups(ctx context.Context, req *milvuspb.ListPrivilegeGroupsRequest, opts ...grpc.CallOption) (*milvuspb.ListPrivilegeGroupsResponse, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordClient) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("implement me")
 }
 
 type mockHandler struct {

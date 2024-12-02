@@ -4,6 +4,7 @@ option go_package = "github.com/milvus-io/milvus/internal/proto/internalpb";
 
 import "common.proto";
 import "schema.proto";
+import "milvus.proto";
 
 message GetTimeTickChannelRequest {
 }
@@ -96,6 +97,7 @@ message SubSearchRequest {
   string metricType = 9;
   int64 group_by_field_id = 10;
   int64 group_size = 11;
+  int64 field_id = 12;
 }
 
 message SearchRequest {
@@ -124,6 +126,8 @@ message SearchRequest {
   common.ConsistencyLevel consistency_level = 22;
   int64 group_by_field_id = 23;
   int64 group_size = 24;
+  int64 field_id = 25;
+  bool is_topk_reduce = 26;
 }
 
 message SubSearchResults {
@@ -159,6 +163,7 @@ message SearchResults {
   repeated SubSearchResults sub_results = 15;
   bool is_advanced = 16;
   int64 all_search_count = 17;
+  bool is_topk_reduce = 18;
 }
 
 message CostAggregation {
@@ -259,6 +264,7 @@ message ListPolicyResponse {
   common.Status status = 1;
   repeated string policy_infos = 2;
   repeated string user_roles = 3;
+  repeated milvus.PrivilegeGroupInfo privilege_groups = 4;
 }
 
 message ShowConfigurationsRequest {
@@ -304,8 +310,8 @@ enum ImportJobState {
   Importing = 3;
   Failed = 4;
   Completed = 5;
-  Stats = 6;
-  IndexBuilding = 7;
+  IndexBuilding = 6;
+  Stats = 7;
 }
 
 message ImportFile {

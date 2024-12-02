@@ -19,21 +19,23 @@ package http
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/http/healthz"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -238,4 +240,97 @@ func (m *MockIndicator) Health(ctx context.Context) commonpb.StateCode {
 
 func (m *MockIndicator) GetName() string {
 	return m.name
+}
+
+func TestRegisterWebUIHandler(t *testing.T) {
+	// Initialize the HTTP server
+	func() {
+		defer func() {
+			if err := recover(); err != nil {
+				fmt.Println("May the handler has been registered!", err)
+			}
+		}()
+		RegisterWebUIHandler()
+	}()
+
+	// Create a test server
+	ts := httptest.NewServer(http.DefaultServeMux)
+	defer ts.Close()
+
+	// Test cases
+	tests := []struct {
+		url          string
+		expectedCode int
+		expectedBody string
+	}{
+		{"/webui/", http.StatusOK, "<!doctype html>"},
+		{"/webui/index.html", http.StatusOK, "<!doctype html>"},
+		{"/webui/unknown", http.StatusOK, "<!doctype html>"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			req, err := http.NewRequest("GET", ts.URL+tt.url, nil)
+			assert.NoError(t, err)
+			req.Header.Set("Accept", "text/html")
+			resp, err := ts.Client().Do(req)
+			assert.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, tt.expectedCode, resp.StatusCode)
+
+			body := make([]byte, len(tt.expectedBody))
+			_, err = resp.Body.Read(body)
+			assert.NoError(t, err)
+			assert.Contains(t, strings.ToLower(string(body)), tt.expectedBody)
+		})
+	}
+}
+
+func TestHandleNotFound(t *testing.T) {
+	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+	fallbackHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Fallback"))
+	})
+
+	handler := handleNotFound(mainHandler, fallbackHandler)
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+	resp := w.Result()
+	body := make([]byte, 8)
+	resp.Body.Read(body)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "Fallback", string(body))
+}
+
+func TestServeFile(t *testing.T) {
+	fs := http.FS(staticFiles)
+	handler := serveFile("unknown", fs)
+
+	// No Accept in http header
+	{
+		req := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+		resp := w.Result()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	}
+
+	// unknown request file
+	{
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Header.Set("Accept", "text/html")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+		resp := w.Result()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	}
 }

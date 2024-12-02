@@ -48,7 +48,7 @@ func Test_describeDatabaseTask_Execute(t *testing.T) {
 	t.Run("describe with empty database name", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
-			Return(model.NewDefaultDatabase(), nil)
+			Return(model.NewDefaultDatabase(nil), nil)
 		core := newTestCore(withMeta(meta))
 
 		task := &describeDBTask{

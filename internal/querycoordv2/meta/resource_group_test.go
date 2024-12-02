@@ -5,8 +5,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestResourceGroup(t *testing.T) {
@@ -24,7 +27,10 @@ func TestResourceGroup(t *testing.T) {
 			ResourceGroup: "rg3",
 		}},
 	}
-	rg := NewResourceGroup("rg1", cfg)
+
+	nodeMgr := session.NewNodeManager()
+
+	rg := NewResourceGroup("rg1", cfg, nodeMgr)
 	cfg2 := rg.GetConfig()
 	assert.Equal(t, cfg.Requests.NodeNum, cfg2.Requests.NodeNum)
 
@@ -84,6 +90,9 @@ func TestResourceGroup(t *testing.T) {
 	}
 	assertion()
 
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 1,
+	}))
 	// Test AddNode
 	mrg = rg.CopyForWrite()
 	mrg.AssignNode(1)
@@ -108,6 +117,9 @@ func TestResourceGroup(t *testing.T) {
 	}
 	assertion()
 
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 2,
+	}))
 	// Test AddNode until meet requirement.
 	mrg = rg.CopyForWrite()
 	mrg.AssignNode(2)
@@ -132,6 +144,12 @@ func TestResourceGroup(t *testing.T) {
 	}
 	assertion()
 
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 3,
+	}))
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 4,
+	}))
 	// Test AddNode until exceed requirement.
 	mrg = rg.CopyForWrite()
 	mrg.AssignNode(3)
@@ -202,12 +220,21 @@ func TestResourceGroup(t *testing.T) {
 }
 
 func TestResourceGroupMeta(t *testing.T) {
+	nodeMgr := session.NewNodeManager()
+
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 1,
+	}))
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 2,
+	}))
+
 	rgMeta := &querypb.ResourceGroup{
 		Name:     "rg1",
 		Capacity: 1,
 		Nodes:    []int64{1, 2},
 	}
-	rg := NewResourceGroupFromMeta(rgMeta)
+	rg := NewResourceGroupFromMeta(rgMeta, nodeMgr)
 	assert.Equal(t, "rg1", rg.GetName())
 	assert.ElementsMatch(t, []int64{1, 2}, rg.GetNodes())
 	assert.Equal(t, 2, rg.NodeNum())
@@ -225,6 +252,9 @@ func TestResourceGroupMeta(t *testing.T) {
 	assert.False(t, rg.ContainNode(4))
 	assert.Error(t, rg.MeetRequirement())
 
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 4,
+	}))
 	rgMeta = &querypb.ResourceGroup{
 		Name:     "rg1",
 		Capacity: 1,
@@ -244,7 +274,7 @@ func TestResourceGroupMeta(t *testing.T) {
 			}},
 		},
 	}
-	rg = NewResourceGroupFromMeta(rgMeta)
+	rg = NewResourceGroupFromMeta(rgMeta, nodeMgr)
 	assert.Equal(t, "rg1", rg.GetName())
 	assert.ElementsMatch(t, []int64{1, 2, 4}, rg.GetNodes())
 	assert.Equal(t, 3, rg.NodeNum())
@@ -271,7 +301,7 @@ func TestResourceGroupMeta(t *testing.T) {
 		Capacity: defaultResourceGroupCapacity,
 		Nodes:    []int64{1, 2},
 	}
-	rg = NewResourceGroupFromMeta(rgMeta)
+	rg = NewResourceGroupFromMeta(rgMeta, nodeMgr)
 	assert.Equal(t, DefaultResourceGroupName, rg.GetName())
 	assert.ElementsMatch(t, []int64{1, 2}, rg.GetNodes())
 	assert.Equal(t, 2, rg.NodeNum())
@@ -311,7 +341,7 @@ func TestResourceGroupMeta(t *testing.T) {
 			}},
 		},
 	}
-	rg = NewResourceGroupFromMeta(rgMeta)
+	rg = NewResourceGroupFromMeta(rgMeta, nodeMgr)
 	assert.Equal(t, DefaultResourceGroupName, rg.GetName())
 	assert.ElementsMatch(t, []int64{1, 2}, rg.GetNodes())
 	assert.Equal(t, 2, rg.NodeNum())
@@ -331,4 +361,93 @@ func TestResourceGroupMeta(t *testing.T) {
 
 	newMeta = rg.GetMeta()
 	assert.Equal(t, int32(1000000), newMeta.Capacity)
+}
+
+func TestRGNodeFilter(t *testing.T) {
+	nodeMgr := session.NewNodeManager()
+
+	rg := NewResourceGroup("rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 3,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 3,
+		},
+		NodeFilter: &rgpb.ResourceGroupNodeFilter{
+			NodeLabels: []*commonpb.KeyValuePair{
+				{
+					Key:   "dc_name",
+					Value: "dc1",
+				},
+			},
+		},
+	}, nodeMgr)
+
+	rg.nodes = typeutil.NewSet[int64](1, 2, 3)
+
+	nodeInfo1 := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 1,
+		Labels: map[string]string{
+			"dc_name": "dc1",
+		},
+	})
+	nodeInfo2 := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 2,
+		Labels: map[string]string{
+			"dc_name": "dc1",
+		},
+	})
+	nodeInfo3 := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 3,
+		Labels: map[string]string{
+			"dc_name": "dc2",
+		},
+	})
+
+	nodeMgr.Add(nodeInfo1)
+	nodeMgr.Add(nodeInfo2)
+	nodeMgr.Add(nodeInfo3)
+
+	assert.True(t, rg.AcceptNode(1))
+	assert.True(t, rg.AcceptNode(2))
+	assert.False(t, rg.AcceptNode(3))
+	assert.Error(t, rg.MeetRequirement())
+	assert.Equal(t, rg.NodeNum(), 2)
+	assert.Len(t, rg.GetNodes(), 2)
+
+	rg2 := NewResourceGroup("rg2", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 1,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 1,
+		},
+		NodeFilter: &rgpb.ResourceGroupNodeFilter{
+			NodeLabels: []*commonpb.KeyValuePair{
+				{
+					Key:   "dc_name",
+					Value: "dc2",
+				},
+			},
+		},
+	}, nodeMgr)
+	assert.Equal(t, rg.SelectNodeForRG(rg2), int64(3))
+
+	rg3 := NewResourceGroup("rg2", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 1,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 1,
+		},
+		NodeFilter: &rgpb.ResourceGroupNodeFilter{
+			NodeLabels: []*commonpb.KeyValuePair{
+				{
+					Key:   "dc_name",
+					Value: "dc1",
+				},
+			},
+		},
+	}, nodeMgr)
+	assert.Equal(t, rg.SelectNodeForRG(rg3), int64(-1))
 }

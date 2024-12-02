@@ -2,13 +2,13 @@ package rootcoord
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
@@ -196,7 +197,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, PartitionMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(pm)}, nil)
+			Return([]string{"rootcoord/partitions/1/1"}, []string{string(pm)}, nil)
 
 		fieldMeta := &schemapb.FieldSchema{}
 		fm, err := proto.Marshal(fieldMeta)
@@ -206,7 +207,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(fm)}, nil)
+			Return([]string{"rootcoord/fields/1/1"}, []string{string(fm)}, nil)
 
 		functionMeta := &schemapb.FunctionSchema{}
 		fcm, err := proto.Marshal(functionMeta)
@@ -215,7 +216,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FunctionMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(fcm)}, nil)
+			Return([]string{"rootcoord/functions/1/1"}, []string{string(fcm)}, nil)
 
 		kc := Catalog{Snapshot: kv}
 		ret, err := kc.ListCollections(ctx, testDb, ts)
@@ -246,7 +247,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, PartitionMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(pm)}, nil)
+			Return([]string{"rootcoord/partitions/1/1"}, []string{string(pm)}, nil)
 
 		fieldMeta := &schemapb.FieldSchema{}
 		fm, err := proto.Marshal(fieldMeta)
@@ -256,7 +257,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(fm)}, nil)
+			Return([]string{"rootcoord/fields/1/1"}, []string{string(fm)}, nil)
 
 		functionMeta := &schemapb.FunctionSchema{}
 		fcm, err := proto.Marshal(functionMeta)
@@ -265,7 +266,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FunctionMetaPrefix)
 			}), ts).
-			Return([]string{"key"}, []string{string(fcm)}, nil)
+			Return([]string{"rootcoord/functions/1/1"}, []string{string(fcm)}, nil)
 
 		kv.On("MultiSaveAndRemove", mock.Anything, mock.Anything, ts).Return(nil)
 		kc := Catalog{Snapshot: kv}
@@ -1243,9 +1244,31 @@ func TestCatalog_CreateCollection(t *testing.T) {
 			Partitions: []*model.Partition{
 				{PartitionName: "test"},
 			},
-			Fields:    []*model.Field{{Name: "text", DataType: schemapb.DataType_VarChar}, {Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}},
-			Functions: []*model.Function{{Name: "test", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse"}}},
-			State:     pb.CollectionState_CollectionCreating,
+			Fields: []*model.Field{
+				{
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "enable_analyzer",
+							Value: "true",
+						},
+					},
+				},
+				{
+					Name:     "sparse",
+					DataType: schemapb.DataType_SparseFloatVector,
+				},
+			},
+			Functions: []*model.Function{
+				{
+					Name:             "test",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"text"},
+					OutputFieldNames: []string{"sparse"},
+				},
+			},
+			State: pb.CollectionState_CollectionCreating,
 		}
 		err := kc.CreateCollection(ctx, coll, 100)
 		assert.NoError(t, err)
@@ -1325,9 +1348,31 @@ func TestCatalog_DropCollection(t *testing.T) {
 			Partitions: []*model.Partition{
 				{PartitionName: "test"},
 			},
-			Fields:    []*model.Field{{Name: "text", DataType: schemapb.DataType_VarChar}, {Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}},
-			Functions: []*model.Function{{Name: "test", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse"}}},
-			State:     pb.CollectionState_CollectionDropping,
+			Fields: []*model.Field{
+				{
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "enable_analyzer",
+							Value: "true",
+						},
+					},
+				},
+				{
+					Name:     "sparse",
+					DataType: schemapb.DataType_SparseFloatVector,
+				},
+			},
+			Functions: []*model.Function{
+				{
+					Name:             "test",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"text"},
+					OutputFieldNames: []string{"sparse"},
+				},
+			},
+			State: pb.CollectionState_CollectionDropping,
 		}
 		err := kc.DropCollection(ctx, coll, 100)
 		assert.NoError(t, err)
@@ -2657,6 +2702,11 @@ func TestRBAC_Backup(t *testing.T) {
 	})
 	c.AlterUserRole(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: "user1"}, &milvuspb.RoleEntity{Name: "role1"}, milvuspb.OperateUserRoleType_AddUserToRole)
 
+	c.SavePrivilegeGroup(ctx, &milvuspb.PrivilegeGroupInfo{
+		GroupName:  "custom_group",
+		Privileges: []*milvuspb.PrivilegeEntity{{Name: "CreateCollection"}},
+	})
+
 	// test backup success
 	backup, err := c.BackupRBAC(ctx, util.DefaultTenant)
 	assert.NoError(t, err)
@@ -2667,6 +2717,9 @@ func TestRBAC_Backup(t *testing.T) {
 	assert.Equal(t, "user1", backup.Users[0].User)
 	assert.Equal(t, 1, len(backup.Users[0].Roles))
 	assert.Equal(t, 1, len(backup.Roles))
+	assert.Equal(t, 1, len(backup.PrivilegeGroups))
+	assert.Equal(t, "custom_group", backup.PrivilegeGroups[0].GroupName)
+	assert.Equal(t, "CreateCollection", backup.PrivilegeGroups[0].Privileges[0].Name)
 }
 
 func TestRBAC_Restore(t *testing.T) {
@@ -2712,8 +2765,15 @@ func TestRBAC_Restore(t *testing.T) {
 				DbName:     util.DefaultDBName,
 				Grantor: &milvuspb.GrantorEntity{
 					User:      &milvuspb.UserEntity{Name: "user1"},
-					Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+					Privilege: &milvuspb.PrivilegeEntity{Name: "Load"},
 				},
+			},
+		},
+
+		PrivilegeGroups: []*milvuspb.PrivilegeGroupInfo{
+			{
+				GroupName:  "custom_group",
+				Privileges: []*milvuspb.PrivilegeEntity{{Name: "CreateCollection"}},
 			},
 		},
 	}
@@ -2741,6 +2801,13 @@ func TestRBAC_Restore(t *testing.T) {
 	assert.Equal(t, "obj_name1", grants[0].ObjectName)
 	assert.Equal(t, "role1", grants[0].Role.Name)
 	assert.Equal(t, "user1", grants[0].Grantor.User.Name)
+	assert.Equal(t, "Load", grants[0].Grantor.Privilege.Name)
+	// check privilege group
+	privGroups, err := c.ListPrivilegeGroups(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, privGroups, 1)
+	assert.Equal(t, "custom_group", privGroups[0].GroupName)
+	assert.Equal(t, "CreateCollection", privGroups[0].Privileges[0].Name)
 
 	rbacMeta2 := &milvuspb.RBACMeta{
 		Users: []*milvuspb.UserInfo{
@@ -2777,8 +2844,15 @@ func TestRBAC_Restore(t *testing.T) {
 				DbName:     util.DefaultDBName,
 				Grantor: &milvuspb.GrantorEntity{
 					User:      &milvuspb.UserEntity{Name: "user2"},
-					Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+					Privilege: &milvuspb.PrivilegeEntity{Name: "Load"},
 				},
+			},
+		},
+
+		PrivilegeGroups: []*milvuspb.PrivilegeGroupInfo{
+			{
+				GroupName:  "custom_group2",
+				Privileges: []*milvuspb.PrivilegeEntity{{Name: "DropCollection"}},
 			},
 		},
 	}
@@ -2802,6 +2876,145 @@ func TestRBAC_Restore(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.Len(t, grants, 1)
+	assert.Equal(t, grants[0].Grantor.Privilege.Name, "Load")
+	// check privilege group
+	privGroups, err = c.ListPrivilegeGroups(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, privGroups, 1)
+	assert.Equal(t, "custom_group", privGroups[0].GroupName)
+	assert.Equal(t, "CreateCollection", privGroups[0].Privileges[0].Name)
+}
+
+func TestRBAC_PrivilegeGroup(t *testing.T) {
+	ctx := context.TODO()
+	group1 := "group1"
+	group2 := "group2"
+	key1 := BuildPrivilegeGroupkey(group1)
+	key2 := BuildPrivilegeGroupkey(group2)
+	privGroupInfo1 := &milvuspb.PrivilegeGroupInfo{GroupName: group1, Privileges: []*milvuspb.PrivilegeEntity{{Name: "priv10"}, {Name: "priv11"}}}
+	privGroupInfo2 := &milvuspb.PrivilegeGroupInfo{GroupName: group2, Privileges: []*milvuspb.PrivilegeEntity{{Name: "priv20"}, {Name: "priv21"}}}
+	v1, _ := proto.Marshal(privGroupInfo1)
+	v2, _ := proto.Marshal(privGroupInfo2)
+
+	t.Run("test GetPrivilegeGroup", func(t *testing.T) {
+		var (
+			kvmock = mocks.NewTxnKV(t)
+			c      = &Catalog{Txn: kvmock}
+		)
+		kvmock.EXPECT().Load(key1).Return(string(v1), nil)
+		kvmock.EXPECT().Load(key2).Return("", merr.ErrIoKeyNotFound)
+
+		tests := []struct {
+			description        string
+			expectedErr        error
+			groupName          string
+			expectedPrivileges []string
+		}{
+			{"group not found", fmt.Errorf("privilege group [%s] does not exist", group2), group2, nil},
+			{"valid group", nil, group1, []string{"priv10", "priv11"}},
+		}
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				group, err := c.GetPrivilegeGroup(ctx, test.groupName)
+				if test.expectedErr != nil {
+					assert.Error(t, err, test.expectedErr)
+				} else {
+					assert.NoError(t, err)
+					assert.ElementsMatch(t, getPrivilegeNames(group.Privileges), test.expectedPrivileges)
+				}
+			})
+		}
+	})
+
+	t.Run("test DropPrivilegeGroup", func(t *testing.T) {
+		var (
+			kvmock = mocks.NewTxnKV(t)
+			c      = &Catalog{Txn: kvmock}
+		)
+
+		kvmock.EXPECT().Remove(key1).Return(nil)
+		kvmock.EXPECT().Remove(key2).Return(errors.New("Mock remove failure"))
+
+		tests := []struct {
+			description string
+			isValid     bool
+			groupName   string
+		}{
+			{"valid group", true, group1},
+			{"remove failure", false, group2},
+		}
+
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				err := c.DropPrivilegeGroup(ctx, test.groupName)
+				if test.isValid {
+					assert.NoError(t, err)
+				} else {
+					assert.Error(t, err)
+				}
+			})
+		}
+	})
+
+	t.Run("test SavePrivilegeGroup", func(t *testing.T) {
+		var (
+			kvmock = mocks.NewTxnKV(t)
+			c      = &Catalog{Txn: kvmock}
+		)
+
+		kvmock.EXPECT().Save(key1, mock.Anything).Return(nil)
+		kvmock.EXPECT().Save(key2, mock.Anything).Return(nil)
+
+		tests := []struct {
+			description string
+			isValid     bool
+			group       *milvuspb.PrivilegeGroupInfo
+		}{
+			{"valid group with existing key", true, &milvuspb.PrivilegeGroupInfo{GroupName: group1, Privileges: []*milvuspb.PrivilegeEntity{{Name: "priv10"}, {Name: "priv11"}}}},
+			{"valid group without existing key", true, &milvuspb.PrivilegeGroupInfo{GroupName: group2, Privileges: []*milvuspb.PrivilegeEntity{{Name: "priv10"}, {Name: "priv11"}}}},
+		}
+
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				err := c.SavePrivilegeGroup(ctx, test.group)
+				if test.isValid {
+					assert.NoError(t, err)
+				} else {
+					assert.Error(t, err)
+				}
+			})
+		}
+	})
+
+	t.Run("test ListPrivilegeGroups", func(t *testing.T) {
+		var (
+			kvmock = mocks.NewTxnKV(t)
+			c      = &Catalog{Txn: kvmock}
+		)
+
+		kvmock.EXPECT().LoadWithPrefix(PrivilegeGroupPrefix).Return(
+			[]string{key1, key2},
+			[]string{string(v1), string(v2)},
+			nil,
+		)
+		groups, err := c.ListPrivilegeGroups(ctx)
+		assert.NoError(t, err)
+		groupNames := lo.Map(groups, func(g *milvuspb.PrivilegeGroupInfo, _ int) string {
+			return g.GroupName
+		})
+		assert.ElementsMatch(t, groupNames, []string{group1, group2})
+		assert.ElementsMatch(t, getPrivilegeNames(groups[0].Privileges), []string{"priv10", "priv11"})
+		assert.ElementsMatch(t, getPrivilegeNames(groups[1].Privileges), []string{"priv20", "priv21"})
+	})
+}
+
+func getPrivilegeNames(privileges []*milvuspb.PrivilegeEntity) []string {
+	if len(privileges) == 0 {
+		return []string{}
+	}
+	return lo.Map(privileges, func(p *milvuspb.PrivilegeEntity, _ int) string {
+		return p.Name
+	})
 }
 
 func TestCatalog_AlterDatabase(t *testing.T) {

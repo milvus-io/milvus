@@ -6,8 +6,10 @@ import (
 )
 
 type LoadParams struct {
-	CollectionName string
-	Replica        int
+	CollectionName       string
+	Replica              int
+	LoadFields           []string
+	SkipLoadDynamicField bool
 }
 
 func NewLoadParams(collectionName string) *LoadParams {
@@ -18,6 +20,16 @@ func NewLoadParams(collectionName string) *LoadParams {
 
 func (opt *LoadParams) TWithReplica(replica int) *LoadParams {
 	opt.Replica = replica
+	return opt
+}
+
+func (opt *LoadParams) TWithLoadFields(loadFields ...string) *LoadParams {
+	opt.LoadFields = loadFields
+	return opt
+}
+
+func (opt *LoadParams) TWithSkipLoadDynamicField(skipFlag bool) *LoadParams {
+	opt.SkipLoadDynamicField = skipFlag
 	return opt
 }
 
@@ -49,6 +61,23 @@ func GenSearchVectors(nq int, dim int, dataType entity.FieldType) []entity.Vecto
 		for i := 0; i < nq; i++ {
 			vec := common.GenSparseVector(dim)
 			vectors = append(vectors, vec)
+		}
+	}
+	return vectors
+}
+
+func GenFp16OrBf16VectorsFromFloatVector(nq int, dim int, dataType entity.FieldType) []entity.Vector {
+	vectors := make([]entity.Vector, 0, nq)
+	switch dataType {
+	case entity.FieldTypeFloat16Vector:
+		for i := 0; i < nq; i++ {
+			vector := entity.FloatVector(common.GenFloatVector(dim)).ToFloat16Vector()
+			vectors = append(vectors, vector)
+		}
+	case entity.FieldTypeBFloat16Vector:
+		for i := 0; i < nq; i++ {
+			vector := entity.FloatVector(common.GenFloatVector(dim)).ToBFloat16Vector()
+			vectors = append(vectors, vector)
 		}
 	}
 	return vectors

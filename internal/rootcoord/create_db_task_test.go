@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -51,10 +52,9 @@ func Test_CreateDBTask_Prepare(t *testing.T) {
 	t.Run("check database number fail", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		cfgMaxDatabaseNum := Params.RootCoordCfg.MaxDatabaseNum.GetAsInt()
-		len := cfgMaxDatabaseNum + 1
-		dbs := make([]*model.Database, 0, len)
-		for i := 0; i < len; i++ {
-			dbs = append(dbs, model.NewDefaultDatabase())
+		dbs := make([]*model.Database, 0, cfgMaxDatabaseNum)
+		for i := 0; i < cfgMaxDatabaseNum; i++ {
+			dbs = append(dbs, model.NewDefaultDatabase(nil))
 		}
 		meta.On("ListDatabases",
 			mock.Anything,
@@ -73,7 +73,7 @@ func Test_CreateDBTask_Prepare(t *testing.T) {
 			},
 		}
 		err := task.Prepare(context.Background())
-		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrDatabaseNumLimitExceeded)
 	})
 
 	t.Run("ok", func(t *testing.T) {
@@ -81,7 +81,7 @@ func Test_CreateDBTask_Prepare(t *testing.T) {
 		meta.On("ListDatabases",
 			mock.Anything,
 			mock.Anything).
-			Return([]*model.Database{model.NewDefaultDatabase()}, nil)
+			Return([]*model.Database{model.NewDefaultDatabase(nil)}, nil)
 
 		core := newTestCore(withMeta(meta), withValidIDAllocator())
 		paramtable.Get().Save(Params.RootCoordCfg.MaxDatabaseNum.Key, strconv.Itoa(10))

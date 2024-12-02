@@ -187,7 +187,7 @@ func TestAlterDatabase(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestDescribeDatabase(t *testing.T) {
+func TestDescribeDatabaseTask(t *testing.T) {
 	rc := mocks.NewMockRootCoordClient(t)
 
 	rc.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{}, nil)

@@ -148,7 +148,8 @@ var (
 	// this operation is denied because the user not authorized, user need to login in first
 	ErrPrivilegeNotAuthenticated = newMilvusError("not authenticated", 1400, false)
 	// this operation is denied because the user has no permission to do this, user need higher privilege
-	ErrPrivilegeNotPermitted = newMilvusError("privilege not permitted", 1401, false)
+	ErrPrivilegeNotPermitted     = newMilvusError("privilege not permitted", 1401, false)
+	ErrPrivilegeGroupInvalidName = newMilvusError("invalid privilege group name", 1402, false)
 
 	// Alias related
 	ErrAliasNotFound               = newMilvusError("alias not found", 1600, false)
@@ -180,8 +181,11 @@ var (
 	ErrSegcore                    = newMilvusError("segcore error", 2000, false)
 	ErrSegcoreUnsupported         = newMilvusError("segcore unsupported error", 2001, false)
 	ErrSegcorePretendFinished     = newMilvusError("segcore pretend finished", 2002, false)
-	ErrSegcoreFollyOtherException = newMilvusError("segcore folly other exception", 2200, false) // throw from segcore.
-	ErrSegcoreFollyCancel         = newMilvusError("segcore Future was canceled", 2201, false)   // throw from segcore.
+	ErrSegcoreFollyOtherException = newMilvusError("segcore folly other exception", 2037, false) // throw from segcore.
+	ErrSegcoreFollyCancel         = newMilvusError("segcore Future was canceled", 2038, false)   // throw from segcore.
+	ErrSegcoreOutOfRange          = newMilvusError("segcore out of range", 2039, false)          // throw from segcore.
+	ErrSegcoreGCPNativeError      = newMilvusError("segcore GCP native error", 2040, false)      // throw from segcore.
+	KnowhereError                 = newMilvusError("knowhere error", 2099, false)                // throw from segcore.
 
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError

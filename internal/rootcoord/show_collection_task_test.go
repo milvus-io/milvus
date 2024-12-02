@@ -169,7 +169,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock error: select user")).Once()
 
 		task := &showCollectionTask{
@@ -189,7 +189,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return([]*milvuspb.UserResult{}, nil).Once()
 
 		task := &showCollectionTask{
@@ -210,7 +210,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return([]*milvuspb.UserResult{
 				{
 					User: &milvuspb.UserEntity{
@@ -250,7 +250,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return([]*milvuspb.UserResult{
 				{
 					User: &milvuspb.UserEntity{
@@ -263,7 +263,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 					},
 				},
 			}, nil).Once()
-		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return(nil, errors.New("mock error: select grant")).Once()
+		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock error: select grant")).Once()
 
 		task := &showCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -281,7 +281,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return([]*milvuspb.UserResult{
 				{
 					User: &milvuspb.UserEntity{
@@ -294,7 +294,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 					},
 				},
 			}, nil).Once()
-		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return([]*milvuspb.GrantEntity{
+		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything, mock.Anything).Return([]*milvuspb.GrantEntity{
 			{
 				Object: &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
 				Grantor: &milvuspb.GrantorEntity{
@@ -331,7 +331,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return([]*milvuspb.UserResult{
 				{
 					User: &milvuspb.UserEntity{
@@ -344,7 +344,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 					},
 				},
 			}, nil).Once()
-		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return([]*milvuspb.GrantEntity{
+		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything, mock.Anything).Return([]*milvuspb.GrantEntity{
 			{
 				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 				ObjectName: util.AnyWord,
@@ -376,7 +376,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return([]*milvuspb.UserResult{
 				{
 					User: &milvuspb.UserEntity{
@@ -389,7 +389,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 					},
 				},
 			}, nil).Once()
-		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return([]*milvuspb.GrantEntity{
+		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything, mock.Anything).Return([]*milvuspb.GrantEntity{
 			{
 				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 				ObjectName: "a",

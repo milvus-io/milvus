@@ -7,20 +7,20 @@ import (
 )
 
 type SegmentIndex struct {
-	SegmentID     int64
-	CollectionID  int64
-	PartitionID   int64
-	NumRows       int64
-	IndexID       int64
-	BuildID       int64
-	NodeID        int64
-	IndexVersion  int64
-	IndexState    commonpb.IndexState
-	FailReason    string
-	IsDeleted     bool
-	CreateTime    uint64
-	IndexFileKeys []string
-	IndexSize     uint64
+	SegmentID      int64
+	CollectionID   int64
+	PartitionID    int64
+	NumRows        int64
+	IndexID        int64
+	BuildID        int64
+	NodeID         int64
+	IndexVersion   int64
+	IndexState     commonpb.IndexState
+	FailReason     string
+	IsDeleted      bool
+	CreatedUTCTime uint64
+	IndexFileKeys  []string
+	IndexSize      uint64
 	// deprecated
 	WriteHandoff        bool
 	CurrentIndexVersion int32
@@ -44,7 +44,7 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 		FailReason:          segIndex.FailReason,
 		IndexVersion:        segIndex.IndexVersion,
 		IsDeleted:           segIndex.Deleted,
-		CreateTime:          segIndex.CreateTime,
+		CreatedUTCTime:      segIndex.CreateTime,
 		IndexFileKeys:       common.CloneStringList(segIndex.IndexFileKeys),
 		IndexSize:           segIndex.SerializeSize,
 		WriteHandoff:        segIndex.WriteHandoff,
@@ -70,7 +70,7 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 		IndexVersion:        segIdx.IndexVersion,
 		IndexFileKeys:       common.CloneStringList(segIdx.IndexFileKeys),
 		Deleted:             segIdx.IsDeleted,
-		CreateTime:          segIdx.CreateTime,
+		CreateTime:          segIdx.CreatedUTCTime,
 		SerializeSize:       segIdx.IndexSize,
 		WriteHandoff:        segIdx.WriteHandoff,
 		CurrentIndexVersion: segIdx.CurrentIndexVersion,
@@ -90,7 +90,7 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		FailReason:          segIndex.FailReason,
 		IndexVersion:        segIndex.IndexVersion,
 		IsDeleted:           segIndex.IsDeleted,
-		CreateTime:          segIndex.CreateTime,
+		CreatedUTCTime:      segIndex.CreatedUTCTime,
 		IndexFileKeys:       common.CloneStringList(segIndex.IndexFileKeys),
 		IndexSize:           segIndex.IndexSize,
 		WriteHandoff:        segIndex.WriteHandoff,

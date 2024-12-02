@@ -659,6 +659,10 @@ func (c *mockPulsarClient) TopicPartitions(topic string) ([]string, error) {
 func (c *mockPulsarClient) Close() {
 }
 
+func (c *mockPulsarClient) NewTransaction(duration time.Duration) (pulsar.Transaction, error) {
+	return nil, hackPulsarError(pulsar.ConnectError)
+}
+
 func TestPulsarClient_SubscribeExclusiveFail(t *testing.T) {
 	t.Run("exclusive pulsar consumer failure", func(t *testing.T) {
 		pc := &pulsarClient{

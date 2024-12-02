@@ -18,16 +18,42 @@ package datacoord
 
 import (
 	"context"
+	"strconv"
 	"sync"
+	"time"
 
+	"github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+func newCompactionTaskStats(task *datapb.CompactionTask) *metricsinfo.CompactionTask {
+	return &metricsinfo.CompactionTask{
+		PlanID:       task.PlanID,
+		CollectionID: task.CollectionID,
+		Type:         task.Type.String(),
+		State:        task.State.String(),
+		FailReason:   task.FailReason,
+		StartTime:    typeutil.TimestampToString(uint64(task.StartTime)),
+		EndTime:      typeutil.TimestampToString(uint64(task.EndTime)),
+		TotalRows:    task.TotalRows,
+		InputSegments: lo.Map(task.InputSegments, func(t int64, i int) string {
+			return strconv.FormatInt(t, 10)
+		}),
+		ResultSegments: lo.Map(task.ResultSegments, func(t int64, i int) string {
+			return strconv.FormatInt(t, 10)
+		}),
+	}
+}
 
 type compactionTaskMeta struct {
 	sync.RWMutex
@@ -35,6 +61,7 @@ type compactionTaskMeta struct {
 	catalog metastore.DataCoordCatalog
 	// currently only clustering compaction task is stored in persist meta
 	compactionTasks map[int64]map[int64]*datapb.CompactionTask // triggerID -> planID
+	taskStats       *expirable.LRU[UniqueID, *metricsinfo.CompactionTask]
 }
 
 func newCompactionTaskMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*compactionTaskMeta, error) {
@@ -43,6 +70,7 @@ func newCompactionTaskMeta(ctx context.Context, catalog metastore.DataCoordCatal
 		ctx:             ctx,
 		catalog:         catalog,
 		compactionTasks: make(map[int64]map[int64]*datapb.CompactionTask, 0),
+		taskStats:       expirable.NewLRU[UniqueID, *metricsinfo.CompactionTask](32, nil, time.Minute*15),
 	}
 	if err := csm.reloadFromKV(); err != nil {
 		return nil, err
@@ -57,6 +85,13 @@ func (csm *compactionTaskMeta) reloadFromKV() error {
 		return err
 	}
 	for _, task := range compactionTasks {
+		// To maintain compatibility with versions ≤v2.4.12, which use `ResultSegments` as preallocate segment IDs.
+		if task.PreAllocatedSegmentIDs == nil && len(task.GetResultSegments()) == 2 {
+			task.PreAllocatedSegmentIDs = &datapb.IDRange{
+				Begin: task.GetResultSegments()[0],
+				End:   task.GetResultSegments()[1],
+			}
+		}
 		csm.saveCompactionTaskMemory(task)
 	}
 	log.Info("DataCoord compactionTaskMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
@@ -111,29 +146,30 @@ func (csm *compactionTaskMeta) GetCompactionTasksByTriggerID(triggerID int64) []
 	return res
 }
 
-func (csm *compactionTaskMeta) SaveCompactionTask(task *datapb.CompactionTask) error {
+func (csm *compactionTaskMeta) SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
 	csm.Lock()
 	defer csm.Unlock()
-	if err := csm.catalog.SaveCompactionTask(csm.ctx, task); err != nil {
+	if err := csm.catalog.SaveCompactionTask(ctx, task); err != nil {
 		log.Error("meta update: update compaction task fail", zap.Error(err))
 		return err
 	}
-	return csm.saveCompactionTaskMemory(task)
+	csm.saveCompactionTaskMemory(task)
+	return nil
 }
 
-func (csm *compactionTaskMeta) saveCompactionTaskMemory(task *datapb.CompactionTask) error {
+func (csm *compactionTaskMeta) saveCompactionTaskMemory(task *datapb.CompactionTask) {
 	_, triggerIDExist := csm.compactionTasks[task.TriggerID]
 	if !triggerIDExist {
 		csm.compactionTasks[task.TriggerID] = make(map[int64]*datapb.CompactionTask, 0)
 	}
 	csm.compactionTasks[task.TriggerID][task.PlanID] = task
-	return nil
+	csm.taskStats.Add(task.PlanID, newCompactionTaskStats(task))
 }
 
-func (csm *compactionTaskMeta) DropCompactionTask(task *datapb.CompactionTask) error {
+func (csm *compactionTaskMeta) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
 	csm.Lock()
 	defer csm.Unlock()
-	if err := csm.catalog.DropCompactionTask(csm.ctx, task); err != nil {
+	if err := csm.catalog.DropCompactionTask(ctx, task); err != nil {
 		log.Error("meta update: drop compaction task fail", zap.Int64("triggerID", task.TriggerID), zap.Int64("planID", task.PlanID), zap.Int64("collectionID", task.CollectionID), zap.Error(err))
 		return err
 	}
@@ -145,4 +181,13 @@ func (csm *compactionTaskMeta) DropCompactionTask(task *datapb.CompactionTask) e
 		delete(csm.compactionTasks, task.TriggerID)
 	}
 	return nil
+}
+
+func (csm *compactionTaskMeta) TaskStatsJSON() string {
+	tasks := csm.taskStats.Values()
+	ret, err := json.Marshal(tasks)
+	if err != nil {
+		return ""
+	}
+	return string(ret)
 }

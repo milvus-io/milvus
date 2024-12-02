@@ -17,7 +17,7 @@ type DeltalogIterator struct {
 	disposedOnce sync.Once
 	disposed     atomic.Bool
 
-	data  *storage.DeleteData
+	data  *storage.DeltaData
 	blobs []*storage.Blob
 	label *Label
 	pos   int
@@ -50,8 +50,8 @@ func (d *DeltalogIterator) Next() (*LabeledRowData, error) {
 	}
 
 	row := &DeltalogRow{
-		Pk:        d.data.Pks[d.pos],
-		Timestamp: d.data.Tss[d.pos],
+		Pk:        d.data.DeletePks().Get(d.pos),
+		Timestamp: d.data.DeleteTimestamps()[d.pos],
 	}
 	d.pos++
 
@@ -76,7 +76,7 @@ func (d *DeltalogIterator) hasNext() bool {
 		d.data = dData
 		d.blobs = nil
 	}
-	return int64(d.pos) < d.data.RowCount
+	return int64(d.pos) < d.data.DeleteRowCount()
 }
 
 func (d *DeltalogIterator) isDisposed() bool {

@@ -14,7 +14,6 @@ from npy_append_array import NpyAppendArray
 from faker import Faker
 from pathlib import Path
 from minio import Minio
-from pymilvus import DataType, CollectionSchema
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
 from common.common_params import ExprCheckParams
@@ -24,6 +23,12 @@ import pickle
 from collections import Counter
 import bm25s
 import jieba
+import re
+
+from pymilvus import CollectionSchema, DataType, FunctionType, Function
+
+from bm25s.tokenization import Tokenizer
+
 fake = Faker()
 
 
@@ -75,24 +80,169 @@ class ParamInfo:
 
 param_info = ParamInfo()
 
+en_vocabularies_distribution = {
+    "hello": 0.01,
+    "milvus": 0.01,
+    "vector": 0.01,
+    "database": 0.01
+}
 
-def analyze_documents(texts, language="en"):
-    stopwords = "en"
-    if language in ["en", "english"]:
-        stopwords = "en"
-    if language in ["zh", "cn", "chinese"]:
-        stopword = " "
-        new_texts = []
-        for doc in texts:
-            seg_list = jieba.cut(doc, cut_all=True)
-            new_texts.append(" ".join(seg_list))
-        texts = new_texts
-        stopwords = [stopword]
-    # Start timing
-    t0 = time.time()
+zh_vocabularies_distribution = {
+    "你好": 0.01,
+    "向量": 0.01,
+    "数据": 0.01,
+    "库": 0.01
+}
+
+def patch_faker_text(fake_instance, vocabularies_distribution):
+    """
+    Monkey patch the text() method of a Faker instance to include custom vocabulary.
+    Each word in vocabularies_distribution has an independent chance to be inserted.
+
+    Args:
+        fake_instance: Faker instance to patch
+        vocabularies_distribution: Dictionary where:
+            - key: word to insert
+            - value: probability (0-1) of inserting this word into each sentence
+
+    Example:
+        vocabularies_distribution = {
+            "hello": 0.1,    # 10% chance to insert "hello" in each sentence
+            "milvus": 0.1,   # 10% chance to insert "milvus" in each sentence
+        }
+    """
+    original_text = fake_instance.text
+
+    def new_text(nb_sentences=100, *args, **kwargs):
+        sentences = []
+        # Split original text into sentences
+        original_sentences = original_text(nb_sentences).split('.')
+        original_sentences = [s.strip() for s in original_sentences if s.strip()]
+
+        for base_sentence in original_sentences:
+            words = base_sentence.split()
+
+            # Independently decide whether to insert each word
+            for word, probability in vocabularies_distribution.items():
+                if random.random() < probability:
+                    # Choose random position to insert the word
+                    insert_pos = random.randint(0, len(words))
+                    words.insert(insert_pos, word)
+
+            # Reconstruct the sentence
+            base_sentence = ' '.join(words)
+
+            # Ensure proper capitalization
+            base_sentence = base_sentence[0].upper() + base_sentence[1:]
+            sentences.append(base_sentence)
+
+        return '. '.join(sentences) + '.'
+
+
+
+    # Replace the original text method with our custom one
+    fake_instance.text = new_text
+
+
+
+
+
+def get_bm25_ground_truth(corpus, queries, top_k=100, language="en"):
+    """
+    Get the ground truth for BM25 search.
+    :param corpus: The corpus of documents
+    :param queries: The query string or list of query strings
+    :return: The ground truth for BM25 search
+    """
+
+    def remove_punctuation(text):
+        text = text.strip()
+        text = text.replace("\n", " ")
+        return re.sub(r'[^\w\s]', ' ', text)
 
     # Tokenize the corpus
-    tokenized = bm25s.tokenize(texts, lower=True, stopwords=stopwords)
+    def jieba_split(text):
+        text_without_punctuation = remove_punctuation(text)
+        return jieba.lcut(text_without_punctuation)
+
+    stopwords = "english" if language in ["en", "english"] else [" "]
+    stemmer = None
+    if language in ["zh", "cn", "chinese"]:
+        splitter = jieba_split
+        tokenizer = Tokenizer(
+            stemmer=stemmer, splitter=splitter, stopwords=stopwords
+        )
+    else:
+        tokenizer = Tokenizer(
+            stemmer=stemmer, stopwords=stopwords
+        )
+    corpus_tokens = tokenizer.tokenize(corpus, return_as="tuple")
+    retriever = bm25s.BM25()
+    retriever.index(corpus_tokens)
+    query_tokens = tokenizer.tokenize(queries,return_as="tuple")
+    results, scores = retriever.retrieve(query_tokens, corpus=corpus, k=top_k)
+    return results, scores
+
+
+def custom_tokenizer(language="en"):
+    def remove_punctuation(text):
+        text = text.strip()
+        text = text.replace("\n", " ")
+        return re.sub(r'[^\w\s]', ' ', text)
+
+    # Tokenize the corpus
+    def jieba_split(text):
+        text_without_punctuation = remove_punctuation(text)
+        return jieba.cut_for_search(text_without_punctuation)
+
+    def blank_space_split(text):
+        text_without_punctuation = remove_punctuation(text)
+        return text_without_punctuation.split()
+
+    stopwords = [" "]
+    stemmer = None
+    if language in ["zh", "cn", "chinese"]:
+        splitter = jieba_split
+        tokenizer = Tokenizer(
+            stemmer=stemmer, splitter=splitter, stopwords=stopwords
+        )
+    else:
+        splitter = blank_space_split
+        tokenizer = Tokenizer(
+            stemmer=stemmer, splitter= splitter, stopwords=stopwords
+        )
+    return tokenizer
+
+def manual_check_text_match(df, word, col):
+    id_list = []
+    for i in range(len(df)):
+        row = df.iloc[i]
+        # log.info(f"word :{word}, row: {row[col]}")
+        if word in row[col]:
+            id_list.append(row["id"])
+    return id_list
+
+
+def get_top_english_tokens(counter, n=10):
+    english_pattern = re.compile(r'^[a-zA-Z]+$')
+
+    english_tokens = {
+        word: freq
+        for word, freq in counter.items()
+        if english_pattern.match(str(word))
+    }
+    english_counter = Counter(english_tokens)
+    return english_counter.most_common(n)
+
+def analyze_documents(texts, language="en"):
+
+    tokenizer = custom_tokenizer(language)
+    new_texts = []
+    for text in texts:
+        if isinstance(text, str):
+            new_texts.append(text)
+    # Tokenize the corpus
+    tokenized = tokenizer.tokenize(new_texts, return_as="tuple", show_progress=False)
     # log.info(f"Tokenized: {tokenized}")
     # Create a frequency counter
     freq = Counter()
@@ -106,31 +256,32 @@ def analyze_documents(texts, language="en"):
     # Convert token ids back to words
     word_freq = Counter({id_to_word[token_id]: count for token_id, count in freq.items()})
 
-    # End timing
-    tt = time.time() - t0
-    log.info(f"Analyze document cost time: {tt}")
 
+    # if language in ["zh", "cn", "chinese"], remove the long words
+    # this is a trick to make the text match test case verification simple, because the long word can be still split
+    if language in ["zh", "cn", "chinese"]:
+        word_freq = Counter({word: count for word, count in word_freq.items() if 1< len(word) <= 3})
+    log.info(f"word freq {word_freq.most_common(10)}")
     return word_freq
+
+
+def check_token_overlap(text_a, text_b, language="en"):
+    word_freq_a = analyze_documents([text_a], language)
+    word_freq_b = analyze_documents([text_b], language)
+    overlap = set(word_freq_a.keys()).intersection(set(word_freq_b.keys()))
+    return overlap, word_freq_a, word_freq_b
 
 
 def split_dataframes(df, fields, language="en"):
     df_copy = df.copy()
-    if language in ["zh", "cn", "chinese"]:
-        for col in fields:
-            new_texts = []
-            for doc in df[col]:
-                seg_list = jieba.cut(doc, cut_all=True)
-                new_texts.append(list(seg_list))
-            df_copy[col] = new_texts
-        return df_copy
     for col in fields:
+        tokenizer = custom_tokenizer(language)
         texts = df[col].to_list()
-        tokenized = bm25s.tokenize(texts, lower=True, stopwords="en")
+        tokenized = tokenizer.tokenize(texts, return_as="tuple")
         new_texts = []
         id_vocab_map = {id: word for word, id in tokenized.vocab.items()}
         for doc_ids in tokenized.ids:
             new_texts.append([id_vocab_map[token_id] for token_id in doc_ids])
-
         df_copy[col] = new_texts
     return df_copy
 
@@ -162,7 +313,7 @@ def generate_text_match_expr(query_dict):
 
     def process_node(node):
         if isinstance(node, dict) and 'field' in node and 'value' in node:
-            return f"TextMatch({node['field']}, '{node['value']}')"
+            return f"TEXT_MATCH({node['field']}, '{node['value']}')"
         elif isinstance(node, dict) and 'not' in node:
             return f"not {process_node(node['not'])}"
         elif isinstance(node, list):
@@ -638,10 +789,15 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
 
 def gen_all_datatype_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                        auto_id=False, dim=ct.default_dim, enable_dynamic_field=True, **kwargs):
+    analyzer_params = {
+        "tokenizer": "standard",
+    }
     fields = [
         gen_int64_field(),
         gen_float_field(),
         gen_string_field(),
+        gen_string_field(name="text", max_length=2000, enable_analyzer=True, enable_match=True,
+                         analyzer_params=analyzer_params),
         gen_json_field(),
         gen_array_field(name="array_int", element_type=DataType.INT64),
         gen_array_field(name="array_float", element_type=DataType.FLOAT),
@@ -649,12 +805,21 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         gen_array_field(name="array_bool", element_type=DataType.BOOL),
         gen_float_vec_field(dim=dim),
         gen_float_vec_field(name="image_emb", dim=dim),
-        gen_float_vec_field(name="text_emb", dim=dim),
+        gen_float_vec_field(name="text_sparse_emb", vector_data_type="SPARSE_FLOAT_VECTOR"),
         gen_float_vec_field(name="voice_emb", dim=dim),
     ]
+
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
                                                                     enable_dynamic_field=enable_dynamic_field, **kwargs)
+    bm25_function = Function(
+        name=f"text",
+        function_type=FunctionType.BM25,
+        input_field_names=["text"],
+        output_field_names=["text_sparse_emb"],
+        params={},
+    )
+    schema.add_function(bm25_function)
     return schema
 
 
@@ -670,7 +835,7 @@ def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.de
             log.error("Primary key only support int or varchar")
             assert False
     else:
-        fields = [gen_int64_field(), gen_float_vec_field(dim=dim), gen_json_field(),
+        fields = [gen_int64_field(), gen_float_vec_field(dim=dim), gen_json_field(nullable=True),
                   gen_array_field(name=ct.default_int32_array_field_name, element_type=DataType.INT32,
                                   max_capacity=max_capacity),
                   gen_array_field(name=ct.default_float_array_field_name, element_type=DataType.FLOAT,
@@ -678,7 +843,7 @@ def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.de
                   gen_array_field(name=ct.default_string_array_field_name, element_type=DataType.VARCHAR,
                                   max_capacity=max_capacity, max_length=max_length, nullable=True)]
         if with_json is False:
-            fields.remove(gen_json_field())
+            fields.remove(gen_json_field(nullable=True))
 
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
@@ -950,11 +1115,24 @@ def gen_vectors(nb, dim, vector_data_type="FLOAT_VECTOR"):
         vectors = gen_bf16_vectors(nb, dim)[1]
     elif vector_data_type == "SPARSE_FLOAT_VECTOR":
         vectors = gen_sparse_vectors(nb, dim)
-
+    elif vector_data_type == "TEXT_SPARSE_VECTOR":
+        vectors = gen_text_vectors(nb)
+    else:
+        log.error(f"Invalid vector data type: {vector_data_type}")
+        raise Exception(f"Invalid vector data type: {vector_data_type}")
     if dim > 1:
         if vector_data_type == "FLOAT_VECTOR":
             vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
             vectors = vectors.tolist()
+    return vectors
+
+
+def gen_text_vectors(nb, language="en"):
+
+    fake = Faker("en_US")
+    if language == "zh":
+        fake = Faker("zh_CN")
+    vectors = [" milvus " + fake.text() for _ in range(nb)]
     return vectors
 
 
@@ -1143,8 +1321,9 @@ def gen_json_data_for_diff_json_types(nb=ct.default_nb, start=0, json_type="json
     Method: gen json data for different json types. Refer to RFC7159
     """
     if json_type == "json_embedded_object":                 # a json object with an embedd json object
-        return [{json_type: {"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i)}, "float": i*1.0}, "str": str(i)}
-                       for i in range(start, start + nb)]
+        return [{json_type: {"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i), "level2_array": [i for i in range(i, i + 10)]},
+                             "float": i*1.0}, "str": str(i), "array": [i for i in range(i, i + 10)], "bool": bool(i)}
+                for i in range(start, start + nb)]
     if json_type == "json_objects_array":                   # a json-objects array with 2 json objects
         return [[{"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i)}, "float": i*1.0, "str": str(i)},
                  {"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i)}, "float": i*1.0, "str": str(i)}
@@ -1342,7 +1521,7 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
         null_number = int(nb * nullable_fields[ct.default_bool_field_name])
         null_data = [None for _ in range(null_number)]
         bool_data = bool_data[:nb - null_number] + null_data
-        bool_values = pd.Series(data=bool_data, dtype=object)
+        bool_values = pd.Series(data=bool_data, dtype="bool")
 
     float_data = [np.float32(i) for i in range(start, start + nb)]
     float_values = pd.Series(data=float_data, dtype="float32")
@@ -1576,19 +1755,33 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
     return data
 
 
-def gen_row_data_by_schema(nb=ct.default_nb, schema=None):
+def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=None):
     if schema is None:
         schema = gen_default_collection_schema()
+    # ignore auto id field and the fields in function output
+    func_output_fields = []
+    if hasattr(schema, "functions"):
+        functions = schema.functions
+        for func in functions:
+            output_field_names = func.output_field_names
+            func_output_fields.extend(output_field_names)
+    func_output_fields = list(set(func_output_fields))
     fields = schema.fields
-    fields_not_auto_id = []
+    fields_needs_data = []
     for field in fields:
-        if not field.auto_id:
-            fields_not_auto_id.append(field)
+        if field.auto_id:
+            continue
+        if field.name in func_output_fields:
+            continue
+        fields_needs_data.append(field)
     data = []
     for i in range(nb):
         tmp = {}
-        for field in fields_not_auto_id:
+        for field in fields_needs_data:
             tmp[field.name] = gen_data_by_collection_field(field)
+            if start is not None and field.dtype == DataType.INT64:
+                tmp[field.name] = start
+                start += 1
         data.append(tmp)
     return data
 
@@ -1612,6 +1805,15 @@ def get_int64_field_name(schema=None):
             return field.name
     return None
 
+
+def get_text_field_name(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.VARCHAR and field.params.get("enable_analyzer", False):
+            return field.name
+    return None
 
 def get_float_field_name(schema=None):
     if schema is None:
@@ -1677,6 +1879,18 @@ def get_binary_vec_field_name_list(schema=None):
     return vec_fields
 
 
+def get_bm25_vec_field_name_list(schema=None):
+    if not hasattr(schema, "functions"):
+        return []
+    functions = schema.functions
+    bm25_func = [func for func in functions if func.type == FunctionType.BM25]
+    bm25_outputs = []
+    for func in bm25_func:
+        bm25_outputs.extend(func.output_field_names)
+    bm25_outputs = list(set(bm25_outputs))
+
+    return bm25_outputs
+
 def get_dim_by_schema(schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
@@ -1688,13 +1902,17 @@ def get_dim_by_schema(schema=None):
     return None
 
 
-def gen_varchar_data(length: int, nb: int):
-    return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
+def gen_varchar_data(length: int, nb: int, text_mode=False):
+    if text_mode:
+        return [fake.text() for _ in range(nb)]
+    else:
+        return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
 
 
 def gen_data_by_collection_field(field, nb=None, start=None):
     # if nb is None, return one data, else return a list of data
     data_type = field.dtype
+    enable_analyzer = field.params.get("enable_analyzer", False)
     if data_type == DataType.BOOL:
         if nb is None:
             return random.choice([True, False])
@@ -1730,8 +1948,8 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         max_length = min(20, max_length-1)
         length = random.randint(0, max_length)
         if nb is None:
-            return gen_varchar_data(length=length, nb=1)[0]
-        return gen_varchar_data(length=length, nb=nb)
+            return gen_varchar_data(length=length, nb=1, text_mode=enable_analyzer)[0]
+        return gen_varchar_data(length=length, nb=nb, text_mode=enable_analyzer)
     if data_type == DataType.JSON:
         if nb is None:
             return {"name": fake.name(), "address": fake.address()}
@@ -1845,7 +2063,7 @@ def gen_values(schema: CollectionSchema, nb, start_id=0, default_values: dict = 
         if default_value is not None:
             data.append(default_value)
         elif field.auto_id is False:
-            data.append(gen_data_by_collection_field(field, nb, start_id * nb))
+            data.append(gen_data_by_collection_field(field, nb, start_id))
     return data
 
 
@@ -1976,6 +2194,8 @@ def gen_simple_index():
             continue
         elif ct.all_index_types[i] in ct.sparse_support:
             continue
+        elif ct.all_index_types[i] in ct.gpu_support:
+            continue
         dic = {"index_type": ct.all_index_types[i], "metric_type": "L2"}
         dic.update({"params": ct.default_all_indexes_params[i]})
         index_params.append(dic)
@@ -2019,7 +2239,7 @@ def gen_invalid_search_params_type():
         if index_type == "FLAT":
             continue
         # search_params.append({"index_type": index_type, "search_params": {"invalid_key": invalid_search_key}})
-        if index_type in ["IVF_FLAT", "IVF_SQ8", "IVF_PQ"]:
+        if index_type in ["IVF_FLAT", "IVF_SQ8", "IVF_PQ", "BIN_FLAT", "BIN_IVF_FLAT"]:
             for nprobe in ct.get_invalid_ints:
                 ivf_search_params = {"index_type": index_type, "search_params": {"nprobe": nprobe}}
                 search_params.append(ivf_search_params)
@@ -2099,35 +2319,6 @@ def gen_autoindex_search_params():
     return search_params
 
 
-def gen_invalid_search_param(index_type, metric_type="L2"):
-    search_params = []
-    if index_type in ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"] \
-            or index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]:
-        for nprobe in [-1]:
-            ivf_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
-            search_params.append(ivf_search_params)
-    elif index_type in ["HNSW"]:
-        for ef in [-1]:
-            hnsw_search_param = {"metric_type": metric_type, "params": {"ef": ef}}
-            search_params.append(hnsw_search_param)
-    elif index_type == "ANNOY":
-        for search_k in ["-2"]:
-            annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
-            search_params.append(annoy_search_param)
-    elif index_type == "DISKANN":
-        for search_list in ["-1"]:
-            diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
-            search_params.append(diskann_search_param)
-    elif index_type == "SCANN":
-        for reorder_k in [-1]:
-            scann_search_param = {"metric_type": metric_type, "params": {"reorder_k": reorder_k, "nprobe": 10}}
-            search_params.append(scann_search_param)
-    else:
-        log.error("Invalid index_type.")
-        raise Exception("Invalid index_type.")
-    return search_params
-
-
 def gen_all_type_fields():
     fields = []
     for k, v in DataType.__members__.items():
@@ -2137,49 +2328,98 @@ def gen_all_type_fields():
     return fields
 
 
-def gen_normal_expressions():
+def gen_normal_expressions_and_templates():
+    """
+    Gen a list of filter in expression-format(as a string) and template-format(as a dict)
+    The two formats equals to each other.
+    """
     expressions = [
-        "",
-        "int64 > 0",
-        "(int64 > 0 && int64 < 400) or (int64 > 500 && int64 < 1000)",
-        "int64 not in [1, 2, 3]",
-        "int64 in [1, 2, 3] and float != 2",
-        "int64 == 0 || float == 10**2 || (int64 + 1) == 3",
-        "0 <= int64 < 400 and int64 % 100 == 0",
-        "200+300 < int64 <= 500+500",
-        "int64 > 400 && int64 < 200",
-        "int64 in [300/2, 900%40, -10*30+800, (100+200)*2] or float in [+3**6, 2**10/2]",
-        "float <= -4**5/2 && float > 500-1 && float != 500/2+260"
+        ["", {"expr": "", "expr_params": {}}],
+        ["int64 > 0", {"expr": "int64 > {value_0}", "expr_params": {"value_0": 0}}],
+        ["(int64 > 0 && int64 < 400) or (int64 > 500 && int64 < 1000)",
+         {"expr": "(int64 > {value_0} && int64 < {value_1}) or (int64 > {value_2} && int64 < {value_3})",
+          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 500, "value_3": 1000}}],
+        ["int64 not in [1, 2, 3]", {"expr": "int64 not in {value_0}", "expr_params": {"value_0": [1, 2, 3]}}],
+        ["int64 in [1, 2, 3] and float != 2", {"expr": "int64 in {value_0} and float != {value_1}",
+                                               "expr_params": {"value_0": [1, 2, 3], "value_1": 2}}],
+        ["int64 == 0 || float == 10**2 || (int64 + 1) == 3",
+         {"expr": "int64 == {value_0} || float == {value_1} || (int64 + {value_2}) == {value_3}",
+          "expr_params": {"value_0": 0, "value_1": 10**2, "value_2": 1, "value_3": 3}}],
+        ["0 <= int64 < 400 and int64 % 100 == 0",
+         {"expr": "{value_0} <= int64 < {value_1} and int64 % {value_2} == {value_0}",
+          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 100}}],
+        ["200+300 < int64 <= 500+500", {"expr": "{value_0} < int64 <= {value_1}",
+                                        "expr_params": {"value_1": 500+500, "value_0": 200+300}}],
+        ["int64 > 400 && int64 < 200", {"expr": "int64 > {value_0} && int64 < {value_1}",
+                                        "expr_params": {"value_0": 400, "value_1": 200}}],
+        ["int64 in [300/2, 900%40, -10*30+800, (100+200)*2] or float in [+3**6, 2**10/2]",
+         {"expr": "int64 in {value_0} or float in {value_1}",
+          "expr_params": {"value_0": [int(300/2), 900%40, -10*30+800, (100+200)*2], "value_1": [+3**6*1.0, 2**10/2*1.0]}}],
+        ["float <= -4**5/2 && float > 500-1 && float != 500/2+260",
+         {"expr": "float <= {value_0} && float > {value_1} && float != {value_2}",
+          "expr_params": {"value_0": -4**5/2, "value_1": 500-1, "value_2": 500/2+260}}],
     ]
     return expressions
 
 
-def gen_json_field_expressions():
+def gen_json_field_expressions_and_templates():
+    """
+    Gen a list of filter in expression-format(as a string) and template-format(as a dict)
+    The two formats equals to each other.
+    """
     expressions = [
-        "json_field['number'] > 0",
-        "0 <= json_field['number'] < 400 or 1000 > json_field['number'] >= 500",
-        "json_field['number'] not in [1, 2, 3]",
-        "json_field['number'] in [1, 2, 3] and json_field['float'] != 2",
-        "json_field['number'] == 0 || json_field['float'] == 10**2 || json_field['number'] + 1 == 3",
-        "json_field['number'] < 400 and json_field['number'] >= 100 and json_field['number'] % 100 == 0",
-        "json_field['float'] > 400 && json_field['float'] < 200",
-        "json_field['number'] in [300/2, -10*30+800, (100+200)*2] or json_field['float'] in [+3**6, 2**10/2]",
-        "json_field['float'] <= -4**5/2 && json_field['float'] > 500-1 && json_field['float'] != 500/2+260"
+        ["json_field['number'] > 0", {"expr": "json_field['number'] > {value_0}", "expr_params": {"value_0": 0}}],
+        ["0 <= json_field['number'] < 400 or 1000 > json_field['number'] >= 500",
+         {"expr": "{value_0} <= json_field['number'] < {value_1} or {value_2} > json_field['number'] >= {value_3}",
+          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 1000, "value_3": 500}}],
+        ["json_field['number'] not in [1, 2, 3]", {"expr": "json_field['number'] not in {value_0}",
+                                                   "expr_params": {"value_0": [1, 2, 3]}}],
+        ["json_field['number'] in [1, 2, 3] and json_field['float'] != 2",
+         {"expr": "json_field['number'] in {value_0} and json_field['float'] != {value_1}",
+          "expr_params": {"value_0": [1, 2, 3], "value_1": 2}}],
+        ["json_field['number'] == 0 || json_field['float'] == 10**2 || json_field['number'] + 1 == 3",
+         {"expr": "json_field['number'] == {value_0} || json_field['float'] == {value_1} || json_field['number'] + {value_2} == {value_3}",
+          "expr_params": {"value_0": 0, "value_1": 10**2, "value_2": 1, "value_3": 3}}],
+        ["json_field['number'] < 400 and json_field['number'] >= 100 and json_field['number'] % 100 == 0",
+         {"expr": "json_field['number'] < {value_0} and json_field['number'] >= {value_1} and json_field['number'] % {value_1} == 0",
+          "expr_params": {"value_0": 400, "value_1": 100}}],
+        ["json_field['float'] > 400 && json_field['float'] < 200", {"expr": "json_field['float'] > {value_0} && json_field['float'] < {value_1}",
+                                                                    "expr_params": {"value_0": 400, "value_1": 200}}],
+        ["json_field['number'] in [300/2, -10*30+800, (100+200)*2] or json_field['float'] in [+3**6, 2**10/2]",
+         {"expr": "json_field['number'] in {value_0} or json_field['float'] in {value_1}",
+          "expr_params": {"value_0": [int(300/2), -10*30+800, (100+200)*2], "value_1": [+3**6*1.0, 2**10/2*1.0]}}],
+        ["json_field['float'] <= -4**5/2 && json_field['float'] > 500-1 && json_field['float'] != 500/2+260",
+         {"expr": "json_field['float'] <= {value_0} && json_field['float'] > {value_1} && json_field['float'] != {value_2}",
+          "expr_params": {"value_0": -4**5/2, "value_1": 500-1, "value_2": 500/2+260}}],
     ]
     return expressions
 
 
-def gen_array_field_expressions():
+def gen_array_field_expressions_and_templates():
+    """
+    Gen a list of filter in expression-format(as a string) and template-format(as a dict) for a field.
+    The two formats equals to each other.
+    """
     expressions = [
-        "int32_array[0] > 0",
-        "0 <= int32_array[0] < 400 or 1000 > float_array[1] >= 500",
-        "int32_array[1] not in [1, 2, 3]",
-        "int32_array[1] in [1, 2, 3] and string_array[1] != '2'",
-        "int32_array == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]",
-        "int32_array[1] + 1 == 3 && int32_array[0] - 1 != 1",
-        "int32_array[1] % 100 == 0 && string_array[1] in ['1', '2']",
-        "int32_array[1] in [300/2, -10*30+800, (200-100)*2] "
-        "or (float_array[1] <= -4**5/2 || 100 <= int32_array[1] < 200)"
+        ["int32_array[0] > 0", {"expr": "int32_array[0] > {value_0}", "expr_params": {"value_0": 0}}],
+        ["0 <= int32_array[0] < 400 or 1000 > float_array[1] >= 500",
+         {"expr": "{value_0} <= int32_array[0] < {value_1} or {value_2} > float_array[1] >= {value_3}",
+          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 1000, "value_3": 500}}],
+        ["int32_array[1] not in [1, 2, 3]", {"expr": "int32_array[1] not in {value_0}", "expr_params": {"value_0": [1, 2, 3]}}],
+        ["int32_array[1] in [1, 2, 3] and string_array[1] != '2'",
+         {"expr": "int32_array[1] in {value_0} and string_array[1] != {value_2}",
+          "expr_params": {"value_0": [1, 2, 3], "value_2": "2"}}],
+        ["int32_array == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]", {"expr": "int32_array == {value_0}",
+                                                            "expr_params": {"value_0": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}}],
+        ["int32_array[1] + 1 == 3 && int32_array[0] - 1 != 1",
+         {"expr": "int32_array[1] + {value_0} == {value_2} && int32_array[0] - {value_0} != {value_0}",
+          "expr_params": {"value_0": 1, "value_2": 3}}],
+        ["int32_array[1] % 100 == 0 && string_array[1] in ['1', '2']",
+         {"expr": "int32_array[1] % {value_0} == {value_1} && string_array[1] in {value_2}",
+          "expr_params": {"value_0": 100, "value_1": 0, "value_2": ["1", "2"]}}],
+        ["int32_array[1] in [300/2, -10*30+800, (200-100)*2] or (float_array[1] <= -4**5/2 || 100 <= int32_array[1] < 200)",
+         {"expr": "int32_array[1] in {value_0} or (float_array[1] <= {value_1} || {value_2} <= int32_array[1] < {value_3})",
+          "expr_params": {"value_0": [int(300/2), -10*30+800, (200-100)*2], "value_1": -4**5/2, "value_2": 100, "value_3": 200}}]
     ]
     return expressions
 
@@ -2229,37 +2469,42 @@ def gen_invalid_string_expressions():
     return expressions
 
 
-def gen_invalid_bool_expressions():
-    expressions = [
-        "bool",
-        "!bool",
-        "true",
-        "false",
-        "int64 > 0 and bool",
-        "int64 > 0 or false"
+def gen_normal_expressions_and_templates_field(field):
+    """
+    Gen a list of filter in expression-format(as a string) and template-format(as a dict) for a field.
+    The two formats equals to each other.
+    """
+    expressions_and_templates = [
+        ["", {"expr": "", "expr_params": {}}],
+        [f"{field} > 0", {"expr": f"{field} > {{value_0}}", "expr_params": {"value_0": 0}}],
+        [f"({field} > 0 && {field} < 400) or ({field} > 500 && {field} < 1000)",
+         {"expr": f"({field} > {{value_0}} && {field} < {{value_1}}) or ({field} > {{value_2}} && {field} < {{value_3}})",
+          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 500, "value_3": 1000}}],
+        [f"{field} not in [1, 2, 3]", {"expr": f"{field} not in {{value_0}}", "expr_params": {"value_0": [1, 2, 3]}}],
+        [f"{field} in [1, 2, 3] and {field} != 2", {"expr": f"{field} in {{value_0}} and {field} != {{value_1}}", "expr_params": {"value_0": [1, 2, 3], "value_1": 2}}],
+        [f"{field} == 0 || {field} == 1 || {field} == 2", {"expr": f"{field} == {{value_0}} || {field} == {{value_1}} || {field} == {{value_2}}",
+         "expr_params": {"value_0": 0, "value_1": 1, "value_2": 2}}],
+        [f"0 < {field} < 400", {"expr": f"{{value_0}} < {field} < {{value_1}}", "expr_params": {"value_0": 0, "value_1": 400}}],
+        [f"500 <= {field} <= 1000", {"expr": f"{{value_0}} <= {field} <= {{value_1}}", "expr_params": {"value_0": 500, "value_1": 1000}}],
+        [f"200+300 <= {field} <= 500+500", {"expr": f"{{value_0}} <= {field} <= {{value_1}}", "expr_params": {"value_0": 200+300, "value_1": 500+500}}],
+        [f"{field} in [300/2, 900%40, -10*30+800, 2048/2%200, (100+200)*2]", {"expr": f"{field} in {{value_0}}", "expr_params": {"value_0": [300*1.0/2, 900*1.0%40, -10*30*1.0+800, 2048*1.0/2%200, (100+200)*1.0*2]}}],
+        [f"{field} in [+3**6, 2**10/2]", {"expr": f"{field} in {{value_0}}", "expr_params": {"value_0": [+3**6*1.0, 2**10*1.0/2]}}],
+        [f"{field} <= 4**5/2 && {field} > 500-1 && {field} != 500/2+260", {"expr": f"{field} <= {{value_0}} && {field} > {{value_1}} && {field} != {{value_2}}",
+         "expr_params": {"value_0": 4**5/2, "value_1": 500-1, "value_2": 500/2+260}}],
+        [f"{field} > 400 && {field} < 200", {"expr": f"{field} > {{value_0}} && {field} < {{value_1}}", "expr_params": {"value_0": 400, "value_1": 200}}],
+        [f"{field} < -2**8", {"expr": f"{field} < {{value_0}}", "expr_params": {"value_0": -2**8}}],
+        [f"({field} + 1) == 3 || {field} * 2 == 64 || {field} == 10**2", {"expr": f"({field} + {{value_0}}) == {{value_1}} || {field} * {{value_2}} == {{value_3}} || {field} == {{value_4}}",
+         "expr_params": {"value_0": 1, "value_1": 3, "value_2": 2, "value_3": 64, "value_4": 10**2}}]
     ]
-    return expressions
+    return expressions_and_templates
 
 
-def gen_normal_expressions_field(field):
-    expressions = [
-        "",
-        f"{field} > 0",
-        f"({field} > 0 && {field} < 400) or ({field} > 500 && {field} < 1000)",
-        f"{field} not in [1, 2, 3]",
-        f"{field} in [1, 2, 3] and {field} != 2",
-        f"{field} == 0 || {field} == 1 || {field} == 2",
-        f"0 < {field} < 400",
-        f"500 <= {field} <= 1000",
-        f"200+300 <= {field} <= 500+500",
-        f"{field} in [300/2, 900%40, -10*30+800, 2048/2%200, (100+200)*2]",
-        f"{field} in [+3**6, 2**10/2]",
-        f"{field} <= 4**5/2 && {field} > 500-1 && {field} != 500/2+260",
-        f"{field} > 400 && {field} < 200",
-        f"{field} < -2**8",
-        f"({field} + 1) == 3 || {field} * 2 == 64 || {field} == 10**2"
-    ]
-    return expressions
+def get_expr_from_template(template={}):
+    return template.get("expr", None)
+
+
+def get_expr_params_from_template(template={}):
+    return template.get("expr_params", None)
 
 
 def gen_integer_overflow_expressions():
@@ -2813,6 +3058,8 @@ def get_activate_func_from_metric_type(metric_type):
         activate_function = lambda x: (1 + x) * 0.5
     elif metric_type == "IP":
         activate_function = lambda x: 0.5 + math.atan(x)/ math.pi
+    elif metric_type == "BM25":
+        activate_function = lambda x: 2 * math.atan(x) / math.pi
     else:
         activate_function  = lambda x: 1.0 - 2*math.atan(x) / math.pi
     return activate_function
@@ -2925,7 +3172,7 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
 
     rng = np.random.default_rng()
     vectors = [{
-        d: rng.random() for d in random.sample(range(dim), random.randint(20, 30))
+        d: rng.random() for d in list(set(random.sample(range(dim), random.randint(20, 30)) + [0, 1]))
     } for _ in range(nb)]
     if sparse_format == "coo":
         vectors = [
@@ -2949,7 +3196,10 @@ def gen_vectors_based_on_vector_type(num, dim, vector_data_type=ct.float_type):
         vectors = gen_bf16_vectors(num, dim)[1]
     elif vector_data_type == ct.sparse_vector:
         vectors = gen_sparse_vectors(num, dim)
-
+    elif vector_data_type == ct.text_sparse_vector:
+        vectors = gen_text_vectors(num)
+    else:
+        raise Exception("vector_data_type is invalid")
     return vectors
 
 

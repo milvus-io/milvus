@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package httpserver
 
 import (
@@ -9,14 +25,15 @@ import (
 // v2
 const (
 	// --- category ---
-	CollectionCategory = "/collections/"
-	EntityCategory     = "/entities/"
-	PartitionCategory  = "/partitions/"
-	UserCategory       = "/users/"
-	RoleCategory       = "/roles/"
-	IndexCategory      = "/indexes/"
-	AliasCategory      = "/aliases/"
-	ImportJobCategory  = "/jobs/import/"
+	CollectionCategory     = "/collections/"
+	EntityCategory         = "/entities/"
+	PartitionCategory      = "/partitions/"
+	UserCategory           = "/users/"
+	RoleCategory           = "/roles/"
+	IndexCategory          = "/indexes/"
+	AliasCategory          = "/aliases/"
+	ImportJobCategory      = "/jobs/import/"
+	PrivilegeGroupCategory = "/privilege_groups/"
 
 	ListAction           = "list"
 	HasAction            = "has"
@@ -37,13 +54,17 @@ const (
 	AdvancedSearchAction = "advanced_search"
 	HybridSearchAction   = "hybrid_search"
 
-	UpdatePasswordAction  = "update_password"
-	GrantRoleAction       = "grant_role"
-	RevokeRoleAction      = "revoke_role"
-	GrantPrivilegeAction  = "grant_privilege"
-	RevokePrivilegeAction = "revoke_privilege"
-	AlterAction           = "alter"
-	GetProgressAction     = "get_progress"
+	UpdatePasswordAction            = "update_password"
+	GrantRoleAction                 = "grant_role"
+	RevokeRoleAction                = "revoke_role"
+	GrantPrivilegeAction            = "grant_privilege"
+	RevokePrivilegeAction           = "revoke_privilege"
+	GrantPrivilegeActionV2          = "grant_privilege_v2"
+	RevokePrivilegeActionV2         = "revoke_privilege_v2"
+	AlterAction                     = "alter"
+	GetProgressAction               = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
+	AddPrivilegesToGroupAction      = "add_privileges_to_group"
+	RemovePrivilegesFromGroupAction = "remove_privileges_from_group"
 )
 
 const (
@@ -77,6 +98,7 @@ const (
 	HTTPIndexField           = "fieldName"
 	HTTPAliasName            = "aliasName"
 	HTTPRequestData          = "data"
+	HTTPRequestDefaultValue  = "defaultValue"
 	DefaultDbName            = "default"
 	DefaultIndexName         = "vector_idx"
 	DefaultAliasName         = "the_alias"
@@ -94,14 +116,25 @@ const (
 
 	HTTPReturnHas = "has"
 
-	HTTPReturnFieldName         = "name"
-	HTTPReturnFieldID           = "id"
-	HTTPReturnFieldType         = "type"
-	HTTPReturnFieldPrimaryKey   = "primaryKey"
-	HTTPReturnFieldPartitionKey = "partitionKey"
-	HTTPReturnFieldAutoID       = "autoId"
-	HTTPReturnFieldElementType  = "elementType"
-	HTTPReturnDescription       = "description"
+	HTTPReturnFieldName             = "name"
+	HTTPReturnFieldID               = "id"
+	HTTPReturnFieldType             = "type"
+	HTTPReturnFieldPrimaryKey       = "primaryKey"
+	HTTPReturnFieldPartitionKey     = "partitionKey"
+	HTTPReturnFieldClusteringKey    = "clusteringKey"
+	HTTPReturnFieldNullable         = "nullable"
+	HTTPReturnFieldDefaultValue     = "defaultValue"
+	HTTPReturnFieldAutoID           = "autoId"
+	HTTPReturnFieldElementType      = "elementType"
+	HTTPReturnDescription           = "description"
+	HTTPReturnFieldIsFunctionOutput = "isFunctionOutput"
+
+	HTTPReturnFunctionName             = "name"
+	HTTPReturnFunctionID               = "id"
+	HTTPReturnFunctionType             = "type"
+	HTTPReturnFunctionInputFieldNames  = "inputFieldNames"
+	HTTPReturnFunctionOutputFieldNames = "outputFieldNames"
+	HTTPReturnFunctionParams           = "params"
 
 	HTTPReturnIndexMetricType  = "metricType"
 	HTTPReturnIndexType        = "indexType"
@@ -115,11 +148,14 @@ const (
 
 	HTTPReturnRowCount = "rowCount"
 
-	HTTPReturnObjectType = "objectType"
-	HTTPReturnObjectName = "objectName"
-	HTTPReturnPrivilege  = "privilege"
-	HTTPReturnGrantor    = "grantor"
-	HTTPReturnDbName     = "dbName"
+	HTTPReturnObjectType         = "objectType"
+	HTTPReturnObjectName         = "objectName"
+	HTTPReturnPrivilege          = "privilege"
+	HTTPReturnGrantor            = "grantor"
+	HTTPReturnDbName             = "dbName"
+	HTTPReturnPrivilegeGroupName = "privilegeGroupName"
+	HTTPReturnPrivileges         = "privileges"
+	HTTPReturnPrivilegeGroups    = "privilegeGroups"
 
 	DefaultMetricType       = metric.COSINE
 	DefaultPrimaryFieldName = "id"
@@ -138,6 +174,6 @@ const (
 	ParamRangeFilter     = "range_filter"
 	ParamGroupByField    = "group_by_field"
 	ParamGroupSize       = "group_size"
-	ParamGroupStrictSize = "group_strict_size"
+	ParamStrictGroupSize = "strict_group_size"
 	BoundedTimestamp     = 2
 )

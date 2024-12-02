@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+const analyzerParams = "analyzer_params"
+
 // BM25 Runner
 // Input: string
 // Output: map[uint32]float32
@@ -38,6 +40,15 @@ type BM25FunctionRunner struct {
 	schema      *schemapb.FunctionSchema
 	outputField *schemapb.FieldSchema
 	concurrency int
+}
+
+func getAnalyzerParams(field *schemapb.FieldSchema) string {
+	for _, param := range field.GetTypeParams() {
+		if param.Key == analyzerParams {
+			return param.Value
+		}
+	}
+	return "{}"
 }
 
 func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (*BM25FunctionRunner, error) {
@@ -49,17 +60,21 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 		schema:      schema,
 		concurrency: 8,
 	}
+	var params string
 	for _, field := range coll.GetFields() {
 		if field.GetFieldID() == schema.GetOutputFieldIds()[0] {
 			runner.outputField = field
-			break
+		}
+
+		if field.GetFieldID() == schema.GetInputFieldIds()[0] {
+			params = getAnalyzerParams(field)
 		}
 	}
 
 	if runner.outputField == nil {
 		return nil, fmt.Errorf("no output field")
 	}
-	tokenizer, err := ctokenizer.NewTokenizer(map[string]string{})
+	tokenizer, err := ctokenizer.NewTokenizer(params)
 	if err != nil {
 		return nil, err
 	}
@@ -69,8 +84,7 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 }
 
 func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error {
-	// TODO AOIASD Support single Tokenizer concurrency
-	tokenizer, err := ctokenizer.NewTokenizer(map[string]string{})
+	tokenizer, err := v.tokenizer.Clone()
 	if err != nil {
 		return err
 	}
@@ -93,7 +107,7 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 
 func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 	if len(inputs) > 1 {
-		return nil, fmt.Errorf("BM25 function receieve more than one input")
+		return nil, fmt.Errorf("BM25 function received more than one input column")
 	}
 
 	text, ok := inputs[0].([]string)
@@ -144,16 +158,18 @@ func (v *BM25FunctionRunner) GetOutputFields() []*schemapb.FieldSchema {
 }
 
 func buildSparseFloatArray(mapdata []map[uint32]float32) *schemapb.SparseFloatArray {
-	dim := 0
+	dim := int64(0)
 	bytes := lo.Map(mapdata, func(sparseMap map[uint32]float32, _ int) []byte {
-		if len(sparseMap) > dim {
-			dim = len(sparseMap)
+		row := typeutil.CreateAndSortSparseFloatRow(sparseMap)
+		rowDim := typeutil.SparseFloatRowDim(row)
+		if rowDim > dim {
+			dim = rowDim
 		}
-		return typeutil.CreateAndSortSparseFloatRow(sparseMap)
+		return row
 	})
 
 	return &schemapb.SparseFloatArray{
 		Contents: bytes,
-		Dim:      int64(dim),
+		Dim:      dim,
 	}
 }

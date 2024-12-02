@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -63,9 +64,13 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	defer sp.End()
 
 	channelsMvcc := make(map[string]uint64)
+	isTopkReduce := false
 	for _, r := range results {
 		for ch, ts := range r.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
+		}
+		if r.GetIsTopkReduce() {
+			isTopkReduce = true
 		}
 		// shouldn't let new SearchResults.MetricType to be empty, though the req.MetricType is empty
 		if info.GetMetricType() == "" {
@@ -120,6 +125,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	}, 0)
 	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	searchResults.ChannelsMvcc = channelsMvcc
+	searchResults.IsTopkReduce = isTopkReduce
 	return searchResults, nil
 }
 
@@ -129,11 +135,15 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 
 	channelsMvcc := make(map[string]uint64)
 	relatedDataSize := int64(0)
+	isTopkReduce := false
 	searchResults := &internalpb.SearchResults{
 		IsAdvanced: true,
 	}
 
 	for index, result := range results {
+		if result.GetIsTopkReduce() {
+			isTopkReduce = true
+		}
 		relatedDataSize += result.GetCostAggregation().GetTotalRelatedDataSize()
 		for ch, ts := range result.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
@@ -169,6 +179,7 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 		searchResults.CostAggregation = &internalpb.CostAggregation{}
 	}
 	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
+	searchResults.IsTopkReduce = isTopkReduce
 	return searchResults, nil
 }
 
@@ -403,7 +414,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			return nil, err
 		}
 		validRetrieveResults = append(validRetrieveResults, tr)
-		if plan.ignoreNonPk {
+		if plan.IsIgnoreNonPk() {
 			validSegments = append(validSegments, segments[i])
 		}
 		loopEnd += size
@@ -483,7 +494,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		log.Debug("skip duplicated query result while reducing segcore.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
 	}
 
-	if !plan.ignoreNonPk {
+	if !plan.IsIgnoreNonPk() {
 		// target entry already retrieved, don't do this after AppendPKs for better performance. Save the cost everytime
 		// judge the `!plan.ignoreNonPk` condition.
 		_, span2 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-AppendFieldData")
@@ -514,7 +525,10 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 				var r *segcorepb.RetrieveResults
 				var err error
 				if err := doOnSegment(ctx, manager, validSegments[idx], func(ctx context.Context, segment Segment) error {
-					r, err = segment.RetrieveByOffsets(ctx, plan, theOffsets)
+					r, err = segment.RetrieveByOffsets(ctx, &segcore.RetrievePlanWithOffsets{
+						RetrievePlan: plan,
+						Offsets:      theOffsets,
+					})
 					return err
 				}); err != nil {
 					return nil, err

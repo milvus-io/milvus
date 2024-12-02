@@ -55,13 +55,14 @@ const (
 	IteratorField        = "iterator"
 	GroupByFieldKey      = "group_by_field"
 	GroupSizeKey         = "group_size"
-	GroupStrictSize      = "group_strict_size"
+	StrictGroupSize      = "strict_group_size"
 	RankGroupScorer      = "rank_group_scorer"
 	AnnsFieldKey         = "anns_field"
 	TopKKey              = "topk"
 	NQKey                = "nq"
 	MetricTypeKey        = common.MetricTypeKey
 	SearchParamsKey      = "params"
+	ExprParamsKey        = "expr_params"
 	RoundDecimalKey      = "round_decimal"
 	OffsetKey            = "offset"
 	LimitKey             = "limit"
@@ -406,7 +407,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 
-		if err := ctokenizer.ValidateTextSchema(field); err != nil {
+		if err := ctokenizer.ValidateTextSchema(field, wasBm25FunctionInputField(t.schema, field)); err != nil {
 			return err
 		}
 	}
@@ -564,9 +565,19 @@ func (t *hasCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *hasCollectionTask) Execute(ctx context.Context) error {
-	var err error
-	t.result, err = t.rootCoord.HasCollection(ctx, t.HasCollectionRequest)
-	return merr.CheckRPCCall(t.result, err)
+	t.result = &milvuspb.BoolResponse{
+		Status: merr.Success(),
+	}
+	_, err := globalMetaCache.GetCollectionID(ctx, t.HasCollectionRequest.GetDbName(), t.HasCollectionRequest.GetCollectionName())
+	// error other than
+	if err != nil && !errors.Is(err, merr.ErrCollectionNotFound) {
+		t.result.Status = merr.Status(err)
+		return err
+	}
+	// if collection not nil, means error is ErrCollectionNotFound, result is false
+	// otherwise, result is true
+	t.result.Value = (err == nil)
+	return nil
 }
 
 func (t *hasCollectionTask) PostExecute(ctx context.Context) error {
@@ -1712,7 +1723,6 @@ func (t *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 }
 
 func (t *releaseCollectionTask) PostExecute(ctx context.Context) error {
-	globalMetaCache.DeprecateShardCache(t.GetDbName(), t.CollectionName)
 	return nil
 }
 
@@ -1982,7 +1992,6 @@ func (t *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 }
 
 func (t *releasePartitionsTask) PostExecute(ctx context.Context) error {
-	globalMetaCache.DeprecateShardCache(t.GetDbName(), t.CollectionName)
 	return nil
 }
 

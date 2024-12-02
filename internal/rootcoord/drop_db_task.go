@@ -47,7 +47,7 @@ func (t *dropDatabaseTask) Execute(ctx context.Context) error {
 		databaseName: dbName,
 		ts:           ts,
 	})
-	redoTask.AddAsyncStep(&expireCacheStep{
+	redoTask.AddSyncStep(&expireCacheStep{
 		baseStep: baseStep{core: t.core},
 		dbName:   dbName,
 		ts:       ts,
@@ -59,4 +59,8 @@ func (t *dropDatabaseTask) Execute(ctx context.Context) error {
 		},
 	})
 	return redoTask.Execute(ctx)
+}
+
+func (t *dropDatabaseTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(NewClusterLockerKey(true))
 }

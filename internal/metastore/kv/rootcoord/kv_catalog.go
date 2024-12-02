@@ -2,8 +2,10 @@ package rootcoord
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -354,6 +357,28 @@ func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID type
 	return partitions, nil
 }
 
+func (kc *Catalog) batchListPartitionsAfter210(ctx context.Context, ts typeutil.Timestamp) (map[int64][]*model.Partition, error) {
+	_, values, err := kc.Snapshot.LoadWithPrefix(PartitionMetaPrefix, ts)
+	if err != nil {
+		return nil, err
+	}
+
+	ret := make(map[int64][]*model.Partition)
+	for i := 0; i < len(values); i++ {
+		partitionMeta := &pb.PartitionInfo{}
+		err := proto.Unmarshal([]byte(values[i]), partitionMeta)
+		if err != nil {
+			return nil, err
+		}
+		collectionID := partitionMeta.GetCollectionId()
+		if ret[collectionID] == nil {
+			ret[collectionID] = make([]*model.Partition, 0)
+		}
+		ret[collectionID] = append(ret[collectionID], model.UnmarshalPartitionModel(partitionMeta))
+	}
+	return ret, nil
+}
+
 func fieldVersionAfter210(collMeta *pb.CollectionInfo) bool {
 	return len(collMeta.GetSchema().GetFields()) <= 0
 }
@@ -376,6 +401,32 @@ func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil
 	return fields, nil
 }
 
+func (kc *Catalog) batchListFieldsAfter210(ctx context.Context, ts typeutil.Timestamp) (map[int64][]*model.Field, error) {
+	keys, values, err := kc.Snapshot.LoadWithPrefix(FieldMetaPrefix, ts)
+	if err != nil {
+		return nil, err
+	}
+
+	ret := make(map[int64][]*model.Field)
+	for i := 0; i < len(values); i++ {
+		fieldMeta := &schemapb.FieldSchema{}
+		err := proto.Unmarshal([]byte(values[i]), fieldMeta)
+		if err != nil {
+			return nil, err
+		}
+
+		collectionID, err := strconv.ParseInt(strings.Split(keys[i], "/")[2], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		if ret[collectionID] == nil {
+			ret[collectionID] = make([]*model.Field, 0)
+		}
+		ret[collectionID] = append(ret[collectionID], model.UnmarshalFieldModel(fieldMeta))
+	}
+	return ret, nil
+}
+
 func (kc *Catalog) listFunctions(collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Function, error) {
 	prefix := BuildFunctionPrefix(collectionID)
 	_, values, err := kc.Snapshot.LoadWithPrefix(prefix, ts)
@@ -392,6 +443,30 @@ func (kc *Catalog) listFunctions(collectionID typeutil.UniqueID, ts typeutil.Tim
 		functions = append(functions, model.UnmarshalFunctionModel(functionSchema))
 	}
 	return functions, nil
+}
+
+func (kc *Catalog) batchListFunctions(ts typeutil.Timestamp) (map[int64][]*model.Function, error) {
+	keys, values, err := kc.Snapshot.LoadWithPrefix(FunctionMetaPrefix, ts)
+	if err != nil {
+		return nil, err
+	}
+	ret := make(map[int64][]*model.Function)
+	for i := 0; i < len(values); i++ {
+		functionSchema := &schemapb.FunctionSchema{}
+		err := proto.Unmarshal([]byte(values[i]), functionSchema)
+		if err != nil {
+			return nil, err
+		}
+		collectionID, err := strconv.ParseInt(strings.Split(keys[i], "/")[2], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		if ret[collectionID] == nil {
+			ret[collectionID] = make([]*model.Function, 0)
+		}
+		ret[collectionID] = append(ret[collectionID], model.UnmarshalFunctionModel(functionSchema))
+	}
+	return ret, nil
 }
 
 func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *pb.CollectionInfo,
@@ -421,6 +496,50 @@ func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *p
 	}
 	collection.Functions = functions
 	return collection, nil
+}
+
+func (kc *Catalog) batchAppendPartitionAndFieldsInfo(ctx context.Context, collMeta []*pb.CollectionInfo,
+	ts typeutil.Timestamp,
+) ([]*model.Collection, error) {
+	var partitionMetaMap map[int64][]*model.Partition
+	var fieldMetaMap map[int64][]*model.Field
+	var functionMetaMap map[int64][]*model.Function
+	ret := make([]*model.Collection, 0)
+	for _, coll := range collMeta {
+		collection := model.UnmarshalCollectionModel(coll)
+		if partitionVersionAfter210(coll) || fieldVersionAfter210(coll) {
+			if len(partitionMetaMap) == 0 {
+				var err error
+				partitionMetaMap, err = kc.batchListPartitionsAfter210(ctx, ts)
+				if err != nil {
+					return nil, err
+				}
+
+				fieldMetaMap, err = kc.batchListFieldsAfter210(ctx, ts)
+				if err != nil {
+					return nil, err
+				}
+
+				functionMetaMap, err = kc.batchListFunctions(ts)
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			if partitionMetaMap[collection.CollectionID] != nil {
+				collection.Partitions = partitionMetaMap[collection.CollectionID]
+			}
+			if fieldMetaMap[collection.CollectionID] != nil {
+				collection.Fields = fieldMetaMap[collection.CollectionID]
+			}
+			if functionMetaMap[collection.CollectionID] != nil {
+				collection.Functions = functionMetaMap[collection.CollectionID]
+			}
+		}
+		ret = append(ret, collection)
+	}
+
+	return ret, nil
 }
 
 func (kc *Catalog) GetCollectionByID(ctx context.Context, dbID int64, ts typeutil.Timestamp, collectionID typeutil.UniqueID) (*model.Collection, error) {
@@ -677,23 +796,28 @@ func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 		return nil, err
 	}
 
-	colls := make([]*model.Collection, 0, len(vals))
+	start := time.Now()
+	colls := make([]*pb.CollectionInfo, 0, len(vals))
 	for _, val := range vals {
-		collMeta := pb.CollectionInfo{}
-		err := proto.Unmarshal([]byte(val), &collMeta)
+		collMeta := &pb.CollectionInfo{}
+		err := proto.Unmarshal([]byte(val), collMeta)
 		if err != nil {
 			log.Warn("unmarshal collection info failed", zap.Error(err))
 			continue
 		}
-		kc.fixDefaultDBIDConsistency(ctx, &collMeta, ts)
-		collection, err := kc.appendPartitionAndFieldsInfo(ctx, &collMeta, ts)
-		if err != nil {
-			return nil, err
-		}
-		colls = append(colls, collection)
+		kc.fixDefaultDBIDConsistency(ctx, collMeta, ts)
+		colls = append(colls, collMeta)
+	}
+	log.Info("unmarshal all collection details cost", zap.Int64("db", dbID), zap.Duration("cost", time.Since(start)))
+
+	start = time.Now()
+	ret, err := kc.batchAppendPartitionAndFieldsInfo(ctx, colls, ts)
+	log.Info("append partition and fields info cost", zap.Int64("db", dbID), zap.Duration("cost", time.Since(start)))
+	if err != nil {
+		return nil, err
 	}
 
-	return colls, nil
+	return ret, nil
 }
 
 // fixDefaultDBIDConsistency fix dbID consistency for collectionInfo.
@@ -1332,10 +1456,16 @@ func (kc *Catalog) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBA
 		grantsEntity = append(grantsEntity, grants...)
 	}
 
+	privGroups, err := kc.ListPrivilegeGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	return &milvuspb.RBACMeta{
-		Users:  userInfos,
-		Roles:  roleEntity,
-		Grants: grantsEntity,
+		Users:           userInfos,
+		Roles:           roleEntity,
+		Grants:          grantsEntity,
+		PrivilegeGroups: privGroups,
 	}, nil
 }
 
@@ -1344,6 +1474,7 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 	needRollbackUser := make([]*milvuspb.UserInfo, 0)
 	needRollbackRole := make([]*milvuspb.RoleEntity, 0)
 	needRollbackGrants := make([]*milvuspb.GrantEntity, 0)
+	needRollbackPrivilegeGroups := make([]*milvuspb.PrivilegeGroupInfo, 0)
 	defer func() {
 		if err != nil {
 			log.Warn("failed to restore rbac, try to rollback", zap.Error(err))
@@ -1370,6 +1501,14 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 					log.Warn("failed to rollback users after restore failed", zap.Error(err))
 				}
 			}
+
+			// roll back privilege group
+			for _, group := range needRollbackPrivilegeGroups {
+				err = kc.DropPrivilegeGroup(ctx, group.GroupName)
+				if err != nil {
+					log.Warn("failed to rollback privilege groups after restore failed", zap.Error(err))
+				}
+			}
 		}
 	}()
 
@@ -1392,9 +1531,42 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 		needRollbackRole = append(needRollbackRole, role)
 	}
 
-	// restore grant
+	// restore privilege group
+	existPrivGroups, err := kc.ListPrivilegeGroups(ctx)
+	if err != nil {
+		return err
+	}
+	existPrivGroupMap := lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GroupName, struct{}{} })
+	for _, group := range meta.PrivilegeGroups {
+		if _, ok := existPrivGroupMap[group.GroupName]; ok {
+			log.Warn("failed to restore, privilege group already exists", zap.String("group", group.GroupName))
+			err = errors.Newf("privilege group [%s] already exists", group.GroupName)
+			return err
+		}
+		err = kc.SavePrivilegeGroup(ctx, group)
+		if err != nil {
+			return err
+		}
+		needRollbackPrivilegeGroups = append(needRollbackPrivilegeGroups, group)
+	}
+
+	// restore grant, list latest privilege group first
+	existPrivGroups, err = kc.ListPrivilegeGroups(ctx)
+	if err != nil {
+		return err
+	}
+	existPrivGroupMap = lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GroupName, struct{}{} })
 	for _, grant := range meta.Grants {
-		grant.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(grant.Grantor.Privilege.Name)
+		privName := grant.Grantor.Privilege.Name
+		if util.IsPrivilegeNameDefined(privName) {
+			grant.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(privName)
+		} else if _, ok := existPrivGroupMap[privName]; ok {
+			grant.Grantor.Privilege.Name = util.PrivilegeGroupNameForMetastore(privName)
+		} else {
+			log.Warn("failed to restore, privilege group does not exist", zap.String("group", privName))
+			err = errors.Newf("privilege group [%s] does not exist", privName)
+			return err
+		}
 		err = kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Grant)
 		if err != nil {
 			return err
@@ -1437,6 +1609,72 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 	}
 
 	return err
+}
+
+func (kc *Catalog) GetPrivilegeGroup(ctx context.Context, groupName string) (*milvuspb.PrivilegeGroupInfo, error) {
+	k := BuildPrivilegeGroupkey(groupName)
+	val, err := kc.Txn.Load(k)
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, fmt.Errorf("privilege group [%s] does not exist", groupName)
+		}
+		log.Error("failed to load privilege group", zap.String("group", groupName), zap.Error(err))
+		return nil, err
+	}
+	privGroupInfo := &milvuspb.PrivilegeGroupInfo{}
+	err = proto.Unmarshal([]byte(val), privGroupInfo)
+	if err != nil {
+		log.Error("failed to unmarshal privilege group info", zap.Error(err))
+		return nil, err
+	}
+	return privGroupInfo, nil
+}
+
+func (kc *Catalog) DropPrivilegeGroup(ctx context.Context, groupName string) error {
+	k := BuildPrivilegeGroupkey(groupName)
+	err := kc.Txn.Remove(k)
+	if err != nil {
+		log.Warn("fail to drop privilege group", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) SavePrivilegeGroup(ctx context.Context, data *milvuspb.PrivilegeGroupInfo) error {
+	k := BuildPrivilegeGroupkey(data.GroupName)
+	groupInfo := &milvuspb.PrivilegeGroupInfo{
+		GroupName:  data.GroupName,
+		Privileges: lo.Uniq(data.Privileges),
+	}
+	v, err := proto.Marshal(groupInfo)
+	if err != nil {
+		log.Error("failed to marshal privilege group info", zap.Error(err))
+		return err
+	}
+	if err = kc.Txn.Save(k, string(v)); err != nil {
+		log.Warn("fail to put privilege group", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
+	_, vals, err := kc.Txn.LoadWithPrefix(PrivilegeGroupPrefix)
+	if err != nil {
+		log.Error("failed to list privilege groups", zap.String("prefix", PrivilegeGroupPrefix), zap.Error(err))
+		return nil, err
+	}
+	privGroups := make([]*milvuspb.PrivilegeGroupInfo, 0, len(vals))
+	for _, val := range vals {
+		privGroupInfo := &milvuspb.PrivilegeGroupInfo{}
+		err = proto.Unmarshal([]byte(val), privGroupInfo)
+		if err != nil {
+			log.Error("failed to unmarshal privilege group info", zap.Error(err))
+			return nil, err
+		}
+		privGroups = append(privGroups, privGroupInfo)
+	}
+	return privGroups, nil
 }
 
 func (kc *Catalog) Close() {

@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -59,14 +60,17 @@ type nodeCtxManager struct {
 	closeWg      *sync.WaitGroup
 	closeOnce    sync.Once
 	closeCh      chan struct{} // notify nodes to exit
+
+	lastAccessTime *atomic.Time
 }
 
 // NewNodeCtxManager init with the inputNode and fg.closeWg
 func NewNodeCtxManager(nodeCtx *nodeCtx, closeWg *sync.WaitGroup) *nodeCtxManager {
 	return &nodeCtxManager{
-		inputNodeCtx: nodeCtx,
-		closeWg:      closeWg,
-		closeCh:      make(chan struct{}),
+		inputNodeCtx:   nodeCtx,
+		closeWg:        closeWg,
+		closeCh:        make(chan struct{}),
+		lastAccessTime: atomic.NewTime(time.Now()),
 	}
 }
 
@@ -117,6 +121,10 @@ func (nodeCtxManager *nodeCtxManager) workNodeStart() {
 					curNode.blockMutex.RUnlock()
 					curNode = inputNode
 					continue
+				}
+
+				if nodeCtxManager.lastAccessTime != nil {
+					nodeCtxManager.lastAccessTime.Store(time.Now())
 				}
 
 				output = n.Operate(input)

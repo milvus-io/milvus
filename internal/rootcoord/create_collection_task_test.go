@@ -246,23 +246,7 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{1: {1, 2}})
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
 			Return(&model.Database{Name: "db1"}, nil).Once()
-
-		meta.On("GetDatabaseByID",
-			mock.Anything, mock.Anything, mock.Anything,
-		).Return(&model.Database{
-			Name: "default",
-		}, nil)
-		meta.On("GetCollectionByID",
-			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-		).Return(&model.Collection{
-			Name:      "default",
-			ShardsNum: 2,
-			Partitions: []*model.Partition{
-				{
-					PartitionID: 1,
-				},
-			},
-		}, nil)
+		meta.EXPECT().GetGeneralCount(mock.Anything).Return(1)
 
 		core := newTestCore(withMeta(meta))
 
@@ -295,8 +279,7 @@ func Test_createCollectionTask_validate(t *testing.T) {
 					},
 				},
 			}, nil).Once()
-		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).
-			Return(nil, errors.New("mock"))
+		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 
 		core := newTestCore(withMeta(meta))
 		task := createCollectionTask{
@@ -408,11 +391,27 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 				CollectionName: collectionName,
 			},
 		}
-		schema1 := &schemapb.CollectionSchema{
+		schema := &schemapb.CollectionSchema{
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
 					DataType: schemapb.DataType_BinaryVector,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_BoolData{
+							BoolData: false,
+						},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(schema)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		schema1 := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_Int16,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_BoolData{
 							BoolData: false,
@@ -428,7 +427,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_IntData{
 							IntData: 1,
@@ -444,7 +443,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_LongData{
 							LongData: 1,
@@ -460,7 +459,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_FloatData{
 							FloatData: 1,
@@ -476,7 +475,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_DoubleData{
 							DoubleData: 1,
@@ -492,7 +491,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
-					DataType: schemapb.DataType_BinaryVector,
+					DataType: schemapb.DataType_Bool,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_StringData{
 							StringData: "a",
@@ -712,12 +711,13 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
-	).Return(model.NewDefaultDatabase(), nil)
+	).Return(model.NewDefaultDatabase(nil), nil)
 	meta.On("ListAllAvailCollections",
 		mock.Anything,
 	).Return(map[int64][]int64{
 		util.DefaultDBID: {1, 2},
 	}, nil)
+	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
@@ -738,8 +738,6 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 	})
 
 	t.Run("invalid schema", func(t *testing.T) {
-		meta.On("GetDatabaseByID", mock.Anything,
-			mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 		core := newTestCore(withMeta(meta))
 		collectionName := funcutil.GenRandomStr()
 		task := &createCollectionTask{
@@ -768,8 +766,6 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		}
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		meta.On("GetDatabaseByID", mock.Anything,
-			mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 		core := newTestCore(withInvalidIDAllocator(), withMeta(meta))
 
 		task := createCollectionTask{
@@ -792,8 +788,6 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		field1 := funcutil.GenRandomStr()
 
 		ticker := newRocksMqTtSynchronizer()
-		meta.On("GetDatabaseByID", mock.Anything,
-			mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 
 		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
 
@@ -914,13 +908,25 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		ticker := newTickerWithMockFailStream()
 		shardNum := 2
 		pchans := ticker.getDmlChannelNames(shardNum)
-		core := newTestCore(withTtSynchronizer(ticker))
+		meta := newMockMetaTable()
+		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
+			return nil, errors.New("error mock GetCollectionByName")
+		}
+		core := newTestCore(withTtSynchronizer(ticker), withMeta(meta))
+		schema := &schemapb.CollectionSchema{Name: "", Fields: []*schemapb.FieldSchema{{}}}
 		task := &createCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			channels: collectionChannels{
 				physicalChannels: pchans,
 				virtualChannels:  []string{funcutil.GenRandomStr(), funcutil.GenRandomStr()},
 			},
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: "",
+				Schema:         []byte{},
+				ShardsNum:      int32(shardNum),
+			},
+			schema: schema,
 		}
 		err := task.Execute(context.Background())
 		assert.Error(t, err)
@@ -1126,14 +1132,13 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
-	).Return(model.NewDefaultDatabase(), nil)
+	).Return(model.NewDefaultDatabase(nil), nil)
 	meta.On("ListAllAvailCollections",
 		mock.Anything,
 	).Return(map[int64][]int64{
 		util.DefaultDBID: {1, 2},
 	}, nil)
-	meta.On("GetDatabaseByID", mock.Anything,
-		mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
+	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)

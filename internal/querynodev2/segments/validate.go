@@ -42,17 +42,16 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 	if len(partitionIDs) == 0 {
 		searchPartIDs = collection.GetPartitions()
 	} else {
-		if collection.ExistPartition(partitionIDs...) {
-			searchPartIDs = partitionIDs
-		}
+		// use request partition ids directly, ignoring meta partition ids
+		// partitions shall be controlled by delegator distribution
+		searchPartIDs = partitionIDs
 	}
 
 	log.Ctx(ctx).Debug("read target partitions", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", searchPartIDs))
 
 	// all partitions have been released
 	if len(searchPartIDs) == 0 && collection.GetLoadType() == querypb.LoadType_LoadPartition {
-		return nil, errors.New("partitions have been released , collectionID = " +
-			fmt.Sprintln(collectionID) + "target partitionIDs = " + fmt.Sprintln(searchPartIDs))
+		return nil, errors.Newf("partitions have been released , collectionID = %d target partitionIDs = %v", collectionID, searchPartIDs)
 	}
 
 	if len(searchPartIDs) == 0 && collection.GetLoadType() == querypb.LoadType_LoadCollection {
@@ -62,6 +61,11 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 	// validate segment
 	segments := make([]Segment, 0, len(segmentIDs))
 	var err error
+	defer func() {
+		if err != nil {
+			manager.Segment.Unpin(segments)
+		}
+	}()
 	if len(segmentIDs) == 0 {
 		for _, partID := range searchPartIDs {
 			segments, err = manager.Segment.GetAndPinBy(WithPartition(partID), segmentFilter)
@@ -76,7 +80,7 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 		}
 		for _, segment := range segments {
 			if !funcutil.SliceContain(searchPartIDs, segment.Partition()) {
-				err := fmt.Errorf("segment %d belongs to partition %d, which is not in %v", segment.ID(), segment.Partition(), searchPartIDs)
+				err = fmt.Errorf("segment %d belongs to partition %d, which is not in %v", segment.ID(), segment.Partition(), searchPartIDs)
 				return nil, err
 			}
 		}

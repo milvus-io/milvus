@@ -54,6 +54,10 @@ struct BinaryRangeElementFunc {
 
 #define BinaryRangeJSONCompare(cmp)                           \
     do {                                                      \
+        if (valid_data != nullptr && !valid_data[i]) {        \
+            res[i] = valid_res[i] = false;                    \
+            break;                                            \
+        }                                                     \
         auto x = src[i].template at<GetType>(pointer);        \
         if (x.error()) {                                      \
             if constexpr (std::is_same_v<GetType, int64_t>) { \
@@ -81,8 +85,10 @@ struct BinaryRangeElementFuncForJson {
                ValueType val2,
                const std::string& pointer,
                const milvus::Json* src,
+               const bool* valid_data,
                size_t n,
-               TargetBitmapView res) {
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
         for (size_t i = 0; i < n; ++i) {
             if constexpr (lower_inclusive && upper_inclusive) {
                 BinaryRangeJSONCompare(val1 <= value && value <= val2);
@@ -107,9 +113,15 @@ struct BinaryRangeElementFuncForArray {
                ValueType val2,
                int index,
                const milvus::ArrayView* src,
+               const bool* valid_data,
                size_t n,
-               TargetBitmapView res) {
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
         for (size_t i = 0; i < n; ++i) {
+            if (valid_data != nullptr && !valid_data[i]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
             if constexpr (lower_inclusive && upper_inclusive) {
                 if (index >= src[i].length()) {
                     res[i] = false;
@@ -223,7 +235,6 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr> expr_;
-    ColumnVectorPtr cached_overflow_res_{nullptr};
     int64_t overflow_check_pos_{0};
 };
 }  //namespace exec

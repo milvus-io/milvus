@@ -19,10 +19,12 @@ package meta
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -184,4 +186,43 @@ func (suite *ChannelDistManagerSuite) AssertCollection(channels []*DmChannel, co
 
 func TestChannelDistManager(t *testing.T) {
 	suite.Run(t, new(ChannelDistManagerSuite))
+}
+
+func TestGetChannelDistJSON(t *testing.T) {
+	manager := NewChannelDistManager()
+	channel1 := DmChannelFromVChannel(&datapb.VchannelInfo{
+		CollectionID: 100,
+		ChannelName:  "channel-1",
+	})
+	channel1.Node = 1
+	channel1.Version = 1
+
+	channel2 := DmChannelFromVChannel(&datapb.VchannelInfo{
+		CollectionID: 200,
+		ChannelName:  "channel-2",
+	})
+	channel2.Node = 2
+	channel2.Version = 1
+
+	manager.Update(1, channel1)
+	manager.Update(2, channel2)
+
+	channels := manager.GetChannelDist()
+	assert.Equal(t, 2, len(channels))
+
+	checkResult := func(channel *metricsinfo.DmChannel) {
+		if channel.NodeID == 1 {
+			assert.Equal(t, "channel-1", channel.ChannelName)
+			assert.Equal(t, int64(100), channel.CollectionID)
+		} else if channel.NodeID == 2 {
+			assert.Equal(t, "channel-2", channel.ChannelName)
+			assert.Equal(t, int64(200), channel.CollectionID)
+		} else {
+			assert.Failf(t, "unexpected node id", "unexpected node id %d", channel.NodeID)
+		}
+	}
+
+	for _, channel := range channels {
+		checkResult(channel)
+	}
 }

@@ -22,20 +22,19 @@ using stdclock = std::chrono::high_resolution_clock;
 class TextMatchIndex : public InvertedIndexTantivy<std::string> {
  public:
     // for growing segment.
-    explicit TextMatchIndex(
-        int64_t commit_interval_in_ms,
-        const char* tokenizer_name,
-        const std::map<std::string, std::string>& tokenizer_params);
+    explicit TextMatchIndex(int64_t commit_interval_in_ms,
+                            const char* unique_id,
+                            const char* tokenizer_name,
+                            const char* analyzer_params);
     // for sealed segment.
-    explicit TextMatchIndex(
-        const std::string& path,
-        const char* tokenizer_name,
-        const std::map<std::string, std::string>& tokenizer_params);
+    explicit TextMatchIndex(const std::string& path,
+                            const char* unique_id,
+                            const char* tokenizer_name,
+                            const char* analyzer_params);
     // for building index.
-    explicit TextMatchIndex(
-        const storage::FileManagerContext& ctx,
-        const char* tokenizer_name,
-        const std::map<std::string, std::string>& tokenizer_params);
+    explicit TextMatchIndex(const storage::FileManagerContext& ctx,
+                            const char* tokenizer_name,
+                            const char* analyzer_params);
     // for loading index
     explicit TextMatchIndex(const storage::FileManagerContext& ctx);
 
@@ -48,10 +47,16 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
 
  public:
     void
-    AddText(const std::string& text, int64_t offset);
+    AddText(const std::string& text, const bool valid, int64_t offset);
 
     void
-    AddTexts(size_t n, const std::string* texts, int64_t offset_begin);
+    AddNull(int64_t offset);
+
+    void
+    AddTexts(size_t n,
+             const std::string* texts,
+             const bool* valids,
+             int64_t offset_begin);
 
     void
     Finish();
@@ -67,9 +72,7 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     CreateReader();
 
     void
-    RegisterTokenizer(
-        const char* tokenizer_name,
-        const std::map<std::string, std::string>& tokenizer_params);
+    RegisterTokenizer(const char* tokenizer_name, const char* analyzer_params);
 
     TargetBitmap
     MatchQuery(const std::string& query);

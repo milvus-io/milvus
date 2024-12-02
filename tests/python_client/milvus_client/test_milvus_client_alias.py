@@ -92,9 +92,7 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         alias = cf.gen_unique_str("collection_alias")
         collection_name = "a".join("a" for i in range(256))
         # 2. create alias
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
-                                                f"the length of a collection name must be less than 255 characters: "
-                                                f"invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
         client_w.create_alias(client, collection_name, alias,
                               check_task=CheckTasks.err_res, check_items=error)
 
@@ -109,8 +107,7 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         client = self._connect(enable_milvus_client_api=True)
         alias = cf.gen_unique_str("collection_alias")
         collection_name = "not_exist_collection_alias"
-        error = {ct.err_code: 100, ct.err_msg: f"can't find collection collection not "
-                                               f"found[database=default][collection={collection_name}]"}
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={collection_name}]"}
         client_w.create_alias(client, collection_name, alias,
                               check_task=CheckTasks.err_res, check_items=error)
 
@@ -128,8 +125,9 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. create alias
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {collection_name}. the first character of a "
-                                                f"collection name must be an underscore or letter: invalid parameter"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"Invalid collection alias: {alias}. "
+                             f"the first character of a collection alias must be an underscore or letter"}
         client_w.create_alias(client, collection_name, alias,
                               check_task=CheckTasks.err_res, check_items=error)
         client_w.drop_collection(client, collection_name)
@@ -148,9 +146,7 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. create alias
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
-                                                f"the length of a collection name must be less than 255 characters: "
-                                                f"invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection alias must be less than 255 characters"}
         client_w.create_alias(client, collection_name, alias,
                               check_task=CheckTasks.err_res, check_items=error)
         client_w.drop_collection(client, collection_name)
@@ -220,8 +216,8 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         expected: create alias successfully
         """
         client = self._connect(enable_milvus_client_api=True)
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {alias_name}. the first character of a "
-                                                f"collection name must be an underscore or letter: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection alias: {alias_name}. the first character of a "
+                                                f"collection alias must be an underscore or letter"}
         client_w.drop_alias(client, alias_name,
                             check_task=CheckTasks.err_res, check_items=error)
 
@@ -235,9 +231,7 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         """
         client = self._connect(enable_milvus_client_api=True)
         alias = "a".join("a" for i in range(256))
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {alias}. "
-                                                f"the length of a collection name must be less than 255 characters: "
-                                                f"invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection alias must be less than 255 characters"}
         client_w.drop_alias(client, alias,
                             check_task=CheckTasks.err_res, check_items=error)
 
@@ -269,9 +263,7 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         alias = cf.gen_unique_str("collection_alias")
         collection_name = "a".join("a" for i in range(256))
         # 2. create alias
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
-                                             f"the length of a collection name must be less than 255 characters: "
-                                             f"invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
         client_w.alter_alias(client, collection_name, alias,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -287,8 +279,7 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         alias = cf.gen_unique_str("collection_alias")
         collection_name = cf.gen_unique_str("not_exist_collection_alias")
         # 2. create alias
-        error = {ct.err_code: 100, ct.err_msg: f"can't find collection collection not "
-                                               f"found[database=default][collection={collection_name}]"}
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[collection={collection_name}]"}
         client_w.alter_alias(client, collection_name, alias,
                              check_task=CheckTasks.err_res, check_items=error)
         client_w.drop_collection(client, collection_name)
@@ -307,10 +298,10 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. create alias
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {collection_name}. the first character of a "
-                                                f"collection name must be an underscore or letter: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection alias: {alias}. the first character of a "
+                                                f"collection alias must be an underscore or letter"}
         client_w.alter_alias(client, collection_name, alias,
-                              check_task=CheckTasks.err_res, check_items=error)
+                             check_task=CheckTasks.err_res, check_items=error)
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -327,11 +318,9 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. create alias
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
-                                                f"the length of a collection name must be less than 255 characters: "
-                                                f"invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection alias must be less than 255 characters"}
         client_w.alter_alias(client, collection_name, alias,
-                              check_task=CheckTasks.err_res, check_items=error)
+                             check_task=CheckTasks.err_res, check_items=error)
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -362,15 +351,15 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         expected: alter alias successfully
         """
         client = self._connect(enable_milvus_client_api=True)
-        collection_name = cf.gen_unique_str(prefix)
-        alias = cf.gen_unique_str("collection_alias")
-        another_alias = cf.gen_unique_str("collection_alias_another")
+        collection_name = cf.gen_unique_str("coll")
+        alias = cf.gen_unique_str("alias")
+        another_alias = cf.gen_unique_str("another_alias")
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. create alias
         client_w.create_alias(client, collection_name, alias)
         # 3. alter alias
-        error = {ct.err_code: 1600, ct.err_msg: f"alias not found[database=default][alias={collection_name}]"}
+        error = {ct.err_code: 1600, ct.err_msg: f"alias not found[database=default][alias={another_alias}]"}
         client_w.alter_alias(client, collection_name, another_alias,
                              check_task=CheckTasks.err_res, check_items=error)
         client_w.drop_collection(client, collection_name)

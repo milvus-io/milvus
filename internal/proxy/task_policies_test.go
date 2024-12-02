@@ -26,7 +26,6 @@ func TestRoundRobinPolicy(t *testing.T) {
 		"c2": {{nodeID: 0, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}},
 		"c3": {{nodeID: 1, address: "fake"}, {nodeID: 3, address: "fake"}, {nodeID: 4, address: "fake"}},
 	}
-	mgr.UpdateShardLeaders(nil, shard2leaders)
 
 	querier := &mockQuery{}
 	querier.init()

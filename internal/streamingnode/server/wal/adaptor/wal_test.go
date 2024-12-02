@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
 )
 
+const testVChannel = "v1"
+
 type walTestFramework struct {
 	b            wal.OpenerBuilder
 	t            *testing.T
@@ -60,8 +62,8 @@ func initResourceForTest(t *testing.T) {
 	flusher := mock_flusher.NewMockFlusher(t)
 	flusher.EXPECT().RegisterPChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
 	flusher.EXPECT().UnregisterPChannel(mock.Anything).Return().Maybe()
-	flusher.EXPECT().RegisterVChannel(mock.Anything, mock.Anything).Return()
-	flusher.EXPECT().UnregisterVChannel(mock.Anything).Return()
+	flusher.EXPECT().RegisterVChannel(mock.Anything, mock.Anything).Return().Maybe()
+	flusher.EXPECT().UnregisterVChannel(mock.Anything).Return().Maybe()
 
 	resource.InitForTest(
 		t,
@@ -184,7 +186,7 @@ func (f *testOneWALFramework) testSendCreateCollection(ctx context.Context, w wa
 			PartitionIds: []int64{2},
 		}).
 		WithBody(&msgpb.CreateCollectionRequest{}).
-		WithVChannel("v1").
+		WithVChannel(testVChannel).
 		BuildMutable()
 	assert.NoError(f.t, err)
 
@@ -194,13 +196,16 @@ func (f *testOneWALFramework) testSendCreateCollection(ctx context.Context, w wa
 }
 
 func (f *testOneWALFramework) testSendDropCollection(ctx context.Context, w wal.WAL) {
+	// Here, the drop colllection is conflict with the txn message, so we need to wait for a while.
+	// TODO: fix it in the redo interceptor.
+	time.Sleep(2 * time.Second)
 	// drop collection after test
 	dropMsg, err := message.NewDropCollectionMessageBuilderV1().
 		WithHeader(&message.DropCollectionMessageHeader{
 			CollectionId: 1,
 		}).
 		WithBody(&msgpb.DropCollectionRequest{}).
-		WithVChannel("v1").
+		WithVChannel(testVChannel).
 		BuildMutable()
 	assert.NoError(f.t, err)
 
@@ -220,7 +225,7 @@ func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]mess
 
 			createPartOfTxn := func() (*message.ImmutableTxnMessageBuilder, *message.TxnContext) {
 				msg, err := message.NewBeginTxnMessageBuilderV2().
-					WithVChannel("v1").
+					WithVChannel(testVChannel).
 					WithHeader(&message.BeginTxnMessageHeader{
 						KeepaliveMilliseconds: 1000,
 					}).
@@ -319,6 +324,7 @@ func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]mess
 
 func (f *testOneWALFramework) testRead(ctx context.Context, w wal.WAL) ([]message.ImmutableMessage, error) {
 	s, err := w.Read(ctx, wal.ReadOption{
+		VChannel:      testVChannel,
 		DeliverPolicy: options.DeliverPolicyAll(),
 		MessageFilter: []options.DeliverFilter{
 			options.DeliverFilterMessageType(message.MessageTypeInsert),
@@ -364,6 +370,7 @@ func (f *testOneWALFramework) testReadWithOption(ctx context.Context, w wal.WAL)
 			// Test start from some message and timetick is gte than it.
 			readFromMsg := f.written[idx]
 			s, err := w.Read(ctx, wal.ReadOption{
+				VChannel:      testVChannel,
 				DeliverPolicy: options.DeliverPolicyStartFrom(readFromMsg.LastConfirmedMessageID()),
 				MessageFilter: []options.DeliverFilter{
 					options.DeliverFilterTimeTickGTE(readFromMsg.TimeTick()),

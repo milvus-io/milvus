@@ -22,18 +22,9 @@ TokenizerParams
 ParseTokenizerParams(const TypeParams& params) {
     auto iter = params.find("analyzer_params");
     if (iter == params.end()) {
-        return {};
+        return "{}";
     }
-    nlohmann::json j = nlohmann::json::parse(iter->second);
-    std::map<std::string, std::string> ret;
-    for (const auto& [k, v] : j.items()) {
-        try {
-            ret[k] = v.get<std::string>();
-        } catch (std::exception& e) {
-            ret[k] = v.dump();
-        }
-    }
-    return ret;
+    return iter->second;
 }
 
 bool
@@ -47,9 +38,24 @@ FieldMeta::enable_match() const {
     return string_info_->enable_match;
 }
 
+bool
+FieldMeta::enable_analyzer() const {
+    if (!IsStringDataType(type_)) {
+        return false;
+    }
+    if (!string_info_.has_value()) {
+        return false;
+    }
+    return string_info_->enable_analyzer;
+}
+
 TokenizerParams
-FieldMeta::get_tokenizer_params() const {
-    Assert(enable_match());
+FieldMeta::get_analyzer_params() const {
+    if (!enable_analyzer()) {
+        PanicInfo(
+            Unsupported,
+            fmt::format("unsupported text index when not enable analyzer"));
+    }
     auto params = string_info_->params;
     return ParseTokenizerParams(params);
 }
@@ -91,29 +97,32 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         auto type_map = RepeatedKeyValToMap(schema_proto.type_params());
         AssertInfo(type_map.count(MAX_LENGTH), "max_length not found");
         auto max_len = boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
-        bool enable_match = false;
-        if (type_map.count("enable_match")) {
-            auto param_str = type_map.at("enable_match");
+
+        auto get_bool_value = [&](const std::string& key) -> bool {
+            if (!type_map.count(key)) {
+                return false;
+            }
+            auto param_str = type_map.at(key);
             std::transform(param_str.begin(),
                            param_str.end(),
                            param_str.begin(),
                            ::tolower);
+            std::istringstream ss(param_str);
+            bool b;
+            ss >> std::boolalpha >> b;
+            return b;
+        };
 
-            auto bool_cast = [](const std::string& arg) -> bool {
-                std::istringstream ss(arg);
-                bool b;
-                ss >> std::boolalpha >> b;
-                return b;
-            };
+        bool enable_analyzer = get_bool_value("enable_analyzer");
+        bool enable_match = get_bool_value("enable_match");
 
-            enable_match = bool_cast(param_str);
-        }
         return FieldMeta{name,
                          field_id,
                          data_type,
                          max_len,
                          nullable,
                          enable_match,
+                         enable_analyzer,
                          type_map};
     }
 

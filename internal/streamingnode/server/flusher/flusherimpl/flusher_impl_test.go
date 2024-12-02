@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -48,9 +50,15 @@ func init() {
 
 func newMockDatacoord(t *testing.T, maybe bool) *mocks.MockDataCoordClient {
 	datacoord := mocks.NewMockDataCoordClient(t)
+	failureCnt := atomic.NewInt32(20)
 	expect := datacoord.EXPECT().GetChannelRecoveryInfo(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, request *datapb.GetChannelRecoveryInfoRequest, option ...grpc.CallOption,
 		) (*datapb.GetChannelRecoveryInfoResponse, error) {
+			if failureCnt.Dec() > 0 {
+				return &datapb.GetChannelRecoveryInfoResponse{
+					Status: merr.Status(merr.ErrCollectionNotFound),
+				}, nil
+			}
 			messageID := 1
 			b := make([]byte, 8)
 			common.Endian.PutUint64(b, uint64(messageID))

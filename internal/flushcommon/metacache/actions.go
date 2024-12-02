@@ -129,6 +129,14 @@ func WithNoSyncingTask() SegmentFilter {
 
 type SegmentAction func(info *SegmentInfo)
 
+func SegmentActions(actions ...SegmentAction) SegmentAction {
+	return func(info *SegmentInfo) {
+		for _, act := range actions {
+			act(info)
+		}
+	}
+}
+
 func UpdateState(state commonpb.SegmentState) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.state = state
@@ -147,6 +155,14 @@ func UpdateNumOfRows(numOfRows int64) SegmentAction {
 	}
 }
 
+func SetStartPositionIfNil(startPos *msgpb.MsgPosition) SegmentAction {
+	return func(info *SegmentInfo) {
+		if info.startPosition == nil {
+			info.startPosition = startPos
+		}
+	}
+}
+
 func UpdateBufferedRows(bufferedRows int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.bufferRows = bufferedRows
@@ -161,6 +177,9 @@ func RollStats(newStats ...*storage.PrimaryKeyStats) SegmentAction {
 
 func MergeBm25Stats(newStats map[int64]*storage.BM25Stats) SegmentAction {
 	return func(info *SegmentInfo) {
+		if info.bm25stats == nil {
+			info.bm25stats = NewEmptySegmentBM25Stats()
+		}
 		info.bm25stats.Merge(newStats)
 	}
 }

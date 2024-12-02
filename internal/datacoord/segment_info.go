@@ -166,7 +166,7 @@ func (s *SegmentsInfo) GetRealSegmentsForChannel(channel string) []*SegmentInfo 
 
 // GetCompactionTo returns the segment that the provided segment is compacted to.
 // Return (nil, false) if given segmentID can not found in the meta.
-// Return (nil, true) if given segmentID can be found not no compaction to.
+// Return (nil, true) if given segmentID can be found with no compaction to.
 // Return (notnil, true) if given segmentID can be found and has compaction to.
 func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) ([]*SegmentInfo, bool) {
 	if _, ok := s.segments[fromSegmentID]; !ok {
@@ -216,14 +216,6 @@ func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 func (s *SegmentsInfo) SetRowCount(segmentID UniqueID, rowCount int64) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.Clone(SetRowCount(rowCount))
-	}
-}
-
-// SetState sets Segment State info for SegmentInfo with provided segmentID
-// if SegmentInfo not found, do nothing
-func (s *SegmentsInfo) SetState(segmentID UniqueID, state commonpb.SegmentState) {
-	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.Clone(SetState(state))
 	}
 }
 
@@ -508,9 +500,9 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 	return s.size.Load()
 }
 
-// getDeltaCount use cached value when segment is immutable
+// Any edits on deltalogs of flushed segments will reset deltaRowcount to -1
 func (s *SegmentInfo) getDeltaCount() int64 {
-	if s.deltaRowcount.Load() < 0 || s.State != commonpb.SegmentState_Flushed {
+	if s.deltaRowcount.Load() < 0 || s.GetState() != commonpb.SegmentState_Flushed {
 		var rc int64
 		for _, deltaLogs := range s.GetDeltalogs() {
 			for _, l := range deltaLogs.GetBinlogs() {

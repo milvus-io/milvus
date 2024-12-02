@@ -334,6 +334,7 @@ class CollectionClient(Requests):
         self.endpoint = endpoint
         self.api_key = token
         self.db_name = None
+        self.name_list = []
         self.headers = self.update_headers()
 
     @classmethod
@@ -435,6 +436,10 @@ class CollectionClient(Requests):
 
     def collection_create(self, payload, db_name="default"):
         time.sleep(1)  # wait for collection created and in case of rate limit
+        c_name = payload.get("collectionName", None)
+        db_name = payload.get("dbName", db_name)
+        self.name_list.append((db_name, c_name))
+
         url = f'{self.endpoint}/v2/vectordb/collections/create'
         if self.db_name is not None:
             payload["dbName"] = self.db_name

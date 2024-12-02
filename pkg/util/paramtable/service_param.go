@@ -455,7 +455,9 @@ It is recommended to change this parameter before starting Milvus for the first 
 }
 
 type MetaStoreConfig struct {
-	MetaStoreType ParamItem `refreshable:"false"`
+	MetaStoreType              ParamItem `refreshable:"false"`
+	SnapshotTTLSeconds         ParamItem `refreshable:"true"`
+	SnapshotReserveTimeSeconds ParamItem `refreshable:"true"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -463,10 +465,28 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Key:          "metastore.type",
 		Version:      "2.2.0",
 		DefaultValue: util.MetaStoreTypeEtcd,
-		Doc:          `Default value: etcd, Valid values: [etcd, tikv] `,
+		Doc:          `Default value: etcd, Valid values: [etcd, tikv]`,
 		Export:       true,
 	}
 	p.MetaStoreType.Init(base.mgr)
+
+	p.SnapshotTTLSeconds = ParamItem{
+		Key:          "metastore.snapshot.ttl",
+		Version:      "2.4.14",
+		DefaultValue: "86400",
+		Doc:          `snapshot ttl in seconds`,
+		Export:       true,
+	}
+	p.SnapshotTTLSeconds.Init(base.mgr)
+
+	p.SnapshotReserveTimeSeconds = ParamItem{
+		Key:          "metastore.snapshot.reserveTime",
+		Version:      "2.4.14",
+		DefaultValue: "3600",
+		Doc:          `snapshot reserve time in seconds`,
+		Export:       true,
+	}
+	p.SnapshotReserveTimeSeconds.Init(base.mgr)
 
 	// TODO: The initialization operation of metadata storage is called in the initialization phase of every node.
 	// There should be a single initialization operation for meta store, then move the metrics registration to there.
@@ -772,7 +792,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	// due to implicit rule of MQ priority，the default address should be empty
 	k.Address = ParamItem{
 		Key:          "kafka.brokerList",
-		DefaultValue: "",
+		DefaultValue: "localhost:9092",
 		Version:      "2.1.0",
 		Export:       true,
 	}

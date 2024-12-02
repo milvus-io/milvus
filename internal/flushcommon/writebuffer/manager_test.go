@@ -95,16 +95,31 @@ func (s *ManagerSuite) TestFlushSegments() {
 		defer cancel()
 
 		wb := NewMockWriteBuffer(s.T())
-
-		s.manager.mut.Lock()
-		s.manager.buffers[s.channelName] = wb
-		s.manager.mut.Unlock()
+		s.manager.buffers.Insert(s.channelName, wb)
 
 		wb.EXPECT().SealSegments(mock.Anything, mock.Anything).Return(nil)
 
 		err := manager.SealSegments(ctx, s.channelName, []int64{1})
 		s.NoError(err)
 	})
+}
+
+func (s *ManagerSuite) TestCreateNewGrowingSegment() {
+	manager := s.manager
+	err := manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1)
+	s.Error(err)
+
+	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Once()
+	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+
+	wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
+		idAllocator: s.allocator,
+	})
+	s.NoError(err)
+
+	s.manager.buffers.Insert(s.channelName, wb)
+	err = manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1)
+	s.NoError(err)
 }
 
 func (s *ManagerSuite) TestBufferData() {
@@ -117,10 +132,7 @@ func (s *ManagerSuite) TestBufferData() {
 	s.Run("normal_buffer_data", func() {
 		wb := NewMockWriteBuffer(s.T())
 
-		s.manager.mut.Lock()
-		s.manager.buffers[s.channelName] = wb
-		s.manager.mut.Unlock()
-
+		s.manager.buffers.Insert(s.channelName, wb)
 		wb.EXPECT().BufferData(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		err := manager.BufferData(s.channelName, nil, nil, nil, nil)
@@ -138,10 +150,7 @@ func (s *ManagerSuite) TestGetCheckpoint() {
 	s.Run("normal_checkpoint", func() {
 		wb := NewMockWriteBuffer(s.T())
 
-		manager.mut.Lock()
-		manager.buffers[s.channelName] = wb
-		manager.mut.Unlock()
-
+		manager.buffers.Insert(s.channelName, wb)
 		pos := &msgpb.MsgPosition{ChannelName: s.channelName, Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0)}
 		wb.EXPECT().GetCheckpoint().Return(pos)
 		wb.EXPECT().GetFlushTimestamp().Return(nonFlushTS)
@@ -154,10 +163,7 @@ func (s *ManagerSuite) TestGetCheckpoint() {
 	s.Run("checkpoint_need_update", func() {
 		wb := NewMockWriteBuffer(s.T())
 
-		manager.mut.Lock()
-		manager.buffers[s.channelName] = wb
-		manager.mut.Unlock()
-
+		manager.buffers.Insert(s.channelName, wb)
 		cpTimestamp := tsoutil.ComposeTSByTime(time.Now(), 0)
 
 		pos := &msgpb.MsgPosition{ChannelName: s.channelName, Timestamp: cpTimestamp}
@@ -202,10 +208,7 @@ func (s *ManagerSuite) TestDropPartitions() {
 		wb := NewMockWriteBuffer(s.T())
 		wb.EXPECT().DropPartitions(mock.Anything).Return()
 
-		manager.mut.Lock()
-		manager.buffers[s.channelName] = wb
-		manager.mut.Unlock()
-
+		manager.buffers.Insert(s.channelName, wb)
 		manager.DropPartitions(s.channelName, []int64{1})
 	})
 }
@@ -242,10 +245,7 @@ func (s *ManagerSuite) TestMemoryCheck() {
 		}
 		flag.Store(true)
 	}).Return()
-	manager.mut.Lock()
-	manager.buffers[s.channelName] = wb
-	manager.mut.Unlock()
-
+	manager.buffers.Insert(s.channelName, wb)
 	manager.Start()
 	defer manager.Stop()
 

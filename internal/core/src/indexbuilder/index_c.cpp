@@ -284,7 +284,7 @@ BuildTextIndex(CBinarySet* c_binary_set,
         auto index = std::make_unique<index::TextMatchIndex>(
             fileManagerContext,
             "milvus_tokenizer",
-            field_schema.get_tokenizer_params());
+            field_schema.get_analyzer_params().c_str());
         index->Build(config);
         auto binary =
             std::make_unique<knowhere::BinarySet>(index->Upload(config));

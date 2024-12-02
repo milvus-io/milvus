@@ -108,11 +108,11 @@ func (m *CompactionTriggerManager) startLoop() {
 	defer logutil.LogPanic()
 	defer m.closeWg.Done()
 
-	l0Ticker := time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
+	l0Ticker := time.NewTicker(Params.DataCoordCfg.L0CompactionTriggerInterval.GetAsDuration(time.Second))
 	defer l0Ticker.Stop()
 	clusteringTicker := time.NewTicker(Params.DataCoordCfg.ClusteringCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer clusteringTicker.Stop()
-	singleTicker := time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
+	singleTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer singleTicker.Stop()
 	log.Info("Compaction trigger manager start")
 	for {
@@ -315,7 +315,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		return
 	}
 
-	resultSegmentNum := totalRows / preferSegmentRows * 2
+	resultSegmentNum := (totalRows/preferSegmentRows + 1) * 2
 	start, end, err := m.allocator.AllocN(resultSegmentNum)
 	if err != nil {
 		log.Warn("pre-allocate result segments failed", zap.String("view", view.String()), zap.Error(err))
@@ -335,12 +335,16 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		Schema:             collection.Schema,
 		ClusteringKeyField: view.(*ClusteringSegmentsView).clusteringKeyField,
 		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
-		ResultSegments:     []int64{start, end}, // pre-allocated result segments range
+		ResultSegments:     []int64{},
 		MaxSegmentRows:     maxSegmentRows,
 		PreferSegmentRows:  preferSegmentRows,
 		TotalRows:          totalRows,
 		AnalyzeTaskID:      taskID + 1,
 		LastStateStartTime: time.Now().Unix(),
+		PreAllocatedSegmentIDs: &datapb.IDRange{
+			Begin: start,
+			End:   end,
+		},
 	}
 	err = m.compactionHandler.enqueueCompaction(task)
 	if err != nil {
@@ -391,10 +395,14 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		Channel:            view.GetGroupLabel().Channel,
 		Schema:             collection.Schema,
 		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
-		ResultSegments:     []int64{startID + 1, endID},
+		ResultSegments:     []int64{},
 		TotalRows:          totalRows,
 		LastStateStartTime: time.Now().Unix(),
 		MaxSize:            getExpandedSize(expectedSize),
+		PreAllocatedSegmentIDs: &datapb.IDRange{
+			Begin: startID + 1,
+			End:   endID,
+		},
 	}
 	err = m.compactionHandler.enqueueCompaction(task)
 	if err != nil {

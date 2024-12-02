@@ -59,6 +59,11 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	if ContainsKeyPairArray(a.Req.GetProperties(), oldDB.Properties) {
+		log.Info("skip to alter database due to no changes were detected in the properties", zap.String("databaseName", a.Req.GetDbName()))
+		return nil
+	}
+
 	newDB := oldDB.Clone()
 	ret := MergeProperties(oldDB.Properties, a.Req.GetProperties())
 	newDB.Properties = ret
@@ -111,6 +116,13 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 	}
 
 	return redoTask.Execute(ctx)
+}
+
+func (a *alterDatabaseTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(a.Req.GetDbName(), true),
+	)
 }
 
 func MergeProperties(oldProps []*commonpb.KeyValuePair, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {

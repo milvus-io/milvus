@@ -15,7 +15,7 @@ spec:
         - chaos-testing
       labelSelectors:
         release: milvus-chaos
-        app: pulsar
+        app: pulsarv3
     mode: fixed
     value: "1"
     action: pod-kill

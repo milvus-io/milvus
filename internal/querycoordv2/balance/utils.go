@@ -129,10 +129,10 @@ func PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []Se
 ) {
 	balanceInfo := fmt.Sprintf("%s new plans:{collectionID:%d, replicaID:%d, ", PlanInfoPrefix, collectionID, replicaID)
 	for _, segmentPlan := range segmentPlans {
-		balanceInfo += segmentPlan.ToString()
+		balanceInfo += segmentPlan.String()
 	}
 	for _, channelPlan := range channelPlans {
-		balanceInfo += channelPlan.ToString()
+		balanceInfo += channelPlan.String()
 	}
 	balanceInfo += "}"
 	log.Info(balanceInfo)

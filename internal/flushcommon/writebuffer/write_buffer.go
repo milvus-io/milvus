@@ -37,6 +37,8 @@ const (
 type WriteBuffer interface {
 	// HasSegment checks whether certain segment exists in this buffer.
 	HasSegment(segmentID int64) bool
+	// CreateNewGrowingSegment creates a new growing segment in the buffer.
+	CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition)
 	// BufferData is the method to buffer dml data msgs.
 	BufferData(insertMsgs []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error
 	// FlushTimestamp set flush timestamp for write buffer
@@ -66,50 +68,35 @@ type checkpointCandidate struct {
 }
 
 type checkpointCandidates struct {
-	candidates map[string]*checkpointCandidate
-	mu         sync.RWMutex
+	candidates *typeutil.ConcurrentMap[string, *checkpointCandidate]
+}
+
+func getCandidatesKey(segmentID int64, timestamp uint64) string {
+	return fmt.Sprintf("%d-%d", segmentID, timestamp)
 }
 
 func newCheckpointCandiates() *checkpointCandidates {
 	return &checkpointCandidates{
-		candidates: make(map[string]*checkpointCandidate),
+		candidates: typeutil.NewConcurrentMap[string, *checkpointCandidate](), // segmentID-ts
 	}
 }
 
 func (c *checkpointCandidates) Remove(segmentID int64, timestamp uint64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.candidates, fmt.Sprintf("%d-%d", segmentID, timestamp))
-}
-
-func (c *checkpointCandidates) RemoveChannel(channel string, timestamp uint64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.candidates, fmt.Sprintf("%s-%d", channel, timestamp))
+	c.candidates.Remove(getCandidatesKey(segmentID, timestamp))
 }
 
 func (c *checkpointCandidates) Add(segmentID int64, position *msgpb.MsgPosition, source string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.candidates[fmt.Sprintf("%d-%d", segmentID, position.GetTimestamp())] = &checkpointCandidate{segmentID, position, source}
-}
-
-func (c *checkpointCandidates) AddChannel(channel string, position *msgpb.MsgPosition, source string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.candidates[fmt.Sprintf("%s-%d", channel, position.GetTimestamp())] = &checkpointCandidate{-1, position, source}
+	c.candidates.Insert(getCandidatesKey(segmentID, position.GetTimestamp()), &checkpointCandidate{segmentID, position, source})
 }
 
 func (c *checkpointCandidates) GetEarliestWithDefault(def *checkpointCandidate) *checkpointCandidate {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	var result *checkpointCandidate = def
-	for _, candidate := range c.candidates {
+	c.candidates.Range(func(_ string, candidate *checkpointCandidate) bool {
 		if result == nil || candidate.position.GetTimestamp() < result.position.GetTimestamp() {
 			result = candidate
 		}
-	}
+		return true
+	})
 	return result
 }
 
@@ -119,20 +106,11 @@ func NewWriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syncm
 		opt(option)
 	}
 
-	switch option.deletePolicy {
-	case DeletePolicyBFPkOracle:
-		return NewBFWriteBuffer(channel, metacache, syncMgr, option)
-	case DeletePolicyL0Delta:
-		return NewL0WriteBuffer(channel, metacache, syncMgr, option)
-	default:
-		return nil, merr.WrapErrParameterInvalid("valid delete policy config", option.deletePolicy)
-	}
+	return NewL0WriteBuffer(channel, metacache, syncMgr, option)
 }
 
 // writeBufferBase is the common component for buffering data
 type writeBufferBase struct {
-	mut sync.RWMutex
-
 	collectionID int64
 	channelName  string
 
@@ -141,6 +119,7 @@ type writeBufferBase struct {
 	estSizePerRecord int
 	metaCache        metacache.MetaCache
 
+	mut     sync.RWMutex
 	buffers map[int64]*segmentBuffer // segmentID => segmentBuffer
 
 	syncPolicies   []SyncPolicy
@@ -151,7 +130,8 @@ type writeBufferBase struct {
 	checkpoint     *msgpb.MsgPosition
 	flushTimestamp *atomic.Uint64
 
-	errHandler func(err error)
+	errHandler           func(err error)
+	taskObserverCallback func(t syncmgr.Task, err error) // execute when a sync task finished, should be concurrent safe.
 
 	// pre build logger
 	logger        *log.MLogger
@@ -181,19 +161,20 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 	}
 
 	wb := &writeBufferBase{
-		channelName:      channel,
-		collectionID:     metacache.Collection(),
-		collSchema:       schema,
-		estSizePerRecord: estSize,
-		syncMgr:          syncMgr,
-		metaWriter:       option.metaWriter,
-		buffers:          make(map[int64]*segmentBuffer),
-		metaCache:        metacache,
-		serializer:       serializer,
-		syncCheckpoint:   newCheckpointCandiates(),
-		syncPolicies:     option.syncPolicies,
-		flushTimestamp:   flushTs,
-		errHandler:       option.errorHandler,
+		channelName:          channel,
+		collectionID:         metacache.Collection(),
+		collSchema:           schema,
+		estSizePerRecord:     estSize,
+		syncMgr:              syncMgr,
+		metaWriter:           option.metaWriter,
+		buffers:              make(map[int64]*segmentBuffer),
+		metaCache:            metacache,
+		serializer:           serializer,
+		syncCheckpoint:       newCheckpointCandiates(),
+		syncPolicies:         option.syncPolicies,
+		flushTimestamp:       flushTs,
+		errHandler:           option.errorHandler,
+		taskObserverCallback: option.taskObserverCallback,
 	}
 
 	wb.logger = log.With(zap.Int64("collectionID", wb.collectionID),
@@ -342,6 +323,10 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 		}
 
 		result = append(result, wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
+			if wb.taskObserverCallback != nil {
+				wb.taskObserverCallback(syncTask, err)
+			}
+
 			if err != nil {
 				return err
 			}
@@ -521,14 +506,13 @@ func (id *InsertData) batchPkExists(pks []storage.PrimaryKey, tss []uint64, hits
 	return hits
 }
 
-// bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.
-func (wb *writeBufferBase) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition) error {
-	_, ok := wb.metaCache.GetSegmentByID(inData.segmentID)
+func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition) {
+	_, ok := wb.metaCache.GetSegmentByID(segmentID)
 	// new segment
 	if !ok {
 		wb.metaCache.AddSegment(&datapb.SegmentInfo{
-			ID:            inData.segmentID,
-			PartitionID:   inData.partitionID,
+			ID:            segmentID,
+			PartitionID:   partitionID,
 			CollectionID:  wb.collectionID,
 			InsertChannel: wb.channelName,
 			StartPosition: startPos,
@@ -536,14 +520,20 @@ func (wb *writeBufferBase) bufferInsert(inData *InsertData, startPos, endPos *ms
 		}, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
 		}, metacache.NewBM25StatsFactory, metacache.SetStartPosRecorded(false))
-		log.Info("add growing segment", zap.Int64("segmentID", inData.segmentID), zap.String("channel", wb.channelName))
+		log.Info("add growing segment", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName))
 	}
+}
 
+// bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.
+func (wb *writeBufferBase) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition) error {
+	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos)
 	segBuf := wb.getOrCreateBuffer(inData.segmentID)
 
 	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)
-	wb.metaCache.UpdateSegments(metacache.UpdateBufferedRows(segBuf.insertBuffer.rows),
-		metacache.WithSegmentIDs(inData.segmentID))
+	wb.metaCache.UpdateSegments(metacache.SegmentActions(
+		metacache.UpdateBufferedRows(segBuf.insertBuffer.rows),
+		metacache.SetStartPositionIfNil(startPos),
+	), metacache.WithSegmentIDs(inData.segmentID))
 
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(float64(totalMemSize))
 
@@ -605,7 +595,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithLevel(segmentInfo.Level()).
 		WithDataSource(metrics.StreamingDataSourceLabel).
 		WithCheckpoint(wb.checkpoint).
-		WithBatchSize(batchSize).
+		WithBatchRows(batchSize).
 		WithErrorHandler(wb.errHandler)
 
 	if len(bm25) != 0 {
@@ -654,6 +644,10 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 		}
 
 		f := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
+			if wb.taskObserverCallback != nil {
+				wb.taskObserverCallback(syncTask, err)
+			}
+
 			if err != nil {
 				return err
 			}

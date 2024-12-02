@@ -44,6 +44,7 @@ var (
 	NewDropCollectionMessageBuilderV1   = createNewMessageBuilderV1[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]()
 	NewCreatePartitionMessageBuilderV1  = createNewMessageBuilderV1[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]()
 	NewDropPartitionMessageBuilderV1    = createNewMessageBuilderV1[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]()
+	NewCreateSegmentMessageBuilderV2    = createNewMessageBuilderV2[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]()
 	NewFlushMessageBuilderV2            = createNewMessageBuilderV2[*FlushMessageHeader, *FlushMessageBody]()
 	NewManualFlushMessageBuilderV2      = createNewMessageBuilderV2[*ManualFlushMessageHeader, *ManualFlushMessageBody]()
 	NewBeginTxnMessageBuilderV2         = createNewMessageBuilderV2[*BeginTxnMessageHeader, *BeginTxnMessageBody]()
@@ -190,6 +191,15 @@ func (b *ImmutableTxnMessageBuilder) ExpiredTimeTick() uint64 {
 func (b *ImmutableTxnMessageBuilder) Add(msg ImmutableMessage) *ImmutableTxnMessageBuilder {
 	b.messages = append(b.messages, msg)
 	return b
+}
+
+// EstimateSize estimates the size of the txn message.
+func (b *ImmutableTxnMessageBuilder) EstimateSize() int {
+	size := b.begin.EstimateSize()
+	for _, m := range b.messages {
+		size += m.EstimateSize()
+	}
+	return size
 }
 
 // Build builds a txn message.

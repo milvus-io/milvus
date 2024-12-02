@@ -1,17 +1,25 @@
 package storage
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 )
 
 func TestVarCharPrimaryKey(t *testing.T) {
-	pk := NewVarCharPrimaryKey("milvus")
+	t.Run("size", func(t *testing.T) {
+		longString := "The High-Performance Vector Database Built for Scale"
+		pk := NewVarCharPrimaryKey(longString)
+		gotSize := pk.Size()
+		expectSize := len(longString) + 8
 
+		assert.EqualValues(t, expectSize, gotSize)
+	})
+
+	pk := NewVarCharPrimaryKey("milvus")
 	testPk := NewVarCharPrimaryKey("milvus")
 
 	// test GE
@@ -176,4 +184,38 @@ func TestParsePrimaryKeysAndIDs(t *testing.T) {
 		testPks := ParseIDs2PrimaryKeys(ids)
 		assert.ElementsMatch(t, c.pks, testPks)
 	}
+}
+
+type badPks struct {
+	PrimaryKeys
+}
+
+func (pks *badPks) Type() schemapb.DataType {
+	return schemapb.DataType_None
+}
+
+func TestParsePrimaryKeysBatch2IDs(t *testing.T) {
+	t.Run("success_cases", func(t *testing.T) {
+		intPks := NewInt64PrimaryKeys(3)
+		intPks.AppendRaw(1, 2, 3)
+
+		ids, err := ParsePrimaryKeysBatch2IDs(intPks)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []int64{1, 2, 3}, ids.GetIntId().GetData())
+
+		strPks := NewVarcharPrimaryKeys(3)
+		strPks.AppendRaw("1", "2", "3")
+
+		ids, err = ParsePrimaryKeysBatch2IDs(strPks)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []string{"1", "2", "3"}, ids.GetStrId().GetData())
+	})
+
+	t.Run("unsupport_type", func(t *testing.T) {
+		intPks := NewInt64PrimaryKeys(3)
+		intPks.AppendRaw(1, 2, 3)
+
+		_, err := ParsePrimaryKeysBatch2IDs(&badPks{PrimaryKeys: intPks})
+		assert.Error(t, err)
+	})
 }

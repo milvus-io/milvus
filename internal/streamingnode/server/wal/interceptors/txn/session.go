@@ -108,6 +108,14 @@ func (s *TxnSession) IsExpiredOrDone(ts uint64) bool {
 	return s.isExpiredOrDone(ts)
 }
 
+// State returns the state of the session.
+func (s *TxnSession) State() message.TxnState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.state
+}
+
 // isExpiredOrDone checks if the session is expired or done.
 func (s *TxnSession) isExpiredOrDone(ts uint64) bool {
 	// A timeout txn or rollbacked/committed txn should be cleared.

@@ -109,13 +109,11 @@ func (it *upsertTaskByStreamingService) packDeleteMessage(ctx context.Context) (
 	result, numRows, err := repackDeleteMsgByHash(
 		ctx,
 		it.upsertMsg.DeleteMsg.PrimaryKeys,
-		vChannels,
-		it.idAllocator,
+		vChannels, it.idAllocator,
 		it.BeginTs(),
-		it.upsertMsg.DeleteMsg.CollectionID,
-		it.upsertMsg.DeleteMsg.CollectionName,
-		it.upsertMsg.DeleteMsg.PartitionID,
-		it.upsertMsg.DeleteMsg.PartitionName,
+		it.upsertMsg.DeleteMsg.CollectionID, it.upsertMsg.DeleteMsg.CollectionName,
+		it.upsertMsg.DeleteMsg.PartitionID, it.upsertMsg.DeleteMsg.PartitionName,
+		it.req.GetDbName(),
 	)
 	if err != nil {
 		return nil, err

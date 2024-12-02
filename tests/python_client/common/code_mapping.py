@@ -34,9 +34,10 @@ class IndexErrorMessage(ExceptionsMessage):
     WrongFieldName = "cannot create index on non-vector field: %s"
     DropLoadedIndex = "index cannot be dropped, collection is loaded, please release it first"
     CheckVectorIndex = "data type {0} can't build with this index {1}"
-    SparseFloatVectorMetricType = "only IP is the supported metric type for sparse index"
+    SparseFloatVectorMetricType = "only IP&BM25 is the supported metric type for sparse index"
     VectorMetricTypeExist = "metric type not set for vector index"
-    CheckBitmapIndex = "bitmap index are only supported on bool, int, string and array field"
+    # please update the msg below as #37543 fixed
+    CheckBitmapIndex = "bitmap index are only supported on bool, int, string"
     CheckBitmapOnPK = "create bitmap index on primary key not supported"
     CheckBitmapCardinality = "failed to check bitmap cardinality limit, should be larger than 0 and smaller than 1000"
     NotConfigable = "{0} is not configable index param"

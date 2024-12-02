@@ -17,6 +17,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "common/resource_c.h"
 #include "common/binary_set_c.h"
 #include "common/type_c.h"
 #include "segcore/collection_c.h"
@@ -46,6 +47,9 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
                 enum CDataType field_type,
                 bool enable_mmap,
                 const char* mmap_dir_path);
+
+LoadResourceRequest
+EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info);
 
 CStatus
 AppendIndexInfo(CLoadIndexInfo c_load_index_info,

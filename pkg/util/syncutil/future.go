@@ -1,5 +1,9 @@
 package syncutil
 
+import (
+	"context"
+)
+
 // Future is a future value that can be set and retrieved.
 type Future[T any] struct {
 	ch    chan struct{}
@@ -17,6 +21,17 @@ func NewFuture[T any]() *Future[T] {
 func (f *Future[T]) Set(value T) {
 	f.value = value
 	close(f.ch)
+}
+
+// GetWithContext retrieves the value of the future if set, otherwise block until set or the context is done.
+func (f *Future[T]) GetWithContext(ctx context.Context) (T, error) {
+	select {
+	case <-ctx.Done():
+		var val T
+		return val, ctx.Err()
+	case <-f.ch:
+		return f.value, nil
+	}
 }
 
 // Get retrieves the value of the future if set, otherwise block until set.

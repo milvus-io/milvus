@@ -22,7 +22,7 @@ This document will help to set up your Milvus development environment and to run
       - [Install cmake](#install-cmake)
       - [Installing Dependencies](#installing-dependencies)
       - [Install conan](#install-conan)
-      - [Install GO 1.80](#install-go-180)
+      - [Install GO 1.22](#install-go-122)
       - [Download source code](#download-source-code)
       - [Check OS PAGESIZE](#check-os-pagesize)
       - [Modify the MILVUS_JEMALLOC_LG_PAGE setting](#modify-the-milvus_jemalloc_lg_page-setting)
@@ -178,7 +178,7 @@ Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set a
 ```shell
 $ go version
 ```
-Note: go >= 1.21 is required to build Milvus.
+Note: go >= 1.22 is required to build Milvus.
 
 #### Docker & Docker Compose
 
@@ -248,11 +248,11 @@ python3 --version
 pip3 install conan==1.64.1
 ```
 
-#### Install GO 1.80
+#### Install GO 1.22
 
 ```bash
-wget https://go.dev/dl/go1.21.11.linux-arm64.tar.gz
-tar zxf go1.21.11.linux-arm64.tar.gz
+wget https://go.dev/dl/go1.22.8.linux-arm64.tar.gz
+tar zxf go1.22.8.linux-arm64.tar.gz
 mv ./go /usr/local
 vi /etc/profile
 export PATH=$PATH:/usr/local/go/bin

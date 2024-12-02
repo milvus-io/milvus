@@ -28,8 +28,7 @@
 namespace milvus::query {
 
 namespace impl {
-// THIS CONTAINS EXTRA BODY FOR VISITOR
-// WILL BE USED BY GENERATOR UNDER suvlim/core_gen/
+
 class ExecPlanNodeVisitor : PlanNodeVisitor {
  public:
     ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,

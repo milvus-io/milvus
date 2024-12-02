@@ -65,7 +65,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 			privilegeColls.Insert(util.AnyWord)
 			return privilegeColls, nil
 		}
-		userRoles, err := t.core.meta.SelectUser("", &milvuspb.UserEntity{
+		userRoles, err := t.core.meta.SelectUser(ctx, "", &milvuspb.UserEntity{
 			Name: curUser,
 		}, true)
 		if err != nil {
@@ -79,7 +79,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 				privilegeColls.Insert(util.AnyWord)
 				return privilegeColls, nil
 			}
-			entities, err := t.core.meta.SelectGrant("", &milvuspb.GrantEntity{
+			entities, err := t.core.meta.SelectGrant(ctx, "", &milvuspb.GrantEntity{
 				Role:   role,
 				DbName: t.Req.GetDbName(),
 			})
@@ -146,4 +146,8 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, uint64(physical))
 	}
 	return nil
+}
+
+func (t *showCollectionTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(NewClusterLockerKey(false), NewDatabaseLockerKey(t.Req.GetDbName(), false))
 }

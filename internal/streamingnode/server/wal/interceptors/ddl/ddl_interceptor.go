@@ -34,14 +34,21 @@ type ddlAppendInterceptor struct {
 }
 
 // DoAppend implements AppendInterceptor.
-func (d *ddlAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
+func (d *ddlAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
+	// send the create collection message.
+	msgID, err := append(ctx, msg)
+	if err != nil {
+		return msgID, err
+	}
+
 	switch msg.MessageType() {
 	case message.MessageTypeCreateCollection:
 		resource.Resource().Flusher().RegisterVChannel(msg.VChannel(), d.wal.Get())
 	case message.MessageTypeDropCollection:
-		resource.Resource().Flusher().UnregisterVChannel(msg.VChannel())
+		// TODO: unregister vchannel, cannot unregister vchannel now.
+		// Wait for PR: https://github.com/milvus-io/milvus/pull/37176
 	}
-	return append(ctx, msg)
+	return msgID, nil
 }
 
 // Close implements BasicInterceptor.

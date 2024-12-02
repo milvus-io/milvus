@@ -26,7 +26,7 @@ type rankParams struct {
 	roundDecimal    int64
 	groupByFieldId  int64
 	groupSize       int64
-	groupStrictSize bool
+	strictGroupSize bool
 }
 
 func (r *rankParams) GetLimit() int64 {
@@ -64,9 +64,9 @@ func (r *rankParams) GetGroupSize() int64 {
 	return 1
 }
 
-func (r *rankParams) GetGroupStrictSize() bool {
+func (r *rankParams) GetStrictGroupSize() bool {
 	if r != nil {
-		return r.groupStrictSize
+		return r.strictGroupSize
 	}
 	return false
 }
@@ -75,22 +75,29 @@ func (r *rankParams) String() string {
 	return fmt.Sprintf("limit: %d, offset: %d, roundDecimal: %d", r.GetLimit(), r.GetOffset(), r.GetRoundDecimal())
 }
 
+type SearchInfo struct {
+	planInfo   *planpb.QueryInfo
+	offset     int64
+	parseError error
+	isIterator bool
+}
+
 // parseSearchInfo returns QueryInfo and offset
-func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams) (*planpb.QueryInfo, int64, error) {
+func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams) *SearchInfo {
 	var topK int64
 	isAdvanced := rankParams != nil
 	externalLimit := rankParams.GetLimit() + rankParams.GetOffset()
 	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, searchParamsPair)
 	if err != nil {
 		if externalLimit <= 0 {
-			return nil, 0, fmt.Errorf("%s is required", TopKKey)
+			return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: fmt.Errorf("%s is required", TopKKey)}
 		}
 		topK = externalLimit
 	} else {
 		topKInParam, err := strconv.ParseInt(topKStr, 0, 64)
 		if err != nil {
 			if externalLimit <= 0 {
-				return nil, 0, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
+				return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)}
 			}
 			topK = externalLimit
 		} else {
@@ -98,15 +105,16 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		}
 	}
 
-	isIterator, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
+	isIteratorStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
+	isIterator := (isIteratorStr == "True") || (isIteratorStr == "true")
 
 	if err := validateLimit(topK); err != nil {
-		if isIterator == "True" {
+		if isIterator {
 			// 1. if the request is from iterator, we set topK to QuotaLimit as the iterator can resolve too large topK problem
 			// 2. GetAsInt64 has cached inside, no need to worry about cpu cost for parsing here
 			topK = Params.QuotaConfig.TopKLimit.GetAsInt64()
 		} else {
-			return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
+			return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)}
 		}
 	}
 
@@ -117,12 +125,12 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		if err == nil {
 			offset, err = strconv.ParseInt(offsetStr, 0, 64)
 			if err != nil {
-				return nil, 0, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+				return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)}
 			}
 
 			if offset != 0 {
 				if err := validateLimit(offset); err != nil {
-					return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
+					return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)}
 				}
 			}
 		}
@@ -130,7 +138,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	queryTopK := topK + offset
 	if err := validateLimit(queryTopK); err != nil {
-		return nil, 0, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
+		return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)}
 	}
 
 	// 2. parse metrics type
@@ -147,11 +155,11 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	roundDecimal, err := strconv.ParseInt(roundDecimalStr, 0, 64)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)}
 	}
 
 	if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
-		return nil, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)}
 	}
 
 	// 4. parse search param str
@@ -162,36 +170,41 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	// 5. parse group by field and group by size
 	var groupByFieldId, groupSize int64
-	var groupStrictSize bool
+	var strictGroupSize bool
 	if isAdvanced {
-		groupByFieldId, groupSize, groupStrictSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupSize(), rankParams.GetGroupStrictSize()
+		groupByFieldId, groupSize, strictGroupSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupSize(), rankParams.GetStrictGroupSize()
 	} else {
 		groupByInfo := parseGroupByInfo(searchParamsPair, schema)
 		if groupByInfo.err != nil {
-			return nil, 0, groupByInfo.err
+			return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: groupByInfo.err}
 		}
-		groupByFieldId, groupSize, groupStrictSize = groupByInfo.GetGroupByFieldId(), groupByInfo.GetGroupSize(), groupByInfo.GetGroupStrictSize()
+		groupByFieldId, groupSize, strictGroupSize = groupByInfo.GetGroupByFieldId(), groupByInfo.GetGroupSize(), groupByInfo.GetStrictGroupSize()
 	}
 
 	// 6. parse iterator tag, prevent trying to groupBy when doing iteration or doing range-search
-	if isIterator == "True" && groupByFieldId > 0 {
-		return nil, 0, merr.WrapErrParameterInvalid("", "",
-			"Not allowed to do groupBy when doing iteration")
+	if isIterator && groupByFieldId > 0 {
+		return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: merr.WrapErrParameterInvalid("", "",
+			"Not allowed to do groupBy when doing iteration")}
 	}
 	if strings.Contains(searchParamStr, radiusKey) && groupByFieldId > 0 {
-		return nil, 0, merr.WrapErrParameterInvalid("", "",
-			"Not allowed to do range-search when doing search-group-by")
+		return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: merr.WrapErrParameterInvalid("", "",
+			"Not allowed to do range-search when doing search-group-by")}
 	}
 
-	return &planpb.QueryInfo{
-		Topk:            queryTopK,
-		MetricType:      metricType,
-		SearchParams:    searchParamStr,
-		RoundDecimal:    roundDecimal,
-		GroupByFieldId:  groupByFieldId,
-		GroupSize:       groupSize,
-		GroupStrictSize: groupStrictSize,
-	}, offset, nil
+	return &SearchInfo{
+		planInfo: &planpb.QueryInfo{
+			Topk:            queryTopK,
+			MetricType:      metricType,
+			SearchParams:    searchParamStr,
+			RoundDecimal:    roundDecimal,
+			GroupByFieldId:  groupByFieldId,
+			GroupSize:       groupSize,
+			StrictGroupSize: strictGroupSize,
+		},
+		offset:     offset,
+		isIterator: isIterator,
+		parseError: nil,
+	}
 }
 
 func getOutputFieldIDs(schema *schemaInfo, outputFields []string) (outputFieldIDs []UniqueID, err error) {
@@ -290,7 +303,7 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 type groupByInfo struct {
 	groupByFieldId  int64
 	groupSize       int64
-	groupStrictSize bool
+	strictGroupSize bool
 	err             error
 }
 
@@ -308,9 +321,9 @@ func (g *groupByInfo) GetGroupSize() int64 {
 	return 0
 }
 
-func (g *groupByInfo) GetGroupStrictSize() bool {
+func (g *groupByInfo) GetStrictGroupSize() bool {
 	if g != nil {
-		return g.groupStrictSize
+		return g.strictGroupSize
 	}
 	return false
 }
@@ -334,11 +347,11 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 	if groupByFieldName != "" {
 		fields := schema.GetFields()
 		for _, field := range fields {
-			if field.GetNullable() {
-				ret.err = merr.WrapErrParameterInvalidMsg(fmt.Sprintf("groupBy field(%s) not support nullable == true", groupByFieldName))
-				return ret
-			}
 			if field.Name == groupByFieldName {
+				if field.GetNullable() {
+					ret.err = merr.WrapErrParameterInvalidMsg(fmt.Sprintf("groupBy field(%s) not support nullable == true", groupByFieldName))
+					return ret
+				}
 				groupByFieldId = field.FieldID
 				break
 			}
@@ -357,8 +370,15 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 		groupSize = 1
 	} else {
 		groupSize, err = strconv.ParseInt(groupSizeStr, 0, 64)
-		if err != nil || groupSize <= 0 {
-			groupSize = 1
+		if err != nil {
+			ret.err = merr.WrapErrParameterInvalidMsg(
+				fmt.Sprintf("failed to parse input group size:%s", groupSizeStr))
+			return ret
+		}
+		if groupSize <= 0 {
+			ret.err = merr.WrapErrParameterInvalidMsg(
+				fmt.Sprintf("input group size:%d is negative, failed to do search_groupby", groupSize))
+			return ret
 		}
 	}
 	if groupSize > Params.QuotaConfig.MaxGroupSize.GetAsInt64() {
@@ -369,17 +389,17 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 	ret.groupSize = groupSize
 
 	// 3.  parse group strict size
-	var groupStrictSize bool
-	groupStrictSizeStr, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupStrictSize, searchParamsPair)
+	var strictGroupSize bool
+	strictGroupSizeStr, err := funcutil.GetAttrByKeyFromRepeatedKV(StrictGroupSize, searchParamsPair)
 	if err != nil {
-		groupStrictSize = false
+		strictGroupSize = false
 	} else {
-		groupStrictSize, err = strconv.ParseBool(groupStrictSizeStr)
+		strictGroupSize, err = strconv.ParseBool(strictGroupSizeStr)
 		if err != nil {
-			groupStrictSize = false
+			strictGroupSize = false
 		}
 	}
-	ret.groupStrictSize = groupStrictSize
+	ret.strictGroupSize = strictGroupSize
 	return ret
 }
 
@@ -440,7 +460,7 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 		roundDecimal:    roundDecimal,
 		groupByFieldId:  groupByInfo.GetGroupByFieldId(),
 		groupSize:       groupByInfo.GetGroupSize(),
-		groupStrictSize: groupByInfo.GetGroupStrictSize(),
+		strictGroupSize: groupByInfo.GetStrictGroupSize(),
 	}, nil
 }
 

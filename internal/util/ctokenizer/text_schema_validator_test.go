@@ -1,6 +1,7 @@
 package ctokenizer
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,71 +10,64 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
+func TestValidateEmptyTextSchema(t *testing.T) {
+	fs := &schemapb.FieldSchema{
+		FieldID:    101,
+		DataType:   schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{},
+	}
+	assert.Nil(t, ValidateTextSchema(fs, false))
+}
+
 func TestValidateTextSchema(t *testing.T) {
-	type args struct {
-		fieldSchema *schemapb.FieldSchema
-	}
-	tests := []struct {
-		name     string
-		args     args
-		errIsNil bool
-	}{
+	tests := []*schemapb.FieldSchema{
 		{
-			args: args{
-				fieldSchema: &schemapb.FieldSchema{
-					FieldID:    101,
-					TypeParams: []*commonpb.KeyValuePair{},
-				},
+			FieldID:  101,
+			DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "enable_match", Value: "true"},
 			},
-			errIsNil: true,
 		},
 		{
-			// default
-			args: args{
-				fieldSchema: &schemapb.FieldSchema{
-					FieldID: 101,
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: "enable_match", Value: "true"},
-					},
-				},
+			FieldID:  101,
+			DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "enable_match", Value: "true"},
+				{Key: "analyzer_params", Value: `{"tokenizer": "standard"}`},
 			},
-			errIsNil: true,
 		},
 		{
-			// default
-			args: args{
-				fieldSchema: &schemapb.FieldSchema{
-					FieldID: 101,
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: "enable_match", Value: "true"},
-						{Key: "analyzer_params", Value: `{"tokenizer": "default"}`},
-					},
-				},
+			FieldID:  101,
+			DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "enable_match", Value: "true"},
+				{Key: "analyzer_params", Value: `{"tokenizer": "standard"}`},
 			},
-			errIsNil: true,
-		},
-		{
-			// jieba
-			args: args{
-				fieldSchema: &schemapb.FieldSchema{
-					FieldID: 101,
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: "enable_match", Value: "true"},
-						{Key: "analyzer_params", Value: `{"tokenizer": "jieba"}`},
-					},
-				},
-			},
-			errIsNil: true,
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateTextSchema(tt.args.fieldSchema)
-			if tt.errIsNil {
-				assert.Nil(t, err)
-			} else {
-				assert.NotNil(t, err)
-			}
+
+	for idx, tt := range tests {
+		t.Run(fmt.Sprintf("enable_analyzer not set %d", idx), func(t *testing.T) {
+			err := ValidateTextSchema(tt, false)
+			assert.NotNil(t, err)
+		})
+	}
+
+	for idx, tt := range tests {
+		t.Run(fmt.Sprintf("enable_analyzer set to false %d", idx), func(t *testing.T) {
+			tt.TypeParams = append(tt.TypeParams, &commonpb.KeyValuePair{
+				Key:   "enable_analyzer",
+				Value: "false",
+			})
+			err := ValidateTextSchema(tt, false)
+			assert.NotNil(t, err)
+		})
+	}
+	for idx, tt := range tests {
+		t.Run(fmt.Sprintf("enable_analyzer set to true %d", idx), func(t *testing.T) {
+			tt.TypeParams[len(tt.TypeParams)-1].Value = "true"
+			err := ValidateTextSchema(tt, false)
+			assert.Nil(t, err)
 		})
 	}
 }

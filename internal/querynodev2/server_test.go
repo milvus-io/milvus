@@ -32,9 +32,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/mocks/util/searchutil/mock_optimizers"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/querynodev2/optimizers"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -65,7 +66,7 @@ func (suite *QueryNodeSuite) SetupTest() {
 	var err error
 	paramtable.Init()
 	suite.params = paramtable.Get()
-	suite.params.Save(suite.params.QueryNodeCfg.GCEnabled.Key, "false")
+	suite.params.Save(suite.params.CommonCfg.GCEnabled.Key, "false")
 
 	// mock factory
 	suite.factory = dependency.NewMockFactory(suite.T())
@@ -159,7 +160,7 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 	err = suite.node.Init()
 	suite.NoError(err)
 
-	mockHook := optimizers.NewMockQueryHook(suite.T())
+	mockHook := mock_optimizers.NewMockQueryHook(suite.T())
 	suite.node.queryHook = mockHook
 	suite.node.handleQueryHookEvent()
 
@@ -219,7 +220,7 @@ func (suite *QueryNodeSuite) TestStop() {
 
 	suite.node.manager = segments.NewManager()
 
-	schema := segments.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64, true)
+	schema := mock_segcore.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64, true)
 	collection := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})

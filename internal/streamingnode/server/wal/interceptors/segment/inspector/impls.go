@@ -55,8 +55,8 @@ func (s *sealOperationInspectorImpl) TriggerSealWaited(ctx context.Context, pcha
 	}
 }
 
-// RegsiterPChannelManager implements SealInspector.RegsiterPChannelManager.
-func (s *sealOperationInspectorImpl) RegsiterPChannelManager(m SealOperator) {
+// RegisterPChannelManager implements SealInspector.RegisterPChannelManager.
+func (s *sealOperationInspectorImpl) RegisterPChannelManager(m SealOperator) {
 	_, loaded := s.managers.GetOrInsert(m.Channel().Name, m)
 	if loaded {
 		panic("pchannel manager already exists, critical bug in code")

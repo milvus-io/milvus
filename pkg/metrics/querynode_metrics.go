@@ -162,6 +162,7 @@ var (
 			queryTypeLabelName,
 			statusLabelName,
 			requestScope,
+			collectionIDLabelName,
 		})
 
 	QueryNodeSQReqLatency = prometheus.NewHistogramVec(
@@ -439,6 +440,7 @@ var (
 			Help:      "number of entities which can be searched/queried, clustered by collection, partition and state",
 		}, []string{
 			databaseLabelName,
+			collectionName,
 			nodeIDLabelName,
 			collectionIDLabelName,
 			partitionIDLabelName,
@@ -765,6 +767,43 @@ var (
 		}, []string{
 			nodeIDLabelName,
 		})
+
+	QueryNodeDeleteBufferSize = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "delete_buffer_size",
+			Help:      "delegator delete buffer size (in bytes)",
+		}, []string{
+			nodeIDLabelName,
+			channelNameLabelName,
+		},
+	)
+
+	QueryNodeDeleteBufferRowNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "delete_buffer_row_num",
+			Help:      "delegator delete buffer row num",
+		}, []string{
+			nodeIDLabelName,
+			channelNameLabelName,
+		},
+	)
+
+	QueryNodeCGOCallLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "cgo_latency",
+			Help:      "latency of each cgo call",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			cgoNameLabelName,
+			cgoTypeLabelName,
+		})
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -832,8 +871,13 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeApplyBFCost)
 	registry.MustRegister(QueryNodeForwardDeleteCost)
 	registry.MustRegister(QueryNodeSearchHitSegmentNum)
+	registry.MustRegister(QueryNodeDeleteBufferSize)
+	registry.MustRegister(QueryNodeDeleteBufferRowNum)
+	registry.MustRegister(QueryNodeCGOCallLatency)
 	// Add cgo metrics
 	RegisterCGOMetrics(registry)
+
+	RegisterStreamingServiceClient(registry)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

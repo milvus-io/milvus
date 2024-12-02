@@ -114,5 +114,6 @@ func verify(schema *schemapb.CollectionSchema, insertLogs map[int64][]string) er
 				fieldID, len(logs), common.RowIDField, len(insertLogs[common.RowIDField])))
 		}
 	}
+	// for Function output field, we do not re-run the Function when restoring from a backup.
 	return nil
 }

@@ -105,11 +105,7 @@ func TestNodeManager_Start(t *testing.T) {
 
 	node0.inputChannel = make(chan []Msg)
 
-	nodeCtxManager := &nodeCtxManager{
-		inputNodeCtx: node0,
-		closeWg:      &sync.WaitGroup{},
-	}
-
+	nodeCtxManager := NewNodeCtxManager(node0, &sync.WaitGroup{})
 	assert.NotPanics(t, func() {
 		nodeCtxManager.Start()
 	})

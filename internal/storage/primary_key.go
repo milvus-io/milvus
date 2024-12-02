@@ -17,12 +17,13 @@
 package storage
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type PrimaryKey interface {
@@ -154,7 +155,6 @@ func (ip *Int64PrimaryKey) GetValue() interface{} {
 }
 
 func (ip *Int64PrimaryKey) Size() int64 {
-	// 8 + reflect.ValueOf(Int64PrimaryKey).Type().Size()
 	return 16
 }
 
@@ -255,7 +255,7 @@ func (vcp *VarCharPrimaryKey) Type() schemapb.DataType {
 }
 
 func (vcp *VarCharPrimaryKey) Size() int64 {
-	return int64(8*len(vcp.Value) + 8)
+	return int64(len(vcp.Value) + 8)
 }
 
 func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (PrimaryKey, error) {
@@ -348,6 +348,52 @@ func ParseIDs2PrimaryKeys(ids *schemapb.IDs) []PrimaryKey {
 	}
 
 	return ret
+}
+
+func ParseIDs2PrimaryKeysBatch(ids *schemapb.IDs) PrimaryKeys {
+	var result PrimaryKeys
+	switch ids.IdField.(type) {
+	case *schemapb.IDs_IntId:
+		int64Pks := ids.GetIntId().GetData()
+		pks := NewInt64PrimaryKeys(int64(len(int64Pks)))
+		pks.AppendRaw(int64Pks...)
+		result = pks
+	case *schemapb.IDs_StrId:
+		stringPks := ids.GetStrId().GetData()
+		pks := NewVarcharPrimaryKeys(int64(len(stringPks)))
+		pks.AppendRaw(stringPks...)
+		result = pks
+	default:
+		panic(fmt.Sprintf("unexpected schema id field type %T", ids.IdField))
+	}
+	return result
+}
+
+func ParsePrimaryKeysBatch2IDs(pks PrimaryKeys) (*schemapb.IDs, error) {
+	ret := &schemapb.IDs{}
+	if pks.Len() == 0 {
+		return ret, nil
+	}
+	switch pks.Type() {
+	case schemapb.DataType_Int64:
+		int64Pks := pks.(*Int64PrimaryKeys)
+		ret.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: int64Pks.values,
+			},
+		}
+	case schemapb.DataType_VarChar:
+		varcharPks := pks.(*VarcharPrimaryKeys)
+		ret.IdField = &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: varcharPks.values,
+			},
+		}
+	default:
+		return nil, merr.WrapErrServiceInternal("parsing unsupported pk type", pks.Type().String())
+	}
+
+	return ret, nil
 }
 
 func ParsePrimaryKeys2IDs(pks []PrimaryKey) *schemapb.IDs {

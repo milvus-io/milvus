@@ -14,7 +14,7 @@ import (
 // Otherwise, it will be sent as individual messages.
 // !!! This function do not promise the atomicity and deliver order of the messages appending.
 func (u *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {
-	assertNoSystemMessage(msgs...)
+	assertValidMessage(msgs...)
 
 	// dispatch the messages into different vchannel.
 	dispatchedMessages, indexes := u.dispatchMessages(msgs...)

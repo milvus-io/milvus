@@ -67,10 +67,12 @@ class HybridScalarIndex : public ScalarIndex<T> {
     }
 
     void
-    Build(size_t n, const T* values) override {
+    Build(size_t n,
+          const T* values,
+          const bool* valid_data = nullptr) override {
         SelectIndexBuildType(n, values);
         auto index = GetInternalIndex();
-        index->Build(n, values);
+        index->Build(n, values, valid_data);
         is_built_ = true;
     }
 
@@ -133,7 +135,7 @@ class HybridScalarIndex : public ScalarIndex<T> {
             lower_bound_value, lb_inclusive, upper_bound_value, ub_inclusive);
     }
 
-    T
+    std::optional<T>
     Reverse_Lookup(size_t offset) const override {
         return internal_index_->Reverse_Lookup(offset);
     }

@@ -51,6 +51,7 @@ type TxnOption struct {
 
 type ReadOption struct {
 	// VChannel is the target vchannel to read.
+	// It must be set to read message from a vchannel.
 	VChannel string
 
 	// DeliverPolicy is the deliver policy of the consumer.

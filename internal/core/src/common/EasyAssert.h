@@ -64,13 +64,13 @@ enum ErrorCode {
     MemAllocateFailed = 2034,
     MemAllocateSizeNotMatch = 2035,
     MmapError = 2036,
-    OutOfRange = 2037,
-    GcpNativeError = 2038,
-    KnowhereError = 2100,
+    // timeout or cancel related
+    FollyOtherException = 2037,
+    FollyCancel = 2038,
+    OutOfRange = 2039,
+    GcpNativeError = 2040,
 
-    // timeout or cancel related.
-    FollyOtherException = 2200,
-    FollyCancel = 2201
+    KnowhereError = 2099
 };
 namespace impl {
 void

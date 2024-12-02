@@ -91,11 +91,33 @@ func Test_GetLocalIP(t *testing.T) {
 }
 
 func Test_GetIP(t *testing.T) {
-	ip := GetIP("")
-	assert.NotNil(t, ip)
-	assert.NotZero(t, len(ip))
-	ip = GetIP("127.0.0")
-	assert.Equal(t, ip, "127.0.0")
+	t.Run("empty_fallback_auto", func(t *testing.T) {
+		ip := GetIP("")
+		assert.NotNil(t, ip)
+		assert.NotZero(t, len(ip))
+	})
+
+	t.Run("valid_ip", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			ip := GetIP("8.8.8.8")
+			assert.Equal(t, "8.8.8.8", ip)
+		})
+	})
+
+	t.Run("invalid_ip", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			ip := GetIP("null")
+			assert.Equal(t, "null", ip)
+		}, "non ip format, could be hostname or service name")
+
+		assert.Panics(t, func() {
+			GetIP("0.0.0.0")
+		}, "input is unspecified ip address, panicking")
+
+		assert.Panics(t, func() {
+			GetIP("224.0.0.1")
+		}, "input is multicast ip address, panicking")
+	})
 }
 
 func Test_ParseIndexParamsMap(t *testing.T) {
@@ -544,8 +566,9 @@ func TestMapToJSON(t *testing.T) {
 	s := `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`
 	m, err := JSONToMap(s)
 	assert.NoError(t, err)
-	j := MapToJSON(m)
-	got, err := JSONToMap(string(j))
+	j, err := MapToJSON(m)
+	assert.NoError(t, err)
+	got, err := JSONToMap(j)
 	assert.NoError(t, err)
 	assert.True(t, reflect.DeepEqual(m, got))
 }
@@ -891,5 +914,26 @@ func TestChannelConvert(t *testing.T) {
 	t.Run("get virtual channel", func(t *testing.T) {
 		channel := GetVirtualChannel("by-dev-rootcoord-dml_2", 1001, 0)
 		assert.Equal(t, "by-dev-rootcoord-dml_2_1001v0", channel)
+	})
+}
+
+func TestString2KeyValuePair(t *testing.T) {
+	t.Run("normal", func(t *testing.T) {
+		kvs, err := String2KeyValuePair("{\"key\": \"value\"}")
+		assert.NoError(t, err)
+		assert.Len(t, kvs, 1)
+		assert.Equal(t, "key", kvs[0].Key)
+		assert.Equal(t, "value", kvs[0].Value)
+	})
+
+	t.Run("err", func(t *testing.T) {
+		_, err := String2KeyValuePair("{aa}")
+		assert.Error(t, err)
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		kvs, err := String2KeyValuePair("{}")
+		assert.NoError(t, err)
+		assert.Len(t, kvs, 0)
 	})
 }

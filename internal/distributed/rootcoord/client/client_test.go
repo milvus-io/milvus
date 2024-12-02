@@ -241,7 +241,35 @@ func Test_NewClient(t *testing.T) {
 			retCheck(retNotNil, r, err)
 		}
 		{
+			r, err := client.AlterCollection(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
 			r, err := client.AlterDatabase(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.BackupRBAC(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.RestoreRBAC(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.CreatePrivilegeGroup(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.DropPrivilegeGroup(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.ListPrivilegeGroups(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.OperatePrivilegeGroup(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
 	}

@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -27,6 +26,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -48,6 +48,23 @@ func EqualKeyPairArray(p1 []*commonpb.KeyValuePair, p2 []*commonpb.KeyValuePair)
 		m1[p.Key] = p.Value
 	}
 	for _, p := range p2 {
+		val, ok := m1[p.Key]
+		if !ok {
+			return false
+		}
+		if val != p.Value {
+			return false
+		}
+	}
+	return ContainsKeyPairArray(p1, p2)
+}
+
+func ContainsKeyPairArray(src []*commonpb.KeyValuePair, target []*commonpb.KeyValuePair) bool {
+	m1 := make(map[string]string)
+	for _, p := range target {
+		m1[p.Key] = p.Value
+	}
+	for _, p := range src {
 		val, ok := m1[p.Key]
 		if !ok {
 			return false

@@ -39,17 +39,26 @@ class TestConnectionParams(TestcaseBase):
                                                                              ('_kwargs', None)]})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
-    @pytest.mark.parametrize("data", ct.get_dict_invalid_host_port)
-    def test_connection_add_connection_kwargs_invalid_host_port(self, data):
+    def test_connection_add_connection_kwargs_invalid_host_port(self):
         """
         target: test **kwargs of add_connection
         method: passing invalid value for host and port
         expected: report error
         """
-
         # check param of **kwargs
+        for data in [{"port": "port"}, {"port": ["192.168.1.1"]}]:
+            self.connection_wrap.add_connection(_kwargs=data, check_task=ct.CheckTasks.err_res,
+                                                check_items={ct.err_code: 999,
+                                                             ct.err_msg: "Type of 'port' must be str or int"})
+        for data in [{"host": -1}]:
+            self.connection_wrap.add_connection(_kwargs=data, check_task=ct.CheckTasks.err_res,
+                                                check_items={ct.err_code: 999,
+                                                             ct.err_msg: "Type of 'host' must be str"})
+
+        data = {"port": "-1", "host": "hostlocal"}
         self.connection_wrap.add_connection(_kwargs=data, check_task=ct.CheckTasks.err_res,
-                                            check_items={ct.err_code: 1, ct.err_msg: cem.NoHostPort})
+                                            check_items={ct.err_code: 999,
+                                                         ct.err_msg: "port number -1 out of range, valid range [0, 65535)"})
 
         # get addr of default alias
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
@@ -74,7 +83,7 @@ class TestConnectionParams(TestcaseBase):
         # No check for **kwargs
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=1,
                                      check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 1, ct.err_msg: cem.NoHostPort})
+                                     check_items={ct.err_code: 999, ct.err_msg: "Type of 'host' must be str"})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("alias", ct.get_not_string)
@@ -444,7 +453,8 @@ class TestConnectionOperation(TestcaseBase):
         # using default alias to create connection, the connection does not exist
         err_msg = cem.FailConnect % ("host", str(port))
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 2, ct.err_msg: err_msg})
+                                     check_items={ct.err_code: 999,
+                                                  ct.err_msg: "illegal connection params or server unavailable"})
 
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
@@ -791,7 +801,7 @@ class TestConnectionOperation(TestcaseBase):
 
         # drop collection failed
         self.collection_wrap.drop(check_task=ct.CheckTasks.err_res,
-                                  check_items={ct.err_code: 1, ct.err_msg: "should create connect first"})
+                                  check_items={ct.err_code: 1, ct.err_msg: "should create connection first"})
 
         # successfully created default connection
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=host, port=port,
@@ -892,7 +902,7 @@ class TestConnectIPInvalid(TestcaseBase):
         err_msg = "Type of 'host' must be str."
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=host, port=port,
                                      check_task=ct.CheckTasks.check_value_equal,
-                                     check_items={ct.err_code: 1, ct.err_msg: err_msg})
+                                     check_items={ct.err_code: 999, ct.err_msg: err_msg})
 
 
 class TestConnectPortInvalid(TestcaseBase):
@@ -911,7 +921,7 @@ class TestConnectPortInvalid(TestcaseBase):
         err_msg = "Type of 'host' must be str."
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=host, port=port,
                                      check_task=ct.CheckTasks.check_value_equal,
-                                     check_items={ct.err_code: 1, ct.err_msg: err_msg})
+                                     check_items={ct.err_code: 999, ct.err_msg: err_msg})
 
 
 class TestConnectUriInvalid(TestcaseBase):
@@ -930,7 +940,8 @@ class TestConnectUriInvalid(TestcaseBase):
 
         uri = "{}://{}:{}".format(protocol, host, port)
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 1})
+                                     check_items={ct.err_code: 999,
+                                                  ct.err_msg: "needs start with [unix, http, https, tcp] or a local file endswith [.db]"})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("host", ["256.256.256.256", "10.1.0"])
@@ -945,7 +956,8 @@ class TestConnectUriInvalid(TestcaseBase):
 
         uri = "{}://{}:{}".format(protocol, host, port)
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 2})
+                                     check_items={ct.err_code: 999,
+                                                  ct.err_msg: "illegal connection params or server unavailable"})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("port", ["8080", "443", "0", "65534"])
@@ -960,7 +972,8 @@ class TestConnectUriInvalid(TestcaseBase):
 
         uri = "{}://{}:{}".format(protocol, host, port)
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 2})
+                                     check_items={ct.err_code: 999,
+                                                  ct.err_msg: "illegal connection params or server unavailable"})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("host", ["www.google.com"])
@@ -976,7 +989,8 @@ class TestConnectUriInvalid(TestcaseBase):
 
         uri = "{}://{}:{}".format(protocol, host, port)
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 2})
+                                     check_items={ct.err_code: 999,
+                                                  ct.err_msg: "illegal connection params or server unavailable"})
 
 
 class TestConnectAddressInvalid(TestcaseBase):
@@ -994,7 +1008,8 @@ class TestConnectAddressInvalid(TestcaseBase):
         """
         address = "{}:{}".format(host, port)
         self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 2})
+                                     check_items={ct.err_code: 999,
+                                                  ct.err_msg: "illegal connection params or server unavailable"})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("port", ["100", "65536"])
@@ -1007,7 +1022,8 @@ class TestConnectAddressInvalid(TestcaseBase):
         """
         address = "{}:{}".format(host, port)
         self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 2})
+                                     check_items={ct.err_code: 999,
+                                                  ct.err_msg: "illegal connection params or server unavailable"})
 
 
 class TestConnectUserPasswordInvalid(TestcaseBase):

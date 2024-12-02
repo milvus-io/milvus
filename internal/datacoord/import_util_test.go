@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -39,7 +41,9 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 func TestImportUtil_NewPreImportTasks(t *testing.T) {
@@ -98,21 +102,24 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 		id := rand.Int63()
 		return id, id + n, nil
 	})
-	manager := NewMockManager(t)
-	manager.EXPECT().AllocImportSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(ctx context.Context, taskID int64, collectionID int64, partitionID int64, vchannel string, level datapb.SegmentLevel) (*SegmentInfo, error) {
-			return &SegmentInfo{
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:            rand.Int63(),
-					CollectionID:  collectionID,
-					PartitionID:   partitionID,
-					InsertChannel: vchannel,
-					IsImporting:   true,
-					Level:         level,
-				},
-			}, nil
-		})
-	tasks, err := NewImportTasks(fileGroups, job, manager, alloc)
+	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil)
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(rand.Uint64(), nil)
+
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+
+	meta, err := newMeta(context.TODO(), catalog, nil)
+	assert.NoError(t, err)
+
+	tasks, err := NewImportTasks(fileGroups, job, alloc, meta)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(tasks))
 	for _, task := range tasks {
@@ -230,11 +237,11 @@ func TestImportUtil_RegroupImportFiles(t *testing.T) {
 
 func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListImportJobs().Return(nil, nil)
-	catalog.EXPECT().ListImportTasks().Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
-	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
-	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
@@ -245,7 +252,7 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 
-	imeta, err := NewImportMeta(catalog)
+	imeta, err := NewImportMeta(context.TODO(), catalog)
 	assert.NoError(t, err)
 
 	meta, err := newMeta(context.TODO(), catalog, nil)
@@ -257,7 +264,7 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 			CollectionID: 100,
 		},
 	}
-	err = imeta.AddJob(job)
+	err = imeta.AddJob(context.TODO(), job)
 	assert.NoError(t, err)
 
 	pit := &preImportTask{
@@ -270,7 +277,7 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 			},
 		},
 	}
-	err = imeta.AddTask(pit)
+	err = imeta.AddTask(context.TODO(), pit)
 	assert.NoError(t, err)
 
 	Params.Save(Params.QuotaConfig.DiskProtectionEnabled.Key, "false")
@@ -317,12 +324,12 @@ func TestImportUtil_DropImportTask(t *testing.T) {
 	cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
 
 	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListImportJobs().Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
-	catalog.EXPECT().ListImportTasks().Return(nil, nil)
-	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
-	imeta, err := NewImportMeta(catalog)
+	imeta, err := NewImportMeta(context.TODO(), catalog)
 	assert.NoError(t, err)
 
 	task := &importTask{
@@ -331,7 +338,7 @@ func TestImportUtil_DropImportTask(t *testing.T) {
 			TaskID: 1,
 		},
 	}
-	err = imeta.AddTask(task)
+	err = imeta.AddTask(context.TODO(), task)
 	assert.NoError(t, err)
 
 	err = DropImportTask(task, cluster, imeta)
@@ -414,16 +421,16 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	mockErr := "mock err"
 
 	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListImportJobs().Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
-	catalog.EXPECT().ListImportTasks().Return(nil, nil)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
-	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
-	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -431,7 +438,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 
-	imeta, err := NewImportMeta(catalog)
+	imeta, err := NewImportMeta(context.TODO(), catalog)
 	assert.NoError(t, err)
 
 	meta, err := newMeta(context.TODO(), catalog, nil)
@@ -455,7 +462,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			Files: []*internalpb.ImportFile{file1, file2, file3},
 		},
 	}
-	err = imeta.AddJob(job)
+	err = imeta.AddJob(context.TODO(), job)
 	assert.NoError(t, err)
 
 	pit1 := &preImportTask{
@@ -474,7 +481,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			},
 		},
 	}
-	err = imeta.AddTask(pit1)
+	err = imeta.AddTask(context.TODO(), pit1)
 	assert.NoError(t, err)
 
 	pit2 := &preImportTask{
@@ -489,7 +496,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			},
 		},
 	}
-	err = imeta.AddTask(pit2)
+	err = imeta.AddTask(context.TODO(), pit2)
 	assert.NoError(t, err)
 
 	it1 := &importTask{
@@ -510,7 +517,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			},
 		},
 	}
-	err = imeta.AddTask(it1)
+	err = imeta.AddTask(context.TODO(), it1)
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{ID: 10, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
@@ -539,7 +546,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			},
 		},
 	}
-	err = imeta.AddTask(it2)
+	err = imeta.AddTask(context.TODO(), it2)
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{ID: 20, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
@@ -555,7 +562,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.NoError(t, err)
 
 	// failed state
-	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(mockErr))
+	err = imeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(mockErr))
 	assert.NoError(t, err)
 
 	progress, state, _, _, reason := GetJobProgress(job.GetJobID(), imeta, meta, nil)
@@ -570,7 +577,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.NotEqual(t, "", reason)
 
 	// pending state
-	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Pending))
+	err = imeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Pending))
 	assert.NoError(t, err)
 	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, nil)
 	assert.Equal(t, int64(10), progress)
@@ -578,7 +585,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, "", reason)
 
 	// preImporting state
-	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
+	err = imeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
 	assert.NoError(t, err)
 	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, nil)
 	assert.Equal(t, int64(10+30), progress)
@@ -586,7 +593,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, "", reason)
 
 	// importing state, segmentImportedRows/totalRows = 0.5
-	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing))
+	err = imeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing))
 	assert.NoError(t, err)
 	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, nil)
 	assert.Equal(t, int64(10+30+30*0.5), progress)
@@ -594,17 +601,17 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, "", reason)
 
 	// importing state, segmentImportedRows/totalRows = 1
-	err = meta.UpdateSegmentsInfo(UpdateImportedRows(10, 100))
+	err = meta.UpdateSegmentsInfo(context.TODO(), UpdateImportedRows(10, 100))
 	assert.NoError(t, err)
-	err = meta.UpdateSegmentsInfo(UpdateImportedRows(20, 100))
+	err = meta.UpdateSegmentsInfo(context.TODO(), UpdateImportedRows(20, 100))
 	assert.NoError(t, err)
-	err = meta.UpdateSegmentsInfo(UpdateImportedRows(11, 100))
+	err = meta.UpdateSegmentsInfo(context.TODO(), UpdateImportedRows(11, 100))
 	assert.NoError(t, err)
-	err = meta.UpdateSegmentsInfo(UpdateImportedRows(12, 100))
+	err = meta.UpdateSegmentsInfo(context.TODO(), UpdateImportedRows(12, 100))
 	assert.NoError(t, err)
-	err = meta.UpdateSegmentsInfo(UpdateImportedRows(21, 100))
+	err = meta.UpdateSegmentsInfo(context.TODO(), UpdateImportedRows(21, 100))
 	assert.NoError(t, err)
-	err = meta.UpdateSegmentsInfo(UpdateImportedRows(22, 100))
+	err = meta.UpdateSegmentsInfo(context.TODO(), UpdateImportedRows(22, 100))
 	assert.NoError(t, err)
 	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, nil)
 	assert.Equal(t, int64(float32(10+30+30)), progress)
@@ -612,7 +619,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, "", reason)
 
 	// stats state, len(statsSegmentIDs) / (len(originalSegmentIDs) = 0.5
-	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Stats))
+	err = imeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Stats))
 	assert.NoError(t, err)
 	sjm := NewMockStatsJobManager(t)
 	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).RunAndReturn(func(segmentID int64, _ indexpb.StatsSubJob) indexpb.JobState {
@@ -635,10 +642,76 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, "", reason)
 
 	// completed state
-	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed))
+	err = imeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed))
 	assert.NoError(t, err)
 	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, sjm)
 	assert.Equal(t, int64(100), progress)
 	assert.Equal(t, internalpb.ImportJobState_Completed, state)
 	assert.Equal(t, "", reason)
+}
+
+func TestPreImportTask_MarshalJSON(t *testing.T) {
+	task := &preImportTask{
+		PreImportTask: &datapb.PreImportTask{
+			JobID:        1,
+			TaskID:       2,
+			CollectionID: 3,
+			NodeID:       4,
+			State:        datapb.ImportTaskStateV2_Pending,
+			Reason:       "test reason",
+			CreatedTime:  time.Now().Format(time.RFC3339),
+			CompleteTime: time.Now().Add(time.Hour).Format(time.RFC3339),
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	jsonData, err := task.MarshalJSON()
+	assert.NoError(t, err)
+
+	var importTask metricsinfo.ImportTask
+	err = json.Unmarshal(jsonData, &importTask)
+	assert.NoError(t, err)
+
+	assert.Equal(t, task.GetJobID(), importTask.JobID)
+	assert.Equal(t, task.GetTaskID(), importTask.TaskID)
+	assert.Equal(t, task.GetCollectionID(), importTask.CollectionID)
+	assert.Equal(t, task.GetNodeID(), importTask.NodeID)
+	assert.Equal(t, task.GetState().String(), importTask.State)
+	assert.Equal(t, task.GetReason(), importTask.Reason)
+	assert.Equal(t, "PreImportTask", importTask.TaskType)
+	assert.Equal(t, task.GetCreatedTime(), importTask.CreatedTime)
+	assert.Equal(t, task.GetCompleteTime(), importTask.CompleteTime)
+}
+
+func TestImportTask_MarshalJSON(t *testing.T) {
+	task := &importTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			JobID:        1,
+			TaskID:       2,
+			CollectionID: 3,
+			NodeID:       4,
+			State:        datapb.ImportTaskStateV2_Pending,
+			Reason:       "test reason",
+			CreatedTime:  time.Now().Format(time.RFC3339),
+			CompleteTime: time.Now().Add(time.Hour).Format(time.RFC3339),
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	jsonData, err := task.MarshalJSON()
+	assert.NoError(t, err)
+
+	var importTask metricsinfo.ImportTask
+	err = json.Unmarshal(jsonData, &importTask)
+	assert.NoError(t, err)
+
+	assert.Equal(t, task.GetJobID(), importTask.JobID)
+	assert.Equal(t, task.GetTaskID(), importTask.TaskID)
+	assert.Equal(t, task.GetCollectionID(), importTask.CollectionID)
+	assert.Equal(t, task.GetNodeID(), importTask.NodeID)
+	assert.Equal(t, task.GetState().String(), importTask.State)
+	assert.Equal(t, task.GetReason(), importTask.Reason)
+	assert.Equal(t, "ImportTask", importTask.TaskType)
+	assert.Equal(t, task.GetCreatedTime(), importTask.CreatedTime)
+	assert.Equal(t, task.GetCompleteTime(), importTask.CompleteTime)
 }

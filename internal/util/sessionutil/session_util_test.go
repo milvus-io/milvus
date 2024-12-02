@@ -2,7 +2,6 @@ package sessionutil
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/url"
@@ -26,6 +25,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -1062,6 +1062,21 @@ func (s *SessionSuite) TestSafeCloseLiveCh() {
 	assert.NotPanics(s.T(), func() {
 		session.safeCloseLiveCh()
 	})
+}
+
+func (s *SessionSuite) TestGetSessions() {
+	os.Setenv("MILVUS_SERVER_LABEL_key1", "value1")
+	os.Setenv("MILVUS_SERVER_LABEL_key2", "value2")
+	os.Setenv("key3", "value3")
+
+	defer os.Unsetenv("MILVUS_SERVER_LABEL_key1")
+	defer os.Unsetenv("MILVUS_SERVER_LABEL_key2")
+	defer os.Unsetenv("key3")
+
+	ret := GetServerLabelsFromEnv("querynode")
+	assert.Equal(s.T(), 2, len(ret))
+	assert.Equal(s.T(), "value1", ret["key1"])
+	assert.Equal(s.T(), "value2", ret["key2"])
 }
 
 func TestSessionSuite(t *testing.T) {

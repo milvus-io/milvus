@@ -67,6 +67,7 @@ func (s *statsTaskSuite) SetupSuite() {
 						NumOfRows:     65535,
 						State:         commonpb.SegmentState_Flushed,
 						MaxRowNum:     65535,
+						Level:         datapb.SegmentLevel_L2,
 					},
 				},
 			},
@@ -82,6 +83,7 @@ func (s *statsTaskSuite) SetupSuite() {
 								NumOfRows:     65535,
 								State:         commonpb.SegmentState_Flushed,
 								MaxRowNum:     65535,
+								Level:         datapb.SegmentLevel_L2,
 							},
 						},
 					},
@@ -97,6 +99,7 @@ func (s *statsTaskSuite) SetupSuite() {
 								NumOfRows:     65535,
 								State:         commonpb.SegmentState_Flushed,
 								MaxRowNum:     65535,
+								Level:         datapb.SegmentLevel_L2,
 							},
 						},
 					},
@@ -543,14 +546,18 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 		s.Run("normal case", func() {
 			catalog := catalogmocks.NewDataCoordCatalog(s.T())
+			catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			s.mt.catalog = catalog
 			s.mt.statsTaskMeta.catalog = catalog
-			catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			updateStateOp := UpdateStatusOperator(s.segID, commonpb.SegmentState_Flushed)
+			err := s.mt.UpdateSegmentsInfo(context.TODO(), updateStateOp)
+			s.NoError(err)
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 
 			s.NoError(st.SetJobInfo(s.mt))
-			s.NotNil(s.mt.GetHealthySegment(s.segID + 1))
+			s.NotNil(s.mt.GetHealthySegment(context.TODO(), s.targetID))
 			s.Equal(indexpb.JobState_JobStateFinished, s.mt.statsTaskMeta.tasks[s.taskID].GetState())
+			s.Equal(datapb.SegmentLevel_L2, s.mt.GetHealthySegment(context.TODO(), s.targetID).GetLevel())
 		})
 	})
 }

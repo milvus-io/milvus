@@ -126,6 +126,10 @@ service RootCoord {
     rpc ListPolicy(internal.ListPolicyRequest) returns (internal.ListPolicyResponse) {}
     rpc BackupRBAC(milvus.BackupRBACMetaRequest) returns (milvus.BackupRBACMetaResponse){}
     rpc RestoreRBAC(milvus.RestoreRBACMetaRequest) returns (common.Status){}
+    rpc CreatePrivilegeGroup(milvus.CreatePrivilegeGroupRequest) returns (common.Status) {}
+    rpc DropPrivilegeGroup(milvus.DropPrivilegeGroupRequest) returns (common.Status) {}
+    rpc ListPrivilegeGroups(milvus.ListPrivilegeGroupsRequest) returns (milvus.ListPrivilegeGroupsResponse) {}
+    rpc OperatePrivilegeGroup(milvus.OperatePrivilegeGroupRequest) returns (common.Status) {}
 
     rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
 

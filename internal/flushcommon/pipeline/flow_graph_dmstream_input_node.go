@@ -39,30 +39,10 @@ import (
 //
 // messages between two timeticks to the following flowgraph node. In DataNode, the following flow graph node is
 // flowgraph ddNode.
-func newDmInputNode(initCtx context.Context, dispatcherClient msgdispatcher.Client, seekPos *msgpb.MsgPosition, dmNodeConfig *nodeConfig, input <-chan *msgstream.MsgPack) (*flowgraph.InputNode, error) {
-	log := log.With(zap.Int64("nodeID", paramtable.GetNodeID()),
-		zap.Int64("collectionID", dmNodeConfig.collectionID),
-		zap.String("vchannel", dmNodeConfig.vChannelName))
-	var err error
+func newDmInputNode(dmNodeConfig *nodeConfig, input <-chan *msgstream.MsgPack) *flowgraph.InputNode {
 	if input == nil {
-		if seekPos != nil && len(seekPos.MsgID) != 0 {
-			input, err = dispatcherClient.Register(initCtx, dmNodeConfig.vChannelName, seekPos, common.SubscriptionPositionUnknown)
-			if err != nil {
-				return nil, err
-			}
-			log.Info("datanode seek successfully when register to msgDispatcher",
-				zap.ByteString("msgID", seekPos.GetMsgID()),
-				zap.Time("tsTime", tsoutil.PhysicalTime(seekPos.GetTimestamp())),
-				zap.Duration("tsLag", time.Since(tsoutil.PhysicalTime(seekPos.GetTimestamp()))))
-		} else {
-			input, err = dispatcherClient.Register(initCtx, dmNodeConfig.vChannelName, nil, common.SubscriptionPositionEarliest)
-			if err != nil {
-				return nil, err
-			}
-			log.Info("datanode consume successfully when register to msgDispatcher")
-		}
+		panic("unreachable: input channel is nil for input node")
 	}
-
 	name := fmt.Sprintf("dmInputNode-data-%s", dmNodeConfig.vChannelName)
 	node := flowgraph.NewInputNode(
 		input,
@@ -74,5 +54,27 @@ func newDmInputNode(initCtx context.Context, dispatcherClient msgdispatcher.Clie
 		dmNodeConfig.collectionID,
 		metrics.AllLabel,
 	)
-	return node, nil
+	return node
+}
+
+func createNewInputFromDispatcher(initCtx context.Context, dispatcherClient msgdispatcher.Client, vchannel string, seekPos *msgpb.MsgPosition) (<-chan *msgstream.MsgPack, error) {
+	log := log.With(zap.Int64("nodeID", paramtable.GetNodeID()),
+		zap.String("vchannel", vchannel))
+	if seekPos != nil && len(seekPos.MsgID) != 0 {
+		input, err := dispatcherClient.Register(initCtx, vchannel, seekPos, common.SubscriptionPositionUnknown)
+		if err != nil {
+			return nil, err
+		}
+		log.Info("datanode seek successfully when register to msgDispatcher",
+			zap.ByteString("msgID", seekPos.GetMsgID()),
+			zap.Time("tsTime", tsoutil.PhysicalTime(seekPos.GetTimestamp())),
+			zap.Duration("tsLag", time.Since(tsoutil.PhysicalTime(seekPos.GetTimestamp()))))
+		return input, err
+	}
+	input, err := dispatcherClient.Register(initCtx, vchannel, nil, common.SubscriptionPositionEarliest)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("datanode consume successfully when register to msgDispatcher")
+	return input, err
 }

@@ -35,6 +35,14 @@ var (
 			"meta",
 		},
 	)
+
+	ThreadNum = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Name:      "thread_num",
+			Help:      "the actual thread number of milvus process",
+		},
+	)
 )
 
 // RegisterMQType registers the type of mq

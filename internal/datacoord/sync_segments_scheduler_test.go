@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 
@@ -323,7 +324,7 @@ func (s *SyncSegmentsSchedulerSuite) Test_newSyncSegmentsScheduler() {
 	cm.EXPECT().FindWatcher(mock.Anything).Return(100, nil)
 
 	sm := session.NewMockDataNodeManager(s.T())
-	sm.EXPECT().SyncSegments(mock.Anything, mock.Anything).RunAndReturn(func(i int64, request *datapb.SyncSegmentsRequest) error {
+	sm.EXPECT().SyncSegments(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i int64, request *datapb.SyncSegmentsRequest) error {
 		for _, seg := range request.GetSegmentInfos() {
 			if seg.GetState() == commonpb.SegmentState_Flushed {
 				s.new.Add(1)
@@ -352,21 +353,22 @@ func (s *SyncSegmentsSchedulerSuite) Test_SyncSegmentsFail() {
 	sm := session.NewMockDataNodeManager(s.T())
 
 	sss := newSyncSegmentsScheduler(s.m, cm, sm)
+	ctx := context.Background()
 
 	s.Run("pk not found", func() {
 		sss.meta.collections[1].Schema.Fields[0].IsPrimaryKey = false
-		sss.SyncSegmentsForCollections()
+		sss.SyncSegmentsForCollections(ctx)
 		sss.meta.collections[1].Schema.Fields[0].IsPrimaryKey = true
 	})
 
 	s.Run("find watcher failed", func() {
 		cm.EXPECT().FindWatcher(mock.Anything).Return(0, errors.New("mock error")).Twice()
-		sss.SyncSegmentsForCollections()
+		sss.SyncSegmentsForCollections(ctx)
 	})
 
 	s.Run("sync segment failed", func() {
 		cm.EXPECT().FindWatcher(mock.Anything).Return(100, nil)
-		sm.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(errors.New("mock error"))
-		sss.SyncSegmentsForCollections()
+		sm.EXPECT().SyncSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		sss.SyncSegmentsForCollections(ctx)
 	})
 }

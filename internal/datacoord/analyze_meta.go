@@ -96,12 +96,12 @@ func (m *analyzeMeta) AddAnalyzeTask(task *indexpb.AnalyzeTask) error {
 	return m.saveTask(task)
 }
 
-func (m *analyzeMeta) DropAnalyzeTask(taskID int64) error {
+func (m *analyzeMeta) DropAnalyzeTask(ctx context.Context, taskID int64) error {
 	m.Lock()
 	defer m.Unlock()
 
 	log.Info("drop analyze task", zap.Int64("taskID", taskID))
-	if err := m.catalog.DropAnalyzeTask(m.ctx, taskID); err != nil {
+	if err := m.catalog.DropAnalyzeTask(ctx, taskID); err != nil {
 		log.Warn("drop analyze task by catalog failed", zap.Int64("taskID", taskID),
 			zap.Error(err))
 		return err

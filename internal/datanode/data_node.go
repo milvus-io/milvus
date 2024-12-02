@@ -30,10 +30,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/channel"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
@@ -57,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -127,6 +130,8 @@ type DataNode struct {
 
 	reportImportRetryTimes uint // unitest set this value to 1 to save time, default is 10
 	pool                   *conc.Pool[any]
+
+	metricsRequest *metricsinfo.MetricsRequest
 }
 
 // NewDataNode will return a DataNode with abnormal state.
@@ -144,6 +149,7 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		segmentCache:           util.NewCache(),
 		compactionExecutor:     compaction.NewExecutor(),
 		reportImportRetryTimes: 10,
+		metricsRequest:         metricsinfo.NewMetricsRequest(),
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	expr.Register("datanode", node)
@@ -221,6 +227,7 @@ func (node *DataNode) GetNodeID() int64 {
 func (node *DataNode) Init() error {
 	var initError error
 	node.initOnce.Do(func() {
+		node.registerMetricsRequest()
 		logutil.Logger(node.ctx).Info("DataNode server initializing",
 			zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick.GetValue()),
 		)
@@ -272,6 +279,29 @@ func (node *DataNode) Init() error {
 	return initError
 }
 
+func (node *DataNode) registerMetricsRequest() {
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SystemInfoMetrics,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return node.getSystemInfoMetrics(ctx, req)
+		})
+
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTaskKey,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return node.syncMgr.TaskStatsJSON(), nil
+		})
+
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return node.flowgraphManager.GetSegmentsJSON(), nil
+		})
+
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return node.flowgraphManager.GetChannelsJSON(), nil
+		})
+	log.Info("register metrics actions finished")
+}
+
 // tryToReleaseFlowgraph tries to release a flowgraph
 func (node *DataNode) tryToReleaseFlowgraph(channel string) {
 	log.Info("try to release flowgraph", zap.String("channel", channel))
@@ -288,10 +318,6 @@ func (node *DataNode) tryToReleaseFlowgraph(channel string) {
 
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
-	if paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() && !paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.GetAsBool() {
-		panic("In non-L0 mode, skip loading of bloom filter stats is not allowed.")
-	}
-
 	var startErr error
 	node.startOnce.Do(func() {
 		if err := node.allocator.Start(); err != nil {

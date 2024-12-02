@@ -45,3 +45,11 @@ func ParseTimestamp(data []byte) (time.Time, error) {
 func SubTimeByWallClock(after, before time.Time) time.Duration {
 	return time.Duration(after.UnixNano() - before.UnixNano())
 }
+
+func TimestampToString(ts uint64) string {
+	if ts <= 0 {
+		return ""
+	}
+	ut := time.UnixMilli(int64(ts))
+	return ut.Format(time.DateTime)
+}

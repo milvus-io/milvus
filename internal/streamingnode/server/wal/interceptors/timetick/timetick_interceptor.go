@@ -202,7 +202,7 @@ func (impl *timeTickAppendInterceptor) appendMsg(
 		return nil, err
 	}
 
-	utility.AttachAppendResultTimeTick(ctx, msg.TimeTick())
-	utility.AttachAppendResultTxnContext(ctx, msg.TxnContext())
+	utility.ReplaceAppendResultTimeTick(ctx, msg.TimeTick())
+	utility.ReplaceAppendResultTxnContext(ctx, msg.TxnContext())
 	return msgID, nil
 }

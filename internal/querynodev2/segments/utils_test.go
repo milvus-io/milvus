@@ -10,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -131,7 +130,7 @@ func TestIsIndexMmapEnable(t *testing.T) {
 			IndexParams: []*commonpb.KeyValuePair{
 				{
 					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.IndexFaissIvfFlat,
+					Value: "IVF_FLAT",
 				},
 			},
 		})
@@ -147,7 +146,7 @@ func TestIsIndexMmapEnable(t *testing.T) {
 			IndexParams: []*commonpb.KeyValuePair{
 				{
 					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.IndexINVERTED,
+					Value: "INVERTED",
 				},
 			},
 		})

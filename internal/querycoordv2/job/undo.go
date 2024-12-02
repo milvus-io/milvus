@@ -68,9 +68,9 @@ func (u *UndoList) RollBack() {
 
 	var err error
 	if u.IsNewCollection || u.IsReplicaCreated {
-		err = u.meta.CollectionManager.RemoveCollection(u.CollectionID)
+		err = u.meta.CollectionManager.RemoveCollection(u.ctx, u.CollectionID)
 	} else {
-		err = u.meta.CollectionManager.RemovePartition(u.CollectionID, u.LackPartitions...)
+		err = u.meta.CollectionManager.RemovePartition(u.ctx, u.CollectionID, u.LackPartitions...)
 	}
 	if err != nil {
 		log.Warn("failed to rollback collection from meta", zap.Error(err))

@@ -22,9 +22,11 @@
 
 #include "AckResponder.h"
 #include "InsertRecord.h"
+#include "common/FieldMeta.h"
 #include "common/Schema.h"
 #include "common/IndexMeta.h"
 #include "IndexConfigGenerator.h"
+#include "knowhere/config.h"
 #include "log/Log.h"
 #include "segcore/SegcoreConfig.h"
 #include "index/VectorIndex.h"
@@ -266,10 +268,14 @@ class IndexingRecord {
     void
     Initialize() {
         int offset_id = 0;
+        auto enable_growing_mmap = storage::MmapManager::GetInstance()
+                                       .GetMmapConfig()
+                                       .GetEnableGrowingMmap();
         for (auto& [field_id, field_meta] : schema_.get_fields()) {
             ++offset_id;
             if (field_meta.is_vector() &&
-                segcore_config_.get_enable_interim_segment_index()) {
+                segcore_config_.get_enable_interim_segment_index() &&
+                !enable_growing_mmap) {
                 // TODO: skip binary small index now, reenable after config.yaml is ready
                 if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
                     continue;
@@ -423,6 +429,11 @@ class IndexingRecord {
         auto ptr = dynamic_cast<const VectorFieldIndexing*>(&field_indexing);
         AssertInfo(ptr, "invalid indexing");
         return *ptr;
+    }
+
+    const FieldIndexMeta&
+    get_field_index_meta(FieldId fieldId) const {
+        return index_meta_->GetFieldIndexMeta(fieldId);
     }
 
     bool

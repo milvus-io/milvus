@@ -59,6 +59,7 @@ using float16 = knowhere::fp16;
 using bfloat16 = knowhere::bf16;
 using bin1 = knowhere::bin1;
 
+// See also: https://github.com/milvus-io/milvus-proto/blob/master/proto/schema.proto
 enum class DataType {
     NONE = 0,
     BOOL = 1,
@@ -410,7 +411,8 @@ inline bool
 IsFloatVectorMetricType(const MetricType& metric_type) {
     return metric_type == knowhere::metric::L2 ||
            metric_type == knowhere::metric::IP ||
-           metric_type == knowhere::metric::COSINE;
+           metric_type == knowhere::metric::COSINE ||
+           metric_type == knowhere::metric::BM25;
 }
 
 inline bool

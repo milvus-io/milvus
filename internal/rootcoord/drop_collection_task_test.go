@@ -51,6 +51,7 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 		meta.On("IsAlias",
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(true)
 
 		core := newTestCore(withMeta(meta))
@@ -70,6 +71,7 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("IsAlias",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 		).Return(false)
@@ -129,6 +131,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(coll.Clone(), nil)
 		meta.On("ListAliasesByID",
+			mock.Anything,
 			mock.AnythingOfType("int64"),
 		).Return([]string{})
 
@@ -162,6 +165,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(errors.New("error mock ChangeCollectionState"))
 		meta.On("ListAliasesByID",
+			mock.Anything,
 			mock.Anything,
 		).Return([]string{})
 
@@ -206,6 +210,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(nil)
 		meta.On("ListAliasesByID",
+			mock.Anything,
 			mock.Anything,
 		).Return([]string{})
 		removeCollectionMetaCalled := false

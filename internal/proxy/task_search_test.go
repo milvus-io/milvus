@@ -72,7 +72,9 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		task := &searchTask{
 			ctx:            ctx,
 			collectionName: collName,
-			SearchRequest:  &internalpb.SearchRequest{},
+			SearchRequest: &internalpb.SearchRequest{
+				IsTopkReduce: true,
+			},
 			request: &milvuspb.SearchRequest{
 				CollectionName: collName,
 				Nq:             1,
@@ -98,6 +100,8 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		err := qt.PostExecute(context.TODO())
 		assert.NoError(t, err)
 		assert.Equal(t, qt.result.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+		assert.Equal(t, qt.resultSizeInsufficient, true)
+		assert.Equal(t, qt.isTopkReduce, false)
 	})
 }
 
@@ -300,6 +304,55 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		// contain vector field
 		task.request.OutputFields = []string{testFloatVecField}
 		assert.NoError(t, task.PreExecute(ctx))
+	})
+
+	t.Run("search consistent iterator pre_ts", func(t *testing.T) {
+		collName := "search_with_timeout" + funcutil.GenRandomStr()
+		createColl(t, collName, rc)
+
+		st := getSearchTask(t, collName)
+		st.request.SearchParams = getValidSearchParams()
+		st.request.SearchParams = append(st.request.SearchParams, &commonpb.KeyValuePair{
+			Key:   IteratorField,
+			Value: "True",
+		})
+		st.request.GuaranteeTimestamp = 1000
+		st.request.DslType = commonpb.DslType_BoolExprV1
+
+		ctxTimeout, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
+
+		st.ctx = ctxTimeout
+		assert.NoError(t, st.PreExecute(ctx))
+		assert.True(t, st.isIterator)
+		assert.True(t, st.GetMvccTimestamp() > 0)
+		assert.Equal(t, uint64(1000), st.GetGuaranteeTimestamp())
+	})
+
+	t.Run("search consistent iterator post_ts", func(t *testing.T) {
+		collName := "search_with_timeout" + funcutil.GenRandomStr()
+		createColl(t, collName, rc)
+
+		st := getSearchTask(t, collName)
+		st.request.SearchParams = getValidSearchParams()
+		st.request.SearchParams = append(st.request.SearchParams, &commonpb.KeyValuePair{
+			Key:   IteratorField,
+			Value: "True",
+		})
+		st.request.DslType = commonpb.DslType_BoolExprV1
+
+		_, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
+		enqueueTs := uint64(100000)
+		st.SetTs(enqueueTs)
+		assert.NoError(t, st.PreExecute(ctx))
+		assert.True(t, st.isIterator)
+		assert.True(t, st.GetMvccTimestamp() == 0)
+		st.resultBuf.Insert(&internalpb.SearchResults{})
+		st.PostExecute(context.TODO())
+		assert.Equal(t, st.result.GetSessionTs(), enqueueTs)
 	})
 }
 
@@ -2059,7 +2112,6 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 
 	mgr := NewMockShardClientManager(t)
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
-	mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
 	lb := NewLBPolicyImpl(mgr)
 
 	defer qc.Close()
@@ -2235,11 +2287,11 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.validParams, nil, nil)
-				assert.NoError(t, err)
-				assert.NotNil(t, info)
+				searchInfo := parseSearchInfo(test.validParams, nil, nil)
+				assert.NoError(t, searchInfo.parseError)
+				assert.NotNil(t, searchInfo.planInfo)
 				if test.description == "offsetParam" {
-					assert.Equal(t, targetOffset, offset)
+					assert.Equal(t, targetOffset, searchInfo.offset)
 				}
 			})
 		}
@@ -2256,11 +2308,11 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			limit: externalLimit,
 		}
 
-		info, offset, err := parseSearchInfo(offsetParam, nil, rank)
-		assert.NoError(t, err)
-		assert.NotNil(t, info)
-		assert.Equal(t, int64(10), info.GetTopk())
-		assert.Equal(t, int64(0), offset)
+		searchInfo := parseSearchInfo(offsetParam, nil, rank)
+		assert.NoError(t, searchInfo.parseError)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.Equal(t, int64(10), searchInfo.planInfo.GetTopk())
+		assert.Equal(t, int64(0), searchInfo.offset)
 	})
 
 	t.Run("parseSearchInfo groupBy info for hybrid search", func(t *testing.T) {
@@ -2272,7 +2324,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			},
 		}
 		// 1. first parse rank params
-		// outer params require to group by field 101 and groupSize=3 and groupStrictSize=false
+		// outer params require to group by field 101 and groupSize=3 and strictGroupSize=false
 		testRankParamsPairs := getValidSearchParams()
 		testRankParamsPairs = append(testRankParamsPairs, &commonpb.KeyValuePair{
 			Key:   GroupByFieldKey,
@@ -2283,7 +2335,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			Value: strconv.FormatInt(3, 10),
 		})
 		testRankParamsPairs = append(testRankParamsPairs, &commonpb.KeyValuePair{
-			Key:   GroupStrictSize,
+			Key:   StrictGroupSize,
 			Value: "false",
 		})
 		testRankParamsPairs = append(testRankParamsPairs, &commonpb.KeyValuePair{
@@ -2295,7 +2347,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		// 2. parse search params for sub request in hybridsearch
 		params := getValidSearchParams()
-		// inner params require to group by field 103 and groupSize=10 and groupStrictSize=true
+		// inner params require to group by field 103 and groupSize=10 and strictGroupSize=true
 		params = append(params, &commonpb.KeyValuePair{
 			Key:   GroupByFieldKey,
 			Value: "c3",
@@ -2305,19 +2357,19 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			Value: strconv.FormatInt(10, 10),
 		})
 		params = append(params, &commonpb.KeyValuePair{
-			Key:   GroupStrictSize,
+			Key:   StrictGroupSize,
 			Value: "true",
 		})
 
-		info, _, err := parseSearchInfo(params, schema, testRankParams)
-		assert.NoError(t, err)
-		assert.NotNil(t, info)
+		searchInfo := parseSearchInfo(params, schema, testRankParams)
+		assert.NoError(t, searchInfo.parseError)
+		assert.NotNil(t, searchInfo.planInfo)
 
 		// all group_by related parameters should be aligned to parameters
 		// set by main request rather than inner sub request
-		assert.Equal(t, int64(101), info.GetGroupByFieldId())
-		assert.Equal(t, int64(3), info.GetGroupSize())
-		assert.False(t, info.GetGroupStrictSize())
+		assert.Equal(t, int64(101), searchInfo.planInfo.GetGroupByFieldId())
+		assert.Equal(t, int64(3), searchInfo.planInfo.GetGroupSize())
+		assert.False(t, searchInfo.planInfo.GetStrictGroupSize())
 	})
 
 	t.Run("parseSearchInfo error", func(t *testing.T) {
@@ -2399,12 +2451,12 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.invalidParams, nil, nil)
-				assert.Error(t, err)
-				assert.Nil(t, info)
-				assert.Zero(t, offset)
+				searchInfo := parseSearchInfo(test.invalidParams, nil, nil)
+				assert.Error(t, searchInfo.parseError)
+				assert.Nil(t, searchInfo.planInfo)
+				assert.Zero(t, searchInfo.offset)
 
-				t.Logf("err=%s", err.Error())
+				t.Logf("err=%s", searchInfo.parseError)
 			})
 		}
 	})
@@ -2426,9 +2478,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, nil)
-		assert.Nil(t, info)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, searchInfo.planInfo)
+		assert.ErrorIs(t, searchInfo.parseError, merr.ErrParameterInvalid)
 	})
 	t.Run("check range-search and groupBy", func(t *testing.T) {
 		normalParam := getValidSearchParams()
@@ -2445,9 +2497,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, nil)
-		assert.Nil(t, info)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, searchInfo.planInfo)
+		assert.ErrorIs(t, searchInfo.parseError, merr.ErrParameterInvalid)
 	})
 	t.Run("check nullable and groupBy", func(t *testing.T) {
 		normalParam := getValidSearchParams()
@@ -2464,9 +2516,31 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, nil)
-		assert.Nil(t, info)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, searchInfo.planInfo)
+		assert.ErrorIs(t, searchInfo.parseError, merr.ErrParameterInvalid)
+
+		normalParam = getValidSearchParams()
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   GroupByFieldKey,
+			Value: "string_field",
+		})
+		fields = make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID:  int64(102),
+			Name:     "null_field",
+			Nullable: true,
+		})
+		schema = &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		searchInfo = parseSearchInfo(normalParam, schema, nil)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.NoError(t, searchInfo.parseError)
 	})
 	t.Run("check iterator and topK", func(t *testing.T) {
 		normalParam := getValidSearchParams()
@@ -2483,13 +2557,13 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, nil)
-		assert.NotNil(t, info)
-		assert.NoError(t, err)
-		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), info.Topk)
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.NoError(t, searchInfo.parseError)
+		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), searchInfo.planInfo.GetTopk())
 	})
 
-	t.Run("check max group size", func(t *testing.T) {
+	t.Run("check correctness of group size", func(t *testing.T) {
 		normalParam := getValidSearchParams()
 		normalParam = append(normalParam, &commonpb.KeyValuePair{
 			Key:   GroupSizeKey,
@@ -2503,15 +2577,27 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, nil)
-		assert.Nil(t, info)
-		assert.Error(t, err)
-		assert.True(t, strings.Contains(err.Error(), "exceeds configured max group size"))
-
-		resetSearchParamsValue(normalParam, GroupSizeKey, `10`)
-		info, _, err = parseSearchInfo(normalParam, schema, nil)
-		assert.NotNil(t, info)
-		assert.NoError(t, err)
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.Error(t, searchInfo.parseError)
+		assert.True(t, strings.Contains(searchInfo.parseError.Error(), "exceeds configured max group size"))
+		{
+			resetSearchParamsValue(normalParam, GroupSizeKey, `10`)
+			searchInfo = parseSearchInfo(normalParam, schema, nil)
+			assert.NoError(t, searchInfo.parseError)
+			assert.Equal(t, int64(10), searchInfo.planInfo.GroupSize)
+		}
+		{
+			resetSearchParamsValue(normalParam, GroupSizeKey, `-1`)
+			searchInfo = parseSearchInfo(normalParam, schema, nil)
+			assert.Error(t, searchInfo.parseError)
+			assert.True(t, strings.Contains(searchInfo.parseError.Error(), "is negative"))
+		}
+		{
+			resetSearchParamsValue(normalParam, GroupSizeKey, `xxx`)
+			searchInfo = parseSearchInfo(normalParam, schema, nil)
+			assert.Error(t, searchInfo.parseError)
+			assert.True(t, strings.Contains(searchInfo.parseError.Error(), "failed to parse input group size"))
+		}
 	})
 }
 
@@ -2569,7 +2655,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionBasicInfo{}, nil).Maybe()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 	cache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[string][]nodeInfo{}, nil).Maybe()
 	cache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
 	globalMetaCache = cache
@@ -2657,7 +2743,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			node:   node,
 		}
 
-		err := qt.Requery()
+		err := qt.Requery(nil)
 		assert.NoError(t, err)
 		assert.Len(t, qt.result.Results.FieldsData, 2)
 		for _, field := range qt.result.Results.FieldsData {
@@ -2686,7 +2772,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			node:    node,
 		}
 
-		err := qt.Requery()
+		err := qt.Requery(nil)
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
 	})
@@ -2720,7 +2806,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			node:   node,
 		}
 
-		err := qt.Requery()
+		err := qt.Requery(nil)
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
 	})
@@ -2888,7 +2974,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		}
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Once()
@@ -2897,7 +2983,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.True(t, skip)
 
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Bounded,
 			}, nil).Once()
@@ -2905,7 +2991,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.True(t, skip)
 
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Strong,
 			}, nil).Once()
@@ -2915,7 +3001,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 
 	t.Run("request consistency level", func(t *testing.T) {
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Times(3)
@@ -2987,7 +3073,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		mockMetaCache.ExpectedCalls = nil
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, fmt.Errorf("mock error"))
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil)
@@ -3042,7 +3128,7 @@ func (s *MaterializedViewTestSuite) SetupTest() {
 	s.mockMetaCache = NewMockCache(s.T())
 	s.mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.colID, nil)
 	s.mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-		&collectionBasicInfo{
+		&collectionInfo{
 			collID:                s.colID,
 			partitionKeyIsolation: true,
 		}, nil)

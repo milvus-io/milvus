@@ -493,6 +493,8 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 // definitionLoop schedules the ddl tasks.
 func (sched *taskScheduler) definitionLoop() {
 	defer sched.wg.Done()
+
+	pool := conc.NewPool[struct{}](paramtable.Get().ProxyCfg.DDLConcurrency.GetAsInt(), conc.WithExpiryDuration(time.Minute))
 	for {
 		select {
 		case <-sched.ctx.Done():
@@ -500,7 +502,10 @@ func (sched *taskScheduler) definitionLoop() {
 		case <-sched.ddQueue.utChan():
 			if !sched.ddQueue.utEmpty() {
 				t := sched.scheduleDdTask()
-				sched.processTask(t, sched.ddQueue)
+				pool.Submit(func() (struct{}, error) {
+					sched.processTask(t, sched.ddQueue)
+					return struct{}{}, nil
+				})
 			}
 		}
 	}
@@ -509,6 +514,8 @@ func (sched *taskScheduler) definitionLoop() {
 // controlLoop schedule the data control operation, such as flush
 func (sched *taskScheduler) controlLoop() {
 	defer sched.wg.Done()
+
+	pool := conc.NewPool[struct{}](paramtable.Get().ProxyCfg.DCLConcurrency.GetAsInt(), conc.WithExpiryDuration(time.Minute))
 	for {
 		select {
 		case <-sched.ctx.Done():
@@ -516,7 +523,10 @@ func (sched *taskScheduler) controlLoop() {
 		case <-sched.dcQueue.utChan():
 			if !sched.dcQueue.utEmpty() {
 				t := sched.scheduleDcTask()
-				sched.processTask(t, sched.dcQueue)
+				pool.Submit(func() (struct{}, error) {
+					sched.processTask(t, sched.dcQueue)
+					return struct{}{}, nil
+				})
 			}
 		}
 	}

@@ -117,13 +117,17 @@ class ResponseChecker:
         return True
 
     def assert_exception(self, res, actual=True, error_dict=None):
-        assert actual is False
+        assert actual is False, f"Response of API {self.func_name} expect get error, but success"
         assert len(error_dict) > 0
         if isinstance(res, Error):
             error_code = error_dict[ct.err_code]
-            assert res.code == error_code or error_dict[ct.err_msg] in res.message, (
+            # assert res.code == error_code or error_dict[ct.err_msg] in res.message, (
+            #     f"Response of API {self.func_name} "
+            #     f"expect get error code {error_dict[ct.err_code]} or error message {error_dict[ct.err_code]}, "
+            #     f"but got {res.code} {res.message}")
+            assert error_dict[ct.err_msg] in res.message, (
                 f"Response of API {self.func_name} "
-                f"expect get error code {error_dict[ct.err_code]} or error message {error_dict[ct.err_code]}, "
+                f"expect get error message {error_dict[ct.err_code]}, "
                 f"but got {res.code} {res.message}")
 
         else:
@@ -239,6 +243,14 @@ class ResponseChecker:
             assert res["fields"][1]["name"] == check_items.get("vector_name", "vector")
         if check_items.get("dim", None) is not None:
             assert res["fields"][1]["params"]["dim"] == check_items.get("dim")
+        if check_items.get("nullable_fields", None) is not None:
+            nullable_fields = check_items.get("nullable_fields")
+            if not isinstance(nullable_fields, list):
+                log.error("nullable_fields should be a list including all the nullable fields name")
+                assert False
+            for field in res["fields"]:
+                if field["name"] in nullable_fields:
+                    assert field["nullable"] is True
         assert res["fields"][0]["is_primary"] is True
         assert res["fields"][0]["field_id"] == 100 and (res["fields"][0]["type"] == 5 or 21)
         assert res["fields"][1]["field_id"] == 101 and res["fields"][1]["type"] == 101
@@ -457,8 +469,10 @@ class ResponseChecker:
                 log.info("search iteration finished, close")
                 query_iterator.close()
                 break
+            pk_name = ct.default_int64_field_name if res[0].get(ct.default_int64_field_name, None) is not None \
+                else ct.default_string_field_name
             for i in range(len(res)):
-                pk_list.append(res[i][ct.default_int64_field_name])
+                pk_list.append(res[i][pk_name])
             if check_items.get("limit", None):
                 assert len(res) <= check_items["limit"]
         assert len(pk_list) == len(set(pk_list))

@@ -26,12 +26,14 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -53,18 +55,32 @@ func (s *EmbedEtcdSuite) SetupEmbedEtcd() error {
 		return err
 	}
 
-	s.EtcdServer = server
-	s.EtcdDir = folder
-
+	log.Info("wait for etcd server ready...")
+	select {
+	case <-server.Server.ReadyNotify():
+		s.EtcdServer = server
+		s.EtcdDir = folder
+		log.Info("etcd server ready")
+		return nil
+	case <-time.After(30 * time.Second):
+		server.Server.Stop() // trigger a shutdown
+		log.Fatal("Etcd server took too long to start!")
+	}
 	return nil
 }
 
 func (s *EmbedEtcdSuite) TearDownEmbedEtcd() {
+	defer os.RemoveAll(s.EtcdDir)
 	if s.EtcdServer != nil {
-		s.EtcdServer.Server.Stop()
-	}
-	if s.EtcdDir != "" {
-		os.RemoveAll(s.EtcdDir)
+		log.Info("start to stop etcd server")
+		s.EtcdServer.Close()
+		select {
+		case <-s.EtcdServer.Server.StopNotify():
+			log.Info("etcd server stopped")
+			return
+		case err := <-s.EtcdServer.Err():
+			log.Warn("etcd server has crashed", zap.Error(err))
+		}
 	}
 }
 
@@ -138,9 +154,13 @@ func (s *MiniClusterSuite) TearDownTest() {
 	if err == nil {
 		for idx, collectionName := range resp.GetCollectionNames() {
 			if resp.GetInMemoryPercentages()[idx] == 100 || resp.GetQueryServiceAvailable()[idx] {
-				s.Cluster.Proxy.ReleaseCollection(context.Background(), &milvuspb.ReleaseCollectionRequest{
+				status, err := s.Cluster.Proxy.ReleaseCollection(context.Background(), &milvuspb.ReleaseCollectionRequest{
 					CollectionName: collectionName,
 				})
+				err = merr.CheckRPCCall(status, err)
+				s.NoError(err)
+				collectionID := resp.GetCollectionIds()[idx]
+				s.CheckCollectionCacheReleased(collectionID)
 			}
 		}
 	}

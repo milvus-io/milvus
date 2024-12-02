@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "IndexConfigGenerator.h"
+#include "knowhere/comp/index_param.h"
 #include "log/Log.h"
 
 namespace milvus::segcore {
@@ -23,41 +24,46 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
       is_sparse_(is_sparse) {
     origin_index_type_ = index_meta_.GetIndexType();
     metric_type_ = index_meta_.GeMetricType();
-    // Currently for dense vector index, if the segment is growing, we use IVFCC
-    // as the index type; if the segment is sealed but its index has not been
-    // built by the index node, we use IVFFLAT as the temp index type and
-    // release it once the index node has finished building the index and query
-    // node has loaded it.
+    // For Dense vector, use IVFFLAT_CC as the growing and temp index type.
+    //
+    // For Sparse vector, use SPARSE_WAND_CC for INDEX_SPARSE_WAND index, or use
+    // SPARSE_INVERTED_INDEX_CC for INDEX_SPARSE_INVERTED_INDEX/other sparse
+    // index types as the growing and temp index type.
 
-    // But for sparse vector index(INDEX_SPARSE_INVERTED_INDEX and
-    // INDEX_SPARSE_WAND), those index themselves can be used as the temp index
-    // type, so we can avoid the extra step of "releast temp and load".
-    // When using HNSW(cardinal) for sparse, we use INDEX_SPARSE_INVERTED_INDEX
-    // as the growing index.
-
-    if (origin_index_type_ ==
-            knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
-        origin_index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
-        index_type_ = origin_index_type_;
+    if (origin_index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
+        index_type_ = knowhere::IndexEnum::INDEX_SPARSE_WAND_CC;
     } else if (is_sparse_) {
-        index_type_ = knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX;
+        index_type_ = knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC;
     } else {
-        index_type_ = support_index_types.at(segment_type);
+        index_type_ = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
     }
     build_params_[knowhere::meta::METRIC_TYPE] = metric_type_;
     build_params_[knowhere::indexparam::NLIST] =
         std::to_string(config_.get_nlist());
-    build_params_[knowhere::indexparam::SSIZE] = std::to_string(std::max(
-        static_cast<int>(config_.get_chunk_rows() / config_.get_nlist()), 48));
+    build_params_[knowhere::indexparam::SSIZE] = std::to_string(
+        std::max(static_cast<int>(config_.get_chunk_rows() / config_.get_nlist()), 48));
+
+    if (is_sparse && metric_type_ == knowhere::metric::BM25) {
+        build_params_[knowhere::meta::BM25_K1] =
+            index_meta_.GetIndexParams().at(knowhere::meta::BM25_K1);
+        build_params_[knowhere::meta::BM25_B] =
+            index_meta_.GetIndexParams().at(knowhere::meta::BM25_B);
+        build_params_[knowhere::meta::BM25_AVGDL] =
+            index_meta_.GetIndexParams().at(knowhere::meta::BM25_AVGDL);
+    }
+
     search_params_[knowhere::indexparam::NPROBE] =
         std::to_string(config_.get_nprobe());
+
     // note for sparse vector index: drop_ratio_build is not allowed for growing
     // segment index.
     LOG_INFO(
-        "VecIndexConfig: origin_index_type={}, index_type={}, metric_type={}",
+        "VecIndexConfig: origin_index_type={}, index_type={}, metric_type={}, "
+        "config={}",
         origin_index_type_,
         index_type_,
-        metric_type_);
+        metric_type_,
+        build_params_.dump());
 }
 
 int64_t
@@ -99,6 +105,11 @@ VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) {
         if (searchInfo.search_params_.contains(key)) {
             searchParam.search_params_[key] = searchInfo.search_params_[key];
         }
+    }
+
+    if (metric_type_ == knowhere::metric::BM25) {
+        searchParam.search_params_[knowhere::meta::BM25_AVGDL] =
+            searchInfo.search_params_[knowhere::meta::BM25_AVGDL];
     }
     return searchParam;
 }

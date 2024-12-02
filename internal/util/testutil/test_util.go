@@ -1,7 +1,6 @@
 package testutil
 
 import (
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -109,7 +109,7 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 		return nil, err
 	}
 	for _, f := range schema.GetFields() {
-		if f.GetAutoID() {
+		if f.GetAutoID() || f.IsFunctionOutput {
 			continue
 		}
 		switch f.GetDataType() {
@@ -201,19 +201,87 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 				insertData.Data[f.FieldID].AppendValidDataRows(testutils.GenerateBoolArray(rows))
 			} else if len(nullPercent) == 1 && nullPercent[0] == 100 {
 				insertData.Data[f.FieldID].AppendValidDataRows(make([]bool, rows))
+			} else if len(nullPercent) == 1 && nullPercent[0] == 0 {
+				validData := make([]bool, rows)
+				for i := range validData {
+					validData[i] = true
+				}
+				insertData.Data[f.FieldID].AppendValidDataRows(validData)
 			} else {
-				return nil, merr.WrapErrParameterInvalidMsg("not support the number of nullPercent")
+				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support the number of nullPercent(%d)", nullPercent))
 			}
 		}
 	}
 	return insertData, nil
 }
 
+func CreateFieldWithDefaultValue(dataType schemapb.DataType, id int64, nullable bool) (*schemapb.FieldSchema, error) {
+	field := &schemapb.FieldSchema{
+		FieldID:  102,
+		Name:     dataType.String(),
+		DataType: dataType,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MaxLengthKey,
+				Value: "128",
+			},
+			{
+				Key:   common.MaxCapacityKey,
+				Value: "128",
+			},
+		},
+		Nullable: nullable,
+	}
+
+	switch field.GetDataType() {
+	case schemapb.DataType_Bool:
+		field.DefaultValue = &schemapb.ValueField{
+			Data: &schemapb.ValueField_BoolData{
+				BoolData: ([]bool{true, false})[rand.Intn(2)],
+			},
+		}
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		field.DefaultValue = &schemapb.ValueField{
+			Data: &schemapb.ValueField_IntData{
+				IntData: ([]int32{1, 10, 100, 1000})[rand.Intn(4)],
+			},
+		}
+	case schemapb.DataType_Int64:
+		field.DefaultValue = &schemapb.ValueField{
+			Data: &schemapb.ValueField_LongData{
+				LongData: rand.Int63(),
+			},
+		}
+	case schemapb.DataType_Float:
+		field.DefaultValue = &schemapb.ValueField{
+			Data: &schemapb.ValueField_FloatData{
+				FloatData: rand.Float32(),
+			},
+		}
+	case schemapb.DataType_Double:
+		field.DefaultValue = &schemapb.ValueField{
+			Data: &schemapb.ValueField_DoubleData{
+				DoubleData: rand.Float64(),
+			},
+		}
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		field.DefaultValue = &schemapb.ValueField{
+			Data: &schemapb.ValueField_StringData{
+				StringData: randomString(10),
+			},
+		}
+	default:
+		msg := fmt.Sprintf("type (%s) not support default_value", field.GetDataType().String())
+		return nil, merr.WrapErrParameterInvalidMsg(msg)
+	}
+	return field, nil
+}
+
 func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.InsertData, useNullType bool) ([]arrow.Array, error) {
 	mem := memory.NewGoAllocator()
 	columns := make([]arrow.Array, 0, len(schema.Fields))
 	for _, field := range schema.Fields {
-		if field.GetIsPrimaryKey() && field.GetAutoID() {
+		if field.GetIsPrimaryKey() && field.GetAutoID() || field.GetIsFunctionOutput() {
 			continue
 		}
 		fieldID := field.GetFieldID()
@@ -531,7 +599,7 @@ func CreateInsertDataRowsForJSON(schema *schemapb.CollectionSchema, insertData *
 			field := fieldIDToField[fieldID]
 			dataType := field.GetDataType()
 			elemType := field.GetElementType()
-			if field.GetAutoID() {
+			if field.GetAutoID() || field.IsFunctionOutput {
 				continue
 			}
 			if v.GetRow(i) == nil {
@@ -590,11 +658,12 @@ func CreateInsertDataForCSV(schema *schemapb.CollectionSchema, insertData *stora
 	csvData := make([][]string, 0, rowNum+1)
 
 	header := make([]string, 0)
-	nameToFields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
+	fields := lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return !field.GetAutoID() && !field.IsFunctionOutput
+	})
+	nameToFields := lo.KeyBy(fields, func(field *schemapb.FieldSchema) string {
 		name := field.GetName()
-		if !field.GetAutoID() {
-			header = append(header, name)
-		}
+		header = append(header, name)
 		return name
 	})
 	csvData = append(csvData, header)
@@ -606,9 +675,6 @@ func CreateInsertDataForCSV(schema *schemapb.CollectionSchema, insertData *stora
 			value := insertData.Data[field.FieldID]
 			dataType := field.GetDataType()
 			elemType := field.GetElementType()
-			if field.GetAutoID() {
-				continue
-			}
 			// deal with null value
 			if field.GetNullable() && value.GetRow(i) == nil {
 				data = append(data, nullkey)
