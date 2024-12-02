@@ -52,7 +52,7 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 		s.meta.segments.SetSegment(id, segment)
 	}
 
-	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.mockPlanContext, s.meta)
+	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.mockPlanContext, s.meta, nil)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {

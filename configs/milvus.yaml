@@ -599,6 +599,11 @@ dataCoord:
       minClusterSizeRatio: 0.01 # minimum cluster size / avg size in Kmeans train
       maxClusterSizeRatio: 10 # maximum cluster size / avg size in Kmeans train
       maxClusterSize: 5g # maximum cluster size in Kmeans train
+    vshard:
+      enable: true # Enable vshard
+      splitThreshold: 100gb # splitThreshold for a vshard.
+      checkIntervalSeconds: 30
+      cleanIntervalSeconds: 600
   syncSegmentsInterval: 300 # The time interval for regularly syncing segments
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:

@@ -54,8 +54,11 @@ import (
 )
 
 type CompactionMeta interface {
+	GetCollections() []*collectionInfo
+
 	GetSegment(ctx context.Context, segID UniqueID) *SegmentInfo
 	SelectSegments(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo
+	GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegments
 	GetHealthySegment(ctx context.Context, segID UniqueID) *SegmentInfo
 	UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error
 	SetSegmentsCompacting(ctx context.Context, segmentID []int64, compacting bool)
@@ -72,6 +75,7 @@ type CompactionMeta interface {
 	GetAnalyzeMeta() *analyzeMeta
 	GetPartitionStatsMeta() *partitionStatsMeta
 	GetCompactionTaskMeta() *compactionTaskMeta
+	GetVshardMeta() VshardMeta
 }
 
 var _ CompactionMeta = (*meta)(nil)
@@ -90,6 +94,7 @@ type meta struct {
 	partitionStatsMeta *partitionStatsMeta
 	compactionTaskMeta *compactionTaskMeta
 	statsTaskMeta      *statsTaskMeta
+	vshardMeta         VshardMeta
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -106,6 +111,10 @@ func (m *meta) GetPartitionStatsMeta() *partitionStatsMeta {
 
 func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
 	return m.compactionTaskMeta
+}
+
+func (m *meta) GetVshardMeta() VshardMeta {
+	return m.vshardMeta
 }
 
 type channelCPs struct {
@@ -164,6 +173,12 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	if err != nil {
 		return nil, err
 	}
+
+	vsm, err := newVshardMetaImpl(ctx, catalog)
+	if err != nil {
+		return nil, err
+	}
+
 	mt := &meta{
 		ctx:                ctx,
 		catalog:            catalog,
@@ -176,6 +191,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		partitionStatsMeta: psm,
 		compactionTaskMeta: ctm,
 		statsTaskMeta:      stm,
+		vshardMeta:         vsm,
 	}
 	err = mt.reloadFromKV()
 	if err != nil {
@@ -375,6 +391,47 @@ func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegm
 		result = append(result, entry)
 	}
 	log.Debug("GetSegmentsChanPart", zap.Int("length", len(result)))
+	return result
+}
+
+// GetSegmentsChanPartVshard returns segments organized in Channel-Partition-vshard dimension with selector applied
+func (m *meta) GetSegmentsChanPartVshard(selector SegmentInfoSelector) []*chanPartVshardSegments {
+	m.RLock()
+	defer m.RUnlock()
+	type dim struct {
+		partitionID   int64
+		channelName   string
+		vshardDescStr string
+	}
+
+	mDimEntry := make(map[dim]*chanPartVshardSegments)
+
+	for _, si := range m.segments.segments {
+		if !selector(si) {
+			continue
+		}
+		vshardDesc := "none"
+		if si.GetVshardDesc() != nil {
+			vshardDesc = si.GetVshardDesc().String()
+		}
+		d := dim{si.PartitionID, si.InsertChannel, vshardDesc}
+		entry, ok := mDimEntry[d]
+		if !ok {
+			entry = &chanPartVshardSegments{
+				collectionID: si.CollectionID,
+				partitionID:  si.PartitionID,
+				channelName:  si.InsertChannel,
+				vshard:       si.GetVshardDesc(),
+			}
+			mDimEntry[d] = entry
+		}
+		entry.segments = append(entry.segments, si)
+	}
+	result := make([]*chanPartVshardSegments, 0, len(mDimEntry))
+	for _, entry := range mDimEntry {
+		result = append(result, entry)
+	}
+	log.Debug("GetSegmentsChanPartVshard", zap.Int("length", len(result)))
 	return result
 }
 
@@ -1455,6 +1512,11 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 	}
 
 	for _, seg := range result.GetSegments() {
+		// compatible to old datanode
+		vshard := seg.GetVshard()
+		if vshard == nil && len(t.FromVshards) > 0 {
+			vshard = t.FromVshards[0]
+		}
 		segmentInfo := &datapb.SegmentInfo{
 			ID:                  seg.GetSegmentID(),
 			CollectionID:        compactFromSegInfos[0].CollectionID,
@@ -1477,6 +1539,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			})),
 			// visible after stats and index
 			IsInvisible: true,
+			VshardDesc:  vshard,
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -1538,6 +1601,12 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {
+		// for vshard compaction, get vshard desc from compaction segment result
+		// for mix compaction, get vshard desc from compactionTask.ToVshards, it should be only one ToVshard
+		vshard := compactToSegment.GetVshard()
+		if vshard == nil && len(t.ToVshards) > 0 {
+			vshard = t.ToVshards[0]
+		}
 		compactToSegmentInfo := NewSegmentInfo(
 			&datapb.SegmentInfo{
 				ID:            compactToSegment.GetSegmentID(),
@@ -1563,7 +1632,8 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 				DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 					return info.GetDmlPosition()
 				})),
-				IsSorted: compactToSegment.GetIsSorted(),
+				IsSorted:   compactToSegment.GetIsSorted(),
+				VshardDesc: vshard,
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -1579,6 +1649,7 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 			zap.Int("binlog count", len(compactToSegmentInfo.GetBinlogs())),
 			zap.Int("statslog count", len(compactToSegmentInfo.GetStatslogs())),
 			zap.Int("deltalog count", len(compactToSegmentInfo.GetDeltalogs())),
+			zap.String("vshardDesc", compactToSegmentInfo.GetVshardDesc().String()),
 		)
 		compactToSegments = append(compactToSegments, compactToSegmentInfo)
 	}
@@ -1625,6 +1696,8 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 		return m.completeMixCompactionMutation(t, result)
 	case datapb.CompactionType_ClusteringCompaction:
 		return m.completeClusterCompactionMutation(t, result)
+	case datapb.CompactionType_VShardCompaction:
+		return m.completeMixCompactionMutation(t, result)
 	}
 	return nil, nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 }
@@ -2025,6 +2098,7 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 		Deltalogs:                 nil,
 		CompactionFrom:            []int64{oldSegmentID},
 		IsSorted:                  true,
+		VshardDesc:                cloned.GetVshardDesc(),
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	if segment.GetNumOfRows() > 0 {
