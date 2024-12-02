@@ -332,7 +332,6 @@ var (
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeFlush.String()),
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCompaction.String()),
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeLoadBalance.String()),
-		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRenameCollection.String()),
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateIndex.String()),
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropIndex.String()),
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreatePartition.String()),
@@ -384,6 +383,7 @@ var (
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateResourceGroup.String()),
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropResourceGroup.String()),
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
+		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRenameCollection.String()),
 	)
 )
 
@@ -475,5 +475,5 @@ func GetObjectType(privName string) string {
 			return objectType
 		}
 	}
-	return ""
+	return commonpb.ObjectType_Global.String()
 }

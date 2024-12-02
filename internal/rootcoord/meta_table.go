@@ -1577,6 +1577,10 @@ func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
+	if util.IsBuiltinPrivilegeGroup(groupName) {
+		return merr.WrapErrParameterInvalidMsg("the privilege group name [%s] is defined by built in privilege groups in system", groupName)
+	}
+
 	// validate input params
 	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, groupName)
 	if err != nil {

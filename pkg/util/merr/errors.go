@@ -148,7 +148,8 @@ var (
 	// this operation is denied because the user not authorized, user need to login in first
 	ErrPrivilegeNotAuthenticated = newMilvusError("not authenticated", 1400, false)
 	// this operation is denied because the user has no permission to do this, user need higher privilege
-	ErrPrivilegeNotPermitted = newMilvusError("privilege not permitted", 1401, false)
+	ErrPrivilegeNotPermitted     = newMilvusError("privilege not permitted", 1401, false)
+	ErrPrivilegeGroupInvalidName = newMilvusError("invalid privilege group name", 1402, false)
 
 	// Alias related
 	ErrAliasNotFound               = newMilvusError("alias not found", 1600, false)

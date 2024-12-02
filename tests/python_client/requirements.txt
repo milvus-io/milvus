@@ -13,7 +13,7 @@ pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.5.0
 
-pytest-rerunfailures==9.1.1
+pytest-rerunfailures==14.0
 git+https://github.com/Projectplace/pytest-tags
 ndg-httpsclient
 pyopenssl

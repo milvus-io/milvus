@@ -2106,6 +2106,8 @@ func TestMetaTable_PrivilegeGroup(t *testing.T) {
 	assert.NoError(t, err)
 	err = mt.OperatePrivilegeGroup(context.TODO(), "", []*milvuspb.PrivilegeEntity{}, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
 	assert.Error(t, err)
+	err = mt.OperatePrivilegeGroup(context.TODO(), "ClusterReadOnly", []*milvuspb.PrivilegeEntity{}, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
+	assert.Error(t, err)
 	err = mt.OperatePrivilegeGroup(context.TODO(), "pg3", []*milvuspb.PrivilegeEntity{}, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
 	assert.Error(t, err)
 	_, err = mt.GetPrivilegeGroupRoles(context.TODO(), "")
