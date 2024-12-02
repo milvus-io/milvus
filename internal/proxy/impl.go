@@ -5334,7 +5334,7 @@ func (node *Proxy) validPrivilegeParams(req *milvuspb.OperatePrivilegeRequest) e
 
 func (node *Proxy) validateOperatePrivilegeV2Params(req *milvuspb.OperatePrivilegeV2Request) error {
 	if req.Role == nil {
-		return fmt.Errorf("the role in the request is nil")
+		return merr.WrapErrParameterInvalidMsg("the role in the request is nil")
 	}
 	if err := ValidateRoleName(req.Role.Name); err != nil {
 		return err
@@ -5342,8 +5342,12 @@ func (node *Proxy) validateOperatePrivilegeV2Params(req *milvuspb.OperatePrivile
 	if err := ValidatePrivilege(req.Grantor.Privilege.Name); err != nil {
 		return err
 	}
+	// validate built-in privilege group params
+	if err := ValidateBuiltInPrivilegeGroup(req.Grantor.Privilege.Name, req.DbName, req.CollectionName); err != nil {
+		return err
+	}
 	if req.Type != milvuspb.OperatePrivilegeType_Grant && req.Type != milvuspb.OperatePrivilegeType_Revoke {
-		return fmt.Errorf("the type in the request not grant or revoke")
+		return merr.WrapErrParameterInvalidMsg("the type in the request not grant or revoke")
 	}
 	if req.DbName != "" && !util.IsAnyWord(req.DbName) {
 		if err := ValidateDatabaseName(req.DbName); err != nil {
