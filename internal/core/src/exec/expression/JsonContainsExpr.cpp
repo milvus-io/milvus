@@ -301,10 +301,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
     auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
                                ? active_count_ - current_data_chunk_pos_
                                : batch_size_;
-    std::unordered_set<ExprValueType> elements;
+    std::unordered_set<GetType> elements;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     for (auto const& element : expr_->vals_) {
-        elements.insert(GetValueFromProto<ExprValueType>(element));
+        elements.insert(GetValueFromProto<GetType>(element));
     }
     if (elements.empty()) {
         MoveCursor();
@@ -327,11 +327,21 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
             }
             auto json =
                 milvus::Json(json_pair.first.data(), json_pair.first.size());
-            auto val = json.at<GetType>(offset, size);
-            if (val.error()) {
+            auto array = json.array_at(offset, size);
+
+            if (array.error()) {
                 return false;
             }
-            return elements.count(ExprValueType(val.value())) > 0;
+            for (auto&& it : array) {
+                auto val = it.template get<GetType>();
+                if (val.error()) {
+                    continue;
+                }
+                if (elements.count(val.value()) > 0) {
+                    return true;
+                }
+            }
+            return false;
         };
         cached_index_chunk_res_ =
             index->FilterByPath(pointer, real_batch_size, filter_func).clone();
@@ -457,8 +467,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
                 return false;
             }
             for (auto&& it : array) {
+                auto val = it.get_array();
+                if (val.error()) {
+                    continue;
+                }
                 for (auto const& element : elements) {
-                    if (CompareTwoJsonArray(it.get_array(), element)) {
+                    if (CompareTwoJsonArray(val, element)) {
                         return true;
                     }
                 }
@@ -656,8 +670,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
             }
             std::unordered_set<GetType> tmp_elements(elements);
             for (auto&& it : array) {
-                tmp_elements.erase(it);
-                if (tmp_elements.empty()) {
+                auto val = it.template get<GetType>();
+                if (val.error()) {
+                    continue;
+                }
+                tmp_elements.erase(val.value());
+                if (tmp_elements.size() == 0) {
                     return true;
                 }
             }
@@ -840,23 +858,29 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = sealed_seg->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func =
-            [sealed_seg, &elements, &elements_index, &field_id](
-                uint32_t row_id, uint16_t offset, uint16_t size) {
+        auto filter_func = [sealed_seg, &elements, &elements_index, &field_id](
+                               uint32_t row_id,
+                               uint16_t offset,
+                               uint16_t size) {
+            return false;
+            auto json_pair = sealed_seg->GetJsonData(field_id, row_id);
+            if (!json_pair.second) {
                 return false;
-                auto json_pair = sealed_seg->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
-                    return false;
-                }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
-                std::unordered_set<int> tmp_elements_index(elements_index);
+            }
+            auto json =
+                milvus::Json(json_pair.first.data(), json_pair.first.size());
+            std::unordered_set<int> tmp_elements_index(elements_index);
+            auto array = json.array_at(offset, size);
+            if (array.error()) {
+                return false;
+            }
+            for (auto&& it : array) {
                 int i = -1;
                 for (auto& element : elements) {
                     i++;
                     switch (element.val_case()) {
                         case proto::plan::GenericValue::kBoolVal: {
-                            auto val = json.at<bool>(offset, size);
+                            auto val = it.template get<bool>();
                             if (val.error()) {
                                 continue;
                             }
@@ -866,7 +890,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                             break;
                         }
                         case proto::plan::GenericValue::kInt64Val: {
-                            auto val = json.at<bool>(offset, size);
+                            auto val = it.template get<int64_t>();
                             if (val.error()) {
                                 continue;
                             }
@@ -876,7 +900,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                             break;
                         }
                         case proto::plan::GenericValue::kFloatVal: {
-                            auto val = json.at<double>(offset, size);
+                            auto val = it.template get<double>();
                             if (val.error()) {
                                 continue;
                             }
@@ -886,7 +910,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                             break;
                         }
                         case proto::plan::GenericValue::kStringVal: {
-                            auto val = json.at<std::string_view>(offset, size);
+                            auto val = it.template get<std::string_view>();
                             if (val.error()) {
                                 continue;
                             }
@@ -896,7 +920,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                             break;
                         }
                         case proto::plan::GenericValue::kArrayVal: {
-                            auto val = json.array_at(offset, size);
+                            auto val = it.get_array();
                             if (val.error()) {
                                 continue;
                             }
@@ -910,15 +934,16 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                                       fmt::format("unsupported data type {}",
                                                   element.val_case()));
                     }
-                    if (tmp_elements_index.empty()) {
+                    if (tmp_elements_index.size() == 0) {
                         return true;
                     }
                 }
-                if (tmp_elements_index.empty()) {
+                if (tmp_elements_index.size() == 0) {
                     return true;
                 }
-                return tmp_elements_index.empty();
-            };
+            }
+            return tmp_elements_index.size() == 0;
+        };
         cached_index_chunk_res_ =
             index->FilterByPath(pointer, real_batch_size, filter_func).clone();
         cached_index_chunk_id_ = 0;
@@ -1043,14 +1068,23 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
             }
             auto json =
                 milvus::Json(json_pair.first.data(), json_pair.first.size());
-            auto val = json.array_at(offset, size);
-            if (val.error()) {
+            auto array = json.array_at(offset, size);
+            if (array.error()) {
                 return false;
             }
             std::unordered_set<int> exist_elements_index;
-            for (int index = 0; index < elements.size(); ++index) {
-                if (CompareTwoJsonArray(val.value(), elements[index])) {
-                    exist_elements_index.insert(index);
+            for (auto&& it : array) {
+                auto json_array = it.get_array();
+                if (json_array.error()) {
+                    continue;
+                }
+                for (int index = 0; index < elements.size(); ++index) {
+                    if (CompareTwoJsonArray(json_array, elements[index])) {
+                        exist_elements_index.insert(index);
+                    }
+                }
+                if (exist_elements_index.size() == elements.size()) {
+                    return true;
                 }
             }
             return exist_elements_index.size() == elements.size();
@@ -1222,63 +1256,69 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
             }
             auto json =
                 milvus::Json(json_pair.first.data(), json_pair.first.size());
-            for (auto const& element : elements) {
-                switch (element.val_case()) {
-                    case proto::plan::GenericValue::kBoolVal: {
-                        auto val = json.at<bool>(offset, size);
-                        if (val.error()) {
-                            return false;
+            auto array = json.array_at(offset, size);
+            if (array.error()) {
+                return false;
+            }
+            // Note: array can only be iterated once
+            for (auto&& it : array) {
+                for (auto const& element : elements) {
+                    switch (element.val_case()) {
+                        case proto::plan::GenericValue::kBoolVal: {
+                            auto val = it.template get<bool>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.bool_val()) {
+                                return true;
+                            }
+                            break;
                         }
-                        if (val.value() == element.bool_val()) {
-                            return true;
+                        case proto::plan::GenericValue::kInt64Val: {
+                            auto val = it.template get<int64_t>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.int64_val()) {
+                                return true;
+                            }
+                            break;
                         }
-                        break;
+                        case proto::plan::GenericValue::kFloatVal: {
+                            auto val = it.template get<double>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.float_val()) {
+                                return true;
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kStringVal: {
+                            auto val = it.template get<std::string_view>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.string_val()) {
+                                return true;
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kArrayVal: {
+                            auto val = it.get_array();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (CompareTwoJsonArray(val, element.array_val())) {
+                                return true;
+                            }
+                            break;
+                        }
+                        default:
+                            PanicInfo(DataTypeInvalid,
+                                      fmt::format("unsupported data type {}",
+                                                  element.val_case()));
                     }
-                    case proto::plan::GenericValue::kInt64Val: {
-                        auto val = json.at<int64_t>(offset, size);
-                        if (val.error()) {
-                            return false;
-                        }
-                        if (val.value() == element.int64_val()) {
-                            return true;
-                        }
-                        break;
-                    }
-                    case proto::plan::GenericValue::kFloatVal: {
-                        auto val = json.at<double>(offset, size);
-                        if (val.error()) {
-                            return false;
-                        }
-                        if (val.value() == element.float_val()) {
-                            return true;
-                        }
-                        break;
-                    }
-                    case proto::plan::GenericValue::kStringVal: {
-                        auto val = json.at<std::string_view>(offset, size);
-                        if (val.error()) {
-                            return false;
-                        }
-                        if (val.value() == element.string_val()) {
-                            return true;
-                        }
-                        break;
-                    }
-                    case proto::plan::GenericValue::kArrayVal: {
-                        auto val = json.array_at(offset, size);
-                        if (val.error()) {
-                            return false;
-                        }
-                        if (CompareTwoJsonArray(val.value(),
-                                                element.array_val())) {
-                            return true;
-                        }
-                        break;
-                    }
-                    default:
-                        PanicInfo(DataTypeInvalid,
-                                  fmt::format("unsupported data type {}",
-                                              element.val_case()));
                 }
             }
             return false;
