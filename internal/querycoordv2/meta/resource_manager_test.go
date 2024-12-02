@@ -615,7 +615,7 @@ func (suite *ResourceManagerSuite) TestUnassignFail() {
 	ctx := suite.ctx
 	// suite.man
 	mockKV := mocks.NewMetaKv(suite.T())
-	mockKV.EXPECT().MultiSave(mock.Anything).Return(nil).Once()
+	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil).Once()
 
 	store := querycoord.NewCatalog(mockKV)
 	suite.manager = NewResourceManager(store, session.NewNodeManager())
@@ -631,7 +631,7 @@ func (suite *ResourceManagerSuite) TestUnassignFail() {
 	}))
 	suite.manager.HandleNodeUp(ctx, 1)
 
-	mockKV.EXPECT().MultiSave(mock.Anything).Return(merr.WrapErrServiceInternal("mocked")).Once()
+	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(merr.WrapErrServiceInternal("mocked")).Once()
 
 	suite.Panics(func() {
 		suite.manager.HandleNodeDown(ctx, 1)

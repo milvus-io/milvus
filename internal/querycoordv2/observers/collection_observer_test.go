@@ -81,7 +81,7 @@ type CollectionObserverSuite struct {
 
 func (suite *CollectionObserverSuite) SetupSuite() {
 	paramtable.Init()
-
+	suite.ctx = context.Background()
 	suite.collections = []int64{100, 101, 102, 103}
 	suite.partitions = map[int64][]int64{
 		100: {10},
@@ -238,7 +238,6 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID: 3,
 	}))
-	suite.ctx = context.Background()
 }
 
 func (suite *CollectionObserverSuite) TearDownTest() {

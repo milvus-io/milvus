@@ -12,6 +12,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"strconv"
@@ -55,7 +56,7 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 		closeWg:           sync.WaitGroup{},
 	}
 	// Get topic from topic begin id
-	topicKeys, _, err := ri.kv.LoadWithPrefix(TopicIDTitle)
+	topicKeys, _, err := ri.kv.LoadWithPrefix(context.TODO(), TopicIDTitle)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +165,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 			return err
 		}
 		ackedTsKey := fixedAckedTsKey + "/" + strconv.FormatInt(pageID, 10)
-		ackedTsVal, err := ri.kv.Load(ackedTsKey)
+		ackedTsVal, err := ri.kv.Load(context.TODO(), ackedTsKey)
 		if err != nil {
 			return err
 		}
@@ -265,7 +266,7 @@ func (ri *retentionInfo) calculateTopicAckedSize(topic string) (int64, error) {
 
 		// check if page is acked
 		ackedTsKey := fixedAckedTsKey + "/" + strconv.FormatInt(pageID, 10)
-		ackedTsVal, err := ri.kv.Load(ackedTsKey)
+		ackedTsVal, err := ri.kv.Load(context.TODO(), ackedTsKey)
 		if err != nil {
 			return -1, err
 		}

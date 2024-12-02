@@ -1,6 +1,8 @@
 package backend
 
 import (
+	"context"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/configs"
@@ -16,7 +18,7 @@ type etcdBasedBackend struct {
 }
 
 func (b etcdBasedBackend) CleanWithPrefix(prefix string) error {
-	return b.txn.RemoveWithPrefix(prefix)
+	return b.txn.RemoveWithPrefix(context.TODO(), prefix)
 }
 
 func newEtcdBasedBackend(cfg *configs.MilvusConfig) (*etcdBasedBackend, error) {
