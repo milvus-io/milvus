@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.71.0') _
+@Library('jenkins-shared-library@loki') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 def milvus_helm_chart_version = '4.2.8'
@@ -19,6 +19,11 @@ pipeline {
 
         )
     }
+
+    environment {
+        LOKI_ADDR = 'http://loki-1-loki-distributed-gateway.loki.svc.cluster.local'
+    }
+
     agent {
         kubernetes {
             cloud '4am'
@@ -39,7 +44,7 @@ pipeline {
         }
         stage('build & test') {
             steps {
-                container('tkn') {
+                container('all-in-one') {
                     script {
                         def job_name = tekton.cpp_ut arch: 'amd64',
                                               isPr: isPr,
@@ -56,7 +61,7 @@ pipeline {
             }
             post {
                 always {
-                    container('tkn') {
+                    container('all-in-one') {
                         script {
                             tekton.sure_stop()
                         }
