@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -100,9 +101,8 @@ func (t *QueryTask) Execute() error {
 	}
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "QueryTask")
 
-	retrievePlan, err := segments.NewRetrievePlan(
-		t.ctx,
-		t.collection,
+	retrievePlan, err := segcore.NewRetrievePlan(
+		t.collection.GetCCollection(),
 		t.req.Req.GetSerializedExprPlan(),
 		t.req.Req.GetMvccTimestamp(),
 		t.req.Req.Base.GetMsgID(),

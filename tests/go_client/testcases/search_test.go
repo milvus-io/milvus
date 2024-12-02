@@ -839,24 +839,28 @@ func TestSearchMultiVectors(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// search with all kinds of vectors
-	type mFieldNameType struct {
-		fieldName  string
-		fieldType  entity.FieldType
-		metricType entity.MetricType
+	type fieldTestCase struct {
+		fieldName     string
+		fieldType     entity.FieldType
+		metricType    entity.MetricType
+		genVectorFunc func(nq int, dim int, dataType entity.FieldType) []entity.Vector
 	}
-	fnts := []mFieldNameType{
-		{fieldName: common.DefaultFloatVecFieldName, fieldType: entity.FieldTypeFloatVector, metricType: entity.L2},
-		{fieldName: common.DefaultBinaryVecFieldName, fieldType: entity.FieldTypeBinaryVector, metricType: entity.JACCARD},
-		{fieldName: common.DefaultFloat16VecFieldName, fieldType: entity.FieldTypeFloat16Vector, metricType: entity.L2},
-		{fieldName: common.DefaultBFloat16VecFieldName, fieldType: entity.FieldTypeBFloat16Vector, metricType: entity.L2},
+	testCases := []fieldTestCase{
+		{fieldName: common.DefaultFloatVecFieldName, fieldType: entity.FieldTypeFloatVector, metricType: entity.L2, genVectorFunc: hp.GenSearchVectors},
+		{fieldName: common.DefaultBinaryVecFieldName, fieldType: entity.FieldTypeBinaryVector, metricType: entity.JACCARD, genVectorFunc: hp.GenSearchVectors},
+		{fieldName: common.DefaultFloat16VecFieldName, fieldType: entity.FieldTypeFloat16Vector, metricType: entity.L2, genVectorFunc: hp.GenSearchVectors},
+		{fieldName: common.DefaultBFloat16VecFieldName, fieldType: entity.FieldTypeBFloat16Vector, metricType: entity.L2, genVectorFunc: hp.GenSearchVectors},
+		// field type is float16 / bfloat16, but query with float vector
+		{fieldName: common.DefaultFloat16VecFieldName, fieldType: entity.FieldTypeFloat16Vector, metricType: entity.L2, genVectorFunc: hp.GenFp16OrBf16VectorsFromFloatVector},
+		{fieldName: common.DefaultBFloat16VecFieldName, fieldType: entity.FieldTypeBFloat16Vector, metricType: entity.L2, genVectorFunc: hp.GenFp16OrBf16VectorsFromFloatVector},
 	}
 
-	for _, fnt := range fnts {
-		queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, fnt.fieldType)
+	for _, tc := range testCases {
+		queryVec := tc.genVectorFunc(common.DefaultNq, common.DefaultDim, tc.fieldType)
 		expr := fmt.Sprintf("%s > 10", common.DefaultInt64FieldName)
 
 		resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit*2, queryVec).WithConsistencyLevel(entity.ClStrong).
-			WithFilter(expr).WithANNSField(fnt.fieldName).WithOutputFields("*"))
+			WithFilter(expr).WithANNSField(tc.fieldName).WithOutputFields("*"))
 		common.CheckErr(t, errSearch, true)
 		common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit*2)
 		common.CheckOutputFields(t, []string{
@@ -866,7 +870,7 @@ func TestSearchMultiVectors(t *testing.T) {
 
 		// pagination search
 		resPage, errPage := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
-			WithFilter(expr).WithANNSField(fnt.fieldName).WithOutputFields("*").WithOffset(10))
+			WithFilter(expr).WithANNSField(tc.fieldName).WithOutputFields("*").WithOffset(10))
 
 		common.CheckErr(t, errPage, true)
 		common.CheckSearchResult(t, resPage, common.DefaultNq, common.DefaultLimit)

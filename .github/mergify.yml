@@ -136,6 +136,7 @@ pull_request_rules:
       - or:
           - -files~=^(?!pkg\/.*_test\.go).*$
           - -files~=^(?!internal\/.*_test\.go).*$
+          - -files~=^(?!client\/.*_test\.go).*$
     actions:
       label:
         add:

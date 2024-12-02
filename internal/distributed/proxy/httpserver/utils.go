@@ -127,7 +127,7 @@ func convertRange(field *schemapb.FieldSchema, result gjson.Result) (string, err
 	fieldType := field.DataType
 
 	if fieldType == schemapb.DataType_Int64 {
-		var dataArray []int64
+		dataArray := make([]int64, 0, len(result.Array()))
 		for _, data := range result.Array() {
 			if data.Type == gjson.String {
 				value, err := cast.ToInt64E(data.Str)
@@ -145,7 +145,7 @@ func convertRange(field *schemapb.FieldSchema, result gjson.Result) (string, err
 		}
 		resultStr = joinArray(dataArray)
 	} else if fieldType == schemapb.DataType_VarChar {
-		var dataArray []string
+		dataArray := make([]string, 0, len(result.Array()))
 		for _, data := range result.Array() {
 			value, err := cast.ToStringE(data.Str)
 			if err != nil {
@@ -175,7 +175,7 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 // --------------------- collection details --------------------- //
 
 func printFields(fields []*schemapb.FieldSchema) []gin.H {
-	var res []gin.H
+	res := make([]gin.H, 0, len(fields))
 	for _, field := range fields {
 		if field.Name == common.MetaFieldName {
 			continue
@@ -187,7 +187,7 @@ func printFields(fields []*schemapb.FieldSchema) []gin.H {
 }
 
 func printFieldsV2(fields []*schemapb.FieldSchema) []gin.H {
-	var res []gin.H
+	res := make([]gin.H, 0, len(fields))
 	for _, field := range fields {
 		if field.Name == common.MetaFieldName {
 			continue
@@ -242,7 +242,7 @@ func printFieldDetail(field *schemapb.FieldSchema, oldVersion bool) gin.H {
 }
 
 func printFunctionDetails(functions []*schemapb.FunctionSchema) []gin.H {
-	var res []gin.H
+	res := make([]gin.H, 0, len(functions))
 	for _, function := range functions {
 		res = append(res, gin.H{
 			HTTPReturnFunctionName:             function.Name,
@@ -269,7 +269,7 @@ func getMetricType(pairs []*commonpb.KeyValuePair) string {
 }
 
 func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
-	var res []gin.H
+	res := make([]gin.H, 0, len(indexes))
 	for _, index := range indexes {
 		res = append(res, gin.H{
 			HTTPIndexName:             index.IndexName,
@@ -291,7 +291,7 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 		return merr.ErrMissingRequiredParameters, reallyDataArray, validDataMap
 	}
 
-	var fieldNames []string
+	fieldNames := make([]string, 0, len(collSchema.Fields))
 	for _, field := range collSchema.Fields {
 		if field.IsDynamic {
 			continue
@@ -1099,12 +1099,12 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 }
 
 func serializeFloatVectors(vectorStr string, dataType schemapb.DataType, dimension, bytesLen int64, fpArrayToBytesFunc func([]float32) []byte) ([][]byte, error) {
-	values := make([][]byte, 0)
 	var fp32Values [][]float32
 	err := json.Unmarshal([]byte(vectorStr), &fp32Values)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vectorStr, err.Error())
 	}
+	values := make([][]byte, 0, len(fp32Values))
 	for _, vectorArray := range fp32Values {
 		if int64(len(vectorArray)) != dimension {
 			return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vectorStr,
@@ -1150,7 +1150,7 @@ func serializeFloatOrByteVectors(jsonResult gjson.Result, dataType schemapb.Data
 }
 
 func serializeSparseFloatVectors(vectors []gjson.Result, dataType schemapb.DataType) ([][]byte, error) {
-	values := make([][]byte, 0)
+	values := make([][]byte, 0, len(vectors))
 	for _, vector := range vectors {
 		vectorBytes := []byte(vector.String())
 		sparseVector, err := typeutil.CreateSparseFloatRowFromJSON(vectorBytes)
@@ -1185,6 +1185,7 @@ func convertQueries2Placeholder(body string, dataType schemapb.DataType, dimensi
 	case schemapb.DataType_VarChar:
 		valueType = commonpb.PlaceholderType_VarChar
 		res := gjson.Get(body, HTTPRequestData).Array()
+		values = make([][]byte, 0, len(res))
 		for _, v := range res {
 			values = append(values, []byte(v.String()))
 		}
@@ -1242,8 +1243,6 @@ func genDynamicFields(fields []string, list []*schemapb.FieldData) []string {
 }
 
 func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs, scores []float32, enableInt64 bool) ([]map[string]interface{}, error) {
-	var queryResp []map[string]interface{}
-
 	columnNum := len(fieldDataList)
 	if rowsNum == int64(0) { // always
 		if columnNum > 0 {
@@ -1299,6 +1298,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	if rowsNum == int64(0) {
 		return []map[string]interface{}{}, nil
 	}
+	queryResp := make([]map[string]interface{}, 0, rowsNum)
 	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
 	for i := int64(0); i < rowsNum; i++ {
 		row := map[string]interface{}{}
@@ -1439,7 +1439,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 }
 
 func formatInt64(intArray []int64) []string {
-	stringArray := make([]string, 0)
+	stringArray := make([]string, 0, len(intArray))
 	for _, i := range intArray {
 		stringArray = append(stringArray, strconv.FormatInt(i, 10))
 	}

@@ -222,6 +222,18 @@ def manual_check_text_match(df, word, col):
             id_list.append(row["id"])
     return id_list
 
+
+def get_top_english_tokens(counter, n=10):
+    english_pattern = re.compile(r'^[a-zA-Z]+$')
+
+    english_tokens = {
+        word: freq
+        for word, freq in counter.items()
+        if english_pattern.match(str(word))
+    }
+    english_counter = Counter(english_tokens)
+    return english_counter.most_common(n)
+
 def analyze_documents(texts, language="en"):
 
     tokenizer = custom_tokenizer(language)

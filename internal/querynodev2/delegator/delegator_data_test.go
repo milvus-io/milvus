@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
@@ -1519,7 +1520,7 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	err = allPartitionDeleteData.Append(storage.NewInt64PrimaryKey(2), 101)
 	s.Require().NoError(err)
 
-	schema := segments.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64, true)
+	schema := mock_segcore.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64, true)
 	collection := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})

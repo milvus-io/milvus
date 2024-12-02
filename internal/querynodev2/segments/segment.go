@@ -29,7 +29,6 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"strings"
 	"time"
 	"unsafe"
@@ -52,8 +51,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -268,7 +267,9 @@ var _ Segment = (*LocalSegment)(nil)
 type LocalSegment struct {
 	baseSegment
 	ptrLock *state.LoadStateLock
-	ptr     C.CSegmentInterface
+	ptr     C.CSegmentInterface // TODO: Remove in future, after move load index into segcore package.
+	// always keep same with csegment.RawPtr(), for eaiser to access,
+	csegment segcore.CSegment
 
 	// cached results, to avoid too many CGO calls
 	memSize     *atomic.Int64
@@ -300,39 +301,17 @@ func NewSegment(ctx context.Context,
 		return nil, err
 	}
 
-	multipleChunkEnable := paramtable.Get().QueryNodeCfg.MultipleChunkedEnable.GetAsBool()
-	var cSegType C.SegmentType
 	var locker *state.LoadStateLock
 	switch segmentType {
 	case SegmentTypeSealed:
-		if multipleChunkEnable {
-			cSegType = C.ChunkedSealed
-		} else {
-			cSegType = C.Sealed
-		}
 		locker = state.NewLoadStateLock(state.LoadStateOnlyMeta)
 	case SegmentTypeGrowing:
 		locker = state.NewLoadStateLock(state.LoadStateDataLoaded)
-		cSegType = C.Growing
 	default:
 		return nil, fmt.Errorf("illegal segment type %d when create segment %d", segmentType, loadInfo.GetSegmentID())
 	}
 
-	var newPtr C.CSegmentInterface
-	_, err = GetDynamicPool().Submit(func() (any, error) {
-		status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(loadInfo.GetSegmentID()), &newPtr, C.bool(loadInfo.GetIsSorted()))
-		err := HandleCStatus(ctx, &status, "NewSegmentFailed",
-			zap.Int64("collectionID", loadInfo.GetCollectionID()),
-			zap.Int64("partitionID", loadInfo.GetPartitionID()),
-			zap.Int64("segmentID", loadInfo.GetSegmentID()),
-			zap.String("segmentType", segmentType.String()))
-		return nil, err
-	}).Await()
-	if err != nil {
-		return nil, err
-	}
-
-	log.Info("create segment",
+	logger := log.With(
 		zap.Int64("collectionID", loadInfo.GetCollectionID()),
 		zap.Int64("partitionID", loadInfo.GetPartitionID()),
 		zap.Int64("segmentID", loadInfo.GetSegmentID()),
@@ -340,10 +319,28 @@ func NewSegment(ctx context.Context,
 		zap.String("level", loadInfo.GetLevel().String()),
 	)
 
+	var csegment segcore.CSegment
+	if _, err := GetDynamicPool().Submit(func() (any, error) {
+		var err error
+		csegment, err = segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
+			Collection:    collection.ccollection,
+			SegmentID:     loadInfo.GetSegmentID(),
+			SegmentType:   segmentType,
+			IsSorted:      loadInfo.GetIsSorted(),
+			EnableChunked: paramtable.Get().QueryNodeCfg.MultipleChunkedEnable.GetAsBool(),
+		})
+		return nil, err
+	}).Await(); err != nil {
+		logger.Warn("create segment failed", zap.Error(err))
+		return nil, err
+	}
+	log.Info("create segment done")
+
 	segment := &LocalSegment{
 		baseSegment:        base,
 		ptrLock:            locker,
-		ptr:                newPtr,
+		ptr:                C.CSegmentInterface(csegment.RawPointer()),
+		csegment:           csegment,
 		lastDeltaTimestamp: atomic.NewUint64(0),
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
@@ -354,6 +351,7 @@ func NewSegment(ctx context.Context,
 	}
 
 	if err := segment.initializeSegment(); err != nil {
+		csegment.Release()
 		return nil, err
 	}
 	return segment, nil
@@ -424,15 +422,12 @@ func (s *LocalSegment) RowNum() int64 {
 
 	rowNum := s.rowNum.Load()
 	if rowNum < 0 {
-		var rowCount C.int64_t
 		GetDynamicPool().Submit(func() (any, error) {
-			rowCount = C.GetRealCount(s.ptr)
-			s.rowNum.Store(int64(rowCount))
+			rowNum = s.csegment.RowNum()
+			s.rowNum.Store(rowNum)
 			return nil, nil
 		}).Await()
-		rowNum = int64(rowCount)
 	}
-
 	return rowNum
 }
 
@@ -444,14 +439,11 @@ func (s *LocalSegment) MemSize() int64 {
 
 	memSize := s.memSize.Load()
 	if memSize < 0 {
-		var cMemSize C.int64_t
 		GetDynamicPool().Submit(func() (any, error) {
-			cMemSize = C.GetMemoryUsageInBytes(s.ptr)
-			s.memSize.Store(int64(cMemSize))
+			memSize = s.csegment.MemSize()
+			s.memSize.Store(memSize)
 			return nil, nil
 		}).Await()
-
-		memSize = int64(cMemSize)
 	}
 	return memSize
 }
@@ -479,8 +471,7 @@ func (s *LocalSegment) HasRawData(fieldID int64) bool {
 	}
 	defer s.ptrLock.RUnlock()
 
-	ret := C.HasRawData(s.ptr, C.int64_t(fieldID))
-	return bool(ret)
+	return s.csegment.HasRawData(fieldID)
 }
 
 func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
@@ -498,192 +489,124 @@ func (s *LocalSegment) ResetIndexesLazyLoad(lazyState bool) {
 	}
 }
 
-func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
-	/*
-		CStatus
-		Search(void* plan,
-			void* placeholder_groups,
-			uint64_t* timestamps,
-			int num_groups,
-			long int* result_ids,
-			float* result_distances);
-	*/
-	log := log.Ctx(ctx).With(
+func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error) {
+	log := log.Ctx(ctx).WithLazy(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("segmentID", s.ID()),
 		zap.String("segmentType", s.segmentType.String()),
 	)
+
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
 
-	traceCtx := ParseCTraceContext(ctx)
-	defer runtime.KeepAlive(traceCtx)
-	defer runtime.KeepAlive(searchReq)
-
-	hasIndex := s.ExistIndex(searchReq.searchFieldID)
+	hasIndex := s.ExistIndex(searchReq.SearchFieldID())
 	log = log.With(zap.Bool("withIndex", hasIndex))
 	log.Debug("search segment...")
 
 	tr := timerecord.NewTimeRecorder("cgoSearch")
-
-	future := cgo.Async(
-		ctx,
-		func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncSearch(
-				traceCtx.ctx,
-				s.ptr,
-				searchReq.plan.cSearchPlan,
-				searchReq.cPlaceholderGroup,
-				C.uint64_t(searchReq.mvccTimestamp),
-			))
-		},
-		cgo.WithName("search"),
-	)
-	defer future.Release()
-	result, err := future.BlockAndLeakyGet()
+	result, err := s.csegment.Search(ctx, searchReq)
 	if err != nil {
 		log.Warn("Search failed")
 		return nil, err
 	}
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Debug("search segment done")
-	return &SearchResult{
-		cSearchResult: (C.CSearchResult)(result),
-	}, nil
+	return result, nil
 }
 
-func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
+func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan, log *zap.Logger) (*segcore.RetrieveResult, error) {
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
 
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-		zap.Int64("msgID", plan.msgID),
-		zap.String("segmentType", s.segmentType.String()),
-	)
 	log.Debug("begin to retrieve")
 
-	traceCtx := ParseCTraceContext(ctx)
-	defer runtime.KeepAlive(traceCtx)
-	defer runtime.KeepAlive(plan)
-
-	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	tr := timerecord.NewTimeRecorder("cgoRetrieve")
-
-	future := cgo.Async(
-		ctx,
-		func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncRetrieve(
-				traceCtx.ctx,
-				s.ptr,
-				plan.cRetrievePlan,
-				C.uint64_t(plan.Timestamp),
-				C.int64_t(maxLimitSize),
-				C.bool(plan.ignoreNonPk),
-			))
-		},
-		cgo.WithName("retrieve"),
-	)
-	defer future.Release()
-	result, err := future.BlockAndLeakyGet()
+	result, err := s.csegment.Retrieve(ctx, plan)
 	if err != nil {
 		log.Warn("Retrieve failed")
 		return nil, err
 	}
-	defer C.DeleteRetrieveResult((*C.CRetrieveResult)(result))
-
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return result, nil
+}
+
+func (s *LocalSegment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error) {
+	log := log.Ctx(ctx).WithLazy(
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("msgID", plan.MsgID()),
+		zap.String("segmentType", s.segmentType.String()),
+	)
+
+	result, err := s.retrieve(ctx, plan, log)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Release()
 
 	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "partial-segcore-results-deserialization")
 	defer span.End()
 
-	retrieveResult := new(segcorepb.RetrieveResults)
-	if err := UnmarshalCProto((*C.CRetrieveResult)(result), retrieveResult); err != nil {
+	retrieveResult, err := result.GetResult()
+	if err != nil {
 		log.Warn("unmarshal retrieve result failed", zap.Error(err))
 		return nil, err
 	}
-
-	log.Debug("retrieve segment done",
-		zap.Int("resultNum", len(retrieveResult.Offset)),
-	)
-	// Sort was done by the segcore.
-	// sort.Sort(&byPK{result})
+	log.Debug("retrieve segment done", zap.Int("resultNum", len(retrieveResult.Offset)))
 	return retrieveResult, nil
 }
 
-func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan, offsets []int64) (*segcorepb.RetrieveResults, error) {
-	if len(offsets) == 0 {
-		return nil, merr.WrapErrParameterInvalid("segment offsets", "empty offsets")
-	}
-
+func (s *LocalSegment) retrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets, log *zap.Logger) (*segcore.RetrieveResult, error) {
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
 
-	fields := []zap.Field{
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-		zap.Int64("msgID", plan.msgID),
-		zap.String("segmentType", s.segmentType.String()),
-		zap.Int("resultNum", len(offsets)),
-	}
-
-	log := log.Ctx(ctx).With(fields...)
 	log.Debug("begin to retrieve by offsets")
 	tr := timerecord.NewTimeRecorder("cgoRetrieveByOffsets")
-	traceCtx := ParseCTraceContext(ctx)
-	defer runtime.KeepAlive(traceCtx)
-	defer runtime.KeepAlive(plan)
-	defer runtime.KeepAlive(offsets)
-
-	future := cgo.Async(
-		ctx,
-		func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncRetrieveByOffsets(
-				traceCtx.ctx,
-				s.ptr,
-				plan.cRetrievePlan,
-				(*C.int64_t)(unsafe.Pointer(&offsets[0])),
-				C.int64_t(len(offsets)),
-			))
-		},
-		cgo.WithName("retrieve-by-offsets"),
-	)
-	defer future.Release()
-	result, err := future.BlockAndLeakyGet()
+	result, err := s.csegment.RetrieveByOffsets(ctx, plan)
 	if err != nil {
 		log.Warn("RetrieveByOffsets failed")
 		return nil, err
 	}
-	defer C.DeleteRetrieveResult((*C.CRetrieveResult)(result))
-
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return result, nil
+}
+
+func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error) {
+	log := log.Ctx(ctx).WithLazy(zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("msgID", plan.MsgID()),
+		zap.String("segmentType", s.segmentType.String()),
+		zap.Int("resultNum", len(plan.Offsets)),
+	)
+
+	result, err := s.retrieveByOffsets(ctx, plan, log)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Release()
 
 	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "reduced-segcore-results-deserialization")
 	defer span.End()
 
-	retrieveResult := new(segcorepb.RetrieveResults)
-	if err := UnmarshalCProto((*C.CRetrieveResult)(result), retrieveResult); err != nil {
+	retrieveResult, err := result.GetResult()
+	if err != nil {
 		log.Warn("unmarshal retrieve by offsets result failed", zap.Error(err))
 		return nil, err
 	}
-
-	log.Debug("retrieve by segment offsets done",
-		zap.Int("resultNum", len(retrieveResult.Offset)),
-	)
+	log.Debug("retrieve by segment offsets done", zap.Int("resultNum", len(retrieveResult.Offset)))
 	return retrieveResult, nil
 }
 
@@ -700,26 +623,6 @@ func (s *LocalSegment) GetFieldDataPath(index *IndexedFieldInfo, offset int64) (
 	return dataPath, offsetInBinlog
 }
 
-// -------------------------------------------------------------------------------------- interfaces for growing segment
-func (s *LocalSegment) preInsert(ctx context.Context, numOfRecords int) (int64, error) {
-	/*
-		long int
-		PreInsert(CSegmentInterface c_segment, long int size);
-	*/
-	var offset int64
-	cOffset := (*C.int64_t)(&offset)
-
-	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
-		status = C.PreInsert(s.ptr, C.int64_t(int64(numOfRecords)), cOffset)
-		return nil, nil
-	}).Await()
-	if err := HandleCStatus(ctx, &status, "PreInsert failed"); err != nil {
-		return 0, err
-	}
-	return offset, nil
-}
-
 func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error {
 	if s.Type() != SegmentTypeGrowing {
 		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.segmentType.String())
@@ -729,24 +632,8 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 	}
 	defer s.ptrLock.RUnlock()
 
-	offset, err := s.preInsert(ctx, len(rowIDs))
-	if err != nil {
-		return err
-	}
-
-	insertRecordBlob, err := proto.Marshal(record)
-	if err != nil {
-		return fmt.Errorf("failed to marshal insert record: %s", err)
-	}
-
-	numOfRow := len(rowIDs)
-	cOffset := C.int64_t(offset)
-	cNumOfRows := C.int64_t(numOfRow)
-	cEntityIDsPtr := (*C.int64_t)(&(rowIDs)[0])
-	cTimestampsPtr := (*C.uint64_t)(&(timestamps)[0])
-
-	var status C.CStatus
-
+	var result *segcore.InsertResult
+	var err error
 	GetDynamicPool().Submit(func() (any, error) {
 		start := time.Now()
 		defer func() {
@@ -756,21 +643,19 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 				"Sync",
 			).Observe(float64(time.Since(start).Milliseconds()))
 		}()
-		status = C.Insert(s.ptr,
-			cOffset,
-			cNumOfRows,
-			cEntityIDsPtr,
-			cTimestampsPtr,
-			(*C.uint8_t)(unsafe.Pointer(&insertRecordBlob[0])),
-			(C.uint64_t)(len(insertRecordBlob)),
-		)
+
+		result, err = s.csegment.Insert(ctx, &segcore.InsertRequest{
+			RowIDs:     rowIDs,
+			Timestamps: timestamps,
+			Record:     record,
+		})
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(ctx, &status, "Insert failed"); err != nil {
+
+	if err != nil {
 		return err
 	}
-
-	s.insertCount.Add(int64(numOfRow))
+	s.insertCount.Add(result.InsertedRows)
 	s.rowNum.Store(-1)
 	s.memSize.Store(-1)
 	return nil
@@ -794,20 +679,7 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 	}
 	defer s.ptrLock.RUnlock()
 
-	cOffset := C.int64_t(0) // depre
-	cSize := C.int64_t(primaryKeys.Len())
-	cTimestampsPtr := (*C.uint64_t)(&(timestamps)[0])
-
-	ids, err := storage.ParsePrimaryKeysBatch2IDs(primaryKeys)
-	if err != nil {
-		return err
-	}
-
-	dataBlob, err := proto.Marshal(ids)
-	if err != nil {
-		return fmt.Errorf("failed to marshal ids: %s", err)
-	}
-	var status C.CStatus
+	var err error
 	GetDynamicPool().Submit(func() (any, error) {
 		start := time.Now()
 		defer func() {
@@ -817,23 +689,19 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 				"Sync",
 			).Observe(float64(time.Since(start).Milliseconds()))
 		}()
-		status = C.Delete(s.ptr,
-			cOffset,
-			cSize,
-			(*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
-			(C.uint64_t)(len(dataBlob)),
-			cTimestampsPtr,
-		)
+		_, err = s.csegment.Delete(ctx, &segcore.DeleteRequest{
+			PrimaryKeys: primaryKeys,
+			Timestamps:  timestamps,
+		})
 		return nil, nil
 	}).Await()
 
-	if err := HandleCStatus(ctx, &status, "Delete failed"); err != nil {
+	if err != nil {
 		return err
 	}
 
 	s.rowNum.Store(-1)
 	s.lastDeltaTimestamp.Store(timestamps[len(timestamps)-1])
-
 	return nil
 }
 
@@ -854,30 +722,17 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 		zap.Int64("segmentID", s.ID()),
 	)
 
-	loadFieldDataInfo, err := newLoadFieldDataInfo(ctx)
-	defer deleteFieldDataInfo(loadFieldDataInfo)
-	if err != nil {
-		return err
+	req := &segcore.LoadFieldDataRequest{
+		MMapDir:  paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
+		RowCount: rowCount,
 	}
-
 	for _, field := range fields {
-		fieldID := field.FieldID
-		err = loadFieldDataInfo.appendLoadFieldInfo(ctx, fieldID, rowCount)
-		if err != nil {
-			return err
-		}
-
-		for _, binlog := range field.Binlogs {
-			err = loadFieldDataInfo.appendLoadFieldDataPath(ctx, fieldID, binlog)
-			if err != nil {
-				return err
-			}
-		}
-
-		loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
+		req.Fields = append(req.Fields, segcore.LoadFieldDataInfo{
+			Field: field,
+		})
 	}
 
-	var status C.CStatus
+	var err error
 	GetLoadPool().Submit(func() (any, error) {
 		start := time.Now()
 		defer func() {
@@ -887,20 +742,15 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 				"Sync",
 			).Observe(float64(time.Since(start).Milliseconds()))
 		}()
-		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
+		_, err = s.csegment.LoadFieldData(ctx, req)
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(ctx, &status, "LoadMultiFieldData failed",
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID())); err != nil {
+	if err != nil {
+		log.Warn("LoadMultiFieldData failed", zap.Error(err))
 		return err
 	}
 
-	log.Info("load mutil field done",
-		zap.Int64("row count", rowCount),
-		zap.Int64("segmentID", s.ID()))
-
+	log.Info("load mutil field done", zap.Int64("row count", rowCount), zap.Int64("segmentID", s.ID()))
 	return nil
 }
 
@@ -922,26 +772,6 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 	)
 	log.Info("start loading field data for field")
 
-	loadFieldDataInfo, err := newLoadFieldDataInfo(ctx)
-	if err != nil {
-		return err
-	}
-	defer deleteFieldDataInfo(loadFieldDataInfo)
-
-	err = loadFieldDataInfo.appendLoadFieldInfo(ctx, fieldID, rowCount)
-	if err != nil {
-		return err
-	}
-
-	if field != nil {
-		for _, binlog := range field.Binlogs {
-			err = loadFieldDataInfo.appendLoadFieldDataPath(ctx, fieldID, binlog)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
 	// TODO retrieve_enable should be considered
 	collection := s.collection
 	fieldSchema, err := getFieldSchema(collection.Schema(), fieldID)
@@ -949,10 +779,15 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		return err
 	}
 	mmapEnabled := isDataMmapEnable(fieldSchema)
-	loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
-	loadFieldDataInfo.enableMmap(fieldID, mmapEnabled)
+	req := &segcore.LoadFieldDataRequest{
+		MMapDir: paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
+		Fields: []segcore.LoadFieldDataInfo{{
+			Field:      field,
+			EnableMMap: mmapEnabled,
+		}},
+		RowCount: rowCount,
+	}
 
-	var status C.CStatus
 	GetLoadPool().Submit(func() (any, error) {
 		start := time.Now()
 		defer func() {
@@ -962,20 +797,16 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 				"Sync",
 			).Observe(float64(time.Since(start).Milliseconds()))
 		}()
+		_, err = s.csegment.LoadFieldData(ctx, req)
 		log.Info("submitted loadFieldData task to load pool")
-		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(ctx, &status, "LoadFieldData failed",
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-		zap.Int64("fieldID", fieldID)); err != nil {
+
+	if err != nil {
+		log.Warn("LoadFieldData failed", zap.Error(err))
 		return err
 	}
-
 	log.Info("load field done")
-
 	return nil
 }
 
@@ -985,46 +816,33 @@ func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fie
 	}
 	defer s.ptrLock.RUnlock()
 
-	log := log.Ctx(ctx).With(
+	log := log.Ctx(ctx).WithLazy(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
 		zap.Int64("row count", rowCount),
 	)
 
-	loadFieldDataInfo, err := newLoadFieldDataInfo(ctx)
-	if err != nil {
-		return err
+	req := &segcore.AddFieldDataInfoRequest{
+		Fields:   make([]segcore.LoadFieldDataInfo, 0, len(fields)),
+		RowCount: rowCount,
 	}
-	defer deleteFieldDataInfo(loadFieldDataInfo)
-
 	for _, field := range fields {
-		fieldID := field.FieldID
-		err = loadFieldDataInfo.appendLoadFieldInfo(ctx, fieldID, rowCount)
-		if err != nil {
-			return err
-		}
-
-		for _, binlog := range field.Binlogs {
-			err = loadFieldDataInfo.appendLoadFieldDataPath(ctx, fieldID, binlog)
-			if err != nil {
-				return err
-			}
-		}
+		req.Fields = append(req.Fields, segcore.LoadFieldDataInfo{
+			Field: field,
+		})
 	}
 
-	var status C.CStatus
+	var err error
 	GetLoadPool().Submit(func() (any, error) {
-		status = C.AddFieldDataInfoForSealed(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
+		_, err = s.csegment.AddFieldDataInfo(ctx, req)
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(ctx, &status, "AddFieldDataInfo failed",
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID())); err != nil {
+
+	if err != nil {
+		log.Warn("AddFieldDataInfo failed", zap.Error(err))
 		return err
 	}
-
 	log.Info("add field data info done")
 	return nil
 }
@@ -1456,7 +1274,7 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 
 	C.DeleteSegment(ptr)
 
-	localDiskUsage, err := GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
+	localDiskUsage, err := segcore.GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
 	// ignore error here, shall not block releasing
 	if err == nil {
 		metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(localDiskUsage) / 1024 / 1024) // in MB

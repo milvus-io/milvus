@@ -2269,6 +2269,35 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		err = checkDynamicFieldData(schema, insertMsg)
 		assert.Error(t, err)
 	})
+	t.Run("key has static field name", func(t *testing.T) {
+		jsonData := make([][]byte, 0)
+		data := map[string]interface{}{
+			"bool":   true,
+			"int":    100,
+			"float":  1.2,
+			"string": "abc",
+			"json": map[string]interface{}{
+				"int":   20,
+				"array": []int{1, 2, 3},
+			},
+			"Int64Field": "error key",
+		}
+		jsonBytes, err := json.MarshalIndent(data, "", "  ")
+		assert.NoError(t, err)
+		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
+		schema := newTestSchema()
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err = checkDynamicFieldData(schema, insertMsg)
+		assert.Error(t, err)
+	})
 	t.Run("disable dynamic schema", func(t *testing.T) {
 		jsonData := make([][]byte, 0)
 		data := map[string]interface{}{

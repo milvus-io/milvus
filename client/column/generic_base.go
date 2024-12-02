@@ -31,6 +31,9 @@ type genericColumnBase[T any] struct {
 	name      string
 	fieldType entity.FieldType
 	values    []T
+
+	nullable  bool
+	validData []bool
 }
 
 // Name returns column name.
@@ -50,11 +53,17 @@ func (c *genericColumnBase[T]) Len() int {
 }
 
 func (c *genericColumnBase[T]) AppendValue(a any) error {
+	if a == nil {
+		return c.AppendNull()
+	}
 	v, ok := a.(T)
 	if !ok {
 		return errors.Newf("unexpected append value type %T, field type %v", a, c.fieldType)
 	}
 	c.values = append(c.values, v)
+	if c.nullable {
+		c.validData = append(c.validData, true)
+	}
 	return nil
 }
 
@@ -70,17 +79,25 @@ func (c *genericColumnBase[T]) slice(start, end int) *genericColumnBase[T] {
 	if end == -1 || end > l {
 		end = l
 	}
-	return &genericColumnBase[T]{
+	result := &genericColumnBase[T]{
 		name:      c.name,
 		fieldType: c.fieldType,
 		values:    c.values[start:end],
+		nullable:  c.nullable,
 	}
+	if c.nullable {
+		result.validData = c.validData[start:end]
+	}
+	return result
 }
 
 func (c *genericColumnBase[T]) FieldData() *schemapb.FieldData {
 	fd := values2FieldData(c.values, c.fieldType, 0)
 	fd.FieldName = c.name
 	fd.Type = schemapb.DataType(c.fieldType)
+	if c.nullable {
+		fd.ValidData = c.validData
+	}
 	return fd
 }
 
@@ -143,4 +160,35 @@ func (c *genericColumnBase[T]) MustValue(idx int) T {
 		panic("index out of range")
 	}
 	return c.values[idx]
+}
+
+func (c *genericColumnBase[T]) AppendNull() error {
+	if !c.nullable {
+		return errors.New("append null to not nullable column")
+	}
+	var v T
+	c.validData = append(c.validData, true)
+	c.values = append(c.values, v)
+	return nil
+}
+
+func (c *genericColumnBase[T]) IsNull(idx int) (bool, error) {
+	if err := c.rangeCheck(idx); err != nil {
+		return false, err
+	}
+	if !c.nullable {
+		return false, nil
+	}
+	return !c.validData[idx], nil
+}
+
+func (c *genericColumnBase[T]) Nullable() bool {
+	return c.nullable
+}
+
+func (c *genericColumnBase[T]) withValidData(validData []bool) {
+	if len(validData) > 0 {
+		c.nullable = true
+		c.validData = validData
+	}
 }

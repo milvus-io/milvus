@@ -100,6 +100,33 @@ $ make milvus
 
 ## 入门指南
 
+### 教程
+
+你可以从[教程概述](https://milvus.io/docs/tutorials-overview.md)中，找到涵盖 RAG（检索增强生成）、语义搜索、混合搜索、问答、推荐系统等主题以及各种快速入门指南。这些资源旨在帮助你快速高效地入门。
+
+| 教程 | 使用场景 | 相关 Milvus 功能 |
+| -------- | -------- | --------- |
+| [使用 Milvus 构建 RAG](https://milvus.io/docs/build-rag-with-milvus.md) |  RAG | 向量搜索 |
+| [使用 Milvus 构建多模态 RAG](https://milvus.io/docs/multimodal_rag_with_milvus.md) | RAG | 向量搜索, 动态字段 |
+| [使用 Milvus 进行图像搜索](https://milvus.io/docs/image_similarity_search.md) | 语义搜索 | 向量搜索, 动态字段 |
+| [使用 Milvus 进行混合搜索](https://milvus.io/docs/hybrid_search_with_milvus.md) | 混合搜索 | 混合搜索, 多向量, 密集嵌入, 稀疏嵌入 |
+| [使用多向量实现多模态搜索](https://milvus.io/docs/multimodal_rag_with_milvus.md) | 语义搜索 | 多向量, 混合搜索 |
+| [问答系统](https://milvus.io/docs/question_answering_system.md) | 问答系统 | 向量搜索 |
+| [推荐系统](https://milvus.io/docs/recommendation_system.md) | 推荐系统 | 向量搜索 |
+| [视频相似性搜索](https://milvus.io/docs/video_similarity_search.md) | 语义搜索 | 向量搜索 |
+| [音频相似性搜索](https://milvus.io/docs/audio_similarity_search.md) | 语义搜索 | 向量搜索 |
+| [DNA 分类](https://milvus.io/docs/dna_sequence_classification.md) | 分类 | 向量搜索 |
+| [文本搜索引擎](https://milvus.io/docs/text_search_engine.md) | 语义搜索 | 向量搜索 |
+| [通过文本搜索图像](https://milvus.io/docs/text_image_search.md) | 语义搜索 | 向量搜索 |
+| [图像去重](https://milvus.io/docs/image_deduplication_system.md) | 重复数据删除 | 向量搜索 |
+| [使用 Milvus 构建图形 RAG](https://milvus.io/docs/graph_rag_with_milvus.md) | RAG | 图搜索 |
+| [使用 Milvus 进行上下文检索](https://milvus.io/docs/contextual_retrieval_with_milvus.md) | 快速入门 | 向量搜索 |
+| [使用 Milvus 进行 HDBSCAN 聚类](https://milvus.io/docs/hdbscan_clustering_with_milvus.md) | 快速入门 | 向量搜索 |
+| [使用 ColPali 实现多模态检索](https://milvus.io/docs/use_ColPali_with_milvus.md) | 快速入门 | 向量搜索 |
+| [向量可视化](https://milvus.io/docs/vector_visualization.md) | 快速入门 | 向量搜索 |
+| [基于 Milvus 的电影推荐](https://milvus.io/docs/movie_recommendation_with_milvus.md) | 推荐系统 | 向量搜索 |
+| [使用 Matryoshka 嵌入进行漏斗搜索](https://milvus.io/docs/funnel_search_with_matryoshka.md) | 快速入门 | 向量搜索 |
+
 ### 应用场景
 
 <table>
@@ -201,6 +228,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/Hard-Coder05"><img src="https://avatars.githubusercontent.com/u/54059881?v=4" width="30px" /></a>
 <a href="https://github.com/Heisenberg-Y"><img src="https://avatars.githubusercontent.com/u/35055583?v=4" width="30px" /></a>
 <a href="https://github.com/HesterG"><img src="https://avatars.githubusercontent.com/u/17645053?v=4" width="30px" /></a>
+<a href="https://github.com/HuaSheng2000"><img src="https://avatars.githubusercontent.com/u/34791273?v=4" width="30px" /></a>
 <a href="https://github.com/HuangHua"><img src="https://avatars.githubusercontent.com/u/2274405?v=4" width="30px" /></a>
 <a href="https://github.com/Ice-YcY"><img src="https://avatars.githubusercontent.com/u/85332705?v=4" width="30px" /></a>
 <a href="https://github.com/JackLCL"><img src="https://avatars.githubusercontent.com/u/53512883?v=4" width="30px" /></a>
@@ -317,7 +345,6 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/cxie"><img src="https://avatars.githubusercontent.com/u/653101?v=4" width="30px" /></a>
 <a href="https://github.com/cxytz01"><img src="https://avatars.githubusercontent.com/u/18002438?v=4" width="30px" /></a>
 <a href="https://github.com/cydrain"><img src="https://avatars.githubusercontent.com/u/3992404?v=4" width="30px" /></a>
-<a href="https://github.com/czhen-zilliz"><img src="https://avatars.githubusercontent.com/u/83751452?v=4" width="30px" /></a>
 <a href="https://github.com/czpmango"><img src="https://avatars.githubusercontent.com/u/26356194?v=4" width="30px" /></a>
 <a href="https://github.com/czs007"><img src="https://avatars.githubusercontent.com/u/59249785?v=4" width="30px" /></a>
 <a href="https://github.com/dandv"><img src="https://avatars.githubusercontent.com/u/33569?v=4" width="30px" /></a>

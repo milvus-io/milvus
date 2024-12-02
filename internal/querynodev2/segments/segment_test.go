@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	storage "github.com/milvus-io/milvus/internal/storage"
@@ -54,8 +55,8 @@ func (suite *SegmentSuite) SetupTest() {
 	suite.segmentID = 1
 
 	suite.manager = NewManager()
-	schema := GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64, true)
-	indexMeta := GenTestIndexMeta(suite.collectionID, schema)
+	schema := mock_segcore.GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64, true)
+	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, schema)
 	suite.manager.Collection.PutOrRef(suite.collectionID,
 		schema,
 		indexMeta,
@@ -93,7 +94,7 @@ func (suite *SegmentSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 
-	binlogs, _, err := SaveBinLog(ctx,
+	binlogs, _, err := mock_segcore.SaveBinLog(ctx,
 		suite.collectionID,
 		suite.partitionID,
 		suite.segmentID,
@@ -124,7 +125,7 @@ func (suite *SegmentSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 
-	insertMsg, err := genInsertMsg(suite.collection, suite.partitionID, suite.growing.ID(), msgLength)
+	insertMsg, err := mock_segcore.GenInsertMsg(suite.collection.GetCCollection(), suite.partitionID, suite.growing.ID(), msgLength)
 	suite.Require().NoError(err)
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
 	suite.Require().NoError(err)
@@ -187,9 +188,9 @@ func (suite *SegmentSuite) TestDelete() {
 }
 
 func (suite *SegmentSuite) TestHasRawData() {
-	has := suite.growing.HasRawData(simpleFloatVecField.id)
+	has := suite.growing.HasRawData(mock_segcore.SimpleFloatVecField.ID)
 	suite.True(has)
-	has = suite.sealed.HasRawData(simpleFloatVecField.id)
+	has = suite.sealed.HasRawData(mock_segcore.SimpleFloatVecField.ID)
 	suite.True(has)
 }
 

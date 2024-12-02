@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/mocks/util/searchutil/mock_optimizers"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -36,7 +37,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 
 	suite.Run("normal_run", func() {
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
-		mockHook := NewMockQueryHook(suite.T())
+		mockHook := mock_optimizers.NewMockQueryHook(suite.T())
 		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
 			params[common.TopKKey] = int64(50)
 			params[common.SearchParamKey] = `{"param": 2}`
@@ -87,7 +88,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 	})
 
 	suite.Run("disable optimization", func() {
-		mockHook := NewMockQueryHook(suite.T())
+		mockHook := mock_optimizers.NewMockQueryHook(suite.T())
 		suite.queryHook = mockHook
 		defer func() { suite.queryHook = nil }()
 
@@ -144,7 +145,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 
 	suite.Run("other_plannode", func() {
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
-		mockHook := NewMockQueryHook(suite.T())
+		mockHook := mock_optimizers.NewMockQueryHook(suite.T())
 		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
 			params[common.TopKKey] = int64(50)
 			params[common.SearchParamKey] = `{"param": 2}`
@@ -174,7 +175,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 	suite.Run("no_serialized_plan", func() {
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
 		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
-		mockHook := NewMockQueryHook(suite.T())
+		mockHook := mock_optimizers.NewMockQueryHook(suite.T())
 		suite.queryHook = mockHook
 		defer func() { suite.queryHook = nil }()
 
@@ -187,7 +188,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 
 	suite.Run("hook_run_error", func() {
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
-		mockHook := NewMockQueryHook(suite.T())
+		mockHook := mock_optimizers.NewMockQueryHook(suite.T())
 		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
 			params[common.TopKKey] = int64(50)
 			params[common.SearchParamKey] = `{"param": 2}`

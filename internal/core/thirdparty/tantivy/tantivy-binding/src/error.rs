@@ -1,40 +1,35 @@
+use core::fmt;
+
 use serde_json as json;
 
 #[derive(Debug)]
-pub struct TantivyError{
-    reason: String,
+pub enum TantivyBindingError {
+    JsonError(serde_json::Error),
+    InternalError(String),
 }
 
-impl TantivyError{
-    fn new(reason:String) -> Self{
-        TantivyError{reason:reason}
-    }
-
-    pub fn reason(&self) -> String{
-        return self.reason.clone()
+impl From<serde_json::Error> for TantivyBindingError {
+    fn from(value: serde_json::Error) -> Self {
+        TantivyBindingError::JsonError(value)
     }
 }
 
-impl From<&str> for TantivyError{
-    fn from(value: &str) -> Self {
-        Self::new(value.to_string())
+impl fmt::Display for TantivyBindingError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            TantivyBindingError::JsonError(e) => write!(f, "JsonError: {}", e),
+            TantivyBindingError::InternalError(e) => write!(f, "InternalError: {}", e),
+        }
     }
 }
 
-impl From<String> for TantivyError{
-    fn from(value: String) -> Self {
-        Self::new(value)
+impl std::error::Error for TantivyBindingError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            TantivyBindingError::JsonError(e) => Some(e),
+            TantivyBindingError::InternalError(_) => None,
+        }
     }
 }
 
-impl From<json::Error> for TantivyError{
-    fn from(value: json::Error) -> Self {
-        Self::new(value.to_string())
-    }
-}
-
-impl ToString for TantivyError{
-    fn to_string(&self) -> String {
-        return self.reason()
-    }
-}
+pub type Result<T> = std::result::Result<T, TantivyBindingError>;

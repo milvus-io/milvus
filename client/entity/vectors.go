@@ -17,8 +17,7 @@
 package entity
 
 import (
-	"encoding/binary"
-	"math"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // Vector interface vector used int search
@@ -44,13 +43,17 @@ func (fv FloatVector) FieldType() FieldType {
 // Serialize serializes vector into byte slice, used in search placeholder
 // LittleEndian is used for convention
 func (fv FloatVector) Serialize() []byte {
-	data := make([]byte, 0, 4*len(fv)) // float32 occupies 4 bytes
-	buf := make([]byte, 4)
-	for _, f := range fv {
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(f))
-		data = append(data, buf...)
-	}
-	return data
+	return typeutil.Float32ArrayToBytes(fv)
+}
+
+func (fv FloatVector) ToFloat16Vector() Float16Vector {
+	return typeutil.Float32ArrayToFloat16Bytes(fv)
+}
+
+// SerializeToBFloat16Bytes serializes vector into bfloat16 byte slice,
+// used in search placeholder
+func (fv FloatVector) ToBFloat16Vector() BFloat16Vector {
+	return typeutil.Float32ArrayToBFloat16Bytes(fv)
 }
 
 // FloatVector float32 vector wrapper.
@@ -70,6 +73,10 @@ func (fv Float16Vector) Serialize() []byte {
 	return fv
 }
 
+func (fv Float16Vector) ToFloat32Vector() FloatVector {
+	return typeutil.Float16BytesToFloat32Vector(fv)
+}
+
 // FloatVector float32 vector wrapper.
 type BFloat16Vector []byte
 
@@ -85,6 +92,10 @@ func (fv BFloat16Vector) FieldType() FieldType {
 
 func (fv BFloat16Vector) Serialize() []byte {
 	return fv
+}
+
+func (fv BFloat16Vector) ToFloat32Vector() FloatVector {
+	return typeutil.BFloat16BytesToFloat32Vector(fv)
 }
 
 // BinaryVector []byte vector wrapper

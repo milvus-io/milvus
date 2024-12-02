@@ -183,6 +183,28 @@ func TestInsertDynamicExtraColumn(t *testing.T) {
 	}
 }
 
+func TestInsertFp16OrBf16VectorsWithFp32Vector(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	fp16VecField := entity.NewField().WithName(common.DefaultFloat16VecFieldName).WithDataType(entity.FieldTypeFloat16Vector).WithDim(common.DefaultDim)
+	bf16VecField := entity.NewField().WithName(common.DefaultBFloat16VecFieldName).WithDataType(entity.FieldTypeBFloat16Vector).WithDim(common.DefaultDim)
+
+	// create collection
+	collName := common.GenRandomString(prefix, 6)
+	schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(fp16VecField).WithField(bf16VecField)
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	// prepare data
+	int64Column := hp.GenColumnData(100, entity.FieldTypeInt64, *hp.TNewDataOption())
+	fp16VecColumn := hp.GenColumnDataWithFp32VecConversion(100, entity.FieldTypeFloat16Vector, *hp.TNewDataOption().TWithDim(128))
+	bf16VecColumn := hp.GenColumnDataWithFp32VecConversion(100, entity.FieldTypeBFloat16Vector, *hp.TNewDataOption().TWithDim(128))
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, int64Column, fp16VecColumn, bf16VecColumn))
+	common.CheckErr(t, err, true)
+}
+
 // test insert array column with empty data
 func TestInsertEmptyArray(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)

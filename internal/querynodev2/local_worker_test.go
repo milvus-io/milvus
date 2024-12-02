@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
@@ -93,8 +94,8 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 	err = suite.node.Start()
 	suite.NoError(err)
 
-	suite.schema = segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
-	suite.indexMeta = segments.GenTestIndexMeta(suite.collectionID, suite.schema)
+	suite.schema = mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
+	suite.indexMeta = mock_segcore.GenTestIndexMeta(suite.collectionID, suite.schema)
 	collection := segments.NewCollection(suite.collectionID, suite.schema, suite.indexMeta, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
@@ -114,7 +115,7 @@ func (suite *LocalWorkerTestSuite) AfterTest(suiteName, testName string) {
 
 func (suite *LocalWorkerTestSuite) TestLoadSegment() {
 	// load empty
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	req := &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			TargetID: suite.node.session.GetServerID(),

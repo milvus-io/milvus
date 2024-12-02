@@ -6382,30 +6382,6 @@ func Test_validateUtil_checkJSONData(t *testing.T) {
 		err := v.checkJSONFieldData(data, f)
 		assert.Error(t, err)
 	})
-
-	t.Run("invalid_JSON_data", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck(), withMaxLenCheck())
-		jsonData := "hello"
-		f := &schemapb.FieldSchema{
-			DataType:  schemapb.DataType_JSON,
-			IsDynamic: true,
-		}
-		data := &schemapb.FieldData{
-			FieldName: "json",
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_JsonData{
-						JsonData: &schemapb.JSONArray{
-							Data: [][]byte{[]byte(jsonData)},
-						},
-					},
-				},
-			},
-		}
-
-		err := v.checkJSONFieldData(data, f)
-		assert.Error(t, err)
-	})
 }
 
 func Test_validateUtil_checkLongFieldData(t *testing.T) {

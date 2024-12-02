@@ -65,3 +65,20 @@ func GenSearchVectors(nq int, dim int, dataType entity.FieldType) []entity.Vecto
 	}
 	return vectors
 }
+
+func GenFp16OrBf16VectorsFromFloatVector(nq int, dim int, dataType entity.FieldType) []entity.Vector {
+	vectors := make([]entity.Vector, 0, nq)
+	switch dataType {
+	case entity.FieldTypeFloat16Vector:
+		for i := 0; i < nq; i++ {
+			vector := entity.FloatVector(common.GenFloatVector(dim)).ToFloat16Vector()
+			vectors = append(vectors, vector)
+		}
+	case entity.FieldTypeBFloat16Vector:
+		for i := 0; i < nq; i++ {
+			vector := entity.FloatVector(common.GenFloatVector(dim)).ToBFloat16Vector()
+			vectors = append(vectors, vector)
+		}
+	}
+	return vectors
+}

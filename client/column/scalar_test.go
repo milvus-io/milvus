@@ -18,6 +18,7 @@ package column
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"testing"
 
@@ -210,6 +211,145 @@ func (s *ScalarSuite) TestBasic() {
 			s.Equal(name, parsed.Name())
 			s.Equal(data, parsed.Data())
 			s.Equal(entity.FieldTypeVarChar, column.Type())
+		}
+	})
+}
+
+func (s *ScalarSuite) TestSlice() {
+	n := 100
+	s.Run("column_bool", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		data := make([]bool, 0, n)
+		for i := 0; i < 100; i++ {
+			data = append(data, rand.Int()%2 == 0)
+		}
+		column := NewColumnBool(name, data)
+
+		l := rand.Intn(n)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnBool)
+		if s.True(ok) {
+			s.Equal(column.Type(), slicedColumn.Type())
+			s.Equal(data[:l], slicedColumn.Data())
+		}
+	})
+
+	s.Run("column_int8", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		data := make([]int8, 0, n)
+		for i := 0; i < 100; i++ {
+			data = append(data, int8(rand.Intn(math.MaxInt8)))
+		}
+		column := NewColumnInt8(name, data)
+
+		l := rand.Intn(n)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnInt8)
+		if s.True(ok) {
+			s.Equal(column.Type(), slicedColumn.Type())
+			s.Equal(data[:l], slicedColumn.Data())
+		}
+	})
+
+	s.Run("column_int16", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		data := make([]int16, 0, n)
+		for i := 0; i < 100; i++ {
+			data = append(data, int16(rand.Intn(math.MaxInt16)))
+		}
+		column := NewColumnInt16(name, data)
+
+		l := rand.Intn(n)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnInt16)
+		if s.True(ok) {
+			s.Equal(column.Type(), slicedColumn.Type())
+			s.Equal(data[:l], slicedColumn.Data())
+		}
+	})
+
+	s.Run("column_int32", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		data := make([]int32, 0, n)
+		for i := 0; i < 100; i++ {
+			data = append(data, rand.Int31())
+		}
+		column := NewColumnInt32(name, data)
+
+		l := rand.Intn(n)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnInt32)
+		if s.True(ok) {
+			s.Equal(column.Type(), slicedColumn.Type())
+			s.Equal(data[:l], slicedColumn.Data())
+		}
+	})
+
+	s.Run("column_int64", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		data := make([]int64, 0, n)
+		for i := 0; i < 100; i++ {
+			data = append(data, rand.Int63())
+		}
+		column := NewColumnInt64(name, data)
+
+		l := rand.Intn(n)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnInt64)
+		if s.True(ok) {
+			s.Equal(column.Type(), slicedColumn.Type())
+			s.Equal(data[:l], slicedColumn.Data())
+		}
+	})
+
+	s.Run("column_float", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		data := make([]float32, 0, n)
+		for i := 0; i < 100; i++ {
+			data = append(data, rand.Float32())
+		}
+		column := NewColumnFloat(name, data)
+
+		l := rand.Intn(n)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnFloat)
+		if s.True(ok) {
+			s.Equal(column.Type(), slicedColumn.Type())
+			s.Equal(data[:l], slicedColumn.Data())
+		}
+	})
+
+	s.Run("column_double", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		data := make([]float64, 0, n)
+		for i := 0; i < 100; i++ {
+			data = append(data, rand.Float64())
+		}
+		column := NewColumnDouble(name, data)
+
+		l := rand.Intn(n)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnDouble)
+		if s.True(ok) {
+			s.Equal(column.Type(), slicedColumn.Type())
+			s.Equal(data[:l], slicedColumn.Data())
+		}
+	})
+
+	s.Run("column_varchar", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		data := make([]string, 0, n)
+		for i := 0; i < 100; i++ {
+			data = append(data, fmt.Sprintf("%d", rand.Int()))
+		}
+		column := NewColumnVarChar(name, data)
+
+		l := rand.Intn(n)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnVarChar)
+		if s.True(ok) {
+			s.Equal(column.Type(), slicedColumn.Type())
+			s.Equal(data[:l], slicedColumn.Data())
 		}
 	})
 }

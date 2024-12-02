@@ -39,50 +39,51 @@ func TestUpsertAllFields(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	upsertNb := 200
+	for _, genColumnsFunc := range []func(*entity.Schema, *hp.GenDataOption) ([]column.Column, []column.Column){hp.GenColumnsBasedSchema, hp.GenColumnsBasedSchemaWithFp32VecConversion} {
+		// upsert exist entities [0, 200) -> query and verify
+		columns, dynamicColumns := genColumnsFunc(schema, hp.TNewDataOption().TWithNb(upsertNb))
+		upsertRes, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(columns...).WithColumns(dynamicColumns...))
+		common.CheckErr(t, err, true)
+		require.EqualValues(t, upsertNb, upsertRes.UpsertCount)
 
-	// upsert exist entities [0, 200) -> query and verify
-	columns, dynamicColumns := hp.GenColumnsBasedSchema(schema, hp.TNewDataOption().TWithNb(upsertNb))
-	upsertRes, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(columns...).WithColumns(dynamicColumns...))
-	common.CheckErr(t, err, true)
-	require.EqualValues(t, upsertNb, upsertRes.UpsertCount)
+		expr := fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, upsertNb)
+		resSet, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithOutputFields("*").WithConsistencyLevel(entity.ClStrong))
+		common.CheckErr(t, err, true)
+		common.CheckQueryResult(t, append(columns, hp.MergeColumnsToDynamic(upsertNb, dynamicColumns, common.DefaultDynamicFieldName)), resSet.Fields)
 
-	expr := fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, upsertNb)
-	resSet, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithOutputFields("*").WithConsistencyLevel(entity.ClStrong))
-	common.CheckErr(t, err, true)
-	common.CheckQueryResult(t, append(columns, hp.MergeColumnsToDynamic(upsertNb, dynamicColumns, common.DefaultDynamicFieldName)), resSet.Fields)
+		// deleted all upsert entities -> query and verify
+		delRes, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(expr))
+		common.CheckErr(t, err, true)
+		require.EqualValues(t, upsertNb, delRes.DeleteCount)
 
-	// deleted all upsert entities -> query and verify
-	delRes, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(expr))
-	common.CheckErr(t, err, true)
-	require.EqualValues(t, upsertNb, delRes.DeleteCount)
+		resSet, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong))
+		common.CheckErr(t, err, true)
+		require.Zero(t, resSet.ResultCount)
 
-	resSet, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong))
-	common.CheckErr(t, err, true)
-	require.Zero(t, resSet.ResultCount)
+		// upsert part deleted(not exist) pk and part existed pk [100, 500) -> query and verify the updated entities
+		newUpsertNb := 400
+		newUpsertStart := 100
+		columnsPart, dynamicColumnsPart := genColumnsFunc(schema, hp.TNewDataOption().TWithNb(newUpsertNb).TWithStart(newUpsertStart))
+		upsertResPart, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(columnsPart...).WithColumns(dynamicColumnsPart...))
+		common.CheckErr(t, err, true)
+		require.EqualValues(t, newUpsertNb, upsertResPart.UpsertCount)
 
-	// upsert part deleted(not exist) pk and part existed pk [100, 500) -> query and verify the updated entities
-	newUpsertNb := 400
-	newUpsertStart := 100
-	columnsPart, dynamicColumnsPart := hp.GenColumnsBasedSchema(schema, hp.TNewDataOption().TWithNb(newUpsertNb).TWithStart(newUpsertStart))
-	upsertResPart, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(columnsPart...).WithColumns(dynamicColumnsPart...))
-	common.CheckErr(t, err, true)
-	require.EqualValues(t, newUpsertNb, upsertResPart.UpsertCount)
+		newExpr := fmt.Sprintf("%d <= %s < %d", newUpsertStart, common.DefaultInt64FieldName, newUpsertNb+newUpsertStart)
+		resSetPart, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(newExpr).WithOutputFields("*").WithConsistencyLevel(entity.ClStrong))
+		common.CheckErr(t, err, true)
+		common.CheckQueryResult(t, append(columnsPart, hp.MergeColumnsToDynamic(newUpsertNb, dynamicColumnsPart, common.DefaultDynamicFieldName)), resSetPart.Fields)
 
-	newExpr := fmt.Sprintf("%d <= %s < %d", newUpsertStart, common.DefaultInt64FieldName, newUpsertNb+newUpsertStart)
-	resSetPart, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(newExpr).WithOutputFields("*").WithConsistencyLevel(entity.ClStrong))
-	common.CheckErr(t, err, true)
-	common.CheckQueryResult(t, append(columnsPart, hp.MergeColumnsToDynamic(newUpsertNb, dynamicColumnsPart, common.DefaultDynamicFieldName)), resSetPart.Fields)
+		// upsert all deleted(not exist) pk [0, 100)
+		columnsNot, dynamicColumnsNot := genColumnsFunc(schema, hp.TNewDataOption().TWithNb(newUpsertStart))
+		upsertResNot, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(columnsNot...).WithColumns(dynamicColumnsNot...))
+		common.CheckErr(t, err, true)
+		require.EqualValues(t, newUpsertStart, upsertResNot.UpsertCount)
 
-	// upsert all deleted(not exist) pk [0, 100)
-	columnsNot, dynamicColumnsNot := hp.GenColumnsBasedSchema(schema, hp.TNewDataOption().TWithNb(newUpsertStart))
-	upsertResNot, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(columnsNot...).WithColumns(dynamicColumnsNot...))
-	common.CheckErr(t, err, true)
-	require.EqualValues(t, newUpsertStart, upsertResNot.UpsertCount)
-
-	newExprNot := fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, newUpsertStart)
-	resSetNot, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(newExprNot).WithOutputFields("*").WithConsistencyLevel(entity.ClStrong))
-	common.CheckErr(t, err, true)
-	common.CheckQueryResult(t, append(columnsNot, hp.MergeColumnsToDynamic(newUpsertStart, dynamicColumnsNot, common.DefaultDynamicFieldName)), resSetNot.Fields)
+		newExprNot := fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, newUpsertStart)
+		resSetNot, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(newExprNot).WithOutputFields("*").WithConsistencyLevel(entity.ClStrong))
+		common.CheckErr(t, err, true)
+		common.CheckQueryResult(t, append(columnsNot, hp.MergeColumnsToDynamic(newUpsertStart, dynamicColumnsNot, common.DefaultDynamicFieldName)), resSetNot.Fields)
+	}
 }
 
 func TestUpsertSparse(t *testing.T) {

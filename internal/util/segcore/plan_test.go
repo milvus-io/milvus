@@ -14,18 +14,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package segments
+package segcore_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -36,47 +38,46 @@ type PlanSuite struct {
 	collectionID int64
 	partitionID  int64
 	segmentID    int64
-	collection   *Collection
+	collection   *segcore.CCollection
 }
 
 func (suite *PlanSuite) SetupTest() {
 	suite.collectionID = 100
 	suite.partitionID = 10
 	suite.segmentID = 1
-	schema := GenTestCollectionSchema("plan-suite", schemapb.DataType_Int64, true)
-	suite.collection = NewCollection(suite.collectionID, schema, GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
-		LoadType: querypb.LoadType_LoadCollection,
+	schema := mock_segcore.GenTestCollectionSchema("plan-suite", schemapb.DataType_Int64, true)
+	var err error
+	suite.collection, err = segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
+		Schema:    schema,
+		IndexMeta: mock_segcore.GenTestIndexMeta(suite.collectionID, schema),
 	})
-	suite.collection.AddPartition(suite.partitionID)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (suite *PlanSuite) TearDownTest() {
-	DeleteCollection(suite.collection)
+	suite.collection.Release()
 }
 
 func (suite *PlanSuite) TestPlanCreateByExpr() {
 	planNode := &planpb.PlanNode{
-		OutputFieldIds: []int64{rowIDFieldID},
+		OutputFieldIds: []int64{0},
 	}
 	expr, err := proto.Marshal(planNode)
 	suite.NoError(err)
 
-	_, err = createSearchPlanByExpr(context.Background(), suite.collection, expr)
-	suite.Error(err)
-}
-
-func (suite *PlanSuite) TestPlanFail() {
-	collection := &Collection{
-		id: -1,
-	}
-
-	_, err := createSearchPlanByExpr(context.Background(), collection, nil)
+	_, err = segcore.NewSearchRequest(suite.collection, &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			SerializedExprPlan: expr,
+		},
+	}, nil)
 	suite.Error(err)
 }
 
 func (suite *PlanSuite) TestQueryPlanCollectionReleased() {
-	collection := &Collection{id: suite.collectionID}
-	_, err := NewRetrievePlan(context.Background(), collection, nil, 0, 0)
+	suite.collection.Release()
+	_, err := segcore.NewRetrievePlan(suite.collection, nil, 0, 0)
 	suite.Error(err)
 }
 

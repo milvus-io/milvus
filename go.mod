@@ -67,7 +67,7 @@ require (
 	github.com/greatroar/blobloom v0.0.0-00010101000000-000000000000
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
-	github.com/milvus-io/milvus/pkg v0.0.2-0.20240801085213-a642a26ed4c6
+	github.com/milvus-io/milvus/pkg v0.0.2-0.20241126032235-cb6542339e84
 	github.com/pkg/errors v0.9.1
 	github.com/remeh/sizedwaitgroup v1.0.0
 	github.com/shirou/gopsutil/v4 v4.24.10

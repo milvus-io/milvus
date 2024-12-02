@@ -28,13 +28,10 @@ import "C"
 
 import (
 	"context"
-	"math"
 	"unsafe"
 
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/util/cgoconverter"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -54,39 +51,4 @@ func HandleCStatus(ctx context.Context, status *C.CStatus, extraInfo string, fie
 	err := merr.SegcoreError(int32(errorCode), errorMsg)
 	log.Warn("CStatus returns err", zap.Error(err), zap.String("extra", extraInfo))
 	return err
-}
-
-// UnmarshalCProto unmarshal the proto from C memory
-func UnmarshalCProto(cRes *C.CProto, msg proto.Message) error {
-	blob := (*(*[math.MaxInt32]byte)(cRes.proto_blob))[:int(cRes.proto_size):int(cRes.proto_size)]
-	return proto.Unmarshal(blob, msg)
-}
-
-// CopyCProtoBlob returns the copy of C memory
-func CopyCProtoBlob(cProto *C.CProto) []byte {
-	blob := C.GoBytes(cProto.proto_blob, C.int32_t(cProto.proto_size))
-	C.free(cProto.proto_blob)
-	return blob
-}
-
-// GetCProtoBlob returns the raw C memory, invoker should release it itself
-func GetCProtoBlob(cProto *C.CProto) []byte {
-	lease, blob := cgoconverter.UnsafeGoBytes(&cProto.proto_blob, int(cProto.proto_size))
-	cgoconverter.Extract(lease)
-	return blob
-}
-
-func GetLocalUsedSize(ctx context.Context, path string) (int64, error) {
-	var availableSize int64
-	cSize := (*C.int64_t)(&availableSize)
-	cPath := C.CString(path)
-	defer C.free(unsafe.Pointer(cPath))
-
-	status := C.GetLocalUsedSize(cPath, cSize)
-	err := HandleCStatus(ctx, &status, "get local used size failed")
-	if err != nil {
-		return 0, err
-	}
-
-	return availableSize, nil
 }

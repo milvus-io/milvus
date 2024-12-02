@@ -627,6 +627,44 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 	s.Equal(1, info.failedCnt)
 }
 
+func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
+	s.SetupTest()
+	paramtable.Get().Save("dataCoord.compaction.taskQueueCapacity", "1")
+	defer paramtable.Get().Reset("dataCoord.compaction.taskQueueCapacity")
+
+	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil, nil)
+
+	t1 := newMixCompactionTask(&datapb.CompactionTask{
+		TriggerID: 1,
+		PlanID:    1,
+		Type:      datapb.CompactionType_MixCompaction,
+		Channel:   "ch-01",
+		State:     datapb.CompactionTaskState_executing,
+	}, nil, s.mockMeta, s.mockSessMgr)
+	t1.plan = &datapb.CompactionPlan{
+		PlanID:  1,
+		Type:    datapb.CompactionType_MixCompaction,
+		Channel: "ch-01",
+	}
+
+	s.NoError(s.handler.submitTask(t1))
+
+	t2 := newMixCompactionTask(&datapb.CompactionTask{
+		TriggerID: 1,
+		PlanID:    2,
+		Type:      datapb.CompactionType_MixCompaction,
+		Channel:   "ch-01",
+		State:     datapb.CompactionTaskState_completed,
+	}, nil, s.mockMeta, s.mockSessMgr)
+	t2.plan = &datapb.CompactionPlan{
+		PlanID:  2,
+		Type:    datapb.CompactionType_MixCompaction,
+		Channel: "ch-01",
+	}
+
+	s.Error(s.handler.submitTask(t2))
+}
+
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.SetupTest()
 	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()

@@ -1,11 +1,12 @@
-use tantivy::tokenizer::*;
-use serde_json as json;
 use regex;
+use serde_json as json;
+use tantivy::tokenizer::*;
 
-use crate::error::TantivyError;
+use crate::error::Result;
+use crate::error::TantivyBindingError;
 use crate::util::*;
 
-pub(crate) enum SystemFilter{
+pub(crate) enum SystemFilter {
     Invalid,
     LowerCase(LowerCaser),
     AsciiFolding(AsciiFoldingFilter),
@@ -15,16 +16,16 @@ pub(crate) enum SystemFilter{
     Length(RemoveLongFilter),
     Stop(StopWordFilter),
     Decompounder(SplitCompoundWords),
-    Stemmer(Stemmer)
+    Stemmer(Stemmer),
 }
 
-impl SystemFilter{
-    pub(crate) fn transform(self, builder: TextAnalyzerBuilder) -> TextAnalyzerBuilder{
-        match self{
+impl SystemFilter {
+    pub(crate) fn transform(self, builder: TextAnalyzerBuilder) -> TextAnalyzerBuilder {
+        match self {
             Self::LowerCase(filter) => builder.filter(filter).dynamic(),
             Self::AsciiFolding(filter) => builder.filter(filter).dynamic(),
             Self::AlphaNumOnly(filter) => builder.filter(filter).dynamic(),
-            Self::CnCharOnly(filter)  => builder.filter(filter).dynamic(),
+            Self::CnCharOnly(filter) => builder.filter(filter).dynamic(),
             Self::CnAlphaNumOnly(filter) => builder.filter(filter).dynamic(),
             Self::Length(filter) => builder.filter(filter).dynamic(),
             Self::Stop(filter) => builder.filter(filter).dynamic(),
@@ -41,65 +42,85 @@ impl SystemFilter{
 //     "max": 10, // length
 // }
 // TODO support min length
-fn get_length_filter(params: &json::Map<String, json::Value>) -> Result<SystemFilter, TantivyError>{
+fn get_length_filter(params: &json::Map<String, json::Value>) -> Result<SystemFilter> {
     let limit_str = params.get("max");
-    if limit_str.is_none() || !limit_str.unwrap().is_u64(){
-        return Err("lenth max param was none or not uint".into())
+    if limit_str.is_none() || !limit_str.unwrap().is_u64() {
+        return Err(TantivyBindingError::InternalError(
+            "lenth max param was none or not uint".to_string(),
+        ));
     }
     let limit = limit_str.unwrap().as_u64().unwrap() as usize;
-    Ok(SystemFilter::Length(RemoveLongFilter::limit(limit+1)))
+    Ok(SystemFilter::Length(RemoveLongFilter::limit(limit + 1)))
 }
 
-fn get_stop_words_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, TantivyError>{
+fn get_stop_words_filter(params: &json::Map<String, json::Value>) -> Result<SystemFilter> {
     let value = params.get("stop_words");
-    if value.is_none(){
-        return Err("stop filter stop_words can't be empty".into());
+    if value.is_none() {
+        return Err(TantivyBindingError::InternalError(
+            "stop filter stop_words can't be empty".to_string(),
+        ));
     }
     let str_list = get_string_list(value.unwrap(), "stop_words filter")?;
-    Ok(SystemFilter::Stop(StopWordFilter::remove(get_stop_words_list(str_list))))
+    Ok(SystemFilter::Stop(StopWordFilter::remove(
+        get_stop_words_list(str_list),
+    )))
 }
 
-fn get_decompounder_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, TantivyError>{
+fn get_decompounder_filter(params: &json::Map<String, json::Value>) -> Result<SystemFilter> {
     let value = params.get("word_list");
-    if value.is_none() || !value.unwrap().is_array(){
-        return Err("decompounder word list should be array".into())
+    if value.is_none() || !value.unwrap().is_array() {
+        return Err(TantivyBindingError::InternalError(
+            "decompounder word list should be array".to_string(),
+        ));
     }
 
     let stop_words = value.unwrap().as_array().unwrap();
     let mut str_list = Vec::<String>::new();
-    for element in stop_words{
-        match element.as_str(){
+    for element in stop_words {
+        match element.as_str() {
             Some(word) => str_list.push(word.to_string()),
-            None => return Err("decompounder word list item should be string".into())
+            None => {
+                return Err(TantivyBindingError::InternalError(
+                    "decompounder word list item should be string".to_string(),
+                ))
+            }
         }
-    };
+    }
 
-    match SplitCompoundWords::from_dictionary(str_list){
+    match SplitCompoundWords::from_dictionary(str_list) {
         Ok(f) => Ok(SystemFilter::Decompounder(f)),
-        Err(e) => Err(format!("create decompounder failed: {}", e.to_string()).into())
+        Err(e) => Err(TantivyBindingError::InternalError(format!(
+            "create decompounder failed: {}",
+            e.to_string()
+        ))),
     }
 }
 
-fn get_stemmer_filter(params: &json::Map<String, json::Value>)-> Result<SystemFilter, TantivyError>{
+fn get_stemmer_filter(params: &json::Map<String, json::Value>) -> Result<SystemFilter> {
     let value = params.get("language");
-    if value.is_none() || !value.unwrap().is_string(){
-        return Err("stemmer language field should be string".into())
+    if value.is_none() || !value.unwrap().is_string() {
+        return Err(TantivyBindingError::InternalError(
+            "stemmer language field should be string".to_string(),
+        ));
     }
 
-    match value.unwrap().as_str().unwrap().into_language(){
+    match value.unwrap().as_str().unwrap().into_language() {
         Ok(language) => Ok(SystemFilter::Stemmer(Stemmer::new(language))),
-        Err(e) => Err(format!("create stemmer failed : {}", e.to_string()).into()),
+        Err(e) => Err(TantivyBindingError::InternalError(format!(
+            "create stemmer failed : {}",
+            e.to_string()
+        ))),
     }
 }
 
 trait LanguageParser {
     type Error;
-    fn into_language(self) -> Result<Language, Self::Error>;
+    fn into_language(self) -> Result<Language>;
 }
 
-impl LanguageParser for &str {   
-    type Error = TantivyError;
-    fn into_language(self) -> Result<Language, Self::Error> {
+impl LanguageParser for &str {
+    type Error = TantivyBindingError;
+    fn into_language(self) -> Result<Language> {
         match self.to_lowercase().as_str() {
             "arabig" => Ok(Language::Arabic),
             "danish" => Ok(Language::Danish),
@@ -119,14 +140,17 @@ impl LanguageParser for &str {
             "swedish" => Ok(Language::Swedish),
             "tamil" => Ok(Language::Tamil),
             "turkish" => Ok(Language::Turkish),
-            other => Err(format!("unsupport language: {}", other).into()),
+            other => Err(TantivyBindingError::InternalError(format!(
+                "unsupport language: {}",
+                other
+            ))),
         }
     }
 }
 
-impl From<&str> for SystemFilter{
+impl From<&str> for SystemFilter {
     fn from(value: &str) -> Self {
-        match value{
+        match value {
             "lowercase" => Self::LowerCase(LowerCaser),
             "asciifolding" => Self::AsciiFolding(AsciiFoldingFilter),
             "alphanumonly" => Self::AlphaNumOnly(AlphaNumOnlyFilter),
@@ -138,24 +162,31 @@ impl From<&str> for SystemFilter{
 }
 
 impl TryFrom<&json::Map<String, json::Value>> for SystemFilter {
-    type Error = TantivyError;
+    type Error = TantivyBindingError;
 
-    fn try_from(params: &json::Map<String, json::Value>) -> Result<Self, Self::Error> {
-        match params.get(&"type".to_string()){
-            Some(value) =>{
-                if !value.is_string(){
-                    return Err("filter type should be string".into());
+    fn try_from(params: &json::Map<String, json::Value>) -> Result<Self> {
+        match params.get(&"type".to_string()) {
+            Some(value) => {
+                if !value.is_string() {
+                    return Err(TantivyBindingError::InternalError(
+                        "filter type should be string".to_string(),
+                    ));
                 };
 
-                match value.as_str().unwrap(){
+                match value.as_str().unwrap() {
                     "length" => get_length_filter(params),
                     "stop" => get_stop_words_filter(params),
                     "decompounder" => get_decompounder_filter(params),
                     "stemmer" => get_stemmer_filter(params),
-                    other=> Err(format!("unsupport filter type: {}", other).into()),
+                    other => Err(TantivyBindingError::InternalError(format!(
+                        "unsupport filter type: {}",
+                        other
+                    ))),
                 }
             }
-            None => Err("no type field in filter params".into()),
+            None => Err(TantivyBindingError::InternalError(
+                "no type field in filter params".to_string(),
+            )),
         }
     }
 }
@@ -167,7 +198,7 @@ pub struct CnCharOnlyFilterStream<T> {
     tail: T,
 }
 
-impl TokenFilter for CnCharOnlyFilter{
+impl TokenFilter for CnCharOnlyFilter {
     type Tokenizer<T: Tokenizer> = CnCharOnlyFilterWrapper<T>;
 
     fn transform<T: Tokenizer>(self, tokenizer: T) -> CnCharOnlyFilterWrapper<T> {
@@ -216,7 +247,7 @@ pub struct CnAlphaNumOnlyFilterStream<T> {
     tail: T,
 }
 
-impl TokenFilter for CnAlphaNumOnlyFilter{
+impl TokenFilter for CnAlphaNumOnlyFilter {
     type Tokenizer<T: Tokenizer> = CnAlphaNumOnlyFilterWrapper<T>;
 
     fn transform<T: Tokenizer>(self, tokenizer: T) -> CnAlphaNumOnlyFilterWrapper<T> {

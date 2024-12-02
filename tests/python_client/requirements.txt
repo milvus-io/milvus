@@ -49,6 +49,7 @@ loguru==0.7.0
 # util
 psutil==5.9.4
 pandas==1.5.3
+numpy==1.26.4
 tenacity==8.1.0
 rich==13.7.0
 # for standby test
@@ -66,6 +67,7 @@ ml-dtypes==0.2.0
 # for full text search
 bm25s==0.2.0
 jieba==0.42.1
+Unidecode==1.3.8
 
 
 # for perf test

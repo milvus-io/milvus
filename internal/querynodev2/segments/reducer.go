@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -26,7 +27,7 @@ func CreateInternalReducer(req *querypb.QueryRequest, schema *schemapb.Collectio
 }
 
 type segCoreReducer interface {
-	Reduce(context.Context, []*segcorepb.RetrieveResults, []Segment, *RetrievePlan) (*segcorepb.RetrieveResults, error)
+	Reduce(context.Context, []*segcorepb.RetrieveResults, []Segment, *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)
 }
 
 func CreateSegCoreReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, manager *Manager) segCoreReducer {
