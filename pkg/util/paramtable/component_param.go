@@ -922,7 +922,7 @@ This helps Milvus-CDC synchronize incremental data`,
 	p.LocalRPCEnabled = ParamItem{
 		Key:          "common.localRPCEnabled",
 		Version:      "2.4.18",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          `enable local rpc for internal communication when mix or standalone mode.`,
 		Export:       true,
 	}
