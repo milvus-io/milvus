@@ -416,6 +416,135 @@ func TestCreateIndex(t *testing.T) {
 	}
 }
 
+func TestDatabase(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	postTestCases := []requestBodyTestCase{}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().CreateDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().CreateDatabase(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(DataBaseCategory, CreateAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"invalid_name"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	path = versionalV2(DataBaseCategory, DropAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"mock"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{DbNames: []string{"a", "b", "c"}, DbIds: []int64{100, 101, 102}}, nil).Once()
+	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+		Status: &commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		},
+	}, nil).Once()
+	path = versionalV2(DataBaseCategory, ListAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"mock"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&milvuspb.DescribeDatabaseResponse{DbName: "test", DbID: 100}, nil).Once()
+	mp.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&milvuspb.DescribeDatabaseResponse{
+		Status: &commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		},
+	}, nil).Once()
+	path = versionalV2(DataBaseCategory, DescribeAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"mock"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	path = versionalV2(DataBaseCategory, AlterAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"mock"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	for _, testcase := range postTestCases {
+		t.Run("post"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			}
+		})
+	}
+}
+
 func TestCreateCollection(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
