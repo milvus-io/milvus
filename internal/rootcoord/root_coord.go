@@ -22,7 +22,6 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -2588,43 +2587,21 @@ func (c *Core) isValidPrivilege(ctx context.Context, privilegeName string, objec
 	return fmt.Errorf("not found the privilege name[%s] in object[%s]", privilegeName, object)
 }
 
-func (c *Core) isValidPrivilegeV2(ctx context.Context, privilegeName, dbName, collectionName string) error {
+func (c *Core) isValidPrivilegeV2(ctx context.Context, privilegeName string) error {
 	if util.IsAnyWord(privilegeName) {
 		return nil
 	}
-	var privilegeLevel string
-	for group, privileges := range util.BuiltinPrivilegeGroups {
-		if privilegeName == group || lo.Contains(privileges, privilegeName) {
-			privilegeLevel = group
-			break
-		}
+	customPrivGroup, err := c.meta.IsCustomPrivilegeGroup(ctx, privilegeName)
+	if err != nil {
+		return err
 	}
-	if privilegeLevel == "" {
-		customPrivGroup, err := c.meta.IsCustomPrivilegeGroup(ctx, privilegeName)
-		if err != nil {
-			return err
-		}
-		if customPrivGroup {
-			return nil
-		}
-		return fmt.Errorf("not found the privilege name[%s] in the custom privilege groups", privilegeName)
-	}
-	switch {
-	case strings.HasPrefix(privilegeLevel, milvuspb.PrivilegeLevel_Cluster.String()):
-		if !util.IsAnyWord(dbName) || !util.IsAnyWord(collectionName) {
-			return fmt.Errorf("dbName and collectionName should be * for the cluster level privilege: %s", privilegeName)
-		}
-		return nil
-	case strings.HasPrefix(privilegeLevel, milvuspb.PrivilegeLevel_Database.String()):
-		if collectionName != "" && collectionName != util.AnyWord {
-			return fmt.Errorf("collectionName should be empty or * for the database level privilege: %s", privilegeName)
-		}
-		return nil
-	case strings.HasPrefix(privilegeLevel, milvuspb.PrivilegeLevel_Collection.String()):
-		return nil
-	default:
+	if customPrivGroup {
 		return nil
 	}
+	if util.IsPrivilegeNameDefined(privilegeName) {
+		return nil
+	}
+	return fmt.Errorf("not found the privilege name[%s]", privilegeName)
 }
 
 // OperatePrivilege operate the privilege, including grant and revoke
@@ -2648,7 +2625,7 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 	privName := in.Entity.Grantor.Privilege.Name
 	switch in.Version {
 	case "v2":
-		if err := c.isValidPrivilegeV2(ctx, privName, in.Entity.DbName, in.Entity.ObjectName); err != nil {
+		if err := c.isValidPrivilegeV2(ctx, privName); err != nil {
 			ctxLog.Error("", zap.Error(err))
 			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
 		}
