@@ -90,6 +90,7 @@ type baseSegment struct {
 	bloomFilterSet *pkoracle.BloomFilterSet
 	loadInfo       *atomic.Pointer[querypb.SegmentLoadInfo]
 	isLazyLoad     bool
+	skipGrowingBF  bool // Skip generating or maintaining BF for growing segments; deletion checks will be handled in segcore.
 	channel        metautil.Channel
 
 	bm25Stats map[int64]*storage.BM25Stats
@@ -113,6 +114,7 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 		bm25Stats:      make(map[int64]*storage.BM25Stats),
 		channel:        channel,
 		isLazyLoad:     isLazyLoad(collection, segmentType),
+		skipGrowingBF:  segmentType == SegmentTypeGrowing && paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF.GetAsBool(),
 
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 		needUpdatedVersion: atomic.NewInt64(0),
@@ -186,6 +188,9 @@ func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
 }
 
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
+	if s.skipGrowingBF {
+		return
+	}
 	s.bloomFilterSet.UpdateBloomFilter(pks)
 }
 
@@ -207,10 +212,20 @@ func (s *baseSegment) GetBM25Stats() map[int64]*storage.BM25Stats {
 // false otherwise,
 // may returns true even the PK doesn't exist actually
 func (s *baseSegment) MayPkExist(pk *storage.LocationsCache) bool {
+	if s.skipGrowingBF {
+		return true
+	}
 	return s.bloomFilterSet.MayPkExist(pk)
 }
 
 func (s *baseSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	if s.skipGrowingBF {
+		allPositive := make([]bool, lc.Size())
+		for i := 0; i < lc.Size(); i++ {
+			allPositive[i] = true
+		}
+		return allPositive
+	}
 	return s.bloomFilterSet.BatchPkExist(lc)
 }
 
