@@ -11,11 +11,13 @@
 
 #pragma once
 
+#include <cstdio>
 #include <string>
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "fmt/core.h"
 #include <fcntl.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 namespace milvus {
@@ -27,8 +29,8 @@ class File {
         file.fd_ = -1;
     }
     ~File() {
-        if (fd_ >= 0) {
-            close(fd_);
+        if (fs_ != nullptr) {
+            fclose(fs_);
         }
     }
 
@@ -63,6 +65,22 @@ class File {
         return write(fd_, &value, sizeof(value));
     }
 
+    ssize_t
+    FWrite(const void* buf, size_t size) {
+        return fwrite(buf, sizeof(char), size, fs_);
+    }
+
+    template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
+    ssize_t
+    FWriteInt(T value) {
+        return fwrite(&value, 1, sizeof(value), fs_);
+    }
+
+    int
+    FFlush() {
+        return fflush(fs_);
+    }
+
     offset_t
     Seek(offset_t offset, int whence) {
         return lseek(fd_, offset, whence);
@@ -70,15 +88,22 @@ class File {
 
     void
     Close() {
-        close(fd_);
+        fclose(fs_);
+        fs_ = nullptr;
         fd_ = -1;
     }
 
  private:
     explicit File(int fd, const std::string& filepath)
         : fd_(fd), filepath_(filepath) {
+        fs_ = fdopen(fd_, "wb+");
+        AssertInfo(fs_ != nullptr,
+                   "failed to open file {}: {}",
+                   filepath,
+                   strerror(errno));
     }
     int fd_{-1};
+    FILE* fs_;
     std::string filepath_;
 };
 }  // namespace milvus

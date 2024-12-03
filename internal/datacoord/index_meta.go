@@ -799,7 +799,7 @@ func (m *indexMeta) SetStoredIndexFileSizeMetric(collections map[UniqueID]*colle
 		coll, ok := collections[segmentIdx.CollectionID]
 		if ok {
 			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName, coll.Schema.GetName(),
-				fmt.Sprint(segmentIdx.CollectionID)).Set(float64(segmentIdx.IndexSize))
+				fmt.Sprint(segmentIdx.CollectionID)).Add(float64(segmentIdx.IndexSize))
 			total += segmentIdx.IndexSize
 		}
 	}
