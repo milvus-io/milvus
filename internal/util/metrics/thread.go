@@ -75,6 +75,7 @@ func (thw *threadWatcher) watchThreadNum() {
 			metrics.ThreadNum.Set(float64(threadNum))
 		case <-thw.ch:
 			log.Info("thread watcher exit")
+			return
 		}
 	}
 }
