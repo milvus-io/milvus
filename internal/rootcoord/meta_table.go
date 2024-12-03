@@ -905,8 +905,6 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 
 	mt.generalCnt += int(coll.ShardsNum) // 1 partition * shardNum
 
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
-
 	log.Ctx(ctx).Info("add partition to meta table",
 		zap.Int64("collection", partition.CollectionID), zap.String("partition", partition.PartitionName),
 		zap.Int64("partitionid", partition.PartitionID), zap.Uint64("ts", partition.PartitionCreatedTimestamp))
