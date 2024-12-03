@@ -1161,13 +1161,16 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 
 func NewContextWithMetadata(ctx context.Context, username string, dbName string) context.Context {
 	dbKey := strings.ToLower(util.HeaderDBName)
-	if username == "" {
-		return contextutil.AppendToIncomingContext(ctx, dbKey, dbName)
+	if dbName != "" {
+		ctx = contextutil.AppendToIncomingContext(ctx, dbKey, dbName)
 	}
-	originValue := fmt.Sprintf("%s%s%s", username, util.CredentialSeperator, username)
-	authKey := strings.ToLower(util.HeaderAuthorize)
-	authValue := crypto.Base64Encode(originValue)
-	return contextutil.AppendToIncomingContext(ctx, authKey, authValue, dbKey, dbName)
+	if username != "" {
+		originValue := fmt.Sprintf("%s%s%s", username, util.CredentialSeperator, username)
+		authKey := strings.ToLower(util.HeaderAuthorize)
+		authValue := crypto.Base64Encode(originValue)
+		ctx = contextutil.AppendToIncomingContext(ctx, authKey, authValue)
+	}
+	return ctx
 }
 
 func AppendUserInfoForRPC(ctx context.Context) context.Context {
