@@ -4620,6 +4620,7 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	defer sp.End()
 
 	log := log.Ctx(ctx).With(
+		zap.String("collectionName", req.GetCollectionName()),
 		zap.Int64("collectionID", req.GetCollectionID()))
 
 	log.Info("received ManualCompaction request")
@@ -4627,6 +4628,16 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
+	}
+
+	// before v2.4.18, manual compact request only pass collectionID, should correct sdk's behavior to pass collectionName
+	if req.GetCollectionName() != "" {
+		var err error
+		req.CollectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
 	}
 
 	resp, err := node.dataCoord.ManualCompaction(ctx, req)
@@ -5332,9 +5343,9 @@ func (node *Proxy) validPrivilegeParams(req *milvuspb.OperatePrivilegeRequest) e
 	return nil
 }
 
-func (node *Proxy) validOperatePrivilegeV2Params(req *milvuspb.OperatePrivilegeV2Request) error {
+func (node *Proxy) validateOperatePrivilegeV2Params(req *milvuspb.OperatePrivilegeV2Request) error {
 	if req.Role == nil {
-		return fmt.Errorf("the role in the request is nil")
+		return merr.WrapErrParameterInvalidMsg("the role in the request is nil")
 	}
 	if err := ValidateRoleName(req.Role.Name); err != nil {
 		return err
@@ -5342,11 +5353,17 @@ func (node *Proxy) validOperatePrivilegeV2Params(req *milvuspb.OperatePrivilegeV
 	if err := ValidatePrivilege(req.Grantor.Privilege.Name); err != nil {
 		return err
 	}
-	if req.Type != milvuspb.OperatePrivilegeType_Grant && req.Type != milvuspb.OperatePrivilegeType_Revoke {
-		return fmt.Errorf("the type in the request not grant or revoke")
-	}
-	if err := ValidateObjectName(req.DbName); err != nil {
+	// validate built-in privilege group params
+	if err := ValidateBuiltInPrivilegeGroup(req.Grantor.Privilege.Name, req.DbName, req.CollectionName); err != nil {
 		return err
+	}
+	if req.Type != milvuspb.OperatePrivilegeType_Grant && req.Type != milvuspb.OperatePrivilegeType_Revoke {
+		return merr.WrapErrParameterInvalidMsg("the type in the request not grant or revoke")
+	}
+	if req.DbName != "" && !util.IsAnyWord(req.DbName) {
+		if err := ValidateDatabaseName(req.DbName); err != nil {
+			return err
+		}
 	}
 	if err := ValidateObjectName(req.CollectionName); err != nil {
 		return err
@@ -5365,7 +5382,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if err := node.validOperatePrivilegeV2Params(req); err != nil {
+	if err := node.validateOperatePrivilegeV2Params(req); err != nil {
 		return merr.Status(err), nil
 	}
 	curUser, err := GetCurUserFromContext(ctx)

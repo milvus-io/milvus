@@ -94,6 +94,7 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.ListImportTasksRequest{},
 			&milvuspb.OperatePrivilegeRequest{Entity: &milvuspb.GrantEntity{}},
 			&milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{}},
+			&milvuspb.ManualCompactionRequest{},
 		}
 
 		md := metadata.Pairs(util.HeaderDBName, "db")
@@ -117,7 +118,6 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.CalcDistanceRequest{},
 			&milvuspb.FlushAllRequest{},
 			&milvuspb.GetCompactionStateRequest{},
-			&milvuspb.ManualCompactionRequest{},
 			&milvuspb.GetCompactionPlansRequest{},
 			&milvuspb.GetFlushAllStateRequest{},
 			&milvuspb.GetImportStateRequest{},
