@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -98,14 +99,6 @@ func TestManagerOptions(t *testing.T) {
 	})
 }
 
-func GetSegmentsByChannelAndPartition(t *testing.T, segmentManager *SegmentManager, channel string, partitionID int64) *typeutil.ConcurrentMap[int64, struct{}] {
-	partition2Segments, ok := segmentManager.channel2Segments.Get(channel)
-	assert.True(t, ok)
-	segments, ok := partition2Segments.Get(partitionID)
-	assert.True(t, ok)
-	return segments
-}
-
 func TestAllocSegment(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()
@@ -156,7 +149,8 @@ func TestAllocSegment(t *testing.T) {
 		allocations1, err := segmentManager.AllocSegment(ctx, collID, partitionID, vchannel, 100)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations1))
-		segments := GetSegmentsByChannelAndPartition(t, segmentManager, vchannel, partitionID)
+		segments, ok := segmentManager.channel2Growing.Get(vchannel)
+		assert.True(t, ok)
 		assert.EqualValues(t, 1, segments.Len())
 
 		err = meta.SetState(allocations1[0].SegmentID, commonpb.SegmentState_Dropped)
@@ -166,7 +160,8 @@ func TestAllocSegment(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations2))
 		// clear old healthy and alloc new
-		segments = GetSegmentsByChannelAndPartition(t, segmentManager, vchannel, partitionID)
+		segments, ok = segmentManager.channel2Growing.Get(vchannel)
+		assert.True(t, ok)
 		assert.EqualValues(t, 1, segments.Len())
 		assert.NotEqual(t, allocations1[0].SegmentID, allocations2[0].SegmentID)
 	})
@@ -323,8 +318,12 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 
 	segmentManager, err := newSegmentManager(meta, mockAllocator)
 	assert.NoError(t, err)
-	segments := GetSegmentsByChannelAndPartition(t, segmentManager, vchannel, partitionID)
-	assert.EqualValues(t, 2, segments.Len())
+	growing, ok := segmentManager.channel2Growing.Get(vchannel)
+	assert.True(t, ok)
+	assert.EqualValues(t, 1, growing.Len())
+	sealed, ok := segmentManager.channel2Sealed.Get(vchannel)
+	assert.True(t, ok)
+	assert.EqualValues(t, 1, sealed.Len())
 }
 
 func TestSaveSegmentsToMeta(t *testing.T) {
@@ -341,7 +340,7 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, len(allocations))
-	_, err = segmentManager.SealAllSegments(context.Background(), []string{"c1"}, nil)
+	_, err = segmentManager.SealAllSegments(context.Background(), "c1", nil)
 	assert.NoError(t, err)
 	segment := meta.GetHealthySegment(allocations[0].SegmentID)
 	assert.NotNil(t, segment)
@@ -363,7 +362,7 @@ func TestSaveSegmentsToMetaWithSpecificSegments(t *testing.T) {
 	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, len(allocations))
-	_, err = segmentManager.SealAllSegments(context.Background(), []string{"c1"}, []int64{allocations[0].SegmentID})
+	_, err = segmentManager.SealAllSegments(context.Background(), "c1", []int64{allocations[0].SegmentID})
 	assert.NoError(t, err)
 	segment := meta.GetHealthySegment(allocations[0].SegmentID)
 	assert.NotNil(t, segment)
@@ -389,7 +388,7 @@ func TestDropSegment(t *testing.T) {
 	segment := meta.GetHealthySegment(segID)
 	assert.NotNil(t, segment)
 
-	segmentManager.DropSegment(context.Background(), "c1", 100, segID)
+	segmentManager.DropSegment(context.Background(), "c1", segID)
 	segment = meta.GetHealthySegment(segID)
 	assert.NotNil(t, segment)
 }
@@ -473,7 +472,7 @@ func TestGetFlushableSegments(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		ids, err := segmentManager.SealAllSegments(context.TODO(), []string{"c1"}, nil)
+		ids, err := segmentManager.SealAllSegments(context.TODO(), "c1", nil)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(ids))
 		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
@@ -792,7 +791,7 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 									ID:            1,
 									PartitionID:   partitionID,
 									InsertChannel: "ch1",
-									State:         commonpb.SegmentState_Flushed,
+									State:         commonpb.SegmentState_Sealed,
 								},
 							},
 							2: {
@@ -800,7 +799,7 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 									ID:            2,
 									PartitionID:   partitionID,
 									InsertChannel: "ch2",
-									State:         commonpb.SegmentState_Flushed,
+									State:         commonpb.SegmentState_Growing,
 								},
 							},
 						},
@@ -824,7 +823,7 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 									ID:            1,
 									PartitionID:   partitionID,
 									InsertChannel: "ch1",
-									State:         commonpb.SegmentState_Dropped,
+									State:         commonpb.SegmentState_Sealed,
 								},
 							},
 							2: {
@@ -849,31 +848,33 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &SegmentManager{
-				meta:             tt.fields.meta,
-				channel2Segments: typeutil.NewConcurrentMap[string, Partition2Segments](),
+				meta:            tt.fields.meta,
+				channelLock:     lock.NewKeyLock[string](),
+				channel2Growing: typeutil.NewConcurrentMap[string, typeutil.UniqueSet](),
+				channel2Sealed:  typeutil.NewConcurrentMap[string, typeutil.UniqueSet](),
 			}
 			for _, segmentID := range tt.fields.segments {
 				segmentInfo := tt.fields.meta.GetSegment(segmentID)
-				partID := partitionID
 				channel := tt.args.channel
 				if segmentInfo != nil {
-					partID = segmentInfo.GetPartitionID()
 					channel = segmentInfo.GetInsertChannel()
 				}
-				partition2Segments, _ := s.channel2Segments.GetOrInsert(channel, typeutil.NewConcurrentMap[int64, Segments]())
-				segments, _ := partition2Segments.GetOrInsert(partID, typeutil.NewConcurrentMap[int64, struct{}]())
-				segments.Insert(segmentID, struct{}{})
+				if segmentInfo == nil || segmentInfo.GetState() == commonpb.SegmentState_Growing {
+					growing, _ := s.channel2Growing.GetOrInsert(channel, typeutil.NewUniqueSet())
+					growing.Insert(segmentID)
+				} else if segmentInfo.GetState() == commonpb.SegmentState_Sealed {
+					sealed, _ := s.channel2Sealed.GetOrInsert(channel, typeutil.NewUniqueSet())
+					sealed.Insert(segmentID)
+				}
 			}
 			s.DropSegmentsOfChannel(context.TODO(), tt.args.channel)
 			all := make([]int64, 0)
-			s.channel2Segments.Range(func(_ string, partition2Segments Partition2Segments) bool {
-				partition2Segments.Range(func(_ int64, segments Segments) bool {
-					segments.Range(func(segmentID int64, _ struct{}) bool {
-						all = append(all, segmentID)
-						return true
-					})
-					return true
-				})
+			s.channel2Sealed.Range(func(_ string, segments typeutil.UniqueSet) bool {
+				all = append(all, segments.Collect()...)
+				return true
+			})
+			s.channel2Growing.Range(func(_ string, segments typeutil.UniqueSet) bool {
+				all = append(all, segments.Collect()...)
 				return true
 			})
 			assert.ElementsMatch(t, tt.want, all)
