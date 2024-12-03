@@ -179,7 +179,7 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2BuiltinPrivilegeGroup() {
 	resp, _ = s.operatePrivilegeV2(ctx, roleName, "CollectionAdmin", "db1", "col1", milvuspb.OperatePrivilegeType_Grant)
 	s.True(merr.Ok(resp))
 	resp, _ = s.operatePrivilegeV2(ctx, roleName, "CollectionAdmin", util.AnyWord, "col1", milvuspb.OperatePrivilegeType_Grant)
-	s.True(merr.Ok(resp))
+	s.False(merr.Ok(resp))
 }
 
 func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {

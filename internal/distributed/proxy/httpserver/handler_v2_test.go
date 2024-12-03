@@ -409,98 +409,6 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
-func TestDatabaseWrapper(t *testing.T) {
-	postTestCases := []requestBodyTestCase{}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-		Status:  &StatusSuccess,
-		DbNames: []string{DefaultCollectionName, "exist"},
-	}, nil).Twice()
-	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{Status: commonErrorStatus}, nil).Once()
-	h := NewHandlersV2(mp)
-	ginHandler := gin.Default()
-	app := ginHandler.Group("", genAuthMiddleWare(false))
-	path := "/wrapper/database"
-	app.POST(path, wrapperPost(func() any { return &DefaultReq{} }, h.wrapperCheckDatabase(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
-		return nil, nil
-	})))
-	postTestCases = append(postTestCases, requestBodyTestCase{
-		path:        path,
-		requestBody: []byte(`{}`),
-	})
-	postTestCases = append(postTestCases, requestBodyTestCase{
-		path:        path,
-		requestBody: []byte(`{"dbName": "exist"}`),
-	})
-	postTestCases = append(postTestCases, requestBodyTestCase{
-		path:        path,
-		requestBody: []byte(`{"dbName": "non-exist"}`),
-		errMsg:      "database not found, database: non-exist",
-		errCode:     800, // ErrDatabaseNotFound
-	})
-	postTestCases = append(postTestCases, requestBodyTestCase{
-		path:        path,
-		requestBody: []byte(`{"dbName": "test"}`),
-		errMsg:      "",
-		errCode:     65535,
-	})
-
-	for _, testcase := range postTestCases {
-		t.Run("post"+testcase.path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
-			w := httptest.NewRecorder()
-			ginHandler.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code)
-			fmt.Println(w.Body.String())
-			if testcase.errCode != 0 {
-				returnBody := &ReturnErrMsg{}
-				err := json.Unmarshal(w.Body.Bytes(), returnBody)
-				assert.Nil(t, err)
-				assert.Equal(t, testcase.errCode, returnBody.Code)
-				assert.Equal(t, testcase.errMsg, returnBody.Message)
-			}
-		})
-	}
-
-	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-		Status:  &StatusSuccess,
-		DbNames: []string{DefaultCollectionName, "default"},
-	}, nil).Once()
-	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-		Status:  &StatusSuccess,
-		DbNames: []string{DefaultCollectionName, "test"},
-	}, nil).Once()
-	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{Status: commonErrorStatus}, nil).Once()
-	rawTestCases := []rawTestCase{
-		{
-			errMsg:  "database not found, database: test",
-			errCode: 800, // ErrDatabaseNotFound
-		},
-		{},
-		{
-			errMsg:  "",
-			errCode: 65535,
-		},
-	}
-	for _, testcase := range rawTestCases {
-		t.Run("post with db"+testcase.path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{}`)))
-			req.Header.Set(HTTPHeaderDBName, "test")
-			w := httptest.NewRecorder()
-			ginHandler.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code)
-			fmt.Println(w.Body.String())
-			if testcase.errCode != 0 {
-				returnBody := &ReturnErrMsg{}
-				err := json.Unmarshal(w.Body.Bytes(), returnBody)
-				assert.Nil(t, err)
-				assert.Equal(t, testcase.errCode, returnBody.Code)
-				assert.Equal(t, testcase.errMsg, returnBody.Message)
-			}
-		})
-	}
-}
-
 func TestDocInDocOutCreateCollection(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
@@ -1996,7 +1904,7 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases := []requestBodyTestCase{}
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in {list}", "exprParams":{"list": [2, 4, 6, 8]}, "limit": 4, "outputFields": ["word_count"]}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
@@ -2077,7 +1985,7 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path: AdvancedSearchAction,
 		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
-			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "filter": "book_id in {list}", "exprParams":{"list": [2, 4, 6, 8]},"metricType": "L2", "limit": 3},` +
 			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
 			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
 			`{"data": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +

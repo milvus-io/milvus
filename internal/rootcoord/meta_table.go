@@ -617,6 +617,11 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 		dbName = util.DefaultDBName
 	}
 
+	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
+	if err != nil {
+		return nil, err
+	}
+
 	collectionID, ok := mt.aliases.get(dbName, collectionName)
 	if ok {
 		return mt.getCollectionByIDInternal(ctx, dbName, collectionID, ts, false)
@@ -629,11 +634,6 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 
 	if isMaxTs(ts) {
 		return nil, merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName)
-	}
-
-	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
-	if err != nil {
-		return nil, err
 	}
 
 	// travel meta information from catalog. No need to check time travel logic again, since catalog already did.
