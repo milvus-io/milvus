@@ -335,19 +335,30 @@ func (c *compactionPlanHandler) loadMeta() {
 					zap.String("state", task.GetState().String()))
 				continue
 			} else {
-				// TODO: how to deal with the create failed tasks, leave it in meta forever?
 				t, err := c.createCompactTask(task)
 				if err != nil {
-					log.Warn("compactionPlanHandler loadMeta create compactionTask failed",
+					log.Info("compactionPlanHandler loadMeta create compactionTask failed, try to clean it",
 						zap.Int64("planID", task.GetPlanID()),
 						zap.String("type", task.GetType().String()),
 						zap.String("state", task.GetState().String()),
 						zap.Error(err),
 					)
+					// ignore the drop error
+					c.meta.DropCompactionTask(task)
 					continue
 				}
 				if t.NeedReAssignNodeID() {
-					c.submitTask(t)
+					if err = c.submitTask(t); err != nil {
+						log.Info("compactionPlanHandler loadMeta submit task failed, try to clean it",
+							zap.Int64("planID", task.GetPlanID()),
+							zap.String("type", task.GetType().String()),
+							zap.String("state", task.GetState().String()),
+							zap.Error(err),
+						)
+						// ignore the drop error
+						c.meta.DropCompactionTask(task)
+						continue
+					}
 					log.Info("compactionPlanHandler loadMeta submitTask",
 						zap.Int64("planID", t.GetPlanID()),
 						zap.Int64("triggerID", t.GetTriggerID()),
@@ -537,11 +548,14 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 	c.executingGuard.Unlock()
 }
 
-func (c *compactionPlanHandler) submitTask(t CompactionTask) {
+func (c *compactionPlanHandler) submitTask(t CompactionTask) error {
 	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", t.GetType()))
 	t.SetSpan(span)
-	c.queueTasks.Enqueue(t)
+	if err := c.queueTasks.Enqueue(t); err != nil {
+		return err
+	}
 	metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Pending).Inc()
+	return nil
 }
 
 // restoreTask used to restore Task from etcd
@@ -592,7 +606,11 @@ func (c *compactionPlanHandler) enqueueCompaction(task *datapb.CompactionTask) e
 		log.Warn("Failed to enqueue compaction task, unable to save task meta", zap.Error(err))
 		return err
 	}
-	c.submitTask(t)
+	if err = c.submitTask(t); err != nil {
+		log.Warn("submit compaction task failed", zap.Error(err))
+		c.meta.SetSegmentsCompacting(t.GetInputSegments(), false)
+		return err
+	}
 	log.Info("Compaction plan submitted")
 	return nil
 }
