@@ -507,6 +507,12 @@ class ApiUtilityWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
+    def update_resource_group(self, config, using="default", timeout=None, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.ut.update_resource_groups, config, using, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
     def transfer_node(self, source, target, num_node, using="default", timeout=None, check_task=None, check_items=None,
                       **kwargs):
         func_name = sys._getframe().f_code.co_name

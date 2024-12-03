@@ -117,13 +117,14 @@ type JobIDReq struct {
 func (req *JobIDReq) GetJobID() string { return req.JobID }
 
 type QueryReqV2 struct {
-	DbName         string   `json:"dbName"`
-	CollectionName string   `json:"collectionName" binding:"required"`
-	PartitionNames []string `json:"partitionNames"`
-	OutputFields   []string `json:"outputFields"`
-	Filter         string   `json:"filter"`
-	Limit          int32    `json:"limit"`
-	Offset         int32    `json:"offset"`
+	DbName         string                 `json:"dbName"`
+	CollectionName string                 `json:"collectionName" binding:"required"`
+	PartitionNames []string               `json:"partitionNames"`
+	OutputFields   []string               `json:"outputFields"`
+	Filter         string                 `json:"filter"`
+	Limit          int32                  `json:"limit"`
+	Offset         int32                  `json:"offset"`
+	ExprParams     map[string]interface{} `json:"exprParams"`
 }
 
 func (req *QueryReqV2) GetDbName() string { return req.DbName }
@@ -140,10 +141,11 @@ type CollectionIDReq struct {
 func (req *CollectionIDReq) GetDbName() string { return req.DbName }
 
 type CollectionFilterReq struct {
-	DbName         string `json:"dbName"`
-	CollectionName string `json:"collectionName" binding:"required"`
-	PartitionName  string `json:"partitionName"`
-	Filter         string `json:"filter" binding:"required"`
+	DbName         string                 `json:"dbName"`
+	CollectionName string                 `json:"collectionName" binding:"required"`
+	PartitionName  string                 `json:"partitionName"`
+	Filter         string                 `json:"filter" binding:"required"`
+	ExprParams     map[string]interface{} `json:"exprParams"`
 }
 
 func (req *CollectionFilterReq) GetDbName() string { return req.DbName }
@@ -165,20 +167,21 @@ type searchParams struct {
 }
 
 type SearchReqV2 struct {
-	DbName           string        `json:"dbName"`
-	CollectionName   string        `json:"collectionName" binding:"required"`
-	Data             []interface{} `json:"data" binding:"required"`
-	AnnsField        string        `json:"annsField"`
-	PartitionNames   []string      `json:"partitionNames"`
-	Filter           string        `json:"filter"`
-	GroupByField     string        `json:"groupingField"`
-	GroupSize        int32         `json:"groupSize"`
-	StrictGroupSize  bool          `json:"strictGroupSize"`
-	Limit            int32         `json:"limit"`
-	Offset           int32         `json:"offset"`
-	OutputFields     []string      `json:"outputFields"`
-	SearchParams     searchParams  `json:"searchParams"`
-	ConsistencyLevel string        `json:"consistencyLevel"`
+	DbName           string                 `json:"dbName"`
+	CollectionName   string                 `json:"collectionName" binding:"required"`
+	Data             []interface{}          `json:"data" binding:"required"`
+	AnnsField        string                 `json:"annsField"`
+	PartitionNames   []string               `json:"partitionNames"`
+	Filter           string                 `json:"filter"`
+	GroupByField     string                 `json:"groupingField"`
+	GroupSize        int32                  `json:"groupSize"`
+	StrictGroupSize  bool                   `json:"strictGroupSize"`
+	Limit            int32                  `json:"limit"`
+	Offset           int32                  `json:"offset"`
+	OutputFields     []string               `json:"outputFields"`
+	SearchParams     searchParams           `json:"searchParams"`
+	ConsistencyLevel string                 `json:"consistencyLevel"`
+	ExprParams       map[string]interface{} `json:"exprParams"`
 	// not use Params any more, just for compatibility
 	Params map[string]float64 `json:"params"`
 }
@@ -191,14 +194,15 @@ type Rand struct {
 }
 
 type SubSearchReq struct {
-	Data         []interface{} `json:"data" binding:"required"`
-	AnnsField    string        `json:"annsField"`
-	Filter       string        `json:"filter"`
-	GroupByField string        `json:"groupingField"`
-	MetricType   string        `json:"metricType"`
-	Limit        int32         `json:"limit"`
-	Offset       int32         `json:"offset"`
-	SearchParams searchParams  `json:"params"`
+	Data         []interface{}          `json:"data" binding:"required"`
+	AnnsField    string                 `json:"annsField"`
+	Filter       string                 `json:"filter"`
+	GroupByField string                 `json:"groupingField"`
+	MetricType   string                 `json:"metricType"`
+	Limit        int32                  `json:"limit"`
+	Offset       int32                  `json:"offset"`
+	SearchParams searchParams           `json:"params"`
+	ExprParams   map[string]interface{} `json:"exprParams"`
 }
 
 type HybridSearchReq struct {

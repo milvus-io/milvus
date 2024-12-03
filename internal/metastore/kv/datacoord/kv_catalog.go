@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -292,8 +291,6 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 	}
 	kvs := make(map[string]string)
 	for _, segment := range segments {
-		kc.collectMetrics(segment)
-
 		// we don't persist binlog fields, but instead store binlogs as independent kvs
 		cloned := proto.Clone(segment).(*datapb.SegmentInfo)
 		resetBinlogFields(cloned)
@@ -359,23 +356,6 @@ func (kc *Catalog) SaveByBatch(kvs map[string]string) error {
 		return err
 	}
 	return nil
-}
-
-func (kc *Catalog) collectMetrics(s *datapb.SegmentInfo) {
-	statsFieldFn := func(fieldBinlogs []*datapb.FieldBinlog) int {
-		cnt := 0
-		for _, fbs := range fieldBinlogs {
-			cnt += len(fbs.Binlogs)
-		}
-		return cnt
-	}
-
-	cnt := 0
-	cnt += statsFieldFn(s.GetBinlogs())
-	cnt += statsFieldFn(s.GetStatslogs())
-	cnt += statsFieldFn(s.GetDeltalogs())
-
-	metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(fmt.Sprint(s.CollectionID)).Set(float64(cnt))
 }
 
 func (kc *Catalog) hasBinlogPrefix(segment *datapb.SegmentInfo) (bool, error) {
