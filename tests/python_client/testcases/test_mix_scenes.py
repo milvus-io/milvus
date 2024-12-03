@@ -2055,13 +2055,17 @@ class TestMixScenes(TestcaseBase):
                                    check_items={"exp_res": []})
 
         # search
-        nq, limit = 10, 10
+        expr_left, expr_right = Expr.GT(Expr.SUB('INT64', 37).subset, 13).value, Expr.LIKE('VARCHAR', '%a').value
+        expr, rex, nq, limit = Expr.AND(expr_left, expr_right).value, r'.*a$', 10, 10
+        # counts data match expr
+        counts = sum([eval(expr_left.replace('INT64', str(i))) and re.search(rex, j) is not None for i, j in
+                      zip(insert_data.get('INT64', []), insert_data.get('VARCHAR', []))])
+        check_task = None if counts == 0 else CheckTasks.check_search_results
         self.collection_wrap.search(
             data=cf.gen_field_values(self.collection_wrap.schema, nb=nq).get(DataType.FLOAT_VECTOR.name),
             anns_field=DataType.FLOAT_VECTOR.name, param={"metric_type": MetricType.L2, "ef": 32}, limit=limit,
-            expr=Expr.AND(Expr.GT(Expr.SUB('INT64', 37).subset, 13), Expr.LIKE('VARCHAR', '%a')).value,
-            output_fields=scalar_fields, check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": insert_data.get(DataType.INT64.name), "limit": limit,
+            expr=expr, output_fields=scalar_fields, check_task=check_task,
+            check_items={"nq": nq, "ids": insert_data.get(primary_field), "limit": min(limit, counts),
                          "output_fields": scalar_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
