@@ -387,6 +387,22 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 	return m.getNumRowsOfCollectionUnsafe(collectionID)
 }
 
+func getBinlogFileCount(s *datapb.SegmentInfo) int {
+	statsFieldFn := func(fieldBinlogs []*datapb.FieldBinlog) int {
+		cnt := 0
+		for _, fbs := range fieldBinlogs {
+			cnt += len(fbs.Binlogs)
+		}
+		return cnt
+	}
+
+	cnt := 0
+	cnt += statsFieldFn(s.GetBinlogs())
+	cnt += statsFieldFn(s.GetStatslogs())
+	cnt += statsFieldFn(s.GetDeltalogs())
+	return cnt
+}
+
 func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	info := &metricsinfo.DataCoordQuotaMetrics{}
 	m.RLock()
@@ -400,6 +416,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	segments := m.segments.GetSegments()
 	var total int64
 	metrics.DataCoordStoredBinlogSize.Reset()
+	metrics.DataCoordSegmentBinLogFileCount.Reset()
 	for _, segment := range segments {
 		segmentSize := segment.getSegmentSize()
 		if isSegmentHealthy(segment) && !segment.GetIsImporting() {
@@ -416,7 +433,9 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 			coll, ok := m.collections[segment.GetCollectionID()]
 			if ok {
 				metrics.DataCoordStoredBinlogSize.WithLabelValues(coll.DatabaseName,
-					fmt.Sprint(segment.GetCollectionID()), segment.GetState().String()).Set(float64(segmentSize))
+					fmt.Sprint(segment.GetCollectionID()), segment.GetState().String()).Add(float64(segmentSize))
+				metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(
+					fmt.Sprint(segment.GetCollectionID())).Add(float64(getBinlogFileCount(segment.SegmentInfo)))
 			} else {
 				log.Warn("not found database name", zap.Int64("collectionID", segment.GetCollectionID()))
 			}
