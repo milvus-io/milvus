@@ -906,4 +906,59 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 				nodeIDLabelName:       nodeIDLabel,
 				collectionIDLabelName: collectionIDLabel,
 			})
+	QueryNodeNumSegments.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeSQCount.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeSearchHitSegmentNum.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeSegmentPruneRatio.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeSegmentPruneBias.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeSegmentPruneLatency.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeEntitiesSize.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeLevelZeroSize.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
 }
