@@ -113,7 +113,7 @@ func (ch *channelMeta) String() string {
 	return fmt.Sprintf("Name: %s, CollectionID: %d, StartPositions: %v", ch.Name, ch.CollectionID, ch.StartPositions)
 }
 
-func (channelMeta) GetDBProperties() []*commonpb.KeyValuePair {
+func (ch *channelMeta) GetDBProperties() []*commonpb.KeyValuePair {
 	return nil
 }
 

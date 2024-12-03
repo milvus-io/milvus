@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -111,6 +113,12 @@ func (suite *PipelineTestSuite) TestBasic() {
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	collection := segments.NewCollection(suite.collectionID, schema, mock_segcore.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
+		DbProperties: []*commonpb.KeyValuePair{
+			{
+				Key:   common.ReplicateIDKey,
+				Value: "local-test",
+			},
+		},
 	})
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 
@@ -143,16 +151,16 @@ func (suite *PipelineTestSuite) TestBasic() {
 		Collection: suite.collectionManager,
 		Segment:    suite.segmentManager,
 	}
-	pipeline, err := NewPipeLine(collection, suite.channel, manager, suite.tSafeManager, suite.msgDispatcher, suite.delegator)
+	pipelineObj, err := NewPipeLine(collection, suite.channel, manager, suite.tSafeManager, suite.msgDispatcher, suite.delegator)
 	suite.NoError(err)
 
 	// Init Consumer
-	err = pipeline.ConsumeMsgStream(context.Background(), &msgpb.MsgPosition{})
+	err = pipelineObj.ConsumeMsgStream(context.Background(), &msgpb.MsgPosition{})
 	suite.NoError(err)
 
-	err = pipeline.Start()
+	err = pipelineObj.Start()
 	suite.NoError(err)
-	defer pipeline.Close()
+	defer pipelineObj.Close()
 
 	// watch tsafe manager
 	listener := suite.tSafeManager.WatchChannel(suite.channel)
@@ -161,7 +169,7 @@ func (suite *PipelineTestSuite) TestBasic() {
 	in := suite.buildMsgPack(schema)
 	suite.msgChan <- in
 
-	// wait pipeline work
+	// wait pipelineObj work
 	<-listener.On()
 
 	// check tsafe

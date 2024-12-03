@@ -4312,28 +4312,48 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
 	})
+}
 
-	// t.Run("fail to wait ts", func(t *testing.T) {
-	// 	task := &alterCollectionTask{
-	// 		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-	// 			CollectionName: "test",
-	// 			Properties: []*commonpb.KeyValuePair{
-	// 				{
-	// 					Key:   common.ReplicateIDKey,
-	// 					Value: "",
-	// 				},
-	// 			},
-	// 		},
-	// 		rootCoord:             mockRootcoord,
-	// 	}
-	//
-	// 	mockRootcoord.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
-	// 		Status:    merr.Success(),
-	// 		Timestamp: 100,
-	// 		Count:     1,
-	// 	}, nil).Once()
-	// 	mockRootcoord.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(nil, errors.New("err")).Once()
-	// 	err := task.PreExecute(ctx)
-	// 	assert.Error(t, err)
-	// })
+func TestInsertForReplicate(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	globalMetaCache = mockCache
+
+	t.Run("get replicate id fail", func(t *testing.T) {
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("err")).Once()
+		task := &insertTask{
+			insertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					CollectionName: "foo",
+				},
+			},
+		}
+		err := task.PreExecute(context.Background())
+		assert.Error(t, err)
+	})
+	t.Run("insert with replicate id", func(t *testing.T) {
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+			schema: &schemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{
+					Properties: []*commonpb.KeyValuePair{
+						{
+							Key:   common.ReplicateIDKey,
+							Value: "local-mac",
+						},
+					},
+				},
+			},
+			replicateID: "local-mac",
+		}, nil).Once()
+		task := &insertTask{
+			insertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					CollectionName: "foo",
+				},
+			},
+		}
+		err := task.PreExecute(context.Background())
+		assert.Error(t, err)
+	})
 }
