@@ -465,7 +465,7 @@ func TestDatabase(t *testing.T) {
 		errCode:     1100, // ErrParameterInvalid
 	})
 
-	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{DbNames: []string{"a", "b", "c"}, DbIds: []int64{100, 101, 102}}, nil).Once()
+	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{DbNames: []string{"a", "b", "c"}}, nil).Once()
 	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
 		Status: &commonpb.Status{
 			Code:   1100,
