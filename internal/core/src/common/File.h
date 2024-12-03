@@ -73,7 +73,7 @@ class File {
     template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
     ssize_t
     FWriteInt(T value) {
-        return fwrite(&value, sizeof(value), 1, fs_);
+        return fwrite(&value, 1, sizeof(value), fs_);
     }
 
     int
@@ -96,7 +96,11 @@ class File {
  private:
     explicit File(int fd, const std::string& filepath)
         : fd_(fd), filepath_(filepath) {
-        fs_ = fdopen(fd_, "wb");
+        fs_ = fdopen(fd_, "wb+");
+        AssertInfo(fs_ != nullptr,
+                   "failed to open file {}: {}",
+                   filepath,
+                   strerror(errno));
     }
     int fd_{-1};
     FILE* fs_;
