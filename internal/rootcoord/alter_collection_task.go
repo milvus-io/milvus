@@ -223,6 +223,7 @@ func (a *alterCollectionFieldTask) Execute(ctx context.Context) error {
 
 var allowedProps = []string{
 	common.MaxLengthKey,
+	common.MmapEnabledKey,
 }
 
 func IsKeyAllowed(key string) bool {
