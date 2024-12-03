@@ -1864,7 +1864,7 @@ func TestCore_InitRBAC(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		c := newTestCore(withHealthyCode(), withMeta(meta))
 		meta.EXPECT().CreateRole(mock.Anything, mock.Anything).Return(nil).Twice()
-		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(3)
 
 		Params.Save(Params.RoleCfg.Enabled.Key, "false")
 		Params.Save(Params.ProxyCfg.EnablePublicPrivilege.Key, "true")
