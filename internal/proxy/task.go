@@ -1088,20 +1088,16 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	endTS, ok := common.GetReplicateEndTS(t.Properties)
 	if ok && collBasicInfo.replicateID != "" {
-		var rootcoordTS uint64
-		for {
-			allocResp, err := t.rootCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
-				Count: 1,
-			})
-			if err = merr.CheckRPCCall(allocResp, err); err != nil {
-				return merr.WrapErrServiceInternal("alloc timestamp failed", err.Error())
-			}
-			rootcoordTS = allocResp.GetTimestamp()
-			if rootcoordTS > endTS {
-				break
-			}
-			log.Info("wait for rootcoord ts", zap.Uint64("rootcoord ts", rootcoordTS), zap.Uint64("end ts", endTS))
-			time.Sleep(500 * time.Millisecond)
+		allocResp, err := t.rootCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
+			Count:          1,
+			BlockTimestamp: endTS,
+		})
+		if err = merr.CheckRPCCall(allocResp, err); err != nil {
+			return merr.WrapErrServiceInternal("alloc timestamp failed", err.Error())
+		}
+		if allocResp.GetTimestamp() <= endTS {
+			return merr.WrapErrServiceInternal("alter collection: alloc timestamp failed, timestamp is not greater than endTS",
+				fmt.Sprintf("timestamp = %d, endTS = %d", allocResp.GetTimestamp(), endTS))
 		}
 	}
 

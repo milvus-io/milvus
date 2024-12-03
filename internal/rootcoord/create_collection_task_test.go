@@ -823,6 +823,70 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 	})
 }
 
+func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
+	paramtable.Init()
+	meta := mockrootcoord.NewIMetaTable(t)
+	t.Run("with db properties", func(t *testing.T) {
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
+			Name: "foo",
+			ID:   1,
+			Properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.ReplicateIDKey,
+					Value: "local-test",
+				},
+			},
+		}, nil).Twice()
+		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
+			util.DefaultDBID: {1, 2},
+		}).Once()
+		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
+
+		defer cleanTestEnv()
+
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+
+		ticker := newRocksMqTtSynchronizer()
+		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
+
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     field1,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := createCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.ReplicateIDKey,
+						Value: "hoo",
+					},
+				},
+			},
+			dbID: 1,
+		}
+		task.Req.ShardsNum = common.DefaultShardsNum
+		err = task.Prepare(context.Background())
+		assert.Len(t, task.dbProperties, 1)
+		assert.Len(t, task.Req.Properties, 0)
+		assert.NoError(t, err)
+	})
+}
+
 func Test_createCollectionTask_Execute(t *testing.T) {
 	t.Run("add same collection with different parameters", func(t *testing.T) {
 		defer cleanTestEnv()

@@ -2026,13 +2026,13 @@ func TestAlterCollectionReplicateProperty(t *testing.T) {
 	factory := newMockMsgStreamFactory()
 	msgStreamObj := msgstream.NewMockMsgStream(t)
 	msgStreamObj.EXPECT().SetRepackFunc(mock.Anything).Return().Maybe()
-	msgStreamObj.EXPECT().AsProducer(mock.Anything).Return().Maybe()
-	msgStreamObj.EXPECT().EnableProduce(mock.Anything).Return().Maybe()
+	msgStreamObj.EXPECT().AsProducer(mock.Anything, mock.Anything).Return().Maybe()
+	msgStreamObj.EXPECT().ForceEnableProduce(mock.Anything).Return().Maybe()
 	msgStreamObj.EXPECT().Close().Return().Maybe()
 	mockMsgID1 := mqcommon.NewMockMessageID(t)
 	mockMsgID2 := mqcommon.NewMockMessageID(t)
 	mockMsgID2.EXPECT().Serialize().Return([]byte("mock message id 2")).Maybe()
-	msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(map[string][]mqcommon.MessageID{
+	msgStreamObj.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(map[string][]mqcommon.MessageID{
 		"alter_property": {mockMsgID1, mockMsgID2},
 	}, nil).Maybe()
 

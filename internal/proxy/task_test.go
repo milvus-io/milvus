@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -4276,7 +4277,7 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 	globalMetaCache = mockCache
 	ctx := context.Background()
 	mockRootcoord := mocks.NewMockRootCoordClient(t)
-	t.Run("set replicate property to true", func(t *testing.T) {
+	t.Run("invalid replicate id", func(t *testing.T) {
 		task := &alterCollectionTask{
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Properties: []*commonpb.KeyValuePair{
@@ -4293,7 +4294,7 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("invalid replicate id", func(t *testing.T) {
+	t.Run("empty replicate id", func(t *testing.T) {
 		task := &alterCollectionTask{
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				CollectionName: "test",
@@ -4330,27 +4331,69 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	// t.Run("fail to wait ts", func(t *testing.T) {
-	// 	task := &alterCollectionTask{
-	// 		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-	// 			CollectionName: "test",
-	// 			Properties: []*commonpb.KeyValuePair{
-	// 				{
-	// 					Key:   common.ReplicateIDKey,
-	// 					Value: "",
-	// 				},
-	// 			},
-	// 		},
-	// 		rootCoord:             mockRootcoord,
-	// 	}
-	//
-	// 	mockRootcoord.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
-	// 		Status:    merr.Success(),
-	// 		Timestamp: 100,
-	// 		Count:     1,
-	// 	}, nil).Once()
-	// 	mockRootcoord.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(nil, errors.New("err")).Once()
-	// 	err := task.PreExecute(ctx)
-	// 	assert.Error(t, err)
-	// })
+	t.Run("alloc wrong ts", func(t *testing.T) {
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				CollectionName: "test",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.ReplicateEndTSKey,
+						Value: "100",
+					},
+				},
+			},
+			rootCoord: mockRootcoord,
+		}
+
+		mockRootcoord.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
+			Status:    merr.Success(),
+			Timestamp: 99,
+		}, nil).Once()
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+}
+
+func TestInsertForReplicate(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	globalMetaCache = mockCache
+
+	t.Run("get replicate id fail", func(t *testing.T) {
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("err")).Once()
+		task := &insertTask{
+			insertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					CollectionName: "foo",
+				},
+			},
+		}
+		err := task.PreExecute(context.Background())
+		assert.Error(t, err)
+	})
+	t.Run("insert with replicate id", func(t *testing.T) {
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+			schema: &schemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{
+					Properties: []*commonpb.KeyValuePair{
+						{
+							Key:   common.ReplicateIDKey,
+							Value: "local-mac",
+						},
+					},
+				},
+			},
+			replicateID: "local-mac",
+		}, nil).Once()
+		task := &insertTask{
+			insertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					CollectionName: "foo",
+				},
+			},
+		}
+		err := task.PreExecute(context.Background())
+		assert.Error(t, err)
+	})
 }

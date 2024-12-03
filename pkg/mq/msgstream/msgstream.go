@@ -75,7 +75,6 @@ type MsgStream interface {
 	CheckTopicValid(channel string) error
 
 	ForceEnableProduce(can bool)
-	SetReplicate(config *ReplicateConfig)
 }
 
 type ReplicateConfig struct {
@@ -92,7 +91,7 @@ func GetReplicateConfig(replicateID, dbName, colName string) *ReplicateConfig {
 	replicateConfig := &ReplicateConfig{
 		ReplicateID: replicateID,
 		CheckFunc: func(msg *ReplicateMsg) bool {
-			if !msg.IsEnd {
+			if !msg.GetIsEnd() {
 				return false
 			}
 			log.Info("check replicate msg",
@@ -100,10 +99,10 @@ func GetReplicateConfig(replicateID, dbName, colName string) *ReplicateConfig {
 				zap.String("dbName", dbName),
 				zap.String("colName", colName),
 				zap.Any("msg", msg))
-			if msg.IsCluster {
+			if msg.GetIsCluster() {
 				return true
 			}
-			return msg.Database == dbName && (msg.GetCollection() == colName || msg.GetCollection() == "")
+			return msg.GetDatabase() == dbName && (msg.GetCollection() == colName || msg.GetCollection() == "")
 		},
 	}
 	return replicateConfig

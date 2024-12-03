@@ -128,7 +128,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	replicateID, err := GetReplicateID(it.ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("get replicate id failed", zap.String("collectionName", collectionName), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		return merr.WrapErrAsInputError(err)
 	}
 	if replicateID != "" {
 		return merr.WrapErrCollectionReplicateMode("insert")

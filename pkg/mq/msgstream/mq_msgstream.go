@@ -283,20 +283,6 @@ func (ms *mqMsgStream) isSkipSystemTT() bool {
 	return ms.replicateID != ""
 }
 
-func (ms *mqMsgStream) checkReplicateEndMsg(msg TsMsg) bool {
-	if !ms.isSkipSystemTT() ||
-		msg.Type() != commonpb.MsgType_Replicate ||
-		ms.checkFunc == nil {
-		return false
-	}
-	replicateMsg := msg.(*ReplicateMsg)
-	check := ms.checkFunc(replicateMsg)
-	if check {
-		ms.replicateID = ""
-	}
-	return check
-}
-
 // checkReplicateID check the replicate id of the message, return values: isMatch, isReplicate
 func (ms *mqMsgStream) checkReplicateID(msg TsMsg) (bool, bool) {
 	if !ms.isSkipSystemTT() {

@@ -1746,6 +1746,19 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 		}, nil
 	}
 
+	if in.BlockTimestamp > 0 {
+		blockTime, _ := tsoutil.ParseTS(in.BlockTimestamp)
+		lastTime := c.tsoAllocator.GetLastSavedTime()
+		deltaDuration := blockTime.Sub(lastTime)
+		if deltaDuration > 0 {
+			log.Info("wait for block timestamp",
+				zap.Time("blockTime", blockTime),
+				zap.Time("lastTime", lastTime),
+				zap.Duration("delta", deltaDuration))
+			time.Sleep(deltaDuration + time.Millisecond*200)
+		}
+	}
+
 	ts, err := c.tsoAllocator.GenerateTSO(in.GetCount())
 	if err != nil {
 		log.Ctx(ctx).Error("failed to allocate timestamp", zap.String("role", typeutil.RootCoordRole),
