@@ -4620,6 +4620,7 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	defer sp.End()
 
 	log := log.Ctx(ctx).With(
+		zap.String("collectionName", req.GetCollectionName()),
 		zap.Int64("collectionID", req.GetCollectionID()))
 
 	log.Info("received ManualCompaction request")
@@ -4627,6 +4628,16 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
+	}
+
+	// before v2.4.18, manual compact request only pass collectionID, should correct sdk's behavior to pass collectionName
+	if req.GetCollectionName() != "" {
+		var err error
+		req.CollectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
 	}
 
 	resp, err := node.dataCoord.ManualCompaction(ctx, req)
