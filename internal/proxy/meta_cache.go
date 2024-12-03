@@ -75,7 +75,7 @@ type Cache interface {
 	InvalidateShardLeaderCache(collections []int64)
 	ListShardLocation() map[int64]nodeInfo
 	RemoveCollection(ctx context.Context, database, collectionName string)
-	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64) []string
+	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string
 
 	// GetCredentialInfo operate credential cache
 	GetCredentialInfo(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
@@ -458,7 +458,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	curVersion := m.collectionCacheVersion[collection.GetCollectionID()]
-	if collection.GetRequestTime() < curVersion {
+	// Compatibility logic: if the rootcoord version is lower(requestTime = 0), update the cache directly.
+	if collection.GetRequestTime() < curVersion && collection.GetRequestTime() != 0 {
 		log.Debug("describe collection timestamp less than version, don't update cache",
 			zap.String("collectionName", collectionName),
 			zap.Uint64("version", collection.GetRequestTime()), zap.Uint64("cache version", curVersion))
@@ -845,7 +846,7 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 	log.Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))
 }
 
-func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64) []string {
+func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var collNames []string
@@ -859,7 +860,11 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID Uniq
 			}
 		}
 	}
-	m.collectionCacheVersion[collectionID] = version
+	if removeVersion {
+		delete(m.collectionCacheVersion, collectionID)
+	} else {
+		m.collectionCacheVersion[collectionID] = version
+	}
 	log.Debug("remove collection by id", zap.Int64("id", collectionID), zap.Strings("collection", collNames))
 	return collNames
 }

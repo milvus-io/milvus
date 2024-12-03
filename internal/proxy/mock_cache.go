@@ -1109,17 +1109,17 @@ func (_c *MockCache_RemoveCollection_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// RemoveCollectionsByID provides a mock function with given fields: ctx, collectionID, version
-func (_m *MockCache) RemoveCollectionsByID(ctx context.Context, collectionID int64, version uint64) []string {
-	ret := _m.Called(ctx, collectionID, version)
+// RemoveCollectionsByID provides a mock function with given fields: ctx, collectionID, version, removeVersion
+func (_m *MockCache) RemoveCollectionsByID(ctx context.Context, collectionID int64, version uint64, removeVersion bool) []string {
+	ret := _m.Called(ctx, collectionID, version, removeVersion)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RemoveCollectionsByID")
 	}
 
 	var r0 []string
-	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64) []string); ok {
-		r0 = rf(ctx, collectionID, version)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64, bool) []string); ok {
+		r0 = rf(ctx, collectionID, version, removeVersion)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
@@ -1138,13 +1138,14 @@ type MockCache_RemoveCollectionsByID_Call struct {
 //   - ctx context.Context
 //   - collectionID int64
 //   - version uint64
-func (_e *MockCache_Expecter) RemoveCollectionsByID(ctx interface{}, collectionID interface{}, version interface{}) *MockCache_RemoveCollectionsByID_Call {
-	return &MockCache_RemoveCollectionsByID_Call{Call: _e.mock.On("RemoveCollectionsByID", ctx, collectionID, version)}
+//   - removeVersion bool
+func (_e *MockCache_Expecter) RemoveCollectionsByID(ctx interface{}, collectionID interface{}, version interface{}, removeVersion interface{}) *MockCache_RemoveCollectionsByID_Call {
+	return &MockCache_RemoveCollectionsByID_Call{Call: _e.mock.On("RemoveCollectionsByID", ctx, collectionID, version, removeVersion)}
 }
 
-func (_c *MockCache_RemoveCollectionsByID_Call) Run(run func(ctx context.Context, collectionID int64, version uint64)) *MockCache_RemoveCollectionsByID_Call {
+func (_c *MockCache_RemoveCollectionsByID_Call) Run(run func(ctx context.Context, collectionID int64, version uint64, removeVersion bool)) *MockCache_RemoveCollectionsByID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(uint64))
+		run(args[0].(context.Context), args[1].(int64), args[2].(uint64), args[3].(bool))
 	})
 	return _c
 }
@@ -1154,7 +1155,7 @@ func (_c *MockCache_RemoveCollectionsByID_Call) Return(_a0 []string) *MockCache_
 	return _c
 }
 
-func (_c *MockCache_RemoveCollectionsByID_Call) RunAndReturn(run func(context.Context, int64, uint64) []string) *MockCache_RemoveCollectionsByID_Call {
+func (_c *MockCache_RemoveCollectionsByID_Call) RunAndReturn(run func(context.Context, int64, uint64, bool) []string) *MockCache_RemoveCollectionsByID_Call {
 	_c.Call.Return(run)
 	return _c
 }

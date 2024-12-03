@@ -794,14 +794,14 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 
-	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1), 100)
+	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1), 100, false)
 	// no collectionInfo of collection2, should access RootCoord
 	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 3)
 
-	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1), 100)
+	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1), 100, false)
 	// no collectionInfo of collection2, should access RootCoord
 	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
@@ -1277,7 +1277,7 @@ func TestMetaCache_Parallel(t *testing.T) {
 
 	cacheVersion := uint64(100)
 	// clean cache
-	cache.RemoveCollectionsByID(ctx, 111, cacheVersion+2)
+	cache.RemoveCollectionsByID(ctx, 111, cacheVersion+2, false)
 
 	// update cache, but version is smaller
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, option ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
