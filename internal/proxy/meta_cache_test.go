@@ -140,7 +140,8 @@ func (m *MockRootCoordClientInterface) DescribeCollection(ctx context.Context, i
 				AutoID: true,
 				Name:   "collection1",
 			},
-			DbName: dbName,
+			DbName:      dbName,
+			RequestTime: 100,
 		}, nil
 	}
 	if in.CollectionName == "collection2" || in.CollectionID == 2 {
@@ -151,7 +152,8 @@ func (m *MockRootCoordClientInterface) DescribeCollection(ctx context.Context, i
 				AutoID: true,
 				Name:   "collection2",
 			},
-			DbName: dbName,
+			DbName:      dbName,
+			RequestTime: 100,
 		}, nil
 	}
 	if in.CollectionName == "errorCollection" {
@@ -161,7 +163,8 @@ func (m *MockRootCoordClientInterface) DescribeCollection(ctx context.Context, i
 			Schema: &schemapb.CollectionSchema{
 				AutoID: true,
 			},
-			DbName: dbName,
+			DbName:      dbName,
+			RequestTime: 100,
 		}, nil
 	}
 
@@ -791,14 +794,14 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 
-	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1))
+	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1), 100)
 	// no collectionInfo of collection2, should access RootCoord
 	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 3)
 
-	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1))
+	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1), 100)
 	// no collectionInfo of collection2, should access RootCoord
 	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
@@ -1258,4 +1261,61 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 			assert.ElementsMatch(t, tc.expectResult, result)
 		})
 	}
+}
+
+func TestMetaCache_Parallel(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockRootCoordClient(t)
+	queryCoord := mocks.NewMockQueryCoordClient(t)
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+	mgr := newShardClientMgr()
+	cache, err := NewMetaCache(rootCoord, queryCoord, mgr)
+	assert.NoError(t, err)
+
+	cacheVersion := uint64(100)
+	// clean cache
+	cache.RemoveCollectionsByID(ctx, 111, cacheVersion+2)
+
+	// update cache, but version is smaller
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, option ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(),
+			Schema: &schemapb.CollectionSchema{
+				Name: "collection1",
+			},
+			CollectionID: 111,
+			DbName:       dbName,
+			RequestTime:  cacheVersion,
+		}, nil
+	}).Once()
+
+	collInfo, err := cache.update(ctx, dbName, "collection1", 111)
+	assert.NoError(t, err)
+	assert.Equal(t, "collection1", collInfo.schema.Name)
+	assert.Equal(t, int64(111), collInfo.collID)
+	_, ok := cache.collInfo[dbName]["collection1"]
+	assert.False(t, ok)
+
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, option ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+		cacheVersion++
+		return &milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(),
+			Schema: &schemapb.CollectionSchema{
+				Name: "collection1",
+			},
+			CollectionID: 111,
+			DbName:       dbName,
+			RequestTime:  cacheVersion + 5,
+		}, nil
+	}).Once()
+
+	collInfo, err = cache.update(ctx, dbName, "collection1", 111)
+	assert.NoError(t, err)
+	assert.Equal(t, "collection1", collInfo.schema.Name)
+	assert.Equal(t, int64(111), collInfo.collID)
+	_, ok = cache.collInfo[dbName]["collection1"]
+	assert.True(t, ok)
 }

@@ -37,7 +37,8 @@ func (t *alterAliasTask) Prepare(ctx context.Context) error {
 }
 
 func (t *alterAliasTask) Execute(ctx context.Context) error {
-	if err := t.core.ExpireMetaCache(ctx, t.Req.GetDbName(), []string{t.Req.GetAlias()}, InvalidCollectionID, "", t.GetTs(), proxyutil.SetMsgType(commonpb.MsgType_AlterAlias)); err != nil {
+	collID := t.core.meta.GetCollectionID(ctx, t.Req.GetDbName(), t.Req.GetCollectionName())
+	if err := t.core.ExpireMetaCache(ctx, t.Req.GetDbName(), []string{t.Req.GetAlias()}, collID, "", t.GetTs(), proxyutil.SetMsgType(commonpb.MsgType_AlterAlias)); err != nil {
 		return err
 	}
 	// alter alias is atomic enough.

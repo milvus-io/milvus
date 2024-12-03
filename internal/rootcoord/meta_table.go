@@ -56,6 +56,10 @@ type IMetaTable interface {
 	AddCollection(ctx context.Context, coll *model.Collection) error
 	ChangeCollectionState(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error
 	RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
+	// GetCollectionID retrieves the corresponding collectionID based on the collectionName.
+	// If the collection does not exist, it will return InvalidCollectionID.
+	// Please use the function with caution.
+	GetCollectionID(ctx context.Context, dbName string, collectionName string) UniqueID
 	GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error)
 	GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	GetCollectionByIDWithMaxTs(ctx context.Context, collectionID UniqueID) (*model.Collection, error)
@@ -608,6 +612,36 @@ func (mt *MetaTable) GetCollectionByName(ctx context.Context, dbName string, col
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 	return mt.getCollectionByNameInternal(ctx, dbName, collectionName, ts)
+}
+
+// GetCollectionID retrieves the corresponding collectionID based on the collectionName.
+// If the collection does not exist, it will return InvalidCollectionID.
+// Please use the function with caution.
+func (mt *MetaTable) GetCollectionID(ctx context.Context, dbName string, collectionName string) UniqueID {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	// backward compatibility for rolling  upgrade
+	if dbName == "" {
+		log.Warn("db name is empty", zap.String("collectionName", collectionName))
+		dbName = util.DefaultDBName
+	}
+
+	_, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
+	if err != nil {
+		return InvalidCollectionID
+	}
+
+	collectionID, ok := mt.aliases.get(dbName, collectionName)
+	if ok {
+		return collectionID
+	}
+
+	collectionID, ok = mt.names.get(dbName, collectionName)
+	if ok {
+		return collectionID
+	}
+	return InvalidCollectionID
 }
 
 func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error) {

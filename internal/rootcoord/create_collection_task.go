@@ -611,7 +611,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		baseStep:        baseStep{core: t.core},
 		dbName:          t.Req.GetDbName(),
 		collectionNames: []string{t.Req.GetCollectionName()},
-		collectionID:    InvalidCollectionID,
+		collectionID:    collID,
 		ts:              ts,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
 	}, &nullStep{})

@@ -75,7 +75,7 @@ type Cache interface {
 	InvalidateShardLeaderCache(collections []int64)
 	ListShardLocation() map[int64]nodeInfo
 	RemoveCollection(ctx context.Context, database, collectionName string)
-	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string
+	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64) []string
 
 	// GetCredentialInfo operate credential cache
 	GetCredentialInfo(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
@@ -340,6 +340,8 @@ type MetaCache struct {
 	IDCount int64
 	IDIndex int64
 	IDLock  sync.RWMutex
+
+	collectionCacheVersion map[UniqueID]uint64 // collectionID -> cacheVersion
 }
 
 // globalMetaCache is singleton instance of Cache
@@ -368,15 +370,16 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 // NewMetaCache creates a MetaCache with provided RootCoord and QueryNode
 func NewMetaCache(rootCoord types.RootCoordClient, queryCoord types.QueryCoordClient, shardMgr shardClientMgr) (*MetaCache, error) {
 	return &MetaCache{
-		rootCoord:      rootCoord,
-		queryCoord:     queryCoord,
-		dbInfo:         map[string]*databaseInfo{},
-		collInfo:       map[string]map[string]*collectionInfo{},
-		collLeader:     map[string]map[string]*shardLeaders{},
-		credMap:        map[string]*internalpb.CredentialInfo{},
-		shardMgr:       shardMgr,
-		privilegeInfos: map[string]struct{}{},
-		userToRoles:    map[string]map[string]struct{}{},
+		rootCoord:              rootCoord,
+		queryCoord:             queryCoord,
+		dbInfo:                 map[string]*databaseInfo{},
+		collInfo:               map[string]map[string]*collectionInfo{},
+		collLeader:             map[string]map[string]*shardLeaders{},
+		credMap:                map[string]*internalpb.CredentialInfo{},
+		shardMgr:               shardMgr,
+		privilegeInfos:         map[string]struct{}{},
+		userToRoles:            map[string]map[string]struct{}{},
+		collectionCacheVersion: make(map[UniqueID]uint64),
 	}, nil
 }
 
@@ -445,19 +448,35 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	if database == "" {
 		log.Warn("database is empty, use default database name", zap.String("collectionName", collectionName), zap.Stack("stack"))
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	_, dbOk := m.collInfo[database]
-	if !dbOk {
-		m.collInfo[database] = make(map[string]*collectionInfo)
-	}
-
 	isolation, err := common.IsPartitionKeyIsolationKvEnabled(collection.Properties...)
 	if err != nil {
 		return nil, err
 	}
 
 	schemaInfo := newSchemaInfoWithLoadFields(collection.Schema, loadFields)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	curVersion := m.collectionCacheVersion[collection.GetCollectionID()]
+	if collection.GetRequestTime() < curVersion {
+		log.Debug("describe collection timestamp less than version, don't update cache",
+			zap.String("collectionName", collectionName),
+			zap.Uint64("version", collection.GetRequestTime()), zap.Uint64("cache version", curVersion))
+		return &collectionInfo{
+			collID:                collection.CollectionID,
+			schema:                schemaInfo,
+			partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
+			createdTimestamp:      collection.CreatedTimestamp,
+			createdUtcTimestamp:   collection.CreatedUtcTimestamp,
+			consistencyLevel:      collection.ConsistencyLevel,
+			partitionKeyIsolation: isolation,
+		}, nil
+	}
+	_, dbOk := m.collInfo[database]
+	if !dbOk {
+		m.collInfo[database] = make(map[string]*collectionInfo)
+	}
+
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:                collection.CollectionID,
 		schema:                schemaInfo,
@@ -472,7 +491,11 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		zap.String("actual collection Name", collection.Schema.GetName()), zap.Int64("collectionID", collection.CollectionID),
 		zap.Strings("partition", partitions.PartitionNames),
 	)
-	return m.collInfo[database][collectionName], nil
+
+	m.collectionCacheVersion[collection.GetCollectionID()] = collection.GetRequestTime()
+	collInfo := m.collInfo[database][collectionName]
+
+	return collInfo, nil
 }
 
 func buildSfKeyByName(database, collectionName string) string {
@@ -822,18 +845,21 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 	log.Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))
 }
 
-func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string {
+func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var collNames []string
 	for database, db := range m.collInfo {
 		for k, v := range db {
 			if v.collID == collectionID {
-				delete(m.collInfo[database], k)
-				collNames = append(collNames, k)
+				if m.collectionCacheVersion[collectionID] <= version {
+					delete(m.collInfo[database], k)
+					collNames = append(collNames, k)
+				}
 			}
 		}
 	}
+	m.collectionCacheVersion[collectionID] = version
 	log.Debug("remove collection by id", zap.Int64("id", collectionID), zap.Strings("collection", collNames))
 	return collNames
 }
