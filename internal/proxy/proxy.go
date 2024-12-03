@@ -277,7 +277,7 @@ func (node *Proxy) Init() error {
 			zap.Error(err))
 		return err
 	}
-	node.replicateMsgStream.EnableProduce(true)
+	node.replicateMsgStream.ForceEnableProduce(true)
 	node.replicateMsgStream.AsProducer(node.ctx, []string{replicateMsgChannel})
 
 	node.sched, err = newTaskScheduler(node.ctx, node.tsoAllocator, node.factory)

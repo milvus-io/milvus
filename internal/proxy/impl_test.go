@@ -1497,7 +1497,7 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 		msgStreamObj := msgstream.NewMockMsgStream(t)
 		msgStreamObj.EXPECT().SetRepackFunc(mock.Anything).Return()
 		msgStreamObj.EXPECT().AsProducer(mock.Anything, mock.Anything).Return()
-		msgStreamObj.EXPECT().EnableProduce(mock.Anything).Return()
+		msgStreamObj.EXPECT().ForceEnableProduce(mock.Anything).Return()
 		msgStreamObj.EXPECT().Close().Return()
 		mockMsgID1 := mqcommon.NewMockMessageID(t)
 		mockMsgID2 := mqcommon.NewMockMessageID(t)
