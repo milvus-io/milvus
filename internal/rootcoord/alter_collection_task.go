@@ -215,7 +215,7 @@ func (a *alterCollectionFieldTask) Execute(ctx context.Context) error {
 		dbName:          a.Req.GetDbName(),
 		collectionNames: append(collectionNames, a.Req.GetCollectionName()),
 		collectionID:    InvalidCollectionID,
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollectionField)},
 	})
 
 	return redoTask.Execute(ctx)
