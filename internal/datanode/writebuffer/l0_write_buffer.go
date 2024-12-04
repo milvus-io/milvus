@@ -182,8 +182,7 @@ func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 					err := segment.GetBloomFilterSet().UpdatePKRange(fieldData)
 					if err != nil {
 						return err
-	}
-
+					}
 				}
 			}
 		}
