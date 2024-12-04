@@ -129,21 +129,21 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	if globalMetaCache != nil {
 		switch msgType {
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias:
-			if collectionName != "" {
-				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
-				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
-			}
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), msgType == commonpb.MsgType_DropCollection)
 				for _, name := range aliasName {
 					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
 				}
+			}
+			if collectionName != "" {
+				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
+				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
 			}
 			log.Info("complete to invalidate collection meta cache with collection name", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
 			// All the request from query use collectionID
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
 				for _, name := range aliasName {
 					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
 				}
@@ -154,30 +154,26 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 				log.Warn("invalidate collection meta cache failed. partitionName is empty")
 				return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
 			}
-			// no need to deprecate shard cache because shard won't change when create or drop partition
-			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
 			// drop all the alias as well
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
-				for _, name := range aliasName {
-					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
-				}
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
 			}
+			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
 		default:
 			log.Warn("receive unexpected msgType of invalidate collection meta cache", zap.String("msgType", request.GetBase().GetMsgType().String()))
+			if request.CollectionID != UniqueID(0) {
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
+				for _, name := range aliasName {
+					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+				}
+			}
 
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
 				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
-			}
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
-				for _, name := range aliasName {
-					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
-				}
 			}
 		}
 	}
