@@ -149,7 +149,7 @@ func TestNewDataViewManager_TryUpdateDataView(t *testing.T) {
 			CollectionID: collectionID,
 			ChannelName:  "ch0",
 			SeekPosition: &msgpb.MsgPosition{
-				Timestamp: uint64(time.Now().UnixNano()),
+				Timestamp: uint64(time.Now().Add(paramtable.Get().DataCoordCfg.CPIntervalToUpdateDataView.GetAsDuration(time.Second)).UnixNano()),
 			},
 			UnflushedSegmentIds:    []int64{100, 200},
 			PartitionStatsVersions: map[int64]int64{1000: 2000},

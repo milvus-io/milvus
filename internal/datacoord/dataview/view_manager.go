@@ -17,6 +17,7 @@
 package dataview
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -163,7 +164,7 @@ func (m *dataViewManager) TryUpdateDataView(collectionID int64) {
 		curTime := tsoutil.PhysicalTime(current.GetSeekPosition().GetTimestamp())
 		if newTime.Sub(curTime) > paramtable.Get().DataCoordCfg.CPIntervalToUpdateDataView.GetAsDuration(time.Second) {
 			// update due to channel cp advanced
-			m.update(newView, "channel cp advanced")
+			m.update(newView, fmt.Sprintf("channel cp advanced, curTime=%v, newTime=%v", curTime, newTime))
 			return
 		}
 	}
