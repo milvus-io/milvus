@@ -50,7 +50,6 @@ type Collection struct {
 	mut             sync.RWMutex
 	refreshNotifier chan struct{}
 	LoadSpan        trace.Span
-	isReleasing     bool
 }
 
 func (collection *Collection) SetRefreshNotifier(notifier chan struct{}) {
@@ -58,18 +57,6 @@ func (collection *Collection) SetRefreshNotifier(notifier chan struct{}) {
 	defer collection.mut.Unlock()
 
 	collection.refreshNotifier = notifier
-}
-
-func (collection *Collection) SetReleasing() {
-	collection.mut.Lock()
-	defer collection.mut.Unlock()
-	collection.isReleasing = true
-}
-
-func (collection *Collection) IsReleasing() bool {
-	collection.mut.RLock()
-	defer collection.mut.RUnlock()
-	return collection.isReleasing
 }
 
 func (collection *Collection) IsRefreshed() bool {
@@ -439,15 +426,6 @@ func (m *CollectionManager) Exist(collectionID typeutil.UniqueID) bool {
 	return ok
 }
 
-func (m *CollectionManager) SetReleasing(collectionID typeutil.UniqueID) {
-	m.rwmutex.Lock()
-	defer m.rwmutex.Unlock()
-	coll, ok := m.collections[collectionID]
-	if ok {
-		coll.SetReleasing()
-	}
-}
-
 // GetAll returns the collection ID of all loaded collections
 func (m *CollectionManager) GetAll() []int64 {
 	m.rwmutex.RLock()
@@ -565,13 +543,13 @@ func (m *CollectionManager) putPartition(partitions []*Partition, withSave bool)
 	return nil
 }
 
-func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int32) (int32, error) {
+func (m *CollectionManager) UpdatePartitionLoadPercent(partitionID int64, loadPercent int32) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
 	oldPartition, ok := m.partitions[partitionID]
 	if !ok {
-		return 0, merr.WrapErrPartitionNotFound(partitionID)
+		return merr.WrapErrPartitionNotFound(partitionID)
 	}
 
 	// update partition load percentage
@@ -579,7 +557,7 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 	newPartition.LoadPercentage = loadPercent
 	savePartition := false
 	if loadPercent == 100 {
-		savePartition = true
+		savePartition = newPartition.Status != querypb.LoadStatus_Loaded || newPartition.RecoverTimes != 0
 		newPartition.Status = querypb.LoadStatus_Loaded
 		// if partition becomes loaded, clear it's recoverTimes in load info
 		newPartition.RecoverTimes = 0
@@ -587,22 +565,24 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
 		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Partition %d loaded", partitionID)))
 	}
-	err := m.putPartition([]*Partition{newPartition}, savePartition)
-	if err != nil {
-		return 0, err
-	}
+	return m.putPartition([]*Partition{newPartition}, savePartition)
+}
+
+func (m *CollectionManager) UpdateCollectionLoadPercent(collectionID int64) (int32, error) {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
 
 	// update collection load percentage
-	oldCollection, ok := m.collections[newPartition.CollectionID]
+	oldCollection, ok := m.collections[collectionID]
 	if !ok {
-		return 0, merr.WrapErrCollectionNotFound(newPartition.CollectionID)
+		return 0, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	collectionPercent := m.calculateLoadPercentage(oldCollection.CollectionID)
 	newCollection := oldCollection.Clone()
 	newCollection.LoadPercentage = collectionPercent
 	saveCollection := false
 	if collectionPercent == 100 {
-		saveCollection = true
+		saveCollection = newCollection.Status != querypb.LoadStatus_Loaded || newCollection.RecoverTimes != 0
 		if newCollection.LoadSpan != nil {
 			newCollection.LoadSpan.End()
 			newCollection.LoadSpan = nil

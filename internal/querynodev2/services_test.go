@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -97,7 +98,7 @@ func (suite *ServiceSuite) SetupSuite() {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.GCEnabled.Key, "false")
 
-	suite.rootPath = suite.T().Name()
+	suite.rootPath = path.Join("/tmp/milvus/test", suite.T().Name())
 	suite.collectionID = 111
 	suite.collectionName = "test-collection"
 	suite.partitionIDs = []int64{222}
@@ -2195,6 +2196,41 @@ func (suite *ServiceSuite) TestLoadPartition() {
 	status, err = suite.node.LoadPartitions(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+}
+
+func (suite *ServiceSuite) TestCheckHealth() {
+	suite.Run("node not healthy", func() {
+		suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		ctx := context.Background()
+		resp, err := suite.node.CheckHealth(ctx, nil)
+		suite.NoError(err)
+		suite.False(merr.Ok(resp.GetStatus()))
+		suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	suite.Run("exceeded timetick lag on pipeline", func() {
+		suite.node.tSafeManager = tsafe.NewTSafeReplica()
+		suite.node.tSafeManager.Add(context.TODO(), "timetick-lag-ch", 1)
+		ctx := context.Background()
+		suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := suite.node.CheckHealth(ctx, nil)
+		suite.NoError(err)
+		suite.True(merr.Ok(resp.GetStatus()))
+		suite.False(resp.GetIsHealthy())
+		suite.NotEmpty(resp.Reasons)
+	})
+
+	suite.Run("ok", func() {
+		ctx := context.Background()
+		suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
+		suite.node.tSafeManager = tsafe.NewTSafeReplica()
+		resp, err := suite.node.CheckHealth(ctx, nil)
+		suite.NoError(err)
+		suite.True(merr.Ok(resp.GetStatus()))
+		suite.True(resp.GetIsHealthy())
+		suite.Empty(resp.Reasons)
+	})
 }
 
 func TestQueryNodeService(t *testing.T) {

@@ -517,6 +517,10 @@ func TestQuery(t *testing.T) {
 		expectedBody: "{\"code\":200,\"data\":[{\"book_id\":1,\"book_intro\":[0.1,0.11],\"word_count\":1000},{\"book_id\":2,\"book_intro\":[0.2,0.22],\"word_count\":2000},{\"book_id\":3,\"book_intro\":[0.3,0.33],\"word_count\":3000}]}",
 	})
 
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
+
 	for _, tt := range testCases {
 		reqs := []*http.Request{genQueryRequest(), genGetRequest()}
 		t.Run(tt.name, func(t *testing.T) {
@@ -601,6 +605,10 @@ func TestDelete(t *testing.T) {
 		expectedBody: "{\"code\":200,\"data\":{}}",
 	})
 
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
+
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
@@ -624,11 +632,15 @@ func TestDelete(t *testing.T) {
 }
 
 func TestDeleteForFilter(t *testing.T) {
+	paramtable.Init()
 	jsonBodyList := [][]byte{
 		[]byte(`{"collectionName": "` + DefaultCollectionName + `" , "id": [1,2,3]}`),
 		[]byte(`{"collectionName": "` + DefaultCollectionName + `" , "filter": "id in [1,2,3]"}`),
 		[]byte(`{"collectionName": "` + DefaultCollectionName + `" , "id": [1,2,3], "filter": "id in [1,2,3]"}`),
 	}
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 	for _, jsonBody := range jsonBodyList {
 		t.Run("delete success", func(t *testing.T) {
 			mp := mocks.NewMockProxy(t)
@@ -726,6 +738,10 @@ func TestInsert(t *testing.T) {
 		HTTPCollectionName: DefaultCollectionName,
 		HTTPReturnData:     rows[0],
 	})
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
+
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
@@ -771,6 +787,9 @@ func TestInsertForDataType(t *testing.T) {
 		"[success]with dynamic field": withDynamicField(newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, false, true))),
 		"[success]with array fields":  withArrayField(newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, false, true))),
 	}
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 	for name, schema := range schemas {
 		t.Run(name, func(t *testing.T) {
 			mp := mocks.NewMockProxy(t)
@@ -838,6 +857,9 @@ func TestReturnInt64(t *testing.T) {
 		schemapb.DataType_Int64:   "1,2,3",
 		schemapb.DataType_VarChar: "\"1\",\"2\",\"3\"",
 	}
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 	for _, dataType := range schemas {
 		t.Run("[insert]httpCfg.allow: false", func(t *testing.T) {
 			schema := newCollectionSchema(generateCollectionSchema(dataType, false, true))
@@ -1167,6 +1189,9 @@ func TestUpsert(t *testing.T) {
 		HTTPCollectionName: DefaultCollectionName,
 		HTTPReturnData:     rows[0],
 	})
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
@@ -1265,6 +1290,9 @@ func TestSearch(t *testing.T) {
 		exceptCode:   200,
 		expectedBody: "{\"code\":200,\"data\":[{\"book_id\":1,\"book_intro\":[0.1,0.11],\"distance\":0.01,\"word_count\":1000},{\"book_id\":2,\"book_intro\":[0.2,0.22],\"distance\":0.04,\"word_count\":2000},{\"book_id\":3,\"book_intro\":[0.3,0.33],\"distance\":0.09,\"word_count\":3000}]}",
 	})
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
