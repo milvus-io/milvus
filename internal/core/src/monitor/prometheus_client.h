@@ -127,6 +127,9 @@ DECLARE_PROMETHEUS_HISTOGRAM(internal_mmap_allocated_space_bytes_file);
 DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_mmap_in_used_space_bytes);
 DECLARE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_anon);
 DECLARE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_file);
+DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_mmap_in_used_count);
+DECLARE_PROMETHEUS_GAUGE(internal_mmap_in_used_count_anon);
+DECLARE_PROMETHEUS_GAUGE(internal_mmap_in_used_count_file);
 
 // search metrics
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency);
