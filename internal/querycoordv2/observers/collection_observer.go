@@ -47,7 +47,7 @@ type CollectionObserver struct {
 
 	dist                 *meta.DistributionManager
 	meta                 *meta.Meta
-	targetMgr            *meta.TargetManager
+	targetMgr            meta.TargetManagerInterface
 	targetObserver       *TargetObserver
 	checkerController    *checkers.CheckerController
 	partitionLoadedCount map[int64]int
@@ -69,7 +69,7 @@ type LoadTask struct {
 func NewCollectionObserver(
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	targetObserver *TargetObserver,
 	checherController *checkers.CheckerController,
 	proxyManager proxyutil.ProxyClientManagerInterface,

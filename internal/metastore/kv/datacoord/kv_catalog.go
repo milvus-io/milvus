@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
@@ -42,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -891,6 +893,9 @@ func (kc *Catalog) GetCurrentPartitionStatsVersion(ctx context.Context, collID, 
 	key := buildCurrentPartitionStatsVersionPath(collID, partID, vChannel)
 	valueStr, err := kc.MetaKv.Load(key)
 	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return 0, nil
+		}
 		return 0, err
 	}
 

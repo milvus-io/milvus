@@ -22,7 +22,6 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -32,7 +31,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -50,6 +48,7 @@ import (
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -128,6 +127,7 @@ type Core struct {
 
 	enableActiveStandBy bool
 	activateFunc        func() error
+	healthChecker       *healthcheck.Checker
 }
 
 // --------------------- function --------------------------
@@ -482,6 +482,8 @@ func (c *Core) initInternal() error {
 		return err
 	}
 
+	interval := Params.CommonCfg.HealthCheckInterval.GetAsDuration(time.Second)
+	c.healthChecker = healthcheck.NewChecker(interval, c.healthCheckFn)
 	log.Info("init rootcoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", c.address))
 	return nil
 }
@@ -758,6 +760,7 @@ func (c *Core) startInternal() error {
 	}()
 
 	c.startServerLoop()
+	c.healthChecker.Start()
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.RootCoordRole, c.session.ServerID)
 	logutil.Logger(c.ctx).Info("rootcoord startup successfully")
@@ -816,6 +819,10 @@ func (c *Core) revokeSession() {
 // Stop stops rootCoord.
 func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
+	if c.healthChecker != nil {
+		c.healthChecker.Close()
+	}
+
 	c.stopExecutor()
 	c.stopScheduler()
 	if c.proxyWatcher != nil {
@@ -2572,43 +2579,21 @@ func (c *Core) isValidPrivilege(ctx context.Context, privilegeName string, objec
 	return fmt.Errorf("not found the privilege name[%s] in object[%s]", privilegeName, object)
 }
 
-func (c *Core) isValidPrivilegeV2(ctx context.Context, privilegeName, dbName, collectionName string) error {
+func (c *Core) isValidPrivilegeV2(ctx context.Context, privilegeName string) error {
 	if util.IsAnyWord(privilegeName) {
 		return nil
 	}
-	var privilegeLevel string
-	for group, privileges := range util.BuiltinPrivilegeGroups {
-		if privilegeName == group || lo.Contains(privileges, privilegeName) {
-			privilegeLevel = group
-			break
-		}
+	customPrivGroup, err := c.meta.IsCustomPrivilegeGroup(privilegeName)
+	if err != nil {
+		return err
 	}
-	if privilegeLevel == "" {
-		customPrivGroup, err := c.meta.IsCustomPrivilegeGroup(privilegeName)
-		if err != nil {
-			return err
-		}
-		if customPrivGroup {
-			return nil
-		}
-		return fmt.Errorf("not found the privilege name[%s] in the custom privilege groups", privilegeName)
-	}
-	switch {
-	case strings.HasPrefix(privilegeLevel, milvuspb.PrivilegeLevel_Cluster.String()):
-		if !util.IsAnyWord(dbName) || !util.IsAnyWord(collectionName) {
-			return fmt.Errorf("dbName and collectionName should be * for the cluster level privilege: %s", privilegeName)
-		}
-		return nil
-	case strings.HasPrefix(privilegeLevel, milvuspb.PrivilegeLevel_Database.String()):
-		if collectionName != "" && collectionName != util.AnyWord {
-			return fmt.Errorf("collectionName should be empty or * for the database level privilege: %s", privilegeName)
-		}
-		return nil
-	case strings.HasPrefix(privilegeLevel, milvuspb.PrivilegeLevel_Collection.String()):
-		return nil
-	default:
+	if customPrivGroup {
 		return nil
 	}
+	if util.IsPrivilegeNameDefined(privilegeName) {
+		return nil
+	}
+	return fmt.Errorf("not found the privilege name[%s]", privilegeName)
 }
 
 // OperatePrivilege operate the privilege, including grant and revoke
@@ -2629,26 +2614,27 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
 	}
 
+	privName := in.Entity.Grantor.Privilege.Name
 	switch in.Version {
 	case "v2":
-		if err := c.isValidPrivilegeV2(ctx, in.Entity.Grantor.Privilege.Name,
-			in.Entity.DbName, in.Entity.ObjectName); err != nil {
+		if err := c.isValidPrivilegeV2(ctx, privName); err != nil {
 			ctxLog.Error("", zap.Error(err))
 			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
 		}
+		// set up object type for metastore, to be compatible with v1 version
+		in.Entity.Object.Name = util.GetObjectType(privName)
 	default:
-		if err := c.isValidPrivilege(ctx, in.Entity.Grantor.Privilege.Name, in.Entity.Object.Name); err != nil {
+		if err := c.isValidPrivilege(ctx, privName, in.Entity.Object.Name); err != nil {
 			ctxLog.Error("", zap.Error(err))
 			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
 		}
 		// set up object name if it is global object type and not built in privilege group
-		if in.Entity.Object.Name == commonpb.ObjectType_Global.String() && !lo.Contains(lo.Keys(util.BuiltinPrivilegeGroups), in.Entity.Grantor.Privilege.Name) {
+		if in.Entity.Object.Name == commonpb.ObjectType_Global.String() && !util.IsBuiltinPrivilegeGroup(in.Entity.Grantor.Privilege.Name) {
 			in.Entity.ObjectName = util.AnyWord
 		}
 	}
 
-	// set up privilege name for metastore
-	privName := in.Entity.Grantor.Privilege.Name
+	privName = in.Entity.Grantor.Privilege.Name
 
 	redoTask := newBaseRedoTask(c.stepExecutor)
 	redoTask.AddSyncStep(NewSimpleStep("operate privilege meta data", func(ctx context.Context) ([]nestedStep, error) {
@@ -3030,53 +3016,40 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 		}, nil
 	}
 
-	group, ctx := errgroup.WithContext(ctx)
-	errs := typeutil.NewConcurrentSet[error]()
+	latestCheckResult := c.healthChecker.GetLatestCheckResult()
+	return healthcheck.GetCheckHealthResponseFromResult(latestCheckResult), nil
+}
+
+func (c *Core) healthCheckFn() *healthcheck.Result {
+	timeout := Params.CommonCfg.HealthCheckRPCTimeout.GetAsDuration(time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, timeout)
+	defer cancel()
 
 	proxyClients := c.proxyClientManager.GetProxyClients()
+	wg := sync.WaitGroup{}
+	lock := sync.Mutex{}
+	result := healthcheck.NewResult()
+
 	proxyClients.Range(func(key int64, value types.ProxyClient) bool {
 		nodeID := key
 		proxyClient := value
-		group.Go(func() error {
-			sta, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
-			if err != nil {
-				errs.Insert(err)
-				return err
-			}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+			err = merr.AnalyzeComponentStateResp(typeutil.ProxyRole, nodeID, resp, err)
 
-			err = merr.AnalyzeState("Proxy", nodeID, sta)
+			lock.Lock()
+			defer lock.Unlock()
 			if err != nil {
-				errs.Insert(err)
+				result.AppendUnhealthyClusterMsg(healthcheck.NewUnhealthyClusterMsg(typeutil.ProxyRole, nodeID, err.Error(), healthcheck.NodeHealthCheck))
 			}
-
-			return err
-		})
+		}()
 		return true
 	})
 
-	maxDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
-	if maxDelay > 0 {
-		group.Go(func() error {
-			err := CheckTimeTickLagExceeded(ctx, c.queryCoord, c.dataCoord, maxDelay)
-			if err != nil {
-				errs.Insert(err)
-			}
-			return err
-		})
-	}
-
-	err := group.Wait()
-	if err != nil {
-		return &milvuspb.CheckHealthResponse{
-			Status:    merr.Success(),
-			IsHealthy: false,
-			Reasons: lo.Map(errs.Collect(), func(e error, i int) string {
-				return err.Error()
-			}),
-		}, nil
-	}
-
-	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}, nil
+	wg.Wait()
+	return result
 }
 
 func (c *Core) CreatePrivilegeGroup(ctx context.Context, in *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {
@@ -3087,12 +3060,12 @@ func (c *Core) CreatePrivilegeGroup(ctx context.Context, in *milvuspb.CreatePriv
 	ctxLog.Debug(method)
 
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return merr.Status(err), nil
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_CreatePrivilegeGroupFailure), nil
 	}
 
 	if err := c.meta.CreatePrivilegeGroup(in.GroupName); err != nil {
 		ctxLog.Warn("fail to create privilege group", zap.Error(err))
-		return merr.Status(err), nil
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_CreatePrivilegeGroupFailure), nil
 	}
 
 	ctxLog.Debug(method + " success")
@@ -3110,12 +3083,12 @@ func (c *Core) DropPrivilegeGroup(ctx context.Context, in *milvuspb.DropPrivileg
 	ctxLog.Debug(method)
 
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return merr.Status(err), nil
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_DropPrivilegeGroupFailure), nil
 	}
 
 	if err := c.meta.DropPrivilegeGroup(in.GroupName); err != nil {
 		ctxLog.Warn("fail to drop privilege group", zap.Error(err))
-		return merr.Status(err), nil
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_DropPrivilegeGroupFailure), nil
 	}
 
 	ctxLog.Debug(method + " success")
@@ -3302,8 +3275,7 @@ func (c *Core) OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePr
 	if err != nil {
 		errMsg := "fail to execute task when operate privilege group"
 		ctxLog.Warn(errMsg, zap.Error(err))
-		status := merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperatePrivilegeGroupFailure)
-		return status, nil
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeGroupFailure), nil
 	}
 
 	ctxLog.Debug(method + " success")
@@ -3319,13 +3291,17 @@ func (c *Core) expandPrivilegeGroups(grants []*milvuspb.GrantEntity, groups map[
 		if err != nil {
 			return nil, err
 		}
-		if objectType := util.GetObjectType(privilegeName); objectType != "" {
-			grant.Object.Name = objectType
+		objectType := &milvuspb.ObjectEntity{
+			Name: util.GetObjectType(privilegeName),
+		}
+		objectName := grant.ObjectName
+		if objectType.Name == commonpb.ObjectType_Global.String() {
+			objectName = util.AnyWord
 		}
 		return &milvuspb.GrantEntity{
 			Role:       grant.Role,
-			Object:     grant.Object,
-			ObjectName: grant.ObjectName,
+			Object:     objectType,
+			ObjectName: objectName,
 			Grantor: &milvuspb.GrantorEntity{
 				User: grant.Grantor.User,
 				Privilege: &milvuspb.PrivilegeEntity{
@@ -3338,20 +3314,16 @@ func (c *Core) expandPrivilegeGroups(grants []*milvuspb.GrantEntity, groups map[
 
 	for _, grant := range grants {
 		privName := grant.Grantor.Privilege.Name
-		if privGroup, exists := groups[privName]; !exists {
-			newGrant, err := createGrantEntity(grant, privName)
+		privGroup, exists := groups[privName]
+		if !exists {
+			privGroup = []*milvuspb.PrivilegeEntity{{Name: privName}}
+		}
+		for _, priv := range privGroup {
+			newGrant, err := createGrantEntity(grant, priv.Name)
 			if err != nil {
 				return nil, err
 			}
 			newGrants = append(newGrants, newGrant)
-		} else {
-			for _, priv := range privGroup {
-				newGrant, err := createGrantEntity(grant, priv.Name)
-				if err != nil {
-					return nil, err
-				}
-				newGrants = append(newGrants, newGrant)
-			}
 		}
 	}
 	// uniq by role + object + object name + grantor user + privilege name + db name

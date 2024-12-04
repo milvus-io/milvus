@@ -609,6 +609,11 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 		dbName = util.DefaultDBName
 	}
 
+	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
+	if err != nil {
+		return nil, err
+	}
+
 	collectionID, ok := mt.aliases.get(dbName, collectionName)
 	if ok {
 		return mt.getCollectionByIDInternal(ctx, dbName, collectionID, ts, false)
@@ -621,11 +626,6 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 
 	if isMaxTs(ts) {
 		return nil, merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName)
-	}
-
-	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
-	if err != nil {
-		return nil, err
 	}
 
 	// travel meta information from catalog. No need to check time travel logic again, since catalog already did.
@@ -870,8 +870,6 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 	mt.collID2Meta[partition.CollectionID].Partitions = append(mt.collID2Meta[partition.CollectionID].Partitions, partition.Clone())
 
 	mt.generalCnt += int(coll.ShardsNum) // 1 partition * shardNum
-
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
 
 	log.Ctx(ctx).Info("add partition to meta table",
 		zap.Int64("collection", partition.CollectionID), zap.String("partition", partition.PartitionName),
@@ -1542,6 +1540,10 @@ func (mt *MetaTable) OperatePrivilegeGroup(groupName string, privileges []*milvu
 	}
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
+
+	if util.IsBuiltinPrivilegeGroup(groupName) {
+		return merr.WrapErrParameterInvalidMsg("the privilege group name [%s] is defined by built in privilege groups in system", groupName)
+	}
 
 	// validate input params
 	definedByUsers, err := mt.IsCustomPrivilegeGroup(groupName)

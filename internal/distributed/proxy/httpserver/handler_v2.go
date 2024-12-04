@@ -50,70 +50,75 @@ func NewHandlersV2(proxyClient types.ProxyComponent) *HandlersV2 {
 }
 
 func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
-	router.POST(CollectionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listCollections)))))
-	router.POST(CollectionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.hasCollection)))))
+	router.POST(CollectionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.listCollections))))
+	router.POST(CollectionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.hasCollection))))
 	// todo review the return data
-	router.POST(CollectionCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getCollectionDetails)))))
-	router.POST(CollectionCategory+StatsAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getCollectionStats)))))
-	router.POST(CollectionCategory+LoadStateAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getCollectionLoadState)))))
-	router.POST(CollectionCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionReq{AutoID: DisableAutoID} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createCollection)))))
-	router.POST(CollectionCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.dropCollection)))))
-	router.POST(CollectionCategory+RenameAction, timeoutMiddleware(wrapperPost(func() any { return &RenameCollectionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.renameCollection)))))
-	router.POST(CollectionCategory+LoadAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.loadCollection)))))
-	router.POST(CollectionCategory+ReleaseAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.releaseCollection)))))
+	router.POST(CollectionCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.getCollectionDetails))))
+	router.POST(CollectionCategory+StatsAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.getCollectionStats))))
+	router.POST(CollectionCategory+LoadStateAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.getCollectionLoadState))))
+	router.POST(CollectionCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionReq{AutoID: DisableAutoID} }, wrapperTraceLog(h.createCollection))))
+	router.POST(CollectionCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.dropCollection))))
+	router.POST(CollectionCategory+RenameAction, timeoutMiddleware(wrapperPost(func() any { return &RenameCollectionReq{} }, wrapperTraceLog(h.renameCollection))))
+	router.POST(CollectionCategory+LoadAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.loadCollection))))
+	router.POST(CollectionCategory+ReleaseAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.releaseCollection))))
 
+	router.POST(DataBaseCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.createDatabase))))
+	router.POST(DataBaseCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.dropDatabase))))
+	router.POST(DataBaseCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &EmptyReq{} }, wrapperTraceLog(h.listDatabases))))
+	router.POST(DataBaseCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.describeDatabase))))
+	router.POST(DataBaseCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	// Query
 	router.POST(EntityCategory+QueryAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &QueryReqV2{
 			Limit:        100,
 			OutputFields: []string{DefaultOutputFields},
 		}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.query)))), true))
+	}, wrapperTraceLog(h.query))), true))
 	// Get
 	router.POST(EntityCategory+GetAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionIDReq{
 			OutputFields: []string{DefaultOutputFields},
 		}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.get)))), true))
+	}, wrapperTraceLog(h.get))), true))
 	// Delete
 	router.POST(EntityCategory+DeleteAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionFilterReq{}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.delete)))), false))
+	}, wrapperTraceLog(h.delete))), false))
 	// Insert
 	router.POST(EntityCategory+InsertAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionDataReq{}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.insert)))), false))
+	}, wrapperTraceLog(h.insert))), false))
 	// Upsert
 	router.POST(EntityCategory+UpsertAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionDataReq{}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.upsert)))), false))
+	}, wrapperTraceLog(h.upsert))), false))
 	// Search
 	router.POST(EntityCategory+SearchAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &SearchReqV2{
 			Limit: 100,
 		}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.search)))), true))
+	}, wrapperTraceLog(h.search))), true))
 	// advanced_search, backward compatible uri
 	router.POST(EntityCategory+AdvancedSearchAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.advancedSearch)))), true))
+	}, wrapperTraceLog(h.advancedSearch))), true))
 	// HybridSearch
 	router.POST(EntityCategory+HybridSearchAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.advancedSearch)))), true))
+	}, wrapperTraceLog(h.advancedSearch))), true))
 
-	router.POST(PartitionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listPartitions)))))
-	router.POST(PartitionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.hasPartitions)))))
-	router.POST(PartitionCategory+StatsAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.statsPartition)))))
+	router.POST(PartitionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.listPartitions))))
+	router.POST(PartitionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.hasPartitions))))
+	router.POST(PartitionCategory+StatsAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.statsPartition))))
 
-	router.POST(PartitionCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createPartition)))))
-	router.POST(PartitionCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.dropPartition)))))
-	router.POST(PartitionCategory+LoadAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionsReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.loadPartitions)))))
-	router.POST(PartitionCategory+ReleaseAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionsReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.releasePartitions)))))
+	router.POST(PartitionCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.createPartition))))
+	router.POST(PartitionCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.dropPartition))))
+	router.POST(PartitionCategory+LoadAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionsReq{} }, wrapperTraceLog(h.loadPartitions))))
+	router.POST(PartitionCategory+ReleaseAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionsReq{} }, wrapperTraceLog(h.releasePartitions))))
 
 	router.POST(UserCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.listUsers))))
 	router.POST(UserCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &UserReq{} }, wrapperTraceLog(h.describeUser))))
@@ -141,24 +146,24 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(PrivilegeGroupCategory+AddPrivilegesToGroupAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.addPrivilegesToGroup))))
 	router.POST(PrivilegeGroupCategory+RemovePrivilegesFromGroupAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.removePrivilegesFromGroup))))
 
-	router.POST(IndexCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listIndexes)))))
-	router.POST(IndexCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &IndexReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.describeIndex)))))
+	router.POST(IndexCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.listIndexes))))
+	router.POST(IndexCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &IndexReq{} }, wrapperTraceLog(h.describeIndex))))
 
-	router.POST(IndexCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &IndexParamReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createIndex)))))
+	router.POST(IndexCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &IndexParamReq{} }, wrapperTraceLog(h.createIndex))))
 	// todo cannot drop index before release it ?
-	router.POST(IndexCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &IndexReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.dropIndex)))))
+	router.POST(IndexCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &IndexReq{} }, wrapperTraceLog(h.dropIndex))))
 
-	router.POST(AliasCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listAlias)))))
-	router.POST(AliasCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &AliasReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.describeAlias)))))
+	router.POST(AliasCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listAlias))))
+	router.POST(AliasCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &AliasReq{} }, wrapperTraceLog(h.describeAlias))))
 
-	router.POST(AliasCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &AliasCollectionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createAlias)))))
-	router.POST(AliasCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &AliasReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.dropAlias)))))
-	router.POST(AliasCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &AliasCollectionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.alterAlias)))))
+	router.POST(AliasCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &AliasCollectionReq{} }, wrapperTraceLog(h.createAlias))))
+	router.POST(AliasCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &AliasReq{} }, wrapperTraceLog(h.dropAlias))))
+	router.POST(AliasCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &AliasCollectionReq{} }, wrapperTraceLog(h.alterAlias))))
 
-	router.POST(ImportJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listImportJob)))))
-	router.POST(ImportJobCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &ImportReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createImportJob)))))
-	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getImportJobProcess)))))
-	router.POST(ImportJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getImportJobProcess)))))
+	router.POST(ImportJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listImportJob))))
+	router.POST(ImportJobCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &ImportReq{} }, wrapperTraceLog(h.createImportJob))))
+	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getImportJobProcess))))
+	router.POST(ImportJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getImportJobProcess))))
 }
 
 type (
@@ -191,13 +196,15 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			return
 		}
 		dbName := ""
-		if getter, ok := req.(requestutil.DBNameGetter); ok {
-			dbName = getter.GetDbName()
-		}
-		if dbName == "" {
-			dbName = c.Request.Header.Get(HTTPHeaderDBName)
+		if req != nil {
+			if getter, ok := req.(requestutil.DBNameGetter); ok {
+				dbName = getter.GetDbName()
+			}
 			if dbName == "" {
-				dbName = DefaultDbName
+				dbName = c.Request.Header.Get(HTTPHeaderDBName)
+				if dbName == "" {
+					dbName = DefaultDbName
+				}
 			}
 		}
 		username, _ := c.Get(ContextUsername)
@@ -261,7 +268,7 @@ func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 			if err != nil {
 				log.Ctx(ctx).Info("trace info: all, error", zap.Error(err))
 			} else {
-				log.Ctx(ctx).Info("trace info: all, unknown", zap.Any("resp", resp))
+				log.Ctx(ctx).Info("trace info: all, unknown")
 			}
 		}
 		return resp, err
@@ -332,31 +339,6 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 		}
 	}
 	return response, err
-}
-
-func (h *HandlersV2) wrapperCheckDatabase(v2 handlerFuncV2) handlerFuncV2 {
-	return func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
-		if dbName == DefaultDbName || proxy.CheckDatabase(ctx, dbName) {
-			return v2(ctx, c, req, dbName)
-		}
-		resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ListDatabases", func(reqCtx context.Context, req any) (interface{}, error) {
-			return h.proxy.ListDatabases(reqCtx, &milvuspb.ListDatabasesRequest{})
-		})
-		if err != nil {
-			return resp, err
-		}
-		for _, db := range resp.(*milvuspb.ListDatabasesResponse).DbNames {
-			if db == dbName {
-				return v2(ctx, c, req, dbName)
-			}
-		}
-		log.Ctx(ctx).Warn("high level restful api, non-exist database", zap.String("database", dbName))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(merr.ErrDatabaseNotFound),
-			HTTPReturnMessage: merr.ErrDatabaseNotFound.Error() + ", database: " + dbName,
-		})
-		return nil, merr.ErrDatabaseNotFound
-	}
 }
 
 func (h *HandlersV2) hasCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
@@ -1379,6 +1361,99 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return statusResponse, err
+}
+
+func (h *HandlersV2) createDatabase(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*DatabaseReqWithProperties)
+	req := &milvuspb.CreateDatabaseRequest{
+		DbName: dbName,
+	}
+	properties := make([]*commonpb.KeyValuePair, 0, len(httpReq.Properties))
+	for key, value := range httpReq.Properties {
+		properties = append(properties, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+	}
+	req.Properties = properties
+
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateDatabase", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.CreateDatabase(reqCtx, req.(*milvuspb.CreateDatabaseRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) dropDatabase(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	req := &milvuspb.DropDatabaseRequest{
+		DbName: dbName,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropDatabase", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.DropDatabase(reqCtx, req.(*milvuspb.DropDatabaseRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+// todo: use a more flexible way to handle the number of input parameters of req
+func (h *HandlersV2) listDatabases(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	req := &milvuspb.ListDatabasesRequest{}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ListDatabases", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ListDatabases(reqCtx, req.(*milvuspb.ListDatabasesRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnList(resp.(*milvuspb.ListDatabasesResponse).DbNames))
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) describeDatabase(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	req := &milvuspb.DescribeDatabaseRequest{
+		DbName: dbName,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DescribeDatabase", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.DescribeDatabase(reqCtx, req.(*milvuspb.DescribeDatabaseRequest))
+	})
+	if err != nil {
+		return nil, err
+	}
+	info, _ := resp.(*milvuspb.DescribeDatabaseResponse)
+	if info.Properties == nil {
+		info.Properties = []*commonpb.KeyValuePair{}
+	}
+	dataBaseInfo := map[string]any{
+		HTTPDbName:     info.DbName,
+		HTTPDbID:       info.DbID,
+		HTTPProperties: info.Properties,
+	}
+	HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: dataBaseInfo})
+	return resp, err
+}
+
+func (h *HandlersV2) alterDatabase(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*DatabaseReqWithProperties)
+	req := &milvuspb.AlterDatabaseRequest{
+		DbName: dbName,
+	}
+	properties := make([]*commonpb.KeyValuePair, 0, len(httpReq.Properties))
+	for key, value := range httpReq.Properties {
+		properties = append(properties, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+	}
+	req.Properties = properties
+
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterDatabase", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AlterDatabase(reqCtx, req.(*milvuspb.AlterDatabaseRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
 }
 
 func (h *HandlersV2) listPartitions(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {

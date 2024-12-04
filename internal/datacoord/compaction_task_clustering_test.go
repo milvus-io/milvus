@@ -112,7 +112,7 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 	task.processPipelining()
 
 	seg11 := s.meta.GetSegment(101)
-	s.Equal(datapb.SegmentLevel_L2, seg11.Level)
+	s.Equal(datapb.SegmentLevel_L1, seg11.Level)
 	seg21 := s.meta.GetSegment(102)
 	s.Equal(datapb.SegmentLevel_L2, seg21.Level)
 	s.Equal(int64(10000), seg21.PartitionStatsVersion)
@@ -147,11 +147,13 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 	s.Equal(int64(10000), seg22.PartitionStatsVersion)
 
 	seg32 := s.meta.GetSegment(103)
-	s.Equal(datapb.SegmentLevel_L1, seg32.Level)
-	s.Equal(int64(0), seg32.PartitionStatsVersion)
+	s.Equal(datapb.SegmentLevel_L2, seg32.Level)
+	s.Equal(int64(10001), seg32.PartitionStatsVersion)
+	s.Equal(commonpb.SegmentState_Dropped, seg32.GetState())
 	seg42 := s.meta.GetSegment(104)
-	s.Equal(datapb.SegmentLevel_L1, seg42.Level)
-	s.Equal(int64(0), seg42.PartitionStatsVersion)
+	s.Equal(datapb.SegmentLevel_L2, seg42.Level)
+	s.Equal(int64(10001), seg42.PartitionStatsVersion)
+	s.Equal(commonpb.SegmentState_Dropped, seg42.GetState())
 }
 
 func (s *ClusteringCompactionTaskSuite) generateBasicTask(vectorClusteringKey bool) *clusteringCompactionTask {

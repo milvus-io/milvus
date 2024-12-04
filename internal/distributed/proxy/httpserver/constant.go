@@ -9,6 +9,7 @@ import (
 // v2
 const (
 	// --- category ---
+	DataBaseCategory       = "/databases/"
 	CollectionCategory     = "/collections/"
 	EntityCategory         = "/entities/"
 	PartitionCategory      = "/partitions/"
@@ -74,6 +75,8 @@ const (
 	HTTPCollectionName       = "collectionName"
 	HTTPCollectionID         = "collectionID"
 	HTTPDbName               = "dbName"
+	HTTPDbID                 = "dbID"
+	HTTPProperties           = "properties"
 	HTTPPartitionName        = "partitionName"
 	HTTPPartitionNames       = "partitionNames"
 	HTTPUserName             = "userName"
