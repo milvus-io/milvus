@@ -11,7 +11,7 @@ expr:
 	| '(' expr ')'											                     # Parens
 	| '[' expr (',' expr)* ','? ']'                                              # Array
 	| EmptyArray                                                                 # EmptyArray
-	| expr LIKE StringLiteral                                                    # Like
+	| expr op = NOT? LIKE StringLiteral                                          # Like
 	| TEXTMATCH'('Identifier',' StringLiteral')'                                 # TextMatch
 	| expr POW expr											                     # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                     # Unary

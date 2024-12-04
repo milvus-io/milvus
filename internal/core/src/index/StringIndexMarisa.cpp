@@ -483,13 +483,13 @@ StringIndexMarisa::Range(std::string lower_bound_value,
 }
 
 const TargetBitmap
-StringIndexMarisa::PrefixMatch(std::string_view prefix) {
-    TargetBitmap bitset(str_ids_.size());
+StringIndexMarisa::PrefixMatch(std::string_view prefix, bool reverse_result) {
+    TargetBitmap bitset(str_ids_.size(), reverse_result);
     auto matched = prefix_match(prefix);
     for (const auto str_id : matched) {
         auto offsets = str_ids_to_offsets_[str_id];
         for (auto offset : offsets) {
-            bitset[offset] = true;
+            bitset[offset] = !reverse_result;
         }
     }
     return bitset;

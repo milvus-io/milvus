@@ -138,10 +138,10 @@ class BitmapIndex : public ScalarIndex<T> {
     }
 
     const TargetBitmap
-    PatternMatch(const std::string& pattern) override {
+    PatternMatch(const std::string& pattern, bool reverse_result) override {
         PatternMatchTranslator translator;
         auto regex_pattern = translator(pattern);
-        return RegexQuery(regex_pattern);
+        return RegexQuery(regex_pattern, reverse_result);
     }
 
     bool
@@ -150,7 +150,7 @@ class BitmapIndex : public ScalarIndex<T> {
     }
 
     const TargetBitmap
-    RegexQuery(const std::string& regex_pattern) override;
+    RegexQuery(const std::string& regex_pattern, bool reverse_result) override;
 
  public:
     int64_t

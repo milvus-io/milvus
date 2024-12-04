@@ -39,6 +39,12 @@ func Test_hasWildcards(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			args: args{
+				pattern: "%suffix",
+			},
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -76,6 +82,12 @@ func Test_findLocOfLastWildcard(t *testing.T) {
 			},
 			want: 5,
 		},
+		{
+			args: args{
+				pattern: "%%suffix",
+			},
+			want: 2,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,7 +100,8 @@ func Test_findLocOfLastWildcard(t *testing.T) {
 
 func Test_translatePatternMatch(t *testing.T) {
 	type args struct {
-		pattern string
+		pattern  string
+		hasNotOp bool
 	}
 	tests := []struct {
 		name        string
@@ -97,32 +110,64 @@ func Test_translatePatternMatch(t *testing.T) {
 		wantOperand string
 		wantErr     bool
 	}{
+		// not like
 		{
-			args:        args{pattern: "prefix%"},
+			args:        args{pattern: "prefix%", hasNotOp: true},
+			wantOp:      planpb.OpType_PrefixNotMatch,
+			wantOperand: "prefix",
+			wantErr:     false,
+		},
+		{
+			args:        args{pattern: "equal", hasNotOp: true},
+			wantOp:      planpb.OpType_NotEqual,
+			wantOperand: "equal",
+			wantErr:     false,
+		},
+		{
+			args:        args{pattern: "%%%%%%", hasNotOp: true},
+			wantOp:      planpb.OpType_PrefixNotMatch,
+			wantOperand: "",
+			wantErr:     false,
+		},
+		{
+			args:        args{pattern: "prefix%suffix", hasNotOp: true},
+			wantOp:      planpb.OpType_NotMatch,
+			wantOperand: "prefix%suffix",
+			wantErr:     false,
+		},
+		{
+			args:        args{pattern: "_0", hasNotOp: true},
+			wantOp:      planpb.OpType_NotMatch,
+			wantOperand: "_0",
+			wantErr:     false,
+		},
+		// like
+		{
+			args:        args{pattern: "prefix%", hasNotOp: false},
 			wantOp:      planpb.OpType_PrefixMatch,
 			wantOperand: "prefix",
 			wantErr:     false,
 		},
 		{
-			args:        args{pattern: "equal"},
+			args:        args{pattern: "equal", hasNotOp: false},
 			wantOp:      planpb.OpType_Equal,
 			wantOperand: "equal",
 			wantErr:     false,
 		},
 		{
-			args:        args{pattern: "%%%%%%"},
+			args:        args{pattern: "%%%%%%", hasNotOp: false},
 			wantOp:      planpb.OpType_PrefixMatch,
 			wantOperand: "",
 			wantErr:     false,
 		},
 		{
-			args:        args{pattern: "prefix%suffix"},
+			args:        args{pattern: "prefix%suffix", hasNotOp: false},
 			wantOp:      planpb.OpType_Match,
 			wantOperand: "prefix%suffix",
 			wantErr:     false,
 		},
 		{
-			args:        args{pattern: "_0"},
+			args:        args{pattern: "_0", hasNotOp: false},
 			wantOp:      planpb.OpType_Match,
 			wantOperand: "_0",
 			wantErr:     false,
@@ -130,7 +175,7 @@ func Test_translatePatternMatch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotOp, gotOperand, err := translatePatternMatch(tt.args.pattern)
+			gotOp, gotOperand, err := translatePatternMatch(tt.args.pattern, tt.args.hasNotOp)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("translatePatternMatch(%s) error = %v, wantErr %v", tt.args.pattern, err, tt.wantErr)
 				return

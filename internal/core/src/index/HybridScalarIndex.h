@@ -105,10 +105,10 @@ class HybridScalarIndex : public ScalarIndex<T> {
     }
 
     const TargetBitmap
-    PatternMatch(const std::string& pattern) override {
+    PatternMatch(const std::string& pattern, bool reverse_result) override {
         PatternMatchTranslator translator;
         auto regex_pattern = translator(pattern);
-        return RegexQuery(regex_pattern);
+        return RegexQuery(regex_pattern, reverse_result);
     }
 
     bool
@@ -117,8 +117,8 @@ class HybridScalarIndex : public ScalarIndex<T> {
     }
 
     const TargetBitmap
-    RegexQuery(const std::string& pattern) override {
-        return internal_index_->RegexQuery(pattern);
+    RegexQuery(const std::string& pattern, bool reverse_result) override {
+        return internal_index_->RegexQuery(pattern, reverse_result);
     }
 
     const TargetBitmap

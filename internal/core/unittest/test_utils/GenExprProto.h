@@ -56,7 +56,7 @@ GenGenericValue(T value) {
 
 template <typename T>
 auto
-GenUnaryRangeExpr(proto::plan::OpType op, T& value) {
+GenUnaryRangeExpr(proto::plan::OpType op, const T& value) {
     auto unary_range_expr = new proto::plan::UnaryRangeExpr();
     unary_range_expr->set_op(op);
     auto generic = GenGenericValue(value);
