@@ -50,27 +50,6 @@ type InternaltlsTestSuit struct {
 
 // Define the content for the configuration YAML file
 var configContent = `
-rootCoord:
-  ip: localhost
-
-proxy:
-  ip: localhost
-
-queryCoord:
-  ip: localhost
-
-queryNode:
-  ip: localhost
-
-indexNode:
-  ip: localhost
-
-dataCoord:
-  ip: localhost
-
-dataNode:
-  ip: localhost
-
 common:
   security:
     internaltlsEnabled : true
@@ -79,6 +58,7 @@ internaltls:
   serverPemPath: ../../../configs/cert/server.pem
   serverKeyPath: ../../../configs/cert/server.key
   caPemPath: ../../../configs/cert/ca.pem
+  sni: localhost
 `
 
 const configFilePath = "../../../configs/_test.yaml"
