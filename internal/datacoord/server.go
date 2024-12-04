@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -162,6 +163,8 @@ type Server struct {
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
+
+	healthChecker *healthcheck.Checker
 }
 
 type CollectionNameInfo struct {
@@ -407,6 +410,8 @@ func (s *Server) initDataCoord() error {
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
+	interval := Params.CommonCfg.HealthCheckInterval.GetAsDuration(time.Second)
+	s.healthChecker = healthcheck.NewChecker(interval, s.healthCheckFn)
 	log.Info("init datacoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
 	return nil
 }
@@ -725,6 +730,7 @@ func (s *Server) startServerLoop() {
 	go s.importChecker.Start()
 	s.garbageCollector.start()
 	s.syncSegmentsScheduler.Start()
+	s.healthChecker.Start()
 }
 
 // startDataNodeTtLoop start a goroutine to recv data node tt msg from msgstream
@@ -1106,6 +1112,9 @@ func (s *Server) initRootCoordClient() error {
 func (s *Server) Stop() error {
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
 		return nil
+	}
+	if s.healthChecker != nil {
+		s.healthChecker.Close()
 	}
 	logutil.Logger(s.ctx).Info("datacoord server shutdown")
 	s.garbageCollector.close()

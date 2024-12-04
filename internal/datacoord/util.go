@@ -271,7 +271,8 @@ func getCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMer
 	}
 }
 
-func CheckCheckPointsHealth(meta *meta) error {
+func CheckCheckPointsHealth(meta *meta) map[int64]string {
+	checkResult := make(map[int64]string)
 	for channel, cp := range meta.GetChannelCheckpoints() {
 		collectionID := funcutil.GetCollectionIDFromVChannel(channel)
 		if collectionID == -1 {
@@ -285,31 +286,30 @@ func CheckCheckPointsHealth(meta *meta) error {
 		ts, _ := tsoutil.ParseTS(cp.Timestamp)
 		lag := time.Since(ts)
 		if lag > paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsDuration(time.Second) {
-			return merr.WrapErrChannelCPExceededMaxLag(channel, fmt.Sprintf("checkpoint lag: %f(min)", lag.Minutes()))
+			checkResult[collectionID] = fmt.Sprintf("exceeds max lag:%s on channel:%s checkpoint", lag, channel)
 		}
 	}
-	return nil
+	return checkResult
 }
 
-func CheckAllChannelsWatched(meta *meta, channelManager ChannelManager) error {
+func CheckAllChannelsWatched(meta *meta, channelManager ChannelManager) map[int64]string {
 	collIDs := meta.ListCollections()
+	checkResult := make(map[int64]string)
 	for _, collID := range collIDs {
 		collInfo := meta.GetCollection(collID)
 		if collInfo == nil {
-			log.Warn("collection info is nil, skip it", zap.Int64("collectionID", collID))
+			log.RatedWarn(60, "collection info is nil, skip it", zap.Int64("collectionID", collID))
 			continue
 		}
 
 		for _, channelName := range collInfo.VChannelNames {
 			_, err := channelManager.FindWatcher(channelName)
 			if err != nil {
-				log.Warn("find watcher for channel failed", zap.Int64("collectionID", collID),
-					zap.String("channelName", channelName), zap.Error(err))
-				return err
+				checkResult[collID] = fmt.Sprintf("channel:%s is not watched", channelName)
 			}
 		}
 	}
-	return nil
+	return checkResult
 }
 
 func getBinLogIDs(segment *SegmentInfo, fieldID int64) []int64 {

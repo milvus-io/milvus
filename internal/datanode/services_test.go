@@ -1114,6 +1114,40 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 	})
 }
 
+func (s *DataNodeServicesSuite) TestCheckHealth() {
+	s.Run("node not healthy", func() {
+		s.SetupTest()
+		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		ctx := context.Background()
+		resp, err := s.node.CheckHealth(ctx, nil)
+		s.NoError(err)
+		s.False(merr.Ok(resp.GetStatus()))
+		s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	s.Run("exceeded timetick lag on pipeline", func() {
+		s.SetupTest()
+		rateCol.updateFlowGraphTt("timetick-lag-ch", 1)
+		ctx := context.Background()
+		resp, err := s.node.CheckHealth(ctx, nil)
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		s.False(resp.GetIsHealthy())
+		s.NotEmpty(resp.Reasons)
+	})
+
+	s.Run("ok", func() {
+		s.SetupTest()
+		rateCol.removeFlowGraphChannel("timetick-lag-ch")
+		ctx := context.Background()
+		resp, err := s.node.CheckHealth(ctx, nil)
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		s.True(resp.GetIsHealthy())
+		s.Empty(resp.Reasons)
+	})
+}
+
 func (s *DataNodeServicesSuite) TestDropCompactionPlan() {
 	s.Run("node not healthy", func() {
 		s.SetupTest()

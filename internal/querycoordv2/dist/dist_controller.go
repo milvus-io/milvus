@@ -99,7 +99,7 @@ func NewDistController(
 	client session.Cluster,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	scheduler task.Scheduler,
 	syncTargetVersionFn TriggerUpdateTargetVersion,
 ) *ControllerImpl {
