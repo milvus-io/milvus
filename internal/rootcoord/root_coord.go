@@ -566,6 +566,7 @@ func (c *Core) initPublicRolePrivilege() error {
 	// grant privileges for the public role
 	globalPrivileges := []string{
 		commonpb.ObjectPrivilege_PrivilegeDescribeCollection.String(),
+		commonpb.ObjectPrivilege_PrivilegeListAliases.String(),
 	}
 	collectionPrivileges := []string{
 		commonpb.ObjectPrivilege_PrivilegeIndexDetail.String(),

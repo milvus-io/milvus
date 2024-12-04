@@ -5276,7 +5276,7 @@ func (node *Proxy) validateOperatePrivilegeV2Params(req *milvuspb.OperatePrivile
 			return err
 		}
 	}
-	if err := ValidateObjectName(req.CollectionName); err != nil {
+	if err := ValidateCollectionName(req.CollectionName); err != nil {
 		return err
 	}
 	return nil
