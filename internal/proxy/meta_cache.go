@@ -490,7 +490,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 
 	log.Ctx(ctx).Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName),
 		zap.String("actual collection Name", collection.Schema.GetName()), zap.Int64("collectionID", collection.CollectionID),
-		zap.Strings("partition", partitions.PartitionNames),
+		zap.Strings("partition", partitions.PartitionNames), zap.Uint64("currentVersion", curVersion),
+		zap.Uint64("version", collection.GetRequestTime()),
 	)
 
 	m.collectionCacheVersion[collection.GetCollectionID()] = collection.GetRequestTime()
@@ -849,11 +850,13 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	curVersion := m.collectionCacheVersion[collectionID]
 	var collNames []string
 	for database, db := range m.collInfo {
 		for k, v := range db {
 			if v.collID == collectionID {
-				if m.collectionCacheVersion[collectionID] <= version {
+				if version == 0 || curVersion <= version {
 					delete(m.collInfo[database], k)
 					collNames = append(collNames, k)
 				}
@@ -862,10 +865,12 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID Uniq
 	}
 	if removeVersion {
 		delete(m.collectionCacheVersion, collectionID)
-	} else {
+	} else if version != 0 {
 		m.collectionCacheVersion[collectionID] = version
 	}
-	log.Debug("remove collection by id", zap.Int64("id", collectionID), zap.Strings("collection", collNames))
+	log.Debug("remove collection by id", zap.Int64("id", collectionID),
+		zap.Strings("collection", collNames), zap.Uint64("currentVersion", curVersion),
+		zap.Uint64("version", version), zap.Bool("removeVersion", removeVersion))
 	return collNames
 }
 

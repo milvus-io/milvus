@@ -143,7 +143,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
 			// All the request from query use collectionID
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
 				for _, name := range aliasName {
 					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
 				}
