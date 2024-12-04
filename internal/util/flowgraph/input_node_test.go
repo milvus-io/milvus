@@ -42,8 +42,8 @@ func TestInputNode(t *testing.T) {
 
 	msgPack := generateMsgPack()
 	produceStream, _ := factory.NewMsgStream(context.TODO())
-	produceStream.AsProducer(channels)
-	produceStream.Produce(&msgPack)
+	produceStream.AsProducer(context.TODO(), channels)
+	produceStream.Produce(context.TODO(), &msgPack)
 
 	nodeName := "input_node"
 	inputNode := NewInputNode(msgStream.Chan(), nodeName, 100, 100, "", 0, 0, "")
@@ -84,7 +84,7 @@ func Test_InputNodeSkipMode(t *testing.T) {
 	msgStream.AsConsumer(context.Background(), channels, "sub", common.SubscriptionPositionEarliest)
 
 	produceStream, _ := factory.NewMsgStream(context.TODO())
-	produceStream.AsProducer(channels)
+	produceStream.AsProducer(context.TODO(), channels)
 	closeCh := make(chan struct{})
 	outputCh := make(chan bool)
 
@@ -110,7 +110,7 @@ func Test_InputNodeSkipMode(t *testing.T) {
 	defer close(closeCh)
 
 	msgPack := generateMsgPack()
-	produceStream.Produce(&msgPack)
+	produceStream.Produce(context.TODO(), &msgPack)
 	log.Info("produce empty ttmsg")
 	<-outputCh
 	assert.Equal(t, 1, outputCount)
@@ -118,7 +118,7 @@ func Test_InputNodeSkipMode(t *testing.T) {
 
 	time.Sleep(3 * time.Second)
 	assert.Equal(t, false, inputNode.skipMode)
-	produceStream.Produce(&msgPack)
+	produceStream.Produce(context.TODO(), &msgPack)
 	log.Info("after 3 seconds with no active msg receive, input node will turn on skip mode")
 	<-outputCh
 	assert.Equal(t, 2, outputCount)
@@ -126,13 +126,13 @@ func Test_InputNodeSkipMode(t *testing.T) {
 
 	log.Info("some ttmsg will be skipped in skip mode")
 	// this msg will be skipped
-	produceStream.Produce(&msgPack)
+	produceStream.Produce(context.TODO(), &msgPack)
 	<-outputCh
 	assert.Equal(t, 2, outputCount)
 	assert.Equal(t, true, inputNode.skipMode)
 
 	// this msg will be consumed
-	produceStream.Produce(&msgPack)
+	produceStream.Produce(context.TODO(), &msgPack)
 	<-outputCh
 	assert.Equal(t, 3, outputCount)
 	assert.Equal(t, true, inputNode.skipMode)

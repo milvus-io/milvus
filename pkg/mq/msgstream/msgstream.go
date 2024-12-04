@@ -55,11 +55,11 @@ type RepackFunc func(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, erro
 type MsgStream interface {
 	Close()
 
-	AsProducer(channels []string)
-	Produce(*MsgPack) error
+	AsProducer(ctx context.Context, channels []string)
+	Produce(context.Context, *MsgPack) error
 	SetRepackFunc(repackFunc RepackFunc)
 	GetProduceChannels() []string
-	Broadcast(*MsgPack) (map[string][]MessageID, error)
+	Broadcast(context.Context, *MsgPack) (map[string][]MessageID, error)
 
 	AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error
 	Chan() <-chan *MsgPack

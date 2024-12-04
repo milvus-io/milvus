@@ -142,7 +142,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	}
 
 	dt.tr = timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute delete %d", dt.ID()))
-	stream, err := dt.chMgr.getOrCreateDmlStream(dt.collectionID)
+	stream, err := dt.chMgr.getOrCreateDmlStream(ctx, dt.collectionID)
 	if err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		zap.Int64("taskID", dt.ID()),
 		zap.Duration("prepare duration", dt.tr.RecordSpan()))
 
-	err = stream.Produce(msgPack)
+	err = stream.Produce(ctx, msgPack)
 	if err != nil {
 		return err
 	}
