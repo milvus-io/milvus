@@ -1102,6 +1102,13 @@ func ValidateObjectName(entity string) error {
 	return validateName(entity, "object name")
 }
 
+func ValidateCollectionName(entity string) error {
+	if util.IsAnyWord(entity) {
+		return nil
+	}
+	return validateName(entity, "collection name")
+}
+
 func ValidateObjectType(entity string) error {
 	return validateName(entity, "ObjectType")
 }
