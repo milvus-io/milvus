@@ -336,28 +336,28 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 }
 
 // GetSegmentsChanPart returns segments organized in Channel-Partition dimension with selector applied
-func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegments {
-	m.RLock()
-	defer m.RUnlock()
-	mDimEntry := make(map[string]*chanPartSegments)
+// TODO: Move this function to the compaction module after reorganizing the DataCoord modules.
+func GetSegmentsChanPart(m *meta, filters ...SegmentFilter) []*chanPartSegments {
+	type dim struct {
+		partitionID int64
+		channelName string
+	}
 
-	log.Debug("GetSegmentsChanPart segment number", zap.Int("length", len(m.segments.GetSegments())))
-	for _, segmentInfo := range m.segments.segments {
-		if !selector(segmentInfo) {
-			continue
-		}
+	mDimEntry := make(map[dim]*chanPartSegments)
 
+	candidates := m.SelectSegments(filters...)
+	for _, segmentInfo := range candidates {
 		cloned := segmentInfo.Clone()
 
-		dim := fmt.Sprintf("%d-%s", cloned.PartitionID, cloned.InsertChannel)
-		entry, ok := mDimEntry[dim]
+		d := dim{cloned.PartitionID, cloned.InsertChannel}
+		entry, ok := mDimEntry[d]
 		if !ok {
 			entry = &chanPartSegments{
 				collectionID: cloned.CollectionID,
 				partitionID:  cloned.PartitionID,
 				channelName:  cloned.InsertChannel,
 			}
-			mDimEntry[dim] = entry
+			mDimEntry[d] = entry
 		}
 		entry.segments = append(entry.segments, cloned)
 	}
@@ -1293,6 +1293,16 @@ func (m *meta) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
 	m.Lock()
 	defer m.Unlock()
 	m.segments.SetAllocations(segmentID, allocations)
+}
+
+// SetSegmentsAllocations set Segments allocations, will overwrite ALL original allocations
+// Note that allocations is not persisted in KV store
+func (m *meta) SetSegmentsAllocations(segmentsAllocations map[int64][]*Allocation) {
+	m.Lock()
+	defer m.Unlock()
+	for segmentID, allocations := range segmentsAllocations {
+		m.segments.SetAllocations(segmentID, allocations)
+	}
 }
 
 // SetCurrentRows set current row count for segment with provided `segmentID`
