@@ -78,6 +78,11 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(CollectionCategory+LoadAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.loadCollection))))
 	router.POST(CollectionCategory+ReleaseAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.releaseCollection))))
 
+	router.POST(DataBaseCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.createDatabase))))
+	router.POST(DataBaseCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.dropDatabase))))
+	router.POST(DataBaseCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &EmptyReq{} }, wrapperTraceLog(h.listDatabases))))
+	router.POST(DataBaseCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.describeDatabase))))
+	router.POST(DataBaseCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	// Query
 	router.POST(EntityCategory+QueryAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &QueryReqV2{
@@ -207,13 +212,15 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			return
 		}
 		dbName := ""
-		if getter, ok := req.(requestutil.DBNameGetter); ok {
-			dbName = getter.GetDbName()
-		}
-		if dbName == "" {
-			dbName = c.Request.Header.Get(HTTPHeaderDBName)
+		if req != nil {
+			if getter, ok := req.(requestutil.DBNameGetter); ok {
+				dbName = getter.GetDbName()
+			}
 			if dbName == "" {
-				dbName = DefaultDbName
+				dbName = c.Request.Header.Get(HTTPHeaderDBName)
+				if dbName == "" {
+					dbName = DefaultDbName
+				}
 			}
 		}
 		username, _ := c.Get(ContextUsername)
@@ -277,7 +284,7 @@ func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 			if err != nil {
 				log.Ctx(ctx).Info("trace info: all, error", zap.Error(err))
 			} else {
-				log.Ctx(ctx).Info("trace info: all, unknown", zap.Any("resp", resp))
+				log.Ctx(ctx).Info("trace info: all, unknown")
 			}
 		}
 		return resp, err
@@ -1149,7 +1156,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	var err error
 	fieldNames := map[string]bool{}
 	partitionsNum := int64(-1)
-	if httpReq.Schema.Fields == nil || len(httpReq.Schema.Fields) == 0 {
+	if len(httpReq.Schema.Fields) == 0 {
 		if len(httpReq.Schema.Functions) > 0 {
 			err := merr.WrapErrParameterInvalid("schema", "functions",
 				"functions are not supported for quickly create collection")
@@ -1466,6 +1473,99 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return statusResponse, err
+}
+
+func (h *HandlersV2) createDatabase(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*DatabaseReqWithProperties)
+	req := &milvuspb.CreateDatabaseRequest{
+		DbName: dbName,
+	}
+	properties := make([]*commonpb.KeyValuePair, 0, len(httpReq.Properties))
+	for key, value := range httpReq.Properties {
+		properties = append(properties, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+	}
+	req.Properties = properties
+
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateDatabase", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.CreateDatabase(reqCtx, req.(*milvuspb.CreateDatabaseRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) dropDatabase(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	req := &milvuspb.DropDatabaseRequest{
+		DbName: dbName,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropDatabase", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.DropDatabase(reqCtx, req.(*milvuspb.DropDatabaseRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+// todo: use a more flexible way to handle the number of input parameters of req
+func (h *HandlersV2) listDatabases(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	req := &milvuspb.ListDatabasesRequest{}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ListDatabases", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ListDatabases(reqCtx, req.(*milvuspb.ListDatabasesRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnList(resp.(*milvuspb.ListDatabasesResponse).DbNames))
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) describeDatabase(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	req := &milvuspb.DescribeDatabaseRequest{
+		DbName: dbName,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DescribeDatabase", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.DescribeDatabase(reqCtx, req.(*milvuspb.DescribeDatabaseRequest))
+	})
+	if err != nil {
+		return nil, err
+	}
+	info, _ := resp.(*milvuspb.DescribeDatabaseResponse)
+	if info.Properties == nil {
+		info.Properties = []*commonpb.KeyValuePair{}
+	}
+	dataBaseInfo := map[string]any{
+		HTTPDbName:     info.DbName,
+		HTTPDbID:       info.DbID,
+		HTTPProperties: info.Properties,
+	}
+	HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: dataBaseInfo})
+	return resp, err
+}
+
+func (h *HandlersV2) alterDatabase(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*DatabaseReqWithProperties)
+	req := &milvuspb.AlterDatabaseRequest{
+		DbName: dbName,
+	}
+	properties := make([]*commonpb.KeyValuePair, 0, len(httpReq.Properties))
+	for key, value := range httpReq.Properties {
+		properties = append(properties, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+	}
+	req.Properties = properties
+
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterDatabase", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AlterDatabase(reqCtx, req.(*milvuspb.AlterDatabaseRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
 }
 
 func (h *HandlersV2) listPartitions(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
