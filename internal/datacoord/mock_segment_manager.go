@@ -271,17 +271,10 @@ type MockManager_SealAllSegments_Call struct {
 
 // SealAllSegments is a helper method to define mock.On call
 //   - ctx context.Context
-<<<<<<< HEAD
 //   - channel string
 //   - segIDs []int64
 func (_e *MockManager_Expecter) SealAllSegments(ctx interface{}, channel interface{}, segIDs interface{}) *MockManager_SealAllSegments_Call {
 	return &MockManager_SealAllSegments_Call{Call: _e.mock.On("SealAllSegments", ctx, channel, segIDs)}
-=======
-//   - collectionID int64
-//   - segIDs []int64
-func (_e *MockManager_Expecter) SealAllSegments(ctx interface{}, collectionID interface{}, segIDs interface{}) *MockManager_SealAllSegments_Call {
-	return &MockManager_SealAllSegments_Call{Call: _e.mock.On("SealAllSegments", ctx, collectionID, segIDs)}
->>>>>>> febed0abb7de38e1c4f78c679328eb87fd82fc49
 }
 
 func (_c *MockManager_SealAllSegments_Call) Run(run func(ctx context.Context, channel string, segIDs []int64)) *MockManager_SealAllSegments_Call {
