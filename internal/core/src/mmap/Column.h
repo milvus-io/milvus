@@ -388,11 +388,13 @@ class ColumnBase {
                 mapped_size);
             milvus::monitor::internal_mmap_in_used_space_bytes_anon.Increment(
                 mapped_size);
+            milvus::monitor::internal_mmap_in_used_count_anon.Increment();
         } else if (mapping_type_ == MappingType::MAP_WITH_FILE) {
             milvus::monitor::internal_mmap_allocated_space_bytes_file.Observe(
                 mapped_size);
             milvus::monitor::internal_mmap_in_used_space_bytes_file.Increment(
                 mapped_size);
+            milvus::monitor::internal_mmap_in_used_count_file.Increment();
         }
         // else: does not update metric for MAP_WITH_MANAGER, MmapChunkManagerPtr
         // will update metric itself.
@@ -403,9 +405,11 @@ class ColumnBase {
         if (mapping_type_ == MappingType::MAP_WITH_ANONYMOUS) {
             milvus::monitor::internal_mmap_in_used_space_bytes_anon.Decrement(
                 mapped_size);
+            milvus::monitor::internal_mmap_in_used_count_anon.Decrement();
         } else if (mapping_type_ == MappingType::MAP_WITH_FILE) {
             milvus::monitor::internal_mmap_in_used_space_bytes_file.Decrement(
                 mapped_size);
+            milvus::monitor::internal_mmap_in_used_count_file.Decrement();
         }
         // else: does not update metric for MAP_WITH_MANAGER, MmapChunkManagerPtr
         // will update metric itself.
