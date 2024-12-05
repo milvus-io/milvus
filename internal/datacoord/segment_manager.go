@@ -530,6 +530,7 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) {
 		return
 	}
 
+	segmentsAllocations := make(map[int64][]*Allocation)
 	growing.Range(func(id int64) bool {
 		segment := s.meta.GetHealthySegment(id)
 		if segment == nil {
@@ -546,9 +547,10 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) {
 				allocations = append(allocations, segment.allocations[i])
 			}
 		}
-		s.meta.SetAllocations(segment.GetID(), allocations)
+		segmentsAllocations[id] = allocations
 		return true
 	})
+	s.meta.SetSegmentsAllocations(segmentsAllocations)
 }
 
 func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
