@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	qc "github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -172,17 +171,9 @@ func (s *Server) init() error {
 	}
 
 	// wait for master init or healthy
-	log.Info("QueryCoord try to wait for RootCoord ready")
-	err = componentutil.WaitForComponentHealthy(s.loopCtx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Error("QueryCoord wait for RootCoord ready failed", zap.Error(err))
-		panic(err)
-	}
-
 	if err := s.SetRootCoord(s.rootCoord); err != nil {
 		panic(err)
 	}
-	log.Info("QueryCoord report RootCoord ready")
 
 	// --- Data service client ---
 	if s.dataCoord == nil {
@@ -190,11 +181,6 @@ func (s *Server) init() error {
 	}
 
 	log.Info("QueryCoord try to wait for DataCoord ready")
-	err = componentutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Error("QueryCoord wait for DataCoord ready failed", zap.Error(err))
-		panic(err)
-	}
 	if err := s.SetDataCoord(s.dataCoord); err != nil {
 		panic(err)
 	}

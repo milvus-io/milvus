@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -218,6 +219,22 @@ func (s *Server) Init() error {
 }
 
 func (s *Server) initQueryCoord() error {
+	// wait for master init or healthy
+	log.Info("QueryCoord try to wait for RootCoord ready")
+	if err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200); err != nil {
+		log.Error("QueryCoord wait for RootCoord ready failed", zap.Error(err))
+		panic(err)
+	}
+	log.Info("QueryCoord report RootCoord ready")
+
+	// wait for master init or healthy
+	log.Info("QueryCoord try to wait for DataCoord ready")
+	if err := componentutil.WaitForComponentHealthy(s.ctx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200); err != nil {
+		log.Error("QueryCoord wait for DataCoord ready failed", zap.Error(err))
+		panic(err)
+	}
+	log.Info("QueryCoord report DataCoord ready")
+
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	log.Info("start init querycoord", zap.Any("State", commonpb.StateCode_Initializing))
 	// Init KV and ID allocator
