@@ -21,81 +21,15 @@ import (
 	"fmt"
 	"time"
 
-	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
-
-func (s *LevelZeroSuite) createCollection(collection string) {
-	schema := integration.ConstructSchema(collection, s.dim, false)
-	marshaledSchema, err := proto.Marshal(schema)
-	s.Require().NoError(err)
-
-	status, err := s.Cluster.Proxy.CreateCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
-		CollectionName: collection,
-		Schema:         marshaledSchema,
-		ShardsNum:      1,
-	})
-	s.Require().NoError(err)
-	s.Require().True(merr.Ok(status))
-	log.Info("CreateCollection result", zap.Any("status", status))
-}
-
-func (s *LevelZeroSuite) generateSegment(collection string, numRows int, startPk int64, seal bool) {
-	log.Info("=========================Start generate one segment=========================")
-	pkColumn := integration.NewInt64FieldDataWithStart(integration.Int64Field, numRows, startPk)
-	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, numRows, s.dim)
-	hashKeys := integration.GenerateHashKeys(numRows)
-	insertResult, err := s.Cluster.Proxy.Insert(context.TODO(), &milvuspb.InsertRequest{
-		CollectionName: collection,
-		FieldsData:     []*schemapb.FieldData{pkColumn, fVecColumn},
-		HashKeys:       hashKeys,
-		NumRows:        uint32(numRows),
-	})
-	s.Require().NoError(err)
-	s.True(merr.Ok(insertResult.GetStatus()))
-	s.Require().EqualValues(numRows, insertResult.GetInsertCnt())
-	s.Require().EqualValues(numRows, len(insertResult.GetIDs().GetIntId().GetData()))
-
-	if seal {
-		log.Info("=========================Start to flush =========================",
-			zap.String("collection", collection),
-			zap.Int("numRows", numRows),
-			zap.Int64("startPK", startPk),
-		)
-
-		flushResp, err := s.Cluster.Proxy.Flush(context.TODO(), &milvuspb.FlushRequest{
-			CollectionNames: []string{collection},
-		})
-		s.NoError(err)
-		segmentLongArr, has := flushResp.GetCollSegIDs()[collection]
-		s.Require().True(has)
-		segmentIDs := segmentLongArr.GetData()
-		s.Require().NotEmpty(segmentLongArr)
-		s.Require().True(has)
-
-		flushTs, has := flushResp.GetCollFlushTs()[collection]
-		s.True(has)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		s.WaitForFlush(ctx, segmentIDs, flushTs, "", collection)
-		log.Info("=========================Finish to generate one segment=========================",
-			zap.String("collection", collection),
-			zap.Int("numRows", numRows),
-			zap.Int64("startPK", startPk),
-		)
-	}
-}
 
 func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
@@ -113,7 +47,9 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	)
 
 	collectionName := "TestLevelZero_" + funcutil.GenRandomStr()
-	s.createCollection(collectionName)
+	s.schema = integration.ConstructSchema(collectionName, s.dim, false)
+	req := s.buildCreateCollectionRequest(collectionName, s.schema, 0)
+	s.createCollection(req)
 
 	// create index
 	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
@@ -134,9 +70,9 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	s.Require().NoError(err)
 	s.WaitForLoad(ctx, collectionName)
 
-	s.generateSegment(collectionName, 1, 0, true)
-	s.generateSegment(collectionName, 2, 1, true)
-	s.generateSegment(collectionName, 2, 3, false)
+	s.generateSegment(collectionName, 1, 0, true, -1)
+	s.generateSegment(collectionName, 2, 1, true, -1)
+	s.generateSegment(collectionName, 2, 3, false, -1)
 
 	checkRowCount := func(rowCount int) {
 		// query
