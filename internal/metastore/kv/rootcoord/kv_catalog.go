@@ -440,6 +440,7 @@ func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *p
 	return collection, nil
 }
 
+// TODO: This function will be invoked many times if there are many databases, leading to significant overhead.
 func (kc *Catalog) batchAppendPartitionAndFieldsInfo(ctx context.Context, collMeta []*pb.CollectionInfo,
 	ts typeutil.Timestamp,
 ) ([]*model.Collection, error) {
