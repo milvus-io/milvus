@@ -98,6 +98,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 		})
 
 	wNode.updater.update(wNode.channelName, end.GetTimestamp(), stats)
+	rateCol.updateFlowGraphTt(wNode.channelName, end.GetTimestamp())
 
 	res := flowGraphMsg{
 		timeRange:      fgMsg.timeRange,
